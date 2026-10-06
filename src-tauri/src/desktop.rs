@@ -1,4 +1,10 @@
-use crate::{application, contracts::AppInfo};
+use crate::{application, contracts::AppInfo, terminal::TerminalService};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use tauri::Manager;
+mod terminal;
 
 #[tauri::command]
 fn get_app_info() -> AppInfo {
@@ -6,10 +12,35 @@ fn get_app_info() -> AppInfo {
 }
 
 pub fn run() {
+    let stopping = Arc::new(AtomicBool::new(false));
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_app_info])
-        .run(tauri::generate_context!())
-        .expect("failed to run Wyss Console");
+        .manage(TerminalService::default())
+        .invoke_handler(tauri::generate_handler![
+            get_app_info,
+            terminal::create_terminal,
+            terminal::terminal_write,
+            terminal::terminal_read_output,
+            terminal::terminal_resize,
+            terminal::close_terminal,
+            terminal::terminal_status
+        ])
+        .build(tauri::generate_context!())
+        .expect("failed to build Wyss Console")
+        .run(move |handle, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event
+                && !stopping.swap(true, Ordering::AcqRel)
+            {
+                api.prevent_exit();
+                let service = handle.state::<TerminalService>().inner().clone();
+                let app = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let result =
+                        tauri::async_runtime::spawn_blocking(move || service.shutdown()).await;
+                    let code = if matches!(result, Ok(Ok(()))) { 0 } else { 1 };
+                    app.exit(code);
+                });
+            }
+        });
 }
 
 #[cfg(test)]

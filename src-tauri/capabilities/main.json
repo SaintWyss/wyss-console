@@ -1,7 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Read-only application information for the local main window.",
+  "description": "Local application information and narrow human-terminal operations for the main window.",
   "windows": ["main"],
-  "permissions": ["allow-get-app-info"]
+  "permissions": [
+    "allow-get-app-info",
+    "allow-create-terminal",
+    "allow-terminal-write",
+    "allow-terminal-read-output",
+    "allow-terminal-resize",
+    "allow-close-terminal",
+    "allow-terminal-status"
+  ]
 }
