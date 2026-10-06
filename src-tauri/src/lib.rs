@@ -1,5 +1,5 @@
 mod application;
-mod contracts;
+pub mod contracts;
 mod desktop;
 
 pub fn run() {

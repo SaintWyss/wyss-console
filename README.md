@@ -1,9 +1,11 @@
 # Wyss Console
 
 Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current status: **Sprint 0A foundation** using Tauri 2,
+Linux-first, local-first. Current status: **Sprint 0B executable contracts** using Tauri 2,
 Rust, Svelte, TypeScript and Vite. The window displays application information
-returned by typed IPC. Architecture decisions are in [docs/adr](docs/adr).
+returned by typed IPC. EventEnvelope v1 validates independently of IPC, using a
+shared Rust/TypeScript fixture corpus. No Event Bus, storage or terminal exists.
+Architecture decisions are in [docs/adr](docs/adr).
 
 ## Development
 

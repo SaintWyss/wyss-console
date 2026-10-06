@@ -1,0 +1,17 @@
+import { parseUuid, type Uuid } from './uuid';
+
+declare const identityBrand: unique symbol;
+type Identity<Name extends string> = Uuid & { readonly [identityBrand]: Name };
+export type ConsoleSessionId = Identity<'ConsoleSessionId'>;
+export type TerminalId = Identity<'TerminalId'>;
+export type ManagedSessionId = Identity<'ManagedSessionId'>;
+
+export function parseConsoleSessionId(value: unknown): ConsoleSessionId {
+  return parseUuid(value) as ConsoleSessionId;
+}
+export function parseTerminalId(value: unknown): TerminalId {
+  return parseUuid(value) as TerminalId;
+}
+export function parseManagedSessionId(value: unknown): ManagedSessionId {
+  return parseUuid(value) as ManagedSessionId;
+}

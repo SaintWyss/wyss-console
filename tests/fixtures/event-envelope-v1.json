@@ -1,0 +1,2622 @@
+{
+  "valid": [
+    {
+      "name": "minimal ephemeral",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      }
+    },
+    {
+      "name": "durable minimized metadata",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {
+          "result": "ok",
+          "count": 2
+        },
+        "persistence": "durable",
+        "sensitivity": "internal",
+        "redaction": "applied"
+      }
+    },
+    {
+      "name": "explicit null identities",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "terminal.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {
+          "console_session_id": "11111111-1111-4111-8111-111111111111",
+          "terminal_id": "22222222-2222-4222-8222-222222222222"
+        },
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      }
+    },
+    {
+      "name": "correlation and causation",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "42",
+        "session_id": "11111111-1111-4111-8111-111111111111",
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": "22222222-2222-4222-8222-222222222222",
+        "causation_id": "11111111-1111-4111-8111-111111111111",
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      }
+    },
+    {
+      "name": "maximum u64 sequence",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "18446744073709551615",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      }
+    },
+    {
+      "name": "nested JSON payload",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {
+          "nested": {
+            "values": [null, true, 3.25, "example"]
+          },
+          "__proto__": {
+            "safe": true
+          }
+        },
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      }
+    },
+    {
+      "name": "uppercase UUID retained",
+      "event": {
+        "schema_version": 1,
+        "event_id": "ABCDEFAB-1234-4567-89AB-ABCDEFABCDEF",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      }
+    },
+    {
+      "name": "zero UTC offset",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00+00:00",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      }
+    },
+    {
+      "name": "lowercase RFC3339",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06t12:00:00z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      }
+    },
+    {
+      "name": "fraction preserved",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00.123456789123Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      }
+    },
+    {
+      "name": "leap day",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2024-02-29T00:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      }
+    },
+    {
+      "name": "leap second",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2016-12-31T23:59:60Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      }
+    },
+    {
+      "name": "ephemeral secret never durable",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "secret",
+        "redaction": "content_omitted"
+      }
+    },
+    {
+      "name": "durable public metadata",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "durable",
+        "sensitivity": "public",
+        "redaction": "none"
+      }
+    },
+    {
+      "name": "sensitive minimized metadata",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "durable",
+        "sensitivity": "sensitive",
+        "redaction": "content_omitted"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "schema 0",
+      "event": {
+        "schema_version": 0,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "schema_version",
+        "code": "invalid_schema_version"
+      }
+    },
+    {
+      "name": "schema 2",
+      "event": {
+        "schema_version": 2,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "schema_version",
+        "code": "invalid_schema_version"
+      }
+    },
+    {
+      "name": "schema 1",
+      "event": {
+        "schema_version": "1",
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "schema_version",
+        "code": "invalid_schema_version"
+      }
+    },
+    {
+      "name": "schema None",
+      "event": {
+        "schema_version": null,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "schema_version",
+        "code": "invalid_schema_version"
+      }
+    },
+    {
+      "name": "schema True",
+      "event": {
+        "schema_version": true,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "schema_version",
+        "code": "invalid_schema_version"
+      }
+    },
+    {
+      "name": "malformed event_id",
+      "event": {
+        "schema_version": 1,
+        "event_id": "not-a-uuid",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_id",
+        "code": "invalid_uuid"
+      }
+    },
+    {
+      "name": "malformed stream_id",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "not-a-uuid",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "stream_id",
+        "code": "invalid_uuid"
+      }
+    },
+    {
+      "name": "malformed session_id",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": "not-a-uuid",
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "session_id",
+        "code": "invalid_uuid"
+      }
+    },
+    {
+      "name": "malformed correlation_id",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": "not-a-uuid",
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "correlation_id",
+        "code": "invalid_uuid"
+      }
+    },
+    {
+      "name": "malformed causation_id",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": "not-a-uuid",
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "causation_id",
+        "code": "invalid_uuid"
+      }
+    },
+    {
+      "name": "malformed source instance",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "not-a-uuid"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "source.instance_id",
+        "code": "invalid_uuid"
+      }
+    },
+    {
+      "name": "uuid form 11111111111141118111111111111111",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111111141118111111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_id",
+        "code": "invalid_uuid"
+      }
+    },
+    {
+      "name": "uuid form {11111111-1111-4111-8111-111111111111}",
+      "event": {
+        "schema_version": 1,
+        "event_id": "{11111111-1111-4111-8111-111111111111}",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_id",
+        "code": "invalid_uuid"
+      }
+    },
+    {
+      "name": "uuid form 11111111-1111-4111-8111-111111111111\n",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111\n",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_id",
+        "code": "invalid_uuid"
+      }
+    },
+    {
+      "name": "sequence 0",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "0",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "invalid_sequence"
+      }
+    },
+    {
+      "name": "sequence -1",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "-1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "invalid_sequence"
+      }
+    },
+    {
+      "name": "sequence +1",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "+1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "invalid_sequence"
+      }
+    },
+    {
+      "name": "sequence 01",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "01",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "invalid_sequence"
+      }
+    },
+    {
+      "name": "sequence 1.0",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1.0",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "invalid_sequence"
+      }
+    },
+    {
+      "name": "sequence 18446744073709551616",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "18446744073709551616",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "invalid_sequence"
+      }
+    },
+    {
+      "name": "sequence ",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "invalid_sequence"
+      }
+    },
+    {
+      "name": "sequence 1e3",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1e3",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "invalid_sequence"
+      }
+    },
+    {
+      "name": "sequence 1\n",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1\n",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "invalid_sequence"
+      }
+    },
+    {
+      "name": "sequence  1",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": " 1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "invalid_sequence"
+      }
+    },
+    {
+      "name": "sequence 1",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": 1,
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "invalid_sequence"
+      }
+    },
+    {
+      "name": "sequence None",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": null,
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "invalid_sequence"
+      }
+    },
+    {
+      "name": "timestamp invalid",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "invalid",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp 2026-02-29T00:00:00Z",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-02-29T00:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp 2026-04-31T00:00:00Z",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-04-31T00:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp 2026-13-01T00:00:00Z",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-13-01T00:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp 2026-10-00T00:00:00Z",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-00T00:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp 2026-10-06T24:00:00Z",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T24:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp 2026-10-06T12:60:00Z",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:60:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp 2026-10-06T12:00:61Z",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:61Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp 2026-10-06T12:00:60Z",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:60Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp 2026-10-06T12:00:00-03:00",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00-03:00",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp 2026-10-06T12:00:00-00:00",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00-00:00",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp 2026-10-06 12:00:00Z",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06 12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp 2026-10-06T12:00:00Z\n",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z\n",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "timestamp None",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": null,
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "invalid_timestamp"
+      }
+    },
+    {
+      "name": "event type created",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_type",
+        "code": "invalid_event_type"
+      }
+    },
+    {
+      "name": "event type .created",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": ".created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_type",
+        "code": "invalid_event_type"
+      }
+    },
+    {
+      "name": "event type console.",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_type",
+        "code": "invalid_event_type"
+      }
+    },
+    {
+      "name": "event type console..created",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console..created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_type",
+        "code": "invalid_event_type"
+      }
+    },
+    {
+      "name": "event type Console.created",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "Console.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_type",
+        "code": "invalid_event_type"
+      }
+    },
+    {
+      "name": "event type console.created\n",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.created\n",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_type",
+        "code": "invalid_event_type"
+      }
+    },
+    {
+      "name": "event type console.created-event",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.created-event",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_type",
+        "code": "invalid_event_type"
+      }
+    },
+    {
+      "name": "payload version 0",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 0,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "payload_schema_version",
+        "code": "invalid_positive_integer"
+      }
+    },
+    {
+      "name": "payload version -1",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": -1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "payload_schema_version",
+        "code": "invalid_positive_integer"
+      }
+    },
+    {
+      "name": "payload version 1.5",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1.5,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "payload_schema_version",
+        "code": "invalid_positive_integer"
+      }
+    },
+    {
+      "name": "payload version 1",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": "1",
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "payload_schema_version",
+        "code": "invalid_positive_integer"
+      }
+    },
+    {
+      "name": "payload version None",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": null,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "payload_schema_version",
+        "code": "invalid_positive_integer"
+      }
+    },
+    {
+      "name": "invalid persistence",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "unknown",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "persistence",
+        "code": "invalid_enum"
+      }
+    },
+    {
+      "name": "invalid sensitivity",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "unknown",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sensitivity",
+        "code": "invalid_enum"
+      }
+    },
+    {
+      "name": "invalid redaction",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "unknown"
+      },
+      "error": {
+        "field": "redaction",
+        "code": "invalid_enum"
+      }
+    },
+    {
+      "name": "payload []",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": [],
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "payload",
+        "code": "expected_object"
+      }
+    },
+    {
+      "name": "payload None",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": null,
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "payload",
+        "code": "expected_object"
+      }
+    },
+    {
+      "name": "payload text",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": "text",
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "payload",
+        "code": "expected_object"
+      }
+    },
+    {
+      "name": "payload 1",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": 1,
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "payload",
+        "code": "expected_object"
+      }
+    },
+    {
+      "name": "component ''",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "source.component",
+        "code": "invalid_component"
+      }
+    },
+    {
+      "name": "component ' '",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": " ",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "source.component",
+        "code": "invalid_component"
+      }
+    },
+    {
+      "name": "component '\\u2003'",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": " ",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "source.component",
+        "code": "invalid_component"
+      }
+    },
+    {
+      "name": "component 'console\\n'",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console\n",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "source.component",
+        "code": "invalid_component"
+      }
+    },
+    {
+      "name": "component '\\x85'",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "source.component",
+        "code": "invalid_component"
+      }
+    },
+    {
+      "name": "secret durable",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "durable",
+        "sensitivity": "secret",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sensitivity",
+        "code": "durable_secret"
+      }
+    },
+    {
+      "name": "missing schema_version",
+      "event": {
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "schema_version",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing event_id",
+      "event": {
+        "schema_version": 1,
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_id",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing event_type",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "event_type",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing payload_schema_version",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "payload_schema_version",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing timestamp",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "timestamp",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing stream_id",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "stream_id",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing sequence",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sequence",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing session_id",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "session_id",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing source",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "source",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing correlation_id",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "correlation_id",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing causation_id",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "causation_id",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing payload",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "payload",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing persistence",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "persistence",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing sensitivity",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "sensitivity",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing redaction",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal"
+      },
+      "error": {
+        "field": "redaction",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing source component",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "source.component",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "missing source instance_id",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "source.instance_id",
+        "code": "missing_field"
+      }
+    },
+    {
+      "name": "unknown field None",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111"
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none",
+        "extra": true
+      },
+      "error": {
+        "field": "$",
+        "code": "unexpected_field"
+      }
+    },
+    {
+      "name": "unknown field source",
+      "event": {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "console.session.created",
+        "payload_schema_version": 1,
+        "timestamp": "2026-10-06T12:00:00Z",
+        "stream_id": "22222222-2222-4222-8222-222222222222",
+        "sequence": "1",
+        "session_id": null,
+        "source": {
+          "component": "console",
+          "instance_id": "11111111-1111-4111-8111-111111111111",
+          "extra": true
+        },
+        "correlation_id": null,
+        "causation_id": null,
+        "payload": {},
+        "persistence": "ephemeral",
+        "sensitivity": "internal",
+        "redaction": "none"
+      },
+      "error": {
+        "field": "source",
+        "code": "unexpected_field"
+      }
+    },
+    {
+      "name": "non-object envelope",
+      "event": [],
+      "error": {
+        "field": "$",
+        "code": "expected_object"
+      }
+    }
+  ]
+}

@@ -18,3 +18,11 @@ impl From<ApplicationInfo> for AppInfo {
         }
     }
 }
+pub mod event_envelope;
+pub mod identities;
+mod scalars;
+
+pub use scalars::{ContractError, ErrorCode, Sequence, UtcTimestamp, WireUuid};
+
+#[cfg(test)]
+mod tests;
