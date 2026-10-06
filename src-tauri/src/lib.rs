@@ -1,3 +1,4 @@
+pub mod adapters;
 mod application;
 pub mod contracts;
 mod desktop;

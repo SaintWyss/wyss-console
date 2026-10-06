@@ -1,0 +1,2015 @@
+{
+  "notice": "SYNTHETIC, schema-derived OFFLINE fixtures; never captured traffic or installed-runtime evidence. Wire JSON stays text to preserve signed i64 IDs outside JavaScript. Expected projections use existing common DTOs only.",
+  "source_revision": "0b863c69f50335acd92164aab971cb58d298c2fe",
+  "valid": [
+    {
+      "name": "initialize",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "initialize"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"wyss_console\",\"title\":\"Wyss Console\",\"version\":\"fixture-version\"},\"capabilities\":{\"experimentalApi\":false}}}"
+    },
+    {
+      "name": "initialized",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "initialized"
+      },
+      "direction": "client",
+      "wire": "{\"method\":\"initialized\"}"
+    },
+    {
+      "name": "initialize-response",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/v1/InitializeResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "initialize-response"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"request-fixture\",\"result\":{\"userAgent\":\"fixture-agent\",\"codexHome\":\"/fixture/codex\",\"platformFamily\":\"unix\",\"platformOs\":\"linux\"}}",
+      "operation": "initialize",
+      "request_id": "request-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "thread-start",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "thread-start"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"thread/start\",\"params\":{\"cwd\":\"/tmp\"}}"
+    },
+    {
+      "name": "thread-start-response",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/v2/ThreadStartResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "thread-start-response"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"request-fixture\",\"result\":{\"approvalPolicy\":\"on-request\",\"approvalsReviewer\":\"user\",\"cwd\":\"/tmp\",\"model\":\"fixture-model\",\"modelProvider\":\"custom-provider\",\"sandbox\":{\"type\":\"workspaceWrite\",\"writableRoots\":[],\"networkAccess\":false,\"excludeTmpdirEnvVar\":false,\"excludeSlashTmp\":false},\"thread\":{\"id\":\"thread-fixture\",\"cliVersion\":\"fixture-runtime\",\"createdAt\":1,\"updatedAt\":2,\"cwd\":\"/tmp\",\"ephemeral\":true,\"modelProvider\":\"custom-provider\",\"preview\":\"\",\"projectId\":null,\"sessionId\":\"vendor-session-tree\",\"source\":\"appServer\",\"status\":{\"type\":\"idle\"},\"turns\":[]}}}",
+      "operation": "thread_start",
+      "request_id": "request-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "session",
+        "state": "idle",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "idle",
+          "runtime_state": "idle",
+          "observed_model": {
+            "schema_version": 1,
+            "provider_id": "custom-provider",
+            "model_id": "fixture-model",
+            "display_name": null,
+            "availability": "unknown"
+          },
+          "terminal_id": null
+        }
+      }
+    },
+    {
+      "name": "thread-resume",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "thread-resume"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"thread/resume\",\"params\":{\"threadId\":\"thread-fixture\"}}"
+    },
+    {
+      "name": "thread-resume-response",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/v2/ThreadResumeResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "thread-resume-response"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"request-fixture\",\"result\":{\"approvalPolicy\":\"on-request\",\"approvalsReviewer\":\"user\",\"cwd\":\"/tmp\",\"model\":\"fixture-model\",\"modelProvider\":\"custom-provider\",\"sandbox\":{\"type\":\"workspaceWrite\",\"writableRoots\":[],\"networkAccess\":false,\"excludeTmpdirEnvVar\":false,\"excludeSlashTmp\":false},\"thread\":{\"id\":\"thread-fixture\",\"cliVersion\":\"fixture-runtime\",\"createdAt\":1,\"updatedAt\":2,\"cwd\":\"/tmp\",\"ephemeral\":true,\"modelProvider\":\"custom-provider\",\"preview\":\"\",\"projectId\":null,\"sessionId\":\"vendor-session-tree\",\"source\":\"appServer\",\"status\":{\"type\":\"idle\"},\"turns\":[]}}}",
+      "operation": "thread_resume",
+      "request_id": "request-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "session",
+        "state": "idle",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "idle",
+          "runtime_state": "idle",
+          "observed_model": {
+            "schema_version": 1,
+            "provider_id": "custom-provider",
+            "model_id": "fixture-model",
+            "display_name": null,
+            "availability": "unknown"
+          },
+          "terminal_id": null
+        }
+      }
+    },
+    {
+      "name": "turn-start",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "turn-start"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"turn/start\",\"params\":{\"threadId\":\"thread-fixture\",\"input\":[{\"type\":\"text\",\"text\":\"fixture prompt\",\"text_elements\":[]}]}}"
+    },
+    {
+      "name": "turn-start-response",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/v2/TurnStartResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "turn-start-response"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"request-fixture\",\"result\":{\"turn\":{\"id\":\"turn-fixture\",\"items\":[],\"status\":\"inProgress\",\"error\":null}}}",
+      "operation": "turn_start",
+      "request_id": "request-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "turn",
+        "outcome": "in_progress",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "running",
+          "runtime_state": "inProgress",
+          "observed_model": null,
+          "terminal_id": null
+        },
+        "error": null
+      }
+    },
+    {
+      "name": "turn-interrupt",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "turn-interrupt"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"turn/interrupt\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\"}}"
+    },
+    {
+      "name": "turn-interrupt-response",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/v2/TurnInterruptResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "turn-interrupt-response"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"request-fixture\",\"result\":{}}",
+      "operation": "turn_interrupt",
+      "request_id": "request-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "model-list",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "model-list"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"model/list\",\"params\":{\"includeHidden\":true,\"limit\":0}}"
+    },
+    {
+      "name": "request-string-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "request-string-id"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"42\",\"method\":\"model/list\",\"params\":{}}"
+    },
+    {
+      "name": "request-max-i64",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "request-max-i64"
+      },
+      "direction": "client",
+      "wire": "{\"id\":9223372036854775807,\"method\":\"model/list\",\"params\":{}}"
+    },
+    {
+      "name": "request-min-i64",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "request-min-i64"
+      },
+      "direction": "client",
+      "wire": "{\"id\":-9223372036854775808,\"method\":\"model/list\",\"params\":{}}"
+    },
+    {
+      "name": "request-zero-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "request-zero-id"
+      },
+      "direction": "client",
+      "wire": "{\"id\":0,\"method\":\"model/list\",\"params\":{}}"
+    },
+    {
+      "name": "request-negative-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "request-negative-id"
+      },
+      "direction": "client",
+      "wire": "{\"id\":-42,\"method\":\"model/list\",\"params\":{}}"
+    },
+    {
+      "name": "request-trace",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "request-trace"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"model/list\",\"params\":{},\"trace\":{\"traceparent\":\"00-fixture\",\"tracestate\":null}}"
+    },
+    {
+      "name": "thread-started-idle",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "thread-started-idle"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"thread-fixture\",\"cliVersion\":\"fixture-runtime\",\"createdAt\":1,\"updatedAt\":2,\"cwd\":\"/tmp\",\"ephemeral\":true,\"modelProvider\":\"custom-provider\",\"preview\":\"\",\"projectId\":null,\"sessionId\":\"vendor-session-tree\",\"source\":\"appServer\",\"status\":{\"type\":\"idle\"},\"turns\":[]}}}",
+      "expected": {
+        "kind": "session",
+        "state": "idle",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "idle",
+          "runtime_state": "idle",
+          "observed_model": null,
+          "terminal_id": null
+        }
+      }
+    },
+    {
+      "name": "thread-started-running",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "thread-started-running"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"thread-fixture\",\"cliVersion\":\"fixture-runtime\",\"createdAt\":1,\"updatedAt\":2,\"cwd\":\"/tmp\",\"ephemeral\":true,\"modelProvider\":\"custom-provider\",\"preview\":\"\",\"projectId\":null,\"sessionId\":\"vendor-session-tree\",\"source\":\"appServer\",\"status\":{\"type\":\"active\",\"activeFlags\":[]},\"turns\":[]}}}",
+      "expected": {
+        "kind": "session",
+        "state": "running",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "running",
+          "runtime_state": "active",
+          "observed_model": null,
+          "terminal_id": null
+        }
+      }
+    },
+    {
+      "name": "thread-started-waiting_for_approval",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "thread-started-waiting_for_approval"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"thread-fixture\",\"cliVersion\":\"fixture-runtime\",\"createdAt\":1,\"updatedAt\":2,\"cwd\":\"/tmp\",\"ephemeral\":true,\"modelProvider\":\"custom-provider\",\"preview\":\"\",\"projectId\":null,\"sessionId\":\"vendor-session-tree\",\"source\":\"appServer\",\"status\":{\"type\":\"active\",\"activeFlags\":[\"waitingOnApproval\"]},\"turns\":[]}}}",
+      "expected": {
+        "kind": "session",
+        "state": "waiting_for_approval",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "waiting_for_approval",
+          "runtime_state": "active",
+          "observed_model": null,
+          "terminal_id": null
+        }
+      }
+    },
+    {
+      "name": "thread-started-waiting_for_input",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "thread-started-waiting_for_input"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"thread-fixture\",\"cliVersion\":\"fixture-runtime\",\"createdAt\":1,\"updatedAt\":2,\"cwd\":\"/tmp\",\"ephemeral\":true,\"modelProvider\":\"custom-provider\",\"preview\":\"\",\"projectId\":null,\"sessionId\":\"vendor-session-tree\",\"source\":\"appServer\",\"status\":{\"type\":\"active\",\"activeFlags\":[\"waitingOnUserInput\"]},\"turns\":[]}}}",
+      "expected": {
+        "kind": "session",
+        "state": "waiting_for_input",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "waiting_for_input",
+          "runtime_state": "active",
+          "observed_model": null,
+          "terminal_id": null
+        }
+      }
+    },
+    {
+      "name": "thread-started-unknown-active",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "unknown",
+        "origin": "synthetic_forward_compatibility",
+        "purpose": "thread-started-unknown-active"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"thread-fixture\",\"cliVersion\":\"fixture-runtime\",\"createdAt\":1,\"updatedAt\":2,\"cwd\":\"/tmp\",\"ephemeral\":true,\"modelProvider\":\"custom-provider\",\"preview\":\"\",\"projectId\":null,\"sessionId\":\"vendor-session-tree\",\"source\":\"appServer\",\"status\":{\"type\":\"active\",\"activeFlags\":[\"futureFlag\"]},\"turns\":[]}}}",
+      "expected": {
+        "kind": "session",
+        "state": "unknown",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "unknown",
+          "runtime_state": "active",
+          "observed_model": null,
+          "terminal_id": null
+        }
+      }
+    },
+    {
+      "name": "thread-started-unknown-futureState",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "unknown",
+        "origin": "synthetic_forward_compatibility",
+        "purpose": "thread-started-unknown-futureState"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"thread-fixture\",\"cliVersion\":\"fixture-runtime\",\"createdAt\":1,\"updatedAt\":2,\"cwd\":\"/tmp\",\"ephemeral\":true,\"modelProvider\":\"custom-provider\",\"preview\":\"\",\"projectId\":null,\"sessionId\":\"vendor-session-tree\",\"source\":\"appServer\",\"status\":{\"type\":\"futureState\"},\"turns\":[]}}}",
+      "expected": {
+        "kind": "session",
+        "state": "unknown",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "unknown",
+          "runtime_state": "futureState",
+          "observed_model": null,
+          "terminal_id": null
+        }
+      }
+    },
+    {
+      "name": "thread-started-failed",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "thread-started-failed"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"thread-fixture\",\"cliVersion\":\"fixture-runtime\",\"createdAt\":1,\"updatedAt\":2,\"cwd\":\"/tmp\",\"ephemeral\":true,\"modelProvider\":\"custom-provider\",\"preview\":\"\",\"projectId\":null,\"sessionId\":\"vendor-session-tree\",\"source\":\"appServer\",\"status\":{\"type\":\"systemError\"},\"turns\":[]}}}",
+      "expected": {
+        "kind": "session",
+        "state": "failed",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "failed",
+          "runtime_state": "systemError",
+          "observed_model": null,
+          "terminal_id": null
+        }
+      }
+    },
+    {
+      "name": "thread-started-unknown-notLoaded",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "thread-started-unknown-notLoaded"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"thread-fixture\",\"cliVersion\":\"fixture-runtime\",\"createdAt\":1,\"updatedAt\":2,\"cwd\":\"/tmp\",\"ephemeral\":true,\"modelProvider\":\"custom-provider\",\"preview\":\"\",\"projectId\":null,\"sessionId\":\"vendor-session-tree\",\"source\":\"appServer\",\"status\":{\"type\":\"notLoaded\"},\"turns\":[]}}}",
+      "expected": {
+        "kind": "session",
+        "state": "unknown",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "unknown",
+          "runtime_state": "notLoaded",
+          "observed_model": null,
+          "terminal_id": null
+        }
+      }
+    },
+    {
+      "name": "turn-started",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "turn-started"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"thread-fixture\",\"turn\":{\"id\":\"turn-fixture\",\"items\":[],\"status\":\"inProgress\",\"error\":null}}}",
+      "expected": {
+        "kind": "turn",
+        "outcome": "in_progress",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "running",
+          "runtime_state": "inProgress",
+          "observed_model": null,
+          "terminal_id": null
+        },
+        "error": null
+      }
+    },
+    {
+      "name": "turn-completed-completed",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "turn-completed-completed"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turn\":{\"id\":\"turn-fixture\",\"items\":[],\"status\":\"completed\",\"error\":null}}}",
+      "expected": {
+        "kind": "turn",
+        "outcome": "completed",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "idle",
+          "runtime_state": "completed",
+          "observed_model": null,
+          "terminal_id": null
+        },
+        "error": null
+      }
+    },
+    {
+      "name": "turn-completed-failed",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "turn-completed-failed"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turn\":{\"id\":\"turn-fixture\",\"items\":[],\"status\":\"failed\",\"error\":{\"message\":\"PRIVATE_PROVIDER_ERROR_DO_NOT_SURFACE\",\"codexErrorInfo\":\"other\"}}}}",
+      "expected": {
+        "kind": "turn",
+        "outcome": "failed",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "failed",
+          "runtime_state": "failed",
+          "observed_model": null,
+          "terminal_id": null
+        },
+        "error": {
+          "schema_version": 1,
+          "code": "runtime_failed",
+          "operation": null,
+          "diagnostic": {
+            "code": "codex.request_failed",
+            "summary": "Codex reported failed work."
+          }
+        }
+      }
+    },
+    {
+      "name": "turn-completed-interrupted",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "turn-completed-interrupted"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turn\":{\"id\":\"turn-fixture\",\"items\":[],\"status\":\"interrupted\",\"error\":null}}}",
+      "expected": {
+        "kind": "turn",
+        "outcome": "interrupted",
+        "common": {
+          "schema_version": 1,
+          "managed_session_id": "11111111-1111-4111-8111-111111111111",
+          "adapter_id": "codex",
+          "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+          "runtime_session_id": "thread-fixture",
+          "state": "interrupted",
+          "runtime_state": "interrupted",
+          "observed_model": null,
+          "terminal_id": null
+        },
+        "error": null
+      }
+    },
+    {
+      "name": "item-agentMessage-started",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-agentMessage-started"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/started\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"agentMessage\",\"text\":\"fixture answer\"},\"startedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "agent_message",
+        "stage": "started",
+        "surface": "stable",
+        "status": null,
+        "detail": {
+          "text": "fixture answer",
+          "phase": null
+        }
+      }
+    },
+    {
+      "name": "item-agentMessage-completed",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-agentMessage-completed"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"agentMessage\",\"text\":\"fixture answer\"},\"completedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "agent_message",
+        "stage": "completed",
+        "surface": "stable",
+        "status": null,
+        "detail": {
+          "text": "fixture answer",
+          "phase": null
+        }
+      }
+    },
+    {
+      "name": "item-userMessage-started",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-userMessage-started"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/started\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"userMessage\",\"content\":[{\"type\":\"text\",\"text\":\"fixture prompt\"}]},\"startedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "user_message",
+        "stage": "started",
+        "surface": "stable",
+        "status": null,
+        "detail": {
+          "content_count": 1
+        }
+      }
+    },
+    {
+      "name": "item-userMessage-completed",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-userMessage-completed"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"userMessage\",\"content\":[{\"type\":\"text\",\"text\":\"fixture prompt\"}]},\"completedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "user_message",
+        "stage": "completed",
+        "surface": "stable",
+        "status": null,
+        "detail": {
+          "content_count": 1
+        }
+      }
+    },
+    {
+      "name": "item-commandExecution-started",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-commandExecution-started"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/started\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"commandExecution\",\"command\":\"printf fixture\",\"cwd\":\"/tmp\",\"commandActions\":[],\"status\":\"completed\",\"exitCode\":0},\"startedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "command_execution",
+        "stage": "started",
+        "surface": "stable",
+        "status": "completed",
+        "detail": {
+          "command": "printf fixture",
+          "cwd": "/tmp",
+          "exit_code": 0
+        }
+      }
+    },
+    {
+      "name": "item-commandExecution-completed",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-commandExecution-completed"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"commandExecution\",\"command\":\"printf fixture\",\"cwd\":\"/tmp\",\"commandActions\":[],\"status\":\"completed\",\"exitCode\":0},\"completedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "command_execution",
+        "stage": "completed",
+        "surface": "stable",
+        "status": "completed",
+        "detail": {
+          "command": "printf fixture",
+          "cwd": "/tmp",
+          "exit_code": 0
+        }
+      }
+    },
+    {
+      "name": "item-fileChange-started",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-fileChange-started"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/started\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"fileChange\",\"status\":\"completed\",\"changes\":[{\"path\":\"fixture.txt\",\"kind\":{\"type\":\"update\",\"move_path\":null},\"diff\":\"synthetic patch\"}]},\"startedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "file_change",
+        "stage": "started",
+        "surface": "stable",
+        "status": "completed",
+        "detail": {
+          "changes": [
+            {
+              "path": "fixture.txt",
+              "kind": {
+                "type": "update",
+                "move_path": null
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "item-fileChange-completed",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-fileChange-completed"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"fileChange\",\"status\":\"completed\",\"changes\":[{\"path\":\"fixture.txt\",\"kind\":{\"type\":\"update\",\"move_path\":null},\"diff\":\"synthetic patch\"}]},\"completedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "file_change",
+        "stage": "completed",
+        "surface": "stable",
+        "status": "completed",
+        "detail": {
+          "changes": [
+            {
+              "path": "fixture.txt",
+              "kind": {
+                "type": "update",
+                "move_path": null
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "item-mcpToolCall-started",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-mcpToolCall-started"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/started\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"mcpToolCall\",\"server\":\"fixture-server\",\"tool\":\"fixture-tool\",\"arguments\":{},\"status\":\"completed\"},\"startedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "mcp_tool_call",
+        "stage": "started",
+        "surface": "stable",
+        "status": "completed",
+        "detail": {
+          "server": "fixture-server",
+          "tool": "fixture-tool"
+        }
+      }
+    },
+    {
+      "name": "item-mcpToolCall-completed",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-mcpToolCall-completed"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"mcpToolCall\",\"server\":\"fixture-server\",\"tool\":\"fixture-tool\",\"arguments\":{},\"status\":\"completed\"},\"completedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "mcp_tool_call",
+        "stage": "completed",
+        "surface": "stable",
+        "status": "completed",
+        "detail": {
+          "server": "fixture-server",
+          "tool": "fixture-tool"
+        }
+      }
+    },
+    {
+      "name": "item-reasoning-started",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-reasoning-started"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/started\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"reasoning\",\"summary\":[\"user-visible summary\"],\"content\":[\"PRIVATE_REASONING_MUST_NOT_SURFACE\"]},\"startedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "reasoning_summary",
+        "stage": "started",
+        "surface": "stable",
+        "status": null,
+        "detail": {
+          "summary": ["user-visible summary"]
+        }
+      }
+    },
+    {
+      "name": "item-reasoning-completed",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-reasoning-completed"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"reasoning\",\"summary\":[\"user-visible summary\"],\"content\":[\"PRIVATE_REASONING_MUST_NOT_SURFACE\"]},\"completedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "reasoning_summary",
+        "stage": "completed",
+        "surface": "stable",
+        "status": null,
+        "detail": {
+          "summary": ["user-visible summary"]
+        }
+      }
+    },
+    {
+      "name": "item-plan-started",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "experimental",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-plan-started"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/started\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"plan\",\"text\":\"experimental plan\"},\"startedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "plan",
+        "stage": "started",
+        "surface": "experimental",
+        "status": null,
+        "detail": {
+          "text": "experimental plan"
+        }
+      }
+    },
+    {
+      "name": "item-plan-completed",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "experimental",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item-plan-completed"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"plan\",\"text\":\"experimental plan\"},\"completedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "plan",
+        "stage": "completed",
+        "surface": "experimental",
+        "status": null,
+        "detail": {
+          "text": "experimental plan"
+        }
+      }
+    },
+    {
+      "name": "item-futureItem-started",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "unknown",
+        "origin": "synthetic_forward_compatibility",
+        "purpose": "item-futureItem-started"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/started\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"futureItem\",\"vendorDetail\":{\"bounded\":true}},\"startedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "unknown",
+        "stage": "started",
+        "surface": "unknown",
+        "status": null,
+        "detail": {
+          "vendor_type": "futureItem"
+        }
+      }
+    },
+    {
+      "name": "item-futureItem-completed",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "unknown",
+        "origin": "synthetic_forward_compatibility",
+        "purpose": "item-futureItem-completed"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"item\":{\"id\":\"item-fixture\",\"type\":\"futureItem\",\"vendorDetail\":{\"bounded\":true}},\"completedAtMs\":1}}",
+      "expected": {
+        "kind": "item",
+        "item_kind": "unknown",
+        "stage": "completed",
+        "surface": "unknown",
+        "status": null,
+        "detail": {
+          "vendor_type": "futureItem"
+        }
+      }
+    },
+    {
+      "name": "item/agentMessage/delta",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item/agentMessage/delta"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"delta\":\"á✓日本\"}}",
+      "expected": {
+        "kind": "content",
+        "content_kind": "agent_message",
+        "text": "á✓日本",
+        "detail": {
+          "summary_index_decimal": null
+        }
+      }
+    },
+    {
+      "name": "item/commandExecution/outputDelta",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item/commandExecution/outputDelta"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/commandExecution/outputDelta\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"delta\":\"fixture output\"}}",
+      "expected": {
+        "kind": "content",
+        "content_kind": "command_output",
+        "text": "fixture output",
+        "detail": {
+          "summary_index_decimal": null
+        }
+      }
+    },
+    {
+      "name": "item/reasoning/summaryTextDelta",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item/reasoning/summaryTextDelta"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/reasoning/summaryTextDelta\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"delta\":\"visible summary\",\"summaryIndex\":2}}",
+      "expected": {
+        "kind": "content",
+        "content_kind": "reasoning_summary",
+        "text": "visible summary",
+        "detail": {
+          "summary_index_decimal": "2"
+        }
+      }
+    },
+    {
+      "name": "item/mcpToolCall/progress",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "item/mcpToolCall/progress"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/mcpToolCall/progress\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"message\":\"progress\"}}",
+      "expected": {
+        "kind": "content",
+        "content_kind": "tool_progress",
+        "text": "progress",
+        "detail": {
+          "summary_index_decimal": null
+        }
+      }
+    },
+    {
+      "name": "turn-plan-updated",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "turn-plan-updated"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"turn/plan/updated\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"explanation\":\"visible plan\",\"plan\":[{\"step\":\"fixture step\",\"status\":\"pending\"}]}}",
+      "expected": {
+        "kind": "content",
+        "content_kind": "plan",
+        "text": "visible plan",
+        "detail": {
+          "plan": [
+            {
+              "step": "fixture step",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "experimental-item/plan/delta",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "experimental",
+        "origin": "synthetic_schema_derived",
+        "purpose": "experimental-item/plan/delta"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/plan/delta\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"delta\":\"experimental\"}}",
+      "expected": {
+        "kind": "unknown_notification",
+        "surface": "experimental"
+      }
+    },
+    {
+      "name": "experimental-process/outputDelta",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "experimental",
+        "origin": "synthetic_schema_derived",
+        "purpose": "experimental-process/outputDelta"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"process/outputDelta\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"delta\":\"experimental\"}}",
+      "expected": {
+        "kind": "unknown_notification",
+        "surface": "experimental"
+      }
+    },
+    {
+      "name": "private-reasoning",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "private",
+        "origin": "synthetic_schema_derived",
+        "purpose": "private-reasoning"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/reasoning/textDelta\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"delta\":\"PRIVATE_REASONING_MUST_NOT_SURFACE\"}}",
+      "expected": {
+        "kind": "suppressed_private_reasoning"
+      }
+    },
+    {
+      "name": "model-list-response",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/v2/ModelListResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "model-list-response"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"request-fixture\",\"result\":{\"data\":[{\"id\":\"catalog-fixture\",\"model\":\"fixture-model\",\"displayName\":\"Fixture Model\",\"description\":\"Synthetic model\",\"hidden\":true,\"isDefault\":false,\"defaultReasoningEffort\":\"medium\",\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"medium\",\"description\":\"Fixture effort\"}],\"inputModalities\":[\"text\",\"image\"]}],\"nextCursor\":\"next-fixture\"}}",
+      "operation": "model_list",
+      "request_id": "request-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "model_catalog",
+        "models": [
+          {
+            "model": {
+              "schema_version": 1,
+              "provider_id": null,
+              "model_id": "fixture-model",
+              "display_name": "Fixture Model",
+              "availability": "unknown"
+            },
+            "codex": {
+              "id": "catalog-fixture",
+              "hidden": true,
+              "isDefault": false,
+              "defaultReasoningEffort": "medium",
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "medium",
+                  "description": "Fixture effort"
+                }
+              ],
+              "inputModalities": ["text", "image"]
+            }
+          }
+        ],
+        "next_cursor": "next-fixture"
+      }
+    },
+    {
+      "name": "command-approval-request",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "command-approval-request"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"approval-fixture\",\"method\":\"item/commandExecution/requestApproval\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"startedAtMs\":1,\"command\":\"printf fixture\",\"cwd\":\"/tmp\",\"reason\":\"fixture request\"}}",
+      "expected": {
+        "kind": "approval",
+        "approval_kind": "command",
+        "surface": "stable"
+      }
+    },
+    {
+      "name": "command-decision-accept",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/CommandExecutionRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "command-decision-accept"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"approval-fixture\",\"result\":{\"decision\":\"accept\"}}",
+      "operation": "command_approval",
+      "request_id": "approval-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "command-decision-acceptForSession",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/CommandExecutionRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "command-decision-acceptForSession"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"approval-fixture\",\"result\":{\"decision\":\"acceptForSession\"}}",
+      "operation": "command_approval",
+      "request_id": "approval-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "command-decision-decline",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/CommandExecutionRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "command-decision-decline"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"approval-fixture\",\"result\":{\"decision\":\"decline\"}}",
+      "operation": "command_approval",
+      "request_id": "approval-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "command-decision-cancel",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/CommandExecutionRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "command-decision-cancel"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"approval-fixture\",\"result\":{\"decision\":\"cancel\"}}",
+      "operation": "command_approval",
+      "request_id": "approval-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "file_change-approval-request",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "file_change-approval-request"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"approval-fixture\",\"method\":\"item/fileChange/requestApproval\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"startedAtMs\":1,\"reason\":\"fixture change\"}}",
+      "expected": {
+        "kind": "approval",
+        "approval_kind": "file_change",
+        "surface": "stable"
+      }
+    },
+    {
+      "name": "file_change-decision-accept",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/FileChangeRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "file_change-decision-accept"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"approval-fixture\",\"result\":{\"decision\":\"accept\"}}",
+      "operation": "file_approval",
+      "request_id": "approval-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "file_change-decision-acceptForSession",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/FileChangeRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "file_change-decision-acceptForSession"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"approval-fixture\",\"result\":{\"decision\":\"acceptForSession\"}}",
+      "operation": "file_approval",
+      "request_id": "approval-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "file_change-decision-decline",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/FileChangeRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "file_change-decision-decline"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"approval-fixture\",\"result\":{\"decision\":\"decline\"}}",
+      "operation": "file_approval",
+      "request_id": "approval-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "file_change-decision-cancel",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/FileChangeRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "file_change-decision-cancel"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"approval-fixture\",\"result\":{\"decision\":\"cancel\"}}",
+      "operation": "file_approval",
+      "request_id": "approval-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "permissions-approval-request",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "permissions-approval-request"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"approval-fixture\",\"method\":\"item/permissions/requestApproval\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"startedAtMs\":1,\"cwd\":\"/tmp\",\"permissions\":{\"network\":{\"enabled\":true}},\"reason\":\"fixture permissions\"}}",
+      "expected": {
+        "kind": "approval",
+        "approval_kind": "permissions",
+        "surface": "stable"
+      }
+    },
+    {
+      "name": "empty-permission-response",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/PermissionsRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "empty-permission-response"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"approval-fixture\",\"result\":{\"permissions\":{},\"scope\":\"turn\"}}",
+      "operation": "permission_approval",
+      "request_id": "approval-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "command-structured-acceptWithExecpolicyAmendment",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/CommandExecutionRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "command-structured-acceptWithExecpolicyAmendment"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"approval-fixture\",\"result\":{\"decision\":{\"acceptWithExecpolicyAmendment\":{\"execpolicy_amendment\":[\"printf\"]}}}}",
+      "operation": "command_approval",
+      "request_id": "approval-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "command-structured-applyNetworkPolicyAmendment",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/CommandExecutionRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "command-structured-applyNetworkPolicyAmendment"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"approval-fixture\",\"result\":{\"decision\":{\"applyNetworkPolicyAmendment\":{\"network_policy_amendment\":{\"action\":\"allow\",\"host\":\"example.invalid\"}}}}}",
+      "operation": "command_approval",
+      "request_id": "approval-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "acknowledged"
+      }
+    },
+    {
+      "name": "approval-request-experimental-field",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "experimental",
+        "origin": "synthetic_schema_derived",
+        "purpose": "approval-request-experimental-field"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"approval-fixture\",\"method\":\"item/commandExecution/requestApproval\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"startedAtMs\":1,\"additionalPermissions\":{}}}",
+      "expected": {
+        "kind": "approval",
+        "approval_kind": "command",
+        "surface": "experimental"
+      }
+    },
+    {
+      "name": "request-resolved",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "request-resolved"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"serverRequest/resolved\",\"params\":{\"threadId\":\"thread-fixture\",\"requestId\":9223372036854775807}}",
+      "expected": {
+        "kind": "approval_resolved",
+        "request_id_decimal": "9223372036854775807"
+      }
+    },
+    {
+      "name": "unknown-notification",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "unknown",
+        "origin": "synthetic_forward_compatibility",
+        "purpose": "unknown-notification"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"future/notification\",\"params\":{\"vendor\":{\"bounded\":true}}}",
+      "expected": {
+        "kind": "unknown_notification",
+        "surface": "unknown"
+      }
+    },
+    {
+      "name": "unknown-server-request",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "unknown",
+        "origin": "synthetic_forward_compatibility",
+        "purpose": "unknown-server-request"
+      },
+      "direction": "server",
+      "wire": "{\"id\":-10,\"method\":\"future/request\",\"params\":{\"vendor\":true}}",
+      "expected": {
+        "kind": "unsupported_server_request",
+        "surface": "unknown"
+      }
+    },
+    {
+      "name": "unknown-response",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/src/rpc.rs",
+        "retrieved": "2026-10-06",
+        "stability": "unknown",
+        "origin": "synthetic_forward_compatibility",
+        "purpose": "unknown-response"
+      },
+      "direction": "server",
+      "wire": "{\"id\":9223372036854775807,\"result\":{\"futureResult\":true}}"
+    },
+    {
+      "name": "error-response",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/v2/ModelListResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "error-response"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"request-fixture\",\"error\":{\"code\":-32000,\"message\":\"PRIVATE_PROVIDER_ERROR_DO_NOT_SURFACE\",\"data\":{\"sensitive\":\"do not project\"}}}",
+      "operation": "model_list",
+      "request_id": "request-fixture",
+      "request_id_kind": "string",
+      "expected": {
+        "kind": "error",
+        "error": {
+          "schema_version": 1,
+          "code": "protocol_error",
+          "operation": null,
+          "diagnostic": {
+            "code": "codex.request_failed",
+            "summary": "Codex reported a protocol request failure."
+          }
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "malformed-envelope",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "malformed-envelope"
+      },
+      "direction": "server",
+      "wire": "{}"
+    },
+    {
+      "name": "missing-method",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "missing-method"
+      },
+      "direction": "server",
+      "wire": "{\"id\":1,\"params\":{}}"
+    },
+    {
+      "name": "request-missing-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "request-missing-id"
+      },
+      "direction": "client",
+      "wire": "{\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"wyss_console\",\"title\":\"Wyss Console\",\"version\":\"fixture-version\"},\"capabilities\":{\"experimentalApi\":false}}}"
+    },
+    {
+      "name": "response-missing-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/src/rpc.rs",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "response-missing-id"
+      },
+      "direction": "server",
+      "wire": "{\"result\":{}}"
+    },
+    {
+      "name": "boolean-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "boolean-id"
+      },
+      "direction": "client",
+      "wire": "{\"id\":true,\"method\":\"model/list\",\"params\":{}}"
+    },
+    {
+      "name": "null-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "null-id"
+      },
+      "direction": "client",
+      "wire": "{\"id\":null,\"method\":\"model/list\",\"params\":{}}"
+    },
+    {
+      "name": "array-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "array-id"
+      },
+      "direction": "client",
+      "wire": "{\"id\":[],\"method\":\"model/list\",\"params\":{}}"
+    },
+    {
+      "name": "out-of-range-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "out-of-range-id"
+      },
+      "direction": "client",
+      "wire": "{\"id\":9223372036854775808,\"method\":\"model/list\",\"params\":{}}"
+    },
+    {
+      "name": "empty-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "empty-id"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"\",\"method\":\"model/list\",\"params\":{}}"
+    },
+    {
+      "name": "invalid-client-info",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "invalid-client-info"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"wyss_console\"}}}"
+    },
+    {
+      "name": "missing-params",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "missing-params"
+      },
+      "direction": "client",
+      "wire": "{\"method\":\"thread/start\",\"id\":1}"
+    },
+    {
+      "name": "invalid-thread-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "invalid-thread-id"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"thread/resume\",\"params\":{\"threadId\":\"\"}}"
+    },
+    {
+      "name": "invalid-turn-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "invalid-turn-id"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"turn/interrupt\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"\\n\"}}"
+    },
+    {
+      "name": "invalid-turn-status",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "invalid-turn-status"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turn\":{\"id\":\"turn-fixture\",\"items\":[],\"status\":\"future\",\"error\":null}}}"
+    },
+    {
+      "name": "completion-in-progress",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "completion-in-progress"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"thread-fixture\",\"turn\":{\"id\":\"turn-fixture\",\"items\":[],\"status\":\"inProgress\",\"error\":null}}}"
+    },
+    {
+      "name": "invalid-approval-correlation",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "invalid-approval-correlation"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"item/commandExecution/requestApproval\",\"params\":{\"threadId\":\"thread-fixture\",\"startedAtMs\":1}}"
+    },
+    {
+      "name": "approval-missing-timestamp",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "approval-missing-timestamp"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"item/fileChange/requestApproval\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\"}}"
+    },
+    {
+      "name": "bad-method",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "bad-method"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"bad method\",\"params\":{}}"
+    },
+    {
+      "name": "oversized-method",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "oversized-method"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"params\":{}}"
+    },
+    {
+      "name": "error-missing-message",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/src/rpc.rs",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "error-missing-message"
+      },
+      "direction": "server",
+      "wire": "{\"id\":1,\"error\":{\"code\":-1}}"
+    },
+    {
+      "name": "error-invalid-code",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/src/rpc.rs",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "error-invalid-code"
+      },
+      "direction": "server",
+      "wire": "{\"id\":1,\"error\":{\"code\":\"-1\",\"message\":\"error\"}}"
+    },
+    {
+      "name": "result-and-error",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/src/rpc.rs",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "result-and-error"
+      },
+      "direction": "server",
+      "wire": "{\"id\":1,\"result\":{},\"error\":{\"code\":-1,\"message\":\"error\"}}"
+    },
+    {
+      "name": "malformed-unknown-request",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "malformed-unknown-request"
+      },
+      "direction": "server",
+      "wire": "{\"id\":{},\"method\":\"future/request\",\"params\":{}}"
+    },
+    {
+      "name": "bad-trace",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "bad-trace"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"model/list\",\"params\":{},\"trace\":{\"traceparent\":42}}"
+    },
+    {
+      "name": "jsonrpc-header",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "jsonrpc-header"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"model/list\",\"params\":{},\"jsonrpc\":\"2.0\"}"
+    },
+    {
+      "name": "delta-missing-item",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "delta-missing-item"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"delta\":\"x\"}}"
+    },
+    {
+      "name": "non-text-outbound-input",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "non-text-outbound-input"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"method\":\"turn/start\",\"params\":{\"threadId\":\"thread-fixture\",\"input\":[{\"type\":\"future\"}]}}"
+    },
+    {
+      "name": "invalid-approval-decision",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/CommandExecutionRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "invalid-approval-decision"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"result\":{\"decision\":\"approve\"}}",
+      "operation": "command_approval",
+      "request_id": "request-fixture",
+      "request_id_kind": "string"
+    },
+    {
+      "name": "file-command-decision",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/FileChangeRequestApprovalResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "file-command-decision"
+      },
+      "direction": "client",
+      "wire": "{\"id\":\"request-fixture\",\"result\":{\"decision\":{\"acceptWithExecpolicyAmendment\":{\"execpolicy_amendment\":[]}}}}",
+      "operation": "file_approval",
+      "request_id": "request-fixture",
+      "request_id_kind": "string"
+    },
+    {
+      "name": "invalid-model-list",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/v2/ModelListResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "invalid-model-list"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"request-fixture\",\"result\":{\"data\":[{\"id\":\"fixture\"}]}}",
+      "operation": "model_list",
+      "request_id": "request-fixture",
+      "request_id_kind": "string"
+    },
+    {
+      "name": "invalid-initialize-result",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/v1/InitializeResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "invalid-initialize-result"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"request-fixture\",\"result\":{\"userAgent\":\"fixture\"}}",
+      "operation": "initialize",
+      "request_id": "request-fixture",
+      "request_id_kind": "string"
+    },
+    {
+      "name": "invalid-turn-result",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/v2/TurnStartResponse.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "invalid-turn-result"
+      },
+      "direction": "server",
+      "wire": "{\"id\":\"request-fixture\",\"result\":{\"turn\":{\"id\":\"turn-fixture\",\"items\":[],\"status\":\"bad\"}}}",
+      "operation": "turn_start",
+      "request_id": "request-fixture",
+      "request_id_kind": "string"
+    },
+    {
+      "name": "duplicate-top-level",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "duplicate-top-level"
+      },
+      "direction": "client",
+      "wire": "{\"id\":1,\"id\":2,\"method\":\"model/list\",\"params\":{}}"
+    },
+    {
+      "name": "duplicate-nested",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "duplicate-nested"
+      },
+      "direction": "client",
+      "wire": "{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"a\",\"name\":\"b\",\"version\":\"v\"}}}"
+    },
+    {
+      "name": "fractional-id",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "fractional-id"
+      },
+      "direction": "client",
+      "wire": "{\"id\":1.0,\"method\":\"model/list\",\"params\":{}}"
+    },
+    {
+      "name": "multiple-frames",
+      "provenance": {
+        "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json",
+        "retrieved": "2026-10-06",
+        "stability": "stable",
+        "origin": "synthetic_schema_derived",
+        "purpose": "multiple-frames"
+      },
+      "direction": "server",
+      "wire": "{\"method\":\"future\"}\n{\"method\":\"future\"}"
+    }
+  ],
+  "binding": {
+    "managed_session_id": "11111111-1111-4111-8111-111111111111",
+    "runtime_instance_id": "22222222-2222-4222-8222-222222222222",
+    "thread_id": "thread-fixture"
+  }
+}

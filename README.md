@@ -1,7 +1,7 @@
 # Wyss Console
 
 Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current status: **Sprint 2A agent adapter contracts** using Tauri 2,
+Linux-first, local-first. Current status: **Sprint 2B offline Codex codec** using Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -75,3 +75,12 @@ parity. They do not claim installed-runtime compatibility. See ADR 0008 and
 [official runtime-surface research](docs/research/agent-runtime-surfaces-2026-10-06.md).
 No agent runtime, SDK, network, authority or agent UI is connected. Existing local
 terminal behavior is unchanged; managed-agent execution requires external authority.
+
+## Codex protocol boundary
+
+An offline Rust codec validates and normalizes a bounded subset of Codex App Server
+messages using schema-derived synthetic fixtures. It includes initialization ordering,
+thread/turn/item lifecycle, approvals and model catalogs. Shared common projections
+are checked in Rust and TypeScript. **The Codex runtime is not connected or usable
+through Console yet.** No Codex process, authentication or live transport is involved.
+See ADR 0009 for limits and deferred integration.

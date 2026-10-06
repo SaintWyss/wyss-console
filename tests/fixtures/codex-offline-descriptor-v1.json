@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "adapter_id": "codex",
+  "runtime_kind": "codex",
+  "implementation_version": "offline-codec-v1",
+  "runtime_version": {
+    "value": null,
+    "evidence": {
+      "kind": "static_knowledge",
+      "outcome": "declared",
+      "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+      "observed_at": null
+    }
+  },
+  "protocol_version": {
+    "value": null,
+    "evidence": {
+      "kind": "static_knowledge",
+      "outcome": "declared",
+      "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+      "observed_at": null
+    }
+  },
+  "transport": "structured_stdio",
+  "capabilities": {
+    "session_create": {
+      "request": {
+        "support": "conditional",
+        "evidence": [
+          {
+            "kind": "static_knowledge",
+            "outcome": "declared",
+            "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+            "observed_at": null
+          }
+        ],
+        "conditions": ["codex.protocol-surface-verified"],
+        "reason": "not_probed"
+      }
+    },
+    "session_resume": {
+      "request": {
+        "support": "conditional",
+        "evidence": [
+          {
+            "kind": "static_knowledge",
+            "outcome": "declared",
+            "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+            "observed_at": null
+          }
+        ],
+        "conditions": ["codex.protocol-surface-verified"],
+        "reason": "not_probed"
+      }
+    },
+    "session_interrupt": {
+      "request": {
+        "support": "conditional",
+        "evidence": [
+          {
+            "kind": "static_knowledge",
+            "outcome": "declared",
+            "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+            "observed_at": null
+          }
+        ],
+        "conditions": ["codex.protocol-surface-verified"],
+        "reason": "not_probed"
+      }
+    },
+    "session_status": {
+      "observe": {
+        "support": "conditional",
+        "evidence": [
+          {
+            "kind": "static_knowledge",
+            "outcome": "declared",
+            "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+            "observed_at": null
+          }
+        ],
+        "conditions": ["codex.protocol-surface-verified"],
+        "reason": "not_probed"
+      }
+    },
+    "prompt_submit": {
+      "request": {
+        "support": "conditional",
+        "evidence": [
+          {
+            "kind": "static_knowledge",
+            "outcome": "declared",
+            "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+            "observed_at": null
+          }
+        ],
+        "conditions": ["codex.protocol-surface-verified"],
+        "reason": "not_probed"
+      }
+    },
+    "structured_messages": {
+      "observe": {
+        "support": "conditional",
+        "evidence": [
+          {
+            "kind": "static_knowledge",
+            "outcome": "declared",
+            "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+            "observed_at": null
+          }
+        ],
+        "conditions": ["codex.protocol-surface-verified"],
+        "reason": "not_probed"
+      }
+    },
+    "streaming_output": {
+      "observe": {
+        "support": "conditional",
+        "evidence": [
+          {
+            "kind": "static_knowledge",
+            "outcome": "declared",
+            "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+            "observed_at": null
+          }
+        ],
+        "conditions": ["codex.protocol-surface-verified"],
+        "reason": "not_probed"
+      }
+    },
+    "model_list": {
+      "observe": {
+        "support": "conditional",
+        "evidence": [
+          {
+            "kind": "static_knowledge",
+            "outcome": "declared",
+            "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+            "observed_at": null
+          }
+        ],
+        "conditions": ["codex.protocol-surface-verified"],
+        "reason": "not_probed"
+      }
+    },
+    "tool_calls": {
+      "observe": {
+        "support": "conditional",
+        "evidence": [
+          {
+            "kind": "static_knowledge",
+            "outcome": "declared",
+            "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+            "observed_at": null
+          }
+        ],
+        "conditions": ["codex.protocol-surface-verified"],
+        "reason": "not_probed"
+      }
+    },
+    "approvals": {
+      "observe": {
+        "support": "conditional",
+        "evidence": [
+          {
+            "kind": "static_knowledge",
+            "outcome": "declared",
+            "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+            "observed_at": null
+          }
+        ],
+        "conditions": ["codex.protocol-surface-verified"],
+        "reason": "not_probed"
+      },
+      "request": {
+        "support": "conditional",
+        "evidence": [
+          {
+            "kind": "static_knowledge",
+            "outcome": "declared",
+            "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+            "observed_at": null
+          }
+        ],
+        "conditions": ["codex.protocol-surface-verified"],
+        "reason": "not_probed"
+      }
+    }
+  },
+  "compatibility": {
+    "state": "unknown",
+    "evidence": [
+      {
+        "kind": "static_knowledge",
+        "outcome": "declared",
+        "reference": "openai/codex@0b863c69f50335acd92164aab971cb58d298c2fe; offline codec only",
+        "observed_at": null
+      }
+    ],
+    "reason": "not_probed"
+  },
+  "limitations": [
+    "Offline translation surface only; no installed runtime probed.",
+    "Partial text-input, lifecycle, approval and catalog coverage; no authority."
+  ],
+  "extensions": {
+    "codex.protocol": {
+      "source_revision": "0b863c69f50335acd92164aab971cb58d298c2fe",
+      "retrieved": "2026-10-06",
+      "live_runtime_connected": false
+    }
+  }
+}

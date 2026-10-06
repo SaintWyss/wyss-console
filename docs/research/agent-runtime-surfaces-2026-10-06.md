@@ -24,6 +24,41 @@ Uncertain: installed CLI version, exact schema/feature gates, account access,
 coverage of every tool/subagent and the experimental surface's future stability.
 No optimistic compatibility range or local capability claim is inferred.
 
+### Sprint 2B: generated protocol verification
+
+Retrieved again: 2026-10-06. Wire source pinned to official
+[openai/codex revision 0b863c69](https://github.com/openai/codex/tree/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol).
+This is source inspection, not a locally installed release or compatibility claim.
+
+- [rpc.rs](https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/src/rpc.rs): no `jsonrpc` header; request IDs are string or signed i64; requests may carry optional W3C `trace`. Direction must distinguish client/server requests. Default documented stdio is newline-delimited JSON; the offline codec accepts one complete JSON value and implements no reader or transport.
+- [ClientRequest schema](https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ClientRequest.json): initialize/clientInfo, thread start/resume, turn start/interrupt and model/list. Initialization response is in [v1/InitializeResponse](https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/v1/InitializeResponse.json); later operations use v2 response schemas. A v2 payload is not the JSON-RPC header/version and does not require experimental opt-in by itself.
+- [ServerNotification schema](https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerNotification.json): separate thread, turn and item identities; final turn status is completed/failed/interrupted. Stable deltas include agent messages, command output and explicit reasoning summaries. Raw reasoning text is excluded from Wyss normalization. Plan updates are distinct from experimental plan items/deltas.
+- [ServerRequest schema](https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/ServerRequest.json): separate command, file-change and permission approval requests. Command decisions are accept, acceptForSession, decline, cancel, or verified structured execpolicy/network-policy amendments. File changes support the four string decisions. Permission responses use a granted permission profile, not a command decision; 2B encodes only the verified empty-grant subset. Resolution notifications correlate the original request ID.
+- [ModelListResponse schema](https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/json/v2/ModelListResponse.json): catalog id/model, displayName, hidden/isDefault and reasoning-effort metadata. Reasoning effort is now nonempty opaque text, not a closed hardcoded enum. The catalog does not provide a provider field or establish entitlement; use unknown provider/access. A thread response can explicitly report a different modelProvider.
+
+Example/schema differences: pinned schemas require `startedAtMs` on approval and
+item-start notifications, `completedAtMs` on item completion, and additional Thread
+metadata that abbreviated documentation examples omit. The current command approval
+schema has no `availableDecisions` field. Use verified response decision shapes,
+not an assumed list copied from examples. `grantRoot` is explicitly unstable.
+These are wire-shape refinements, with no conflict with the frozen Wyss architecture.
+
+[Protocol registration](https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/src/protocol/common.rs)
+and field annotations in
+[thread.rs](https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)
+and [turn.rs](https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/src/protocol/v2/turn.rs)
+identify experimental methods/fields. The codec tags selected known experimental
+surfaces and preserves unknown ones without claiming stable support. Outbound typed
+operations stay minimal; initialization opts out of experimental API in normal fixtures.
+No complete experimental method registry is claimed. Authentication APIs are excluded.
+
+The 2B corpus contains synthetic schema-derived shapes, deliberately malformed cases
+and explicitly labeled forward-compatibility examples. No fixture is captured traffic.
+Fifty-seven stable examples were additionally checked against the pinned generated schemas
+using the already installed Ajv dependency; integer precision/range is verified in Rust,
+not JavaScript schema validation (i64 extrema fixtures are excluded from that check). Generated schemas are not vendored into the repository.
+Installed version, handshake, effective capabilities and compatibility remain unproven.
+
 ## Claude Code / Agent SDK
 
 [Official Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview)
