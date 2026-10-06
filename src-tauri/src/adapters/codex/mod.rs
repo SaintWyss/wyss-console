@@ -1,4 +1,4 @@
-//! Offline Codex app-server codec. No process, network, authentication or Tauri API.
+//! Codex codec and an explicitly invoked read-only developer probe. No Tauri API.
 //! Vendor IDs are not Wyss identities.
 //!
 //! ```compile_fail
@@ -7,6 +7,8 @@
 //! let session: ManagedSessionId = thread;
 //! ```
 mod normalize;
+#[cfg(unix)]
+pub mod probe;
 mod protocol;
 mod state;
 mod wire;

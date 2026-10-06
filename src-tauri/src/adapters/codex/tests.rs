@@ -267,6 +267,7 @@ fn outbound_small_stable_subset_encodes_deterministically() {
             turn_id: turn,
         },
         ClientOperation::ModelList {
+            limit: None,
             cursor: None,
             include_hidden: true,
         },
@@ -652,4 +653,76 @@ fn null_experimental_permission_field_does_not_disagree_with_wire_classification
     };
     assert_eq!(m.surface(), Surface::Stable);
     assert_eq!(a.surface, m.surface());
+}
+
+#[test]
+fn official_notification_envelope_fixtures_round_trip() {
+    let corpus: Value = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/codex-notification-envelope-v1.json"
+    ))
+    .unwrap();
+    assert_eq!(corpus["valid"].as_array().unwrap().len(), 9);
+    assert_eq!(corpus["invalid"].as_array().unwrap().len(), 16);
+    for c in corpus["valid"].as_array().unwrap() {
+        let m = parse_case(c).unwrap_or_else(|e| panic!("{}: {e}", c["name"]));
+        assert_eq!(m.kind(), WireKind::Notification);
+        let reparsed = WireMessage::parse(&m.encode().unwrap(), direction(c)).unwrap();
+        assert_eq!(m.vendor_value(), reparsed.vendor_value());
+        assert_eq!(
+            m.emitted_at_ms(),
+            m.vendor_value().get("emittedAtMs").and_then(Value::as_i64)
+        );
+    }
+    for c in corpus["invalid"].as_array().unwrap() {
+        assert!(parse_case(c).is_err(), "accepted {}", c["name"]);
+    }
+}
+#[test]
+fn emission_metadata_does_not_change_normalized_observations() {
+    for c in corpus()["valid"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["direction"] == "server" && c.get("operation").is_none())
+    {
+        let original = parse_case(c).unwrap();
+        if original.kind() != WireKind::Notification {
+            continue;
+        }
+        let mut value = original.vendor_value().clone();
+        value["emittedAtMs"] = json!(i64::MAX);
+        let stamped = WireMessage::from_value(value, Direction::ServerToClient).unwrap();
+        assert_eq!(stamped.emitted_at_ms(), Some(i64::MAX));
+        assert_eq!(stamped.surface(), original.surface());
+        assert_eq!(
+            snapshot(observation(c, &stamped).unwrap()),
+            snapshot(observation(c, &original).unwrap()),
+            "{}",
+            c["name"]
+        );
+    }
+}
+#[test]
+fn rejection_structure_contains_only_bounded_keys_and_safe_method() {
+    let mut value = json!({"method":"future/notice","params":{"secret":"never retained"},"unverified":"never retained"});
+    for i in 0..40 {
+        value[format!("field{i}")] = json!("never retained");
+    }
+    value["x".repeat(65)] = json!("never retained");
+    let failure = WireMessage::parse_diagnosed(
+        &serde_json::to_vec(&value).unwrap(),
+        Direction::ServerToClient,
+    )
+    .unwrap_err();
+    assert_eq!(failure.error.code, "unknown_field");
+    let structure = failure.structure.unwrap();
+    assert_eq!(structure.category_candidate, "notification");
+    assert!(structure.keys_omitted);
+    assert!(structure.top_level_keys.len() <= 16);
+    assert!(structure.top_level_keys.iter().all(|k| k.len() <= 64));
+    assert!(
+        !serde_json::to_string(&structure)
+            .unwrap()
+            .contains("never retained")
+    );
 }

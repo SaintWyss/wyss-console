@@ -1,8 +1,8 @@
 # Agent runtime surfaces — 2026-10-06
 
 Retrieved: 2026-10-06. Primary official documentation only. This is documentation
-research, not a local installation inventory, integration test or compatibility
-certification. No runtime was launched and no authentication material was read.
+research. The Sprint 2C subsection separately records a read-only installed-runtime
+probe; no authentication material was read by Wyss.
 
 ## Codex
 
@@ -20,8 +20,9 @@ candidate; it does not implement every published transport.
 warns that a model catalog is not itself an entitlement check. Hence catalog
 visibility and effective selection/access remain separate contract concepts.
 
-Uncertain: installed CLI version, exact schema/feature gates, account access,
-coverage of every tool/subagent and the experimental surface's future stability.
+Uncertain: configured feature gates, account access, coverage of every tool/subagent
+and the experimental surface's future stability. Installed version/probe facts are
+recorded separately below.
 No optimistic compatibility range or local capability claim is inferred.
 
 ### Sprint 2B: generated protocol verification
@@ -57,7 +58,66 @@ and explicitly labeled forward-compatibility examples. No fixture is captured tr
 Fifty-seven stable examples were additionally checked against the pinned generated schemas
 using the already installed Ajv dependency; integer precision/range is verified in Rust,
 not JavaScript schema validation (i64 extrema fixtures are excluded from that check). Generated schemas are not vendored into the repository.
-Installed version, handshake, effective capabilities and compatibility remain unproven.
+Offline fixtures do not establish installed version, handshake or compatibility;
+see the separate Sprint 2C observations below.
+
+### Sprint 2C: current schema and installed-runtime probe
+
+Retrieved: 2026-10-06. Current official source inspected at
+[0b47040d](https://github.com/openai/codex/tree/0b47040dc9eb08d9c37d51e0824870ce5b27101b/codex-rs/app-server-protocol).
+[v1 initialization](https://github.com/openai/codex/blob/0b47040dc9eb08d9c37d51e0824870ce5b27101b/codex-rs/app-server-protocol/src/protocol/v1.rs)
+retains clientInfo and optional capabilities with experimental API false by default.
+Gateway OAuth, attestation, MCP extensions and notification suppression are optional
+and not enabled. The [model/list parameter schema](https://github.com/openai/codex/blob/0b47040dc9eb08d9c37d51e0824870ce5b27101b/codex-rs/app-server-protocol/schema/json/v2/ModelListParams.json)
+provides optional cursor, uint32 limit and includeHidden. The official App Server
+page still documents default newline-delimited JSON over stdio. No frozen wire or
+normalized semantics were changed to match an installed version.
+
+Installed executable: canonical standalone Codex binary, version `codex-cli 0.159.0`.
+The [official release RPC source](https://github.com/openai/codex/blob/rust-v0.159.0/codex-rs/app-server-protocol/src/rpc.rs)
+and [release initialize source](https://github.com/openai/codex/blob/rust-v0.159.0/codex-rs/app-server-protocol/src/protocol/v1.rs)
+were also inspected. Source differences are informational, not compatibility proof.
+
+The original Sprint 2B codec omitted official notification-envelope metadata.
+A bounded live diagnostic identified the rejected field as `emittedAtMs` on
+`remoteControl/status/changed`, with top-level keys `emittedAtMs`, `method`, `params`.
+This field already existed in the pinned Sprint 2B source; it is not new protocol
+drift in Codex 0.159.0. Verified official sources:
+
+- [Pinned Rust envelope](https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/src/protocol/common.rs):
+  `ServerNotificationEnvelope` flattens the notification and declares optional
+  `emitted_at_ms: Option<i64>`, camelCase, absent-compatible decoding.
+- [Current Rust envelope](https://github.com/openai/codex/blob/0b47040dc9eb08d9c37d51e0824870ce5b27101b/codex-rs/app-server-protocol/src/protocol/common.rs)
+  retains that signed i64 contract. Explicit null decodes to absence; non-null
+  integers may span the full signed i64 range.
+- [Pinned generated TypeScript envelope](https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/schema/typescript/ServerNotificationEnvelope.ts)
+  and [current generated envelope](https://github.com/openai/codex/blob/0b47040dc9eb08d9c37d51e0824870ce5b27101b/codex-rs/app-server-protocol/schema/typescript/ServerNotificationEnvelope.ts)
+  expose optional `emittedAtMs`, documented as Unix emission time in milliseconds.
+- [Pinned producer](https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server/src/outgoing_message.rs)
+  and [current producer](https://github.com/openai/codex/blob/0b47040dc9eb08d9c37d51e0824870ce5b27101b/codex-rs/app-server/src/outgoing_message.rs)
+  populate the field when emitting app-server notifications.
+
+The codec now accepts exactly that optional server-notification field, validates
+its upstream type/range and preserves it only as vendor metadata. Other unknown
+envelope keys and placement on requests/responses/client notifications still reject.
+It does not change normalized observations, EventEnvelope v1 or canonical ordering.
+Focused fixtures are synthetic/schema-derived, not retained live frames.
+
+Corrected live result: fixed app-server spawn, correlated initialize success,
+initialized sent, experimental false; model/list limit 50/includeHidden false
+returned seven models with no next cursor. `remoteControl/status/changed` and
+`account/updated` each arrived once with the legal three-key envelope and emission
+metadata present. Only key/method/presence summaries were retained, not raw params
+or timestamp values. Compatibility is compatible for this exercised surface.
+Model provider and availability remain unknown; listing does not prove entitlement
+or describe all possible configured providers. No unexercised capability is confirmed.
+
+Owned child PID 213482 exited by EOF, status 0, and was reaped without escalation.
+Git-content snapshots matched before/after; four pre-existing Codex PIDs remained
+unchanged. No workspace work, authentication inspection, configuration override,
+thread, turn, prompt, tool operation or approval response was performed by Wyss.
+These are local observations, not a guarantee about every runtime/configuration.
+See ADR 0010 for limits and shutdown.
 
 ## Claude Code / Agent SDK
 

@@ -121,3 +121,24 @@ No installed-runtime support or entitlement is asserted.
 
 Implementation status: offline codec, normalization, ordering guard and synthetic
 fixture tests. Terminal behavior, IPC, capabilities and EventEnvelope v1 are unchanged.
+
+## Sprint 2C schema-completeness correction — 2026-10-06
+
+The original Sprint 2B codec omitted an official server-notification envelope field,
+`emittedAtMs`. It was already present at the pinned revision
+`0b863c69f50335acd92164aab971cb58d298c2fe`; this was a codec omission, not evidence
+that Codex 0.159.0 introduced incompatible metadata. The current revision
+`0b47040dc9eb08d9c37d51e0824870ce5b27101b` retains the same contract.
+
+Official `common.rs` defines `ServerNotificationEnvelope` with a flattened notification
+and `emitted_at_ms: Option<i64>`, camelCase serialization and backward-compatible
+absence. The generated TypeScript envelope exposes optional `emittedAtMs`; the
+app-server producer populates it. See the research note for pinned/current sources.
+
+Only server-to-client notifications now accept this exact optional field. Non-null
+values must be signed i64 integers, including both extrema; absent/null mean unknown.
+The vendor wire object preserves its original representation on round-trip. It is
+provider emission-time metadata, not a Wyss timestamp, stream sequence, causal order,
+request identity or authority evidence. Normalized observations and EventEnvelope v1
+are unchanged. Client notifications, requests and responses gain no additional fields;
+all unverified top-level keys still reject. The architectural decision stays Accepted.

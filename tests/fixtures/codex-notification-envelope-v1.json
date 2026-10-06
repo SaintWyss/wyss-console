@@ -1,0 +1,142 @@
+{
+  "schema": 1,
+  "provenance": {
+    "kind": "synthetic_schema_derived",
+    "retrieved": "2026-10-06",
+    "pinned_revision": "0b863c69f50335acd92164aab971cb58d298c2fe",
+    "current_revision": "0b47040dc9eb08d9c37d51e0824870ce5b27101b",
+    "source": "https://github.com/openai/codex/blob/0b863c69f50335acd92164aab971cb58d298c2fe/codex-rs/app-server-protocol/src/protocol/common.rs",
+    "type": "ServerNotificationEnvelope.emitted_at_ms: Option<i64>",
+    "stability": "stable",
+    "captured_live": false
+  },
+  "valid": [
+    {
+      "name": "unknown-without-emission",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"}}"
+    },
+    {
+      "name": "unknown-with-emission",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":1791325200377}"
+    },
+    {
+      "name": "known-without-emission",
+      "direction": "server",
+      "wire": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"delta\":\"synthetic\"}}"
+    },
+    {
+      "name": "known-with-emission",
+      "direction": "server",
+      "wire": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"delta\":\"synthetic\"},\"emittedAtMs\":1791325200377}"
+    },
+    {
+      "name": "emission-null",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":null}"
+    },
+    {
+      "name": "emission-min-i64",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":-9223372036854775808}"
+    },
+    {
+      "name": "emission-max-i64",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":9223372036854775807}"
+    },
+    {
+      "name": "emission-zero",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":0}"
+    },
+    {
+      "name": "emission-negative",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":-1}"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "emission-string",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":\"123\"}"
+    },
+    {
+      "name": "emission-boolean",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":true}"
+    },
+    {
+      "name": "emission-float",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":1.5}"
+    },
+    {
+      "name": "emission-integral-float",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":1.0}"
+    },
+    {
+      "name": "emission-object",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":{}}"
+    },
+    {
+      "name": "emission-array",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":[]}"
+    },
+    {
+      "name": "emission-over-i64",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":9223372036854775808}"
+    },
+    {
+      "name": "emission-under-i64",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":-9223372036854775809}"
+    },
+    {
+      "name": "emission-on-client-request",
+      "direction": "client",
+      "wire": "{\"id\":\"1\",\"method\":\"model/list\",\"params\":{},\"emittedAtMs\":1}"
+    },
+    {
+      "name": "emission-on-server-request",
+      "direction": "server",
+      "wire": "{\"id\":\"1\",\"method\":\"future/request\",\"emittedAtMs\":1}"
+    },
+    {
+      "name": "emission-on-success-response",
+      "direction": "server",
+      "wire": "{\"id\":\"1\",\"result\":{},\"emittedAtMs\":1}"
+    },
+    {
+      "name": "emission-on-error-response",
+      "direction": "server",
+      "wire": "{\"id\":\"1\",\"error\":{\"code\":1,\"message\":\"synthetic\"},\"emittedAtMs\":1}"
+    },
+    {
+      "name": "emission-on-client-notification",
+      "direction": "client",
+      "wire": "{\"method\":\"initialized\",\"emittedAtMs\":1}"
+    },
+    {
+      "name": "known-extra-field",
+      "direction": "server",
+      "wire": "{\"method\":\"item/agentMessage/delta\",\"params\":{\"threadId\":\"thread-fixture\",\"turnId\":\"turn-fixture\",\"itemId\":\"item-fixture\",\"delta\":\"synthetic\"},\"emittedAtMs\":1,\"unverified\":true}"
+    },
+    {
+      "name": "unknown-extra-field",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emittedAtMs\":1,\"unverified\":true}"
+    },
+    {
+      "name": "wrong-spelling",
+      "direction": "server",
+      "wire": "{\"method\":\"future/notice\",\"params\":{\"value\":\"synthetic\"},\"emitted_at_ms\":1}"
+    }
+  ]
+}

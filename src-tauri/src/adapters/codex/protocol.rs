@@ -143,6 +143,7 @@ pub enum ClientOperation {
         turn_id: CodexTurnId,
     },
     ModelList {
+        limit: Option<u32>,
         cursor: Option<String>,
         include_hidden: bool,
     },
@@ -185,11 +186,12 @@ impl ClientOperation {
                 json!({"threadId":thread_id,"turnId":turn_id}),
             ),
             Self::ModelList {
+                limit,
                 cursor,
                 include_hidden,
             } => (
                 "model/list",
-                json!({"cursor":cursor,"includeHidden":include_hidden}),
+                json!({"cursor":cursor,"includeHidden":include_hidden,"limit":limit}),
             ),
         };
         WireMessage::request(id, method, params)

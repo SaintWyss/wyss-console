@@ -88,23 +88,105 @@ impl fmt::Debug for WireMessage {
             .finish_non_exhaustive()
     }
 }
+/// Bounded structural diagnostics only: no params, result, error text or field values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct WireStructure {
+    pub category_candidate: &'static str,
+    pub top_level_keys: Vec<String>,
+    pub keys_omitted: bool,
+    pub method: Option<String>,
+    pub emitted_at_ms_present: bool,
+}
+impl WireStructure {
+    fn from_value(value: &Value) -> Self {
+        let object = value.as_object();
+        let has = |key| object.is_some_and(|o| o.contains_key(key));
+        let category_candidate = match (has("method"), has("id"), has("result"), has("error")) {
+            (true, false, false, false) => "notification",
+            (true, true, false, false) => "request",
+            (false, true, true, false) => "success_response",
+            (false, true, false, true) => "error_response",
+            _ => "unclassified",
+        };
+        let mut keys_omitted = false;
+        let mut top_level_keys = Vec::new();
+        if let Some(o) = object {
+            for key in o.keys() {
+                if top_level_keys.len() == 16
+                    || key.len() > 64
+                    || !key
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+                {
+                    keys_omitted = true;
+                } else {
+                    top_level_keys.push(key.clone());
+                }
+            }
+        }
+        let method = value
+            .get("method")
+            .and_then(Value::as_str)
+            .filter(|m| {
+                !m.is_empty()
+                    && m.len() <= 128
+                    && m.bytes().all(|b| {
+                        b.is_ascii_alphanumeric() || matches!(b, b'/' | b'_' | b'.' | b'-')
+                    })
+            })
+            .map(str::to_owned);
+        Self {
+            category_candidate,
+            top_level_keys,
+            keys_omitted,
+            method,
+            emitted_at_ms_present: has("emittedAtMs"),
+        }
+    }
+}
+#[derive(Debug)]
+pub(crate) struct WireParseFailure {
+    pub error: CodecError,
+    pub structure: Option<WireStructure>,
+}
+
 impl WireMessage {
     /// One complete JSON value, optionally followed by JSON whitespace/newline.
     /// JSONL transport/framing and partial-frame accumulation are deliberately absent.
     pub fn parse(bytes: &[u8], direction: Direction) -> Result<Self> {
-        if bytes.len() > MAX_FRAME_BYTES {
-            return fail("frame_too_large");
-        }
-        let mut decoder = serde_json::Deserializer::from_slice(bytes);
-        let value = UniqueValue::deserialize(&mut decoder)
-            .map_err(|_| CodecError {
+        Self::parse_diagnosed(bytes, direction).map_err(|failure| failure.error)
+    }
+    pub(crate) fn parse_diagnosed(
+        bytes: &[u8],
+        direction: Direction,
+    ) -> std::result::Result<Self, WireParseFailure> {
+        let decode = || -> Result<Value> {
+            if bytes.len() > MAX_FRAME_BYTES {
+                return fail("frame_too_large");
+            }
+            let mut decoder = serde_json::Deserializer::from_slice(bytes);
+            let value = UniqueValue::deserialize(&mut decoder)
+                .map_err(|_| CodecError {
+                    code: "invalid_json",
+                })?
+                .0;
+            decoder.end().map_err(|_| CodecError {
                 code: "invalid_json",
-            })?
-            .0;
-        decoder.end().map_err(|_| CodecError {
-            code: "invalid_json",
+            })?;
+            Ok(value)
+        };
+        let value = decode().map_err(|error| WireParseFailure {
+            error,
+            structure: None,
         })?;
-        Self::from_value(value, direction)
+        let structure = WireStructure::from_value(&value);
+        Self::from_value(value, direction).map_err(|error| WireParseFailure {
+            error,
+            structure: Some(structure),
+        })
+    }
+    pub(crate) fn structure(&self) -> WireStructure {
+        WireStructure::from_value(&self.value)
     }
     pub fn from_value(value: Value, direction: Direction) -> Result<Self> {
         let mut nodes = 0;
@@ -136,11 +218,20 @@ impl WireMessage {
             WireKind::ClientRequest | WireKind::ServerRequest => {
                 &["id", "method", "params", "trace"]
             }
+            WireKind::Notification if direction == Direction::ServerToClient => {
+                &["method", "params", "emittedAtMs"]
+            }
             WireKind::Notification => &["method", "params"],
             WireKind::SuccessResponse => &["id", "result"],
             WireKind::ErrorResponse => &["id", "error"],
         };
         only(o, allowed)?;
+        if let Some(value) = o.get("emittedAtMs").filter(|v| !v.is_null()) {
+            // Official ServerNotificationEnvelope uses Option<i64>, not u64 or JS number.
+            if value.as_i64().is_none() {
+                return fail("invalid_emitted_at_ms");
+            }
+        }
         if has_method {
             let method = text(required(o, "method")?, 128)?;
             if method.is_empty()
@@ -187,6 +278,11 @@ impl WireMessage {
     }
     pub fn method(&self) -> Option<&str> {
         self.value.get("method").and_then(Value::as_str)
+    }
+    /// Codex emission metadata only; never canonical ordering or authority.
+    /// Absent/null both mean unknown; the original JSON representation is retained.
+    pub fn emitted_at_ms(&self) -> Option<i64> {
+        self.value.get("emittedAtMs").and_then(Value::as_i64)
     }
     pub fn params(&self) -> Option<&Value> {
         self.value.get("params")
