@@ -1,0 +1,70 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color-scheme: light dark;
+  color: #20252c;
+  background: #f5f7fa;
+  font-synthesis: none;
+  line-height: 1.5;
+  --muted: #505b6b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+main {
+  max-width: 40rem;
+  margin-inline: auto;
+  padding: 3rem 1.5rem;
+  overflow-wrap: anywhere;
+}
+
+h1 {
+  font-size: 1.75rem;
+  line-height: 1.2;
+  margin: 0 0 1.5rem;
+}
+
+p {
+  margin: 0 0 1.5rem;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.5rem 1.5rem;
+  font-size: 1rem;
+  margin: 0;
+}
+
+dt {
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #e9edf3;
+    background: #20252c;
+    --muted: #b9c3d0;
+  }
+}
+
+@media (max-width: 375px) {
+  dl {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+
+  dd {
+    margin-bottom: 0.75rem;
+  }
+}
