@@ -4,6 +4,7 @@ declare const identityBrand: unique symbol;
 type Identity<Name extends string> = Uuid & { readonly [identityBrand]: Name };
 export type ConsoleSessionId = Identity<'ConsoleSessionId'>;
 export type TerminalId = Identity<'TerminalId'>;
+export type AgentRuntimeInstanceId = Identity<'AgentRuntimeInstanceId'>;
 export type ManagedSessionId = Identity<'ManagedSessionId'>;
 
 export function parseConsoleSessionId(value: unknown): ConsoleSessionId {
@@ -14,4 +15,10 @@ export function parseTerminalId(value: unknown): TerminalId {
 }
 export function parseManagedSessionId(value: unknown): ManagedSessionId {
   return parseUuid(value) as ManagedSessionId;
+}
+
+export function parseAgentRuntimeInstanceId(
+  value: unknown,
+): AgentRuntimeInstanceId {
+  return parseUuid(value) as AgentRuntimeInstanceId;
 }

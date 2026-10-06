@@ -18,6 +18,7 @@ impl From<ApplicationInfo> for AppInfo {
         }
     }
 }
+pub mod agent_adapter;
 pub mod event_envelope;
 pub mod identities;
 mod scalars;

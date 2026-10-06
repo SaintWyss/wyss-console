@@ -11,6 +11,17 @@
 //! let local = ConsoleSessionId::parse("11111111-1111-4111-8111-111111111111").unwrap();
 //! let managed: ManagedSessionId = local;
 //! ```
+//! ```compile_fail
+//! use wyss_console::contracts::identities::{ManagedSessionId, TerminalId};
+//! let terminal = TerminalId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+//! let managed: ManagedSessionId = terminal;
+//! ```
+//!
+//! ```compile_fail
+//! use wyss_console::contracts::identities::{ManagedSessionId, AgentRuntimeInstanceId};
+//! let instance = AgentRuntimeInstanceId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+//! let managed: ManagedSessionId = instance;
+//! ```
 use super::WireUuid;
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +43,7 @@ macro_rules! identity {
     };
 }
 
+identity!(AgentRuntimeInstanceId);
 identity!(ManagedSessionId);
 identity!(ConsoleSessionId);
 identity!(TerminalId);

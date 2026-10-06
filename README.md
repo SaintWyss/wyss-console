@@ -1,7 +1,7 @@
 # Wyss Console
 
 Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current status: **Sprint 1C local terminal sessions and tabs** using Tauri 2,
+Linux-first, local-first. Current status: **Sprint 2A agent adapter contracts** using Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -65,3 +65,13 @@ clipboard permissions. External terminal hyperlinks are disabled.
 Human terminal survival across Console process crash is not guaranteed at this stage.
 Graceful application exit closes its local terminals. ADRs 0005–0007 record backend
 ownership, renderer flow and local session ownership. No agents, Event Bus or persistence exist.
+
+## Agent adapter contracts
+
+Validated Rust/TypeScript v1 contracts describe agent adapters, capabilities,
+version/compatibility evidence, observed managed-session state, models and safe
+errors. Shared synthetic JSON fixtures prove classification and semantic round-trip
+parity. They do not claim installed-runtime compatibility. See ADR 0008 and
+[official runtime-surface research](docs/research/agent-runtime-surfaces-2026-10-06.md).
+No agent runtime, SDK, network, authority or agent UI is connected. Existing local
+terminal behavior is unchanged; managed-agent execution requires external authority.
