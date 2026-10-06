@@ -11,6 +11,7 @@ export interface TerminalRenderer {
     binary: (data: string) => void,
   ): () => void;
   setInput(enabled: boolean): void;
+  setActive(active: boolean): void;
   focus(): void;
   dispose(): void;
 }
@@ -39,6 +40,26 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
   });
   const fit = new FitAddon();
   let disposed = false;
+  let active = true;
+  // Hidden terminals must still answer emulator protocol queries. disableStdin
+  // gates those replies too, so visibility gates DOM user input separately.
+  term.attachCustomKeyEventHandler(() => active);
+  const guardInput = (event: Event) => {
+    if (!active) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  };
+  const guardedEvents = [
+    'paste',
+    'beforeinput',
+    'input',
+    'compositionstart',
+    'compositionupdate',
+    'compositionend',
+  ];
+  for (const event of guardedEvents)
+    host.addEventListener(event, guardInput, true);
   let pending: ((processed: boolean) => void) | undefined;
   const colors = matchMedia('(prefers-color-scheme: dark)');
   const updateTheme = () => {
@@ -50,6 +71,8 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
     term.open(host);
   } catch (error) {
     colors.removeEventListener('change', updateTheme);
+    for (const event of guardedEvents)
+      host.removeEventListener(event, guardInput, true);
     term.dispose();
     throw error;
   }
@@ -86,6 +109,11 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
     setInput(enabled) {
       term.options.disableStdin = !enabled;
     },
+    setActive(value) {
+      active = value;
+      host.inert = !value;
+      if (!value && !disposed) term.blur();
+    },
     focus() {
       if (!disposed) term.focus();
     },
@@ -95,6 +123,8 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
       pending?.(false);
       pending = undefined;
       colors.removeEventListener('change', updateTheme);
+      for (const event of guardedEvents)
+        host.removeEventListener(event, guardInput, true);
       // Terminal owns and disposes its loaded fit addon.
       term.dispose();
     },

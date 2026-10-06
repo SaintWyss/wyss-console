@@ -69,3 +69,40 @@ it('disposes DOM and media listeners and cancels a pending byte write', async ()
   renderer.dispose();
   expect(remove).toHaveBeenCalledTimes(1);
 });
+
+it('keeps hidden byte parsing and protocol responses alive while gating user keys/paste', async () => {
+  const data = vi.fn();
+  renderer.input(data, vi.fn());
+  renderer.setInput(true);
+  renderer.setActive(false);
+  expect(host.inert).toBe(true);
+  await renderer.write(new TextEncoder().encode('\x1b[6n'));
+  expect(data).toHaveBeenCalledExactlyOnceWith('\x1b[1;1R');
+  data.mockClear();
+  const textarea = host.querySelector('textarea')!;
+  textarea.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'a',
+      code: 'KeyA',
+      keyCode: 65,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  const paste = new Event('paste', { bubbles: true, cancelable: true });
+  textarea.dispatchEvent(paste);
+  expect(paste.defaultPrevented).toBe(true);
+  expect(data).not.toHaveBeenCalled();
+  renderer.setActive(true);
+  expect(host.inert).toBe(false);
+  textarea.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'a',
+      code: 'KeyA',
+      keyCode: 65,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  expect(data).toHaveBeenCalledWith('a');
+});

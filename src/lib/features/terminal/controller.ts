@@ -16,6 +16,8 @@ const WRITE_LIMIT = 4096;
 
 /** One local human-terminal owner. No command interpretation or domain authority. */
 export class TerminalController {
+  private active = true;
+  private focusPending = false;
   private id?: TerminalId;
   private info?: TerminalInfo;
   private state: ViewState = 'starting';
@@ -44,6 +46,19 @@ export class TerminalController {
     private readonly update: (state: TerminalViewState) => void,
   ) {}
 
+  setActive(active: boolean) {
+    this.active = active;
+    this.renderer.setActive(active);
+    if (!active) {
+      clearTimeout(this.resizeTimer);
+      this.resizeTimer = undefined;
+      this.desiredSize = undefined;
+      this.focusPending = false;
+    } else if (!this.stopped) {
+      this.focusPending = true;
+      this.requestFit();
+    }
+  }
   start(): Promise<void> {
     return (this.startTask ??= this.initialize());
   }
@@ -61,7 +76,10 @@ export class TerminalController {
       );
       this.observer = new ResizeObserver(() => this.requestFit());
       this.observer.observe(this.host);
-      const size = this.renderer.fit() ?? { rows: 24, cols: 80 };
+      const size = (this.active ? this.renderer.fit() : undefined) ?? {
+        rows: 24,
+        cols: 80,
+      };
       this.info = await desktop.createTerminal(size);
       this.id = this.info.terminal_id;
       this.sentSize = size;
@@ -72,7 +90,7 @@ export class TerminalController {
       this.state = 'running';
       this.renderer.setInput(true);
       this.publish();
-      this.renderer.focus();
+      if (this.active) this.renderer.focus();
       this.requestFit();
       void this.output();
     } catch (error) {
@@ -80,10 +98,15 @@ export class TerminalController {
     }
   }
   private requestFit() {
-    if (this.stopped || this.resizeTimer) return;
+    if (this.stopped || !this.active || this.resizeTimer) return;
     this.resizeTimer = setTimeout(() => {
       this.resizeTimer = undefined;
+      if (this.stopped || !this.active) return;
       const size = this.renderer.fit();
+      if (this.focusPending) {
+        this.focusPending = false;
+        this.renderer.focus();
+      }
       if (size) {
         this.desiredSize = size;
         void this.resize();
@@ -91,11 +114,22 @@ export class TerminalController {
     }, 60);
   }
   private async resize() {
-    if (this.resizing || !this.id || this.state !== 'running' || this.stopped)
+    if (
+      this.resizing ||
+      !this.active ||
+      !this.id ||
+      this.state !== 'running' ||
+      this.stopped
+    )
       return;
     this.resizing = true;
     try {
-      while (!this.stopped && this.state === 'running' && this.desiredSize) {
+      while (
+        !this.stopped &&
+        this.active &&
+        this.state === 'running' &&
+        this.desiredSize
+      ) {
         const size = this.desiredSize;
         this.desiredSize = undefined;
         if (

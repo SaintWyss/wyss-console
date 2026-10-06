@@ -96,3 +96,60 @@ button:focus-visible {
     align-items: flex-start;
   }
 }
+.workspace-toolbar {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.terminal-tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+}
+.terminal-tab {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 2px solid transparent;
+}
+.terminal-tab:has([aria-selected='true']) {
+  border-bottom-color: currentColor;
+}
+.terminal-tab button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.terminal-tab [aria-selected='true'] {
+  color: inherit;
+  font-weight: 600;
+}
+.tab-close {
+  min-width: 44px;
+}
+.new-terminal {
+  flex-shrink: 0;
+}
+.terminal-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.terminal-panel[hidden] {
+  display: none;
+}
+.terminal-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  text-align: center;
+}
+.workspace-error {
+  margin: 0;
+  font-size: 0.875rem;
+}

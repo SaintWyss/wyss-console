@@ -1,23 +1,19 @@
-import { TerminalController, type TerminalViewState } from './controller';
-import { createRenderer } from './renderer';
+import { TerminalSessionManager, type WorkspaceState } from './session-manager';
 
-let owner: TerminalController | undefined;
+let owner: TerminalSessionManager | undefined;
 let retirement: Promise<void> = Promise.resolve();
 
-/** One view lease, not a single-terminal backend assumption. Serialize remount cleanup. */
-export function mountTerminal(
-  host: HTMLElement,
-  update: (state: TerminalViewState) => void,
-) {
+/** One workspace lease; each manager owns multiple independent terminal controllers. */
+export function mountWorkspace(update: (state: WorkspaceState) => void) {
   if (owner) retirement = owner.dispose();
-  const controller = new TerminalController(host, createRenderer(host), update);
-  owner = controller;
-  void retirement.then(() => controller.start());
+  const manager = new TerminalSessionManager(update);
+  owner = manager;
+  void retirement.then(() => manager.start());
   return {
-    close: () => controller.close(),
+    manager,
     dispose() {
-      const cleanup = controller.dispose();
-      if (owner === controller) {
+      const cleanup = manager.dispose();
+      if (owner === manager) {
         owner = undefined;
         retirement = cleanup;
       }

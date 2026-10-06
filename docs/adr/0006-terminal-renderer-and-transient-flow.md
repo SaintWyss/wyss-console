@@ -105,3 +105,11 @@ EventEnvelope lifecycle producers, Event Bus, durable terminal content, authorit
 agents, tabs/panes, persistent sessions, settings, clipboard enhancements and every
 other control-plane integration remain deferred. ADR 0002's managed-agent lifecycle
 invariant is unchanged: these are local human terminals.
+
+## Sprint 1C implementation status
+
+ADR 0007 moves the single-view lease into a multi-session workspace lease. Every
+keyed session owns one persistent renderer/controller; inactive output continues,
+while fit/focus follow only the active session. Scrollback, byte/ACK bounds, renderer
+selection, TERM, CSP and all authority boundaries remain unchanged. Tabs are now
+implemented; persistence, panes and global shortcuts remain deferred.

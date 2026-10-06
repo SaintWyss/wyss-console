@@ -62,6 +62,7 @@ function renderer() {
       return cleanup;
     }),
     setInput: vi.fn(),
+    setActive: vi.fn(),
     focus: vi.fn(),
     dispose: vi.fn(),
   };
