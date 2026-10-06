@@ -79,7 +79,7 @@ fn open(
     let mut command = CommandBuilder::new(shell);
     command.arg("-i");
     command.cwd(cwd);
-    command.env("TERM", "dumb");
+    command.env("TERM", "xterm-256color");
     let child = pair
         .slave
         .spawn_command(command)

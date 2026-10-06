@@ -14,15 +14,15 @@
       {
         "label": "main",
         "title": "Wyss Console",
-        "width": 640,
-        "height": 420,
+        "width": 960,
+        "height": 640,
         "minWidth": 320,
         "minHeight": 320
       }
     ],
     "security": {
       "capabilities": ["main"],
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self'; img-src 'self'; frame-src 'none'; base-uri 'none'; form-action 'none'",
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self'; style-src-elem 'self' 'unsafe-inline'; style-src-attr 'unsafe-inline'; img-src 'self'; frame-src 'none'; base-uri 'none'; form-action 'none'",
       "devCsp": "default-src 'self'; connect-src ipc: http://ipc.localhost http://127.0.0.1:1420 ws://127.0.0.1:1420; style-src 'self' 'unsafe-inline'; img-src 'self'; frame-src 'none'; base-uri 'none'; form-action 'none'"
     }
   },

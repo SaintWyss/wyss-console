@@ -1,9 +1,9 @@
 # Wyss Console
 
 Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current status: **Sprint 1A PTY foundation** using Tauri 2,
-Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs;
-there is no terminal renderer yet. EventEnvelope contracts remain independent
+Linux-first, local-first. Current status: **Sprint 1B interactive terminal** using Tauri 2,
+Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
+and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
 
 ## Development
@@ -40,15 +40,19 @@ npm run desktop:run
 
 Produces `src-tauri/target/release/wyss-console`. Distribution packaging is deferred.
 
-## PTY diagnostic
+## Interactive terminal
 
-In the desktop window, open **PTY diagnostic — Sprint 1A** and select **Run PTY
-smoke**. It creates the account shell, writes `printf 'WYSS_PTY_OK\n'` and `pwd`,
-checks returned bytes, resizes to 32×100, checks `stty size`, and closes the terminal.
-The text preview is transient and capped; it is not a terminal emulator. Remove
-or replace `src/lib/features/pty-diagnostic` when the Sprint 1B renderer is ready.
+The application opens one local account-shell terminal automatically. Type normally;
+keyboard input is transported to the shell. Resize the window to resize the real PTY.
+`exit` ends the shell without respawning; **Close terminal** releases its resources.
+Reload/restart creates a fresh terminal. No tabs or restoration are available yet.
 
-Sprint 1A uses `TERM=dumb` because no emulator answers terminal capability queries.
-Human terminal survival across Console process crash is not guaranteed in Sprint 1A.
-Graceful application exit closes its local terminals. PTY ownership, limits,
-acknowledgements and failure semantics are recorded in ADR 0005.
+TERM is scoped to each child as `xterm-256color`. Scrollback is 5,000 volatile lines.
+Output uses bounded byte batches acknowledged after xterm processing. Input is capped
+at 64 KiB queued and 4 KiB per IPC write; an excessive paste fails visibly instead of
+buffering indefinitely. Selection/paste use default WebView behavior, without added
+clipboard permissions. External terminal hyperlinks are disabled.
+
+Human terminal survival across Console process crash is not guaranteed at this stage.
+Graceful application exit closes its local terminals. ADRs 0005/0006 record backend
+ownership and renderer flow. No agents, Event Bus or persistence exist.

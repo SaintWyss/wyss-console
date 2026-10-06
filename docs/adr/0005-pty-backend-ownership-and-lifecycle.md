@@ -147,3 +147,11 @@ A lifecycle producer and any Event Bus remain **deferred**. Also deferred: xterm
 ANSI rendering, tabs/panes, scrollback UI/storage, terminal restoration, persistent
 PTYs, external authority, agents, adapters, permissions and routing. The diagnostic
 component and smoke helper are removable when Sprint 1B provides the renderer.
+
+## Sprint 1B implementation status
+
+ADR 0006 adds the official xterm renderer and fit addon. Child TERM now uses
+`xterm-256color`; Sprint 1A's `dumb` configuration and diagnostic UI are superseded
+by the interactive terminal view. Backend bounds, commands, ownership and shutdown
+remain unchanged. Lifecycle EventEnvelope producers and all authority mechanisms
+remain deferred.

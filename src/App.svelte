@@ -1,10 +1,26 @@
 <script lang="ts">
-  import Foundation from './lib/features/foundation/Foundation.svelte';
-  import PtyDiagnostic from './lib/features/pty-diagnostic/PtyDiagnostic.svelte';
+  import { onMount } from 'svelte';
+  import { getAppInfo } from './lib/desktop/client';
+  import TerminalView from './lib/features/terminal/TerminalView.svelte';
+  let version = $state('');
+  onMount(() => {
+    let active = true;
+    void getAppInfo().then(
+      (info) => {
+        if (active) version = info.version;
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  });
 </script>
 
 <main>
-  <h1>Wyss Console</h1>
-  <Foundation />
-  <PtyDiagnostic />
+  <header class="app-header">
+    <h1>Wyss Console</h1>
+    <span>{version}</span>
+  </header>
+  <TerminalView />
 </main>

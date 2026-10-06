@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { mockIPC } from '@tauri-apps/api/mocks';
-import App from '../src/App.svelte';
+import Foundation from '../src/lib/features/foundation/Foundation.svelte';
 import { getAppInfo } from '../src/lib/desktop/client';
 import type { AppInfo } from '../src/lib/contracts/app-info';
 import fixture from './fixtures/app-info-v1.json';
@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 function render() {
-  app = mount(App, { target: document.body });
+  app = mount(Foundation, { target: document.body });
   flushSync();
 }
 
@@ -49,7 +49,6 @@ describe('AppInfo IPC', () => {
       .poll(() => document.querySelector('[role="status"]')?.textContent)
       .toBe('Foundation ready');
 
-    expect(document.querySelector('h1')?.textContent).toBe('Wyss Console');
     expect(document.querySelector('[role="status"]')?.textContent).toBe(
       'Foundation ready',
     );

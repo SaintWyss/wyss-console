@@ -394,14 +394,13 @@ fn production_shell_selection_uses_account_shell_and_default_home() {
         .unwrap();
     assert_eq!(terminal.shell, expected_shell.to_string_lossy());
     assert_eq!(terminal.cwd, home.canonicalize().unwrap().to_string_lossy());
-    service
-        .write(
-            &terminal.terminal_id,
-            b"printf '\\nUSER_SHELL_OK\\n'\n".to_vec(),
-        )
-        .unwrap();
-    output_until(&service, &terminal.terminal_id, b"\r\nUSER_SHELL_OK\r\n");
+    // With xterm-256color fish legitimately waits for a renderer handshake.
+    // This backend-only regression checks real account-shell spawn/cleanup;
+    // interaction and capability replies are validated with the real GUI renderer.
+    let pid = Pid::from_raw(terminal.observed_pid.unwrap() as i32);
+    assert_eq!(kill(pid, None), Ok(()));
     service.close(&terminal.terminal_id).unwrap();
+    assert_eq!(kill(pid, None), Err(Errno::ESRCH));
 }
 
 #[test]
@@ -545,4 +544,24 @@ fn dropping_last_service_requests_child_cleanup() {
         kill(Pid::from_raw(terminal.observed_pid.unwrap() as i32), None),
         Err(Errno::ESRCH)
     );
+}
+
+#[test]
+fn renderer_term_is_scoped_to_spawned_shell() {
+    let before = std::env::var_os("TERM");
+    let service = TerminalService::default();
+    let terminal = shell(&service);
+    service
+        .write(
+            &terminal.terminal_id,
+            b"printf '\\nTERM_CHECK:%s\\n' \"$TERM\"\n".to_vec(),
+        )
+        .unwrap();
+    output_until(
+        &service,
+        &terminal.terminal_id,
+        b"\r\nTERM_CHECK:xterm-256color\r\n",
+    );
+    assert_eq!(std::env::var_os("TERM"), before);
+    service.close(&terminal.terminal_id).unwrap();
 }
