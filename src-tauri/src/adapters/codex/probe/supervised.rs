@@ -92,6 +92,11 @@ pub(crate) enum Observation {
         methods: RuntimeMethods,
     },
 }
+/// Authority-fixed launch inputs of one runtime generation.
+struct Generation {
+    forced_mcp: BTreeSet<String>,
+    catalog_dir: std::path::PathBuf,
+}
 pub(crate) struct Worker {
     cancel: Arc<AtomicBool>,
     wake: UnixStream,
@@ -103,12 +108,17 @@ impl Worker {
     pub fn start(
         instance: AgentRuntimeInstanceId,
         forced_mcp: BTreeSet<String>,
+        catalog_dir: std::path::PathBuf,
         mut observe: impl FnMut(&AgentRuntimeInstanceId, Observation, &AtomicBool) + Send + 'static,
     ) -> std::io::Result<Self> {
         let (wake, reader) = UnixStream::pair()?;
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = cancel.clone();
         let (commands, rx) = mpsc::sync_channel(1);
+        let generation = Generation {
+            forced_mcp,
+            catalog_dir,
+        };
         let thread = thread::Builder::new()
             .name("codex-runtime".into())
             .spawn(move || {
@@ -118,7 +128,7 @@ impl Worker {
                     &flag,
                     reader,
                     rx,
-                    &forced_mcp,
+                    &generation,
                     &mut observe,
                     &mut methods,
                 );
@@ -180,6 +190,8 @@ struct RuntimeIo<'a> {
     forward: Option<&'a mut dyn FnMut(Observation)>,
     active_pair: Option<(CodexThreadId, CodexTurnId)>,
     isolation_violation: bool,
+    /// Authority model catalog of this generation. Discovery has none and starts no thread.
+    catalog: Option<&'a Path>,
 }
 impl RuntimeIo<'_> {
     fn isolation_failure(&mut self) -> ProbeError {
@@ -410,7 +422,7 @@ fn run(
     cancel: &Arc<AtomicBool>,
     wake: UnixStream,
     commands: Receiver<RuntimeCommand>,
-    forced_mcp: &BTreeSet<String>,
+    generation: &Generation,
     observe: &mut impl FnMut(&AgentRuntimeInstanceId, Observation, &AtomicBool),
     methods: &mut RuntimeMethods,
 ) -> std::result::Result<(), RuntimeDiagnostic> {
@@ -450,10 +462,17 @@ fn run(
         methods,
     )
     .map_err(diagnostic)?;
-    names.extend(forced_mcp.iter().cloned());
+    names.extend(generation.forced_mcp.iter().cloned());
+    // Discovery just refreshed the runtime's own backend catalog. The final generation only
+    // ever sees the authority's normalized presentation of it.
+    let catalog = authority_catalog(&generation.catalog_dir)
+        .map_err(|_| RuntimeDiagnostic::SafetyUnproven)?;
     let mut command = Command::new(&executable);
     command
-        .args(safety::process_args(&names).map_err(|_| RuntimeDiagnostic::SafetyUnproven)?)
+        .args(
+            safety::process_args(&names, Some(&catalog))
+                .map_err(|_| RuntimeDiagnostic::SafetyUnproven)?,
+        )
         .current_dir(&cwd);
     let mut owner = OwnedProcess::spawn(&mut command).map_err(diagnostic)?;
     owner.cancel_with(cancel.clone(), wake);
@@ -473,6 +492,7 @@ fn run(
             forward: Some(&mut forward),
             active_pair: None,
             isolation_violation: false,
+            catalog: Some(&catalog),
         };
         let mut correlation = handshake(&mut io, &mut report)?;
         // A catalog RPC error is safe degradation in the standalone probe, but not runtime readiness.
@@ -784,7 +804,8 @@ fn safety_preflight(
     report: &mut CodexLiveProbeReportV1,
 ) -> ProbeResult<()> {
     let config = safety_query(io, cwd, false, correlation, report)?;
-    safety::verify_config(&config).map_err(|_| ProbeError::Protocol)?;
+    let catalog = io.catalog.ok_or(ProbeError::Protocol)?;
+    safety::verify_config(&config, catalog).map_err(|_| ProbeError::Protocol)?;
     let configured = safety::mcp_names(&config, false).map_err(|_| ProbeError::Protocol)?;
     if !configured.is_subset(names) {
         io.emit(Observation::SafetyConfigChanged(
@@ -848,7 +869,7 @@ fn discover_mcp(
 ) -> ProbeResult<BTreeSet<String>> {
     let mut command = Command::new(executable);
     command
-        .args(safety::process_args(&BTreeSet::new()).map_err(|_| ProbeError::Codec)?)
+        .args(safety::process_args(&BTreeSet::new(), None).map_err(|_| ProbeError::Codec)?)
         .current_dir(cwd);
     let mut owner = OwnedProcess::spawn(&mut command)?;
     owner.cancel_with(cancel.clone(), wake);
@@ -865,6 +886,7 @@ fn discover_mcp(
             forward: None,
             active_pair: None,
             isolation_violation: false,
+            catalog: None,
         };
         let mut report = initial_report(cwd.to_owned());
         let mut correlation = handshake(&mut io, &mut report)?;
@@ -882,6 +904,56 @@ fn discover_mcp(
     })();
     owner.shutdown()?;
     result
+}
+
+/// Reads the runtime's own cached backend catalog and writes the authority presentation
+/// next to the control socket. Wrong owner, symlink, oversize or malformed content keeps
+/// the runtime from starting; nothing is inferred from a missing cache.
+fn authority_catalog(dir: &Path) -> ProbeResult<std::path::PathBuf> {
+    use std::io::Read;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let flags = nix::libc::O_NOFOLLOW | nix::libc::O_CLOEXEC;
+    let home = match env::var_os("CODEX_HOME") {
+        Some(home) if !home.is_empty() => std::path::PathBuf::from(home),
+        _ => std::path::PathBuf::from(env::var_os("HOME").ok_or(ProbeError::Protocol)?)
+            .join(".codex"),
+    };
+    let cache = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(flags)
+        .open(home.join("models_cache.json"))
+        .map_err(|_| ProbeError::Protocol)?;
+    let metadata = cache.metadata().map_err(|_| ProbeError::Protocol)?;
+    if !metadata.is_file()
+        || metadata.uid() != nix::unistd::geteuid().as_raw()
+        || metadata.len() > safety::MAX_CATALOG_BYTES as u64
+    {
+        return Err(ProbeError::Protocol);
+    }
+    let mut raw = Vec::new();
+    cache
+        .take(safety::MAX_CATALOG_BYTES as u64 + 1)
+        .read_to_end(&mut raw)
+        .map_err(|_| ProbeError::Protocol)?;
+    let presented = safety::inference_catalog(&raw).map_err(|_| ProbeError::Protocol)?;
+    let path = dir.join("codex-model-catalog.json");
+    if !safety::safe_catalog_path(&path) {
+        return Err(ProbeError::Protocol);
+    }
+    let staging = dir.join("codex-model-catalog.json.tmp");
+    let _ = std::fs::remove_file(&staging);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(flags)
+        .open(&staging)
+        .map_err(|_| ProbeError::Protocol)?;
+    file.write_all(&presented)
+        .and_then(|()| file.sync_all())
+        .and_then(|()| std::fs::rename(&staging, &path))
+        .map_err(|_| ProbeError::Protocol)?;
+    Ok(path)
 }
 
 fn start_turn(

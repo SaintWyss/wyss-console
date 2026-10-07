@@ -43,6 +43,7 @@ never a shell or client-supplied flags, contains fixed `-c key=false` overrides 
 ```text
 features.apps
 features.code_mode
+features.code_mode_host
 features.code_mode_only
 features.context_management
 features.current_time_reminder
@@ -58,6 +59,7 @@ features.plugins
 features.request_permissions_tool
 features.shell_snapshot
 features.shell_tool
+features.sleep_tool
 features.standalone_web_search
 features.token_budget
 features.tool_suggest
@@ -69,8 +71,58 @@ tools.experimental_request_user_input.enabled
 tools.update_plan.enabled
 ```
 
-It also sets `web_search="disabled"`. These keys come from the pinned
+It also sets `web_search="disabled"` and `agents.enabled=false`. The original keys
+come from the pinned
 [temporary_structured_request implementation](https://github.com/openai/codex/blob/687a119f0fcaace47e1f1abcc77cec6c813fd6da/codex-rs/tui/src/temporary_structured_request.rs).
+`features.code_mode_host`, `features.sleep_tool` and `agents.enabled` were added after
+the model-visible tool surface was audited (below).
+
+## Authority-normalized model presentation
+
+Feature flags alone do not bound what the model is offered. In 0.159.0 the backend
+model catalog carries per-model metadata that registers tools independently of
+them: `tool_mode` overrides `features.code_mode`
+([tools/mod.rs](https://github.com/openai/codex/blob/687a119f0fcaace47e1f1abcc77cec6c813fd6da/codex-rs/core/src/tools/mod.rs)),
+and `multi_agent_version` and `experimental_supported_tools` register collaboration,
+asynchronous user-input and clock tools
+([tools/spec_plan.rs](https://github.com/openai/codex/blob/687a119f0fcaace47e1f1abcc77cec6c813fd6da/codex-rs/core/src/tools/spec_plan.rs)).
+Observed on 2026-10-07 with the real provider and the original 26 overrides, the
+inference runtime advertised ten tools to `gpt-6.1-sol`: `functions.exec`,
+`functions.wait`, `functions.request_user_input_async`, `clock.sleep` and six
+`collaboration.*` tools including `spawn_agent`. With a persistent thread a scripted
+`spawn_agent` call started a sub-agent that issued its own inference request. The
+notification filter classifies the resulting `subAgentActivity` item as an isolation
+violation only after that start, and `list_agents` produces no observable item.
+Post-hoc containment was therefore not a sufficient boundary.
+
+The authority now owns the model presentation. After the discovery child has
+refreshed the runtime's cached backend catalog (`models_cache.json` in the Codex
+home), the supervisor reads it through a no-follow descriptor, requires a regular
+file owned by the authority user of at most 4 MiB with 1–64 models, and writes a
+normalized copy to `$XDG_RUNTIME_DIR/wyss-console/codex-model-catalog.json` (0600,
+atomic replace). For every model it pins:
+
+```text
+tool_mode = "direct"
+experimental_supported_tools = []
+multi_agent_version = null
+apply_patch_tool_type = null
+```
+
+All other provider metadata is carried unchanged. The thread-capable generation is
+launched with `-c model_catalog_json="<that path>"`; the path is authority-generated
+and restricted to `[A-Za-z0-9/_.-]` so it needs no TOML escaping. A configured
+catalog makes the runtime use a static model manager, so the presentation cannot be
+replaced by a later backend refresh within that generation. Every safety preflight
+additionally requires config/read to reflect `agents.enabled = false` and exactly
+that catalog path. A missing, symlinked, foreign-owned, oversized or malformed cache
+fails the generation as SafetyUnproven before any thread-capable process starts;
+nothing is inferred from absence.
+
+With this presentation the real provider received zero model-visible tools for an
+inference turn and answered normally. The catalog file contains provider model
+metadata only: no prompt, credential or user configuration. It is transient runtime
+state, rewritten for each generation, and is not part of Wyss durability.
 
 A discovery-only child may initialize, list models and read config; it cannot create,
 resume or turn a thread. Effective MCP names are validated as 1–64 ASCII bare TOML

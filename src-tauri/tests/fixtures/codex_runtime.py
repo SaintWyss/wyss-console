@@ -18,6 +18,18 @@ flags = dict(a.split('=', 1) for a in argv[1::2])
 assert len(flags) == len(argv) // 2
 assert not argv or flags.get('features.hooks') == 'false' and flags.get('features.shell_tool') == 'false'
 assert not argv or flags.get('features.unified_exec') == 'false' and flags.get('web_search') == '"disabled"'
+assert not argv or flags.get('agents.enabled') == 'false'
+assert not argv or flags.get('features.code_mode_host') == 'false' and flags.get('features.sleep_tool') == 'false'
+catalog = flags.get('model_catalog_json', '').strip('"') or None
+if catalog:
+    # The authority presentation is in place before the thread-capable generation starts.
+    presented = json.loads(Path(catalog).read_text())
+    assert presented['models'] and all(
+        m['tool_mode'] == 'direct' and m['experimental_supported_tools'] == []
+        and m['multi_agent_version'] is None and m['apply_patch_tool_type'] is None
+        for m in presented['models'])
+    assert Path(catalog).stat().st_mode & 0o777 == 0o600
+    (root / 'catalog-launches').open('a').write('1\n')
 
 with (root / 'pids').open('a') as record:
     record.write(str(os.getpid()) + '\n')
@@ -99,7 +111,7 @@ for line in sys.stdin:
         if scenario=='mcp_drift' and calls>=1:names.append('new_mcp')
         servers = {n: {'enabled': flags.get('mcp_servers.' + n + '.enabled') != 'false'} for n in names}
         features = {k.split('.',1)[1]: False for k in flags if k.startswith('features.')}
-        emit({'id':message['id'],'result':{'config':{'mcp_servers':servers,'features':features,'cloud':{'skills':{'enabled':False}},'skills':{'include_instructions':False},'web_search':'disabled'},'layers':None}})
+        emit({'id':message['id'],'result':{'config':{'mcp_servers':servers,'features':features,'cloud':{'skills':{'enabled':False}},'skills':{'include_instructions':False},'web_search':'disabled','agents':{'enabled':flags.get('agents.enabled') != 'false'},'model_catalog_json':catalog},'layers':None}})
     elif method == 'hooks/list':
         hooks=[{'enabled':True}] if scenario=='hooks_enabled' or (root/'restore-hooks').exists() else []
         emit({'id':message['id'],'result':{'data':[{'hooks':hooks}]}})

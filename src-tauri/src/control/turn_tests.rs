@@ -575,7 +575,10 @@ fn safety_preflight_rejects_reflected_capability_drift_and_suppresses_private_re
     }
     // A managed engine setting is allowed only together with the separately checked zero inventory.
     config["config"]["features"]["hooks"] = json!(true);
-    assert!(safety::verify_config(&config).is_ok());
+    let catalog = std::path::Path::new("/run/user/1000/wyss-console/codex-model-catalog.json");
+    config["config"]["agents"] = json!({"enabled": false});
+    config["config"]["model_catalog_json"] = json!(catalog.to_str().unwrap());
+    assert!(safety::verify_config(&config, catalog).is_ok());
     for key in [
         "shell_tool",
         "unified_exec",
@@ -586,7 +589,7 @@ fn safety_preflight_rejects_reflected_capability_drift_and_suppresses_private_re
     ] {
         let mut bad = config.clone();
         bad["config"]["features"][key] = json!(true);
-        assert!(safety::verify_config(&bad).is_err());
+        assert!(safety::verify_config(&bad, catalog).is_err());
     }
     let message = |method: &str| {
         WireMessage::from_value(json!({"method":method,"params":{"threadId":"thread","turnId":"turn","itemId":"item","delta":"PRIVATE_SENTINEL","contentIndex":0,"summaryIndex":0}}),Direction::ServerToClient).unwrap()

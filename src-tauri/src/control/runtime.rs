@@ -35,12 +35,14 @@ pub(super) struct Runtime {
     safety: Option<RuntimeSafetyProfile>,
     mcp_clamp: std::collections::BTreeSet<String>,
     reclamped: bool,
+    /// Private authority directory that receives the normalized model catalog.
+    catalog_dir: std::path::PathBuf,
 }
 impl Runtime {
     pub fn owns_generation(&self, id: &AgentRuntimeInstanceId) -> bool {
         self.attempt.as_ref() == Some(id)
     }
-    pub fn new(store: &Store) -> ControlResult<Self> {
+    pub fn new(store: &Store, catalog_dir: &std::path::Path) -> ControlResult<Self> {
         Ok(Self {
             control: store.runtime_control()?,
             state: ActualState::Stopped,
@@ -54,6 +56,7 @@ impl Runtime {
             safety: None,
             mcp_clamp: Default::default(),
             reclamped: false,
+            catalog_dir: catalog_dir.to_path_buf(),
         })
     }
     fn desired(&self) -> DesiredState {
@@ -152,6 +155,7 @@ impl Runtime {
             match Worker::start(
                 id,
                 self.mcp_clamp.clone(),
+                self.catalog_dir.clone(),
                 move |id, observation, cancel| {
                     let mut message = CoreMessage::Runtime(id.clone(), observation);
                     // Bounded backpressure, interruptible so core shutdown/stop can always join.
@@ -188,7 +192,7 @@ impl Runtime {
         names: std::collections::BTreeSet<String>,
     ) -> ControlResult<()> {
         self.contain(store, RuntimeDiagnostic::SafetyUnproven)?;
-        if self.reclamped || crate::adapters::codex::safety::process_args(&names).is_err() {
+        if self.reclamped || crate::adapters::codex::safety::process_args(&names, None).is_err() {
             return Ok(());
         }
         self.reclamped = true;

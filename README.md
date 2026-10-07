@@ -274,7 +274,11 @@ configuration overrides.
 Each generation first runs a discovery-only App Server to read effective MCP names,
 then reaps it and starts the final child with every discovered MCP server disabled
 before thread creation. Fixed process and thread overrides disable external tool
-surfaces. config/read and hooks/list must verify the safety preconditions, including
+surfaces. Backend model metadata can register tools independently of those overrides,
+so the authority also launches the final child with its own normalized model catalog
+(direct tool mode, no experimental, multi-agent or patch tools); with it the provider
+receives zero model-visible tools. A catalog that cannot be proven safe keeps the
+runtime from starting. config/read and hooks/list must verify the safety preconditions, including
 zero enabled executable external hooks. Restoring user/project/plugin/managed hooks
 or incompatible configuration makes inference unavailable; Wyss never edits them.
 Explicit resume verifies the stored thread/workspace, readOnly sandbox and never

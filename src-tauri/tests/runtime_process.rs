@@ -50,12 +50,18 @@ impl Sandbox {
     fn new(scenario: &'static str) -> Self {
         let root = std::env::temp_dir().join(format!("wyss-rt-{}", id().as_str()));
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
-        for d in ["run", "state", "bin"] {
+        for d in ["run", "state", "bin", "codex-home"] {
             fs::DirBuilder::new()
                 .mode(0o700)
                 .create(root.join(d))
                 .unwrap();
         }
+        // Backend metadata as the provider caches it: every tool selector the authority must pin.
+        fs::write(
+            root.join("codex-home/models_cache.json"),
+            r#"{"fetched_at":"2026-10-07T00:00:00Z","models":[{"slug":"fixture-model","tool_mode":"code_mode_only","shell_type":"unified_exec","apply_patch_tool_type":"freeform","multi_agent_version":"v2","experimental_supported_tools":["send_user_message_async","clock"]}]}"#,
+        )
+        .unwrap();
         let fake = root.join("bin/codex");
         fs::write(&fake, include_str!("fixtures/codex_runtime.py")).unwrap();
         fs::set_permissions(fake, fs::Permissions::from_mode(0o700)).unwrap();
@@ -67,6 +73,7 @@ impl Sandbox {
                 .env("XDG_RUNTIME_DIR", self.root.join("run"))
                 .env("XDG_STATE_HOME", self.root.join("state"))
                 .env("PATH", self.root.join("bin"))
+                .env("CODEX_HOME", self.root.join("codex-home"))
                 .env("WYSS_RUNTIME_FIXTURE", &self.root)
                 .env("WYSS_RUNTIME_SCENARIO", self.scenario)
                 .stdin(Stdio::null())
@@ -1819,4 +1826,62 @@ fn cancel_waits_for_correlated_started_when_start_response_precedes_provider_act
     c.runtime_stop(mutation()).unwrap();
     env.wait(&mut c, ActualState::Stopped);
     a.stop(false);
+}
+
+#[test]
+fn inference_generation_only_starts_with_the_authority_model_catalog() {
+    let env = Sandbox::new("happy");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    let ready = env.wait(&mut c, ActualState::Ready);
+    assert!(ready.runtime_safety_profile.is_some());
+    // Discovery has no catalog; only the thread-capable generation is launched with it.
+    assert_eq!(
+        fs::read_to_string(env.root.join("catalog-launches"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+    let catalog = env.root.join("run/wyss-console/codex-model-catalog.json");
+    assert_eq!(
+        fs::metadata(&catalog).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let presented: serde_json::Value =
+        serde_json::from_slice(&fs::read(&catalog).unwrap()).unwrap();
+    let model = &presented["models"][0];
+    assert_eq!(model["slug"], "fixture-model");
+    assert_eq!(model["tool_mode"], "direct");
+    assert_eq!(model["experimental_supported_tools"], serde_json::json!([]));
+    assert!(model["multi_agent_version"].is_null() && model["apply_patch_tool_type"].is_null());
+    a.stop(false);
+    // Without a provable catalog there is no thread-capable generation at all.
+    for sabotage in ["missing", "symlink", "malformed", "no_models"] {
+        let env = Sandbox::new("happy");
+        let cache = env.root.join("codex-home/models_cache.json");
+        match sabotage {
+            "missing" => fs::remove_file(&cache).unwrap(),
+            "symlink" => {
+                let real = env.root.join("elsewhere.json");
+                fs::rename(&cache, &real).unwrap();
+                std::os::unix::fs::symlink(&real, &cache).unwrap();
+            }
+            "malformed" => fs::write(&cache, b"{\"models\": [").unwrap(),
+            _ => fs::write(&cache, br#"{"models":[]}"#).unwrap(),
+        }
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(mutation()).unwrap();
+        let failed = env.wait(&mut c, ActualState::Failed);
+        assert_eq!(
+            failed.diagnostic,
+            Some(RuntimeDiagnostic::SafetyUnproven),
+            "{sabotage}"
+        );
+        assert!(!env.root.join("catalog-launches").exists(), "{sabotage}");
+        assert_eq!(count(&env, "thread/start"), 0, "{sabotage}");
+        a.stop(false);
+    }
 }
