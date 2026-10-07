@@ -52,8 +52,20 @@ impl Conversations {
         {
             s.state = BindingState::BoundAttached;
             s.runtime_instance_id = Some(live);
+            s.attachment_profile = Some(AttachmentProfile::InferenceOnlyV1);
         }
         Ok(ResultValue::BindingStatus(s))
+    }
+    pub fn projection(
+        &self,
+        store: &Store,
+        runtime: &Runtime,
+        id: &ManagedSessionId,
+    ) -> ControlResult<BindingStatus> {
+        match self.status(store, runtime, id)? {
+            ResultValue::BindingStatus(s) => Ok(s),
+            _ => Err(ControlError::InternalError),
+        }
     }
     pub fn begin(
         &mut self,
@@ -236,6 +248,24 @@ impl Conversations {
             }
         };
         let _ = p.reply.try_send(result);
+    }
+    pub fn reject_pre_dispatch(
+        &mut self,
+        store: &mut Store,
+        runtime: &Runtime,
+        id: &AgentRuntimeInstanceId,
+    ) {
+        if let Some(p) = &self.pending {
+            let operation = p.reservation.operation_id.clone();
+            self.complete(
+                store,
+                runtime,
+                id,
+                &operation,
+                Err(ConversationFailure::NotDispatched),
+            );
+        }
+        self.attachments.clear();
     }
     pub fn detach(&mut self, store: &mut Store) {
         self.invalidate_admission();

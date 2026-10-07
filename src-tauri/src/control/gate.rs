@@ -19,7 +19,7 @@ impl ExecutionDecision {
 }
 pub(super) struct ExecutionGate;
 impl ExecutionGate {
-    pub(super) fn evaluate(
+    fn base(
         store: &Store,
         session_id: &ManagedSessionId,
         action: ExecutionScope,
@@ -77,6 +77,49 @@ impl ExecutionGate {
             return deny(RuntimeIncompatible);
         }
         ExecutionDecision::Allowed
+    }
+    pub(super) fn evaluate(
+        store: &Store,
+        session: &ManagedSessionId,
+        action: ExecutionScope,
+        runtime: &RuntimeStatus,
+    ) -> ExecutionDecision {
+        let base = Self::base(store, session, action, runtime);
+        if matches!(base, ExecutionDecision::Allowed) && action == ExecutionScope::TurnStart {
+            ExecutionDecision::Denied(GateReason::BindingDetached)
+        } else {
+            base
+        }
+    }
+    pub(super) fn turn(
+        store: &Store,
+        session: &ManagedSessionId,
+        runtime: &RuntimeStatus,
+        binding: &BindingStatus,
+    ) -> ExecutionDecision {
+        let base = Self::base(store, session, ExecutionScope::TurnStart, runtime);
+        if !matches!(base, ExecutionDecision::Allowed) {
+            return base;
+        }
+        use GateReason::*;
+        let reason = if binding.binding.is_none() {
+            Some(BindingNotFound)
+        } else if binding.state != BindingState::BoundAttached {
+            Some(BindingDetached)
+        } else if binding.runtime_instance_id != runtime.runtime_instance_id {
+            Some(AttachmentRuntimeMismatch)
+        } else if runtime.runtime_safety_profile != Some(RuntimeSafetyProfile::CodexInferenceV1) {
+            Some(RuntimeSafetyProfileMissing)
+        } else if binding.attachment_profile != Some(AttachmentProfile::InferenceOnlyV1) {
+            Some(InferenceProfileMissing)
+        } else {
+            match store.active_turn() {
+                Ok(Some(_)) => Some(ActiveTurnExists),
+                Err(_) => Some(AuthorityUnavailable),
+                Ok(None) => None,
+            }
+        };
+        reason.map_or(ExecutionDecision::Allowed, ExecutionDecision::Denied)
     }
     pub(super) fn diagnostic(store: &Store, p: &GateQuery, runtime: &RuntimeStatus) -> GateStatus {
         GateStatus {

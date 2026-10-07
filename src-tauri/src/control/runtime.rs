@@ -1,7 +1,8 @@
 //! Authority-core projection and reconciliation. The core remains the sole durable writer.
 use super::{server::CoreMessage, store::Store};
 pub(super) use crate::adapters::codex::probe::supervised::{
-    ConversationCommand, ConversationFailure, MaterializationStage, Observation,
+    ConversationCommand, ConversationFailure, MaterializationStage, Observation, RuntimeCommand,
+    TurnCommand,
 };
 use crate::{
     adapters::codex::probe::supervised::Worker,
@@ -31,8 +32,14 @@ pub(super) struct Runtime {
     models: Vec<AgentModelDescriptorV1>,
     diagnostic: Option<RuntimeDiagnostic>,
     methods: RuntimeMethods,
+    safety: Option<RuntimeSafetyProfile>,
+    mcp_clamp: std::collections::BTreeSet<String>,
+    reclamped: bool,
 }
 impl Runtime {
+    pub fn owns_generation(&self, id: &AgentRuntimeInstanceId) -> bool {
+        self.attempt.as_ref() == Some(id)
+    }
     pub fn new(store: &Store) -> ControlResult<Self> {
         Ok(Self {
             control: store.runtime_control()?,
@@ -44,6 +51,9 @@ impl Runtime {
             models: Vec::new(),
             diagnostic: None,
             methods: RuntimeMethods::default(),
+            safety: None,
+            mcp_clamp: Default::default(),
+            reclamped: false,
         })
     }
     fn desired(&self) -> DesiredState {
@@ -79,6 +89,7 @@ impl Runtime {
             model_count: self.models.len() as u16,
             diagnostic: self.diagnostic,
             outbound_methods: self.methods.clone(),
+            runtime_safety_profile: self.safety,
         }
     }
     pub fn models(&self, p: &RuntimeModels) -> ControlResult<ResultValue> {
@@ -122,6 +133,10 @@ impl Runtime {
         let changed =
             control.as_ref().map(|r| r.revision) != self.control.as_ref().map(|r| r.revision);
         self.control = control;
+        if changed {
+            self.reclamped = false;
+            self.mcp_clamp.clear();
+        }
         if self.desired() == DesiredState::Stopped {
             self.stop(store, true)?;
         } else if self.worker.is_none() && (startup || changed) {
@@ -134,22 +149,26 @@ impl Runtime {
                 .expect("generated identity");
             self.attempt = Some(id.clone());
             let core = core.clone();
-            match Worker::start(id, move |id, observation, cancel| {
-                let mut message = CoreMessage::Runtime(id.clone(), observation);
-                // Bounded backpressure, interruptible so core shutdown/stop can always join.
-                loop {
-                    if cancel.load(Ordering::Acquire) {
-                        break;
-                    }
-                    match core.try_send(message) {
-                        Ok(()) | Err(TrySendError::Disconnected(_)) => break,
-                        Err(TrySendError::Full(pending)) => {
-                            message = pending;
-                            thread::sleep(Duration::from_millis(5));
+            match Worker::start(
+                id,
+                self.mcp_clamp.clone(),
+                move |id, observation, cancel| {
+                    let mut message = CoreMessage::Runtime(id.clone(), observation);
+                    // Bounded backpressure, interruptible so core shutdown/stop can always join.
+                    loop {
+                        if cancel.load(Ordering::Acquire) {
+                            break;
+                        }
+                        match core.try_send(message) {
+                            Ok(()) | Err(TrySendError::Disconnected(_)) => break,
+                            Err(TrySendError::Full(pending)) => {
+                                message = pending;
+                                thread::sleep(Duration::from_millis(5));
+                            }
                         }
                     }
-                }
-            }) {
+                },
+            ) {
                 Ok(worker) => self.worker = Some(worker),
                 Err(_) => {
                     self.state = ActualState::Failed;
@@ -160,8 +179,32 @@ impl Runtime {
         }
         Ok(())
     }
+    /// One safety-only reconciliation per explicit runtime control revision. Never a
+    /// crash-retry loop and never requeues a conversation or prompt command.
+    pub fn reclamp(
+        &mut self,
+        store: &mut Store,
+        core: &SyncSender<CoreMessage>,
+        names: std::collections::BTreeSet<String>,
+    ) -> ControlResult<()> {
+        self.contain(store, RuntimeDiagnostic::SafetyUnproven)?;
+        if self.reclamped || crate::adapters::codex::safety::process_args(&names).is_err() {
+            return Ok(());
+        }
+        self.reclamped = true;
+        self.mcp_clamp = names;
+        self.reconcile(store, core, true)
+    }
     pub fn command(&mut self, c: ConversationCommand) -> bool {
+        self.worker
+            .as_mut()
+            .is_some_and(|w| w.command(RuntimeCommand::Conversation(c)))
+    }
+    pub fn turn_command(&mut self, c: RuntimeCommand) -> bool {
         self.worker.as_mut().is_some_and(|w| w.command(c))
+    }
+    pub fn contain(&mut self, store: &mut Store, reason: RuntimeDiagnostic) -> ControlResult<()> {
+        self.fail(store, reason)
     }
     pub fn observe(
         &mut self,
@@ -173,10 +216,16 @@ impl Runtime {
             return Ok(());
         }
         match event {
-            Observation::Materialization { .. } => (),
-            Observation::Conversation { methods, .. } => {
+            Observation::Materialization { .. }
+            | Observation::TurnNotice(_)
+            | Observation::IsolationViolation
+            | Observation::SafetyConfigChanged(_) => (),
+            Observation::Conversation { methods, .. }
+            | Observation::TurnResult { methods, .. }
+            | Observation::InterruptResult { methods, .. } => {
                 self.methods = methods;
             }
+            Observation::Discovering => self.state = ActualState::Initializing,
             Observation::Spawned => {
                 self.live = Some(id);
                 self.state = ActualState::Initializing;
@@ -200,6 +249,7 @@ impl Runtime {
                 self.models = models;
                 self.methods = methods;
                 self.state = ActualState::Ready;
+                self.safety = Some(RuntimeSafetyProfile::CodexInferenceV1);
             }
             Observation::Exited { reason, methods } => {
                 self.methods = methods;
@@ -234,6 +284,7 @@ impl Runtime {
         }
         let id = self.live.take();
         self.attempt = None;
+        self.safety = None;
         self.models.clear();
         self.version = None;
         self.state = ActualState::Stopped;

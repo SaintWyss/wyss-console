@@ -108,6 +108,8 @@ pub fn message_surface(message: &WireMessage) -> Surface {
 #[serde(rename_all = "snake_case")]
 pub enum Operation {
     Initialize,
+    ConfigRead,
+    HooksList,
     ThreadStart,
     ThreadResume,
     ThreadArchive,
@@ -185,7 +187,7 @@ impl ClientOperation {
             Self::ThreadResume { thread_id } => ("thread/resume", json!({"threadId":thread_id})),
             Self::TurnStart { thread_id, text } => (
                 "turn/start",
-                json!({"threadId":thread_id,"input":[{"type":"text","text":text,"text_elements":[]}]}),
+                json!({"threadId":thread_id,"input":[{"type":"text","text":text,"textElements":[]}]}),
             ),
             Self::TurnInterrupt { thread_id, turn_id } => (
                 "turn/interrupt",
@@ -733,6 +735,12 @@ pub(crate) fn validate_result(operation: Operation, v: &Value) -> Result<()> {
             let sandbox = object(required(p, "sandbox")?)?;
             field_text(sandbox, "type", 128)?;
             validate_thread(required(p, "thread")?)?;
+        }
+        Operation::ConfigRead => {
+            object(required(p, "config")?)?;
+        }
+        Operation::HooksList => {
+            super::safety::zero_external_hooks(v)?;
         }
         Operation::TurnStart => validate_turn(required(p, "turn")?)?,
         Operation::ThreadArchive => only(p, &[])?,

@@ -1,7 +1,7 @@
 # Wyss Console
 
 Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current validated status: **Sprint 2G managed Codex session lifecycle and runtime binding** using Tauri 2,
+Linux-first, local-first. Current validated status: **Sprint 2H inference-only managed turns and structured streaming** using Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -87,7 +87,7 @@ are checked in Rust and TypeScript. Codex is not usable through the Console UI. 
 
 The explicit developer harness discovers Codex, reads its version, starts a private
 app-server, initializes with experimental API disabled, requests one model catalog
-page and reaps its child. **No managed Codex work is executed yet.** No threads,
+page and reaps its child. **This read-only probe executes no managed work.** No threads,
 turns, prompts, approval responses, login or configuration changes are sent.
 
 ```sh
@@ -112,7 +112,8 @@ external authority.
 
 `wyss-control` independently owns prepared/closed managed-session identities,
 canonical control state, durable intent receipts and a minimal EventEnvelope audit.
-**No managed agent work executes yet.** Prepared is not execution permission.
+**Prepared is not execution permission.** Explicit, leased inference-only turns are
+available through the authority developer client, with no product chat UI.
 Human terminal tabs remain Console-local; the read-only Codex probe above remains
 a separate developer tool. The desktop does not start or connect to the authority.
 
@@ -138,7 +139,7 @@ From another terminal:
 ```
 
 The client also supports `hello`, `get UUID`, `close UUID revision`, and
-`prepare intent-UUID` for durable retry. Close changes only the control record.
+`prepare intent-UUID` for durable retry. Close commits session/lease control state and cancels any active managed turn.
 Prepared sessions create no Codex thread/turn. Stop authority using Ctrl+C or SIGTERM;
 a normal control client cannot shut it down.
 
@@ -160,10 +161,11 @@ No production state is created by the test suite.
 
 `wyss-control` can supervise one shared, long-lived `codex app-server`, independently
 of Console clients. Durable desired running/stopped is separate from observed
-starting/initializing/ready/stopping/failed. Schema v1/v2 upgrades transactionally to
-v3, preserving existing sessions, receipts, stream, audit and runtime desired
-state. Migration creates no runtime desired state; startup reconciles an existing
-desired-running record. No ManagedSession is bound to this process.
+starting/initializing/ready/stopping/failed. Schema v1–v4 upgrades transactionally to
+v5, preserving sessions, leases, bindings, operation journal, receipts, stream,
+audit and runtime desired state. Migration creates no runtime desired state or
+managed turns; startup reconciles an existing desired-running record. Durable
+conversation bindings use CodexThreadId; runtime attachment remains transient.
 
 The developer client exposes the new normalized control methods:
 
@@ -209,7 +211,7 @@ Execution is denied by default. A prepared ManagedSession has no permission unti
 an explicit `executionLease/grant` commits a durable lease and audit. Runtime
 startup, client reconnection and authority restart never grant or renew a lease.
 Lease operations themselves create **zero Codex threads or turns**, submit no
-prompts, and answer no approvals or permission requests. First managed work remains blocked.
+prompts, and answer no approvals or permission requests. A grant alone never executes work.
 
 Schema v3 adds only execution leases and a unique active-lease index; migration
 preserves sessions, runtime desired state, receipts and exact audit bytes, and
@@ -227,7 +229,7 @@ uses authority NOW + TTL. Original intent retries return their original receipt,
 including the original expiry; UUID case and scope order are normalized.
 
 `executionGate/status` takes session ID and one scope, returning an informational
-reason only. It is not an authorization token. Future execution must reevaluate
+reason only. It is not an authorization token. Execution reevaluates
 the internal gate immediately before the authority-owned side effect. It requires
 prepared session, active unexpired scoped lease, matching runtime metadata,
 desired running, actual ready, live runtime identity, compatible runtime and
@@ -248,8 +250,9 @@ See [ADR 0013](docs/adr/0013-execution-gates-leases-and-revocation.md).
 The authority implementation adds gated conversation create/resume, schema v4,
 immutable ManagedSessionId-to-CodexThreadId bindings and an external-effect journal.
 Runtime attachment is transient and restart never automatically resumes a thread.
-No turns, prompts or approval/permission responses are enabled; first managed agent
-work remains disabled. Tauri/human terminal integration is unchanged.
+Conversation create/resume itself sends no turn or prompt. Turns require the additional
+inference profiles and turn_start gate described below. Approval/permission responses
+remain disabled. Tauri/human terminal integration is unchanged.
 
 Empty Codex 0.159.0 threads are materialized durably without a turn through an
 internal stable start→archive→unarchive persistence barrier. Create leaves the
@@ -258,3 +261,53 @@ lease scope before attachment; authority/runtime restart never resumes implicitl
 No experimental API or history mode is enabled. The compatibility barrier, journal
 ambiguity and zero-turn boundary are documented in
 [ADR 0014](docs/adr/0014-managed-codex-session-binding.md).
+
+## Inference-only managed turns
+
+Sprint 2H enables the first authority-owned text inference through the typed Rust client
+and developer harness. It requires **all three** of an attested `codex_inference_v1`
+process, a current `inference_only_v1` attachment, and an allowed internal `turn_start`
+execution gate. The compatible runtime is currently exactly Codex 0.159.0 with
+experimentalApi=false. No client can supply runtime args, tools, permissions or turn
+configuration overrides.
+
+Each generation first runs a discovery-only App Server to read effective MCP names,
+then reaps it and starts the final child with every discovered MCP server disabled
+before thread creation. Fixed process and thread overrides disable external tool
+surfaces. config/read and hooks/list must verify the safety preconditions, including
+zero enabled executable external hooks. Restoring user/project/plugin/managed hooks
+or incompatible configuration makes inference unavailable; Wyss never edits them.
+Explicit resume verifies the stored thread/workspace, readOnly sandbox and never
+approval policy before publishing its transient attachment profile.
+
+Control operations are `managedSession/turn/start`, `managedSession/turn/status`,
+`managedSession/turn/events` and `managedSession/turn/cancel`. The developer start
+command takes session ID, expected session revision and intent UUID, and reads the
+prompt from stdin. Only one exact text input of 1–8192 UTF-8 bytes is accepted.
+Wyss persists its authority-computed SHA-256 fingerprint and byte length, never the
+prompt, assistant output or reasoning. Codex-owned conversation history may retain
+its legitimate content. Start returns a committed starting receipt asynchronously;
+status observes later running/terminal revisions. Retrying the same intent returns
+its original receipt and never resends the prompt.
+
+At most one managed turn is starting/running globally. ManagedTurnId is distinct
+from CodexTurnId. Durable terminal states are completed, interrupted, failed and
+indeterminate. Assistant deltas and visible reasoning summaries use a separate
+memory-only stream; raw/private reasoning is suppressed. Per-turn buffers retain
+at most 256 events/256 KiB, the last eight turns, with UTF-8-safe splitting and
+explicit gaps. Event pages contain at most fifty events within control-frame bounds.
+Authority restart preserves canonical status but loses transient output.
+
+Cancellation remains available after lease expiry/revocation. The authority interrupts
+on explicit cancel, admitted-lease expiry/revocation or session close. Renewal of the
+same lease may extend execution; a replacement never transfers a running admission.
+Failure to confirm interruption within the bounded deadline contains/reaps the runtime.
+Client disconnect has no turn effect. Runtime/authority restart clears both profiles
+and attachments, preserves durable bindings, and never replays a prompt. Nonterminal
+turns recovered after a crash become indeterminate.
+
+**Tool, command, file, MCP, web, subagent and approval/permission execution remains
+disabled until Sprint 2I establishes authority mediation.** Any observed external
+action or server request fails closed and contains the runtime; no request is answered.
+The standalone read-only probe, human terminals and Tauri capabilities are unchanged.
+See [ADR 0015](docs/adr/0015-first-managed-turn-and-streaming.md).

@@ -21,6 +21,19 @@ use wyss_console::{
 fn id() -> WireUuid {
     WireUuid::try_from(uuid::Uuid::new_v4().to_string()).unwrap()
 }
+fn bootstrap() -> [&'static str; 9] {
+    [
+        "initialize",
+        "initialized",
+        "model/list",
+        "config/read",
+        "initialize",
+        "initialized",
+        "model/list",
+        "config/read",
+        "hooks/list",
+    ]
+}
 fn mutation() -> RuntimeMutation {
     RuntimeMutation {
         intent_id: id(),
@@ -190,7 +203,7 @@ fn authority_runtime_lifecycle_idempotency_clients_restarts_and_sigkill_containm
             Some(first_id.clone())
         );
     }
-    assert_eq!(env.pids().len(), 1);
+    assert_eq!(env.pids().len(), 2);
     let mut cursor = None;
     let mut models = Vec::new();
     loop {
@@ -223,7 +236,7 @@ fn authority_runtime_lifecycle_idempotency_clients_restarts_and_sigkill_containm
     }
     assert_eq!(models.len(), 45);
     // Independent transport record enforces the complete exact outbound plan and ordering.
-    assert_eq!(env.methods(), ["initialize", "initialized", "model/list"]);
+    assert_eq!(env.methods(), bootstrap());
     drop(c);
     let mut c = env.client();
     assert_eq!(
@@ -235,7 +248,7 @@ fn authority_runtime_lifecycle_idempotency_clients_restarts_and_sigkill_containm
         prepared
     );
     a.stop(false);
-    dead(env.pids()[0]);
+    dead(env.pids()[1]);
     let mut b = env.start();
     let mut c = env.client();
     let second = env.wait(&mut c, ActualState::Ready);
@@ -256,7 +269,7 @@ fn authority_runtime_lifecycle_idempotency_clients_restarts_and_sigkill_containm
         Err(ControlError::StaleRevision)
     ));
     b.stop(true);
-    dead(env.pids()[1]);
+    dead(env.pids()[3]);
     assert!(
         spectator.0.try_wait().unwrap().is_none(),
         "unrelated Codex child affected"
@@ -275,7 +288,7 @@ fn authority_runtime_lifecycle_idempotency_clients_restarts_and_sigkill_containm
     assert_eq!(stopped.revision, 2);
     assert_eq!(c.runtime_stop(stop).unwrap(), stopped);
     env.wait(&mut c, ActualState::Stopped);
-    dead(env.pids()[2]);
+    dead(env.pids()[5]);
     assert!(matches!(
         c.runtime_models(RuntimeModels {
             adapter_id: RuntimeTarget::codex().adapter_id,
@@ -290,7 +303,7 @@ fn authority_runtime_lifecycle_idempotency_clients_restarts_and_sigkill_containm
         c.runtime_status().unwrap().desired_state,
         DesiredState::Stopped
     );
-    assert_eq!(env.pids().len(), 3);
+    assert_eq!(env.pids().len(), 6);
     d.stop(false);
     let mut e = env.start();
     let mut c = env.client();
@@ -298,7 +311,7 @@ fn authority_runtime_lifecycle_idempotency_clients_restarts_and_sigkill_containm
     assert_eq!(final_state.actual_state, ActualState::Stopped);
     assert_eq!(final_state.desired_state, DesiredState::Stopped);
     assert_eq!(final_state.revision, 2);
-    assert_eq!(env.pids().len(), 3);
+    assert_eq!(env.pids().len(), 6);
     assert_eq!(
         c.get(prepared.managed_session_id.clone()).unwrap(),
         prepared
@@ -327,12 +340,27 @@ fn runtime_fails_closed_for_invalid_protocol_exit_requests_and_catalog_without_r
         assert!(failed.runtime_instance_id.is_none());
         assert_eq!(failed.model_count, 0);
         assert!(failed.diagnostic.is_some());
-        dead(env.pids()[0]);
-        assert_eq!(env.pids().len(), 1);
-        assert_eq!(env.methods(), ["initialize", "initialized", "model/list"]);
+        let attempts = env.pids().len();
+        assert!((1..=2).contains(&attempts));
+        for pid in env.pids() {
+            dead(pid);
+        }
+        assert!(env.methods().iter().all(|m| {
+            [
+                "initialize",
+                "initialized",
+                "model/list",
+                "config/read",
+                "hooks/list",
+            ]
+            .contains(&m.as_str())
+        }));
         if scenario == "server_request" {
             assert_eq!(fs::read_to_string(env.root.join("responses")).unwrap(), "0");
-            assert_eq!(failed.diagnostic, Some(RuntimeDiagnostic::ServerRequest));
+            assert_eq!(
+                failed.diagnostic,
+                Some(RuntimeDiagnostic::InferenceIsolationViolation)
+            );
         }
         for _ in 0..3 {
             assert_eq!(
@@ -340,14 +368,14 @@ fn runtime_fails_closed_for_invalid_protocol_exit_requests_and_catalog_without_r
                 ActualState::Failed
             );
         }
-        assert_eq!(env.pids().len(), 1);
+        assert_eq!(env.pids().len(), attempts);
         // New explicit intent admits exactly one new attempt; an ambiguous retry does not.
         let retry = mutation();
         let r = c.runtime_start(retry.clone()).unwrap();
         assert_eq!(r.revision, 2);
         env.wait(&mut c, ActualState::Failed);
         assert_eq!(c.runtime_start(retry).unwrap(), r);
-        assert_eq!(env.pids().len(), 2);
+        assert_eq!(env.pids().len(), attempts * 2);
         dead(env.pids()[1]);
         a.stop(false);
     }
@@ -365,9 +393,11 @@ fn ready_runtime_continuously_drains_both_pipes_and_shutdown_reaps() {
         thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(c.runtime_status().unwrap().actual_state, ActualState::Ready);
-    assert_eq!(env.methods(), ["initialize", "initialized", "model/list"]);
+    assert_eq!(env.methods(), bootstrap());
     a.stop(false);
-    dead(env.pids()[0]);
+    for pid in env.pids() {
+        dead(pid);
+    }
 }
 #[test]
 fn readiness_audit_failure_reaps_child_and_never_publishes_ready() {
@@ -381,10 +411,12 @@ fn readiness_audit_failure_reaps_child_and_never_publishes_ready() {
     let failed = env.wait(&mut c, ActualState::Failed);
     assert_eq!(failed.diagnostic, Some(RuntimeDiagnostic::AuditUnavailable));
     assert_eq!(failed.model_count, 0);
-    assert_eq!(failed.outbound_methods.initialize, 1);
-    assert_eq!(failed.outbound_methods.initialized, 1);
-    assert_eq!(failed.outbound_methods.model_list, 1);
-    dead(env.pids()[0]);
+    assert_eq!(failed.outbound_methods.initialize, 2);
+    assert_eq!(failed.outbound_methods.initialized, 2);
+    assert_eq!(failed.outbound_methods.model_list, 2);
+    for pid in env.pids() {
+        dead(pid);
+    }
     let ready:i64=conn.query_row("SELECT count(*) FROM control_events WHERE instr(envelope,'authority.runtime.instance_ready')>0",[],|r|r.get(0)).unwrap();
     assert_eq!(ready, 0);
     conn.execute_batch("DROP TRIGGER injected_audit_failure")
@@ -421,15 +453,15 @@ fn supervisor_outbound_method_allowlist_is_exact_on_actual_child_stdin() {
     let mut c = env.client();
     c.runtime_start(mutation()).unwrap();
     let status = env.wait(&mut c, ActualState::Ready);
-    assert_eq!(status.outbound_methods.initialize, 1);
-    assert_eq!(status.outbound_methods.initialized, 1);
-    assert_eq!(status.outbound_methods.model_list, 1);
+    assert_eq!(status.outbound_methods.initialize, 2);
+    assert_eq!(status.outbound_methods.initialized, 2);
+    assert_eq!(status.outbound_methods.model_list, 2);
     let methods = env.methods();
-    assert_eq!(methods, ["initialize", "initialized", "model/list"]);
+    assert_eq!(methods, bootstrap());
     let previous = status.runtime_instance_id;
     assert_eq!(c.runtime_start(mutation()).unwrap().revision, 2);
     assert_eq!(c.runtime_status().unwrap().runtime_instance_id, previous);
-    assert_eq!(env.pids().len(), 1);
+    assert_eq!(env.pids().len(), 2);
     for forbidden in [
         "thread/start",
         "thread/resume",
@@ -494,7 +526,7 @@ fn leases_gate_disconnect_expiry_concurrent_grants_and_restarts_execute_zero_wor
     c.runtime_start(mutation()).unwrap();
     env.wait(&mut c, ActualState::Ready);
     let methods = env.methods();
-    assert_eq!(methods, ["initialize", "initialized", "model/list"]);
+    assert_eq!(methods, bootstrap());
     assert_eq!(
         c.gate_status(query(ExecutionScope::SessionCreate))
             .unwrap()
@@ -505,7 +537,7 @@ fn leases_gate_disconnect_expiry_concurrent_grants_and_restarts_execute_zero_wor
         c.gate_status(query(ExecutionScope::TurnStart))
             .unwrap()
             .reason,
-        GateReason::Allowed
+        GateReason::BindingNotFound
     );
     assert_eq!(
         c.gate_status(query(ExecutionScope::SessionResume))
@@ -540,7 +572,7 @@ fn leases_gate_disconnect_expiry_concurrent_grants_and_restarts_execute_zero_wor
         c.gate_status(query(ExecutionScope::TurnStart))
             .unwrap()
             .reason,
-        GateReason::Allowed
+        GateReason::BindingNotFound
     );
     // Graceful and hard restarts preserve permission identity/revision/deadline exactly.
     for hard in [false, true] {
@@ -556,7 +588,7 @@ fn leases_gate_disconnect_expiry_concurrent_grants_and_restarts_execute_zero_wor
             c.gate_status(query(ExecutionScope::TurnStart))
                 .unwrap()
                 .reason,
-            GateReason::Allowed
+            GateReason::BindingNotFound
         );
     }
     let before = env.methods();
@@ -694,7 +726,16 @@ fn leases_gate_disconnect_expiry_concurrent_grants_and_restarts_execute_zero_wor
     }
     assert!(!env.root.join("run/wyss-console/control.sock").exists());
     for method in env.methods() {
-        assert!(["initialize", "initialized", "model/list"].contains(&method.as_str()));
+        assert!(
+            [
+                "initialize",
+                "initialized",
+                "model/list",
+                "config/read",
+                "hooks/list"
+            ]
+            .contains(&method.as_str())
+        );
     }
 }
 
@@ -912,6 +953,8 @@ fn managed_bindings_share_runtime_survive_restarts_require_explicit_resume_and_k
         "thread/resume",
         "thread/archive",
         "thread/unarchive",
+        "config/read",
+        "hooks/list",
     ]);
     assert_eq!(
         env.methods()
@@ -1268,4 +1311,512 @@ fn materialization_errors_are_indeterminate_never_bind_or_retry_and_never_respon
         drop(c);
         a.stop(false);
     }
+}
+
+fn inference_session(
+    env: &Sandbox,
+    c: &mut ControlClient,
+) -> (ManagedSessionRecord, ExecutionLease) {
+    let (s, l) = prepare_bound_session(
+        c,
+        vec![
+            ExecutionScope::SessionCreate,
+            ExecutionScope::SessionResume,
+            ExecutionScope::TurnStart,
+        ],
+    );
+    c.binding_create(create_params(env, &s)).unwrap();
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundDetached
+    );
+    c.binding_resume(resume_params(&s)).unwrap();
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .attachment_profile,
+        Some(AttachmentProfile::InferenceOnlyV1)
+    );
+    (s, l)
+}
+fn turn_params(s: &ManagedSessionRecord) -> TurnStart {
+    TurnStart {
+        intent_id: id(),
+        managed_session_id: s.managed_session_id.clone(),
+        expected_session_revision: s.revision,
+        prompt: format!("WYSS_2H_SECRET_PROMPT_{}", id().as_str()),
+    }
+}
+fn wait_turn(c: &mut ControlClient, t: &ManagedTurnRecord, terminal: bool) -> ManagedTurnRecord {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        let current = c.turn_status(t.managed_turn_id.clone()).unwrap();
+        if current.state.terminal() == terminal && (terminal || current.state == TurnState::Running)
+        {
+            return current;
+        }
+        assert!(Instant::now() < deadline, "turn state {current:?}");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+#[test]
+fn managed_turn_stream_race_privacy_idempotency_disconnect_and_restart() {
+    let env = Sandbox::new("happy");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    let ready = env.wait(&mut c, ActualState::Ready);
+    assert_eq!(
+        ready.runtime_safety_profile,
+        Some(RuntimeSafetyProfile::CodexInferenceV1)
+    );
+    let (s, _) = inference_session(&env, &mut c);
+    let params = turn_params(&s);
+    let t = c.turn_start(params.clone()).unwrap();
+    assert_eq!(t.state, TurnState::Starting);
+    drop(c);
+    let mut c = env.client();
+    let done = wait_turn(&mut c, &t, true);
+    assert_eq!(done.state, TurnState::Completed);
+    assert_eq!(done.revision, 3);
+    assert!(done.codex_turn_id.is_some());
+    assert_eq!(c.turn_start(params.clone()).unwrap(), t);
+    assert_eq!(count(&env, "turn/start"), 1);
+    let mut conflict = params.clone();
+    conflict.prompt.push('x');
+    assert_eq!(
+        c.turn_start(conflict).unwrap_err(),
+        ControlError::IntentConflict
+    );
+    let page = c
+        .turn_events(TurnEvents {
+            managed_turn_id: t.managed_turn_id.clone(),
+            after_sequence: None,
+            limit: 50,
+        })
+        .unwrap();
+    let raw = serde_json::to_string(&page).unwrap();
+    assert!(raw.contains("ASSISTANT_SENTINEL") && raw.contains("SUMMARY_SENTINEL"));
+    assert!(!raw.contains("RAW_PRIVATE_REASONING_SENTINEL"));
+    assert!(
+        page.events
+            .windows(2)
+            .all(|w| w[0].sequence < w[1].sequence)
+    );
+    assert!(page.terminal);
+    for name in [
+        "control.sqlite3",
+        "control.sqlite3-wal",
+        "control.sqlite3-shm",
+    ] {
+        let bytes = fs::read(env.root.join("state/wyss-console").join(name)).unwrap_or_default();
+        for sentinel in [
+            params.prompt.as_bytes(),
+            b"ASSISTANT_SENTINEL",
+            b"SUMMARY_SENTINEL",
+            b"RAW_PRIVATE_REASONING_SENTINEL",
+        ] {
+            assert!(
+                !bytes.windows(sentinel.len()).any(|w| w == sentinel),
+                "durable content in {name}"
+            );
+        }
+    }
+    let original = done.clone();
+    a.stop(false);
+    a = env.start();
+    let mut c = env.client();
+    env.wait(&mut c, ActualState::Ready);
+    assert_eq!(c.turn_status(t.managed_turn_id.clone()).unwrap(), original);
+    assert_eq!(count(&env, "turn/start"), 1);
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundDetached
+    );
+    assert_eq!(
+        c.turn_start(turn_params(&s)).unwrap_err(),
+        ControlError::GateDenied
+    );
+    assert_eq!(count(&env, "turn/start"), 1);
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    a.stop(false);
+    for pid in env.pids() {
+        dead(pid);
+    }
+}
+#[test]
+fn turn_cancel_is_reductive_idempotent_and_global_concurrency_is_one() {
+    let env = Sandbox::new("turn_long");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, l) = inference_session(&env, &mut c);
+    let (other, _) = inference_session(&env, &mut c);
+    let t = c.turn_start(turn_params(&s)).unwrap();
+    let running = wait_turn(&mut c, &t, false);
+    assert_eq!(
+        c.turn_start(turn_params(&other)).unwrap_err(),
+        ControlError::ActiveTurnExists
+    );
+    assert_eq!(count(&env, "turn/start"), 1);
+    let cancel = TurnCancel {
+        intent_id: id(),
+        managed_turn_id: t.managed_turn_id.clone(),
+        expected_revision: running.revision,
+    };
+    let receipt = c.turn_cancel(cancel.clone()).unwrap();
+    assert_eq!(c.turn_cancel(cancel).unwrap(), receipt);
+    let done = wait_turn(&mut c, &t, true);
+    assert_eq!(done.state, TurnState::Interrupted);
+    assert_eq!(count(&env, "turn/interrupt"), 1);
+    assert_eq!(c.runtime_status().unwrap().actual_state, ActualState::Ready);
+    assert_eq!(
+        c.turn_cancel(TurnCancel {
+            intent_id: id(),
+            managed_turn_id: t.managed_turn_id.clone(),
+            expected_revision: done.revision
+        })
+        .unwrap_err(),
+        ControlError::InvalidTransition
+    );
+    let next = c.turn_start(turn_params(&other)).unwrap();
+    wait_turn(&mut c, &next, false);
+    c.lease_revoke(LeaseRevoke {
+        intent_id: id(),
+        lease_id: l.lease_id,
+        expected_revision: l.revision,
+    })
+    .unwrap(); // Other session remains independent.
+    assert_eq!(
+        c.turn_status(next.managed_turn_id.clone()).unwrap().state,
+        TurnState::Running
+    );
+    c.close(Close {
+        intent_id: id(),
+        managed_session_id: other.managed_session_id,
+        expected_revision: 1,
+    })
+    .unwrap();
+    assert_eq!(
+        wait_turn(&mut c, &next, true).terminal_reason,
+        Some(TurnReason::SessionClosed)
+    );
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    a.stop(false);
+}
+#[test]
+fn admitted_lease_revocation_and_expiry_interrupt_without_client_cancel() {
+    for expire in [false, true] {
+        let env = Sandbox::new("turn_long");
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(mutation()).unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, l) = inference_session(&env, &mut c);
+        let lease = if expire {
+            c.lease_renew(LeaseRenew {
+                intent_id: id(),
+                lease_id: l.lease_id.clone(),
+                expected_revision: 1,
+                ttl_seconds: 2,
+            })
+            .unwrap()
+        } else {
+            l
+        };
+        let t = c.turn_start(turn_params(&s)).unwrap();
+        wait_turn(&mut c, &t, false);
+        if !expire {
+            c.lease_revoke(LeaseRevoke {
+                intent_id: id(),
+                lease_id: lease.lease_id,
+                expected_revision: lease.revision,
+            })
+            .unwrap();
+        }
+        let done = wait_turn(&mut c, &t, true);
+        assert_eq!(done.state, TurnState::Interrupted);
+        assert_eq!(
+            done.terminal_reason,
+            Some(if expire {
+                TurnReason::LeaseExpired
+            } else {
+                TurnReason::LeaseRevoked
+            })
+        );
+        assert_eq!(count(&env, "turn/interrupt"), 1);
+        c.runtime_stop(mutation()).unwrap();
+        env.wait(&mut c, ActualState::Stopped);
+        a.stop(false);
+    }
+}
+#[test]
+fn interrupt_timeout_contains_runtime_and_crash_never_replays_prompt() {
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    for hard in [false, true] {
+        let env = Sandbox::new(if hard {
+            "turn_long"
+        } else {
+            "interrupt_timeout"
+        });
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(mutation()).unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, _) = inference_session(&env, &mut c);
+        let t = c.turn_start(turn_params(&s)).unwrap();
+        let running = wait_turn(&mut c, &t, false);
+        if hard {
+            a.stop(true);
+            for pid in env.pids() {
+                dead(pid);
+            }
+            a = env.start();
+            c = env.client();
+            env.wait(&mut c, ActualState::Ready);
+        } else {
+            c.turn_cancel(TurnCancel {
+                intent_id: id(),
+                managed_turn_id: t.managed_turn_id.clone(),
+                expected_revision: running.revision,
+            })
+            .unwrap();
+            env.wait(&mut c, ActualState::Failed);
+        }
+        assert_eq!(wait_turn(&mut c, &t, true).state, TurnState::Indeterminate);
+        assert_eq!(count(&env, "turn/start"), 1);
+        assert_eq!(
+            c.binding_status(s.managed_session_id.clone())
+                .unwrap()
+                .state,
+            BindingState::BoundDetached
+        );
+        c.runtime_stop(mutation()).unwrap();
+        env.wait(&mut c, ActualState::Stopped);
+        a.stop(false);
+    }
+}
+#[test]
+fn any_external_surface_is_contained_without_server_responses() {
+    for scenario in [
+        "isolation_hook",
+        "isolation_commandExecution",
+        "isolation_fileChange",
+        "isolation_mcpToolCall",
+        "isolation_webSearch",
+        "isolation_collabAgentToolCall",
+        "isolation_approval",
+        "isolation_permission",
+        "isolation_input",
+        "isolation_diff",
+    ] {
+        let env = Sandbox::new(scenario);
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(mutation()).unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, _) = inference_session(&env, &mut c);
+        let t = c.turn_start(turn_params(&s)).unwrap();
+        env.wait(&mut c, ActualState::Failed);
+        let failed = wait_turn(&mut c, &t, true);
+        assert_eq!(failed.state, TurnState::Failed, "{scenario}");
+        assert_eq!(
+            failed.terminal_reason,
+            Some(TurnReason::InferenceIsolationViolation),
+            "{scenario}"
+        );
+        assert_eq!(
+            c.binding_status(s.managed_session_id).unwrap().state,
+            BindingState::BoundDetached
+        );
+        assert_eq!(count(&env, "turn/start"), 1);
+        assert_eq!(count(&env, "RESPONSE"), 0);
+        a.stop(false);
+        for pid in env.pids() {
+            dead(pid);
+        }
+    }
+}
+
+#[test]
+fn safety_preflight_zero_hooks_is_reverified_and_mcp_drift_reconciles_without_work() {
+    let env = Sandbox::new("hooks_enabled");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Failed);
+    assert_eq!(count(&env, "thread/start"), 0);
+    assert_eq!(count(&env, "turn/start"), 0);
+    a.stop(false);
+    let env = Sandbox::new("mcp_drift");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    assert_eq!(env.pids().len(), 4);
+    assert_eq!(count(&env, "thread/start"), 0);
+    assert!(c.runtime_status().unwrap().runtime_safety_profile.is_some());
+    let (s, _) = inference_session(&env, &mut c);
+    fs::write(env.root.join("restore-hooks"), b"fixture").unwrap();
+    let t = c.turn_start(turn_params(&s)).unwrap();
+    env.wait(&mut c, ActualState::Failed);
+    assert!(wait_turn(&mut c, &t, true).state.terminal());
+    assert_eq!(count(&env, "turn/start"), 0);
+    assert_eq!(
+        c.binding_status(s.managed_session_id).unwrap().state,
+        BindingState::BoundDetached
+    );
+    a.stop(false);
+}
+#[test]
+fn renewal_extends_running_turn_and_replacement_never_transfers_admission() {
+    let env = Sandbox::new("turn_long");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, l) = inference_session(&env, &mut c);
+    let short = c
+        .lease_renew(LeaseRenew {
+            intent_id: id(),
+            lease_id: l.lease_id.clone(),
+            expected_revision: l.revision,
+            ttl_seconds: 2,
+        })
+        .unwrap();
+    let t = c.turn_start(turn_params(&s)).unwrap();
+    wait_turn(&mut c, &t, false);
+    let extended = c
+        .lease_renew(LeaseRenew {
+            intent_id: id(),
+            lease_id: l.lease_id.clone(),
+            expected_revision: short.revision,
+            ttl_seconds: 10,
+        })
+        .unwrap();
+    thread::sleep(Duration::from_millis(2100));
+    assert_eq!(
+        c.turn_status(t.managed_turn_id.clone()).unwrap().state,
+        TurnState::Running
+    );
+    c.lease_revoke(LeaseRevoke {
+        intent_id: id(),
+        lease_id: l.lease_id,
+        expected_revision: extended.revision,
+    })
+    .unwrap();
+    let replacement = c
+        .lease_grant(LeaseGrant {
+            intent_id: id(),
+            session_id: s.managed_session_id.clone(),
+            expected_session_revision: 1,
+            scopes: vec![ExecutionScope::TurnStart],
+            ttl_seconds: 60,
+        })
+        .unwrap();
+    assert_ne!(replacement.lease_id, t.admitted_lease_id);
+    assert_eq!(wait_turn(&mut c, &t, true).state, TurnState::Interrupted);
+    assert_eq!(count(&env, "turn/start"), 1);
+    assert_eq!(count(&env, "turn/interrupt"), 1);
+    a.stop(false);
+}
+#[test]
+fn crash_after_prompt_write_before_rpc_response_is_indeterminate_and_never_replayed() {
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    let env = Sandbox::new("turn_timeout");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = inference_session(&env, &mut c);
+    let t = c.turn_start(turn_params(&s)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !env.root.join("turn-written").exists() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    a.stop(true);
+    for pid in env.pids() {
+        dead(pid);
+    }
+    let mut a = env.start();
+    let mut c = env.client();
+    env.wait(&mut c, ActualState::Ready);
+    let prior = c.turn_status(t.managed_turn_id).unwrap();
+    assert_eq!(prior.state, TurnState::Indeterminate);
+    assert!(prior.codex_turn_id.is_none());
+    assert_eq!(count(&env, "turn/start"), 1);
+    a.stop(false);
+}
+#[test]
+fn graceful_shutdown_and_runtime_stop_never_leave_a_running_turn_or_replay() {
+    for stop_runtime in [false, true] {
+        let env = Sandbox::new("turn_long");
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(mutation()).unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, _) = inference_session(&env, &mut c);
+        let t = c.turn_start(turn_params(&s)).unwrap();
+        wait_turn(&mut c, &t, false);
+        if stop_runtime {
+            c.runtime_stop(mutation()).unwrap();
+            env.wait(&mut c, ActualState::Stopped);
+            assert!(wait_turn(&mut c, &t, true).state.terminal());
+        }
+        a.stop(false);
+        for pid in env.pids() {
+            dead(pid);
+        }
+        let mut a = env.start();
+        let mut c = env.client();
+        let previous = c.turn_status(t.managed_turn_id).unwrap();
+        assert!(previous.state.terminal());
+        assert_eq!(count(&env, "turn/start"), 1);
+        assert_eq!(
+            c.binding_status(s.managed_session_id).unwrap().state,
+            BindingState::BoundDetached
+        );
+        a.stop(false);
+    }
+}
+
+#[test]
+fn cancel_waits_for_correlated_started_when_start_response_precedes_provider_activation() {
+    let env = Sandbox::new("turn_response_first");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = inference_session(&env, &mut c);
+    let t = c.turn_start(turn_params(&s)).unwrap();
+    let running = wait_turn(&mut c, &t, false);
+    c.turn_cancel(TurnCancel {
+        intent_id: id(),
+        managed_turn_id: t.managed_turn_id.clone(),
+        expected_revision: running.revision,
+    })
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(80));
+    assert_eq!(count(&env, "turn/interrupt"), 0);
+    assert_eq!(
+        c.turn_status(t.managed_turn_id.clone()).unwrap().state,
+        TurnState::Running
+    );
+    fs::write(env.root.join("release-started"), "").unwrap();
+    let done = wait_turn(&mut c, &t, true);
+    assert_eq!(done.state, TurnState::Interrupted);
+    assert_eq!(done.terminal_reason, Some(TurnReason::UserCancel));
+    assert_eq!(count(&env, "turn/interrupt"), 1);
+    assert_eq!(c.runtime_status().unwrap().actual_state, ActualState::Ready);
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    a.stop(false);
 }

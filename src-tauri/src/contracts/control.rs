@@ -1,6 +1,7 @@
 //! Wyss Control Protocol v1. Runtime supervision does not authorize agent work.
 pub use super::binding::*;
 pub use super::execution::*;
+pub use super::turn::*;
 use super::{
     Sequence, UtcTimestamp, WireUuid,
     agent_adapter::{AgentAdapterId, AgentRuntimeKind},
@@ -14,7 +15,11 @@ use std::fmt;
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_FRAME: usize = 65_536;
 pub const MAX_PAGE: u16 = 50;
-pub const METHODS: [&str; 21] = [
+pub const METHODS: [&str; 25] = [
+    "managedSession/turn/start",
+    "managedSession/turn/status",
+    "managedSession/turn/events",
+    "managedSession/turn/cancel",
     "managedSession/runtime/create",
     "managedSession/runtime/resume",
     "managedSession/runtime/status",
@@ -41,6 +46,8 @@ pub const METHODS: [&str; 21] = [
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlError {
+    TurnNotFound,
+    ActiveTurnExists,
     ProtocolVersionUnsupported,
     HandshakeRequired,
     InvalidRequest,
@@ -128,6 +135,14 @@ pub struct AuditRead {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", deny_unknown_fields)]
 pub enum Operation {
+    #[serde(rename = "managedSession/turn/start")]
+    TurnStart(TurnStart),
+    #[serde(rename = "managedSession/turn/status")]
+    TurnStatus(TurnGet),
+    #[serde(rename = "managedSession/turn/events")]
+    TurnEvents(TurnEvents),
+    #[serde(rename = "managedSession/turn/cancel")]
+    TurnCancel(TurnCancel),
     #[serde(rename = "managedSession/runtime/create")]
     BindingCreate(BindingCreate),
     #[serde(rename = "managedSession/runtime/resume")]
@@ -174,6 +189,14 @@ pub enum Operation {
 impl Operation {
     pub fn validate(&self) -> ControlResult<()> {
         match self {
+            Self::TurnStart(p) => {
+                valid_revision(p.expected_session_revision)?;
+                validate_prompt(&p.prompt)
+            }
+            Self::TurnCancel(p) => valid_revision(p.expected_revision),
+            Self::TurnEvents(p) if p.limit == 0 || p.limit > 50 => {
+                Err(ControlError::InvalidRequest)
+            }
             Self::BindingCreate(p) => {
                 valid_revision(p.expected_session_revision)?;
                 validate_workspace_text(&p.workspace_root)
@@ -297,6 +320,9 @@ pub struct AuthorityStatus {
     deny_unknown_fields
 )]
 pub enum ResultValue {
+    Turn(ManagedTurnRecord),
+    TurnStatus(ManagedTurnStatus),
+    TurnEvents(TurnStreamPage),
     Hello(AuthorityStatus),
     Status(AuthorityStatus),
     Session(ManagedSessionRecord),
@@ -389,7 +415,7 @@ fn validate_result(r: &ResultValue) -> ControlResult<()> {
     match r {
         ResultValue::Hello(s) | ResultValue::Status(s) => {
             if s.protocol_version != 1
-                || s.storage_schema_version != 4
+                || s.storage_schema_version != 5
                 || s.service_version.len() > 128
             {
                 return Err(ControlError::InvalidRequest);
@@ -410,6 +436,25 @@ fn validate_result(r: &ResultValue) -> ControlResult<()> {
         ResultValue::GateStatus(_) => (),
         ResultValue::RuntimeControl(s) => s.validate()?,
         ResultValue::RuntimeStatus(s) => s.validate()?,
+        ResultValue::Turn(t) => t.validate()?,
+        ResultValue::TurnStatus(s) => {
+            s.turn.validate()?;
+            if s.stream_earliest_sequence
+                .zip(s.stream_latest_sequence)
+                .is_some_and(|(a, b)| a > b)
+            {
+                return Err(ControlError::InvalidRequest);
+            }
+        }
+        ResultValue::TurnEvents(p) => {
+            if p.events.len() > 50
+                || p.events.iter().any(|e| {
+                    e.schema_version != 1 || e.text.as_ref().is_some_and(|t| t.len() > 4096)
+                })
+            {
+                return Err(ControlError::InvalidRequest);
+            }
+        }
         ResultValue::RuntimeModels { models, .. } => {
             if models.len() > 20 {
                 return Err(ControlError::InvalidRequest);
@@ -616,6 +661,8 @@ pub enum RuntimeDiagnostic {
     CatalogRejected,
     ChildExited,
     AuditUnavailable,
+    InferenceIsolationViolation,
+    SafetyUnproven,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -631,6 +678,14 @@ pub struct RuntimeMethods {
     pub thread_unarchive: u64,
     #[serde(default)]
     pub thread_resume: u64,
+    #[serde(default)]
+    pub config_read: u64,
+    #[serde(default)]
+    pub hooks_list: u64,
+    #[serde(default)]
+    pub turn_start: u64,
+    #[serde(default)]
+    pub turn_interrupt: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -646,6 +701,8 @@ pub struct RuntimeStatus {
     pub model_count: u16,
     pub diagnostic: Option<RuntimeDiagnostic>,
     pub outbound_methods: RuntimeMethods,
+    #[serde(default)]
+    pub runtime_safety_profile: Option<RuntimeSafetyProfile>,
 }
 impl RuntimeStatus {
     pub fn validate(&self) -> ControlResult<()> {
@@ -659,9 +716,9 @@ impl RuntimeStatus {
                 .runtime_version
                 .as_ref()
                 .is_some_and(|s| s.len() > 128 || s.chars().any(char::is_control))
-            || self.outbound_methods.initialize > 1
-            || self.outbound_methods.initialized > 1
-            || self.outbound_methods.model_list > 1
+            || self.outbound_methods.initialize > 3
+            || self.outbound_methods.initialized > 3
+            || self.outbound_methods.model_list > 3
         {
             return Err(ControlError::InvalidRequest);
         }
@@ -684,4 +741,10 @@ pub struct RuntimeModels {
     pub runtime_kind: AgentRuntimeKind,
     pub cursor: Option<ModelCursor>,
     pub limit: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeSafetyProfile {
+    CodexInferenceV1,
 }

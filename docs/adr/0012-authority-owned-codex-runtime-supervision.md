@@ -184,3 +184,9 @@ by contrast, commits stopped, then reaps; subsequent authority startup launches
 nothing. No shutdown path closes or binds ManagedSessions. Fake-child process tests
 and isolated real Codex acceptance cover all three cases, with unrelated process
 identity snapshots and no raw protocol recording.
+
+## Sprint 2H implementation note
+
+ADR 0015 replaces plain supervised startup with an immutable inference process
+profile, a discovery-only MCP preflight and a freshly attested runtime generation.
+Runtime readiness remains only one necessary execution-gate condition.

@@ -225,6 +225,9 @@ pub fn run_from_environment() -> ControlResult<()> {
     let mut runtime = Runtime::new(&store)?;
     let core = thread::spawn(move || -> ControlResult<()> {
         store.recover_binding_operations()?;
+        store.recover_turns()?;
+        let mut turns = super::turns::Turns::default();
+        let mut closing = false;
         let mut conversations = super::conversations::Conversations::default();
         let mut next_expiry = refresh_expiry(&mut store);
         runtime.reconcile(&mut store, &core_sender, true)?;
@@ -234,8 +237,26 @@ pub fn run_from_environment() -> ControlResult<()> {
                 conversations.invalidate_admission();
                 next_expiry = refresh_expiry(&mut store);
             }
-            let received = match next_expiry {
-                Some(t) => receiver.recv_timeout(expiry_wait(t, store.lease_now())),
+            match turns.enforce(&mut store, &mut runtime) {
+                Ok(true) => conversations.detach(&mut store),
+                Err(_) => {
+                    store.execution_available = false;
+                    let _ = runtime.contain(&mut store, RuntimeDiagnostic::AuditUnavailable);
+                    conversations.detach(&mut store);
+                }
+                Ok(false) => (),
+            }
+            if closing && !turns.active() {
+                break;
+            }
+            let expiry = next_expiry.map(|t| expiry_wait(t, store.lease_now()));
+            let wait = match (expiry, turns.wait()) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, None) => a,
+                (None, b) => b,
+            };
+            let received = match wait {
+                Some(t) => receiver.recv_timeout(t),
                 None => receiver
                     .recv()
                     .map_err(|_| mpsc::RecvTimeoutError::Disconnected),
@@ -246,8 +267,77 @@ pub fn run_from_environment() -> ControlResult<()> {
                 Err(_) => break,
             };
             match message {
-                CoreMessage::Shutdown => break,
+                CoreMessage::Shutdown => {
+                    closing = true;
+                    turns.shutdown(&mut runtime);
+                }
                 CoreMessage::Runtime(id, observation) => {
+                    if !runtime.owns_generation(&id) {
+                        continue;
+                    }
+                    if let Observation::SafetyConfigChanged(names) = observation {
+                        conversations.reject_pre_dispatch(&mut store, &runtime, &id);
+                        if turns.lost(&mut store, TurnReason::DispatchUnknown).is_err()
+                            || runtime.reclamp(&mut store, &core_sender, names).is_err()
+                        {
+                            store.execution_available = false;
+                        }
+                        continue;
+                    }
+                    let turn_result = match &observation {
+                        Observation::TurnNotice(n) => turns.notice(&mut store, &id, n.clone()),
+                        Observation::TurnResult {
+                            managed_turn_id,
+                            result,
+                            ..
+                        } => turns.accepted(
+                            &mut store,
+                            &mut runtime,
+                            &id,
+                            managed_turn_id,
+                            result.clone(),
+                        ),
+                        Observation::InterruptResult {
+                            managed_turn_id,
+                            success,
+                            ..
+                        } if !success => {
+                            if store
+                                .active_turn()
+                                .ok()
+                                .flatten()
+                                .is_some_and(|t| t.managed_turn_id == *managed_turn_id)
+                            {
+                                turns.lost(&mut store, TurnReason::InterruptTimeout)
+                            } else {
+                                Ok(())
+                            }
+                        }
+                        Observation::IsolationViolation => {
+                            let result =
+                                turns.lost(&mut store, TurnReason::InferenceIsolationViolation);
+                            let _ = runtime.contain(
+                                &mut store,
+                                RuntimeDiagnostic::InferenceIsolationViolation,
+                            );
+                            conversations.detach(&mut store);
+                            result
+                        }
+                        Observation::Exited { reason, .. } => turns.lost(
+                            &mut store,
+                            if *reason == RuntimeDiagnostic::InferenceIsolationViolation {
+                                TurnReason::InferenceIsolationViolation
+                            } else {
+                                TurnReason::RuntimeFailed
+                            },
+                        ),
+                        _ => Ok(()),
+                    };
+                    if turn_result.is_err() {
+                        store.execution_available = false;
+                        let _ = runtime.contain(&mut store, RuntimeDiagnostic::AuditUnavailable);
+                        conversations.detach(&mut store);
+                    }
                     match observation {
                         Observation::Materialization {
                             ref operation_id,
@@ -289,6 +379,12 @@ pub fn run_from_environment() -> ControlResult<()> {
                         Operation::BindingCreate(_) | Operation::BindingResume(_)
                     ) && !core_stop.load(Ordering::Acquire)
                     {
+                        if turns.active() {
+                            let _ = job
+                                .reply
+                                .try_send(Err(ControlError::RuntimeOperationInProgress));
+                            continue;
+                        }
                         conversations.begin(&mut store, &mut runtime, &job.op, job.reply);
                         continue;
                     }
@@ -305,6 +401,12 @@ pub fn run_from_environment() -> ControlResult<()> {
                         Err(ControlError::StorageUnavailable)
                     } else {
                         match &job.op {
+                            Operation::TurnStart(p) => {
+                                turns.start(&mut store, &mut runtime, &conversations, p)
+                            }
+                            Operation::TurnStatus(p) => turns.status(&store, p),
+                            Operation::TurnEvents(p) => turns.events(&store, p),
+                            Operation::TurnCancel(p) => turns.cancel(&mut store, &mut runtime, p),
                             Operation::BindingStatus(p) => {
                                 conversations.status(&store, &runtime, &p.managed_session_id)
                             }
@@ -313,6 +415,28 @@ pub fn run_from_environment() -> ControlResult<()> {
                                 .supported()
                                 .map(|()| ResultValue::RuntimeStatus(runtime.status())),
                             Operation::RuntimeModels(p) => runtime.models(p),
+                            Operation::GateStatus(p) if p.action == ExecutionScope::TurnStart => {
+                                let reason =
+                                    match conversations.projection(&store, &runtime, &p.session_id)
+                                    {
+                                        Ok(b) => super::gate::ExecutionGate::turn(
+                                            &store,
+                                            &p.session_id,
+                                            &runtime.status(),
+                                            &b,
+                                        )
+                                        .reason(),
+                                        Err(ControlError::SessionNotFound) => {
+                                            GateReason::SessionNotFound
+                                        }
+                                        Err(_) => GateReason::AuthorityUnavailable,
+                                    };
+                                Ok(ResultValue::GateStatus(GateStatus {
+                                    session_id: p.session_id.clone(),
+                                    action: p.action,
+                                    reason,
+                                }))
+                            }
                             Operation::GateStatus(p) => Ok(ResultValue::GateStatus(
                                 super::gate::ExecutionGate::diagnostic(
                                     &store,
@@ -352,6 +476,9 @@ pub fn run_from_environment() -> ControlResult<()> {
                     }
                     if reconcile && runtime.reconcile(&mut store, &core_sender, false).is_err() {
                         let _ = runtime.audit_failed(&mut store);
+                    }
+                    if reconcile && matches!(job.op, Operation::RuntimeStop(_)) {
+                        let _ = turns.lost(&mut store, TurnReason::RuntimeStopped);
                     }
                 }
             }

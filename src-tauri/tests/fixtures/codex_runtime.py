@@ -11,7 +11,14 @@ scenario = os.environ.get('WYSS_RUNTIME_SCENARIO', 'happy')
 if sys.argv[1:] == ['--version']:
     print('codex-cli 0.159.0')
     sys.exit(0)
-assert sys.argv[1:] == ['app-server']
+assert sys.argv[-1] == 'app-server'
+argv = sys.argv[1:-1]
+assert len(argv) % 2 == 0 and all(argv[i] == '-c' for i in range(0, len(argv), 2))
+flags = dict(a.split('=', 1) for a in argv[1::2])
+assert len(flags) == len(argv) // 2
+assert not argv or flags.get('features.hooks') == 'false' and flags.get('features.shell_tool') == 'false'
+assert not argv or flags.get('features.unified_exec') == 'false' and flags.get('web_search') == '"disabled"'
+
 with (root / 'pids').open('a') as record:
     record.write(str(os.getpid()) + '\n')
 
@@ -21,7 +28,7 @@ def emit(value):
 
 
 def notification():
-    emit({'method': 'future/notice', 'params': {'fixture': 'x' * 4096}})
+    emit({'method': 'remoteControl/status/changed', 'params': {'fixture': 'x' * 4096}})
 
 
 threads_file = root / "threads.json"
@@ -38,7 +45,7 @@ for line in sys.stdin:
         initialize_id = message['id']
         if scenario == 'timeout':
             continue
-        emit({'method': 'future/notice', 'params': {}})
+        emit({'method': 'remoteControl/status/changed', 'params': {}})
         emit({'id': message['id'], 'result': {
             'userAgent': 'fixture', 'codexHome': '/synthetic',
             'platformFamily': 'unix', 'platformOs': 'linux'}})
@@ -70,7 +77,7 @@ for line in sys.stdin:
             emit({'id': 'unanswered', 'method': 'future/action', 'params': {}})
             responses = 0
             for possible_response in sys.stdin:
-                responses += 1
+                responses += int("method" not in json.loads(possible_response))
             (root / 'responses').write_text(str(responses))
             break
         elif scenario == 'exit':
@@ -83,6 +90,19 @@ for line in sys.stdin:
                 notification()
             (root / 'drained').touch()
 
+    elif method == 'config/read':
+        assert message['params']['includeLayers'] is False
+        counter=root/'config-count'
+        calls=int(counter.read_text()) if counter.exists() else 0
+        counter.write_text(str(calls+1))
+        names=['fixture_mcp']
+        if scenario=='mcp_drift' and calls>=1:names.append('new_mcp')
+        servers = {n: {'enabled': flags.get('mcp_servers.' + n + '.enabled') != 'false'} for n in names}
+        features = {k.split('.',1)[1]: False for k in flags if k.startswith('features.')}
+        emit({'id':message['id'],'result':{'config':{'mcp_servers':servers,'features':features,'cloud':{'skills':{'enabled':False}},'skills':{'include_instructions':False},'web_search':'disabled'},'layers':None}})
+    elif method == 'hooks/list':
+        hooks=[{'enabled':True}] if scenario=='hooks_enabled' or (root/'restore-hooks').exists() else []
+        emit({'id':message['id'],'result':{'data':[{'hooks':hooks}]}})
     elif method in ('thread/start', 'thread/resume'):
         assert initialized
         params = message['params']
@@ -90,7 +110,9 @@ for line in sys.stdin:
             assert set(params) == {'cwd', 'ephemeral'} and params['ephemeral'] is False
             thread_id = 'opaque-' + str(len((root / 'methods').read_text().splitlines()))
         else:
-            assert set(params) == {'cwd', 'threadId', 'excludeTurns'} and params['excludeTurns'] is True
+            assert set(params) == {'cwd', 'threadId', 'excludeTurns', 'config', 'sandbox', 'approvalPolicy'} and params['excludeTurns'] is True
+            assert params['sandbox'] == 'read-only' and params['approvalPolicy'] == 'never'
+            assert params['config']['features.hooks'] is False and params['config']['mcp_servers']['fixture_mcp']['enabled'] is False
             thread_id = params['threadId']
         if method == 'thread/resume':
             assert threads[thread_id]['durable'] and not threads[thread_id]['archived']
@@ -122,7 +144,7 @@ for line in sys.stdin:
             del thread['id']
         result = {'thread': thread, 'cwd': params['cwd'], 'model': 'synthetic',
                   'modelProvider': 'synthetic', 'approvalPolicy': 'never',
-                  'approvalsReviewer': 'user', 'sandbox': {'type': 'read-only'}}
+                  'approvalsReviewer': 'user', 'sandbox': {'type': 'readOnly', 'networkAccess': False}}
         if scenario == 'thread_lock_response':
             import sqlite3
             lock = sqlite3.connect(Path(os.environ['XDG_STATE_HOME']) / 'wyss-console/control.sqlite3')
@@ -164,3 +186,51 @@ for line in sys.stdin:
         emit({'method':'thread/archived' if key=='archive' else 'thread/unarchived','params':{'threadId':tid}})
         emit({'id':'unrelated-id' if scenario==key+'_wrong_response' else message['id'],'result':result})
         (root/(key+'-responded')).touch()
+
+    elif method == 'turn/start':
+        p=message['params'];assert set(p)=={'threadId','input'}
+        assert len(p['input'])==1 and set(p['input'][0])=={'type','text','textElements'}
+        assert p['input'][0]['type']=='text' and p['input'][0]['textElements']==[]
+        tid=p['threadId'];turn_id='provider-turn-'+str(len((root/'methods').read_text().splitlines()))
+        current_turn={'id':turn_id,'items':[],'status':'inProgress','error':None}
+        (root/'turn-written').touch()
+        if scenario=='turn_timeout':continue
+        if scenario=='turn_hold':
+            while not (root/'release').exists():time.sleep(.005)
+        def notice(method, **payload):emit({'method':method,'params':{'threadId':tid,'turnId':turn_id,**payload}})
+        if scenario=='turn_response_first':
+            import threading
+            def deferred_start():
+                while not (root/'release-started').exists():time.sleep(.005)
+                emit({'method':'turn/started','params':{'threadId':tid,'turn':current_turn}})
+                (root/'provider-started').touch()
+            emit({'id':message['id'],'result':{'turn':current_turn}})
+            threading.Thread(target=deferred_start,daemon=True).start()
+            continue
+        emit({'method':'turn/started','params':{'threadId':tid,'turn':current_turn}})
+        notice('item/agentMessage/delta',itemId='agent-item',delta='ASSISTANT_SENTINEL')
+        emit({'id':message['id'],'result':{'turn':current_turn}})
+        if scenario.startswith('isolation_'):
+            kind=scenario[len('isolation_'):]
+            if kind=='hook':notice('hook/started',run={'eventName':'sessionStart','handlerType':'command'})
+            elif kind in ['approval','permission','input']:emit({'id':'unanswered','method':{'approval':'item/commandExecution/requestApproval','permission':'item/permissions/requestApproval','input':'item/tool/requestUserInput'}[kind],'params':{}})
+            elif kind=='diff':notice('turn/diff/updated',diff='forbidden')
+            else:notice('item/started',item={'type':kind,'id':'external-item'})
+            (root/'responses').write_text(str(sum(1 for line in sys.stdin if '"method"' not in line)))
+            break
+        if scenario in ['turn_long','interrupt_timeout']:continue
+        notice('item/reasoning/summaryTextDelta',itemId='reasoning-item',summaryIndex=0,delta='SUMMARY_SENTINEL')
+        notice('item/reasoning/textDelta',itemId='reasoning-item',contentIndex=0,delta='RAW_PRIVATE_REASONING_SENTINEL')
+        notice('item/completed',completedAtMs=0,item={'type':'agentMessage','id':'agent-item','text':'ASSISTANT_SENTINEL','phase':'final_answer'})
+        terminal=dict(current_turn,status='completed')
+        emit({'method':'turn/completed','params':{'threadId':tid,'turn':terminal}})
+        (root/'turn-completed').touch()
+    elif method == 'turn/interrupt':
+        if scenario=='turn_response_first' and not (root/'provider-started').exists():
+            emit({'id':message['id'],'error':{'code':-32600,'message':'no active turn to interrupt'}})
+            continue
+        assert set(message['params'])=={'threadId','turnId'}
+        assert message['params']=={'threadId':tid,'turnId':turn_id}
+        emit({'id':message['id'],'result':{}})
+        if scenario!='interrupt_timeout':
+            emit({'method':'turn/completed','params':{'threadId':tid,'turn':dict(current_turn,status='interrupted')}})

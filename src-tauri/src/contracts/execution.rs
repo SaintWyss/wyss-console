@@ -142,6 +142,12 @@ pub struct GateQuery {
 #[serde(rename_all = "snake_case")]
 pub enum GateReason {
     Allowed,
+    BindingNotFound,
+    BindingDetached,
+    AttachmentRuntimeMismatch,
+    InferenceProfileMissing,
+    RuntimeSafetyProfileMissing,
+    ActiveTurnExists,
     SessionNotFound,
     SessionNotPrepared,
     LeaseMissing,

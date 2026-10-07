@@ -10,6 +10,7 @@ mod normalize;
 #[cfg(unix)]
 pub mod probe;
 mod protocol;
+pub(crate) mod safety;
 mod state;
 mod wire;
 pub use normalize::*;

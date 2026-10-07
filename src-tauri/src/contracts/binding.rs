@@ -86,6 +86,8 @@ pub struct BindingStatus {
     pub binding: Option<SessionBinding>,
     pub runtime_instance_id: Option<AgentRuntimeInstanceId>,
     pub operation_id: Option<WireUuid>,
+    #[serde(default)]
+    pub attachment_profile: Option<super::turn::AttachmentProfile>,
 }
 impl BindingStatus {
     pub fn validate(&self) -> ControlResult<()> {

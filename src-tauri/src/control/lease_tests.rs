@@ -139,6 +139,7 @@ fn ready() -> RuntimeStatus {
         compatibility: CompatibilityState::Compatible,
         model_count: 1,
         diagnostic: None,
+        runtime_safety_profile: Some(RuntimeSafetyProfile::CodexInferenceV1),
         outbound_methods: RuntimeMethods {
             initialize: 1,
             initialized: 1,
@@ -165,7 +166,10 @@ fn default_deny_and_grant_has_distinct_identity_revision_ttl_sorted_scopes() {
         time::Duration::seconds(60)
     );
     assert_eq!(f.gate(ExecutionScope::SessionCreate), GateReason::Allowed);
-    assert_eq!(f.gate(ExecutionScope::TurnStart), GateReason::Allowed);
+    assert_eq!(
+        f.gate(ExecutionScope::TurnStart),
+        GateReason::BindingDetached
+    );
     assert_eq!(
         f.gate(ExecutionScope::SessionResume),
         GateReason::ScopeNotGranted
@@ -361,7 +365,10 @@ fn expiry_denies_at_deadline_before_reconciliation_and_audits_once() {
     let mut f = Fixture::new();
     let l = f.grant();
     f.clock.advance(59);
-    assert_eq!(f.gate(ExecutionScope::TurnStart), GateReason::Allowed);
+    assert_eq!(
+        f.gate(ExecutionScope::TurnStart),
+        GateReason::BindingDetached
+    );
     f.clock.advance(1);
     assert_eq!(
         read(&f.store.conn, l.lease_id.as_str()).unwrap().state,
@@ -430,7 +437,10 @@ fn restart_keeps_remaining_window_identity_revision_and_deadline() {
     f.reopen();
     f.store.expire_due().unwrap();
     assert_eq!(read(&f.store.conn, l.lease_id.as_str()).unwrap(), l);
-    assert_eq!(f.gate(ExecutionScope::TurnStart), GateReason::Allowed);
+    assert_eq!(
+        f.gate(ExecutionScope::TurnStart),
+        GateReason::BindingDetached
+    );
     f.clock.advance(40);
     f.reopen();
     assert_eq!(f.gate(ExecutionScope::TurnStart), GateReason::LeaseExpired);
@@ -540,7 +550,7 @@ fn gate_checks_each_runtime_precondition_independently() {
     let sid = &f.session.managed_session_id;
     assert!(matches!(
         ExecutionGate::evaluate(&f.store, sid, ExecutionScope::TurnStart, &r),
-        ExecutionDecision::Allowed
+        ExecutionDecision::Denied(GateReason::BindingDetached)
     ));
     let mut cases = Vec::new();
     let mut v = r.clone();
@@ -750,7 +760,7 @@ fn real_v2_upgrade_preserves_all_bytes_metadata_runtime_receipts_and_creates_zer
     let before = snapshot(&c);
     drop(c);
     let mut s = Store::open(&path, uuid()).unwrap();
-    assert_eq!(s.status().unwrap().storage_schema_version, 4);
+    assert_eq!(s.status().unwrap().storage_schema_version, 5);
     assert_eq!(snapshot(&s.conn), before);
     assert_eq!(s.next_expiry().unwrap(), None);
     assert_eq!(
@@ -811,7 +821,7 @@ fn corrupt_v2_and_v3_and_future_version_fail_closed() {
         };
         let c = Connection::open(&path).unwrap();
         if version == 5 {
-            c.pragma_update(None, "user_version", 5).unwrap();
+            c.pragma_update(None, "user_version", 6).unwrap();
         } else {
             c.execute_batch("DROP TRIGGER control_events_no_delete")
                 .unwrap();

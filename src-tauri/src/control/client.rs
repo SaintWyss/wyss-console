@@ -8,7 +8,7 @@ use super::{
 use crate::contracts::{
     WireUuid,
     control::*,
-    identities::{ExecutionLeaseId, ManagedSessionId},
+    identities::{ExecutionLeaseId, ManagedSessionId, ManagedTurnId},
 };
 use nix::{
     errno::Errno,
@@ -104,6 +104,32 @@ impl ControlClient {
             return Err(ControlError::CorrelationError);
         }
         response.outcome
+    }
+    pub fn turn_start(&mut self, p: TurnStart) -> ControlResult<ManagedTurnRecord> {
+        turn(self.call(Operation::TurnStart(p))?)
+    }
+    pub fn turn_status(&mut self, id: ManagedTurnId) -> ControlResult<ManagedTurnRecord> {
+        self.turn_status_projection(id).map(|s| s.turn)
+    }
+    pub fn turn_status_projection(
+        &mut self,
+        id: ManagedTurnId,
+    ) -> ControlResult<ManagedTurnStatus> {
+        match self.call(Operation::TurnStatus(TurnGet {
+            managed_turn_id: id,
+        }))? {
+            ResultValue::TurnStatus(s) => Ok(s),
+            _ => Err(ControlError::InvalidRequest),
+        }
+    }
+    pub fn turn_cancel(&mut self, p: TurnCancel) -> ControlResult<ManagedTurnRecord> {
+        turn(self.call(Operation::TurnCancel(p))?)
+    }
+    pub fn turn_events(&mut self, p: TurnEvents) -> ControlResult<TurnStreamPage> {
+        match self.call(Operation::TurnEvents(p))? {
+            ResultValue::TurnEvents(page) => Ok(page),
+            _ => Err(ControlError::InvalidRequest),
+        }
     }
     pub fn binding_create(&mut self, p: BindingCreate) -> ControlResult<SessionBinding> {
         binding(self.call(Operation::BindingCreate(p))?)
@@ -253,6 +279,14 @@ fn lease(r: ResultValue) -> ControlResult<ExecutionLease> {
 fn binding(r: ResultValue) -> ControlResult<SessionBinding> {
     if let ResultValue::Binding(b) = r {
         Ok(b)
+    } else {
+        Err(ControlError::InvalidRequest)
+    }
+}
+
+fn turn(r: ResultValue) -> ControlResult<ManagedTurnRecord> {
+    if let ResultValue::Turn(t) = r {
+        Ok(t)
     } else {
         Err(ControlError::InvalidRequest)
     }

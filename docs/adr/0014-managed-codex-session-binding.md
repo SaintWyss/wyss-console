@@ -167,3 +167,9 @@ archive and unarchive. Recovery tests cover every durable checkpoint, before-sta
 reservation, before-binding audit rollback and after-binding receipt/reopen. No
 crash window automatically duplicates a potentially dispatched start. Fake-provider persistence is not evidence of real Codex persistence.
 No managed turn or prompt is enabled.
+
+## Sprint 2H implementation note
+
+ADR 0015 hardens explicit resume with a process safety preflight and an
+inference-only attachment profile. Thread identity, persistence and separately
+gated resume semantics above remain unchanged.

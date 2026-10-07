@@ -49,6 +49,7 @@ enum ProbeError {
     VersionOutput,
     Codec,
     Wake,
+    InferenceIsolationViolation,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -160,6 +161,7 @@ struct Stdio<'a> {
     owner: &'a mut OwnedProcess,
     frames: Frames,
     rejected: Option<WireStructure>,
+    config_response_id: Option<CodexRequestId>,
 }
 impl ProbeIo for Stdio<'_> {
     fn send(&mut self, bytes: &[u8], deadline: Instant) -> ProbeResult<()> {
@@ -177,9 +179,10 @@ impl ProbeIo for Stdio<'_> {
                 let byte = self.frames.scratch[self.frames.position];
                 self.frames.position += 1;
                 if byte == b'\n' {
-                    let message = WireMessage::parse_diagnosed(
+                    let message = WireMessage::parse_diagnosed_for_config(
                         &self.frames.partial,
                         Direction::ServerToClient,
+                        self.config_response_id.as_ref(),
                     )
                     .map_err(|e| {
                         self.rejected = e.structure;
@@ -588,6 +591,7 @@ pub fn run_codex_live_probe() -> CodexLiveProbeReportV1 {
             owner: &mut owner,
             frames: Frames::default(),
             rejected: None,
+            config_response_id: None,
         };
         let result = exchange(&mut io, &mut report);
         report.rejected_frame = io.rejected.take();

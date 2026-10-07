@@ -103,6 +103,7 @@ pub(crate) struct WireStructure {
     pub keys_omitted: bool,
     pub method: Option<String>,
     pub emitted_at_ms_present: bool,
+    pub external_action_candidate: bool,
 }
 impl WireStructure {
     fn from_value(value: &Value) -> Self {
@@ -147,6 +148,9 @@ impl WireStructure {
             top_level_keys,
             keys_omitted,
             method,
+            external_action_candidate: value.get("method").and_then(Value::as_str).is_some_and(
+                |method| super::safety::external_action_candidate(method, &value["params"]),
+            ),
             emitted_at_ms_present: has("emittedAtMs"),
         }
     }
@@ -166,6 +170,13 @@ impl WireMessage {
     pub(crate) fn parse_diagnosed(
         bytes: &[u8],
         direction: Direction,
+    ) -> std::result::Result<Self, WireParseFailure> {
+        Self::parse_diagnosed_for_config(bytes, direction, None)
+    }
+    pub(crate) fn parse_diagnosed_for_config(
+        bytes: &[u8],
+        direction: Direction,
+        config_id: Option<&CodexRequestId>,
     ) -> std::result::Result<Self, WireParseFailure> {
         let decode = || -> Result<Value> {
             if bytes.len() > MAX_FRAME_BYTES {
@@ -187,7 +198,7 @@ impl WireMessage {
             structure: None,
         })?;
         let structure = WireStructure::from_value(&value);
-        Self::from_value(value, direction).map_err(|error| WireParseFailure {
+        Self::from_value_for_config(value, direction, config_id).map_err(|error| WireParseFailure {
             error,
             structure: Some(structure),
         })
@@ -196,8 +207,36 @@ impl WireMessage {
         WireStructure::from_value(&self.value)
     }
     pub fn from_value(value: Value, direction: Direction) -> Result<Self> {
+        Self::from_value_for_config(value, direction, None)
+    }
+    fn from_value_for_config(
+        value: Value,
+        direction: Direction,
+        config_id: Option<&CodexRequestId>,
+    ) -> Result<Self> {
+        // ConfigReadResponse.origins is a flat map of effective configuration keys.
+        // Only the exact in-flight config/read success may use its separate 512-entry cap.
+        let origins = if direction == Direction::ServerToClient
+            && config_id.is_some_and(|id| {
+                value
+                    .get("id")
+                    .and_then(|v| CodexRequestId::from_value(v).ok())
+                    .as_ref()
+                    == Some(id)
+            })
+            && value
+                .get("result")
+                .is_some_and(|r| r.get("config").is_some_and(Value::is_object))
+        {
+            value
+                .get("result")
+                .and_then(|r| r.get("origins"))
+                .map(std::ptr::from_ref)
+        } else {
+            None
+        };
         let mut nodes = 0;
-        bounds(&value, 0, &mut nodes)?;
+        bounds(&value, 0, &mut nodes, origins)?;
         let size = serde_json::to_vec(&value)
             .map_err(|_| CodecError {
                 code: "invalid_json",
@@ -355,7 +394,7 @@ pub(crate) fn array(v: &Value) -> Result<&Vec<Value>> {
         code: "expected_array",
     })
 }
-fn bounds(v: &Value, depth: usize, nodes: &mut usize) -> Result<()> {
+fn bounds(v: &Value, depth: usize, nodes: &mut usize, origins: Option<*const Value>) -> Result<()> {
     *nodes += 1;
     if depth > 16 || *nodes > 8192 {
         return fail("payload_bounds");
@@ -367,15 +406,22 @@ fn bounds(v: &Value, depth: usize, nodes: &mut usize) -> Result<()> {
                 return fail("payload_bounds");
             }
             for v in a {
-                bounds(v, depth + 1, nodes)?;
+                bounds(v, depth + 1, nodes, origins)?;
             }
         }
         Value::Object(o) => {
-            if o.len() > 256 || o.keys().any(|k| k.len() > 256) {
+            if o.len()
+                > if origins == Some(std::ptr::from_ref(v)) {
+                    512
+                } else {
+                    256
+                }
+                || o.keys().any(|k| k.len() > 256)
+            {
                 return fail("payload_bounds");
             }
             for v in o.values() {
-                bounds(v, depth + 1, nodes)?;
+                bounds(v, depth + 1, nodes, origins)?;
             }
         }
         _ => (),

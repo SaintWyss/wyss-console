@@ -381,7 +381,7 @@ fn real_v3_upgrade_preserves_all_data_event_bytes_stream_head_and_zero_bindings(
             .status()
             .unwrap()
             .storage_schema_version,
-        4
+        5
     );
 }
 #[test]

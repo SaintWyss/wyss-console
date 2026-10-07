@@ -2,6 +2,8 @@
 pub(in crate::control) mod bindings;
 #[path = "leases.rs"]
 mod leases;
+#[path = "turn_store.rs"]
+pub(in crate::control) mod turns;
 use super::{paths, schema};
 use crate::contracts::{
     Sequence, WireUuid, control::*, event_envelope::EventEnvelopeV1, identities::ManagedSessionId,
@@ -78,7 +80,7 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .map_err(invalid)?;
-        if version != 4 {
+        if version != 5 {
             return Err(ControlError::StorageIncompatible);
         }
         let stream = WireUuid::try_from(stream).map_err(invalid)?;
@@ -144,6 +146,7 @@ impl Store {
         }
         self.verify_leases()?;
         self.verify_bindings()?;
+        self.verify_turns()?;
         // Receipts contain only typed minimal mutations and their original session projection.
         let mut q = self
             .conn
@@ -154,6 +157,13 @@ impl Store {
             let id: String = r.get(0).map_err(invalid)?;
             WireUuid::try_from(id.clone()).map_err(invalid)?;
             let mutation: String = r.get(1).map_err(invalid)?;
+            let result: String = r.get(2).map_err(invalid)?;
+            if unique_json(mutation.as_bytes()).map_err(invalid)?["method"]
+                == "managedSession/turn/start"
+            {
+                turns::verify_fingerprint_receipt(&id, &mutation, &result)?;
+                continue;
+            }
             let op: Operation =
                 serde_json::from_value(unique_json(mutation.as_bytes()).map_err(invalid)?)
                     .map_err(invalid)?;
@@ -203,7 +213,7 @@ impl Store {
             protocol_version: 1,
             authority_instance_id: self.instance.clone(),
             service_version: env!("CARGO_PKG_VERSION").into(),
-            storage_schema_version: 4,
+            storage_schema_version: 5,
             stream_id: self.stream.clone(),
             last_sequence: if head == 0 {
                 None
@@ -483,6 +493,7 @@ impl Store {
 }
 fn intent(op: &Operation) -> Option<&WireUuid> {
     match op {
+        Operation::TurnCancel(p) => Some(&p.intent_id),
         Operation::BindingCreate(p) => Some(&p.intent_id),
         Operation::BindingResume(p) => Some(&p.intent_id),
         Operation::BindingAbandon(p) => Some(&p.intent_id),
@@ -557,7 +568,11 @@ fn append_event(
     Ok(())
 }
 fn decode_receipt(op: &Operation, raw: &str) -> ControlResult<ResultValue> {
-    if matches!(
+    if matches!(op, Operation::TurnCancel(_)) {
+        let t: ManagedTurnRecord = serde_json::from_str(raw).map_err(invalid)?;
+        t.validate()?;
+        Ok(ResultValue::Turn(t))
+    } else if matches!(
         op,
         Operation::BindingCreate(_) | Operation::BindingResume(_)
     ) {
@@ -625,6 +640,9 @@ fn validate_audit(v: &Value) -> ControlResult<()> {
     let kind = v["event_type"]
         .as_str()
         .ok_or(ControlError::StorageIncompatible)?;
+    if kind.starts_with("authority.managed_turn.") {
+        return turns::validate_audit(v);
+    }
     if kind.starts_with("authority.managed_session.runtime_") {
         return bindings::validate_audit(v);
     }

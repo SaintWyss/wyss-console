@@ -1,10 +1,12 @@
 //! Shared 2C transport/handshake, retained under the authority after catalog readiness.
 use super::*;
+use crate::adapters::codex::safety;
 use crate::contracts::{
     UtcTimestamp, WireUuid,
     control::{RuntimeDiagnostic, RuntimeMethods},
     identities::AgentRuntimeInstanceId,
 };
+use std::collections::BTreeSet;
 use std::{
     io::Write,
     os::unix::net::UnixStream,
@@ -16,6 +18,23 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+pub(crate) enum RuntimeCommand {
+    Conversation(ConversationCommand),
+    Start(TurnCommand),
+    Interrupt {
+        managed_turn_id: crate::contracts::identities::ManagedTurnId,
+        thread_id: CodexThreadId,
+        turn_id: CodexTurnId,
+    },
+}
+pub(crate) struct TurnCommand {
+    pub managed_turn_id: crate::contracts::identities::ManagedTurnId,
+    pub thread_id: CodexThreadId,
+    pub workspace: String,
+    pub prompt: String,
+    pub expires_at: UtcTimestamp,
+    pub admission: Arc<AtomicBool>,
+}
 pub(crate) struct ConversationCommand {
     pub operation_id: WireUuid,
     pub request_id: CodexRequestId,
@@ -48,6 +67,20 @@ pub(crate) enum Observation {
         result: std::result::Result<CodexThreadId, ConversationFailure>,
         methods: RuntimeMethods,
     },
+    TurnResult {
+        managed_turn_id: crate::contracts::identities::ManagedTurnId,
+        result: std::result::Result<CodexTurnId, ConversationFailure>,
+        methods: RuntimeMethods,
+    },
+    InterruptResult {
+        managed_turn_id: crate::contracts::identities::ManagedTurnId,
+        success: bool,
+        methods: RuntimeMethods,
+    },
+    IsolationViolation,
+    TurnNotice(safety::TurnNotice),
+    SafetyConfigChanged(BTreeSet<String>),
+    Discovering,
     Spawned,
     Ready {
         version: String,
@@ -63,12 +96,13 @@ pub(crate) struct Worker {
     cancel: Arc<AtomicBool>,
     wake: UnixStream,
     thread: Option<JoinHandle<RuntimeMethods>>,
-    commands: SyncSender<ConversationCommand>,
+    commands: SyncSender<RuntimeCommand>,
 }
 impl Worker {
     /// Fixed discovery, argv and cwd. No client-provided process inputs.
     pub fn start(
         instance: AgentRuntimeInstanceId,
+        forced_mcp: BTreeSet<String>,
         mut observe: impl FnMut(&AgentRuntimeInstanceId, Observation, &AtomicBool) + Send + 'static,
     ) -> std::io::Result<Self> {
         let (wake, reader) = UnixStream::pair()?;
@@ -79,7 +113,15 @@ impl Worker {
             .name("codex-runtime".into())
             .spawn(move || {
                 let mut methods = RuntimeMethods::default();
-                let result = run(&instance, &flag, reader, rx, &mut observe, &mut methods);
+                let result = run(
+                    &instance,
+                    &flag,
+                    reader,
+                    rx,
+                    &forced_mcp,
+                    &mut observe,
+                    &mut methods,
+                );
                 if !flag.load(Ordering::Acquire) {
                     observe(
                         &instance,
@@ -99,7 +141,7 @@ impl Worker {
             commands,
         })
     }
-    pub fn command(&mut self, command: ConversationCommand) -> bool {
+    pub fn command(&mut self, command: RuntimeCommand) -> bool {
         if self.commands.try_send(command).is_err() {
             return false;
         }
@@ -118,6 +160,7 @@ impl Drop for Worker {
 }
 fn diagnostic(error: ProbeError) -> RuntimeDiagnostic {
     match error {
+        ProbeError::InferenceIsolationViolation => RuntimeDiagnostic::InferenceIsolationViolation,
         ProbeError::RuntimeUnavailable => RuntimeDiagnostic::Unavailable,
         ProbeError::Spawn => RuntimeDiagnostic::SpawnFailed,
         ProbeError::Transport | ProbeError::Shutdown => RuntimeDiagnostic::TransportFailed,
@@ -133,6 +176,30 @@ fn diagnostic(error: ProbeError) -> RuntimeDiagnostic {
 struct RuntimeIo<'a> {
     stdio: Stdio<'a>,
     methods: &'a mut RuntimeMethods,
+    discovery: bool,
+    forward: Option<&'a mut dyn FnMut(Observation)>,
+    active_pair: Option<(CodexThreadId, CodexTurnId)>,
+    isolation_violation: bool,
+}
+impl RuntimeIo<'_> {
+    fn isolation_failure(&mut self) -> ProbeError {
+        self.isolation_violation = true;
+        if let Some((thread_id, turn_id)) = self.active_pair.clone()
+            && let Ok(request) = (ClientOperation::TurnInterrupt { thread_id, turn_id })
+                .encode(CodexRequestId::String(uuid::Uuid::new_v4().to_string()))
+            && let Ok(mut bytes) = request.encode()
+        {
+            bytes.push(b'\n');
+            let _ = self.send(&bytes, Instant::now() + Duration::from_millis(250));
+        }
+        self.emit(Observation::IsolationViolation);
+        ProbeError::InferenceIsolationViolation
+    }
+    fn emit(&mut self, event: Observation) {
+        if let Some(f) = self.forward.as_mut() {
+            f(event);
+        }
+    }
 }
 impl ProbeIo for RuntimeIo<'_> {
     fn send(&mut self, bytes: &[u8], deadline: Instant) -> ProbeResult<()> {
@@ -141,6 +208,96 @@ impl ProbeIo for RuntimeIo<'_> {
             Direction::ClientToServer,
         )
         .map_err(|_| ProbeError::Codec)?;
+        if !message
+            .method()
+            .is_some_and(|m| safety::PRODUCTION_METHODS.contains(&m))
+        {
+            return Err(ProbeError::Protocol);
+        }
+        if self.discovery
+            && !matches!(
+                message.method(),
+                Some("initialize" | "initialized" | "model/list" | "config/read")
+            )
+        {
+            return Err(ProbeError::Protocol);
+        }
+        if matches!(message.method(), Some("turn/start" | "turn/interrupt")) {
+            let p = message
+                .params()
+                .and_then(serde_json::Value::as_object)
+                .ok_or(ProbeError::Protocol)?;
+            if p.len() != 2
+                || !p
+                    .get("threadId")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|s| CodexThreadId::parse(s).is_ok())
+            {
+                return Err(ProbeError::Protocol);
+            }
+            if message.method() == Some("turn/start") {
+                let input = p
+                    .get("input")
+                    .and_then(serde_json::Value::as_array)
+                    .ok_or(ProbeError::Protocol)?;
+                if input.len() != 1
+                    || input[0].as_object().is_none_or(|o| o.len() != 3)
+                    || input[0]["type"] != "text"
+                    || input[0]["textElements"] != serde_json::json!([])
+                    || input[0]["text"]
+                        .as_str()
+                        .is_none_or(|s| crate::contracts::turn::validate_prompt(s).is_err())
+                {
+                    return Err(ProbeError::Protocol);
+                }
+            } else if !p
+                .get("turnId")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|s| CodexTurnId::parse(s).is_ok())
+            {
+                return Err(ProbeError::Protocol);
+            }
+            self.stdio.send(bytes, deadline)?;
+            let count = if message.method() == Some("turn/start") {
+                &mut self.methods.turn_start
+            } else {
+                &mut self.methods.turn_interrupt
+            };
+            *count = count.saturating_add(1);
+            return Ok(());
+        }
+        if matches!(message.method(), Some("config/read" | "hooks/list")) {
+            let p = message
+                .params()
+                .and_then(serde_json::Value::as_object)
+                .ok_or(ProbeError::Protocol)?;
+            let valid = if message.method() == Some("config/read") {
+                p.len() == 2
+                    && p.get("includeLayers") == Some(&serde_json::json!(false))
+                    && p.get("cwd")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|v| Path::new(v).is_absolute())
+            } else {
+                p.len() == 1
+                    && p.get("cwds")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|a| {
+                            a.len() == 1
+                                && a[0].as_str().is_some_and(|v| Path::new(v).is_absolute())
+                        })
+            };
+            if !valid {
+                return Err(ProbeError::Protocol);
+            }
+            self.stdio.send(bytes, deadline)?;
+            let count = if message.method() == Some("config/read") {
+                &mut self.methods.config_read
+            } else {
+                &mut self.methods.hooks_list
+            };
+            *count = count.saturating_add(1);
+            return Ok(());
+        }
         if matches!(
             message.method(),
             Some("thread/archive" | "thread/unarchive")
@@ -170,7 +327,10 @@ impl ProbeIo for RuntimeIo<'_> {
             let valid = if message.method() == Some("thread/start") {
                 p.len() == 2 && p.get("ephemeral") == Some(&serde_json::json!(false))
             } else {
-                p.len() == 3
+                p.len() == 6
+                    && p.get("sandbox") == Some(&serde_json::json!("read-only"))
+                    && p.get("approvalPolicy") == Some(&serde_json::json!("never"))
+                    && p.get("config").is_some_and(serde_json::Value::is_object)
                     && p.get("excludeTurns") == Some(&serde_json::json!(true))
                     && p.get("threadId")
                         .and_then(|v| v.as_str())
@@ -198,7 +358,7 @@ impl ProbeIo for RuntimeIo<'_> {
             Some("model/list") => &mut self.methods.model_list,
             _ => return Err(ProbeError::Protocol),
         };
-        if *counter != 0 {
+        if *counter >= 3 {
             return Err(ProbeError::Protocol);
         }
         self.stdio.send(bytes, deadline)?;
@@ -206,7 +366,40 @@ impl ProbeIo for RuntimeIo<'_> {
         Ok(())
     }
     fn receive(&mut self, deadline: Instant) -> ProbeResult<Option<WireMessage>> {
-        self.stdio.receive(deadline)
+        let message = match self.stdio.receive(deadline) {
+            Err(_)
+                if self.stdio.rejected.as_ref().is_some_and(|s| {
+                    s.category_candidate == "request" || s.external_action_candidate
+                }) =>
+            {
+                return Err(self.isolation_failure());
+            }
+            result => result?,
+        };
+        if let Some(m) = &message {
+            let notice = match safety::notification(m) {
+                Ok(n) => n,
+                Err(e) => {
+                    if e.code == "inference_isolation_violation" {
+                        return Err(self.isolation_failure());
+                    }
+                    return Err(ProbeError::Protocol);
+                }
+            };
+            if notice.as_ref().is_some_and(|n| {
+                matches!(n.kind, safety::NoticeKind::Terminal(_))
+                    && self
+                        .active_pair
+                        .as_ref()
+                        .is_some_and(|(thread, turn)| thread == &n.thread && turn == &n.turn)
+            }) {
+                self.active_pair = None;
+            }
+            if let (Some(notice), Some(forward)) = (notice, self.forward.as_mut()) {
+                forward(Observation::TurnNotice(notice));
+            }
+        }
+        Ok(message)
     }
     fn close_input(&mut self) {
         self.stdio.close_input();
@@ -216,7 +409,8 @@ fn run(
     instance: &AgentRuntimeInstanceId,
     cancel: &Arc<AtomicBool>,
     wake: UnixStream,
-    commands: Receiver<ConversationCommand>,
+    commands: Receiver<RuntimeCommand>,
+    forced_mcp: &BTreeSet<String>,
     observe: &mut impl FnMut(&AgentRuntimeInstanceId, Observation, &AtomicBool),
     methods: &mut RuntimeMethods,
 ) -> std::result::Result<(), RuntimeDiagnostic> {
@@ -239,23 +433,46 @@ fn run(
     let version = parse_version(&raw)
         .filter(|_| report.reaped && report.exit_code == Some(0))
         .ok_or(RuntimeDiagnostic::RuntimeRejected)?;
+    if version != "0.159.0" {
+        return Err(RuntimeDiagnostic::SafetyUnproven);
+    }
     if cancel.load(Ordering::Acquire) {
         return Err(RuntimeDiagnostic::TransportFailed);
     }
+    observe(instance, Observation::Discovering, cancel);
+    // Discovery has no thread-capable IO boundary and is reaped before the final generation.
+    let mut names = discover_mcp(
+        &executable,
+        &cwd,
+        cancel,
+        wake.try_clone()
+            .map_err(|_| RuntimeDiagnostic::TransportFailed)?,
+        methods,
+    )
+    .map_err(diagnostic)?;
+    names.extend(forced_mcp.iter().cloned());
     let mut command = Command::new(&executable);
-    command.arg("app-server").current_dir(&cwd);
+    command
+        .args(safety::process_args(&names).map_err(|_| RuntimeDiagnostic::SafetyUnproven)?)
+        .current_dir(&cwd);
     let mut owner = OwnedProcess::spawn(&mut command).map_err(diagnostic)?;
     owner.cancel_with(cancel.clone(), wake);
     observe(instance, Observation::Spawned, cancel);
     let mut report = initial_report(cwd);
     let result = (|| -> ProbeResult<()> {
+        let mut forward = |event| observe(instance, event, cancel);
         let mut io = RuntimeIo {
             stdio: Stdio {
                 owner: &mut owner,
                 frames: Frames::default(),
                 rejected: None,
+                config_response_id: None,
             },
             methods,
+            discovery: false,
+            forward: Some(&mut forward),
+            active_pair: None,
+            isolation_violation: false,
         };
         let mut correlation = handshake(&mut io, &mut report)?;
         // A catalog RPC error is safe degradation in the standalone probe, but not runtime readiness.
@@ -263,46 +480,90 @@ fn run(
         if report.model_list_result != ProbeStage::Success {
             return Err(ProbeError::RuntimeRejected);
         }
+        safety_preflight(
+            &mut io,
+            &names,
+            report.cwd.to_str().ok_or(ProbeError::Protocol)?,
+            &mut correlation,
+            &mut initial_report(report.cwd.clone()),
+        )?;
         let models = report.models.iter().map(|m| m.model.clone()).collect();
         let methods = io.methods.clone();
-        observe(
-            instance,
-            Observation::Ready {
-                version,
-                models,
-                methods,
-            },
-            cancel,
-        );
+        io.emit(Observation::Ready {
+            version,
+            models,
+            methods,
+        });
         io.stdio.owner.interruptible = true;
         // Infinite lifetime, finite per-frame deadline. Timeout merely permits an idle runtime;
         // cancellation wakes poll immediately. Counters saturate; maps and buffers remain bounded.
         loop {
             if let Ok(command) = commands.try_recv() {
-                let result = conversation(
-                    &mut io,
-                    &command,
-                    &mut correlation,
-                    &mut report,
-                    instance,
-                    observe,
-                    cancel,
-                );
-                let uncertain = result
-                    .as_ref()
-                    .is_err_and(|e| matches!(e, ConversationFailure::Unknown));
-                observe(
-                    instance,
-                    Observation::Conversation {
-                        operation_id: command.operation_id,
-                        result,
-                        methods: io.methods.clone(),
-                    },
-                    cancel,
-                );
+                let uncertain = match command {
+                    RuntimeCommand::Conversation(c) => {
+                        let result = conversation(
+                            &mut io,
+                            &c,
+                            &mut correlation,
+                            &mut report,
+                            cancel,
+                            &names,
+                        );
+                        let unknown = result
+                            .as_ref()
+                            .is_err_and(|e| matches!(e, ConversationFailure::Unknown));
+                        let methods = io.methods.clone();
+                        io.emit(Observation::Conversation {
+                            operation_id: c.operation_id,
+                            result,
+                            methods,
+                        });
+                        unknown
+                    }
+                    RuntimeCommand::Start(c) => {
+                        let result = start_turn(&mut io, &c, &names, &mut correlation, &mut report);
+                        let unknown = result
+                            .as_ref()
+                            .is_err_and(|e| matches!(e, ConversationFailure::Unknown));
+                        let methods = io.methods.clone();
+                        io.emit(Observation::TurnResult {
+                            managed_turn_id: c.managed_turn_id,
+                            result,
+                            methods,
+                        });
+                        unknown
+                    }
+                    RuntimeCommand::Interrupt {
+                        managed_turn_id,
+                        thread_id,
+                        turn_id,
+                    } => {
+                        let message = ClientOperation::TurnInterrupt { thread_id, turn_id }
+                            .encode(CodexRequestId::String(uuid::Uuid::new_v4().to_string()))
+                            .map_err(|_| ProbeError::Codec)?;
+                        let success = exchange(
+                            &mut io,
+                            message,
+                            Operation::TurnInterrupt,
+                            Instant::now() + Duration::from_secs(3),
+                            &mut correlation,
+                            &mut report,
+                        )
+                        .is_ok();
+                        let methods = io.methods.clone();
+                        io.emit(Observation::InterruptResult {
+                            managed_turn_id,
+                            success,
+                            methods,
+                        });
+                        !success
+                    }
+                };
                 if uncertain {
                     return Err(ProbeError::Protocol);
                 }
+                // Another command may already be queued. Do not lose its wake to the RPC waiter.
+                continue;
             }
             match io.receive(Instant::now() + Duration::from_secs(60)) {
                 Ok(Some(message)) => {
@@ -331,9 +592,8 @@ fn conversation(
     c: &ConversationCommand,
     correlation: &mut Correlation,
     report: &mut CodexLiveProbeReportV1,
-    instance: &AgentRuntimeInstanceId,
-    observe: &mut impl FnMut(&AgentRuntimeInstanceId, Observation, &AtomicBool),
     cancel: &AtomicBool,
+    names: &BTreeSet<String>,
 ) -> std::result::Result<CodexThreadId, ConversationFailure> {
     let valid = c.admission.load(Ordering::Acquire)
         && crate::contracts::control::timestamp(&c.expires_at)
@@ -343,8 +603,20 @@ fn conversation(
     if !valid {
         return Err(ConversationFailure::NotDispatched);
     }
-    let message = managed_thread_request(c.request_id.clone(), &c.workspace, c.thread_id.as_ref())
-        .map_err(|_| ConversationFailure::NotDispatched)?;
+    safety_preflight(io, names, &c.workspace, correlation, report)
+        .map_err(|_| ConversationFailure::Unknown)?;
+    let mut message =
+        managed_thread_request(c.request_id.clone(), &c.workspace, c.thread_id.as_ref())
+            .map_err(|_| ConversationFailure::NotDispatched)?;
+    if c.thread_id.is_some() {
+        let mut v = message.vendor_value().clone();
+        v["params"]["sandbox"] = serde_json::json!("read-only");
+        v["params"]["approvalPolicy"] = serde_json::json!("never");
+        v["params"]["config"] =
+            safety::thread_config(names).map_err(|_| ConversationFailure::Unknown)?;
+        message = WireMessage::from_value(v, Direction::ClientToServer)
+            .map_err(|_| ConversationFailure::Unknown)?;
+    }
     let deadline = Instant::now() + Duration::from_secs(10);
     // External admission point. Subsequent durability steps finish this same admitted create;
     // they do not resume/attach or admit any new work after lease expiry/revocation.
@@ -362,14 +634,14 @@ fn conversation(
     let result = exchange(io, message, op, deadline, correlation, report)?;
     let thread = validate_conversation(&result, c)?;
     if c.thread_id.is_some() {
+        safety::verify_resume(&result).map_err(|_| ConversationFailure::Unknown)?;
         return Ok(thread);
     }
     checkpoint(
-        instance,
+        io,
         c,
         &thread,
         MaterializationStage::Started,
-        observe,
         cancel,
         deadline,
     )?;
@@ -406,7 +678,7 @@ fn conversation(
         {
             return Err(ConversationFailure::Unknown);
         }
-        checkpoint(instance, c, &thread, stage, observe, cancel, deadline)?;
+        checkpoint(io, c, &thread, stage, cancel, deadline)?;
     }
     Ok(thread)
 }
@@ -453,7 +725,8 @@ fn exchange(
         let m = match io.receive(deadline) {
             Ok(Some(m)) => m,
             Err(ProbeError::Wake) => continue,
-            _ => return Err(ConversationFailure::Unknown),
+            Err(_) => return Err(ConversationFailure::Unknown),
+            Ok(None) => return Err(ConversationFailure::Unknown),
         };
         if matches!(
             m.kind(),
@@ -472,25 +745,20 @@ fn exchange(
     }
 }
 fn checkpoint(
-    instance: &AgentRuntimeInstanceId,
+    io: &mut RuntimeIo<'_>,
     c: &ConversationCommand,
     thread: &CodexThreadId,
     stage: MaterializationStage,
-    observe: &mut impl FnMut(&AgentRuntimeInstanceId, Observation, &AtomicBool),
     cancel: &AtomicBool,
     deadline: Instant,
 ) -> std::result::Result<(), ConversationFailure> {
     let (reply, rx) = mpsc::sync_channel(1);
-    observe(
-        instance,
-        Observation::Materialization {
-            operation_id: c.operation_id.clone(),
-            thread_id: thread.clone(),
-            stage,
-            reply,
-        },
-        cancel,
-    );
+    io.emit(Observation::Materialization {
+        operation_id: c.operation_id.clone(),
+        thread_id: thread.clone(),
+        stage,
+        reply,
+    });
     // Bounded acknowledgement of the sole SQLite writer; no journal/database polling.
     loop {
         if cancel.load(Ordering::Acquire) || Instant::now() >= deadline {
@@ -506,4 +774,154 @@ fn checkpoint(
             Err(mpsc::RecvTimeoutError::Timeout) => (),
         }
     }
+}
+
+fn safety_preflight(
+    io: &mut RuntimeIo<'_>,
+    names: &BTreeSet<String>,
+    cwd: &str,
+    correlation: &mut Correlation,
+    report: &mut CodexLiveProbeReportV1,
+) -> ProbeResult<()> {
+    let config = safety_query(io, cwd, false, correlation, report)?;
+    safety::verify_config(&config).map_err(|_| ProbeError::Protocol)?;
+    let configured = safety::mcp_names(&config, false).map_err(|_| ProbeError::Protocol)?;
+    if !configured.is_subset(names) {
+        io.emit(Observation::SafetyConfigChanged(
+            names.union(&configured).cloned().collect(),
+        ));
+        return Err(ProbeError::Protocol);
+    }
+    safety::mcp_names(&config, true).map_err(|_| ProbeError::Protocol)?;
+    let hooks = safety_query(io, cwd, true, correlation, report)?;
+    safety::zero_external_hooks(&hooks).map_err(|_| ProbeError::Protocol)
+}
+fn safety_query(
+    io: &mut RuntimeIo<'_>,
+    cwd: &str,
+    hooks: bool,
+    correlation: &mut Correlation,
+    report: &mut CodexLiveProbeReportV1,
+) -> ProbeResult<serde_json::Value> {
+    let id = CodexRequestId::String(uuid::Uuid::new_v4().to_string());
+    let (method, params, op) = if hooks {
+        (
+            "hooks/list",
+            serde_json::json!({"cwds":[cwd]}),
+            Operation::HooksList,
+        )
+    } else {
+        (
+            "config/read",
+            serde_json::json!({"cwd":cwd,"includeLayers":false}),
+            Operation::ConfigRead,
+        )
+    };
+    if !hooks {
+        io.stdio.config_response_id = Some(id.clone());
+    }
+    let message = WireMessage::request(id, method, params).map_err(|_| ProbeError::Codec)?;
+    let result = exchange(
+        io,
+        message,
+        op,
+        Instant::now() + REQUEST_TIMEOUT,
+        correlation,
+        report,
+    )
+    .map_err(|_| {
+        if io.isolation_violation {
+            ProbeError::InferenceIsolationViolation
+        } else {
+            ProbeError::Protocol
+        }
+    });
+    io.stdio.config_response_id = None;
+    result
+}
+fn discover_mcp(
+    executable: &Path,
+    cwd: &Path,
+    cancel: &Arc<AtomicBool>,
+    wake: UnixStream,
+    methods: &mut RuntimeMethods,
+) -> ProbeResult<BTreeSet<String>> {
+    let mut command = Command::new(executable);
+    command
+        .args(safety::process_args(&BTreeSet::new()).map_err(|_| ProbeError::Codec)?)
+        .current_dir(cwd);
+    let mut owner = OwnedProcess::spawn(&mut command)?;
+    owner.cancel_with(cancel.clone(), wake);
+    let result = (|| {
+        let mut io = RuntimeIo {
+            stdio: Stdio {
+                owner: &mut owner,
+                frames: Frames::default(),
+                rejected: None,
+                config_response_id: None,
+            },
+            methods,
+            discovery: true,
+            forward: None,
+            active_pair: None,
+            isolation_violation: false,
+        };
+        let mut report = initial_report(cwd.to_owned());
+        let mut correlation = handshake(&mut io, &mut report)?;
+        if report.model_list_result != ProbeStage::Success {
+            return Err(ProbeError::RuntimeRejected);
+        }
+        let config = safety_query(
+            &mut io,
+            cwd.to_str().ok_or(ProbeError::Protocol)?,
+            false,
+            &mut correlation,
+            &mut report,
+        )?;
+        safety::mcp_names(&config, false).map_err(|_| ProbeError::Protocol)
+    })();
+    owner.shutdown()?;
+    result
+}
+
+fn start_turn(
+    io: &mut RuntimeIo<'_>,
+    c: &TurnCommand,
+    names: &BTreeSet<String>,
+    correlation: &mut Correlation,
+    report: &mut CodexLiveProbeReportV1,
+) -> std::result::Result<CodexTurnId, ConversationFailure> {
+    safety_preflight(io, names, &c.workspace, correlation, report)
+        .map_err(|_| ConversationFailure::Unknown)?;
+    if !c.admission.load(Ordering::Acquire)
+        || crate::contracts::control::timestamp(&c.expires_at)
+            .map_or(true, |t| time::OffsetDateTime::now_utc() >= t)
+    {
+        return Err(ConversationFailure::NotDispatched);
+    }
+    let message = ClientOperation::TurnStart {
+        thread_id: c.thread_id.clone(),
+        text: c.prompt.clone(),
+    }
+    .encode(CodexRequestId::String(uuid::Uuid::new_v4().to_string()))
+    .map_err(|_| ConversationFailure::NotDispatched)?;
+    let result = exchange(
+        io,
+        message,
+        Operation::TurnStart,
+        Instant::now() + REQUEST_TIMEOUT,
+        correlation,
+        report,
+    )?;
+    if result["turn"]["status"] != "inProgress" {
+        return Err(ConversationFailure::Unknown);
+    }
+    let turn = CodexTurnId::parse(
+        result["turn"]["id"]
+            .as_str()
+            .ok_or(ConversationFailure::Unknown)?,
+    )
+    .map_err(|_| ConversationFailure::Unknown)?;
+    io.active_pair = Some((c.thread_id.clone(), turn.clone()));
+    Ok(turn)
 }

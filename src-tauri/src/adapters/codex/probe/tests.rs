@@ -329,6 +329,7 @@ fn real_owned_pipes_frame_multiple_messages_and_reap_on_eof() {
         owner: &mut child,
         frames: Frames::default(),
         rejected: None,
+        config_response_id: None,
     };
     io.send(
         b"{\"method\":\"unknown/one\"}\n{\"id\":7,\"result\":{}}\n",
@@ -367,6 +368,7 @@ fn byte_fragmentation_preserves_protocol_and_unicode() {
         owner: &mut child,
         frames: Frames::default(),
         rejected: None,
+        config_response_id: None,
     };
     for b in "{\"method\":\"future/value\",\"params\":{\"text\":\"日本✓\"}}\n".as_bytes() {
         io.send(&[*b], Instant::now() + Duration::from_secs(2))
@@ -387,6 +389,7 @@ fn corrupt_stdout_is_not_skipped() {
             owner: &mut child,
             frames: Frames::default(),
             rejected: None,
+            config_response_id: None,
         };
         io.send(bytes, Instant::now() + Duration::from_secs(2))
             .unwrap();
@@ -405,6 +408,7 @@ fn unterminated_stdout_frame_is_corruption() {
         owner: &mut child,
         frames: Frames::default(),
         rejected: None,
+        config_response_id: None,
     };
     io.send(b"{}", Instant::now() + Duration::from_secs(2))
         .unwrap();
@@ -425,6 +429,7 @@ fn oversize_frame_rejects_before_unbounded_allocation() {
         owner: &mut child,
         frames: Frames::default(),
         rejected: None,
+        config_response_id: None,
     };
     assert_eq!(
         io.receive(Instant::now() + Duration::from_secs(2))
@@ -458,6 +463,7 @@ fn deadline_timeout_does_not_orphan_child() {
         owner: &mut child,
         frames: Frames::default(),
         rejected: None,
+        config_response_id: None,
     };
     assert_eq!(
         io.receive(Instant::now() + Duration::from_millis(20))
@@ -594,6 +600,7 @@ fn unverified_notification_field_still_rejects_with_structural_diagnostic() {
         owner: &mut child,
         frames: Frames::default(),
         rejected: None,
+        config_response_id: None,
     };
     io.send(
         b"{\"method\":\"future/notice\",\"params\":{},\"synthetic_extra\":true}\n",
@@ -622,6 +629,7 @@ fn stdio_preserves_official_notification_metadata_without_payload_diagnostics() 
         owner: &mut child,
         frames: Frames::default(),
         rejected: None,
+        config_response_id: None,
     };
     io.send(
         br#"{"method":"future/notice","params":{"private":"not retained"},"emittedAtMs":9223372036854775807}
@@ -690,6 +698,7 @@ fn exact_frame_limit_is_allowed_without_truncation() {
         owner: &mut child,
         frames: Frames::default(),
         rejected: None,
+        config_response_id: None,
     };
     io.frames.partial = vec![b' '; MAX_FRAME_BYTES - message.len()];
     let mut bytes = message.to_vec();
