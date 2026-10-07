@@ -27,3 +27,5 @@ pub use scalars::{ContractError, ErrorCode, Sequence, UtcTimestamp, WireUuid};
 
 #[cfg(test)]
 mod tests;
+
+pub mod control;

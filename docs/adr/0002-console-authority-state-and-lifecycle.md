@@ -75,3 +75,12 @@ containment. A separate process alone does not establish an OS security boundary
 
 - Wyss architecture research report, sections 12, 13 and 21.
 - Accepted pre-implementation DECISION_PACKET, 2026-10-06.
+
+## Sprint 2D implementation status
+
+The independently started `wyss-control` process now owns prepared/closed managed
+control records, durable intent receipts and canonical audit. Client disconnect and
+authority restart recovery are tested. Console does not spawn or connect to it yet.
+Runtime supervision, authorization gates and permissions remain deferred; managed
+execution is still unavailable. ADR 0011 records this implementation without
+changing the original authority or crash/restart decision.

@@ -121,3 +121,11 @@ Event Bus, writer coordination, payload-specific validation, persistence, replay
 content inspection, and bounded transient terminal/content channels remain
 **deferred**. Durable/ephemeral classes do not select a transport or database.
 The client/authority and crash/restart contracts in ADR 0002 remain unchanged.
+
+## Sprint 2D implementation status
+
+`wyss-control` is the first durable canonical producer: two minimized managed-session
+control event types, append-only SQLite audit, stable stream and transactional
+sequence/state/intent receipts. Audit append failure rolls back the state mutation.
+Envelope v1 fields and semantics are unchanged. This is a bounded audit reader,
+not an Event Bus or content-persistence system. See ADR 0011.

@@ -1,0 +1,475 @@
+use super::{paths, schema};
+use crate::contracts::{
+    Sequence, WireUuid, control::*, event_envelope::EventEnvelopeV1, identities::ManagedSessionId,
+};
+use rusqlite::{
+    Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
+};
+use serde_json::{Value, json};
+use std::{path::Path, time::Duration};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+
+fn db(_: impl std::fmt::Debug) -> ControlError {
+    ControlError::StorageUnavailable
+}
+fn invalid(_: impl std::fmt::Debug) -> ControlError {
+    ControlError::StorageIncompatible
+}
+pub(crate) fn uuid() -> WireUuid {
+    WireUuid::try_from(uuid::Uuid::new_v4().to_string()).expect("generated UUID")
+}
+fn canonical(id: &str) -> String {
+    id.to_ascii_lowercase()
+}
+fn key(n: u64) -> String {
+    format!("{n:020}")
+}
+fn sequence(n: u64) -> ControlResult<Sequence> {
+    n.to_string().parse().map_err(invalid)
+}
+fn now() -> ControlResult<String> {
+    OffsetDateTime::now_utc().format(&Rfc3339).map_err(invalid)
+}
+
+pub(crate) struct Store {
+    pub(crate) conn: Connection,
+    instance: WireUuid,
+    stream: WireUuid,
+}
+impl Store {
+    pub fn open(path: &Path, instance: WireUuid) -> ControlResult<Self> {
+        paths::private_file(path)?;
+        for suffix in ["-wal", "-shm", "-journal"] {
+            let side = path.with_file_name(format!(
+                "{}{}",
+                path.file_name()
+                    .ok_or(ControlError::UnsafePath)?
+                    .to_string_lossy(),
+                suffix
+            ));
+            if std::fs::symlink_metadata(&side).is_ok() {
+                paths::validate_file(&side)?;
+            }
+        }
+        let mut conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(invalid)?;
+        conn.busy_timeout(Duration::from_secs(1)).map_err(db)?;
+        conn.pragma_update(None, "foreign_keys", true).map_err(db)?;
+        schema::migrate(&mut conn)?;
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(db)?;
+        conn.pragma_update(None, "synchronous", "FULL")
+            .map_err(db)?;
+        conn.pragma_update(None, "trusted_schema", false)
+            .map_err(db)?;
+        let (version, stream, head): (i64, String, String) = conn
+            .query_row(
+                "SELECT schema_version,stream_id,last_sequence FROM authority_metadata WHERE id=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .map_err(invalid)?;
+        if version != 1 {
+            return Err(ControlError::StorageIncompatible);
+        }
+        let stream = WireUuid::try_from(stream).map_err(invalid)?;
+        let store = Self {
+            conn,
+            instance,
+            stream,
+        };
+        store.verify(&head)?;
+        Ok(store)
+    }
+    fn verify(&self, head: &str) -> ControlResult<()> {
+        let head = parse_head(head)?;
+        let mut foreign = self
+            .conn
+            .prepare("PRAGMA foreign_key_check")
+            .map_err(invalid)?;
+        if foreign
+            .query([])
+            .map_err(invalid)?
+            .next()
+            .map_err(invalid)?
+            .is_some()
+        {
+            return Err(ControlError::StorageIncompatible);
+        }
+        let mut query=self.conn.prepare("SELECT event_id,stream_id,sequence,session_id,envelope FROM control_events ORDER BY sequence").map_err(invalid)?;
+        let mut rows = query.query([]).map_err(invalid)?;
+        let mut n = 0u64;
+        while let Some(r) = rows.next().map_err(invalid)? {
+            n = n.checked_add(1).ok_or(ControlError::StorageIncompatible)?;
+            let id: String = r.get(0).map_err(invalid)?;
+            let stream: String = r.get(1).map_err(invalid)?;
+            let order: String = r.get(2).map_err(invalid)?;
+            let session: String = r.get(3).map_err(invalid)?;
+            let raw: String = r.get(4).map_err(invalid)?;
+            let v: Value = serde_json::from_str(&raw).map_err(invalid)?;
+            let e = EventEnvelopeV1::from_value(v.clone()).map_err(invalid)?;
+            if id != v["event_id"]
+                || stream != self.stream.as_str()
+                || order != key(n)
+                || e.sequence().get() != n
+                || session != v["session_id"]
+            {
+                return Err(ControlError::StorageIncompatible);
+            }
+            validate_audit(&v)?;
+        }
+        if head != n {
+            return Err(ControlError::StorageIncompatible);
+        }
+        let mut q = self
+            .conn
+            .prepare("SELECT session_id FROM managed_sessions")
+            .map_err(invalid)?;
+        let ids = q
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(invalid)?;
+        for id in ids {
+            get_session(&self.conn, &id.map_err(invalid)?)?.validate()?;
+        }
+        // Receipts contain only typed minimal mutations and their original session projection.
+        let mut q = self
+            .conn
+            .prepare("SELECT intent_id,mutation,result FROM processed_intents")
+            .map_err(invalid)?;
+        let mut rows = q.query([]).map_err(invalid)?;
+        while let Some(r) = rows.next().map_err(invalid)? {
+            let id: String = r.get(0).map_err(invalid)?;
+            WireUuid::try_from(id.clone()).map_err(invalid)?;
+            let mutation: String = r.get(1).map_err(invalid)?;
+            let op: Operation =
+                serde_json::from_value(unique_json(mutation.as_bytes()).map_err(invalid)?)
+                    .map_err(invalid)?;
+            let Some(intent) = intent(&op) else {
+                return Err(ControlError::StorageIncompatible);
+            };
+            if canonical(intent.as_str()) != id {
+                return Err(ControlError::StorageIncompatible);
+            }
+            let result: String = r.get(2).map_err(invalid)?;
+            let session: ManagedSessionRecord = serde_json::from_str(&result).map_err(invalid)?;
+            session.validate()?;
+        }
+        let count: i64 = self
+            .conn
+            .query_row("SELECT count(*) FROM authority_metadata", [], |r| r.get(0))
+            .map_err(invalid)?;
+        if count != 1 {
+            return Err(ControlError::StorageIncompatible);
+        }
+        Ok(())
+    }
+    pub fn status(&self) -> ControlResult<AuthorityStatus> {
+        let head: String = self
+            .conn
+            .query_row(
+                "SELECT last_sequence FROM authority_metadata WHERE id=1",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(db)?;
+        let head = parse_head(&head)?;
+        let count = |state| {
+            self.conn
+                .query_row(
+                    "SELECT count(*) FROM managed_sessions WHERE control_state=?1",
+                    [state],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(db)
+                .and_then(|n| u64::try_from(n).map_err(invalid))
+        };
+        Ok(AuthorityStatus {
+            protocol_version: 1,
+            authority_instance_id: self.instance.clone(),
+            service_version: env!("CARGO_PKG_VERSION").into(),
+            storage_schema_version: 1,
+            stream_id: self.stream.clone(),
+            last_sequence: if head == 0 {
+                None
+            } else {
+                Some(sequence(head)?)
+            },
+            prepared_count: count("prepared")?,
+            closed_count: count("closed")?,
+        })
+    }
+    pub fn apply(&mut self, op: &Operation) -> ControlResult<ResultValue> {
+        op.validate()?;
+        match op {
+            Operation::Hello(_) => Ok(ResultValue::Hello(self.status()?)),
+            Operation::Status(_) => Ok(ResultValue::Status(self.status()?)),
+            Operation::Get(p) => Ok(ResultValue::Session(get_session(
+                &self.conn,
+                p.managed_session_id.as_str(),
+            )?)),
+            Operation::List(p) => {
+                let mut q=self.conn.prepare("SELECT session_id FROM managed_sessions WHERE created_sequence>?1 ORDER BY created_sequence LIMIT ?2").map_err(db)?;
+                let rows = q
+                    .query_map(params![key(p.after.map_or(0, |s| s.get())), p.limit], |r| {
+                        r.get::<_, String>(0)
+                    })
+                    .map_err(db)?;
+                let mut sessions = Vec::new();
+                for row in rows {
+                    sessions.push(get_session(&self.conn, &row.map_err(db)?)?);
+                }
+                let next = if sessions.len() == p.limit as usize {
+                    sessions.last().map(|s| s.created_sequence)
+                } else {
+                    None
+                };
+                Ok(ResultValue::Sessions { sessions, next })
+            }
+            Operation::AuditRead(p) => {
+                if canonical(p.stream_id.as_str()) != self.stream.as_str() {
+                    return Err(ControlError::InvalidRequest);
+                }
+                let mut q=self.conn.prepare("SELECT envelope FROM control_events WHERE stream_id=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3").map_err(db)?;
+                let rows = q
+                    .query_map(
+                        params![
+                            self.stream.as_str(),
+                            key(p.after_sequence.map_or(0, |s| s.get())),
+                            p.limit
+                        ],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .map_err(db)?;
+                let mut events = Vec::new();
+                for row in rows {
+                    let raw = row.map_err(db)?;
+                    let event: EventEnvelopeV1 = serde_json::from_str(&raw).map_err(invalid)?;
+                    events.push(event);
+                }
+                let next = if events.len() == p.limit as usize {
+                    events.last().map(|e| e.sequence())
+                } else {
+                    None
+                };
+                Ok(ResultValue::Audit { events, next })
+            }
+            Operation::Prepare(_) | Operation::Close(_) => self.mutate(op),
+        }
+    }
+    fn mutate(&mut self, op: &Operation) -> ControlResult<ResultValue> {
+        let intent_id = canonical(intent(op).ok_or(ControlError::InvalidRequest)?.as_str());
+        let mut canonical_op = serde_json::to_value(op).map_err(db)?;
+        canonical_op["params"]["intent_id"] = json!(intent_id);
+        if let Operation::Close(p) = op {
+            canonical_op["params"]["managed_session_id"] =
+                json!(canonical(p.managed_session_id.as_str()));
+        }
+        let mutation = serde_json::to_string(&canonical_op).map_err(db)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db)?;
+        let receipt: Option<(String, String)> = tx
+            .query_row(
+                "SELECT mutation,result FROM processed_intents WHERE intent_id=?1",
+                [&intent_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(db)?;
+        if let Some((original, result)) = receipt {
+            if original != mutation {
+                return Err(ControlError::IntentConflict);
+            }
+            let s: ManagedSessionRecord = serde_json::from_str(&result).map_err(invalid)?;
+            s.validate()?;
+            return Ok(ResultValue::Session(s));
+        }
+        let time = now()?;
+        let mut append = true;
+        let (session, kind) = match op {
+            Operation::Prepare(p) => {
+                let n = next_sequence(&tx)?;
+                let session = ManagedSessionRecord {
+                    managed_session_id: ManagedSessionId::parse(uuid().as_str())
+                        .map_err(invalid)?,
+                    adapter_id: p.adapter_id.clone(),
+                    runtime_kind: p.runtime_kind,
+                    control_state: ControlState::Prepared,
+                    revision: 1,
+                    created_at: time.clone().try_into().map_err(invalid)?,
+                    updated_at: time.clone().try_into().map_err(invalid)?,
+                    created_sequence: sequence(n)?,
+                };
+                tx.execute(
+                    "INSERT INTO managed_sessions VALUES(?1,?2,?3,'prepared',1,?4,?4,?5)",
+                    params![
+                        session.managed_session_id.as_str(),
+                        session.adapter_id.as_str(),
+                        enum_text(&session.runtime_kind)?,
+                        time,
+                        key(n)
+                    ],
+                )
+                .map_err(db)?;
+                (session, "authority.managed_session.prepared")
+            }
+            Operation::Close(p) => {
+                let mut session = get_session(&tx, p.managed_session_id.as_str())?;
+                if session.revision != p.expected_revision {
+                    return Err(ControlError::StaleRevision);
+                }
+                if session.control_state == ControlState::Closed {
+                    append = false;
+                } else {
+                    session.control_state = ControlState::Closed;
+                    session.revision = 2;
+                    session.updated_at = time.clone().try_into().map_err(invalid)?;
+                    tx.execute("UPDATE managed_sessions SET control_state='closed', revision=2, updated_at=?1 WHERE session_id=?2",params![time,session.managed_session_id.as_str()]).map_err(db)?;
+                }
+                (session, "authority.managed_session.closed")
+            }
+            _ => return Err(ControlError::InvalidRequest),
+        };
+        if append {
+            append_event(
+                &tx,
+                &self.instance,
+                &self.stream,
+                &intent_id,
+                &session,
+                kind,
+                &time,
+            )?;
+        }
+        let result = serde_json::to_string(&session).map_err(db)?;
+        tx.execute(
+            "INSERT INTO processed_intents VALUES(?1,?2,?3)",
+            params![intent_id, mutation, result],
+        )
+        .map_err(db)?;
+        tx.commit().map_err(db)?;
+        Ok(ResultValue::Session(session))
+    }
+}
+fn intent(op: &Operation) -> Option<&WireUuid> {
+    match op {
+        Operation::Prepare(p) => Some(&p.intent_id),
+        Operation::Close(p) => Some(&p.intent_id),
+        _ => None,
+    }
+}
+fn enum_text(v: &impl serde::Serialize) -> ControlResult<String> {
+    serde_json::to_value(v)
+        .map_err(db)?
+        .as_str()
+        .map(str::to_owned)
+        .ok_or(ControlError::InternalError)
+}
+fn parse_head(s: &str) -> ControlResult<u64> {
+    if s == "0" {
+        Ok(0)
+    } else {
+        s.parse::<Sequence>().map(|s| s.get()).map_err(invalid)
+    }
+}
+fn next_sequence(tx: &Transaction<'_>) -> ControlResult<u64> {
+    let head: String = tx
+        .query_row(
+            "SELECT last_sequence FROM authority_metadata WHERE id=1",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(db)?;
+    parse_head(&head)?
+        .checked_add(1)
+        .ok_or(ControlError::CapacityExceeded)
+}
+fn append_event(
+    tx: &Transaction<'_>,
+    instance: &WireUuid,
+    stream: &WireUuid,
+    intent: &str,
+    s: &ManagedSessionRecord,
+    kind: &str,
+    time: &str,
+) -> ControlResult<()> {
+    let n = next_sequence(tx)?;
+    let value = json!({"schema_version":1,"event_id":uuid(),"event_type":kind,"payload_schema_version":1,
+        "timestamp":time,"stream_id":stream,"sequence":n.to_string(),"session_id":s.managed_session_id,
+        "source":{"component":"wyss_control","instance_id":instance},"correlation_id":intent,"causation_id":null,
+        "payload":{"adapter_id":s.adapter_id,"runtime_kind":s.runtime_kind,"control_state":s.control_state,"revision":s.revision},
+        "persistence":"durable","sensitivity":"internal","redaction":"none"});
+    validate_audit(&value)?;
+    let event = EventEnvelopeV1::from_value(value.clone()).map_err(invalid)?;
+    tx.execute(
+        "INSERT INTO control_events VALUES(?1,?2,?3,?4,?5)",
+        params![
+            value["event_id"].as_str().unwrap(),
+            stream.as_str(),
+            key(n),
+            s.managed_session_id.as_str(),
+            serde_json::to_string(&event).map_err(db)?
+        ],
+    )
+    .map_err(db)?;
+    tx.execute(
+        "UPDATE authority_metadata SET last_sequence=?1 WHERE id=1",
+        [n.to_string()],
+    )
+    .map_err(db)?;
+    Ok(())
+}
+fn validate_audit(v: &Value) -> ControlResult<()> {
+    let kind = v["event_type"]
+        .as_str()
+        .ok_or(ControlError::StorageIncompatible)?;
+    let state = match kind {
+        "authority.managed_session.prepared" => "prepared",
+        "authority.managed_session.closed" => "closed",
+        _ => return Err(ControlError::StorageIncompatible),
+    };
+    let p = v["payload"]
+        .as_object()
+        .ok_or(ControlError::StorageIncompatible)?;
+    if p.len() != 4
+        || p.get("control_state") != Some(&json!(state))
+        || p.get("revision") != Some(&json!(if state == "prepared" { 1 } else { 2 }))
+        || v["persistence"] != "durable"
+        || v["sensitivity"] != "internal"
+        || v["redaction"] != "none"
+        || v["source"]["component"] != "wyss_control"
+        || v["session_id"].is_null()
+        || v["correlation_id"].is_null()
+        || !v["causation_id"].is_null()
+        || v["payload_schema_version"] != 1
+    {
+        return Err(ControlError::StorageIncompatible);
+    }
+    serde_json::from_value::<crate::contracts::agent_adapter::AgentAdapterId>(
+        p.get("adapter_id")
+            .ok_or(ControlError::StorageIncompatible)?
+            .clone(),
+    )
+    .map_err(invalid)?;
+    serde_json::from_value::<crate::contracts::agent_adapter::AgentRuntimeKind>(
+        p.get("runtime_kind")
+            .ok_or(ControlError::StorageIncompatible)?
+            .clone(),
+    )
+    .map_err(invalid)?;
+    Ok(())
+}
+type SessionRow = (String, String, String, String, i64, String, String, String);
+fn get_session(c: &Connection, id: &str) -> ControlResult<ManagedSessionRecord> {
+    let v:Option<SessionRow>=c.query_row("SELECT session_id,adapter_id,runtime_kind,control_state,revision,created_at,updated_at,created_sequence FROM managed_sessions WHERE session_id=?1",[canonical(id)],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?))).optional().map_err(db)?;
+    let Some((id, adapter, runtime, state, revision, created, updated, seq)) = v else {
+        return Err(ControlError::SessionNotFound);
+    };
+    let s:ManagedSessionRecord=serde_json::from_value(json!({"managed_session_id":id,"adapter_id":adapter,"runtime_kind":runtime,"control_state":state,"revision":u64::try_from(revision).map_err(invalid)?,"created_at":created,"updated_at":updated,"created_sequence":seq.trim_start_matches('0')})).map_err(invalid)?;
+    s.validate()?;
+    Ok(s)
+}

@@ -1,7 +1,7 @@
 # Wyss Console
 
 Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current status: **Sprint 2C read-only Codex compatibility probe** using Tauri 2,
+Linux-first, local-first. Current status: **Sprint 2D external authority foundation** using Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -107,3 +107,51 @@ with no next cursor. Compatibility is confirmed only for the exercised protocol
 surface; listing is not entitlement. The owned app-server exited cleanly and was
 reaped. See ADRs 0009–0010 and the research note. Managed execution still requires
 external authority.
+
+## External control authority
+
+`wyss-control` independently owns prepared/closed managed-session identities,
+canonical control state, durable intent receipts and a minimal EventEnvelope audit.
+**No managed agent work executes yet.** Prepared is not execution permission.
+Human terminal tabs remain Console-local; the read-only Codex probe above remains
+a separate developer tool. The desktop does not start or connect to the authority.
+
+Build the independent binary and developer client:
+
+```sh
+node scripts/tool.mjs cargo build --locked --manifest-path src-tauri/Cargo.toml --bin wyss-control --example control_client
+```
+
+Start independently, with a valid private XDG runtime directory:
+
+```sh
+./src-tauri/target/debug/wyss-control
+```
+
+From another terminal:
+
+```sh
+./src-tauri/target/debug/examples/control_client status
+./src-tauri/target/debug/examples/control_client prepare
+./src-tauri/target/debug/examples/control_client list
+./src-tauri/target/debug/examples/control_client audit
+```
+
+The client also supports `hello`, `get UUID`, `close UUID revision`, and
+`prepare intent-UUID` for durable retry. Close changes only the control record.
+No Codex runtime/thread/turn is created. Stop authority using Ctrl+C or SIGTERM;
+a normal control client cannot shut it down.
+
+Socket: `$XDG_RUNTIME_DIR/wyss-console/control.sock` (0700 directory, 0600 socket).
+Missing/unsafe runtime directories fail closed. State: `$XDG_STATE_HOME/wyss-console/control.sqlite3`,
+fallback `$HOME/.local/state/wyss-console/control.sqlite3`. Product state is private.
+SQLite WAL/FULL commits state, audit and intent receipts atomically. Do not delete
+WAL/SHM files or change/copy an active canonical database casually. Client EOF
+changes no state. Authority restart preserves committed state/stream/sequence.
+Same-UID SO_PEERCRED is a local boundary, not protection from compromised same-user
+processes. Maximum eight connected clients; idle connections expire after five
+seconds. Session/audit pages are bounded to fifty entries. See ADR 0011.
+
+`npm run rust:test` includes hermetic authority unit tests and actual process tests
+using isolated temporary XDG directories. They do not require or launch Codex.
+No production state is created by the test suite.
