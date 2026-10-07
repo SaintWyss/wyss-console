@@ -1,6 +1,8 @@
 //! Explicit developer-only read-only compatibility probe. No Tauri entrypoint.
 //! Production executable/argv/cwd and outbound plan are fixed here, not caller inputs.
 mod process;
+#[cfg(target_os = "linux")]
+pub(crate) mod supervised;
 #[cfg(test)]
 mod tests;
 
@@ -266,6 +268,7 @@ impl Correlation {
                 if self.notification_count > NOTIFICATION_LIMIT {
                     return Err(ProbeError::NotificationLimit);
                 }
+                normalize_inbound(message, None).map_err(|_| ProbeError::Protocol)?;
                 let method = message.method().unwrap();
                 if !report.notifications.contains_key(method)
                     && report.notifications.len() == METHOD_LIMIT
@@ -276,7 +279,8 @@ impl Correlation {
                     .notification_shapes
                     .entry(method.to_owned())
                     .or_insert_with(|| message.structure());
-                *report.notifications.entry(method.to_owned()).or_default() += 1;
+                let count = report.notifications.entry(method.to_owned()).or_default();
+                *count = count.saturating_add(1);
                 Ok(())
             }
             _ => {
@@ -321,7 +325,10 @@ impl Correlation {
 fn wire_error_code(message: &WireMessage) -> Option<i64> {
     message.vendor_value().get("error")?.get("code")?.as_i64()
 }
-fn exchange(io: &mut impl ProbeIo, report: &mut CodexLiveProbeReportV1) -> ProbeResult<()> {
+fn handshake(
+    io: &mut impl ProbeIo,
+    report: &mut CodexLiveProbeReportV1,
+) -> ProbeResult<Correlation> {
     let plan = ProbePlan::new()?;
     report.initialize_request_id = plan.initialize.id().cloned();
     report.model_request_id = plan.models.id().cloned();
@@ -400,6 +407,10 @@ fn exchange(io: &mut impl ProbeIo, report: &mut CodexLiveProbeReportV1) -> Probe
         report.model_list_result = ProbeStage::Success;
         report.confirmed_evidence.push("model_list.observe");
     }
+    Ok(correlation)
+}
+fn exchange(io: &mut impl ProbeIo, report: &mut CodexLiveProbeReportV1) -> ProbeResult<()> {
+    let mut correlation = handshake(io, report)?;
     // EOF requests graceful exit. Validate final/interleaved frames, including duplicate
     // completions, until EOF or a bounded grace deadline. No more outbound operations.
     io.close_input();
@@ -411,7 +422,6 @@ fn exchange(io: &mut impl ProbeIo, report: &mut CodexLiveProbeReportV1) -> Probe
             Err(e) => return Err(e),
         }
     }
-    state.close();
     Ok(())
 }
 fn initial_report(cwd: PathBuf) -> CodexLiveProbeReportV1 {

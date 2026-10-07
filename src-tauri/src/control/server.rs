@@ -1,6 +1,7 @@
 use super::{
     framing::{read_frame, write_frame},
     paths::Paths,
+    runtime::{Observation, Runtime},
     store::{Store, uuid},
 };
 use crate::contracts::{WireUuid, control::*};
@@ -40,7 +41,15 @@ const QUEUE: usize = 8;
 const HELLO_TIMEOUT: Duration = Duration::from_secs(3);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(3);
-struct Job {
+pub(super) enum CoreMessage {
+    Client(Job),
+    Runtime(
+        crate::contracts::identities::AgentRuntimeInstanceId,
+        Observation,
+    ),
+    Shutdown,
+}
+pub(super) struct Job {
     op: Operation,
     reply: SyncSender<ControlResult<ResultValue>>,
 }
@@ -121,7 +130,7 @@ pub(crate) fn peer(stream: &UnixStream) -> ControlResult<()> {
 }
 fn connection(
     mut stream: UnixStream,
-    core: SyncSender<Job>,
+    core: SyncSender<CoreMessage>,
     instance: WireUuid,
     stop: Arc<AtomicBool>,
 ) {
@@ -163,10 +172,10 @@ fn connection(
             Err(ControlError::InvalidRequest)
         } else {
             let (reply, rx) = mpsc::sync_channel(1);
-            match core.try_send(Job {
+            match core.try_send(CoreMessage::Client(Job {
                 op: request.operation,
                 reply,
-            }) {
+            })) {
                 Ok(()) => rx
                     .recv_timeout(Duration::from_secs(3))
                     .unwrap_or(Err(ControlError::StorageUnavailable)),
@@ -210,17 +219,46 @@ pub fn run_from_environment() -> ControlResult<()> {
     let mut store = Store::open(&paths.state.join("control.sqlite3"), instance.clone())?;
     let (listener, _socket) = bind(&paths.runtime.join("control.sock"))?;
     let stop = Arc::new(AtomicBool::new(false));
-    let (sender, receiver) = mpsc::sync_channel::<Job>(QUEUE);
+    let (sender, receiver) = mpsc::sync_channel::<CoreMessage>(QUEUE);
+    let core_sender = sender.clone();
     let core_stop = stop.clone();
-    let core = thread::spawn(move || {
-        while let Ok(job) = receiver.recv() {
-            let result = if core_stop.load(Ordering::Acquire) {
-                Err(ControlError::StorageUnavailable)
-            } else {
-                store.apply(&job.op)
-            };
-            let _ = job.reply.try_send(result);
+    let mut runtime = Runtime::new(&store)?;
+    let core = thread::spawn(move || -> ControlResult<()> {
+        runtime.reconcile(&mut store, &core_sender, true)?;
+        while let Ok(message) = receiver.recv() {
+            match message {
+                CoreMessage::Shutdown => break,
+                CoreMessage::Runtime(id, observation) => {
+                    // A failed observation audit must not bypass child cleanup.
+                    let _ = runtime.observe(&mut store, id, observation);
+                }
+                CoreMessage::Client(job) => {
+                    let result = if core_stop.load(Ordering::Acquire) {
+                        Err(ControlError::StorageUnavailable)
+                    } else {
+                        match &job.op {
+                            Operation::RuntimeStatus(p) => p
+                                .supported()
+                                .map(|()| ResultValue::RuntimeStatus(runtime.status())),
+                            Operation::RuntimeModels(p) => runtime.models(p),
+                            _ => store.apply(&job.op),
+                        }
+                    };
+                    let reconcile = result.is_ok()
+                        && matches!(
+                            job.op,
+                            Operation::RuntimeStart(_) | Operation::RuntimeStop(_)
+                        );
+                    // Canonical receipt is returned before any external side effect.
+                    let _ = job.reply.try_send(result);
+                    if reconcile && runtime.reconcile(&mut store, &core_sender, false).is_err() {
+                        let _ = runtime.audit_failed(&mut store);
+                    }
+                }
+            }
         }
+        // Process shutdown is not a canonical runtime/stop intent.
+        runtime.stop(&mut store, true)
     });
     let mut workers: Vec<thread::JoinHandle<()>> = Vec::new();
     let result = (|| -> ControlResult<()> {
@@ -276,7 +314,8 @@ pub fn run_from_environment() -> ControlResult<()> {
     for h in workers {
         let _ = h.join();
     }
+    let _ = sender.send(CoreMessage::Shutdown);
     drop(sender);
-    core.join().map_err(|_| ControlError::InternalError)?;
+    core.join().map_err(|_| ControlError::InternalError)??;
     result
 }

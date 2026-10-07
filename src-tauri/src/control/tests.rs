@@ -99,7 +99,7 @@ fn fresh_schema_reopen_and_settings() {
 fn unknown_version_fails_closed() {
     let t = Temp::new();
     let s = t.store();
-    s.conn.pragma_update(None, "user_version", 2).unwrap();
+    s.conn.pragma_update(None, "user_version", 3).unwrap();
     drop(s);
     assert!(matches!(
         Store::open(&t.root.join("control.sqlite3"), uuid()),
@@ -509,7 +509,11 @@ fn protocol_hello_and_method_allowlist() {
             "managedSession/get",
             "managedSession/list",
             "managedSession/close",
-            "audit/read"
+            "audit/read",
+            "runtime/start",
+            "runtime/status",
+            "runtime/model/list",
+            "runtime/stop"
         ]
     );
     for forbidden in [
@@ -727,4 +731,332 @@ fn execution_parameters_are_not_accepted() {
         value["params"][name] = json!("not allowed");
         assert!(Request::parse(&serde_json::to_vec(&value).unwrap()).is_err());
     }
+}
+
+fn runtime_mutation() -> RuntimeMutation {
+    RuntimeMutation {
+        intent_id: uuid(),
+        adapter_id: RuntimeTarget::codex().adapter_id,
+        runtime_kind: RuntimeTarget::codex().runtime_kind,
+        expected_revision: None,
+    }
+}
+fn runtime_record(value: ResultValue) -> RuntimeControlRecord {
+    match value {
+        ResultValue::RuntimeControl(r) => r,
+        _ => panic!("runtime receipt"),
+    }
+}
+#[test]
+fn runtime_desired_state_idempotency_conflict_reopen_and_session_isolation() {
+    let t = Temp::new();
+    let mut s = t.store();
+    let prepared = session(s.apply(&prepare()).unwrap());
+    assert!(s.runtime_control().unwrap().is_none());
+    let start = Operation::RuntimeStart(runtime_mutation());
+    let first = runtime_record(s.apply(&start).unwrap());
+    assert_eq!(first.desired_state, DesiredState::Running);
+    assert_eq!(first.revision, 1);
+    assert_eq!(runtime_record(s.apply(&start).unwrap()), first);
+    let Operation::RuntimeStart(p) = &start else {
+        panic!()
+    };
+    assert!(matches!(
+        s.apply(&Operation::RuntimeStop(p.clone())),
+        Err(ControlError::IntentConflict)
+    ));
+    let stop = Operation::RuntimeStop(runtime_mutation());
+    let stopped = runtime_record(s.apply(&stop).unwrap());
+    assert_eq!(stopped.revision, 2);
+    assert_eq!(stopped.desired_state, DesiredState::Stopped);
+    assert_eq!(runtime_record(s.apply(&stop).unwrap()), stopped);
+    drop(s);
+    let mut s = t.store();
+    assert_eq!(runtime_record(s.apply(&start).unwrap()), first);
+    assert_eq!(s.runtime_control().unwrap(), Some(stopped));
+    let restarted = runtime_record(
+        s.apply(&Operation::RuntimeStart(runtime_mutation()))
+            .unwrap(),
+    );
+    assert_eq!(restarted.revision, 3);
+    // A deliberate start while already running is one new revision/reconciliation opportunity.
+    assert_eq!(
+        runtime_record(
+            s.apply(&Operation::RuntimeStart(runtime_mutation()))
+                .unwrap()
+        )
+        .revision,
+        4
+    );
+    assert_eq!(
+        session(
+            s.apply(&Operation::Get(Get {
+                managed_session_id: prepared.managed_session_id.clone()
+            }))
+            .unwrap()
+        ),
+        prepared
+    );
+    let all = events(&mut s);
+    assert_eq!(all.len(), 5);
+    for (index, event) in all.iter().enumerate() {
+        let v = serde_json::to_value(event).unwrap();
+        assert_eq!(event.sequence().get(), index as u64 + 1);
+        if index > 0 {
+            assert!(v["session_id"].is_null());
+            assert_eq!(v["event_type"], "authority.runtime.desired_state_changed");
+            assert!(!v["correlation_id"].is_null());
+            assert_eq!(v["payload"].as_object().unwrap().len(), 4);
+        }
+    }
+}
+#[test]
+fn runtime_unsupported_stale_and_audit_failure_have_zero_side_effects() {
+    let t = Temp::new();
+    let mut s = t.store();
+    let mut p = runtime_mutation();
+    p.runtime_kind = AgentRuntimeKind::GenericCli;
+    assert!(matches!(
+        s.apply(&Operation::RuntimeStart(p)),
+        Err(ControlError::Unsupported)
+    ));
+    let mut p = runtime_mutation();
+    p.expected_revision = Some(1);
+    assert!(matches!(
+        s.apply(&Operation::RuntimeStart(p)),
+        Err(ControlError::StaleRevision)
+    ));
+    s.conn.execute_batch("CREATE TRIGGER reject_runtime_audit BEFORE INSERT ON control_events BEGIN SELECT RAISE(ABORT,'injected_io_failure'); END").unwrap();
+    assert!(matches!(
+        s.apply(&Operation::RuntimeStart(runtime_mutation())),
+        Err(ControlError::StorageUnavailable)
+    ));
+    assert!(s.runtime_control().unwrap().is_none());
+    assert_eq!(s.status().unwrap().last_sequence, None);
+    assert_eq!(
+        s.conn
+            .query_row("SELECT count(*) FROM processed_intents", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+fn v1_fixture(t: &Temp) -> (PathBuf, Vec<(String, String, String)>, ManagedSessionRecord) {
+    let mut s = t.store();
+    let op = prepare();
+    let a = session(s.apply(&op).unwrap());
+    s.apply(&close(&a)).unwrap();
+    let mut q = s
+        .conn
+        .prepare("SELECT event_id,sequence,envelope FROM control_events ORDER BY sequence")
+        .unwrap();
+    let original = q
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    let path = t.root.join("v1.sqlite3");
+    paths::private_file(&path).unwrap();
+    let c = rusqlite::Connection::open(&path).unwrap();
+    for (_, sql) in schema::V1_OBJECTS {
+        c.execute_batch(sql).unwrap();
+    }
+    c.execute(
+        "ATTACH DATABASE ?1 AS source",
+        [t.root.join("control.sqlite3").to_str().unwrap()],
+    )
+    .unwrap();
+    c.execute_batch("INSERT INTO authority_metadata SELECT id,1,stream_id,last_sequence FROM source.authority_metadata;
+        INSERT INTO managed_sessions SELECT * FROM source.managed_sessions;
+        INSERT INTO control_events SELECT * FROM source.control_events;
+        INSERT INTO processed_intents SELECT * FROM source.processed_intents;
+        PRAGMA user_version=1;").unwrap();
+    (path, original, a)
+}
+#[test]
+fn real_v1_migration_preserves_bytes_sessions_receipts_stream_and_head() {
+    let t = Temp::new();
+    let (path, original, prepared) = v1_fixture(&t);
+    let old = t.store().status().unwrap();
+    let mut s = Store::open(&path, uuid()).unwrap();
+    assert_eq!(s.status().unwrap().storage_schema_version, 2);
+    assert_eq!(s.status().unwrap().stream_id, old.stream_id);
+    assert_eq!(s.status().unwrap().last_sequence, old.last_sequence);
+    let saved: Vec<(String, String, String)> = s
+        .conn
+        .prepare("SELECT event_id,sequence,envelope FROM control_events ORDER BY sequence")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(saved, original);
+    assert!(s.runtime_control().unwrap().is_none());
+    let raw: String = s
+        .conn
+        .query_row(
+            "SELECT mutation FROM processed_intents WHERE mutation LIKE '%managedSession/prepare%'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let op: Operation = serde_json::from_str(&raw).unwrap();
+    assert_eq!(session(s.apply(&op).unwrap()), prepared);
+    assert_eq!(
+        session(
+            s.apply(&Operation::Get(Get {
+                managed_session_id: prepared.managed_session_id
+            }))
+            .unwrap()
+        )
+        .control_state,
+        ControlState::Closed
+    );
+    assert_eq!(
+        s.conn
+            .query_row("SELECT count(*) FROM processed_intents", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    drop(s);
+    assert_eq!(
+        Store::open(&path, uuid())
+            .unwrap()
+            .status()
+            .unwrap()
+            .last_sequence,
+        old.last_sequence
+    );
+}
+#[test]
+fn v1_migration_failure_rolls_back_all_ddl_and_version() {
+    let t = Temp::new();
+    let (path, _, _) = v1_fixture(&t);
+    let mut c = rusqlite::Connection::open(path).unwrap();
+    let snapshot = |c: &rusqlite::Connection| {
+        c.query_row(
+            "SELECT group_concat(sql,';') FROM sqlite_master WHERE sql IS NOT NULL",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .unwrap()
+    };
+    let before = snapshot(&c);
+    assert!(schema::fail_migration(&mut c).is_err());
+    assert_eq!(snapshot(&c), before);
+    assert_eq!(
+        c.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
+            .unwrap(),
+        1
+    );
+    schema::migrate(&mut c).unwrap();
+    assert_eq!(
+        c.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
+            .unwrap(),
+        2
+    );
+}
+#[test]
+fn corrupt_v1_schema_is_rejected_without_partial_upgrade() {
+    let t = Temp::new();
+    let (path, _, _) = v1_fixture(&t);
+    let c = rusqlite::Connection::open(&path).unwrap();
+    c.execute_batch("DROP TRIGGER control_events_no_update")
+        .unwrap();
+    drop(c);
+    assert!(matches!(
+        Store::open(&path, uuid()),
+        Err(ControlError::StorageIncompatible)
+    ));
+    let c = rusqlite::Connection::open(path).unwrap();
+    assert_eq!(
+        c.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
+            .unwrap(),
+        1
+    );
+}
+#[test]
+fn runtime_control_rejects_conversation_inputs_and_unbounded_pages() {
+    for method in [
+        "runtime/start",
+        "runtime/stop",
+        "runtime/status",
+        "runtime/model/list",
+    ] {
+        let op = match method {
+            "runtime/start" => Operation::RuntimeStart(runtime_mutation()),
+            "runtime/stop" => Operation::RuntimeStop(runtime_mutation()),
+            "runtime/status" => Operation::RuntimeStatus(RuntimeTarget::codex()),
+            _ => Operation::RuntimeModels(RuntimeModels {
+                adapter_id: RuntimeTarget::codex().adapter_id,
+                runtime_kind: RuntimeTarget::codex().runtime_kind,
+                cursor: None,
+                limit: 20,
+            }),
+        };
+        let raw = request(op).encode().unwrap();
+        assert!(Request::parse(&raw).is_ok());
+        let mut v: Value = serde_json::from_slice(&raw).unwrap();
+        v["params"]["prompt"] = json!("forbidden");
+        assert!(Request::parse(&serde_json::to_vec(&v).unwrap()).is_err());
+    }
+    let mut p = RuntimeModels {
+        adapter_id: RuntimeTarget::codex().adapter_id,
+        runtime_kind: RuntimeTarget::codex().runtime_kind,
+        cursor: None,
+        limit: 21,
+    };
+    assert!(Operation::RuntimeModels(p.clone()).validate().is_err());
+    p.limit = 0;
+    assert!(Operation::RuntimeModels(p).validate().is_err());
+}
+
+#[test]
+fn runtime_lifecycle_audit_is_minimal_monotonic_and_reopens() {
+    let t = Temp::new();
+    let mut s = t.store();
+    let id = crate::contracts::identities::AgentRuntimeInstanceId::parse(uuid().as_str()).unwrap();
+    s.apply(&Operation::RuntimeStart(runtime_mutation()))
+        .unwrap();
+    let ready = json!({"adapter_id":"codex","runtime_kind":"codex","runtime_instance_id":id,"runtime_version":"0.159.0","compatibility":"compatible"});
+    s.runtime_event("authority.runtime.instance_ready", ready.clone())
+        .unwrap();
+    let mut unsafe_payload = ready;
+    unsafe_payload["stderr"] = json!("synthetic private diagnostic");
+    assert!(
+        s.runtime_event("authority.runtime.instance_ready", unsafe_payload)
+            .is_err()
+    );
+    s.runtime_event("authority.runtime.instance_exited",json!({"adapter_id":"codex","runtime_kind":"codex","runtime_instance_id":id,"exit_kind":"protocol_failed","expected":false,"desired_state":"running"})).unwrap();
+    let all = events(&mut s);
+    assert_eq!(all.len(), 3);
+    for (index, event) in all.iter().enumerate() {
+        let v = serde_json::to_value(event).unwrap();
+        assert_eq!(event.sequence().get(), index as u64 + 1);
+        assert!(v["session_id"].is_null());
+        assert_eq!(v["persistence"], "durable");
+        assert_eq!(v["sensitivity"], "internal");
+        if index > 0 {
+            assert!(v["correlation_id"].is_null());
+        }
+        for field in [
+            "pid",
+            "models",
+            "stderr",
+            "stdout",
+            "params",
+            "environment",
+            "prompt",
+        ] {
+            assert!(v["payload"].get(field).is_none());
+        }
+    }
+    drop(s);
+    let mut s = t.store();
+    assert_eq!(events(&mut s).len(), 3);
+    assert_eq!(
+        s.runtime_control().unwrap().unwrap().desired_state,
+        DesiredState::Running
+    );
 }

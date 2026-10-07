@@ -36,6 +36,10 @@ pub(super) struct OwnedProcess {
     tail: VecDeque<u8>,
     pub stderr_bytes: u64,
     status: Option<ExitStatus>,
+    cancellation: Option<(
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+        std::os::unix::net::UnixStream,
+    )>,
 }
 
 fn io_error(_: impl std::fmt::Debug) -> ProbeError {
@@ -50,8 +54,48 @@ fn nonblocking(fd: i32) -> ProbeResult<()> {
     .map_err(io_error)?;
     Ok(())
 }
+#[cfg(target_os = "linux")]
+fn contain_parent(expected_parent: Pid) -> std::io::Result<()> {
+    nix::sys::prctl::set_pdeathsig(Signal::SIGKILL).map_err(std::io::Error::from)?;
+    if nix::unistd::getppid() != expected_parent {
+        return Err(std::io::Error::from_raw_os_error(nix::libc::ECHILD));
+    }
+    Ok(())
+}
+#[cfg(all(test, target_os = "linux"))]
+#[test]
+fn parent_death_setup_rejects_lost_relationship_before_exec() {
+    use std::os::unix::process::CommandExt;
+    let mut command = Command::new("/bin/true");
+    // A changed parent is exactly the observable state after death before prctl.
+    // SAFETY: the helper performs only syscalls and OS-error construction.
+    unsafe {
+        command.pre_exec(|| contain_parent(Pid::from_raw(i32::MAX)));
+    }
+    assert_eq!(
+        command.spawn().unwrap_err().raw_os_error(),
+        Some(nix::libc::ECHILD)
+    );
+}
 impl OwnedProcess {
     pub fn spawn(command: &mut Command) -> ProbeResult<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::process::CommandExt;
+            let expected_parent = nix::unistd::getpid();
+            // SAFETY: only Linux syscalls and construction of an OS error after fork.
+            // SIGKILL cannot be masked; comparing getppid closes the pre-prctl death race.
+            unsafe {
+                command.pre_exec(move || {
+                    contain_parent(expected_parent)?;
+                    // The authority blocks termination signals for signalfd; children must not inherit that mask.
+                    nix::sys::signal::SigSet::empty()
+                        .thread_set_mask()
+                        .map_err(std::io::Error::from)?;
+                    Ok(())
+                });
+            }
+        }
         let child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -67,6 +111,7 @@ impl OwnedProcess {
             tail: VecDeque::with_capacity(STDERR_LIMIT),
             stderr_bytes: 0,
             status: None,
+            cancellation: None,
         };
         owner.stdin = owner.child.stdin.take();
         owner.stdout = owner.child.stdout.take();
@@ -111,6 +156,7 @@ impl OwnedProcess {
         Ok(())
     }
     pub fn read(&mut self, buffer: &mut [u8]) -> ProbeResult<Option<usize>> {
+        self.check_cancel()?;
         self.drain_stderr()?;
         let Some(stdout) = self.stdout.as_mut() else {
             return Ok(Some(0));
@@ -165,12 +211,34 @@ impl OwnedProcess {
         }
         Ok(())
     }
+    pub fn cancel_with(
+        &mut self,
+        flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        wake: std::os::unix::net::UnixStream,
+    ) {
+        self.cancellation = Some((flag, wake));
+    }
+    fn check_cancel(&self) -> ProbeResult<()> {
+        if self
+            .cancellation
+            .as_ref()
+            .is_some_and(|(flag, _)| flag.load(std::sync::atomic::Ordering::Acquire))
+        {
+            Err(ProbeError::Shutdown)
+        } else {
+            Ok(())
+        }
+    }
     pub fn wait(&self, deadline: Instant, writing: bool) -> ProbeResult<()> {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err(ProbeError::Timeout);
         }
-        let mut fds = Vec::with_capacity(3);
+        self.check_cancel()?;
+        let mut fds = Vec::with_capacity(4);
+        if let Some((_, wake)) = &self.cancellation {
+            fds.push(PollFd::new(wake.as_fd(), PollFlags::POLLIN));
+        }
         if !writing && let Some(stdout) = &self.stdout {
             fds.push(PollFd::new(stdout.as_fd(), PollFlags::POLLIN));
         }
@@ -180,9 +248,16 @@ impl OwnedProcess {
         if writing && let Some(stdin) = &self.stdin {
             fds.push(PollFd::new(stdin.as_fd(), PollFlags::POLLOUT));
         }
-        let millis = remaining.as_millis().clamp(1, 50) as u16;
+        let millis = remaining.as_millis().clamp(
+            1,
+            if self.cancellation.is_some() {
+                u16::MAX as u128
+            } else {
+                50
+            },
+        ) as u16;
         match poll(&mut fds, millis) {
-            Ok(_) | Err(Errno::EINTR) => Ok(()),
+            Ok(_) | Err(Errno::EINTR) => self.check_cancel(),
             Err(_) => Err(ProbeError::Transport),
         }
     }
@@ -207,6 +282,7 @@ impl OwnedProcess {
         Ok(true)
     }
     pub fn shutdown(&mut self) -> ProbeResult<ShutdownReport> {
+        self.cancellation.take();
         self.stdin.take();
         let mut result = ShutdownReport {
             stdin_closed: true,

@@ -1,4 +1,4 @@
-//! Wyss Control Protocol v1. No runtime execution operations exist.
+//! Wyss Control Protocol v1. Runtime supervision does not authorize agent work.
 use super::{
     Sequence, UtcTimestamp, WireUuid,
     agent_adapter::{AgentAdapterId, AgentRuntimeKind},
@@ -12,7 +12,7 @@ use std::fmt;
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_FRAME: usize = 65_536;
 pub const MAX_PAGE: u16 = 50;
-pub const METHODS: [&str; 7] = [
+pub const METHODS: [&str; 11] = [
     "authority/hello",
     "authority/status",
     "managedSession/prepare",
@@ -20,6 +20,10 @@ pub const METHODS: [&str; 7] = [
     "managedSession/list",
     "managedSession/close",
     "audit/read",
+    "runtime/start",
+    "runtime/status",
+    "runtime/model/list",
+    "runtime/stop",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +33,7 @@ pub enum ControlError {
     HandshakeRequired,
     InvalidRequest,
     UnsupportedMethod,
+    Unsupported,
     FrameTooLarge,
     TruncatedFrame,
     Timeout,
@@ -112,6 +117,14 @@ pub enum Operation {
     List(List),
     #[serde(rename = "managedSession/close")]
     Close(Close),
+    #[serde(rename = "runtime/start")]
+    RuntimeStart(RuntimeMutation),
+    #[serde(rename = "runtime/stop")]
+    RuntimeStop(RuntimeMutation),
+    #[serde(rename = "runtime/status")]
+    RuntimeStatus(RuntimeTarget),
+    #[serde(rename = "runtime/model/list")]
+    RuntimeModels(RuntimeModels),
     #[serde(rename = "audit/read")]
     AuditRead(AuditRead),
 }
@@ -128,6 +141,9 @@ impl Operation {
                 Err(ControlError::InvalidRequest)
             }
             Self::Close(p) if !(1..=2).contains(&p.expected_revision) => {
+                Err(ControlError::InvalidRequest)
+            }
+            Self::RuntimeModels(p) if p.limit == 0 || p.limit > 20 => {
                 Err(ControlError::InvalidRequest)
             }
             _ => Ok(()),
@@ -226,6 +242,13 @@ pub enum ResultValue {
     Hello(AuthorityStatus),
     Status(AuthorityStatus),
     Session(ManagedSessionRecord),
+    RuntimeControl(RuntimeControlRecord),
+    RuntimeStatus(RuntimeStatus),
+    RuntimeModels {
+        runtime_instance_id: super::identities::AgentRuntimeInstanceId,
+        models: Vec<super::agent_adapter::AgentModelDescriptorV1>,
+        next: Option<ModelCursor>,
+    },
     Sessions {
         sessions: Vec<ManagedSessionRecord>,
         next: Option<Sequence>,
@@ -302,9 +325,16 @@ fn validate_result(r: &ResultValue) -> ControlResult<()> {
     match r {
         ResultValue::Hello(s) | ResultValue::Status(s) => {
             if s.protocol_version != 1
-                || s.storage_schema_version != 1
+                || s.storage_schema_version != 2
                 || s.service_version.len() > 128
             {
+                return Err(ControlError::InvalidRequest);
+            }
+        }
+        ResultValue::RuntimeControl(s) => s.validate()?,
+        ResultValue::RuntimeStatus(s) => s.validate()?,
+        ResultValue::RuntimeModels { models, .. } => {
+            if models.len() > 20 {
                 return Err(ControlError::InvalidRequest);
             }
         }
@@ -417,4 +447,156 @@ impl<'de> Deserialize<'de> for Unique {
         }
         d.deserialize_any(V)
     }
+}
+
+// Runtime control has no conversational input, session binding or executable parameters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeTarget {
+    pub adapter_id: AgentAdapterId,
+    pub runtime_kind: AgentRuntimeKind,
+}
+impl RuntimeTarget {
+    pub fn codex() -> Self {
+        Self {
+            adapter_id: AgentAdapterId::parse("codex").expect("fixed adapter"),
+            runtime_kind: AgentRuntimeKind::Codex,
+        }
+    }
+    pub fn supported(&self) -> ControlResult<()> {
+        if self == &Self::codex() {
+            Ok(())
+        } else {
+            Err(ControlError::Unsupported)
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeMutation {
+    pub intent_id: WireUuid,
+    pub adapter_id: AgentAdapterId,
+    pub runtime_kind: AgentRuntimeKind,
+    pub expected_revision: Option<u64>,
+}
+impl RuntimeMutation {
+    pub fn target(&self) -> RuntimeTarget {
+        RuntimeTarget {
+            adapter_id: self.adapter_id.clone(),
+            runtime_kind: self.runtime_kind,
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesiredState {
+    Running,
+    Stopped,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActualState {
+    Stopped,
+    Starting,
+    Initializing,
+    Ready,
+    Stopping,
+    Failed,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeControlRecord {
+    pub adapter_id: AgentAdapterId,
+    pub runtime_kind: AgentRuntimeKind,
+    pub desired_state: DesiredState,
+    pub revision: u64,
+    pub created_at: UtcTimestamp,
+    pub updated_at: UtcTimestamp,
+}
+impl RuntimeControlRecord {
+    pub fn validate(&self) -> ControlResult<()> {
+        RuntimeTarget {
+            adapter_id: self.adapter_id.clone(),
+            runtime_kind: self.runtime_kind,
+        }
+        .supported()?;
+        if self.revision == 0 || self.revision > i64::MAX as u64 {
+            return Err(ControlError::StorageIncompatible);
+        }
+        Ok(())
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeDiagnostic {
+    Unavailable,
+    SpawnFailed,
+    TransportFailed,
+    HandshakeTimeout,
+    ProtocolFailed,
+    ServerRequest,
+    RuntimeRejected,
+    CatalogRejected,
+    ChildExited,
+    AuditUnavailable,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeMethods {
+    pub initialize: u8,
+    pub initialized: u8,
+    pub model_list: u8,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeStatus {
+    pub adapter_id: AgentAdapterId,
+    pub runtime_kind: AgentRuntimeKind,
+    pub desired_state: DesiredState,
+    pub revision: u64,
+    pub actual_state: ActualState,
+    pub runtime_instance_id: Option<super::identities::AgentRuntimeInstanceId>,
+    pub runtime_version: Option<String>,
+    pub compatibility: super::agent_adapter::CompatibilityState,
+    pub model_count: u16,
+    pub diagnostic: Option<RuntimeDiagnostic>,
+    pub outbound_methods: RuntimeMethods,
+}
+impl RuntimeStatus {
+    pub fn validate(&self) -> ControlResult<()> {
+        RuntimeTarget {
+            adapter_id: self.adapter_id.clone(),
+            runtime_kind: self.runtime_kind,
+        }
+        .supported()?;
+        if self.model_count > 50
+            || self
+                .runtime_version
+                .as_ref()
+                .is_some_and(|s| s.len() > 128 || s.chars().any(char::is_control))
+            || self.outbound_methods.initialize > 1
+            || self.outbound_methods.initialized > 1
+            || self.outbound_methods.model_list > 1
+        {
+            return Err(ControlError::InvalidRequest);
+        }
+        if self.actual_state != ActualState::Ready && self.model_count != 0 {
+            return Err(ControlError::InvalidRequest);
+        }
+        Ok(())
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelCursor {
+    pub runtime_instance_id: super::identities::AgentRuntimeInstanceId,
+    pub index: u16,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeModels {
+    pub adapter_id: AgentAdapterId,
+    pub runtime_kind: AgentRuntimeKind,
+    pub cursor: Option<ModelCursor>,
+    pub limit: u16,
 }

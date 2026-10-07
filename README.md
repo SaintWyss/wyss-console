@@ -1,7 +1,7 @@
 # Wyss Console
 
 Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current status: **Sprint 2D external authority foundation** using Tauri 2,
+Linux-first, local-first. Current status: **Sprint 2E authority-owned Codex runtime supervision** using Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -139,7 +139,7 @@ From another terminal:
 
 The client also supports `hello`, `get UUID`, `close UUID revision`, and
 `prepare intent-UUID` for durable retry. Close changes only the control record.
-No Codex runtime/thread/turn is created. Stop authority using Ctrl+C or SIGTERM;
+Prepared sessions create no Codex thread/turn. Stop authority using Ctrl+C or SIGTERM;
 a normal control client cannot shut it down.
 
 Socket: `$XDG_RUNTIME_DIR/wyss-console/control.sock` (0700 directory, 0600 socket).
@@ -155,3 +155,48 @@ seconds. Session/audit pages are bounded to fifty entries. See ADR 0011.
 `npm run rust:test` includes hermetic authority unit tests and actual process tests
 using isolated temporary XDG directories. They do not require or launch Codex.
 No production state is created by the test suite.
+
+## Authority-owned Codex runtime
+
+`wyss-control` can supervise one shared, long-lived `codex app-server`, independently
+of Console clients. Durable desired running/stopped is separate from observed
+starting/initializing/ready/stopping/failed. Schema v1 upgrades transactionally to
+v2, preserving existing sessions, receipts, stream and audit; upgrade starts no
+runtime. No ManagedSession is bound to this process.
+
+The developer client exposes the new normalized control methods:
+
+```sh
+./src-tauri/target/debug/examples/control_client runtime/status
+./src-tauri/target/debug/examples/control_client runtime/start
+./src-tauri/target/debug/examples/control_client runtime/model/list
+./src-tauri/target/debug/examples/control_client runtime/stop
+```
+
+Start/stop also accept an intent UUID for durable retries. Each new intent commits
+its desired state/revision/audit before reconciliation; retry returns the original
+receipt. Status observes readiness asynchronously. The Rust client supports catalog
+pages of at most twenty descriptors with instance-scoped cursors. The catalog is
+bounded to one fifty-model page, transient and refreshed for each new process;
+listing is not provider entitlement. A rejected catalog fails safely without auth
+remediation. No raw Codex frames/stderr/auth/environment are exposed or persisted.
+
+The shared 2C handshake sends only initialize, initialized and model/list. Stdout
+continues to be validated/drained after readiness and stderr remains bounded.
+Server requests are never answered; protocol failure reaps the child. Linux
+parent-death SIGKILL plus parent-identity checking prevents an orphan App Server
+after authority crash. Graceful authority shutdown reaps the child but preserves
+desired running; restart obtains a fresh AgentRuntimeInstanceId and catalog.
+Explicit runtime/stop persists stopped and suppresses startup reconciliation.
+Unexpected runtime failure does not create an automatic restart loop; a new start
+intent admits one recovery attempt.
+
+**Runtime process readiness is not execution authorization.** No Codex threads or
+turns are created, no prompts execute, and no approvals/permissions are answered.
+Tauri has no runtime command/capability or authority connection. Human terminal
+behavior and the standalone read-only probe remain unchanged. See ADR 0012.
+
+Rust tests include seeded v1 migration, idempotency/audit rollback, deterministic
+fake App Server IO/failure/allowlist checks, graceful restart, explicit stop and
+Linux SIGKILL containment. Normal tests use isolated XDG directories and a fake
+executable, never the user's Codex runtime or production authority state.

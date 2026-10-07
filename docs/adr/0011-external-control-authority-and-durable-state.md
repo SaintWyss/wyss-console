@@ -184,3 +184,9 @@ remain required before managed work. No first prompt is authorized by Sprint 2D.
 Installation/autostart, remote transport, policies, retention and runtime recovery
 are deferred. Current human terminal UX and the separate read-only Codex developer
 probe remain unchanged.
+
+## Implementation status
+
+Sprint 2E adds authority-owned runtime process supervision and schema v2 as specified
+in ADR 0012. The authority/client boundary and durable session ownership remain in
+force. Runtime readiness still grants no managed-work permission.

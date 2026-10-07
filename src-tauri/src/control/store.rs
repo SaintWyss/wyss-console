@@ -72,7 +72,7 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .map_err(invalid)?;
-        if version != 1 {
+        if version != 2 {
             return Err(ControlError::StorageIncompatible);
         }
         let stream = WireUuid::try_from(stream).map_err(invalid)?;
@@ -107,7 +107,7 @@ impl Store {
             let id: String = r.get(0).map_err(invalid)?;
             let stream: String = r.get(1).map_err(invalid)?;
             let order: String = r.get(2).map_err(invalid)?;
-            let session: String = r.get(3).map_err(invalid)?;
+            let session: Option<String> = r.get(3).map_err(invalid)?;
             let raw: String = r.get(4).map_err(invalid)?;
             let v: Value = serde_json::from_str(&raw).map_err(invalid)?;
             let e = EventEnvelopeV1::from_value(v.clone()).map_err(invalid)?;
@@ -115,7 +115,7 @@ impl Store {
                 || stream != self.stream.as_str()
                 || order != key(n)
                 || e.sequence().get() != n
-                || session != v["session_id"]
+                || serde_json::to_value(session).map_err(invalid)? != v["session_id"]
             {
                 return Err(ControlError::StorageIncompatible);
             }
@@ -154,8 +154,10 @@ impl Store {
                 return Err(ControlError::StorageIncompatible);
             }
             let result: String = r.get(2).map_err(invalid)?;
-            let session: ManagedSessionRecord = serde_json::from_str(&result).map_err(invalid)?;
-            session.validate()?;
+            decode_receipt(&op, &result)?;
+        }
+        if let Some(runtime) = self.runtime_control()? {
+            runtime.validate()?;
         }
         let count: i64 = self
             .conn
@@ -190,7 +192,7 @@ impl Store {
             protocol_version: 1,
             authority_instance_id: self.instance.clone(),
             service_version: env!("CARGO_PKG_VERSION").into(),
-            storage_schema_version: 1,
+            storage_schema_version: 2,
             stream_id: self.stream.clone(),
             last_sequence: if head == 0 {
                 None
@@ -256,8 +258,23 @@ impl Store {
                 };
                 Ok(ResultValue::Audit { events, next })
             }
-            Operation::Prepare(_) | Operation::Close(_) => self.mutate(op),
+            Operation::Prepare(_)
+            | Operation::Close(_)
+            | Operation::RuntimeStart(_)
+            | Operation::RuntimeStop(_) => self.mutate(op),
+            _ => Err(ControlError::InvalidRequest),
         }
+    }
+    pub fn runtime_control(&self) -> ControlResult<Option<RuntimeControlRecord>> {
+        read_runtime(&self.conn)
+    }
+    pub fn runtime_event(&mut self, kind: &str, payload: Value) -> ControlResult<()> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db)?;
+        append_runtime_event(&tx, &self.instance, &self.stream, None, kind, payload)?;
+        tx.commit().map_err(db)
     }
     fn mutate(&mut self, op: &Operation) -> ControlResult<ResultValue> {
         let intent_id = canonical(intent(op).ok_or(ControlError::InvalidRequest)?.as_str());
@@ -284,9 +301,55 @@ impl Store {
             if original != mutation {
                 return Err(ControlError::IntentConflict);
             }
-            let s: ManagedSessionRecord = serde_json::from_str(&result).map_err(invalid)?;
-            s.validate()?;
-            return Ok(ResultValue::Session(s));
+            return decode_receipt(op, &result);
+        }
+        if let Operation::RuntimeStart(p) | Operation::RuntimeStop(p) = op {
+            p.target().supported()?;
+            let previous = read_runtime(&tx)?;
+            let revision = previous.as_ref().map_or(0, |r| r.revision);
+            if p.expected_revision.is_some_and(|r| r != revision) {
+                return Err(ControlError::StaleRevision);
+            }
+            let revision = revision
+                .checked_add(1)
+                .filter(|r| *r <= i64::MAX as u64)
+                .ok_or(ControlError::CapacityExceeded)?;
+            let time = now()?;
+            let runtime = RuntimeControlRecord {
+                adapter_id: p.adapter_id.clone(),
+                runtime_kind: p.runtime_kind,
+                desired_state: if matches!(op, Operation::RuntimeStart(_)) {
+                    DesiredState::Running
+                } else {
+                    DesiredState::Stopped
+                },
+                revision,
+                created_at: previous.map_or_else(
+                    || time.clone().try_into().map_err(invalid),
+                    |r| Ok(r.created_at),
+                )?,
+                updated_at: time.clone().try_into().map_err(invalid)?,
+            };
+            tx.execute("INSERT INTO managed_runtimes VALUES('codex','codex',?1,?2,?3,?4) ON CONFLICT(adapter_id) DO UPDATE SET desired_state=excluded.desired_state,revision=excluded.revision,updated_at=excluded.updated_at",params![enum_text(&runtime.desired_state)?,revision as i64,enum_text(&runtime.created_at)?,time]).map_err(db)?;
+            append_runtime_event(
+                &tx,
+                &self.instance,
+                &self.stream,
+                Some(&intent_id),
+                "authority.runtime.desired_state_changed",
+                json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":runtime.desired_state,"revision":revision}),
+            )?;
+            tx.execute(
+                "INSERT INTO processed_intents VALUES(?1,?2,?3)",
+                params![
+                    intent_id,
+                    mutation,
+                    serde_json::to_string(&runtime).map_err(db)?
+                ],
+            )
+            .map_err(db)?;
+            tx.commit().map_err(db)?;
+            return Ok(ResultValue::RuntimeControl(runtime));
         }
         let time = now()?;
         let mut append = true;
@@ -359,6 +422,7 @@ fn intent(op: &Operation) -> Option<&WireUuid> {
     match op {
         Operation::Prepare(p) => Some(&p.intent_id),
         Operation::Close(p) => Some(&p.intent_id),
+        Operation::RuntimeStart(p) | Operation::RuntimeStop(p) => Some(&p.intent_id),
         _ => None,
     }
 }
@@ -423,10 +487,142 @@ fn append_event(
     .map_err(db)?;
     Ok(())
 }
+fn decode_receipt(op: &Operation, raw: &str) -> ControlResult<ResultValue> {
+    if matches!(op, Operation::RuntimeStart(_) | Operation::RuntimeStop(_)) {
+        let r: RuntimeControlRecord = serde_json::from_str(raw).map_err(invalid)?;
+        r.validate()?;
+        Ok(ResultValue::RuntimeControl(r))
+    } else {
+        let s: ManagedSessionRecord = serde_json::from_str(raw).map_err(invalid)?;
+        s.validate()?;
+        Ok(ResultValue::Session(s))
+    }
+}
+fn read_runtime(c: &Connection) -> ControlResult<Option<RuntimeControlRecord>> {
+    let row:Option<(String,i64,String,String)>=c.query_row("SELECT desired_state,revision,created_at,updated_at FROM managed_runtimes WHERE adapter_id='codex'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(db)?;
+    row.map(|(state,revision,created,updated)| {
+        let r:RuntimeControlRecord=serde_json::from_value(json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":state,"revision":revision,"created_at":created,"updated_at":updated})).map_err(invalid)?;
+        r.validate()?; Ok(r)
+    }).transpose()
+}
+fn append_runtime_event(
+    tx: &Transaction<'_>,
+    instance: &WireUuid,
+    stream: &WireUuid,
+    intent: Option<&str>,
+    kind: &str,
+    payload: Value,
+) -> ControlResult<()> {
+    let n = next_sequence(tx)?;
+    let value = json!({"schema_version":1,"event_id":uuid(),"event_type":kind,"payload_schema_version":1,"timestamp":now()?,"stream_id":stream,"sequence":n.to_string(),"session_id":null,"source":{"component":"wyss_control","instance_id":instance},"correlation_id":intent,"causation_id":null,"payload":payload,"persistence":"durable","sensitivity":"internal","redaction":"none"});
+    validate_audit(&value)?;
+    let event = EventEnvelopeV1::from_value(value.clone()).map_err(invalid)?;
+    tx.execute(
+        "INSERT INTO control_events VALUES(?1,?2,?3,NULL,?4)",
+        params![
+            value["event_id"].as_str().unwrap(),
+            stream.as_str(),
+            key(n),
+            serde_json::to_string(&event).map_err(db)?
+        ],
+    )
+    .map_err(db)?;
+    tx.execute(
+        "UPDATE authority_metadata SET last_sequence=?1 WHERE id=1",
+        [n.to_string()],
+    )
+    .map_err(db)?;
+    Ok(())
+}
 fn validate_audit(v: &Value) -> ControlResult<()> {
     let kind = v["event_type"]
         .as_str()
         .ok_or(ControlError::StorageIncompatible)?;
+    if kind.starts_with("authority.runtime.") {
+        if v["persistence"] != "durable"
+            || v["sensitivity"] != "internal"
+            || v["redaction"] != "none"
+            || v["source"]["component"] != "wyss_control"
+            || !v["session_id"].is_null()
+            || !v["causation_id"].is_null()
+            || v["payload_schema_version"] != 1
+        {
+            return Err(ControlError::StorageIncompatible);
+        }
+        let p = v["payload"]
+            .as_object()
+            .ok_or(ControlError::StorageIncompatible)?;
+        let keys: &[&str] = match kind {
+            "authority.runtime.desired_state_changed" => {
+                &["adapter_id", "runtime_kind", "desired_state", "revision"]
+            }
+            "authority.runtime.instance_ready" => &[
+                "adapter_id",
+                "runtime_kind",
+                "runtime_instance_id",
+                "runtime_version",
+                "compatibility",
+            ],
+            "authority.runtime.instance_exited" => &[
+                "adapter_id",
+                "runtime_kind",
+                "runtime_instance_id",
+                "exit_kind",
+                "expected",
+                "desired_state",
+            ],
+            _ => return Err(ControlError::StorageIncompatible),
+        };
+        if p.len() != keys.len()
+            || keys.iter().any(|k| !p.contains_key(*k))
+            || p["adapter_id"] != "codex"
+            || p["runtime_kind"] != "codex"
+        {
+            return Err(ControlError::StorageIncompatible);
+        }
+        if kind.ends_with("desired_state_changed") {
+            if v["correlation_id"].is_null()
+                || !matches!(p["desired_state"].as_str(), Some("running" | "stopped"))
+                || !p["revision"]
+                    .as_u64()
+                    .is_some_and(|n| n > 0 && n <= i64::MAX as u64)
+            {
+                return Err(ControlError::StorageIncompatible);
+            }
+        } else {
+            crate::contracts::identities::AgentRuntimeInstanceId::parse(
+                p["runtime_instance_id"]
+                    .as_str()
+                    .ok_or(ControlError::StorageIncompatible)?,
+            )
+            .map_err(invalid)?;
+            if !v["correlation_id"].is_null() {
+                return Err(ControlError::StorageIncompatible);
+            }
+            if kind.ends_with("instance_ready") {
+                serde_json::from_value::<crate::contracts::agent_adapter::CompatibilityState>(
+                    p["compatibility"].clone(),
+                )
+                .map_err(invalid)?;
+                if p["runtime_version"]
+                    .as_str()
+                    .is_some_and(|s| s.len() > 128 || s.chars().any(char::is_control))
+                    || !(p["runtime_version"].is_null() || p["runtime_version"].is_string())
+                {
+                    return Err(ControlError::StorageIncompatible);
+                }
+            } else {
+                serde_json::from_value::<RuntimeDiagnostic>(p["exit_kind"].clone())
+                    .map_err(invalid)?;
+                if !p["expected"].is_boolean()
+                    || !matches!(p["desired_state"].as_str(), Some("running" | "stopped"))
+                {
+                    return Err(ControlError::StorageIncompatible);
+                }
+            }
+        }
+        return Ok(());
+    }
     let state = match kind {
         "authority.managed_session.prepared" => "prepared",
         "authority.managed_session.closed" => "closed",

@@ -101,6 +101,24 @@ impl ControlClient {
         }
         response.outcome
     }
+    pub fn runtime_start(&mut self, p: RuntimeMutation) -> ControlResult<RuntimeControlRecord> {
+        runtime_control(self.call(Operation::RuntimeStart(p))?)
+    }
+    pub fn runtime_stop(&mut self, p: RuntimeMutation) -> ControlResult<RuntimeControlRecord> {
+        runtime_control(self.call(Operation::RuntimeStop(p))?)
+    }
+    pub fn runtime_status(&mut self) -> ControlResult<RuntimeStatus> {
+        match self.call(Operation::RuntimeStatus(RuntimeTarget::codex()))? {
+            ResultValue::RuntimeStatus(s) => Ok(s),
+            _ => Err(ControlError::InvalidRequest),
+        }
+    }
+    pub fn runtime_models(&mut self, p: RuntimeModels) -> ControlResult<ResultValue> {
+        match self.call(Operation::RuntimeModels(p))? {
+            r @ ResultValue::RuntimeModels { .. } => Ok(r),
+            _ => Err(ControlError::InvalidRequest),
+        }
+    }
     pub fn status(&mut self) -> ControlResult<AuthorityStatus> {
         match self.call(Operation::Status(Empty {}))? {
             ResultValue::Status(s) if s.authority_instance_id == self.instance => Ok(s),
@@ -157,4 +175,12 @@ pub(super) fn exchange(stream: &mut UnixStream, request: &Request) -> ControlRes
 fn client_instance_id() -> WireUuid {
     static ID: OnceLock<WireUuid> = OnceLock::new();
     ID.get_or_init(uuid).clone()
+}
+
+fn runtime_control(r: ResultValue) -> ControlResult<RuntimeControlRecord> {
+    if let ResultValue::RuntimeControl(r) = r {
+        Ok(r)
+    } else {
+        Err(ControlError::InvalidRequest)
+    }
 }

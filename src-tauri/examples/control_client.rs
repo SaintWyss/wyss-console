@@ -1,4 +1,4 @@
-//! Developer-only client. Fixed minimal control operations, never runtime execution.
+//! Developer-only client. Fixed control operations; runtime process readiness never authorizes work.
 use wyss_console::{
     contracts::{
         WireUuid,
@@ -15,6 +15,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let mut c = ControlClient::connect()?;
     let result=match args.first().map(String::as_str) {
+        Some("runtime/status") if args.len()==1=>serde_json::to_value(c.runtime_status()?)?,
+        Some("runtime/model/list") if args.len()==1=>serde_json::to_value(c.runtime_models(RuntimeModels {adapter_id:AgentAdapterId::parse("codex")?,runtime_kind:AgentRuntimeKind::Codex,cursor:None,limit:20})?)?,
+        Some("runtime/start"|"runtime/stop") if args.len()<=2=>{
+            let p=RuntimeMutation{intent_id:if let Some(i)=args.get(1){WireUuid::try_from(i.clone())?}else{id()},adapter_id:AgentAdapterId::parse("codex")?,runtime_kind:AgentRuntimeKind::Codex,expected_revision:None};
+            serde_json::to_value(if args[0]=="runtime/start" {c.runtime_start(p)?} else {c.runtime_stop(p)?})?
+        },
         Some("hello") if args.len()==1=>serde_json::to_value(c.hello_status())?,
         Some("status") if args.len()==1=>serde_json::to_value(c.status()?)?,
         Some("prepare") if args.len()<=2=>serde_json::to_value(c.prepare(Prepare{intent_id:if let Some(i)=args.get(1){WireUuid::try_from(i.clone())?}else{id()},adapter_id:AgentAdapterId::parse("codex")?,runtime_kind:AgentRuntimeKind::Codex})?)?,
@@ -22,7 +28,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some("list") if args.len()==1=>serde_json::to_value(c.list(List{after:None,limit:50})?)?,
         Some("audit") if args.len()==1=>serde_json::to_value(c.audit(AuditRead{stream_id:c.hello_status().stream_id.clone(),after_sequence:None,limit:50})?)?,
         Some("close") if args.len()==3=>serde_json::to_value(c.close(Close{intent_id:id(),managed_session_id:ManagedSessionId::parse(&args[1])?,expected_revision:args[2].parse()?})?)?,
-        _=>return Err("usage: control_client hello|status|prepare [intent UUID]|get UUID|list|audit|close UUID revision".into()),
+        _=>return Err("usage: control_client hello|status|prepare [intent UUID]|get UUID|list|audit|close UUID revision|runtime/status|runtime/model/list|runtime/start [intent UUID]|runtime/stop [intent UUID]".into()),
     };
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
