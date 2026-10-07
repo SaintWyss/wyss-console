@@ -143,6 +143,7 @@ fn ready() -> RuntimeStatus {
             initialize: 1,
             initialized: 1,
             model_list: 1,
+            ..RuntimeMethods::default()
         },
     }
 }
@@ -749,7 +750,7 @@ fn real_v2_upgrade_preserves_all_bytes_metadata_runtime_receipts_and_creates_zer
     let before = snapshot(&c);
     drop(c);
     let mut s = Store::open(&path, uuid()).unwrap();
-    assert_eq!(s.status().unwrap().storage_schema_version, 3);
+    assert_eq!(s.status().unwrap().storage_schema_version, 4);
     assert_eq!(snapshot(&s.conn), before);
     assert_eq!(s.next_expiry().unwrap(), None);
     assert_eq!(
@@ -801,7 +802,7 @@ fn failed_v2_migration_rolls_back_ddl_data_and_version() {
 }
 #[test]
 fn corrupt_v2_and_v3_and_future_version_fail_closed() {
-    for version in [2, 3, 4] {
+    for version in [2, 3, 4, 5] {
         let mut f = Fixture::new();
         let path = if version == 2 {
             v2_fixture(&mut f)
@@ -809,8 +810,8 @@ fn corrupt_v2_and_v3_and_future_version_fail_closed() {
             f.root.join("control.sqlite3")
         };
         let c = Connection::open(&path).unwrap();
-        if version == 4 {
-            c.pragma_update(None, "user_version", 4).unwrap();
+        if version == 5 {
+            c.pragma_update(None, "user_version", 5).unwrap();
         } else {
             c.execute_batch("DROP TRIGGER control_events_no_delete")
                 .unwrap();

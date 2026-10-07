@@ -1,3 +1,5 @@
+#[path = "bindings.rs"]
+pub(in crate::control) mod bindings;
 #[path = "leases.rs"]
 mod leases;
 use super::{paths, schema};
@@ -76,7 +78,7 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .map_err(invalid)?;
-        if version != 3 {
+        if version != 4 {
             return Err(ControlError::StorageIncompatible);
         }
         let stream = WireUuid::try_from(stream).map_err(invalid)?;
@@ -141,6 +143,7 @@ impl Store {
             get_session(&self.conn, &id.map_err(invalid)?)?.validate()?;
         }
         self.verify_leases()?;
+        self.verify_bindings()?;
         // Receipts contain only typed minimal mutations and their original session projection.
         let mut q = self
             .conn
@@ -200,7 +203,7 @@ impl Store {
             protocol_version: 1,
             authority_instance_id: self.instance.clone(),
             service_version: env!("CARGO_PKG_VERSION").into(),
-            storage_schema_version: 3,
+            storage_schema_version: 4,
             stream_id: self.stream.clone(),
             last_sequence: if head == 0 {
                 None
@@ -323,6 +326,16 @@ impl Store {
                 return Err(ControlError::IntentConflict);
             }
             return decode_receipt(op, &result);
+        }
+        if tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM managed_session_operations WHERE operation_id=?1)",
+                [&intent_id],
+                |r| r.get::<_, bool>(0),
+            )
+            .map_err(db)?
+        {
+            return Err(ControlError::IntentConflict);
         }
         let lease_now = self.clock.now();
         if matches!(
@@ -470,6 +483,9 @@ impl Store {
 }
 fn intent(op: &Operation) -> Option<&WireUuid> {
     match op {
+        Operation::BindingCreate(p) => Some(&p.intent_id),
+        Operation::BindingResume(p) => Some(&p.intent_id),
+        Operation::BindingAbandon(p) => Some(&p.intent_id),
         Operation::LeaseGrant(p) => Some(&p.intent_id),
         Operation::LeaseRenew(p) => Some(&p.intent_id),
         Operation::LeaseRevoke(p) => Some(&p.intent_id),
@@ -543,6 +559,17 @@ fn append_event(
 fn decode_receipt(op: &Operation, raw: &str) -> ControlResult<ResultValue> {
     if matches!(
         op,
+        Operation::BindingCreate(_) | Operation::BindingResume(_)
+    ) {
+        let b: SessionBinding = serde_json::from_str(raw).map_err(invalid)?;
+        b.validate()?;
+        Ok(ResultValue::Binding(b))
+    } else if matches!(op, Operation::BindingAbandon(_)) {
+        Ok(ResultValue::BindingAbandoned(
+            serde_json::from_str(raw).map_err(invalid)?,
+        ))
+    } else if matches!(
+        op,
         Operation::LeaseGrant(_) | Operation::LeaseRenew(_) | Operation::LeaseRevoke(_)
     ) {
         let l: ExecutionLease = serde_json::from_str(raw).map_err(invalid)?;
@@ -598,6 +625,9 @@ fn validate_audit(v: &Value) -> ControlResult<()> {
     let kind = v["event_type"]
         .as_str()
         .ok_or(ControlError::StorageIncompatible)?;
+    if kind.starts_with("authority.managed_session.runtime_") {
+        return bindings::validate_audit(v);
+    }
     if kind.starts_with("authority.execution_lease.") {
         return leases::validate_audit(v);
     }

@@ -105,6 +105,26 @@ impl ControlClient {
         }
         response.outcome
     }
+    pub fn binding_create(&mut self, p: BindingCreate) -> ControlResult<SessionBinding> {
+        binding(self.call(Operation::BindingCreate(p))?)
+    }
+    pub fn binding_resume(&mut self, p: BindingResume) -> ControlResult<SessionBinding> {
+        binding(self.call(Operation::BindingResume(p))?)
+    }
+    pub fn binding_status(&mut self, id: ManagedSessionId) -> ControlResult<BindingStatus> {
+        match self.call(Operation::BindingStatus(Get {
+            managed_session_id: id,
+        }))? {
+            ResultValue::BindingStatus(s) => Ok(s),
+            _ => Err(ControlError::InvalidRequest),
+        }
+    }
+    pub fn binding_abandon(&mut self, p: BindingAbandon) -> ControlResult<AbandonedOperation> {
+        match self.call(Operation::BindingAbandon(p))? {
+            ResultValue::BindingAbandoned(s) => Ok(s),
+            _ => Err(ControlError::InvalidRequest),
+        }
+    }
     pub fn lease_grant(&mut self, p: LeaseGrant) -> ControlResult<ExecutionLease> {
         lease(self.call(Operation::LeaseGrant(p))?)
     }
@@ -191,7 +211,15 @@ fn session(r: ResultValue) -> ControlResult<ManagedSessionRecord> {
 }
 pub(super) fn exchange(stream: &mut UnixStream, request: &Request) -> ControlResult<Response> {
     let stop = AtomicBool::new(false);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now()
+        + if matches!(
+            request.operation,
+            Operation::BindingCreate(_) | Operation::BindingResume(_)
+        ) {
+            Duration::from_secs(16)
+        } else {
+            Duration::from_secs(5)
+        };
     write_frame(stream, &request.encode()?, deadline, &stop)?;
     let bytes = read_frame(stream, deadline, &stop)?.ok_or(ControlError::TransportError)?;
     let response = Response::parse(&bytes)?;
@@ -217,6 +245,14 @@ fn runtime_control(r: ResultValue) -> ControlResult<RuntimeControlRecord> {
 fn lease(r: ResultValue) -> ControlResult<ExecutionLease> {
     if let ResultValue::Lease(l) = r {
         Ok(l)
+    } else {
+        Err(ControlError::InvalidRequest)
+    }
+}
+
+fn binding(r: ResultValue) -> ControlResult<SessionBinding> {
+    if let ResultValue::Binding(b) = r {
+        Ok(b)
     } else {
         Err(ControlError::InvalidRequest)
     }

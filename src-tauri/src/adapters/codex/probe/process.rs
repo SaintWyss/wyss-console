@@ -36,6 +36,7 @@ pub(super) struct OwnedProcess {
     tail: VecDeque<u8>,
     pub stderr_bytes: u64,
     status: Option<ExitStatus>,
+    pub interruptible: bool,
     cancellation: Option<(
         std::sync::Arc<std::sync::atomic::AtomicBool>,
         std::os::unix::net::UnixStream,
@@ -111,6 +112,7 @@ impl OwnedProcess {
             tail: VecDeque::with_capacity(STDERR_LIMIT),
             stderr_bytes: 0,
             status: None,
+            interruptible: false,
             cancellation: None,
         };
         owner.stdin = owner.child.stdin.take();
@@ -257,7 +259,23 @@ impl OwnedProcess {
             },
         ) as u16;
         match poll(&mut fds, millis) {
-            Ok(_) | Err(Errno::EINTR) => self.check_cancel(),
+            Ok(_) => {
+                self.check_cancel()?;
+                if self.interruptible
+                    && !writing
+                    && let Some((_, wake)) = &self.cancellation
+                    && fds
+                        .first()
+                        .is_some_and(|f| f.revents().is_some_and(|f| f.contains(PollFlags::POLLIN)))
+                {
+                    let mut wake = wake;
+                    let mut bytes = [0; 64];
+                    let _ = wake.read(&mut bytes);
+                    return Err(ProbeError::Wake);
+                }
+                Ok(())
+            }
+            Err(Errno::EINTR) => self.check_cancel(),
             Err(_) => Err(ProbeError::Transport),
         }
     }
@@ -283,6 +301,7 @@ impl OwnedProcess {
     }
     pub fn shutdown(&mut self) -> ProbeResult<ShutdownReport> {
         self.cancellation.take();
+        self.interruptible = false;
         self.stdin.take();
         let mut result = ShutdownReport {
             stdin_closed: true,

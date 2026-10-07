@@ -1,7 +1,7 @@
 # Wyss Console
 
 Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current status: **Sprint 2F execution gates, leases and revocation** using Tauri 2,
+Linux-first, local-first. Current validated status: **Sprint 2G managed Codex session lifecycle and runtime binding** using Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -192,8 +192,9 @@ Explicit runtime/stop persists stopped and suppresses startup reconciliation.
 Unexpected runtime failure does not create an automatic restart loop; a new start
 intent admits one recovery attempt.
 
-**Runtime process readiness is not execution authorization.** No Codex threads or
-turns are created, no prompts execute, and no approvals/permissions are answered.
+**Runtime process readiness is not execution authorization.** Runtime supervision
+creates no Codex threads or turns, submits no prompts, and answers no approvals or
+permission requests.
 Tauri has no runtime command/capability or authority connection. Human terminal
 behavior and the standalone read-only probe remain unchanged. See ADR 0012.
 
@@ -207,8 +208,8 @@ executable, never the user's Codex runtime or production authority state.
 Execution is denied by default. A prepared ManagedSession has no permission until
 an explicit `executionLease/grant` commits a durable lease and audit. Runtime
 startup, client reconnection and authority restart never grant or renew a lease.
-The authority still creates **zero Codex threads or turns**, submits no prompts
-and answers no approvals or permission requests. First managed work remains blocked.
+Lease operations themselves create **zero Codex threads or turns**, submit no
+prompts, and answer no approvals or permission requests. First managed work remains blocked.
 
 Schema v3 adds only execution leases and a unique active-lease index; migration
 preserves sessions, runtime desired state, receipts and exact audit bytes, and
@@ -241,3 +242,19 @@ Closing a session atomically expires/revokes its lease before closing the sessio
 Runtime stop leaves leases unchanged. Graceful/hard authority restart preserves
 unexpired lease identity, revision and exact deadline, without extending it.
 See [ADR 0013](docs/adr/0013-execution-gates-leases-and-revocation.md).
+
+## Managed conversation binding
+
+The authority implementation adds gated conversation create/resume, schema v4,
+immutable ManagedSessionId-to-CodexThreadId bindings and an external-effect journal.
+Runtime attachment is transient and restart never automatically resumes a thread.
+No turns, prompts or approval/permission responses are enabled; first managed agent
+work remains disabled. Tauri/human terminal integration is unchanged.
+
+Empty Codex 0.159.0 threads are materialized durably without a turn through an
+internal stable start→archive→unarchive persistence barrier. Create leaves the
+binding **bound_detached**. Explicit resume requires the separate `session_resume`
+lease scope before attachment; authority/runtime restart never resumes implicitly.
+No experimental API or history mode is enabled. The compatibility barrier, journal
+ambiguity and zero-turn boundary are documented in
+[ADR 0014](docs/adr/0014-managed-codex-session-binding.md).

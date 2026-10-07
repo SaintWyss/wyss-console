@@ -48,6 +48,7 @@ enum ProbeError {
     Shutdown,
     VersionOutput,
     Codec,
+    Wake,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

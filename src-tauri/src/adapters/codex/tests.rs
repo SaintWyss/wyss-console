@@ -726,3 +726,64 @@ fn rejection_structure_contains_only_bounded_keys_and_safe_method() {
             .contains("never retained")
     );
 }
+
+#[test]
+fn stable_materialization_codec_is_minimal_strict_and_correlated() {
+    let id = CodexRequestId::String("materialize-exact-id".into());
+    let thread = CodexThreadId::parse("opaque-provider-thread").unwrap();
+    for unarchive in [false, true] {
+        let request = materialization_request(id.clone(), &thread, unarchive).unwrap();
+        assert_eq!(request.params().unwrap(), &json!({"threadId":thread}));
+        assert_eq!(message_surface(&request), Surface::Stable);
+        let op = if unarchive {
+            Operation::ThreadUnarchive
+        } else {
+            Operation::ThreadArchive
+        };
+        let result = if unarchive {
+            let c = case("thread-start-response");
+            let v: Value = serde_json::from_str(c["wire"].as_str().unwrap()).unwrap();
+            json!({"thread":v["result"]["thread"]})
+        } else {
+            json!({})
+        };
+        let response =
+            WireMessage::from_value(json!({"id":id,"result":result}), Direction::ServerToClient)
+                .unwrap();
+        validate_response(&response, &id, op).unwrap();
+        assert!(validate_response(&response, &CodexRequestId::Integer(1), op).is_err());
+        let extra = WireMessage::from_value(
+            json!({"id":id,"result":{"unexpected":true}}),
+            Direction::ServerToClient,
+        )
+        .unwrap();
+        assert!(validate_response(&extra, &id, op).is_err());
+        for params in [
+            json!({}),
+            json!({"threadId":""}),
+            json!({"threadId":3}),
+            json!({"threadId":"ok","config":{}}),
+        ] {
+            assert!(WireMessage::request(id.clone(), request.method().unwrap(), params).is_err());
+        }
+    }
+}
+
+#[test]
+fn materialization_notifications_are_validated_and_consumed_without_attachment() {
+    for method in ["thread/archived", "thread/unarchived"] {
+        let m = WireMessage::from_value(
+            json!({"method":method,"params":{"threadId":"thread-valid"}}),
+            Direction::ServerToClient,
+        )
+        .unwrap();
+        assert!(normalize_inbound(&m, None).is_ok());
+        assert!(
+            WireMessage::from_value(
+                json!({"method":method,"params":{"threadId":3}}),
+                Direction::ServerToClient
+            )
+            .is_err()
+        );
+    }
+}

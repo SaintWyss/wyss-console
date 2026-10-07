@@ -1,4 +1,5 @@
 //! Wyss Control Protocol v1. Runtime supervision does not authorize agent work.
+pub use super::binding::*;
 pub use super::execution::*;
 use super::{
     Sequence, UtcTimestamp, WireUuid,
@@ -13,7 +14,11 @@ use std::fmt;
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_FRAME: usize = 65_536;
 pub const MAX_PAGE: u16 = 50;
-pub const METHODS: [&str; 17] = [
+pub const METHODS: [&str; 21] = [
+    "managedSession/runtime/create",
+    "managedSession/runtime/resume",
+    "managedSession/runtime/status",
+    "managedSession/runtime/abandon",
     "authority/hello",
     "authority/status",
     "managedSession/prepare",
@@ -56,6 +61,14 @@ pub enum ControlError {
     InvalidTransition,
     StaleRevision,
     IntentConflict,
+    BindingNotFound,
+    BindingAlreadyExists,
+    BindingIndeterminate,
+    WorkspaceInvalid,
+    RuntimeOperationInProgress,
+    ExternalEffectUnknown,
+    GateDenied,
+    ProviderRejected,
     CapacityExceeded,
     InternalError,
     TransportError,
@@ -115,6 +128,14 @@ pub struct AuditRead {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", deny_unknown_fields)]
 pub enum Operation {
+    #[serde(rename = "managedSession/runtime/create")]
+    BindingCreate(BindingCreate),
+    #[serde(rename = "managedSession/runtime/resume")]
+    BindingResume(BindingResume),
+    #[serde(rename = "managedSession/runtime/status")]
+    BindingStatus(Get),
+    #[serde(rename = "managedSession/runtime/abandon")]
+    BindingAbandon(BindingAbandon),
     #[serde(rename = "authority/hello")]
     Hello(Hello),
     #[serde(rename = "authority/status")]
@@ -153,6 +174,11 @@ pub enum Operation {
 impl Operation {
     pub fn validate(&self) -> ControlResult<()> {
         match self {
+            Self::BindingCreate(p) => {
+                valid_revision(p.expected_session_revision)?;
+                validate_workspace_text(&p.workspace_root)
+            }
+            Self::BindingResume(p) => valid_revision(p.expected_session_revision),
             Self::LeaseGrant(p) => {
                 validate_scopes(&p.scopes)?;
                 validate_ttl(p.ttl_seconds)?;
@@ -274,6 +300,9 @@ pub enum ResultValue {
     Hello(AuthorityStatus),
     Status(AuthorityStatus),
     Session(ManagedSessionRecord),
+    Binding(SessionBinding),
+    BindingStatus(BindingStatus),
+    BindingAbandoned(AbandonedOperation),
     Lease(ExecutionLease),
     ActiveLease(Option<ExecutionLease>),
     GateStatus(GateStatus),
@@ -360,12 +389,15 @@ fn validate_result(r: &ResultValue) -> ControlResult<()> {
     match r {
         ResultValue::Hello(s) | ResultValue::Status(s) => {
             if s.protocol_version != 1
-                || s.storage_schema_version != 3
+                || s.storage_schema_version != 4
                 || s.service_version.len() > 128
             {
                 return Err(ControlError::InvalidRequest);
             }
         }
+        ResultValue::Binding(b) => b.validate()?,
+        ResultValue::BindingStatus(s) => s.validate()?,
+        ResultValue::BindingAbandoned(_) => (),
         ResultValue::Lease(s) => s.validate()?,
         ResultValue::ActiveLease(s) => {
             if let Some(s) = s {
@@ -591,6 +623,14 @@ pub struct RuntimeMethods {
     pub initialize: u8,
     pub initialized: u8,
     pub model_list: u8,
+    #[serde(default)]
+    pub thread_start: u64,
+    #[serde(default)]
+    pub thread_archive: u64,
+    #[serde(default)]
+    pub thread_unarchive: u64,
+    #[serde(default)]
+    pub thread_resume: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

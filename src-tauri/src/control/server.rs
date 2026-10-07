@@ -177,7 +177,7 @@ fn connection(
                 reply,
             })) {
                 Ok(()) => rx
-                    .recv_timeout(Duration::from_secs(3))
+                    .recv_timeout(Duration::from_secs(15))
                     .unwrap_or(Err(ControlError::StorageUnavailable)),
                 Err(mpsc::TrySendError::Full(_)) => Err(ControlError::CapacityExceeded),
                 Err(_) => Err(ControlError::StorageUnavailable),
@@ -224,11 +224,14 @@ pub fn run_from_environment() -> ControlResult<()> {
     let core_stop = stop.clone();
     let mut runtime = Runtime::new(&store)?;
     let core = thread::spawn(move || -> ControlResult<()> {
+        store.recover_binding_operations()?;
+        let mut conversations = super::conversations::Conversations::default();
         let mut next_expiry = refresh_expiry(&mut store);
         runtime.reconcile(&mut store, &core_sender, true)?;
         loop {
             // A bounded wall-clock recheck handles clock changes, without SQLite polling.
             if next_expiry.is_some_and(|t| store.lease_now() >= t) {
+                conversations.invalidate_admission();
                 next_expiry = refresh_expiry(&mut store);
             }
             let received = match next_expiry {
@@ -245,16 +248,67 @@ pub fn run_from_environment() -> ControlResult<()> {
             match message {
                 CoreMessage::Shutdown => break,
                 CoreMessage::Runtime(id, observation) => {
+                    match observation {
+                        Observation::Materialization {
+                            ref operation_id,
+                            ref thread_id,
+                            stage,
+                            ref reply,
+                        } => {
+                            conversations.checkpoint(
+                                &mut store,
+                                &id,
+                                operation_id,
+                                thread_id,
+                                stage,
+                                reply,
+                            );
+                        }
+                        Observation::Conversation {
+                            ref operation_id,
+                            ref result,
+                            ..
+                        } => conversations.complete(
+                            &mut store,
+                            &runtime,
+                            &id,
+                            operation_id,
+                            result.clone(),
+                        ),
+                        Observation::Exited { .. } => conversations.detach(&mut store),
+                        _ => (),
+                    }
                     // A failed observation audit must not bypass child cleanup.
                     if runtime.observe(&mut store, id, observation).is_err() {
                         store.execution_available = false;
                     }
                 }
                 CoreMessage::Client(job) => {
+                    if matches!(
+                        job.op,
+                        Operation::BindingCreate(_) | Operation::BindingResume(_)
+                    ) && !core_stop.load(Ordering::Acquire)
+                    {
+                        conversations.begin(&mut store, &mut runtime, &job.op, job.reply);
+                        continue;
+                    }
+                    if matches!(
+                        job.op,
+                        Operation::LeaseRevoke(_)
+                            | Operation::LeaseRenew(_)
+                            | Operation::Close(_)
+                            | Operation::RuntimeStop(_)
+                    ) {
+                        conversations.invalidate_admission();
+                    }
                     let result = if core_stop.load(Ordering::Acquire) {
                         Err(ControlError::StorageUnavailable)
                     } else {
                         match &job.op {
+                            Operation::BindingStatus(p) => {
+                                conversations.status(&store, &runtime, &p.managed_session_id)
+                            }
+                            Operation::BindingAbandon(p) => store.abandon_binding(p),
                             Operation::RuntimeStatus(p) => p
                                 .supported()
                                 .map(|()| ResultValue::RuntimeStatus(runtime.status())),
@@ -293,6 +347,9 @@ pub fn run_from_environment() -> ControlResult<()> {
                         );
                     // Canonical receipt is returned before any external side effect.
                     let _ = job.reply.try_send(result);
+                    if reconcile && matches!(job.op, Operation::RuntimeStop(_)) {
+                        conversations.detach(&mut store);
+                    }
                     if reconcile && runtime.reconcile(&mut store, &core_sender, false).is_err() {
                         let _ = runtime.audit_failed(&mut store);
                     }
@@ -300,6 +357,7 @@ pub fn run_from_environment() -> ControlResult<()> {
             }
         }
         // Process shutdown is not a canonical runtime/stop intent.
+        conversations.detach(&mut store);
         runtime.stop(&mut store, true)
     });
     let mut workers: Vec<thread::JoinHandle<()>> = Vec::new();
@@ -353,10 +411,11 @@ pub fn run_from_environment() -> ControlResult<()> {
     })();
     stop.store(true, Ordering::Release);
     drop(listener);
+    // Cancel owned provider IO before waiting for clients blocked on a pending operation.
+    let _ = sender.send(CoreMessage::Shutdown);
     for h in workers {
         let _ = h.join();
     }
-    let _ = sender.send(CoreMessage::Shutdown);
     drop(sender);
     core.join().map_err(|_| ControlError::InternalError)??;
     result

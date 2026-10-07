@@ -697,3 +697,575 @@ fn leases_gate_disconnect_expiry_concurrent_grants_and_restarts_execute_zero_wor
         assert!(["initialize", "initialized", "model/list"].contains(&method.as_str()));
     }
 }
+
+fn prepare_bound_session(
+    c: &mut ControlClient,
+    scopes: Vec<ExecutionScope>,
+) -> (ManagedSessionRecord, ExecutionLease) {
+    let s = c
+        .prepare(Prepare {
+            intent_id: id(),
+            adapter_id: RuntimeTarget::codex().adapter_id,
+            runtime_kind: RuntimeTarget::codex().runtime_kind,
+        })
+        .unwrap();
+    let lease = c
+        .lease_grant(LeaseGrant {
+            intent_id: id(),
+            session_id: s.managed_session_id.clone(),
+            expected_session_revision: 1,
+            scopes,
+            ttl_seconds: 300,
+        })
+        .unwrap();
+    (s, lease)
+}
+fn create_params(env: &Sandbox, s: &ManagedSessionRecord) -> BindingCreate {
+    BindingCreate {
+        intent_id: id(),
+        managed_session_id: s.managed_session_id.clone(),
+        expected_session_revision: 1,
+        workspace_root: env.root.to_str().unwrap().to_owned(),
+    }
+}
+fn resume_params(s: &ManagedSessionRecord) -> BindingResume {
+    BindingResume {
+        intent_id: id(),
+        managed_session_id: s.managed_session_id.clone(),
+        expected_session_revision: 1,
+    }
+}
+fn count(env: &Sandbox, method: &str) -> usize {
+    env.methods()
+        .iter()
+        .filter(|m| m.as_str() == method)
+        .count()
+}
+fn wait_file(env: &Sandbox, name: &str) {
+    let until = Instant::now() + Duration::from_secs(5);
+    while !env.root.join(name).exists() {
+        assert!(Instant::now() < until, "{name}");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+#[test]
+fn successful_create_retry_uses_receipt_after_workspace_disappears() {
+    let env = Sandbox::new("happy");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = prepare_bound_session(&mut c, vec![ExecutionScope::SessionCreate]);
+    let workspace = env.root.join("workspace");
+    fs::create_dir(&workspace).unwrap();
+    let alias = env.root.join("workspace-alias");
+    std::os::unix::fs::symlink(&workspace, &alias).unwrap();
+    let mut p = create_params(&env, &s);
+    p.workspace_root = workspace.to_str().unwrap().to_owned();
+    let b = c.binding_create(p.clone()).unwrap();
+    let mut aliased = p.clone();
+    aliased.workspace_root = alias.to_str().unwrap().to_owned();
+    assert_eq!(c.binding_create(aliased).unwrap(), b);
+    let methods = env.methods();
+    fs::remove_dir(&workspace).unwrap();
+    assert_eq!(c.binding_create(p).unwrap(), b);
+    assert_eq!(env.methods(), methods);
+    assert_eq!(count(&env, "thread/start"), 1);
+    assert_eq!(count(&env, "thread/archive"), 1);
+    assert_eq!(count(&env, "thread/unarchive"), 1);
+    assert_eq!(count(&env, "thread/resume"), 0);
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    drop(c);
+    a.stop(false);
+    for pid in env.pids() {
+        dead(pid)
+    }
+}
+#[test]
+fn managed_bindings_share_runtime_survive_restarts_require_explicit_resume_and_keep_zero_turns() {
+    let env = Sandbox::new("happy");
+    let mut a = env.start();
+    let mut c = env.client();
+    let (s, l) = prepare_bound_session(
+        &mut c,
+        vec![ExecutionScope::SessionCreate, ExecutionScope::SessionResume],
+    );
+    assert_eq!(
+        c.binding_create(create_params(&env, &s)).unwrap_err(),
+        ControlError::GateDenied
+    );
+    assert_eq!(count(&env, "thread/start"), 0);
+    c.runtime_start(mutation()).unwrap();
+    let first = env.wait(&mut c, ActualState::Ready);
+    let p = create_params(&env, &s);
+    let b = c.binding_create(p.clone()).unwrap();
+    assert_eq!(c.binding_create(p.clone()).unwrap(), b);
+    assert_eq!(count(&env, "thread/start"), 1);
+    let mut conflicting = p.clone();
+    conflicting.managed_session_id =
+        wyss_console::contracts::identities::ManagedSessionId::parse(id().as_str()).unwrap();
+    assert_eq!(
+        c.binding_create(conflicting).unwrap_err(),
+        ControlError::IntentConflict
+    );
+    assert_eq!(
+        c.binding_create(create_params(&env, &s)).unwrap_err(),
+        ControlError::BindingAlreadyExists
+    );
+    let (s2, _) = prepare_bound_session(&mut c, vec![ExecutionScope::SessionCreate]);
+    let b2 = c.binding_create(create_params(&env, &s2)).unwrap();
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundDetached
+    );
+    assert_eq!(
+        c.binding_status(s2.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundDetached
+    );
+    assert_eq!(count(&env, "thread/resume"), 0);
+    assert_eq!(count(&env, "thread/archive"), 2);
+    assert_eq!(count(&env, "thread/unarchive"), 2);
+    assert_eq!(c.binding_resume(resume_params(&s)).unwrap(), b);
+
+    assert_ne!(b.runtime_session_id, b2.runtime_session_id);
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .runtime_instance_id,
+        first.runtime_instance_id
+    );
+    assert_eq!(
+        c.binding_status(s2.managed_session_id.clone())
+            .unwrap()
+            .runtime_instance_id,
+        None
+    );
+    let before = count(&env, "thread/resume");
+    assert_eq!(
+        c.binding_resume(resume_params(&s2)).unwrap_err(),
+        ControlError::GateDenied
+    );
+    assert_eq!(count(&env, "thread/resume"), before);
+    drop(c);
+    let mut c = env.client();
+    assert_eq!(c.lease_get(l.lease_id.clone()).unwrap(), l);
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundAttached
+    );
+    drop(c);
+    a.stop(false);
+    let mut a = env.start();
+    let mut c = env.client();
+    let second = env.wait(&mut c, ActualState::Ready);
+    assert_ne!(first.runtime_instance_id, second.runtime_instance_id);
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundDetached
+    );
+    assert_eq!(count(&env, "thread/resume"), before);
+    let r = resume_params(&s);
+    assert_eq!(c.binding_resume(r.clone()).unwrap(), b);
+    assert_eq!(c.binding_resume(r).unwrap(), b);
+    assert_eq!(count(&env, "thread/resume"), before + 1);
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundDetached
+    );
+    assert_eq!(c.lease_get(l.lease_id.clone()).unwrap(), l);
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    assert_eq!(count(&env, "thread/resume"), before + 1);
+    assert_eq!(c.binding_resume(resume_params(&s)).unwrap(), b);
+    c.close(Close {
+        intent_id: id(),
+        managed_session_id: s.managed_session_id.clone(),
+        expected_revision: 1,
+    })
+    .unwrap();
+    let status = c.binding_status(s.managed_session_id.clone()).unwrap();
+    assert_eq!(status.binding, Some(b));
+    assert_eq!(status.state, BindingState::BoundDetached);
+    assert_eq!(c.lease_get(l.lease_id).unwrap().state, LeaseState::Revoked);
+    assert_eq!(
+        c.binding_resume(resume_params(&s)).unwrap_err(),
+        ControlError::GateDenied
+    );
+    let allowed = std::collections::BTreeSet::from([
+        "initialize",
+        "initialized",
+        "model/list",
+        "thread/start",
+        "thread/resume",
+        "thread/archive",
+        "thread/unarchive",
+    ]);
+    assert_eq!(
+        env.methods()
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        allowed
+    );
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    drop(c);
+    a.stop(false);
+    for pid in env.pids() {
+        dead(pid)
+    }
+}
+#[test]
+fn create_denied_without_lease_or_with_turn_only_scope_sends_no_frame() {
+    let env = Sandbox::new("happy");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let s = c
+        .prepare(Prepare {
+            intent_id: id(),
+            adapter_id: RuntimeTarget::codex().adapter_id,
+            runtime_kind: RuntimeTarget::codex().runtime_kind,
+        })
+        .unwrap();
+    assert_eq!(
+        c.binding_create(create_params(&env, &s)).unwrap_err(),
+        ControlError::GateDenied
+    );
+    c.lease_grant(LeaseGrant {
+        intent_id: id(),
+        session_id: s.managed_session_id.clone(),
+        expected_session_revision: 1,
+        scopes: vec![ExecutionScope::TurnStart],
+        ttl_seconds: 300,
+    })
+    .unwrap();
+    assert_eq!(
+        c.binding_create(create_params(&env, &s)).unwrap_err(),
+        ControlError::GateDenied
+    );
+    assert_eq!(count(&env, "thread/start"), 0);
+    assert_eq!(
+        c.binding_resume(resume_params(&s)).unwrap_err(),
+        ControlError::BindingNotFound
+    );
+    drop(c);
+    a.stop(false);
+}
+#[test]
+fn malformed_mismatched_server_request_and_timeout_fail_without_binding_or_automatic_retry() {
+    for scenario in [
+        "thread_malformed",
+        "thread_wrong_cwd",
+        "thread_wrong_response",
+        "thread_server_request",
+        "thread_timeout",
+    ] {
+        let env = Sandbox::new(scenario);
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(mutation()).unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, _) = prepare_bound_session(&mut c, vec![ExecutionScope::SessionCreate]);
+        let p = create_params(&env, &s);
+        assert_eq!(
+            c.binding_create(p.clone()).unwrap_err(),
+            ControlError::ExternalEffectUnknown,
+            "{scenario}"
+        );
+        env.wait(&mut c, ActualState::Failed);
+        assert_eq!(
+            c.binding_status(s.managed_session_id.clone())
+                .unwrap()
+                .state,
+            BindingState::Indeterminate
+        );
+        assert_eq!(
+            c.binding_create(p).unwrap_err(),
+            ControlError::BindingIndeterminate
+        );
+        assert_eq!(count(&env, "thread/start"), 1);
+        assert_eq!(count(&env, "RESPONSE"), 0);
+        drop(c);
+        a.stop(false);
+    }
+}
+#[test]
+fn provider_rejection_is_known_failure_and_never_persists_raw_message() {
+    let env = Sandbox::new("thread_error");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = prepare_bound_session(&mut c, vec![ExecutionScope::SessionCreate]);
+    assert_eq!(
+        c.binding_create(create_params(&env, &s)).unwrap_err(),
+        ControlError::ProviderRejected
+    );
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::Unbound
+    );
+    assert_eq!(c.runtime_status().unwrap().actual_state, ActualState::Ready);
+    drop(c);
+    a.stop(false);
+    let db = fs::read(env.root.join("state/wyss-console/control.sqlite3")).unwrap();
+    assert!(
+        !db.windows(b"private provider error".len())
+            .any(|w| w == b"private provider error")
+    );
+}
+#[test]
+fn rejected_resume_discards_previous_attachment_without_stopping_runtime() {
+    let env = Sandbox::new("resume_error");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = prepare_bound_session(
+        &mut c,
+        vec![ExecutionScope::SessionCreate, ExecutionScope::SessionResume],
+    );
+    let b = c.binding_create(create_params(&env, &s)).unwrap();
+    assert_eq!(c.binding_resume(resume_params(&s)).unwrap(), b);
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundAttached
+    );
+    assert_eq!(
+        c.binding_resume(resume_params(&s)).unwrap_err(),
+        ControlError::ProviderRejected
+    );
+    let status = c.binding_status(s.managed_session_id).unwrap();
+    assert_eq!(status.binding, Some(b));
+    assert_eq!(status.state, BindingState::BoundDetached);
+    assert_eq!(c.runtime_status().unwrap().actual_state, ActualState::Ready);
+    assert_eq!(count(&env, "thread/start"), 1);
+    assert_eq!(count(&env, "thread/resume"), 2);
+    drop(c);
+    a.stop(false);
+}
+#[test]
+fn resume_identity_substitution_fails_closed_without_rewriting_binding() {
+    let env = Sandbox::new("thread_wrong_id");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = prepare_bound_session(
+        &mut c,
+        vec![ExecutionScope::SessionCreate, ExecutionScope::SessionResume],
+    );
+    let b = c.binding_create(create_params(&env, &s)).unwrap();
+    assert_eq!(
+        c.binding_resume(resume_params(&s)).unwrap_err(),
+        ControlError::ExternalEffectUnknown
+    );
+    env.wait(&mut c, ActualState::Failed);
+    let status = c.binding_status(s.managed_session_id).unwrap();
+    assert_eq!(status.binding, Some(b));
+    assert_eq!(status.state, BindingState::BoundDetached);
+    drop(c);
+    a.stop(false);
+}
+#[test]
+fn sigkill_after_dispatch_and_after_response_recovers_indeterminate_without_duplicate_create() {
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    for (scenario, marker) in [
+        ("thread_hold", "dispatched"),
+        ("thread_lock_response", "responded"),
+        ("archive_hold", "archive-written"),
+        ("archive_lock_response", "archive-responded"),
+        ("unarchive_hold", "unarchive-written"),
+        ("unarchive_lock_response", "unarchive-responded"),
+    ] {
+        let mut env = Sandbox::new(scenario);
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(mutation()).unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, _) = prepare_bound_session(&mut c, vec![ExecutionScope::SessionCreate]);
+        let p = create_params(&env, &s);
+        let pp = p.clone();
+        let client = thread::spawn(move || c.binding_create(pp));
+        wait_file(&env, marker);
+        a.stop(true);
+        for pid in env.pids() {
+            dead(pid)
+        }
+        let _ = client.join();
+        env.scenario = "happy";
+        let mut a = env.start();
+        let mut c = env.client();
+        env.wait(&mut c, ActualState::Ready);
+        let status = c.binding_status(s.managed_session_id.clone()).unwrap();
+        assert_eq!(status.state, BindingState::Indeterminate);
+        assert!(status.binding.is_none());
+        assert_eq!(
+            c.binding_create(p).unwrap_err(),
+            ControlError::BindingIndeterminate
+        );
+        assert_eq!(count(&env, "thread/start"), 1);
+        c.binding_abandon(BindingAbandon {
+            intent_id: id(),
+            managed_session_id: s.managed_session_id.clone(),
+            operation_id: status.operation_id.unwrap(),
+        })
+        .unwrap();
+        c.binding_create(create_params(&env, &s)).unwrap();
+        assert_eq!(count(&env, "thread/start"), 2);
+        drop(c);
+        a.stop(false);
+        for pid in env.pids() {
+            dead(pid)
+        }
+    }
+}
+#[test]
+fn concurrent_creates_have_one_outstanding_request_and_one_binding() {
+    let env = Sandbox::new("thread_hold");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = prepare_bound_session(&mut c, vec![ExecutionScope::SessionCreate]);
+    let p = create_params(&env, &s);
+    let second = p.clone();
+    let worker = thread::spawn(move || c.binding_create(p));
+    wait_file(&env, "dispatched");
+    let mut c = env.client();
+    assert_eq!(
+        c.binding_create(second).unwrap_err(),
+        ControlError::RuntimeOperationInProgress
+    );
+    fs::write(env.root.join("release"), b"").unwrap();
+    worker.join().unwrap().unwrap();
+    assert_eq!(count(&env, "thread/start"), 1);
+    drop(c);
+    a.stop(false);
+}
+#[test]
+fn graceful_shutdown_interrupts_inflight_create_and_recovers_uncertainty() {
+    let mut env = Sandbox::new("thread_hold");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = prepare_bound_session(&mut c, vec![ExecutionScope::SessionCreate]);
+    let p = create_params(&env, &s);
+    let worker = thread::spawn(move || c.binding_create(p));
+    wait_file(&env, "dispatched");
+    let start = Instant::now();
+    a.stop(false);
+    assert!(start.elapsed() < Duration::from_secs(5));
+    let _ = worker.join();
+    env.scenario = "happy";
+    let mut a = env.start();
+    let mut c = env.client();
+    env.wait(&mut c, ActualState::Ready);
+    assert_eq!(
+        c.binding_status(s.managed_session_id).unwrap().state,
+        BindingState::Indeterminate
+    );
+    assert_eq!(count(&env, "thread/start"), 1);
+    drop(c);
+    a.stop(false);
+}
+#[test]
+fn close_after_admitted_create_keeps_identity_historical_and_never_grants_attachment() {
+    let env = Sandbox::new("thread_hold");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, l) = prepare_bound_session(&mut c, vec![ExecutionScope::SessionCreate]);
+    let p = create_params(&env, &s);
+    let worker = thread::spawn(move || c.binding_create(p));
+    wait_file(&env, "dispatched");
+    let mut c = env.client();
+    c.close(Close {
+        intent_id: id(),
+        managed_session_id: s.managed_session_id.clone(),
+        expected_revision: 1,
+    })
+    .unwrap();
+    fs::write(env.root.join("release"), b"").unwrap();
+    let b = worker.join().unwrap().unwrap();
+    let status = c.binding_status(s.managed_session_id.clone()).unwrap();
+    assert_eq!(status.binding, Some(b));
+    assert_eq!(status.state, BindingState::BoundDetached);
+    assert_eq!(c.lease_get(l.lease_id).unwrap().state, LeaseState::Revoked);
+    assert_eq!(
+        c.binding_resume(resume_params(&s)).unwrap_err(),
+        ControlError::GateDenied
+    );
+    drop(c);
+    a.stop(false);
+}
+
+#[test]
+fn materialization_errors_are_indeterminate_never_bind_or_retry_and_never_respond() {
+    for scenario in [
+        "archive_error",
+        "unarchive_error",
+        "archive_extra",
+        "unarchive_extra",
+        "archive_wrong_response",
+        "unarchive_wrong_response",
+        "unarchive_wrong_id",
+        "unarchive_wrong_cwd",
+        "unarchive_relative_cwd",
+        "unarchive_malformed",
+        "archive_server_request",
+        "unarchive_server_request",
+        "archive_timeout",
+        "unarchive_timeout",
+    ] {
+        let env = Sandbox::new(scenario);
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(mutation()).unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, _) = prepare_bound_session(&mut c, vec![ExecutionScope::SessionCreate]);
+        let p = create_params(&env, &s);
+        assert_eq!(
+            c.binding_create(p.clone()).unwrap_err(),
+            ControlError::ExternalEffectUnknown,
+            "{scenario}"
+        );
+        env.wait(&mut c, ActualState::Failed);
+        assert_eq!(
+            c.binding_status(s.managed_session_id.clone())
+                .unwrap()
+                .state,
+            BindingState::Indeterminate
+        );
+        assert_eq!(
+            c.binding_create(p).unwrap_err(),
+            ControlError::BindingIndeterminate
+        );
+        assert_eq!(count(&env, "thread/start"), 1);
+        assert_eq!(count(&env, "thread/resume"), 0);
+        assert_eq!(count(&env, "RESPONSE"), 0);
+        drop(c);
+        a.stop(false);
+    }
+}

@@ -16,10 +16,14 @@ pub fn method_surface(method: &str) -> Surface {
         | "initialized"
         | "thread/start"
         | "thread/resume"
+        | "thread/archive"
+        | "thread/unarchive"
         | "turn/start"
         | "turn/interrupt"
         | "model/list"
         | "thread/started"
+        | "thread/archived"
+        | "thread/unarchived"
         | "turn/started"
         | "turn/completed"
         | "item/started"
@@ -106,6 +110,8 @@ pub enum Operation {
     Initialize,
     ThreadStart,
     ThreadResume,
+    ThreadArchive,
+    ThreadUnarchive,
     TurnStart,
     TurnInterrupt,
     ModelList,
@@ -261,6 +267,10 @@ fn client_params(method: &str, p: &Map<String, Value>) -> Result<()> {
             }
         }
         "thread/resume" => ids(p, false, false)?,
+        "thread/archive" | "thread/unarchive" => {
+            only(p, &["threadId"])?;
+            ids(p, false, false)?;
+        }
         "turn/start" => {
             ids(p, false, false)?;
             for input in array(required(p, "input")?)? {
@@ -298,6 +308,8 @@ pub(crate) fn validate_message(m: &WireMessage) -> Result<()> {
         "initialize"
             | "thread/start"
             | "thread/resume"
+            | "thread/archive"
+            | "thread/unarchive"
             | "turn/start"
             | "turn/interrupt"
             | "model/list"
@@ -360,6 +372,7 @@ pub(crate) fn validate_message(m: &WireMessage) -> Result<()> {
     let p = params(m)?;
     match method {
         "thread/started" => validate_thread(required(p, "thread")?)?,
+        "thread/archived" | "thread/unarchived" => ids(p, false, false)?,
         "turn/started" | "turn/completed" => {
             ids(p, false, false)?;
             validate_turn(required(p, "turn")?)?;
@@ -722,6 +735,11 @@ pub(crate) fn validate_result(operation: Operation, v: &Value) -> Result<()> {
             validate_thread(required(p, "thread")?)?;
         }
         Operation::TurnStart => validate_turn(required(p, "turn")?)?,
+        Operation::ThreadArchive => only(p, &[])?,
+        Operation::ThreadUnarchive => {
+            only(p, &["thread"])?;
+            validate_thread(required(p, "thread")?)?;
+        }
         Operation::TurnInterrupt => only(p, &[])?,
         Operation::ModelList => {
             optional_text(p, "nextCursor", 2048)?;
@@ -776,4 +794,44 @@ pub(crate) fn validate_result(operation: Operation, v: &Value) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Sprint 2G production surface. No model/config/instructions or turn input can be encoded.
+pub(crate) fn managed_thread_request(
+    id: CodexRequestId,
+    cwd: &str,
+    thread: Option<&CodexThreadId>,
+) -> Result<WireMessage> {
+    let (method, params) = match thread {
+        None => ("thread/start", json!({"cwd":cwd,"ephemeral":false})),
+        Some(id) => (
+            "thread/resume",
+            json!({"threadId":id,"cwd":cwd,"excludeTurns":true}),
+        ),
+    };
+    WireMessage::parse(
+        &serde_json::to_vec(&json!({"id":id,"method":method,"params":params})).map_err(|_| {
+            CodecError {
+                code: "encode_failed",
+            }
+        })?,
+        Direction::ClientToServer,
+    )
+}
+
+/// Internal empty-thread persistence barrier; no generic method or parameter surface.
+pub(crate) fn materialization_request(
+    id: CodexRequestId,
+    thread: &CodexThreadId,
+    unarchive: bool,
+) -> Result<WireMessage> {
+    WireMessage::request(
+        id,
+        if unarchive {
+            "thread/unarchive"
+        } else {
+            "thread/archive"
+        },
+        json!({"threadId":thread}),
+    )
 }

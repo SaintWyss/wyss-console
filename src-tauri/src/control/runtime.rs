@@ -1,6 +1,8 @@
 //! Authority-core projection and reconciliation. The core remains the sole durable writer.
 use super::{server::CoreMessage, store::Store};
-pub(super) use crate::adapters::codex::probe::supervised::Observation;
+pub(super) use crate::adapters::codex::probe::supervised::{
+    ConversationCommand, ConversationFailure, MaterializationStage, Observation,
+};
 use crate::{
     adapters::codex::probe::supervised::Worker,
     contracts::{
@@ -158,6 +160,9 @@ impl Runtime {
         }
         Ok(())
     }
+    pub fn command(&mut self, c: ConversationCommand) -> bool {
+        self.worker.as_mut().is_some_and(|w| w.command(c))
+    }
     pub fn observe(
         &mut self,
         store: &mut Store,
@@ -168,6 +173,10 @@ impl Runtime {
             return Ok(());
         }
         match event {
+            Observation::Materialization { .. } => (),
+            Observation::Conversation { methods, .. } => {
+                self.methods = methods;
+            }
             Observation::Spawned => {
                 self.live = Some(id);
                 self.state = ActualState::Initializing;
@@ -234,4 +243,9 @@ impl Runtime {
         }
         Ok(())
     }
+}
+
+pub(super) use crate::adapters::codex::CodexThreadId as ThreadId;
+pub(super) fn request_id(s: &str) -> crate::adapters::codex::CodexRequestId {
+    crate::adapters::codex::CodexRequestId::String(s.to_owned())
 }

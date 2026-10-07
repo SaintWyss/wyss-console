@@ -14,6 +14,13 @@ macro_rules! vendor_id {
         #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
         #[serde(transparent)]
         pub struct $name(String);
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(
+                d: D,
+            ) -> std::result::Result<Self, D::Error> {
+                Self::parse(&String::deserialize(d)?).map_err(serde::de::Error::custom)
+            }
+        }
         impl $name {
             pub fn parse(value: &str) -> Result<Self> {
                 text(&Value::String(value.to_owned()), 256)?;

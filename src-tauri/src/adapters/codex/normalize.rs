@@ -354,6 +354,12 @@ pub fn normalize_inbound(
     }
     match method {
         "thread/started" => session_observation(&p["thread"], binding, None, None),
+        // Validated lifecycle notices are transient metadata, never attachment proof.
+        "thread/archived" | "thread/unarchived" => Ok(CodexObservation::UnknownNotification {
+            method: method.to_owned(),
+            vendor_params: None,
+            surface,
+        }),
         "turn/started" | "turn/completed" => turn_observation(thread(p)?, &p["turn"], binding),
         "item/started" => item_observation(p, ItemStage::Started),
         "item/completed" => item_observation(p, ItemStage::Completed),
