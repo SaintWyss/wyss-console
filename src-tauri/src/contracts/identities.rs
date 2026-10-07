@@ -22,6 +22,11 @@
 //! let instance = AgentRuntimeInstanceId::parse("11111111-1111-4111-8111-111111111111").unwrap();
 //! let managed: ManagedSessionId = instance;
 //! ```
+//! ```compile_fail
+//! use wyss_console::contracts::identities::{ManagedSessionId, ExecutionLeaseId};
+//! let session = ManagedSessionId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+//! let lease: ExecutionLeaseId = session;
+//! ```
 use super::WireUuid;
 use serde::{Deserialize, Serialize};
 
@@ -45,6 +50,7 @@ macro_rules! identity {
 
 identity!(AgentRuntimeInstanceId);
 identity!(ManagedSessionId);
+identity!(ExecutionLeaseId);
 identity!(ConsoleSessionId);
 identity!(TerminalId);
 

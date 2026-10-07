@@ -29,3 +29,5 @@ pub use scalars::{ContractError, ErrorCode, Sequence, UtcTimestamp, WireUuid};
 mod tests;
 
 pub mod control;
+
+pub mod execution;

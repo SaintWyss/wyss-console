@@ -1,4 +1,5 @@
 //! Wyss Control Protocol v1. Runtime supervision does not authorize agent work.
+pub use super::execution::*;
 use super::{
     Sequence, UtcTimestamp, WireUuid,
     agent_adapter::{AgentAdapterId, AgentRuntimeKind},
@@ -12,7 +13,7 @@ use std::fmt;
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_FRAME: usize = 65_536;
 pub const MAX_PAGE: u16 = 50;
-pub const METHODS: [&str; 11] = [
+pub const METHODS: [&str; 17] = [
     "authority/hello",
     "authority/status",
     "managedSession/prepare",
@@ -24,6 +25,12 @@ pub const METHODS: [&str; 11] = [
     "runtime/status",
     "runtime/model/list",
     "runtime/stop",
+    "executionLease/grant",
+    "executionLease/get",
+    "executionLease/active",
+    "executionLease/renew",
+    "executionLease/revoke",
+    "executionGate/status",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,6 +50,9 @@ pub enum ControlError {
     StorageUnavailable,
     StorageIncompatible,
     SessionNotFound,
+    LeaseNotFound,
+    LeaseAlreadyActive,
+    AuthorityUnavailable,
     InvalidTransition,
     StaleRevision,
     IntentConflict,
@@ -127,10 +137,32 @@ pub enum Operation {
     RuntimeModels(RuntimeModels),
     #[serde(rename = "audit/read")]
     AuditRead(AuditRead),
+    #[serde(rename = "executionLease/grant")]
+    LeaseGrant(LeaseGrant),
+    #[serde(rename = "executionLease/get")]
+    LeaseGet(LeaseGet),
+    #[serde(rename = "executionLease/active")]
+    LeaseActive(LeaseActive),
+    #[serde(rename = "executionLease/renew")]
+    LeaseRenew(LeaseRenew),
+    #[serde(rename = "executionLease/revoke")]
+    LeaseRevoke(LeaseRevoke),
+    #[serde(rename = "executionGate/status")]
+    GateStatus(GateQuery),
 }
 impl Operation {
     pub fn validate(&self) -> ControlResult<()> {
         match self {
+            Self::LeaseGrant(p) => {
+                validate_scopes(&p.scopes)?;
+                validate_ttl(p.ttl_seconds)?;
+                valid_revision(p.expected_session_revision)
+            }
+            Self::LeaseRenew(p) => {
+                validate_ttl(p.ttl_seconds)?;
+                valid_revision(p.expected_revision)
+            }
+            Self::LeaseRevoke(p) => valid_revision(p.expected_revision),
             Self::Hello(h) if h.protocol_version != PROTOCOL_VERSION => {
                 Err(ControlError::ProtocolVersionUnsupported)
             }
@@ -242,6 +274,9 @@ pub enum ResultValue {
     Hello(AuthorityStatus),
     Status(AuthorityStatus),
     Session(ManagedSessionRecord),
+    Lease(ExecutionLease),
+    ActiveLease(Option<ExecutionLease>),
+    GateStatus(GateStatus),
     RuntimeControl(RuntimeControlRecord),
     RuntimeStatus(RuntimeStatus),
     RuntimeModels {
@@ -325,12 +360,22 @@ fn validate_result(r: &ResultValue) -> ControlResult<()> {
     match r {
         ResultValue::Hello(s) | ResultValue::Status(s) => {
             if s.protocol_version != 1
-                || s.storage_schema_version != 2
+                || s.storage_schema_version != 3
                 || s.service_version.len() > 128
             {
                 return Err(ControlError::InvalidRequest);
             }
         }
+        ResultValue::Lease(s) => s.validate()?,
+        ResultValue::ActiveLease(s) => {
+            if let Some(s) = s {
+                s.validate()?;
+                if s.state != LeaseState::Active {
+                    return Err(ControlError::InvalidRequest);
+                }
+            }
+        }
+        ResultValue::GateStatus(_) => (),
         ResultValue::RuntimeControl(s) => s.validate()?,
         ResultValue::RuntimeStatus(s) => s.validate()?,
         ResultValue::RuntimeModels { models, .. } => {

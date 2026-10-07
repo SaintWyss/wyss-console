@@ -224,13 +224,31 @@ pub fn run_from_environment() -> ControlResult<()> {
     let core_stop = stop.clone();
     let mut runtime = Runtime::new(&store)?;
     let core = thread::spawn(move || -> ControlResult<()> {
+        let mut next_expiry = refresh_expiry(&mut store);
         runtime.reconcile(&mut store, &core_sender, true)?;
-        while let Ok(message) = receiver.recv() {
+        loop {
+            // A bounded wall-clock recheck handles clock changes, without SQLite polling.
+            if next_expiry.is_some_and(|t| store.lease_now() >= t) {
+                next_expiry = refresh_expiry(&mut store);
+            }
+            let received = match next_expiry {
+                Some(t) => receiver.recv_timeout(expiry_wait(t, store.lease_now())),
+                None => receiver
+                    .recv()
+                    .map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+            };
+            let message = match received {
+                Ok(m) => m,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(_) => break,
+            };
             match message {
                 CoreMessage::Shutdown => break,
                 CoreMessage::Runtime(id, observation) => {
                     // A failed observation audit must not bypass child cleanup.
-                    let _ = runtime.observe(&mut store, id, observation);
+                    if runtime.observe(&mut store, id, observation).is_err() {
+                        store.execution_available = false;
+                    }
                 }
                 CoreMessage::Client(job) => {
                     let result = if core_stop.load(Ordering::Acquire) {
@@ -241,9 +259,33 @@ pub fn run_from_environment() -> ControlResult<()> {
                                 .supported()
                                 .map(|()| ResultValue::RuntimeStatus(runtime.status())),
                             Operation::RuntimeModels(p) => runtime.models(p),
+                            Operation::GateStatus(p) => Ok(ResultValue::GateStatus(
+                                super::gate::ExecutionGate::diagnostic(
+                                    &store,
+                                    p,
+                                    &runtime.status(),
+                                ),
+                            )),
                             _ => store.apply(&job.op),
                         }
                     };
+                    if matches!(
+                        result,
+                        Err(ControlError::StorageUnavailable | ControlError::StorageIncompatible)
+                    ) {
+                        store.execution_available = false;
+                    }
+                    if result.is_ok()
+                        && matches!(
+                            job.op,
+                            Operation::LeaseGrant(_)
+                                | Operation::LeaseRenew(_)
+                                | Operation::LeaseRevoke(_)
+                                | Operation::Close(_)
+                        )
+                    {
+                        next_expiry = refresh_expiry(&mut store);
+                    }
                     let reconcile = result.is_ok()
                         && matches!(
                             job.op,
@@ -318,4 +360,42 @@ pub fn run_from_environment() -> ControlResult<()> {
     drop(sender);
     core.join().map_err(|_| ControlError::InternalError)??;
     result
+}
+
+// A failed expiry write latches execution closed. No retry loop or second writer.
+pub(super) fn refresh_expiry(store: &mut Store) -> Option<time::OffsetDateTime> {
+    match store.expire_due().and_then(|()| store.next_expiry()) {
+        Ok(next) => next,
+        Err(_) => {
+            store.execution_available = false;
+            None
+        }
+    }
+}
+
+fn expiry_wait(deadline: time::OffsetDateTime, now: time::OffsetDateTime) -> Duration {
+    Duration::try_from(deadline - now)
+        .unwrap_or(Duration::ZERO)
+        .min(Duration::from_secs(30))
+}
+#[cfg(test)]
+mod expiry_wait_tests {
+    use super::*;
+    #[test]
+    fn deadline_wait_is_bounded_and_overdue_never_sleeps() {
+        let now = time::OffsetDateTime::now_utc();
+        assert_eq!(expiry_wait(now, now), Duration::ZERO);
+        assert_eq!(
+            expiry_wait(now - time::Duration::seconds(1), now),
+            Duration::ZERO
+        );
+        assert_eq!(
+            expiry_wait(now + time::Duration::seconds(1), now),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            expiry_wait(now + time::Duration::hours(1), now),
+            Duration::from_secs(30)
+        );
+    }
 }

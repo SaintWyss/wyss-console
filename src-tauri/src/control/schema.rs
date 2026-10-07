@@ -1,4 +1,4 @@
-//! Explicit v0 -> v2 and v1 -> v2 migrations. Unknown/corrupt schemas fail closed.
+//! Explicit v0/v1/v2 -> v3 migrations. Unknown/corrupt schemas fail closed.
 use crate::contracts::control::{ControlError as E, ControlResult};
 use rusqlite::Connection;
 pub(crate) const V1_OBJECTS: &[(&str, &str)] = &[
@@ -27,7 +27,7 @@ pub(crate) const V1_OBJECTS: &[(&str, &str)] = &[
         "CREATE TRIGGER control_events_no_delete BEFORE DELETE ON control_events BEGIN SELECT RAISE(ABORT,'append_only'); END",
     ),
 ];
-pub(crate) const OBJECTS: &[(&str, &str)] = &[
+pub(crate) const V2_OBJECTS: &[(&str, &str)] = &[
     (
         "authority_metadata",
         "CREATE TABLE authority_metadata (id INTEGER PRIMARY KEY CHECK(id=1), schema_version INTEGER NOT NULL CHECK(schema_version=2), stream_id TEXT NOT NULL, last_sequence TEXT NOT NULL) STRICT",
@@ -43,6 +43,26 @@ pub(crate) const OBJECTS: &[(&str, &str)] = &[
     (
         "managed_runtimes",
         "CREATE TABLE managed_runtimes (adapter_id TEXT PRIMARY KEY NOT NULL CHECK(adapter_id='codex'), runtime_kind TEXT NOT NULL CHECK(runtime_kind='codex'), desired_state TEXT NOT NULL CHECK(desired_state IN ('running','stopped')), revision INTEGER NOT NULL CHECK(revision>0), created_at TEXT NOT NULL, updated_at TEXT NOT NULL) STRICT",
+    ),
+];
+pub(crate) const OBJECTS: &[(&str, &str)] = &[
+    (
+        "authority_metadata",
+        "CREATE TABLE authority_metadata (id INTEGER PRIMARY KEY CHECK(id=1), schema_version INTEGER NOT NULL CHECK(schema_version=3), stream_id TEXT NOT NULL, last_sequence TEXT NOT NULL) STRICT",
+    ),
+    V2_OBJECTS[1],
+    V2_OBJECTS[2],
+    V2_OBJECTS[3],
+    V2_OBJECTS[4],
+    V2_OBJECTS[5],
+    V2_OBJECTS[6],
+    (
+        "execution_leases",
+        "CREATE TABLE execution_leases (lease_id TEXT PRIMARY KEY NOT NULL, session_id TEXT NOT NULL REFERENCES managed_sessions(session_id), state TEXT NOT NULL CHECK(state IN ('active','revoked','expired')), scopes TEXT NOT NULL CHECK(length(scopes)<=64), revision INTEGER NOT NULL CHECK(revision>0), issued_at TEXT NOT NULL, expires_at TEXT NOT NULL, updated_at TEXT NOT NULL, revocation_reason TEXT CHECK(revocation_reason IN ('user_request','session_closed')), CHECK((state='revoked')=(revocation_reason IS NOT NULL)), CHECK(lease_id<>session_id)) STRICT",
+    ),
+    (
+        "execution_leases_one_active",
+        "CREATE UNIQUE INDEX execution_leases_one_active ON execution_leases(session_id) WHERE state='active'",
     ),
 ];
 fn validate(c: &Connection, objects: &[(&str, &str)]) -> ControlResult<()> {
@@ -96,11 +116,11 @@ fn migrate_with(
                 tx.execute_batch(sql).map_err(|_| E::StorageUnavailable)?;
             }
             tx.execute(
-                "INSERT INTO authority_metadata VALUES(1,2,?1,'0')",
+                "INSERT INTO authority_metadata VALUES(1,3,?1,'0')",
                 [uuid::Uuid::new_v4().to_string()],
             )
             .map_err(|_| E::StorageUnavailable)?;
-            tx.pragma_update(None, "user_version", 2)
+            tx.pragma_update(None, "user_version", 3)
                 .map_err(|_| E::StorageUnavailable)?;
             before_commit()?;
             tx.commit().map_err(|_| E::StorageUnavailable)?;
@@ -115,19 +135,34 @@ fn migrate_with(
                 ALTER TABLE control_events RENAME TO control_events_v1;",
             )
             .map_err(|_| E::StorageUnavailable)?;
-            for i in [0, 2, 4, 5, 6] {
+            for i in [0, 2, 4, 5, 6, 7, 8] {
                 tx.execute_batch(OBJECTS[i].1)
                     .map_err(|_| E::StorageUnavailable)?;
             }
-            tx.execute_batch("INSERT INTO authority_metadata SELECT id,2,stream_id,last_sequence FROM authority_metadata_v1;
+            tx.execute_batch("INSERT INTO authority_metadata SELECT id,3,stream_id,last_sequence FROM authority_metadata_v1;
                 INSERT INTO control_events SELECT * FROM control_events_v1;
                 DROP TABLE control_events_v1; DROP TABLE authority_metadata_v1;").map_err(|_|E::StorageUnavailable)?;
-            tx.pragma_update(None, "user_version", 2)
+            tx.pragma_update(None, "user_version", 3)
                 .map_err(|_| E::StorageUnavailable)?;
             before_commit()?;
             tx.commit().map_err(|_| E::StorageUnavailable)?;
         }
-        2 => (),
+        2 => {
+            validate(c, V2_OBJECTS)?;
+            let tx = c.transaction().map_err(|_| E::StorageUnavailable)?;
+            tx.execute_batch("ALTER TABLE authority_metadata RENAME TO authority_metadata_v2;")
+                .map_err(|_| E::StorageUnavailable)?;
+            for i in [0, 7, 8] {
+                tx.execute_batch(OBJECTS[i].1)
+                    .map_err(|_| E::StorageUnavailable)?;
+            }
+            tx.execute_batch("INSERT INTO authority_metadata SELECT id,3,stream_id,last_sequence FROM authority_metadata_v2; DROP TABLE authority_metadata_v2;").map_err(|_|E::StorageUnavailable)?;
+            tx.pragma_update(None, "user_version", 3)
+                .map_err(|_| E::StorageUnavailable)?;
+            before_commit()?;
+            tx.commit().map_err(|_| E::StorageUnavailable)?;
+        }
+        3 => (),
         _ => return Err(E::StorageIncompatible),
     }
     validate(c, OBJECTS)

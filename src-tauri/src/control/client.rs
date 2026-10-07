@@ -5,7 +5,11 @@ use super::{
     server::peer,
     store::uuid,
 };
-use crate::contracts::{WireUuid, control::*, identities::ManagedSessionId};
+use crate::contracts::{
+    WireUuid,
+    control::*,
+    identities::{ExecutionLeaseId, ManagedSessionId},
+};
 use nix::{
     errno::Errno,
     sys::socket::{AddressFamily, SockFlag, SockType, UnixAddr, connect, socket},
@@ -101,6 +105,31 @@ impl ControlClient {
         }
         response.outcome
     }
+    pub fn lease_grant(&mut self, p: LeaseGrant) -> ControlResult<ExecutionLease> {
+        lease(self.call(Operation::LeaseGrant(p))?)
+    }
+    pub fn lease_get(&mut self, id: ExecutionLeaseId) -> ControlResult<ExecutionLease> {
+        lease(self.call(Operation::LeaseGet(LeaseGet { lease_id: id }))?)
+    }
+    pub fn lease_active(&mut self, id: ManagedSessionId) -> ControlResult<Option<ExecutionLease>> {
+        match self.call(Operation::LeaseActive(LeaseActive { session_id: id }))? {
+            ResultValue::ActiveLease(l) => Ok(l),
+            _ => Err(ControlError::InvalidRequest),
+        }
+    }
+    pub fn lease_renew(&mut self, p: LeaseRenew) -> ControlResult<ExecutionLease> {
+        lease(self.call(Operation::LeaseRenew(p))?)
+    }
+    pub fn lease_revoke(&mut self, p: LeaseRevoke) -> ControlResult<ExecutionLease> {
+        lease(self.call(Operation::LeaseRevoke(p))?)
+    }
+    /// Informational only. Every future execution operation must evaluate its own internal gate.
+    pub fn gate_status(&mut self, p: GateQuery) -> ControlResult<GateStatus> {
+        match self.call(Operation::GateStatus(p))? {
+            ResultValue::GateStatus(g) => Ok(g),
+            _ => Err(ControlError::InvalidRequest),
+        }
+    }
     pub fn runtime_start(&mut self, p: RuntimeMutation) -> ControlResult<RuntimeControlRecord> {
         runtime_control(self.call(Operation::RuntimeStart(p))?)
     }
@@ -180,6 +209,14 @@ fn client_instance_id() -> WireUuid {
 fn runtime_control(r: ResultValue) -> ControlResult<RuntimeControlRecord> {
     if let ResultValue::RuntimeControl(r) = r {
         Ok(r)
+    } else {
+        Err(ControlError::InvalidRequest)
+    }
+}
+
+fn lease(r: ResultValue) -> ControlResult<ExecutionLease> {
+    if let ResultValue::Lease(l) = r {
+        Ok(l)
     } else {
         Err(ControlError::InvalidRequest)
     }

@@ -1,6 +1,7 @@
 //! External authority foundation. No dependency on Tauri or human terminals.
 pub mod client;
 mod framing;
+mod gate;
 mod paths;
 mod runtime;
 mod schema;

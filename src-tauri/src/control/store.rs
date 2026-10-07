@@ -1,3 +1,5 @@
+#[path = "leases.rs"]
+mod leases;
 use super::{paths, schema};
 use crate::contracts::{
     Sequence, WireUuid, control::*, event_envelope::EventEnvelopeV1, identities::ManagedSessionId,
@@ -35,6 +37,8 @@ pub(crate) struct Store {
     pub(crate) conn: Connection,
     instance: WireUuid,
     stream: WireUuid,
+    pub(super) clock: std::sync::Arc<dyn leases::Clock>,
+    pub(super) execution_available: bool,
 }
 impl Store {
     pub fn open(path: &Path, instance: WireUuid) -> ControlResult<Self> {
@@ -72,7 +76,7 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .map_err(invalid)?;
-        if version != 2 {
+        if version != 3 {
             return Err(ControlError::StorageIncompatible);
         }
         let stream = WireUuid::try_from(stream).map_err(invalid)?;
@@ -80,6 +84,8 @@ impl Store {
             conn,
             instance,
             stream,
+            clock: std::sync::Arc::new(leases::SystemClock),
+            execution_available: true,
         };
         store.verify(&head)?;
         Ok(store)
@@ -134,6 +140,7 @@ impl Store {
         for id in ids {
             get_session(&self.conn, &id.map_err(invalid)?)?.validate()?;
         }
+        self.verify_leases()?;
         // Receipts contain only typed minimal mutations and their original session projection.
         let mut q = self
             .conn
@@ -147,6 +154,7 @@ impl Store {
             let op: Operation =
                 serde_json::from_value(unique_json(mutation.as_bytes()).map_err(invalid)?)
                     .map_err(invalid)?;
+            op.validate().map_err(invalid)?;
             let Some(intent) = intent(&op) else {
                 return Err(ControlError::StorageIncompatible);
             };
@@ -192,7 +200,7 @@ impl Store {
             protocol_version: 1,
             authority_instance_id: self.instance.clone(),
             service_version: env!("CARGO_PKG_VERSION").into(),
-            storage_schema_version: 2,
+            storage_schema_version: 3,
             stream_id: self.stream.clone(),
             last_sequence: if head == 0 {
                 None
@@ -258,6 +266,18 @@ impl Store {
                 };
                 Ok(ResultValue::Audit { events, next })
             }
+            Operation::LeaseGet(p) => Ok(ResultValue::Lease(
+                leases::read(&self.conn, p.lease_id.as_str())?.effective_at(self.clock.now())?,
+            )),
+            Operation::LeaseActive(p) => Ok(ResultValue::ActiveLease(
+                leases::active(&self.conn, p.session_id.as_str())?
+                    .map(|l| l.effective_at(self.clock.now()))
+                    .transpose()?
+                    .filter(|l| l.state == LeaseState::Active),
+            )),
+            Operation::LeaseGrant(_) | Operation::LeaseRenew(_) | Operation::LeaseRevoke(_) => {
+                self.mutate(op)
+            }
             Operation::Prepare(_)
             | Operation::Close(_)
             | Operation::RuntimeStart(_)
@@ -284,6 +304,7 @@ impl Store {
             canonical_op["params"]["managed_session_id"] =
                 json!(canonical(p.managed_session_id.as_str()));
         }
+        leases::canonicalize(op, &mut canonical_op);
         let mutation = serde_json::to_string(&canonical_op).map_err(db)?;
         let tx = self
             .conn
@@ -302,6 +323,27 @@ impl Store {
                 return Err(ControlError::IntentConflict);
             }
             return decode_receipt(op, &result);
+        }
+        let lease_now = self.clock.now();
+        if matches!(
+            op,
+            Operation::LeaseGrant(_) | Operation::LeaseRenew(_) | Operation::LeaseRevoke(_)
+        ) {
+            if !self.execution_available {
+                return Err(ControlError::AuthorityUnavailable);
+            }
+            let lease = leases::mutate(&tx, &self.instance, &self.stream, op, lease_now)?;
+            tx.execute(
+                "INSERT INTO processed_intents VALUES(?1,?2,?3)",
+                params![
+                    intent_id,
+                    mutation,
+                    serde_json::to_string(&lease).map_err(db)?
+                ],
+            )
+            .map_err(db)?;
+            tx.commit().map_err(db)?;
+            return Ok(ResultValue::Lease(lease));
         }
         if let Operation::RuntimeStart(p) | Operation::RuntimeStop(p) = op {
             p.target().supported()?;
@@ -388,6 +430,14 @@ impl Store {
                 if session.control_state == ControlState::Closed {
                     append = false;
                 } else {
+                    leases::close(
+                        &tx,
+                        &self.instance,
+                        &self.stream,
+                        &session,
+                        &intent_id,
+                        lease_now,
+                    )?;
                     session.control_state = ControlState::Closed;
                     session.revision = 2;
                     session.updated_at = time.clone().try_into().map_err(invalid)?;
@@ -420,6 +470,9 @@ impl Store {
 }
 fn intent(op: &Operation) -> Option<&WireUuid> {
     match op {
+        Operation::LeaseGrant(p) => Some(&p.intent_id),
+        Operation::LeaseRenew(p) => Some(&p.intent_id),
+        Operation::LeaseRevoke(p) => Some(&p.intent_id),
         Operation::Prepare(p) => Some(&p.intent_id),
         Operation::Close(p) => Some(&p.intent_id),
         Operation::RuntimeStart(p) | Operation::RuntimeStop(p) => Some(&p.intent_id),
@@ -488,7 +541,14 @@ fn append_event(
     Ok(())
 }
 fn decode_receipt(op: &Operation, raw: &str) -> ControlResult<ResultValue> {
-    if matches!(op, Operation::RuntimeStart(_) | Operation::RuntimeStop(_)) {
+    if matches!(
+        op,
+        Operation::LeaseGrant(_) | Operation::LeaseRenew(_) | Operation::LeaseRevoke(_)
+    ) {
+        let l: ExecutionLease = serde_json::from_str(raw).map_err(invalid)?;
+        l.validate()?;
+        Ok(ResultValue::Lease(l))
+    } else if matches!(op, Operation::RuntimeStart(_) | Operation::RuntimeStop(_)) {
         let r: RuntimeControlRecord = serde_json::from_str(raw).map_err(invalid)?;
         r.validate()?;
         Ok(ResultValue::RuntimeControl(r))
@@ -538,6 +598,9 @@ fn validate_audit(v: &Value) -> ControlResult<()> {
     let kind = v["event_type"]
         .as_str()
         .ok_or(ControlError::StorageIncompatible)?;
+    if kind.starts_with("authority.execution_lease.") {
+        return leases::validate_audit(v);
+    }
     if kind.starts_with("authority.runtime.") {
         if v["persistence"] != "durable"
             || v["sensitivity"] != "internal"

@@ -449,3 +449,251 @@ fn supervisor_outbound_method_allowlist_is_exact_on_actual_child_stdin() {
     assert_eq!(env.methods(), methods);
     a.stop(false);
 }
+
+// Sprint 2F: lease traffic cannot extend the fixed Codex outbound allowlist.
+#[test]
+fn leases_gate_disconnect_expiry_concurrent_grants_and_restarts_execute_zero_work() {
+    use wyss_console::contracts::identities::ManagedSessionId;
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    let env = Sandbox::new("happy");
+    let mut a = env.start();
+    let mut c = env.client();
+    let prepared = c
+        .prepare(Prepare {
+            intent_id: id(),
+            adapter_id: RuntimeTarget::codex().adapter_id,
+            runtime_kind: RuntimeTarget::codex().runtime_kind,
+        })
+        .unwrap();
+    let session = prepared.managed_session_id.clone();
+    let query = |action| GateQuery {
+        session_id: session.clone(),
+        action,
+    };
+    assert!(c.lease_active(session.clone()).unwrap().is_none());
+    assert_eq!(
+        c.gate_status(query(ExecutionScope::TurnStart))
+            .unwrap()
+            .reason,
+        GateReason::LeaseMissing
+    );
+    let grant = LeaseGrant {
+        intent_id: id(),
+        session_id: session.clone(),
+        expected_session_revision: 1,
+        scopes: vec![ExecutionScope::SessionCreate, ExecutionScope::TurnStart],
+        ttl_seconds: 60,
+    };
+    let lease = c.lease_grant(grant.clone()).unwrap();
+    assert_eq!(
+        c.gate_status(query(ExecutionScope::TurnStart))
+            .unwrap()
+            .reason,
+        GateReason::RuntimeNotRunning
+    );
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let methods = env.methods();
+    assert_eq!(methods, ["initialize", "initialized", "model/list"]);
+    assert_eq!(
+        c.gate_status(query(ExecutionScope::SessionCreate))
+            .unwrap()
+            .reason,
+        GateReason::Allowed
+    );
+    assert_eq!(
+        c.gate_status(query(ExecutionScope::TurnStart))
+            .unwrap()
+            .reason,
+        GateReason::Allowed
+    );
+    assert_eq!(
+        c.gate_status(query(ExecutionScope::SessionResume))
+            .unwrap()
+            .reason,
+        GateReason::ScopeNotGranted
+    );
+    drop(c);
+    let mut c = env.client();
+    assert_eq!(c.lease_get(lease.lease_id.clone()).unwrap(), lease);
+    let renewed = c
+        .lease_renew(LeaseRenew {
+            intent_id: id(),
+            lease_id: lease.lease_id.clone(),
+            expected_revision: 1,
+            ttl_seconds: 120,
+        })
+        .unwrap();
+    assert_eq!(renewed.revision, 2);
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    assert_eq!(c.lease_get(lease.lease_id.clone()).unwrap(), renewed);
+    assert_eq!(
+        c.gate_status(query(ExecutionScope::TurnStart))
+            .unwrap()
+            .reason,
+        GateReason::RuntimeNotRunning
+    );
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    assert_eq!(
+        c.gate_status(query(ExecutionScope::TurnStart))
+            .unwrap()
+            .reason,
+        GateReason::Allowed
+    );
+    // Graceful and hard restarts preserve permission identity/revision/deadline exactly.
+    for hard in [false, true] {
+        let pid = *env.pids().last().unwrap();
+        drop(c);
+        a.stop(hard);
+        dead(pid);
+        a = env.start();
+        c = env.client();
+        assert_eq!(c.lease_get(lease.lease_id.clone()).unwrap(), renewed);
+        env.wait(&mut c, ActualState::Ready);
+        assert_eq!(
+            c.gate_status(query(ExecutionScope::TurnStart))
+                .unwrap()
+                .reason,
+            GateReason::Allowed
+        );
+    }
+    let before = env.methods();
+    let revoked = c
+        .lease_revoke(LeaseRevoke {
+            intent_id: id(),
+            lease_id: lease.lease_id,
+            expected_revision: 2,
+        })
+        .unwrap();
+    assert_eq!(
+        revoked.revocation_reason,
+        Some(RevocationReason::UserRequest)
+    );
+    assert_eq!(c.runtime_status().unwrap().actual_state, ActualState::Ready);
+    let short = c
+        .lease_grant(LeaseGrant {
+            intent_id: id(),
+            ttl_seconds: 1,
+            ..grant.clone()
+        })
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    loop {
+        let l = c.lease_get(short.lease_id.clone()).unwrap();
+        if l.state == LeaseState::Expired && l.revision == 2 {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(c.lease_active(session.clone()).unwrap().is_none());
+    assert_eq!(
+        c.gate_status(query(ExecutionScope::TurnStart))
+            .unwrap()
+            .reason,
+        GateReason::LeaseExpired
+    );
+    // Simultaneous grants serialize in the authority; only one can succeed.
+    let handles: Vec<_> = (0..2)
+        .map(|_| {
+            let mut client = env.client();
+            let p = LeaseGrant {
+                intent_id: id(),
+                ..grant.clone()
+            };
+            thread::spawn(move || client.lease_grant(p))
+        })
+        .collect();
+    let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|r| matches!(r, Err(ControlError::LeaseAlreadyActive)))
+            .count(),
+        1
+    );
+    let active = c.lease_active(session.clone()).unwrap().unwrap();
+    c.close(Close {
+        intent_id: id(),
+        managed_session_id: session.clone(),
+        expected_revision: 1,
+    })
+    .unwrap();
+    assert_eq!(
+        c.lease_get(active.lease_id).unwrap().revocation_reason,
+        Some(RevocationReason::SessionClosed)
+    );
+    assert_eq!(
+        c.gate_status(query(ExecutionScope::TurnStart))
+            .unwrap()
+            .reason,
+        GateReason::SessionNotPrepared
+    );
+    assert_eq!(env.methods(), before); // All lease/gate/close operations sent zero Codex frames.
+    let audit = c
+        .audit(AuditRead {
+            stream_id: c.hello_status().stream_id.clone(),
+            after_sequence: None,
+            limit: 50,
+        })
+        .unwrap();
+    let value = serde_json::to_value(audit).unwrap();
+    let events = value["value"]["events"].as_array().unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e["event_type"] == "authority.execution_lease.expired")
+            .count(),
+        1
+    );
+    // Offline expiration after hard crash must be reconciled before serving clients.
+    let second = c
+        .prepare(Prepare {
+            intent_id: id(),
+            adapter_id: RuntimeTarget::codex().adapter_id,
+            runtime_kind: RuntimeTarget::codex().runtime_kind,
+        })
+        .unwrap();
+    let offline = c
+        .lease_grant(LeaseGrant {
+            intent_id: id(),
+            session_id: second.managed_session_id.clone(),
+            ttl_seconds: 1,
+            ..grant
+        })
+        .unwrap();
+    let pid = *env.pids().last().unwrap();
+    drop(c);
+    a.stop(true);
+    dead(pid);
+    thread::sleep(Duration::from_millis(1100));
+    a = env.start();
+    c = env.client();
+    let expired = c.lease_get(offline.lease_id).unwrap();
+    assert_eq!(expired.state, LeaseState::Expired);
+    assert_eq!(expired.revision, 2);
+    assert_eq!(expired.expires_at, offline.expires_at);
+    assert_eq!(
+        c.gate_status(GateQuery {
+            session_id: ManagedSessionId::parse(second.managed_session_id.as_str()).unwrap(),
+            action: ExecutionScope::TurnStart
+        })
+        .unwrap()
+        .reason,
+        GateReason::LeaseExpired
+    );
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    drop(c);
+    a.stop(false);
+    for pid in env.pids() {
+        dead(pid)
+    }
+    assert!(!env.root.join("run/wyss-console/control.sock").exists());
+    for method in env.methods() {
+        assert!(["initialize", "initialized", "model/list"].contains(&method.as_str()));
+    }
+}

@@ -1,7 +1,7 @@
 # Wyss Console
 
 Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current status: **Sprint 2E authority-owned Codex runtime supervision** using Tauri 2,
+Linux-first, local-first. Current status: **Sprint 2F execution gates, leases and revocation** using Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -160,9 +160,10 @@ No production state is created by the test suite.
 
 `wyss-control` can supervise one shared, long-lived `codex app-server`, independently
 of Console clients. Durable desired running/stopped is separate from observed
-starting/initializing/ready/stopping/failed. Schema v1 upgrades transactionally to
-v2, preserving existing sessions, receipts, stream and audit; upgrade starts no
-runtime. No ManagedSession is bound to this process.
+starting/initializing/ready/stopping/failed. Schema v1/v2 upgrades transactionally to
+v3, preserving existing sessions, receipts, stream, audit and runtime desired
+state. Migration creates no runtime desired state; startup reconciles an existing
+desired-running record. No ManagedSession is bound to this process.
 
 The developer client exposes the new normalized control methods:
 
@@ -200,3 +201,43 @@ Rust tests include seeded v1 migration, idempotency/audit rollback, deterministi
 fake App Server IO/failure/allowlist checks, graceful restart, explicit stop and
 Linux SIGKILL containment. Normal tests use isolated XDG directories and a fake
 executable, never the user's Codex runtime or production authority state.
+
+## Execution leases and internal gate
+
+Execution is denied by default. A prepared ManagedSession has no permission until
+an explicit `executionLease/grant` commits a durable lease and audit. Runtime
+startup, client reconnection and authority restart never grant or renew a lease.
+The authority still creates **zero Codex threads or turns**, submits no prompts
+and answers no approvals or permission requests. First managed work remains blocked.
+
+Schema v3 adds only execution leases and a unique active-lease index; migration
+preserves sessions, runtime desired state, receipts and exact audit bytes, and
+creates zero leases. Each lease has its own ExecutionLeaseId and revision, explicit
+nonempty scopes (`session_create`, `session_resume`, `turn_start`), and an
+authority-time TTL of 1–3600 seconds. No scope implies another scope.
+
+The typed Rust client and developer client support `executionLease/grant`,
+`executionLease/get`, `executionLease/active`, `executionLease/renew` and
+`executionLease/revoke`. Grant takes session ID, expected session revision, TTL,
+comma-separated scopes and intent UUID. Renew takes lease ID, expected lease
+revision, TTL and intent UUID; revoke takes lease ID, revision and intent UUID.
+Get/active take the corresponding lease/session ID. Renewal preserves scopes and
+uses authority NOW + TTL. Original intent retries return their original receipt,
+including the original expiry; UUID case and scope order are normalized.
+
+`executionGate/status` takes session ID and one scope, returning an informational
+reason only. It is not an authorization token. Future execution must reevaluate
+the internal gate immediately before the authority-owned side effect. It requires
+prepared session, active unexpired scoped lease, matching runtime metadata,
+desired running, actual ready, live runtime identity, compatible runtime and
+healthy canonical storage. A valid lease with stopped runtime still denies;
+runtime readiness without a lease also denies.
+
+The single authority writer expires overdue leases at startup and through a
+deadline-driven scheduler. Get returns effective state without writing or inventing
+a revision; active never returns an overdue lease. Gates compare UTC time even if
+expiry persistence is delayed. Storage/audit failure latches execution closed.
+Closing a session atomically expires/revokes its lease before closing the session.
+Runtime stop leaves leases unchanged. Graceful/hard authority restart preserves
+unexpired lease identity, revision and exact deadline, without extending it.
+See [ADR 0013](docs/adr/0013-execution-gates-leases-and-revocation.md).

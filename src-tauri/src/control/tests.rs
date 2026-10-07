@@ -99,7 +99,7 @@ fn fresh_schema_reopen_and_settings() {
 fn unknown_version_fails_closed() {
     let t = Temp::new();
     let s = t.store();
-    s.conn.pragma_update(None, "user_version", 3).unwrap();
+    s.conn.pragma_update(None, "user_version", 4).unwrap();
     drop(s);
     assert!(matches!(
         Store::open(&t.root.join("control.sqlite3"), uuid()),
@@ -139,6 +139,8 @@ fn schema_migration_down_and_up_on_empty_and_existing_data() {
         for (name, sql) in schema::OBJECTS.iter().rev() {
             let kind = if sql.starts_with("CREATE TRIGGER") {
                 "TRIGGER"
+            } else if sql.starts_with("CREATE UNIQUE INDEX") {
+                "INDEX"
             } else {
                 "TABLE"
             };
@@ -513,7 +515,13 @@ fn protocol_hello_and_method_allowlist() {
             "runtime/start",
             "runtime/status",
             "runtime/model/list",
-            "runtime/stop"
+            "runtime/stop",
+            "executionLease/grant",
+            "executionLease/get",
+            "executionLease/active",
+            "executionLease/renew",
+            "executionLease/revoke",
+            "executionGate/status"
         ]
     );
     for forbidden in [
@@ -879,7 +887,7 @@ fn real_v1_migration_preserves_bytes_sessions_receipts_stream_and_head() {
     let (path, original, prepared) = v1_fixture(&t);
     let old = t.store().status().unwrap();
     let mut s = Store::open(&path, uuid()).unwrap();
-    assert_eq!(s.status().unwrap().storage_schema_version, 2);
+    assert_eq!(s.status().unwrap().storage_schema_version, 3);
     assert_eq!(s.status().unwrap().stream_id, old.stream_id);
     assert_eq!(s.status().unwrap().last_sequence, old.last_sequence);
     let saved: Vec<(String, String, String)> = s
@@ -954,7 +962,7 @@ fn v1_migration_failure_rolls_back_all_ddl_and_version() {
     assert_eq!(
         c.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
             .unwrap(),
-        2
+        3
     );
 }
 #[test]
