@@ -119,6 +119,7 @@ impl ManagedTurnRecord {
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentProfile {
     InferenceOnlyV1,
+    LocalToolsV1,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -319,6 +319,8 @@ fn real_v3_upgrade_preserves_all_data_event_bytes_stream_head_and_zero_bindings(
             adapter_id: RuntimeTarget::codex().adapter_id,
             runtime_kind: RuntimeTarget::codex().runtime_kind,
             expected_revision: None,
+            safety_profile: None,
+            workspace_root: None,
         }))
         .unwrap();
     f.store

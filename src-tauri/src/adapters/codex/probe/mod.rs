@@ -1,5 +1,7 @@
 //! Explicit developer-only read-only compatibility probe. No Tauri entrypoint.
 //! Production executable/argv/cwd and outbound plan are fixed here, not caller inputs.
+#[cfg(target_os = "linux")]
+pub(crate) mod isolation;
 mod process;
 #[cfg(target_os = "linux")]
 pub(crate) mod supervised;

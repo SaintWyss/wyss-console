@@ -755,6 +755,8 @@ fn runtime_mutation() -> RuntimeMutation {
         adapter_id: RuntimeTarget::codex().adapter_id,
         runtime_kind: RuntimeTarget::codex().runtime_kind,
         expected_revision: None,
+        safety_profile: None,
+        workspace_root: None,
     }
 }
 fn runtime_record(value: ResultValue) -> RuntimeControlRecord {

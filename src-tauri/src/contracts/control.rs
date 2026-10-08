@@ -198,6 +198,8 @@ impl Operation {
                 validate_prompt(&p.prompt)
             }
             Self::TurnCancel(p) => valid_revision(p.expected_revision),
+            Self::RuntimeStart(p) => p.validate(true),
+            Self::RuntimeStop(p) => p.validate(false),
             Self::ApprovalRespond(p) => valid_revision(p.expected_revision),
             Self::TurnEvents(p) if p.limit == 0 || p.limit > 50 => {
                 Err(ControlError::InvalidRequest)
@@ -609,8 +611,25 @@ pub struct RuntimeMutation {
     pub adapter_id: AgentAdapterId,
     pub runtime_kind: AgentRuntimeKind,
     pub expected_revision: Option<u64>,
+    /// Start only. Absent selects the inference profile. The profile of a generation never
+    /// changes: another profile needs a stop and a fresh start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safety_profile: Option<RuntimeSafetyProfile>,
+    /// Start only. The one workspace a local-tools generation is isolated for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<String>,
 }
 impl RuntimeMutation {
+    /// A local-tools start names exactly one workspace; nothing else names any.
+    pub fn validate(&self, start: bool) -> ControlResult<()> {
+        let local = self.safety_profile == Some(RuntimeSafetyProfile::CodexLocalToolsV1);
+        if (!start && self.safety_profile.is_some()) || local != self.workspace_root.is_some() {
+            return Err(ControlError::InvalidRequest);
+        }
+        self.workspace_root
+            .as_deref()
+            .map_or(Ok(()), validate_workspace_text)
+    }
     pub fn target(&self) -> RuntimeTarget {
         RuntimeTarget {
             adapter_id: self.adapter_id.clone(),
@@ -695,6 +714,8 @@ pub struct RuntimeMethods {
     pub turn_start: u64,
     #[serde(default)]
     pub turn_interrupt: u64,
+    #[serde(default)]
+    pub config_requirements_read: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -712,6 +733,9 @@ pub struct RuntimeStatus {
     pub outbound_methods: RuntimeMethods,
     #[serde(default)]
     pub runtime_safety_profile: Option<RuntimeSafetyProfile>,
+    /// The workspace a ready local-tools generation is isolated for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<String>,
 }
 impl RuntimeStatus {
     pub fn validate(&self) -> ControlResult<()> {
@@ -732,6 +756,11 @@ impl RuntimeStatus {
             return Err(ControlError::InvalidRequest);
         }
         if self.actual_state != ActualState::Ready && self.model_count != 0 {
+            return Err(ControlError::InvalidRequest);
+        }
+        if self.workspace_root.is_some()
+            != (self.runtime_safety_profile == Some(RuntimeSafetyProfile::CodexLocalToolsV1))
+        {
             return Err(ControlError::InvalidRequest);
         }
         Ok(())
@@ -756,4 +785,7 @@ pub struct RuntimeModels {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeSafetyProfile {
     CodexInferenceV1,
+    /// Isolated generation offering exactly one-shot command execution and patch
+    /// application, each mediated by the authority.
+    CodexLocalToolsV1,
 }

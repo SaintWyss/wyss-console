@@ -16,7 +16,14 @@ argv = sys.argv[1:-1]
 assert len(argv) % 2 == 0 and all(argv[i] == '-c' for i in range(0, len(argv), 2))
 flags = dict(a.split('=', 1) for a in argv[1::2])
 assert len(flags) == len(argv) // 2
-assert not argv or flags.get('features.hooks') == 'false' and flags.get('features.shell_tool') == 'false'
+# The local-tools generation differs from inference by exactly this one enabled feature.
+local = flags.get('features.shell_tool') == 'true'
+assert not argv or flags.get('features.hooks') == 'false' and flags.get('features.shell_tool') in ('false', 'true')
+assert not local or flags.get('features.unified_exec_tty') == 'false'
+WORKSPACE_ONLY = {'sandbox_workspace_write.exclude_slash_tmp': 'true', 'sandbox_workspace_write.exclude_tmpdir_env_var': 'true',
+                  'sandbox_workspace_write.network_access': 'false'}
+assert {k: v for k, v in flags.items() if k.startswith('sandbox_workspace_write.')} == (WORKSPACE_ONLY if local else {})
+assert local or 'features.unified_exec_tty' not in flags
 assert not argv or flags.get('features.unified_exec') == 'false' and flags.get('web_search') == '"disabled"'
 assert not argv or flags.get('agents.enabled') == 'false'
 assert not argv or flags.get('features.code_mode_host') == 'false' and flags.get('features.sleep_tool') == 'false'
@@ -26,13 +33,33 @@ if catalog:
     presented = json.loads(Path(catalog).read_text())
     assert presented['models'] and all(
         m['tool_mode'] == 'direct' and m['experimental_supported_tools'] == []
-        and m['multi_agent_version'] is None and m['apply_patch_tool_type'] is None
+        and m['multi_agent_version'] is None
+        and (m['apply_patch_tool_type'] == 'freeform' if local else m['apply_patch_tool_type'] is None)
         for m in presented['models'])
     assert Path(catalog).stat().st_mode & 0o777 == 0o600
     (root / 'catalog-launches').open('a').write('1\n')
 
 with (root / 'pids').open('a') as record:
     record.write(str(os.getpid()) + '\n')
+if local:
+    # What this process can actually see from inside its namespace. Never credential bytes
+    # beyond the fixture marker the test wrote itself.
+    home = Path(os.environ['CODEX_HOME'])
+    user = Path(os.environ['WYSS_FIXTURE_USER_HOME'])
+    layers = json.loads(os.environ.get('WYSS_FIXTURE_LAYERS', '[]'))
+    (root / 'local.json').write_text(json.dumps({
+        'codex_home': str(home),
+        'requirements': Path('/etc/codex/requirements.toml').read_text(),
+        'managed_entries': sorted(os.listdir('/etc/codex')),
+        'user_home_entries': sorted(os.listdir(user)),
+        'credential': (home / 'auth.json').read_text(),
+        'credential_writable': os.access(home / 'auth.json', os.W_OK),
+        'inherited': sorted(k for k in os.environ if k.startswith(('CODEX_', 'OPENAI'))),
+        'layers': {p: sorted(os.listdir(p)) for p in layers},
+        'layers_writable': [p for p in layers if os.access(p, os.W_OK)],
+    }))
+    with (root / 'local-launches').open('a') as record:
+        record.write(('final' if catalog else 'discovery') + '\n')
 
 
 def emit(value):
@@ -59,7 +86,8 @@ for line in sys.stdin:
             continue
         emit({'method': 'remoteControl/status/changed', 'params': {}})
         emit({'id': message['id'], 'result': {
-            'userAgent': 'fixture', 'codexHome': '/synthetic',
+            'userAgent': 'fixture',
+            'codexHome': os.environ['CODEX_HOME'] if local and scenario != 'local_wrong_home' else '/synthetic',
             'platformFamily': 'unix', 'platformOs': 'linux'}})
     elif method == 'initialized':
         initialized = True
@@ -70,6 +98,11 @@ for line in sys.stdin:
             emit({'id': message['id'], 'error': {'code': -32603, 'message': 'synthetic private diagnostic'}})
             continue
         count = 51 if scenario == 'too_many_models' else 45
+        if local:
+            # The real runtime refreshes the backend catalog cache of ITS home here.
+            (Path(os.environ['CODEX_HOME']) / 'models_cache.json').write_text(json.dumps({'models': [{
+                'slug': 'fixture-model', 'tool_mode': 'code_mode_only', 'apply_patch_tool_type': 'freeform',
+                'multi_agent_version': 'v2', 'experimental_supported_tools': ['clock']}]}))
         models = [{'id': f'model-{index}', 'model': f'model-{index}',
                    'displayName': 'Synthetic model', 'description': 'Fixture',
                    'hidden': False, 'isDefault': index == 0,
@@ -107,25 +140,48 @@ for line in sys.stdin:
         counter=root/'config-count'
         calls=int(counter.read_text()) if counter.exists() else 0
         counter.write_text(str(calls+1))
-        names=['fixture_mcp']
+        names=[] if local and scenario != 'local_mcp' else ['fixture_mcp']
         if scenario=='mcp_drift' and calls>=1:names.append('new_mcp')
         servers = {n: {'enabled': flags.get('mcp_servers.' + n + '.enabled') != 'false'} for n in names}
-        features = {k.split('.',1)[1]: False for k in flags if k.startswith('features.')}
-        emit({'id':message['id'],'result':{'config':{'mcp_servers':servers,'features':features,'cloud':{'skills':{'enabled':False}},'skills':{'include_instructions':False},'web_search':'disabled','agents':{'enabled':flags.get('agents.enabled') != 'false'},'model_catalog_json':catalog},'layers':None}})
+        features = {k.split('.',1)[1]: v == 'true' for k, v in flags.items() if k.startswith('features.')}
+        emit({'id':message['id'],'result':{'config':{'mcp_servers':servers,'features':features,'cloud':{'skills':{'enabled':False}},'skills':{'include_instructions':False},'web_search':'disabled','agents':{'enabled':flags.get('agents.enabled') != 'false'},'model_catalog_json':catalog,
+            **({'sandbox_workspace_write':{'writable_roots':[],'network_access':False,'exclude_tmpdir_env_var':True,'exclude_slash_tmp':scenario!='local_tmp_writable'}} if local else {})},'layers':None}})
+    elif method == 'configRequirements/read':
+        assert local and message['params'] == {}
+        managed = Path('/etc/codex/requirements.toml').read_text()
+        required = {'unified_exec': False} if 'unified_exec = false' in managed else {}
+        if scenario == 'local_no_requirement':
+            required = {'hooks': True}
+        emit({'id': message['id'], 'result': {'requirements': {'featureRequirements': required, 'hooks': None}}})
     elif method == 'hooks/list':
         hooks=[{'enabled':True}] if scenario=='hooks_enabled' or (root/'restore-hooks').exists() else []
         emit({'id':message['id'],'result':{'data':[{'hooks':hooks}]}})
     elif method in ('thread/start', 'thread/resume'):
         assert initialized
         params = message['params']
-        if method == 'thread/start':
+        posture = ('workspace-write', 'untrusted') if local else ('read-only', 'never')
+        if method == 'thread/start' and not local:
             assert set(params) == {'cwd', 'ephemeral'} and params['ephemeral'] is False
+            thread_id = 'opaque-' + str(len((root / 'methods').read_text().splitlines()))
+        elif method == 'thread/start':
+            assert set(params) == {'cwd', 'ephemeral', 'config', 'sandbox', 'approvalPolicy'} and params['ephemeral'] is False
             thread_id = 'opaque-' + str(len((root / 'methods').read_text().splitlines()))
         else:
             assert set(params) == {'cwd', 'threadId', 'excludeTurns', 'config', 'sandbox', 'approvalPolicy'} and params['excludeTurns'] is True
-            assert params['sandbox'] == 'read-only' and params['approvalPolicy'] == 'never'
-            assert params['config']['features.hooks'] is False and params['config']['mcp_servers']['fixture_mcp']['enabled'] is False
             thread_id = params['threadId']
+        if 'config' in params:
+            assert (params['sandbox'], params['approvalPolicy']) == posture
+            assert params['config']['features.hooks'] is False and params['config']['features.unified_exec'] is False
+            assert params['config']['features.shell_tool'] is local and params['config']['agents.enabled'] is False
+            if local:
+                projects = params['config']['projects']
+                assert params['cwd'] in projects or len(projects) == 1
+                assert projects and all(v == {'trust_level': 'untrusted'} for v in projects.values())
+                assert params['config']['mcp_servers'] == {} and 'default_permissions' not in params['config']
+                assert all(params['config'][k] is (v == 'true') for k, v in WORKSPACE_ONLY.items())
+                (root / 'trust-roots').write_text(json.dumps(sorted(projects)))
+            else:
+                assert params['config']['mcp_servers']['fixture_mcp']['enabled'] is False
         if method == 'thread/resume':
             assert threads[thread_id]['durable'] and not threads[thread_id]['archived']
         assert Path(params['cwd']).is_absolute()
@@ -157,6 +213,14 @@ for line in sys.stdin:
         result = {'thread': thread, 'cwd': params['cwd'], 'model': 'synthetic',
                   'modelProvider': 'synthetic', 'approvalPolicy': 'never',
                   'approvalsReviewer': 'user', 'sandbox': {'type': 'readOnly', 'networkAccess': False}}
+        if local:
+            result.update(approvalPolicy='untrusted', activePermissionProfile=None,
+                          sandbox={'type': 'workspaceWrite', 'writableRoots': [], 'networkAccess': False,
+                                   'excludeTmpdirEnvVar': True, 'excludeSlashTmp': True})
+            if scenario == 'local_weak_thread':
+                result['approvalPolicy'] = 'never'
+            if scenario == 'local_network_thread':
+                result['sandbox']['networkAccess'] = True
         if scenario == 'thread_lock_response':
             import sqlite3
             lock = sqlite3.connect(Path(os.environ['XDG_STATE_HOME']) / 'wyss-console/control.sqlite3')

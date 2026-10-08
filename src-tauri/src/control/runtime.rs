@@ -5,7 +5,10 @@ pub(super) use crate::adapters::codex::probe::supervised::{
     TurnCommand,
 };
 use crate::{
-    adapters::codex::probe::supervised::Worker,
+    adapters::codex::probe::{
+        isolation::Isolation,
+        supervised::{LaunchProfile, Worker},
+    },
     contracts::{
         agent_adapter::{AgentModelDescriptorV1, CompatibilityState},
         control::*,
@@ -37,12 +40,23 @@ pub(super) struct Runtime {
     reclamped: bool,
     /// Private authority directory that receives the normalized model catalog.
     catalog_dir: std::path::PathBuf,
+    /// Private authority directory of the isolated generation's home and policy.
+    isolation_dir: std::path::PathBuf,
+    /// Workspace of the local-tools profile requested by the latest explicit start. Memory
+    /// only: after an authority restart a desired-running runtime comes back as inference.
+    requested: Option<String>,
+    /// Workspace the current generation was launched for, if it is a local-tools one.
+    generation: Option<String>,
 }
 impl Runtime {
     pub fn owns_generation(&self, id: &AgentRuntimeInstanceId) -> bool {
         self.attempt.as_ref() == Some(id)
     }
-    pub fn new(store: &Store, catalog_dir: &std::path::Path) -> ControlResult<Self> {
+    pub fn new(
+        store: &Store,
+        catalog_dir: &std::path::Path,
+        isolation_dir: &std::path::Path,
+    ) -> ControlResult<Self> {
         Ok(Self {
             control: store.runtime_control()?,
             state: ActualState::Stopped,
@@ -57,7 +71,32 @@ impl Runtime {
             mcp_clamp: Default::default(),
             reclamped: false,
             catalog_dir: catalog_dir.to_path_buf(),
+            isolation_dir: isolation_dir.to_path_buf(),
+            requested: None,
+            generation: None,
         })
+    }
+    /// Admission of an explicit start, before anything durable changes. Returns the
+    /// canonical workspace of a local-tools request. A generation never changes profile:
+    /// while one exists, only a request for that same profile and workspace is accepted.
+    pub fn admit_start(&self, p: &RuntimeMutation) -> ControlResult<Option<String>> {
+        p.validate(true)?;
+        let workspace = p
+            .workspace_root
+            .as_deref()
+            .map(super::store::bindings::canonical_workspace)
+            .transpose()?;
+        if self.worker.is_some() && workspace != self.generation {
+            return Err(ControlError::InvalidTransition);
+        }
+        Ok(workspace)
+    }
+    /// Records the profile of a freshly committed start. A replayed intent returns an
+    /// older control revision and changes nothing.
+    pub fn request(&mut self, workspace: Option<String>, committed: &RuntimeControlRecord) {
+        if committed.revision > self.control.as_ref().map_or(0, |r| r.revision) {
+            self.requested = workspace;
+        }
     }
     fn desired(&self) -> DesiredState {
         self.control
@@ -93,6 +132,10 @@ impl Runtime {
             diagnostic: self.diagnostic,
             outbound_methods: self.methods.clone(),
             runtime_safety_profile: self.safety,
+            workspace_root: self
+                .safety
+                .filter(|p| *p == RuntimeSafetyProfile::CodexLocalToolsV1)
+                .and(self.generation.clone()),
         }
     }
     pub fn models(&self, p: &RuntimeModels) -> ControlResult<ResultValue> {
@@ -151,11 +194,20 @@ impl Runtime {
             let id = AgentRuntimeInstanceId::parse(&uuid::Uuid::new_v4().to_string())
                 .expect("generated identity");
             self.attempt = Some(id.clone());
+            self.generation = self.requested.clone();
+            let profile = match &self.generation {
+                None => LaunchProfile::Inference,
+                Some(workspace) => LaunchProfile::LocalTools(Isolation {
+                    workspace: workspace.into(),
+                    state: self.isolation_dir.clone(),
+                }),
+            };
             let core = core.clone();
             match Worker::start(
                 id,
                 self.mcp_clamp.clone(),
                 self.catalog_dir.clone(),
+                profile,
                 move |id, observation, cancel| {
                     let mut message = CoreMessage::Runtime(id.clone(), observation);
                     // Bounded backpressure, interruptible so core shutdown/stop can always join.
@@ -253,7 +305,12 @@ impl Runtime {
                 self.models = models;
                 self.methods = methods;
                 self.state = ActualState::Ready;
-                self.safety = Some(RuntimeSafetyProfile::CodexInferenceV1);
+                // Readiness is reported only after the attestation of this exact profile.
+                self.safety = Some(if self.generation.is_some() {
+                    RuntimeSafetyProfile::CodexLocalToolsV1
+                } else {
+                    RuntimeSafetyProfile::CodexInferenceV1
+                });
             }
             Observation::Exited { reason, methods } => {
                 self.methods = methods;
@@ -289,6 +346,7 @@ impl Runtime {
         let id = self.live.take();
         self.attempt = None;
         self.safety = None;
+        self.generation = None;
         self.models.clear();
         self.version = None;
         self.state = ActualState::Stopped;

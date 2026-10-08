@@ -277,3 +277,97 @@ fn approval_decisions_are_exactly_three_and_presentation_types_hide_their_conten
     lost.acceptable = false;
     lost.validate().unwrap();
 }
+
+#[test]
+fn runtime_start_selects_a_profile_without_changing_the_stored_encoding_of_older_intents() {
+    use super::control::{Operation, RuntimeMutation, RuntimeSafetyProfile, RuntimeStatus};
+    let base = serde_json::json!({
+        "intent_id": "11111111-1111-4111-8111-111111111111",
+        "adapter_id": "codex",
+        "runtime_kind": "codex",
+        "expected_revision": null
+    });
+    // A receipt journaled before profiles existed still parses and re-encodes byte for byte.
+    let plain: RuntimeMutation = serde_json::from_value(base.clone()).unwrap();
+    assert_eq!(
+        (plain.safety_profile, plain.workspace_root.clone()),
+        (None, None)
+    );
+    assert_eq!(serde_json::to_value(&plain).unwrap(), base);
+    let with = |profile: Value, workspace: Value| -> RuntimeMutation {
+        let mut v = base.clone();
+        if !profile.is_null() {
+            v["safety_profile"] = profile;
+        }
+        if !workspace.is_null() {
+            v["workspace_root"] = workspace;
+        }
+        serde_json::from_value(v).unwrap()
+    };
+    let local = with("codex_local_tools_v1".into(), "/work/repo".into());
+    assert_eq!(
+        local.safety_profile,
+        Some(RuntimeSafetyProfile::CodexLocalToolsV1)
+    );
+    Operation::RuntimeStart(local.clone()).validate().unwrap();
+    Operation::RuntimeStart(plain.clone()).validate().unwrap();
+    Operation::RuntimeStart(with("codex_inference_v1".into(), Value::Null))
+        .validate()
+        .unwrap();
+    Operation::RuntimeStop(plain).validate().unwrap();
+    for refused in [
+        Operation::RuntimeStart(with("codex_local_tools_v1".into(), Value::Null)),
+        Operation::RuntimeStart(with(Value::Null, "/work/repo".into())),
+        Operation::RuntimeStart(with("codex_inference_v1".into(), "/work/repo".into())),
+        Operation::RuntimeStart(with("codex_local_tools_v1".into(), "relative".into())),
+        Operation::RuntimeStart(with("codex_local_tools_v1".into(), "/w\n".into())),
+        Operation::RuntimeStop(local.clone()),
+        Operation::RuntimeStop(with("codex_inference_v1".into(), Value::Null)),
+    ] {
+        assert!(refused.validate().is_err(), "{refused:?}");
+    }
+    let mut unknown = base.clone();
+    unknown["safety_profile"] = "codex_full_access".into();
+    assert!(serde_json::from_value::<RuntimeMutation>(unknown).is_err());
+    let mut extra = base.clone();
+    extra["argv"] = serde_json::json!(["--dangerously-bypass"]);
+    assert!(serde_json::from_value::<RuntimeMutation>(extra).is_err());
+    // A status names a workspace exactly when it reports the isolated profile.
+    let status = |profile: Value, workspace: Value| -> RuntimeStatus {
+        let mut v = serde_json::json!({
+            "adapter_id": "codex", "runtime_kind": "codex", "desired_state": "running",
+            "revision": 1, "actual_state": "ready", "runtime_instance_id": null,
+            "runtime_version": "0.159.0", "compatibility": "compatible", "model_count": 1,
+            "diagnostic": null,
+            "outbound_methods": {"initialize": 1, "initialized": 1, "model_list": 1},
+            "runtime_safety_profile": profile
+        });
+        if !workspace.is_null() {
+            v["workspace_root"] = workspace;
+        }
+        serde_json::from_value(v).unwrap()
+    };
+    status("codex_inference_v1".into(), Value::Null)
+        .validate()
+        .unwrap();
+    status("codex_local_tools_v1".into(), "/work/repo".into())
+        .validate()
+        .unwrap();
+    status(Value::Null, Value::Null).validate().unwrap();
+    assert!(
+        status("codex_inference_v1".into(), "/work/repo".into())
+            .validate()
+            .is_err()
+    );
+    assert!(
+        status("codex_local_tools_v1".into(), Value::Null)
+            .validate()
+            .is_err()
+    );
+    assert_eq!(
+        status("codex_inference_v1".into(), Value::Null)
+            .outbound_methods
+            .config_requirements_read,
+        0
+    );
+}

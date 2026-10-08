@@ -111,6 +111,7 @@ impl Fixture {
             diagnostic: None,
             outbound_methods: RuntimeMethods::default(),
             runtime_safety_profile: Some(RuntimeSafetyProfile::CodexInferenceV1),
+            workspace_root: None,
         }
     }
     fn attachment(&self) -> BindingStatus {

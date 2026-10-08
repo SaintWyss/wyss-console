@@ -46,6 +46,35 @@ pub const PRODUCTION_METHODS: [&str; 11] = [
     "turn/start",
     "turn/interrupt",
 ];
+/// The local-tools generation additionally proves its managed requirements.
+pub const LOCAL_TOOLS_METHODS: [&str; 12] = [
+    "initialize",
+    "initialized",
+    "model/list",
+    "config/read",
+    "configRequirements/read",
+    "hooks/list",
+    "thread/start",
+    "thread/archive",
+    "thread/unarchive",
+    "thread/resume",
+    "turn/start",
+    "turn/interrupt",
+];
+/// The single feature the local-tools profile turns on: the one-shot command tool.
+const LOCAL_TOOLS_ENABLED_KEY: &str = "features.shell_tool";
+/// Writes of an approved command are confined to the workspace itself: the runtime's
+/// default extra writable roots (`/tmp` and `$TMPDIR`) and network access are removed.
+const LOCAL_TOOLS_SANDBOX: [(&str, bool); 3] = [
+    ("sandbox_workspace_write.exclude_slash_tmp", true),
+    ("sandbox_workspace_write.exclude_tmpdir_env_var", true),
+    ("sandbox_workspace_write.network_access", false),
+];
+/// Managed requirements of the isolated generation. `-c features.unified_exec=false` alone
+/// is overridden by the runtime; only a managed requirement removes `write_stdin` and
+/// persistent processes.
+pub const LOCAL_TOOLS_REQUIREMENTS: &str = "[features]\nunified_exec = false\n";
+pub const LOCAL_TOOLS_MANAGED_CONFIG: &str = "check_for_update_on_startup = false\n";
 const MAX_MCP: usize = 64;
 pub const MAX_CATALOG_BYTES: usize = 4 * 1024 * 1024;
 const MAX_CATALOG_MODELS: usize = 64;
@@ -103,6 +132,14 @@ pub fn safe_catalog_path(path: &Path) -> bool {
 /// authority presents every model with those selectors pinned off, so the inference
 /// profile advertises no model-controllable tool at all.
 pub fn inference_catalog(cache: &[u8]) -> Result<Vec<u8>> {
+    catalog(cache, false)
+}
+/// Same pins, except that the backend's own patch tool type is kept: the local-tools
+/// profile offers `apply_patch` next to the one-shot command tool, and nothing else.
+pub fn local_tools_catalog(cache: &[u8]) -> Result<Vec<u8>> {
+    catalog(cache, true)
+}
+fn catalog(cache: &[u8], patch_tool: bool) -> Result<Vec<u8>> {
     if cache.len() > MAX_CATALOG_BYTES {
         return fail("catalog_bound");
     }
@@ -127,7 +164,14 @@ pub fn inference_catalog(cache: &[u8]) -> Result<Vec<u8>> {
         model.insert("tool_mode".into(), json!("direct"));
         model.insert("experimental_supported_tools".into(), json!([]));
         model.insert("multi_agent_version".into(), Value::Null);
-        model.insert("apply_patch_tool_type".into(), Value::Null);
+        if !patch_tool {
+            model.insert("apply_patch_tool_type".into(), Value::Null);
+        } else if !matches!(
+            model.get("apply_patch_tool_type"),
+            Some(Value::Null | Value::String(_)) | None
+        ) {
+            return Err(invalid());
+        }
         presented.push(Value::Object(model));
     }
     serde_json::to_vec(&json!({ "models": presented })).map_err(|_| invalid())
@@ -135,12 +179,31 @@ pub fn inference_catalog(cache: &[u8]) -> Result<Vec<u8>> {
 /// Discovery has no catalog yet and no thread-capable IO boundary. The final generation
 /// always receives the authority catalog.
 pub fn process_args(names: &BTreeSet<String>, catalog: Option<&Path>) -> Result<Vec<String>> {
+    launch_args(names, catalog, false)
+}
+/// The inference clamps with the one-shot command tool enabled and the PTY variant of the
+/// persistent command tool pinned off. No client, provider or workspace text is interpolated.
+pub fn local_tools_args(names: &BTreeSet<String>, catalog: Option<&Path>) -> Result<Vec<String>> {
+    launch_args(names, catalog, true)
+}
+fn launch_args(
+    names: &BTreeSet<String>,
+    catalog: Option<&Path>,
+    local_tools: bool,
+) -> Result<Vec<String>> {
     if names.len() > MAX_MCP || names.iter().any(|n| !safe_mcp_name(n)) {
         return fail("mcp_bound");
     }
     let mut args = Vec::new();
     for key in INFERENCE_DISABLED_KEYS {
-        args.extend(["-c".into(), format!("{key}=false")]);
+        let value = local_tools && key == LOCAL_TOOLS_ENABLED_KEY;
+        args.extend(["-c".into(), format!("{key}={value}")]);
+    }
+    if local_tools {
+        args.extend(["-c".into(), "features.unified_exec_tty=false".into()]);
+        for (key, value) in LOCAL_TOOLS_SANDBOX {
+            args.extend(["-c".into(), format!("{key}={value}")]);
+        }
     }
     args.extend(["-c".into(), "web_search=\"disabled\"".into()]);
     args.extend(["-c".into(), "agents.enabled=false".into()]);
@@ -163,6 +226,25 @@ pub fn process_args(names: &BTreeSet<String>, catalog: Option<&Path>) -> Result<
 /// executable hook inventory is checked independently. The two tools.* overrides are
 /// not reflected by 0.159.0 config/read and remain fixed at both encoder boundaries.
 pub fn verify_config(response: &Value, catalog: &Path) -> Result<()> {
+    reflected(response, catalog, false)
+}
+/// The same reflection for the local-tools generation: every clamp off, the command tool
+/// on, and no MCP server configured at all in its private home.
+pub fn verify_local_tools_config(response: &Value, catalog: &Path) -> Result<()> {
+    reflected(response, catalog, true)?;
+    let config = response.get("config").ok_or_else(invalid)?;
+    if config["features"]["unified_exec_tty"] != false
+        || config["sandbox_workspace_write"]
+            != json!({"writable_roots": [], "network_access": false, "exclude_tmpdir_env_var": true, "exclude_slash_tmp": true})
+        || config
+            .get("mcp_servers")
+            .is_some_and(|m| m.as_object().is_none_or(|m| !m.is_empty()))
+    {
+        return fail("local_tools_config_unproven");
+    }
+    Ok(())
+}
+fn reflected(response: &Value, catalog: &Path, local_tools: bool) -> Result<()> {
     let config = response.get("config").ok_or_else(invalid)?;
     if config["agents"]["enabled"] != false
         || config["model_catalog_json"].as_str() != catalog.to_str()
@@ -177,7 +259,7 @@ pub fn verify_config(response: &Value, catalog: &Path) -> Result<()> {
         for segment in key.split('.') {
             value = value.get(segment).ok_or_else(invalid)?;
         }
-        if value != false {
+        if *value != Value::Bool(local_tools && key == LOCAL_TOOLS_ENABLED_KEY) {
             return fail("inference_config_unproven");
         }
     }
@@ -186,21 +268,55 @@ pub fn verify_config(response: &Value, catalog: &Path) -> Result<()> {
     }
     Ok(())
 }
+/// The runtime itself must report the managed requirement that removes the persistent
+/// command tool. Anything else leaves the local-tools profile unproven.
+pub fn verify_requirements(response: &Value) -> Result<()> {
+    if response["requirements"]["featureRequirements"]["unified_exec"] != false {
+        return fail("local_tools_requirements_unproven");
+    }
+    Ok(())
+}
 pub fn thread_config(names: &BTreeSet<String>) -> Result<Value> {
     process_args(names, None)?;
+    let mut config = clamps(names, false);
+    config.insert("default_permissions".into(), json!(":read-only"));
+    Ok(Value::Object(config))
+}
+/// Per-thread overrides of the local-tools profile. Every project root is forced untrusted
+/// here, as JSON values: a workspace path is never interpolated into TOML or a shell.
+pub fn local_tools_thread_config(names: &BTreeSet<String>, roots: &[String]) -> Result<Value> {
+    local_tools_args(names, None)?;
+    if roots.is_empty() || roots.len() > 2 || roots.iter().any(|r| !Path::new(r).is_absolute()) {
+        return fail("trust_roots");
+    }
+    let mut config = clamps(names, true);
+    config.insert("features.unified_exec_tty".into(), Value::Bool(false));
+    for (key, value) in LOCAL_TOOLS_SANDBOX {
+        config.insert(key.into(), Value::Bool(value));
+    }
+    let projects: serde_json::Map<String, Value> = roots
+        .iter()
+        .map(|r| (r.clone(), json!({"trust_level": "untrusted"})))
+        .collect();
+    config.insert("projects".into(), Value::Object(projects));
+    Ok(Value::Object(config))
+}
+fn clamps(names: &BTreeSet<String>, local_tools: bool) -> serde_json::Map<String, Value> {
     let mut config = serde_json::Map::new();
     for key in INFERENCE_DISABLED_KEYS {
-        config.insert(key.into(), Value::Bool(false));
+        config.insert(
+            key.into(),
+            Value::Bool(local_tools && key == LOCAL_TOOLS_ENABLED_KEY),
+        );
     }
     config.insert("web_search".into(), json!("disabled"));
     config.insert("agents.enabled".into(), Value::Bool(false));
-    config.insert("default_permissions".into(), json!(":read-only"));
     let servers: serde_json::Map<String, Value> = names
         .iter()
         .map(|n| (n.clone(), json!({"enabled": false})))
         .collect();
     config.insert("mcp_servers".into(), Value::Object(servers));
-    Ok(Value::Object(config))
+    config
 }
 /// Unknown enablement is a rejection. No hook commands or source paths escape this boundary.
 pub fn zero_external_hooks(response: &Value) -> Result<()> {
@@ -244,9 +360,219 @@ pub fn verify_resume(response: &Value) -> Result<()> {
     Ok(())
 }
 
+/// A local-tools thread is attached only under the mediated posture: every action asks,
+/// writes are confined to the workspace, no network and no extra writable root.
+pub fn verify_local_tools_thread(response: &Value) -> Result<()> {
+    let sandbox = &response["sandbox"];
+    if response["approvalPolicy"] != "untrusted"
+        || sandbox["type"] != "workspaceWrite"
+        || sandbox["networkAccess"] != false
+        || sandbox["excludeSlashTmp"] != true
+        || sandbox["excludeTmpdirEnvVar"] != true
+        || sandbox["writableRoots"]
+            .as_array()
+            .is_none_or(|roots| !roots.is_empty())
+        || response
+            .get("activePermissionProfile")
+            .is_some_and(|v| !v.is_null())
+    {
+        return fail("local_tools_attachment_unproven");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn local_tools_launch_enables_only_the_command_tool_and_never_interpolates_paths() {
+        let names = BTreeSet::new();
+        let inference = process_args(&names, None).unwrap();
+        let local = local_tools_args(&names, None).unwrap();
+        assert_eq!(local.len(), inference.len() + 8);
+        let differing: Vec<_> = inference
+            .iter()
+            .filter(|a| !local.contains(a))
+            .cloned()
+            .collect();
+        assert_eq!(differing, ["features.shell_tool=false"]);
+        let added: Vec<_> = local
+            .iter()
+            .filter(|a| !inference.contains(a))
+            .cloned()
+            .collect();
+        assert_eq!(
+            added,
+            [
+                "features.shell_tool=true",
+                "features.unified_exec_tty=false",
+                "sandbox_workspace_write.exclude_slash_tmp=true",
+                "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+                "sandbox_workspace_write.network_access=false"
+            ]
+        );
+        for kept in [
+            "features.unified_exec=false",
+            "features.hooks=false",
+            "features.multi_agent=false",
+            "features.code_mode_host=false",
+            "agents.enabled=false",
+            "web_search=\"disabled\"",
+        ] {
+            assert!(local.iter().any(|a| a == kept), "{kept}");
+        }
+        assert_eq!(local.last().unwrap(), "app-server");
+        let roots = vec![
+            "/work/re\"po = {x}".to_owned(),
+            "/work/re\"po = {x}/ws".to_owned(),
+        ];
+        let config = local_tools_thread_config(&names, &roots).unwrap();
+        assert_eq!(config["features.shell_tool"], true);
+        assert_eq!(config["features.unified_exec"], false);
+        assert_eq!(config["features.unified_exec_tty"], false);
+        assert_eq!(config["sandbox_workspace_write.exclude_slash_tmp"], true);
+        assert_eq!(
+            config["sandbox_workspace_write.exclude_tmpdir_env_var"],
+            true
+        );
+        assert_eq!(config["sandbox_workspace_write.network_access"], false);
+        assert_eq!(config["agents.enabled"], false);
+        assert!(config.get("default_permissions").is_none());
+        assert_eq!(
+            config["projects"],
+            json!({roots[0].clone(): {"trust_level": "untrusted"}, roots[1].clone(): {"trust_level": "untrusted"}})
+        );
+        for bad in [
+            vec![],
+            vec!["relative".to_owned()],
+            vec!["/a".to_owned(); 3],
+        ] {
+            assert!(local_tools_thread_config(&names, &bad).is_err());
+        }
+        assert_eq!(
+            LOCAL_TOOLS_REQUIREMENTS,
+            "[features]\nunified_exec = false\n"
+        );
+        assert_eq!(LOCAL_TOOLS_METHODS.len(), PRODUCTION_METHODS.len() + 1);
+        assert!(
+            PRODUCTION_METHODS
+                .iter()
+                .all(|m| LOCAL_TOOLS_METHODS.contains(m))
+        );
+    }
+    #[test]
+    fn local_tools_attestation_requires_every_reflected_and_managed_fact() {
+        let catalog = Path::new("/run/user/1000/wyss-console/codex-local-tools-catalog.json");
+        let mut features = serde_json::Map::new();
+        let mut config = serde_json::Map::new();
+        for key in INFERENCE_DISABLED_KEYS {
+            if let Some(("features", name)) = key.split_once('.') {
+                features.insert(name.into(), Value::Bool(name == "shell_tool"));
+            }
+        }
+        features.insert("unified_exec_tty".into(), Value::Bool(false));
+        config.insert("features".into(), Value::Object(features));
+        config.insert("cloud".into(), json!({"skills": {"enabled": false}}));
+        config.insert("skills".into(), json!({"include_instructions": false}));
+        config.insert("agents".into(), json!({"enabled": false}));
+        config.insert("web_search".into(), json!("disabled"));
+        config.insert("mcp_servers".into(), json!({}));
+        config.insert(
+            "sandbox_workspace_write".into(),
+            json!({"writable_roots": [], "network_access": false, "exclude_tmpdir_env_var": true, "exclude_slash_tmp": true}),
+        );
+        config.insert(
+            "model_catalog_json".into(),
+            json!(catalog.to_str().unwrap()),
+        );
+        let good = json!({ "config": config });
+        verify_local_tools_config(&good, catalog).unwrap();
+        // The inference attestation refuses the same runtime, and the reverse.
+        assert!(verify_config(&good, catalog).is_err());
+        let broken = |change: &dyn Fn(&mut Value)| {
+            let mut v = good.clone();
+            change(&mut v["config"]);
+            verify_local_tools_config(&v, catalog).is_err()
+        };
+        let changes: [&dyn Fn(&mut Value); 13] = [
+            &|c| c["sandbox_workspace_write"]["exclude_slash_tmp"] = json!(false),
+            &|c| c["sandbox_workspace_write"]["exclude_tmpdir_env_var"] = json!(false),
+            &|c| c["sandbox_workspace_write"]["network_access"] = json!(true),
+            &|c| c["sandbox_workspace_write"]["writable_roots"] = json!(["/"]),
+            &|c| c["features"]["shell_tool"] = json!(false),
+            &|c| c["features"]["unified_exec"] = json!(true),
+            &|c| c["features"]["unified_exec_tty"] = json!(true),
+            &|c| c["features"]["multi_agent"] = json!(true),
+            &|c| c["features"]["code_mode_host"] = json!(true),
+            &|c| c["agents"]["enabled"] = json!(true),
+            &|c| c["web_search"] = json!("live"),
+            &|c| c["mcp_servers"] = json!({"x": {"enabled": false}}),
+            &|c| c["model_catalog_json"] = json!("/other/catalog.json"),
+        ];
+        for (n, change) in changes.iter().enumerate() {
+            assert!(broken(*change), "change {n}");
+        }
+        verify_requirements(&json!({"requirements": {"featureRequirements": {"unified_exec": false, "hooks": true}}})).unwrap();
+        for bad in [
+            json!({"requirements": {"featureRequirements": {"unified_exec": true}}}),
+            json!({"requirements": {"featureRequirements": {}}}),
+            json!({"requirements": {"featureRequirements": null}}),
+            json!({"requirements": null}),
+            json!({}),
+        ] {
+            assert!(verify_requirements(&bad).is_err(), "{bad}");
+        }
+        let thread = json!({"approvalPolicy": "untrusted", "sandbox": {"type": "workspaceWrite", "writableRoots": [], "networkAccess": false, "excludeTmpdirEnvVar": true, "excludeSlashTmp": true}, "activePermissionProfile": null});
+        verify_local_tools_thread(&thread).unwrap();
+        assert!(verify_resume(&thread).is_err());
+        let changes: [&dyn Fn(&mut Value); 9] = [
+            &|t| t["sandbox"]["excludeSlashTmp"] = json!(false),
+            &|t| t["sandbox"]["excludeTmpdirEnvVar"] = json!(false),
+            &|t| t["approvalPolicy"] = json!("never"),
+            &|t| t["approvalPolicy"] = json!("on-request"),
+            &|t| t["sandbox"]["type"] = json!("dangerFullAccess"),
+            &|t| t["sandbox"]["networkAccess"] = json!(true),
+            &|t| t["sandbox"]["writableRoots"] = json!(["/"]),
+            &|t| {
+                t["sandbox"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("writableRoots");
+            },
+            &|t| t["activePermissionProfile"] = json!({"id": ":workspace"}),
+        ];
+        for (n, change) in changes.iter().enumerate() {
+            let mut t = thread.clone();
+            change(&mut t);
+            assert!(verify_local_tools_thread(&t).is_err(), "thread change {n}");
+        }
+    }
+    #[test]
+    fn local_tools_catalog_keeps_only_the_patch_tool_selector() {
+        let cache = serde_json::to_vec(&json!({"models": [
+            {"slug": "a", "tool_mode": "code_mode_only", "experimental_supported_tools": ["x"], "multi_agent_version": "v2", "apply_patch_tool_type": "freeform"},
+            {"slug": "b", "tool_mode": "code_mode_only"}
+        ]}))
+        .unwrap();
+        let local: Value = serde_json::from_slice(&local_tools_catalog(&cache).unwrap()).unwrap();
+        let inference: Value = serde_json::from_slice(&inference_catalog(&cache).unwrap()).unwrap();
+        for presented in [&local, &inference] {
+            for model in presented["models"].as_array().unwrap() {
+                assert_eq!(model["tool_mode"], "direct");
+                assert_eq!(model["experimental_supported_tools"], json!([]));
+                assert!(model["multi_agent_version"].is_null());
+            }
+        }
+        assert_eq!(local["models"][0]["apply_patch_tool_type"], "freeform");
+        assert!(local["models"][1].get("apply_patch_tool_type").is_none());
+        assert!(inference["models"][0]["apply_patch_tool_type"].is_null());
+        let odd = serde_json::to_vec(
+            &json!({"models": [{"slug": "a", "apply_patch_tool_type": {"x": 1}}]}),
+        )
+        .unwrap();
+        assert!(local_tools_catalog(&odd).is_err());
+        assert!(local_tools_catalog(b"{}").is_err());
+    }
     #[test]
     fn immutable_launch_is_canonical_and_contains_hook_clamp() {
         let names = BTreeSet::from(["server_b".into(), "server-a".into()]);

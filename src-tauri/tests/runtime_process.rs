@@ -40,6 +40,8 @@ fn mutation() -> RuntimeMutation {
         adapter_id: RuntimeTarget::codex().adapter_id,
         runtime_kind: RuntimeTarget::codex().runtime_kind,
         expected_revision: None,
+        safety_profile: None,
+        workspace_root: None,
     }
 }
 struct Sandbox {
@@ -76,6 +78,11 @@ impl Sandbox {
                 .env("CODEX_HOME", self.root.join("codex-home"))
                 .env("WYSS_RUNTIME_FIXTURE", &self.root)
                 .env("WYSS_RUNTIME_SCENARIO", self.scenario)
+                .env("WYSS_FIXTURE_USER_HOME", self.root.join("codex-home"))
+                .env(
+                    "WYSS_FIXTURE_LAYERS",
+                    fs::read_to_string(self.root.join("layers.json")).unwrap_or("[]".into()),
+                )
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -1883,5 +1890,487 @@ fn inference_generation_only_starts_with_the_authority_model_catalog() {
         assert!(!env.root.join("catalog-launches").exists(), "{sabotage}");
         assert_eq!(count(&env, "thread/start"), 0, "{sabotage}");
         a.stop(false);
+    }
+}
+
+/// A workspace nested in a repository that carries project policy at two levels, and a user
+/// Codex home holding a credential next to configuration and rules that must stay hidden.
+fn local_layout(env: &Sandbox) -> String {
+    let home = env.root.join("codex-home");
+    fs::write(home.join("auth.json"), "FIXTURE-CREDENTIAL").unwrap();
+    fs::set_permissions(home.join("auth.json"), fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(home.join("config.toml"), "approval_policy = \"never\"\n").unwrap();
+    fs::create_dir_all(home.join("rules")).unwrap();
+    fs::write(home.join("rules/allow.rules"), "allow everything\n").unwrap();
+    for dir in [
+        "repo/.git",
+        "repo/.codex",
+        "repo/sub/.codex/rules",
+        "repo/sub/ws",
+    ] {
+        fs::create_dir_all(env.root.join(dir)).unwrap();
+    }
+    fs::write(
+        env.root.join("repo/.codex/config.toml"),
+        "approval_policy = \"never\"\n",
+    )
+    .unwrap();
+    fs::write(
+        env.root.join("repo/sub/.codex/rules/allow.rules"),
+        "allow everything\n",
+    )
+    .unwrap();
+    let layers = [
+        env.root.join("repo/.codex"),
+        env.root.join("repo/sub/.codex"),
+    ];
+    fs::write(
+        env.root.join("layers.json"),
+        serde_json::to_string(&layers).unwrap(),
+    )
+    .unwrap();
+    env.root.join("repo/sub/ws").to_str().unwrap().to_owned()
+}
+fn local_mutation(workspace: &str) -> RuntimeMutation {
+    RuntimeMutation {
+        safety_profile: Some(RuntimeSafetyProfile::CodexLocalToolsV1),
+        workspace_root: Some(workspace.to_owned()),
+        ..mutation()
+    }
+}
+fn local_scopes() -> Vec<ExecutionScope> {
+    vec![
+        ExecutionScope::SessionCreate,
+        ExecutionScope::SessionResume,
+        ExecutionScope::TurnStart,
+        ExecutionScope::CommandExecute,
+        ExecutionScope::FileChange,
+    ]
+}
+fn observed(env: &Sandbox) -> serde_json::Value {
+    serde_json::from_str(&fs::read_to_string(env.root.join("local.json")).unwrap()).unwrap()
+}
+#[test]
+fn local_tools_generation_is_isolated_attested_and_serves_only_its_workspace() {
+    let env = Sandbox::new("happy");
+    let workspace = local_layout(&env);
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(local_mutation(&workspace)).unwrap();
+    let ready = env.wait(&mut c, ActualState::Ready);
+    assert_eq!(
+        ready.runtime_safety_profile,
+        Some(RuntimeSafetyProfile::CodexLocalToolsV1)
+    );
+    assert_eq!(ready.workspace_root.as_deref(), Some(workspace.as_str()));
+    // What the runtime process itself could see from inside its namespace.
+    let seen = observed(&env);
+    let private = env.root.join("state/wyss-console/codex-local-tools");
+    assert_eq!(seen["codex_home"], private.join("home").to_str().unwrap());
+    assert_eq!(seen["requirements"], "[features]\nunified_exec = false\n");
+    assert_eq!(
+        seen["managed_entries"],
+        serde_json::json!(["managed_config.toml", "requirements.toml"])
+    );
+    assert_eq!(seen["user_home_entries"], serde_json::json!([]));
+    assert_eq!(seen["credential"], "FIXTURE-CREDENTIAL");
+    assert_eq!(seen["credential_writable"], true);
+    assert_eq!(seen["inherited"], serde_json::json!(["CODEX_HOME"]));
+    assert_eq!(seen["layers_writable"], serde_json::json!([]));
+    for (layer, entries) in seen["layers"].as_object().unwrap() {
+        assert_eq!(entries, &serde_json::json!([]), "{layer} is masked");
+    }
+    assert_eq!(seen["layers"].as_object().unwrap().len(), 2);
+    // Outside it nothing was hidden, copied or created.
+    for (file, content) in [
+        ("codex-home/auth.json", "FIXTURE-CREDENTIAL"),
+        ("codex-home/config.toml", "approval_policy = \"never\"\n"),
+        ("repo/.codex/config.toml", "approval_policy = \"never\"\n"),
+        ("repo/sub/.codex/rules/allow.rules", "allow everything\n"),
+    ] {
+        assert_eq!(fs::read_to_string(env.root.join(file)).unwrap(), content);
+    }
+    assert!(!env.root.join("repo/sub/ws/.codex").exists());
+    assert_eq!(
+        fs::metadata(private.join("home/auth.json")).unwrap().len(),
+        0
+    );
+    // Both the discovery process and the final generation ran inside the namespace, and the
+    // final one proved its managed requirement.
+    assert_eq!(
+        fs::read_to_string(env.root.join("local-launches")).unwrap(),
+        "discovery\nfinal\n"
+    );
+    assert_eq!(
+        env.methods(),
+        [
+            "initialize",
+            "initialized",
+            "model/list",
+            "config/read",
+            "initialize",
+            "initialized",
+            "model/list",
+            "config/read",
+            "configRequirements/read",
+            "hooks/list",
+        ]
+    );
+    assert_eq!(ready.outbound_methods.config_requirements_read, 1);
+    let catalog = env
+        .root
+        .join("run/wyss-console/codex-local-tools-catalog.json");
+    assert_eq!(
+        fs::metadata(&catalog).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let presented: serde_json::Value =
+        serde_json::from_slice(&fs::read(&catalog).unwrap()).unwrap();
+    let model = &presented["models"][0];
+    assert_eq!(model["tool_mode"], "direct");
+    assert_eq!(model["experimental_supported_tools"], serde_json::json!([]));
+    assert!(model["multi_agent_version"].is_null());
+    assert_eq!(model["apply_patch_tool_type"], "freeform");
+    assert!(
+        !env.root
+            .join("run/wyss-console/codex-model-catalog.json")
+            .exists()
+    );
+    // A generation never changes profile or workspace: that needs an explicit stop.
+    let other = env.root.join("repo/sub");
+    for refused in [mutation(), local_mutation(other.to_str().unwrap())] {
+        assert_eq!(
+            c.runtime_start(refused),
+            Err(ControlError::InvalidTransition)
+        );
+    }
+    let before = c.runtime_status().unwrap();
+    assert_eq!(
+        before.revision, ready.revision,
+        "a refused start changes nothing durable"
+    );
+    let pids = env.pids();
+    c.runtime_start(local_mutation(&workspace)).unwrap();
+    assert_eq!(
+        env.pids(),
+        pids,
+        "the same request keeps the same generation"
+    );
+    // Sessions attach only for that workspace, under the mediated posture.
+    let (s, _) = prepare_bound_session(&mut c, local_scopes());
+    let elsewhere = BindingCreate {
+        workspace_root: env.root.to_str().unwrap().to_owned(),
+        ..create_params(&env, &s)
+    };
+    assert_eq!(
+        c.binding_create(elsewhere),
+        Err(ControlError::WorkspaceInvalid)
+    );
+    assert_eq!(count(&env, "thread/start"), 0);
+    let created = c
+        .binding_create(BindingCreate {
+            workspace_root: workspace.clone(),
+            ..create_params(&env, &s)
+        })
+        .unwrap();
+    assert_eq!(created.workspace_root, workspace);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(
+            &fs::read_to_string(env.root.join("trust-roots")).unwrap()
+        )
+        .unwrap(),
+        serde_json::json!([env.root.join("repo").to_str().unwrap(), workspace.as_str()])
+    );
+    c.binding_resume(resume_params(&s)).unwrap();
+    let attached = c.binding_status(s.managed_session_id.clone()).unwrap();
+    assert_eq!(attached.state, BindingState::BoundAttached);
+    assert_eq!(
+        attached.attachment_profile,
+        Some(AttachmentProfile::LocalToolsV1)
+    );
+    for action in local_scopes().into_iter().skip(2) {
+        let gate = c
+            .gate_status(GateQuery {
+                session_id: s.managed_session_id.clone(),
+                action,
+            })
+            .unwrap();
+        assert_eq!(gate.reason, GateReason::Allowed, "{action:?}");
+    }
+    // Stopping and starting without a profile gives the inference generation again, and
+    // neither it nor a restarted authority grants what only the isolated profile may.
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    c.runtime_start(mutation()).unwrap();
+    let inference = env.wait(&mut c, ActualState::Ready);
+    assert_eq!(
+        (
+            inference.runtime_safety_profile,
+            inference.workspace_root.clone()
+        ),
+        (Some(RuntimeSafetyProfile::CodexInferenceV1), None)
+    );
+    for action in [ExecutionScope::CommandExecute, ExecutionScope::FileChange] {
+        let gate = c
+            .gate_status(GateQuery {
+                session_id: s.managed_session_id.clone(),
+                action,
+            })
+            .unwrap();
+        assert_eq!(gate.reason, GateReason::LocalToolsProfileMissing);
+    }
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    c.runtime_start(local_mutation(&workspace)).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    drop(c);
+    a.stop(false);
+    for pid in env.pids() {
+        dead(pid);
+    }
+    // Nothing durable records the profile: a desired-running runtime comes back as the
+    // least capable one.
+    let mut a = env.start();
+    let mut c = env.client();
+    let restarted = env.wait(&mut c, ActualState::Ready);
+    assert_eq!(
+        restarted.runtime_safety_profile,
+        Some(RuntimeSafetyProfile::CodexInferenceV1)
+    );
+    drop(c);
+    a.stop(false);
+}
+#[test]
+fn local_tools_readiness_fails_closed_whenever_isolation_or_attestation_is_unproven() {
+    // The runtime's own answers do not prove the profile.
+    for (scenario, final_launch) in [
+        ("local_wrong_home", false),
+        ("local_mcp", false),
+        ("local_no_requirement", true),
+        ("local_tmp_writable", true),
+    ] {
+        let env = Sandbox::new(scenario);
+        let workspace = local_layout(&env);
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(local_mutation(&workspace)).unwrap();
+        let failed = env.wait(&mut c, ActualState::Failed);
+        assert_eq!(
+            failed.diagnostic,
+            Some(RuntimeDiagnostic::SafetyUnproven),
+            "{scenario}"
+        );
+        assert_eq!(
+            (failed.runtime_safety_profile, failed.workspace_root),
+            (None, None)
+        );
+        assert_eq!(
+            fs::read_to_string(env.root.join("local-launches"))
+                .unwrap()
+                .contains("final"),
+            final_launch,
+            "{scenario}"
+        );
+        assert_eq!(count(&env, "thread/start") + count(&env, "turn/start"), 0);
+        let (s, _) = prepare_bound_session(&mut c, local_scopes());
+        assert_eq!(
+            c.binding_create(BindingCreate {
+                workspace_root: workspace.clone(),
+                ..create_params(&env, &s)
+            }),
+            Err(ControlError::GateDenied)
+        );
+        drop(c);
+        a.stop(false);
+        for pid in env.pids() {
+            dead(pid);
+        }
+    }
+    // The host does not allow a safe namespace: no runtime process is ever launched.
+    for sabotage in [
+        "credential_mode",
+        "credential_symlink",
+        "layer_symlink",
+        "layer_file",
+    ] {
+        let env = Sandbox::new("happy");
+        let workspace = local_layout(&env);
+        let auth = env.root.join("codex-home/auth.json");
+        let layer = env.root.join("repo/sub/ws/.codex");
+        match sabotage {
+            "credential_mode" => {
+                fs::set_permissions(&auth, fs::Permissions::from_mode(0o644)).unwrap()
+            }
+            "credential_symlink" => {
+                let real = env.root.join("real-auth.json");
+                fs::rename(&auth, &real).unwrap();
+                std::os::unix::fs::symlink(&real, &auth).unwrap();
+            }
+            "layer_symlink" => {
+                std::os::unix::fs::symlink(env.root.join("repo/.codex"), &layer).unwrap()
+            }
+            _ => fs::write(&layer, "not a directory").unwrap(),
+        }
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(local_mutation(&workspace)).unwrap();
+        let failed = env.wait(&mut c, ActualState::Failed);
+        assert_eq!(
+            failed.diagnostic,
+            Some(RuntimeDiagnostic::SafetyUnproven),
+            "{sabotage}"
+        );
+        assert!(!env.root.join("local-launches").exists(), "{sabotage}");
+        assert!(env.methods().is_empty(), "{sabotage}");
+        drop(c);
+        a.stop(false);
+    }
+    // A request that names no usable workspace is refused before anything durable changes.
+    let env = Sandbox::new("happy");
+    let workspace = local_layout(&env);
+    let mut a = env.start();
+    let mut c = env.client();
+    let alias = env.root.join("alias");
+    std::os::unix::fs::symlink(&workspace, &alias).unwrap();
+    let invalid = [
+        (Some(RuntimeSafetyProfile::CodexLocalToolsV1), None),
+        (None, Some(workspace.clone())),
+        (
+            Some(RuntimeSafetyProfile::CodexInferenceV1),
+            Some(workspace.clone()),
+        ),
+        (
+            Some(RuntimeSafetyProfile::CodexLocalToolsV1),
+            Some("relative/ws".to_owned()),
+        ),
+        (
+            Some(RuntimeSafetyProfile::CodexLocalToolsV1),
+            Some(env.root.join("missing").to_str().unwrap().to_owned()),
+        ),
+    ];
+    for (safety_profile, workspace_root) in invalid {
+        let request = RuntimeMutation {
+            safety_profile,
+            workspace_root,
+            ..mutation()
+        };
+        assert!(c.runtime_start(request).is_err());
+    }
+    let stop = RuntimeMutation {
+        safety_profile: Some(RuntimeSafetyProfile::CodexLocalToolsV1),
+        workspace_root: Some(workspace.clone()),
+        ..mutation()
+    };
+    assert!(c.runtime_stop(stop).is_err());
+    let untouched = c.runtime_status().unwrap();
+    assert_eq!(
+        (untouched.revision, untouched.actual_state),
+        (0, ActualState::Stopped)
+    );
+    assert!(env.pids().is_empty());
+    // A symlinked spelling of the workspace is accepted only as its canonical path.
+    c.runtime_start(local_mutation(alias.to_str().unwrap()))
+        .unwrap();
+    let ready = env.wait(&mut c, ActualState::Ready);
+    assert_eq!(ready.workspace_root.as_deref(), Some(workspace.as_str()));
+    drop(c);
+    a.stop(false);
+}
+#[test]
+fn local_tools_thread_posture_is_verified_and_new_project_policy_stops_further_work() {
+    for scenario in ["local_weak_thread", "local_network_thread"] {
+        let env = Sandbox::new(scenario);
+        let workspace = local_layout(&env);
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(local_mutation(&workspace)).unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, _) = prepare_bound_session(&mut c, local_scopes());
+        let create = BindingCreate {
+            workspace_root: workspace.clone(),
+            ..create_params(&env, &s)
+        };
+        assert!(c.binding_create(create).is_err(), "{scenario}");
+        let status = c.binding_status(s.managed_session_id.clone()).unwrap();
+        assert_ne!(status.state, BindingState::BoundAttached);
+        assert_eq!(status.attachment_profile, None);
+        // An answer that does not prove the posture leaves an uncertain runtime: contained.
+        env.wait(&mut c, ActualState::Failed);
+        assert_eq!(count(&env, "turn/start"), 0);
+        drop(c);
+        a.stop(false);
+    }
+    let env = Sandbox::new("happy");
+    let workspace = local_layout(&env);
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(local_mutation(&workspace)).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    // The runtime's own sandbox leaves an empty protective directory: that is not policy.
+    let layer = env.root.join("repo/sub/ws/.codex");
+    fs::create_dir(&layer).unwrap();
+    let (s, _) = prepare_bound_session(&mut c, local_scopes());
+    c.binding_create(BindingCreate {
+        workspace_root: workspace.clone(),
+        ..create_params(&env, &s)
+    })
+    .unwrap();
+    // Policy that this namespace does not mask appeared after it was created.
+    fs::write(layer.join("config.toml"), "approval_policy = \"never\"\n").unwrap();
+    let frames = (count(&env, "thread/resume"), count(&env, "turn/start"));
+    assert!(c.binding_resume(resume_params(&s)).is_err());
+    assert_eq!(
+        (count(&env, "thread/resume"), count(&env, "turn/start")),
+        frames
+    );
+    env.wait(&mut c, ActualState::Failed);
+    assert_ne!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundAttached
+    );
+    drop(c);
+    a.stop(false);
+}
+#[test]
+fn local_tools_generation_executes_nothing_while_no_approval_can_be_answered() {
+    for scenario in [
+        "isolation_approval",
+        "isolation_commandExecution",
+        "isolation_fileChange",
+        "isolation_permission",
+        "isolation_mcpToolCall",
+        "isolation_collabAgentToolCall",
+    ] {
+        let env = Sandbox::new(scenario);
+        let workspace = local_layout(&env);
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(local_mutation(&workspace)).unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, _) = prepare_bound_session(&mut c, local_scopes());
+        c.binding_create(BindingCreate {
+            workspace_root: workspace.clone(),
+            ..create_params(&env, &s)
+        })
+        .unwrap();
+        c.binding_resume(resume_params(&s)).unwrap();
+        let t = c.turn_start(turn_params(&s)).unwrap();
+        env.wait(&mut c, ActualState::Failed);
+        let failed = wait_turn(&mut c, &t, true);
+        assert_eq!(failed.state, TurnState::Failed, "{scenario}");
+        assert_eq!(
+            failed.terminal_reason,
+            Some(TurnReason::InferenceIsolationViolation),
+            "{scenario}"
+        );
+        // No provider request was ever answered: nothing was accepted, so nothing ran.
+        assert_eq!(count(&env, "RESPONSE"), 0, "{scenario}");
+        assert_eq!(count(&env, "turn/start"), 1);
+        a.stop(false);
+        for pid in env.pids() {
+            dead(pid);
+        }
     }
 }

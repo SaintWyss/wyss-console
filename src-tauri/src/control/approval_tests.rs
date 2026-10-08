@@ -1831,6 +1831,8 @@ fn populated() -> Fixture {
             adapter_id: RuntimeTarget::codex().adapter_id,
             runtime_kind: RuntimeTarget::codex().runtime_kind,
             expected_revision: None,
+            safety_profile: None,
+            workspace_root: None,
         }))
         .unwrap();
     for table in TABLES {

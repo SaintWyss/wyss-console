@@ -205,6 +205,58 @@ fake App Server IO/failure/allowlist checks, graceful restart, explicit stop and
 Linux SIGKILL containment. Normal tests use isolated XDG directories and a fake
 executable, never the user's Codex runtime or production authority state.
 
+### Isolated local-tools runtime profile
+
+A runtime generation has exactly one safety profile for its whole life. The default
+`codex_inference_v1` offers the model no tool. `codex_local_tools_v1` is requested
+explicitly and names the one workspace it serves:
+
+```sh
+./src-tauri/target/debug/examples/control_client runtime/start/local-tools /abs/workspace
+```
+
+Changing profile or workspace needs `runtime/stop` first; a start that would change
+either on a live generation is refused before anything durable changes. The profile
+is not durable state: after an authority restart a desired-running runtime comes
+back as inference, the least capable profile.
+
+The local-tools generation runs inside an unprivileged `bwrap` namespace whose argv
+is fixed by the authority and built without a shell or any client text:
+
+- `/etc/codex` is replaced by an authority-owned policy whose managed requirement
+  `unified_exec = false` removes the persistent command tool and `write_stdin`.
+  Passing that flag as plain configuration is not enough: the runtime overrides it.
+- `CODEX_HOME` is a private authority directory. The user's Codex home, and
+  `~/.codex`, are hidden behind an empty tmpfs: no user configuration, rules, hooks or
+  MCP servers. Only the pinned release directory returns, read-only.
+- One credential capability crosses: the user's `auth.json`, bound read-write
+  because the runtime refreshes its token in place. It is never read, copied or
+  logged, and a symlinked, foreign-owned or group/world-accessible file is refused.
+  A token refresh by the isolated runtime therefore writes the user's own credential
+  file; narrowing that is deferred.
+- Every existing project policy layer (`.codex`) from the project root down to the
+  workspace is masked read-only, and every thread forces the project root and the
+  workspace `untrusted`. The authority creates nothing in the workspace.
+- The model catalog is the authority's normalized presentation, with direct tools
+  and without code mode, sub-agents or experimental tools; it keeps the patch tool.
+
+Readiness is reported only after the runtime itself proves the profile: its private
+home in the initialize answer, the managed requirement through
+`configRequirements/read`, every reflected clamp with only the command tool
+enabled, no MCP server, no hook, and workspace-only writes (`/tmp` and `$TMPDIR`
+excluded, no network). Every thread must come back with approval policy
+`untrusted` and that sandbox. Anything unproven is `safety_unproven`, and the same
+attestation runs again before each conversation and turn; project policy that
+appears in an unmasked layer afterwards stops further work. The host must provide
+`/usr/bin/bwrap` and an existing `/etc/codex` directory; the authority never
+creates either.
+
+A session attaches as `local_tools_v1` only for the generation's workspace, and
+the `command_execute` and `file_change` gate actions are denied under any other
+profile. The authority does not yet answer provider approval requests: a model
+action that needs one is treated as an isolation violation and nothing executes.
+A session bound under one profile keeps its Codex thread in that profile's home.
+
 ## Execution leases and internal gate
 
 Execution is denied by default. A prepared ManagedSession has no permission until

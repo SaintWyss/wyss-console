@@ -52,7 +52,15 @@ impl Conversations {
         {
             s.state = BindingState::BoundAttached;
             s.runtime_instance_id = Some(live);
-            s.attachment_profile = Some(AttachmentProfile::InferenceOnlyV1);
+            s.attachment_profile = Some(
+                if runtime.status().runtime_safety_profile
+                    == Some(RuntimeSafetyProfile::CodexLocalToolsV1)
+                {
+                    AttachmentProfile::LocalToolsV1
+                } else {
+                    AttachmentProfile::InferenceOnlyV1
+                },
+            );
         }
         Ok(ResultValue::BindingStatus(s))
     }
@@ -132,6 +140,16 @@ impl Conversations {
             && self.attachments.len() >= MAX_ATTACHMENTS
         {
             return Err(ControlError::CapacityExceeded);
+        }
+        // An isolated generation serves exactly the workspace it was launched for.
+        if status.runtime_safety_profile == Some(RuntimeSafetyProfile::CodexLocalToolsV1) {
+            let workspace = match &op {
+                Operation::BindingCreate(p) => Some(p.workspace_root.clone()),
+                _ => store.binding(session)?.map(|b| b.workspace_root),
+            };
+            if workspace != status.workspace_root {
+                return Err(ControlError::WorkspaceInvalid);
+            }
         }
         if !matches!(
             ExecutionGate::evaluate(store, session, action, &status),

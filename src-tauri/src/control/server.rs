@@ -222,7 +222,11 @@ pub fn run_from_environment() -> ControlResult<()> {
     let (sender, receiver) = mpsc::sync_channel::<CoreMessage>(QUEUE);
     let core_sender = sender.clone();
     let core_stop = stop.clone();
-    let mut runtime = Runtime::new(&store, &paths.runtime)?;
+    let mut runtime = Runtime::new(
+        &store,
+        &paths.runtime,
+        &paths.state.join("codex-local-tools"),
+    )?;
     let core = thread::spawn(move || -> ControlResult<()> {
         store.recover_binding_operations()?;
         store.recover_approvals()?;
@@ -445,6 +449,16 @@ pub fn run_from_environment() -> ControlResult<()> {
                                     &runtime.status(),
                                 ),
                             )),
+                            Operation::RuntimeStart(p) => {
+                                // Refused before the durable desired state changes.
+                                runtime.admit_start(p).and_then(|workspace| {
+                                    let result = store.apply(&job.op)?;
+                                    if let ResultValue::RuntimeControl(record) = &result {
+                                        runtime.request(workspace, record);
+                                    }
+                                    Ok(result)
+                                })
+                            }
                             _ => store.apply(&job.op),
                         }
                     };

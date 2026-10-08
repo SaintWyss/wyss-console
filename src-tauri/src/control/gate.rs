@@ -85,10 +85,19 @@ impl ExecutionGate {
         runtime: &RuntimeStatus,
     ) -> ExecutionDecision {
         let base = Self::base(store, session, action, runtime);
-        if matches!(base, ExecutionDecision::Allowed) && action == ExecutionScope::TurnStart {
-            ExecutionDecision::Denied(GateReason::BindingDetached)
-        } else {
-            base
+        if !matches!(base, ExecutionDecision::Allowed) {
+            return base;
+        }
+        match action {
+            ExecutionScope::TurnStart => ExecutionDecision::Denied(GateReason::BindingDetached),
+            // Commands and file changes exist only in the isolated local-tools generation.
+            ExecutionScope::CommandExecute | ExecutionScope::FileChange
+                if runtime.runtime_safety_profile
+                    != Some(RuntimeSafetyProfile::CodexLocalToolsV1) =>
+            {
+                ExecutionDecision::Denied(GateReason::LocalToolsProfileMissing)
+            }
+            _ => base,
         }
     }
     pub(super) fn turn(
@@ -108,10 +117,19 @@ impl ExecutionGate {
             Some(BindingDetached)
         } else if binding.runtime_instance_id != runtime.runtime_instance_id {
             Some(AttachmentRuntimeMismatch)
-        } else if runtime.runtime_safety_profile != Some(RuntimeSafetyProfile::CodexInferenceV1) {
+        } else if runtime.runtime_safety_profile.is_none() {
             Some(RuntimeSafetyProfileMissing)
-        } else if binding.attachment_profile != Some(AttachmentProfile::InferenceOnlyV1) {
+        // A turn runs only on an attachment made under the profile of this generation.
+        } else if runtime.runtime_safety_profile == Some(RuntimeSafetyProfile::CodexInferenceV1)
+            && binding.attachment_profile != Some(AttachmentProfile::InferenceOnlyV1)
+        {
             Some(InferenceProfileMissing)
+        } else if runtime.runtime_safety_profile == Some(RuntimeSafetyProfile::CodexLocalToolsV1)
+            && (binding.attachment_profile != Some(AttachmentProfile::LocalToolsV1)
+                || binding.binding.as_ref().map(|b| b.workspace_root.as_str())
+                    != runtime.workspace_root.as_deref())
+        {
+            Some(LocalToolsProfileMissing)
         } else {
             match store.active_turn() {
                 Ok(Some(_)) => Some(ActiveTurnExists),

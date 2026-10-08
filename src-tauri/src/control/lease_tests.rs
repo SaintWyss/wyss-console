@@ -140,6 +140,7 @@ fn ready() -> RuntimeStatus {
         model_count: 1,
         diagnostic: None,
         runtime_safety_profile: Some(RuntimeSafetyProfile::CodexInferenceV1),
+        workspace_root: None,
         outbound_methods: RuntimeMethods {
             initialize: 1,
             initialized: 1,
@@ -623,6 +624,8 @@ fn scopes_have_no_implied_hierarchy_and_runtime_availability_does_not_change_per
         adapter_id: RuntimeTarget::codex().adapter_id,
         runtime_kind: AgentRuntimeKind::Codex,
         expected_revision: None,
+        safety_profile: None,
+        workspace_root: None,
     };
     f.store.apply(&Operation::RuntimeStop(p.clone())).unwrap();
     assert_eq!(read(&f.store.conn, l.lease_id.as_str()).unwrap(), l);
@@ -714,6 +717,8 @@ fn v2_fixture(f: &mut Fixture) -> std::path::PathBuf {
         adapter_id: RuntimeTarget::codex().adapter_id,
         runtime_kind: AgentRuntimeKind::Codex,
         expected_revision: None,
+        safety_profile: None,
+        workspace_root: None,
     };
     f.store.apply(&Operation::RuntimeStart(p)).unwrap();
     let path = f.root.join("v2.sqlite3");

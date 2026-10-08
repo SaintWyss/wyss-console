@@ -109,6 +109,7 @@ pub fn message_surface(message: &WireMessage) -> Surface {
 pub enum Operation {
     Initialize,
     ConfigRead,
+    ConfigRequirementsRead,
     HooksList,
     ThreadStart,
     ThreadResume,
@@ -738,6 +739,9 @@ pub(crate) fn validate_result(operation: Operation, v: &Value) -> Result<()> {
         }
         Operation::ConfigRead => {
             object(required(p, "config")?)?;
+        }
+        Operation::ConfigRequirementsRead => {
+            object(required(p, "requirements")?)?;
         }
         Operation::HooksList => {
             super::safety::zero_external_hooks(v)?;

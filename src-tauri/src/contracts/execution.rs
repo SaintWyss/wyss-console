@@ -151,6 +151,7 @@ pub enum GateReason {
     BindingDetached,
     AttachmentRuntimeMismatch,
     InferenceProfileMissing,
+    LocalToolsProfileMissing,
     RuntimeSafetyProfileMissing,
     ActiveTurnExists,
     SessionNotFound,

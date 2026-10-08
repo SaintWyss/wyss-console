@@ -92,10 +92,31 @@ pub(crate) enum Observation {
         methods: RuntimeMethods,
     },
 }
+/// How one generation is launched. A generation never changes profile.
+pub(crate) enum LaunchProfile {
+    Inference,
+    LocalTools(isolation::Isolation),
+}
 /// Authority-fixed launch inputs of one runtime generation.
 struct Generation {
     forced_mcp: BTreeSet<String>,
     catalog_dir: std::path::PathBuf,
+    profile: LaunchProfile,
+}
+/// Facts of an isolated generation, fixed when its namespace is created.
+struct Local<'a> {
+    isolation: &'a isolation::Isolation,
+    /// Project policy layers masked for the lifetime of the namespace.
+    masked: Vec<std::path::PathBuf>,
+    /// Roots forced untrusted on every thread.
+    roots: Vec<String>,
+    home: String,
+    workspace: String,
+}
+impl Local<'_> {
+    fn spawn(&self, executable: &Path, args: Vec<String>) -> ProbeResult<Command> {
+        self.isolation.command(executable, args, &self.masked)
+    }
 }
 pub(crate) struct Worker {
     cancel: Arc<AtomicBool>,
@@ -109,6 +130,7 @@ impl Worker {
         instance: AgentRuntimeInstanceId,
         forced_mcp: BTreeSet<String>,
         catalog_dir: std::path::PathBuf,
+        profile: LaunchProfile,
         mut observe: impl FnMut(&AgentRuntimeInstanceId, Observation, &AtomicBool) + Send + 'static,
     ) -> std::io::Result<Self> {
         let (wake, reader) = UnixStream::pair()?;
@@ -118,6 +140,7 @@ impl Worker {
         let generation = Generation {
             forced_mcp,
             catalog_dir,
+            profile,
         };
         let thread = thread::Builder::new()
             .name("codex-runtime".into())
@@ -192,6 +215,10 @@ struct RuntimeIo<'a> {
     isolation_violation: bool,
     /// Authority model catalog of this generation. Discovery has none and starts no thread.
     catalog: Option<&'a Path>,
+    /// Present on an isolated local-tools process, including its discovery.
+    local: Option<&'a Local<'a>>,
+    /// The process itself reported the private Codex home in its initialize response.
+    home_proven: bool,
 }
 impl RuntimeIo<'_> {
     fn isolation_failure(&mut self) -> ProbeError {
@@ -220,11 +247,28 @@ impl ProbeIo for RuntimeIo<'_> {
             Direction::ClientToServer,
         )
         .map_err(|_| ProbeError::Codec)?;
-        if !message
-            .method()
-            .is_some_and(|m| safety::PRODUCTION_METHODS.contains(&m))
-        {
+        if !message.method().is_some_and(|m| {
+            if self.local.is_some() {
+                safety::LOCAL_TOOLS_METHODS.contains(&m)
+            } else {
+                safety::PRODUCTION_METHODS.contains(&m)
+            }
+        }) {
             return Err(ProbeError::Protocol);
+        }
+        if message.method() == Some("configRequirements/read") {
+            if self.discovery
+                || message
+                    .params()
+                    .and_then(serde_json::Value::as_object)
+                    .is_none_or(|p| !p.is_empty())
+            {
+                return Err(ProbeError::Protocol);
+            }
+            self.stdio.send(bytes, deadline)?;
+            self.methods.config_requirements_read =
+                self.methods.config_requirements_read.saturating_add(1);
+            return Ok(());
         }
         if self.discovery
             && !matches!(
@@ -336,18 +380,34 @@ impl ProbeIo for RuntimeIo<'_> {
         if matches!(message.method(), Some("thread/start" | "thread/resume")) {
             let v = message.vendor_value();
             let p = v["params"].as_object().ok_or(ProbeError::Protocol)?;
-            let valid = if message.method() == Some("thread/start") {
+            let start = message.method() == Some("thread/start");
+            // The posture of a thread is fixed by the generation's profile, never by a caller.
+            let (sandbox, policy) = if self.local.is_some() {
+                ("workspace-write", "untrusted")
+            } else {
+                ("read-only", "never")
+            };
+            let posture = p.get("sandbox") == Some(&serde_json::json!(sandbox))
+                && p.get("approvalPolicy") == Some(&serde_json::json!(policy))
+                && p.get("config").is_some_and(serde_json::Value::is_object);
+            let valid = if start && self.local.is_none() {
                 p.len() == 2 && p.get("ephemeral") == Some(&serde_json::json!(false))
+            } else if start {
+                p.len() == 5 && posture && p.get("ephemeral") == Some(&serde_json::json!(false))
             } else {
                 p.len() == 6
-                    && p.get("sandbox") == Some(&serde_json::json!("read-only"))
-                    && p.get("approvalPolicy") == Some(&serde_json::json!("never"))
-                    && p.get("config").is_some_and(serde_json::Value::is_object)
+                    && posture
                     && p.get("excludeTurns") == Some(&serde_json::json!(true))
                     && p.get("threadId")
                         .and_then(|v| v.as_str())
                         .is_some_and(|id| CodexThreadId::parse(id).is_ok())
             };
+            if self
+                .local
+                .is_some_and(|l| p.get("cwd").and_then(|v| v.as_str()) != Some(&l.workspace))
+            {
+                return Err(ProbeError::Protocol);
+            }
             if !valid
                 || !p
                     .get("cwd")
@@ -388,6 +448,15 @@ impl ProbeIo for RuntimeIo<'_> {
             }
             result => result?,
         };
+        if let (Some(m), Some(local)) = (&message, self.local)
+            && m.kind() == WireKind::SuccessResponse
+            && let Some(home) = m.result().and_then(|r| r.get("codexHome"))
+        {
+            if home.as_str() != Some(&local.home) {
+                return Err(ProbeError::Protocol);
+            }
+            self.home_proven = true;
+        }
         if let Some(m) = &message {
             let notice = match safety::notification(m) {
                 Ok(n) => n,
@@ -452,6 +521,23 @@ fn run(
         return Err(RuntimeDiagnostic::TransportFailed);
     }
     observe(instance, Observation::Discovering, cancel);
+    // The namespace of an isolated generation is described once; discovery and the final
+    // process are both launched inside it. Anything unsafe keeps the profile off.
+    let local = match &generation.profile {
+        LaunchProfile::Inference => None,
+        LaunchProfile::LocalTools(isolation) => Some(
+            (|| -> ProbeResult<Local<'_>> {
+                Ok(Local {
+                    isolation,
+                    masked: isolation.layers()?,
+                    roots: isolation.trust_roots()?,
+                    home: text(isolation.home())?,
+                    workspace: text(isolation.workspace.clone())?,
+                })
+            })()
+            .map_err(|_| RuntimeDiagnostic::SafetyUnproven)?,
+        ),
+    };
     // Discovery has no thread-capable IO boundary and is reaped before the final generation.
     let mut names = discover_mcp(
         &executable,
@@ -460,24 +546,41 @@ fn run(
         wake.try_clone()
             .map_err(|_| RuntimeDiagnostic::TransportFailed)?,
         methods,
+        local.as_ref(),
     )
-    .map_err(diagnostic)?;
+    .map_err(|e| match e {
+        ProbeError::Protocol if local.is_some() => RuntimeDiagnostic::SafetyUnproven,
+        e => diagnostic(e),
+    })?;
     names.extend(generation.forced_mcp.iter().cloned());
+    // A private home configures no MCP server; one appearing there is not something to clamp.
+    if local.is_some() && !names.is_empty() {
+        return Err(RuntimeDiagnostic::SafetyUnproven);
+    }
     // Discovery just refreshed the runtime's own backend catalog. The final generation only
     // ever sees the authority's normalized presentation of it.
-    let catalog = authority_catalog(&generation.catalog_dir)
+    let catalog = authority_catalog(&generation.catalog_dir, local.as_ref())
         .map_err(|_| RuntimeDiagnostic::SafetyUnproven)?;
-    let mut command = Command::new(&executable);
-    command
-        .args(
-            safety::process_args(&names, Some(&catalog))
-                .map_err(|_| RuntimeDiagnostic::SafetyUnproven)?,
-        )
-        .current_dir(&cwd);
+    let mut command = match &local {
+        None => {
+            let mut command = Command::new(&executable);
+            command.args(
+                safety::process_args(&names, Some(&catalog))
+                    .map_err(|_| RuntimeDiagnostic::SafetyUnproven)?,
+            );
+            command
+        }
+        Some(local) => safety::local_tools_args(&names, Some(&catalog))
+            .map_err(|_| ProbeError::Protocol)
+            .and_then(|args| local.spawn(&executable, args))
+            .map_err(|_| RuntimeDiagnostic::SafetyUnproven)?,
+    };
+    command.current_dir(&cwd);
     let mut owner = OwnedProcess::spawn(&mut command).map_err(diagnostic)?;
     owner.cancel_with(cancel.clone(), wake);
     observe(instance, Observation::Spawned, cancel);
     let mut report = initial_report(cwd);
+    let mut attested = false;
     let result = (|| -> ProbeResult<()> {
         let mut forward = |event| observe(instance, event, cancel);
         let mut io = RuntimeIo {
@@ -493,6 +596,8 @@ fn run(
             active_pair: None,
             isolation_violation: false,
             catalog: Some(&catalog),
+            local: local.as_ref(),
+            home_proven: false,
         };
         let mut correlation = handshake(&mut io, &mut report)?;
         // A catalog RPC error is safe degradation in the standalone probe, but not runtime readiness.
@@ -514,6 +619,7 @@ fn run(
             models,
             methods,
         });
+        attested = true;
         io.stdio.owner.interruptible = true;
         // Infinite lifetime, finite per-frame deadline. Timeout merely permits an idle runtime;
         // cancellation wakes poll immediately. Counters saturate; maps and buffers remain bounded.
@@ -602,7 +708,11 @@ fn run(
     if report.model_list_result == ProbeStage::RuntimeError {
         return Err(RuntimeDiagnostic::CatalogRejected);
     }
-    result.and(cleanup.map(|_| ())).map_err(diagnostic)
+    result.and(cleanup.map(|_| ())).map_err(|e| match e {
+        // An isolated generation that never proved its profile is unproven, whatever broke.
+        ProbeError::Protocol if local.is_some() && !attested => RuntimeDiagnostic::SafetyUnproven,
+        e => diagnostic(e),
+    })
 }
 
 // Single outstanding provider request (bounded command queue=1). No completed-ID history grows.
@@ -619,7 +729,9 @@ fn conversation(
         && crate::contracts::control::timestamp(&c.expires_at)
             .is_ok_and(|t| time::OffsetDateTime::now_utc() < t)
         && Path::new(&c.workspace).is_dir()
-        && std::fs::canonicalize(&c.workspace).is_ok_and(|p| p == Path::new(&c.workspace));
+        && std::fs::canonicalize(&c.workspace).is_ok_and(|p| p == Path::new(&c.workspace))
+        // An isolated generation serves exactly the workspace it was launched for.
+        && io.local.is_none_or(|l| l.workspace == c.workspace);
     if !valid {
         return Err(ConversationFailure::NotDispatched);
     }
@@ -628,12 +740,21 @@ fn conversation(
     let mut message =
         managed_thread_request(c.request_id.clone(), &c.workspace, c.thread_id.as_ref())
             .map_err(|_| ConversationFailure::NotDispatched)?;
-    if c.thread_id.is_some() {
+    // Inference fixes its posture when a thread is attached. A local-tools thread is never
+    // created without it either: an unposed start would let the runtime trust the project.
+    if c.thread_id.is_some() || io.local.is_some() {
         let mut v = message.vendor_value().clone();
-        v["params"]["sandbox"] = serde_json::json!("read-only");
-        v["params"]["approvalPolicy"] = serde_json::json!("never");
-        v["params"]["config"] =
-            safety::thread_config(names).map_err(|_| ConversationFailure::Unknown)?;
+        let (sandbox, policy, config) = match io.local {
+            None => ("read-only", "never", safety::thread_config(names)),
+            Some(local) => (
+                "workspace-write",
+                "untrusted",
+                safety::local_tools_thread_config(names, &local.roots),
+            ),
+        };
+        v["params"]["sandbox"] = serde_json::json!(sandbox);
+        v["params"]["approvalPolicy"] = serde_json::json!(policy);
+        v["params"]["config"] = config.map_err(|_| ConversationFailure::Unknown)?;
         message = WireMessage::from_value(v, Direction::ClientToServer)
             .map_err(|_| ConversationFailure::Unknown)?;
     }
@@ -653,8 +774,13 @@ fn conversation(
     };
     let result = exchange(io, message, op, deadline, correlation, report)?;
     let thread = validate_conversation(&result, c)?;
+    if io.local.is_some() {
+        safety::verify_local_tools_thread(&result).map_err(|_| ConversationFailure::Unknown)?;
+    }
     if c.thread_id.is_some() {
-        safety::verify_resume(&result).map_err(|_| ConversationFailure::Unknown)?;
+        if io.local.is_none() {
+            safety::verify_resume(&result).map_err(|_| ConversationFailure::Unknown)?;
+        }
         return Ok(thread);
     }
     checkpoint(
@@ -803,9 +929,13 @@ fn safety_preflight(
     correlation: &mut Correlation,
     report: &mut CodexLiveProbeReportV1,
 ) -> ProbeResult<()> {
-    let config = safety_query(io, cwd, false, correlation, report)?;
+    let config = safety_query(io, cwd, Query::Config, correlation, report)?;
     let catalog = io.catalog.ok_or(ProbeError::Protocol)?;
-    safety::verify_config(&config, catalog).map_err(|_| ProbeError::Protocol)?;
+    match io.local {
+        None => safety::verify_config(&config, catalog),
+        Some(_) => safety::verify_local_tools_config(&config, catalog),
+    }
+    .map_err(|_| ProbeError::Protocol)?;
     let configured = safety::mcp_names(&config, false).map_err(|_| ProbeError::Protocol)?;
     if !configured.is_subset(names) {
         io.emit(Observation::SafetyConfigChanged(
@@ -814,31 +944,51 @@ fn safety_preflight(
         return Err(ProbeError::Protocol);
     }
     safety::mcp_names(&config, true).map_err(|_| ProbeError::Protocol)?;
-    let hooks = safety_query(io, cwd, true, correlation, report)?;
+    if let Some(local) = io.local {
+        // The runtime reports its own managed requirements and its own home; the authority
+        // re-reads the workspace: project policy that appeared or vanished since the
+        // namespace was created is not masked by it.
+        let requirements = safety_query(io, cwd, Query::Requirements, correlation, report)?;
+        safety::verify_requirements(&requirements).map_err(|_| ProbeError::Protocol)?;
+        if !io.home_proven || !local.isolation.masks_hold(&local.masked)? {
+            return Err(ProbeError::Protocol);
+        }
+    }
+    let hooks = safety_query(io, cwd, Query::Hooks, correlation, report)?;
     safety::zero_external_hooks(&hooks).map_err(|_| ProbeError::Protocol)
+}
+#[derive(Clone, Copy, PartialEq)]
+enum Query {
+    Config,
+    Requirements,
+    Hooks,
 }
 fn safety_query(
     io: &mut RuntimeIo<'_>,
     cwd: &str,
-    hooks: bool,
+    query: Query,
     correlation: &mut Correlation,
     report: &mut CodexLiveProbeReportV1,
 ) -> ProbeResult<serde_json::Value> {
     let id = CodexRequestId::String(uuid::Uuid::new_v4().to_string());
-    let (method, params, op) = if hooks {
-        (
+    let (method, params, op) = match query {
+        Query::Hooks => (
             "hooks/list",
             serde_json::json!({"cwds":[cwd]}),
             Operation::HooksList,
-        )
-    } else {
-        (
+        ),
+        Query::Config => (
             "config/read",
             serde_json::json!({"cwd":cwd,"includeLayers":false}),
             Operation::ConfigRead,
-        )
+        ),
+        Query::Requirements => (
+            "configRequirements/read",
+            serde_json::json!({}),
+            Operation::ConfigRequirementsRead,
+        ),
     };
-    if !hooks {
+    if query != Query::Hooks {
         io.stdio.config_response_id = Some(id.clone());
     }
     let message = WireMessage::request(id, method, params).map_err(|_| ProbeError::Codec)?;
@@ -860,17 +1010,32 @@ fn safety_query(
     io.stdio.config_response_id = None;
     result
 }
+fn text(path: std::path::PathBuf) -> ProbeResult<String> {
+    path.into_os_string()
+        .into_string()
+        .map_err(|_| ProbeError::Protocol)
+}
 fn discover_mcp(
     executable: &Path,
     cwd: &Path,
     cancel: &Arc<AtomicBool>,
     wake: UnixStream,
     methods: &mut RuntimeMethods,
+    local: Option<&Local<'_>>,
 ) -> ProbeResult<BTreeSet<String>> {
-    let mut command = Command::new(executable);
-    command
-        .args(safety::process_args(&BTreeSet::new(), None).map_err(|_| ProbeError::Codec)?)
-        .current_dir(cwd);
+    let mut command = match local {
+        None => {
+            let mut command = Command::new(executable);
+            command
+                .args(safety::process_args(&BTreeSet::new(), None).map_err(|_| ProbeError::Codec)?);
+            command
+        }
+        Some(local) => local.spawn(
+            executable,
+            safety::local_tools_args(&BTreeSet::new(), None).map_err(|_| ProbeError::Codec)?,
+        )?,
+    };
+    command.current_dir(cwd);
     let mut owner = OwnedProcess::spawn(&mut command)?;
     owner.cancel_with(cancel.clone(), wake);
     let result = (|| {
@@ -887,6 +1052,8 @@ fn discover_mcp(
             active_pair: None,
             isolation_violation: false,
             catalog: None,
+            local,
+            home_proven: false,
         };
         let mut report = initial_report(cwd.to_owned());
         let mut correlation = handshake(&mut io, &mut report)?;
@@ -896,10 +1063,13 @@ fn discover_mcp(
         let config = safety_query(
             &mut io,
             cwd.to_str().ok_or(ProbeError::Protocol)?,
-            false,
+            Query::Config,
             &mut correlation,
             &mut report,
         )?;
+        if local.is_some() && !io.home_proven {
+            return Err(ProbeError::Protocol);
+        }
         safety::mcp_names(&config, false).map_err(|_| ProbeError::Protocol)
     })();
     owner.shutdown()?;
@@ -909,14 +1079,14 @@ fn discover_mcp(
 /// Reads the runtime's own cached backend catalog and writes the authority presentation
 /// next to the control socket. Wrong owner, symlink, oversize or malformed content keeps
 /// the runtime from starting; nothing is inferred from a missing cache.
-fn authority_catalog(dir: &Path) -> ProbeResult<std::path::PathBuf> {
+fn authority_catalog(dir: &Path, local: Option<&Local<'_>>) -> ProbeResult<std::path::PathBuf> {
     use std::io::Read;
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
     let flags = nix::libc::O_NOFOLLOW | nix::libc::O_CLOEXEC;
-    let home = match env::var_os("CODEX_HOME") {
-        Some(home) if !home.is_empty() => std::path::PathBuf::from(home),
-        _ => std::path::PathBuf::from(env::var_os("HOME").ok_or(ProbeError::Protocol)?)
-            .join(".codex"),
+    // Each profile reads the cache its own discovery just refreshed, in its own home.
+    let (home, name) = match local {
+        None => (isolation::user_home()?, "codex-model-catalog.json"),
+        Some(local) => (local.isolation.home(), "codex-local-tools-catalog.json"),
     };
     let cache = std::fs::OpenOptions::new()
         .read(true)
@@ -935,12 +1105,16 @@ fn authority_catalog(dir: &Path) -> ProbeResult<std::path::PathBuf> {
         .take(safety::MAX_CATALOG_BYTES as u64 + 1)
         .read_to_end(&mut raw)
         .map_err(|_| ProbeError::Protocol)?;
-    let presented = safety::inference_catalog(&raw).map_err(|_| ProbeError::Protocol)?;
-    let path = dir.join("codex-model-catalog.json");
+    let presented = match local {
+        None => safety::inference_catalog(&raw),
+        Some(_) => safety::local_tools_catalog(&raw),
+    }
+    .map_err(|_| ProbeError::Protocol)?;
+    let path = dir.join(name);
     if !safety::safe_catalog_path(&path) {
         return Err(ProbeError::Protocol);
     }
-    let staging = dir.join("codex-model-catalog.json.tmp");
+    let staging = dir.join(format!("{name}.tmp"));
     let _ = std::fs::remove_file(&staging);
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -963,6 +1137,9 @@ fn start_turn(
     correlation: &mut Correlation,
     report: &mut CodexLiveProbeReportV1,
 ) -> std::result::Result<CodexTurnId, ConversationFailure> {
+    if io.local.is_some_and(|l| l.workspace != c.workspace) {
+        return Err(ConversationFailure::NotDispatched);
+    }
     safety_preflight(io, names, &c.workspace, correlation, report)
         .map_err(|_| ConversationFailure::Unknown)?;
     if !c.admission.load(Ordering::Acquire)
