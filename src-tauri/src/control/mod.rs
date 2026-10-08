@@ -1,4 +1,5 @@
 //! External authority foundation. No dependency on Tauri or human terminals.
+mod approval_action;
 pub mod client;
 mod conversations;
 mod framing;

@@ -485,7 +485,7 @@ fn v4_migration_preserves_all_rows_bytes_and_rolls_back() {
     );
     drop(c);
     let next = Store::open(&path, uuid()).unwrap();
-    assert_eq!(next.status().unwrap().storage_schema_version, 5);
+    assert_eq!(next.status().unwrap().storage_schema_version, 6);
     assert_eq!(
         next.binding(&f.session.managed_session_id).unwrap(),
         Some(f.binding.clone())

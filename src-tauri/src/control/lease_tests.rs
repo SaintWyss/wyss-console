@@ -760,7 +760,7 @@ fn real_v2_upgrade_preserves_all_bytes_metadata_runtime_receipts_and_creates_zer
     let before = snapshot(&c);
     drop(c);
     let mut s = Store::open(&path, uuid()).unwrap();
-    assert_eq!(s.status().unwrap().storage_schema_version, 5);
+    assert_eq!(s.status().unwrap().storage_schema_version, 6);
     assert_eq!(snapshot(&s.conn), before);
     assert_eq!(s.next_expiry().unwrap(), None);
     assert_eq!(
@@ -821,7 +821,7 @@ fn corrupt_v2_and_v3_and_future_version_fail_closed() {
         };
         let c = Connection::open(&path).unwrap();
         if version == 5 {
-            c.pragma_update(None, "user_version", 6).unwrap();
+            c.pragma_update(None, "user_version", 7).unwrap();
         } else {
             c.execute_batch("DROP TRIGGER control_events_no_delete")
                 .unwrap();

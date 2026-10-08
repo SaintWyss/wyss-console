@@ -1,4 +1,5 @@
 //! Wyss Control Protocol v1. Runtime supervision does not authorize agent work.
+pub use super::approval::*;
 pub use super::binding::*;
 pub use super::execution::*;
 pub use super::turn::*;
@@ -46,6 +47,7 @@ pub const METHODS: [&str; 25] = [
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlError {
+    ApprovalNotFound,
     TurnNotFound,
     ActiveTurnExists,
     ProtocolVersionUnsupported,
@@ -185,6 +187,8 @@ pub enum Operation {
     LeaseRevoke(LeaseRevoke),
     #[serde(rename = "executionGate/status")]
     GateStatus(GateQuery),
+    #[serde(rename = "managedTurn/approval/respond")]
+    ApprovalRespond(ApprovalRespond),
 }
 impl Operation {
     pub fn validate(&self) -> ControlResult<()> {
@@ -194,6 +198,7 @@ impl Operation {
                 validate_prompt(&p.prompt)
             }
             Self::TurnCancel(p) => valid_revision(p.expected_revision),
+            Self::ApprovalRespond(p) => valid_revision(p.expected_revision),
             Self::TurnEvents(p) if p.limit == 0 || p.limit > 50 => {
                 Err(ControlError::InvalidRequest)
             }
@@ -320,6 +325,7 @@ pub struct AuthorityStatus {
     deny_unknown_fields
 )]
 pub enum ResultValue {
+    ApprovalReceipt(ApprovalReceipt),
     Turn(ManagedTurnRecord),
     TurnStatus(ManagedTurnStatus),
     TurnEvents(TurnStreamPage),
@@ -415,7 +421,7 @@ fn validate_result(r: &ResultValue) -> ControlResult<()> {
     match r {
         ResultValue::Hello(s) | ResultValue::Status(s) => {
             if s.protocol_version != 1
-                || s.storage_schema_version != 5
+                || s.storage_schema_version != 6
                 || s.service_version.len() > 128
             {
                 return Err(ControlError::InvalidRequest);
@@ -437,6 +443,9 @@ fn validate_result(r: &ResultValue) -> ControlResult<()> {
         ResultValue::RuntimeControl(s) => s.validate()?,
         ResultValue::RuntimeStatus(s) => s.validate()?,
         ResultValue::Turn(t) => t.validate()?,
+        ResultValue::ApprovalReceipt(r) => {
+            r.validate().map_err(|_| ControlError::InvalidRequest)?
+        }
         ResultValue::TurnStatus(s) => {
             s.turn.validate()?;
             if s.stream_earliest_sequence

@@ -32,6 +32,16 @@
 //! let session = ManagedSessionId::parse("11111111-1111-4111-8111-111111111111").unwrap();
 //! let turn: ManagedTurnId = session;
 //! ```
+//! ```compile_fail
+//! use wyss_console::contracts::identities::{ManagedApprovalId, ManagedTurnId};
+//! let turn = ManagedTurnId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+//! let approval: ManagedApprovalId = turn;
+//! ```
+//! ```compile_fail
+//! use wyss_console::contracts::identities::{ExecutionLeaseId, ManagedApprovalId};
+//! let lease = ExecutionLeaseId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+//! let approval: ManagedApprovalId = lease;
+//! ```
 use super::WireUuid;
 use serde::{Deserialize, Serialize};
 
@@ -57,6 +67,7 @@ identity!(AgentRuntimeInstanceId);
 identity!(ManagedSessionId);
 identity!(ManagedTurnId);
 identity!(ExecutionLeaseId);
+identity!(ManagedApprovalId);
 identity!(ConsoleSessionId);
 identity!(TerminalId);
 

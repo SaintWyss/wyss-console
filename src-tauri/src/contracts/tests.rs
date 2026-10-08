@@ -64,3 +64,216 @@ fn maximum_sequence_and_ephemeral_default() {
     assert_eq!(event.sequence().get(), 1);
     assert_eq!(event.persistence(), Persistence::Ephemeral);
 }
+
+fn approval(change: impl FnOnce(&mut Value)) -> Result<(), ()> {
+    use super::control::ManagedApprovalRecord;
+    let mut v = serde_json::json!({
+        "managed_approval_id": "11111111-1111-4111-8111-111111111111",
+        "managed_turn_id": "22222222-2222-4222-8222-222222222222",
+        "managed_session_id": "33333333-3333-4333-8333-333333333333",
+        "runtime_instance_id": "44444444-4444-4444-8444-444444444444",
+        "kind": "command_execution",
+        "provider_item_id": "call_1",
+        "admitted_lease_id": "55555555-5555-4555-8555-555555555555",
+        "admitted_lease_revision": 1,
+        "state": "pending",
+        "revision": 1,
+        "action_fingerprint": "a".repeat(64),
+        "structure": {"command_bytes": 4, "cwd_bytes": 2, "parsed_actions": 0, "files": 0, "diff_bytes": 0},
+        "decision": null,
+        "effect": "none",
+        "created_at": "2026-10-07T00:00:00Z",
+        "updated_at": "2026-10-07T00:00:00Z",
+        "expires_at": "2026-10-07T00:05:00Z",
+        "terminal_at": null,
+        "terminal_reason": null,
+        "created_sequence": "7"
+    });
+    change(&mut v);
+    serde_json::from_value::<ManagedApprovalRecord>(v)
+        .map_err(|_| ())?
+        .validate()
+        .map_err(|_| ())
+}
+fn decided(v: &mut Value, state: &str, decision: Value, effect: &str) {
+    v["state"] = state.into();
+    v["decision"] = decision;
+    v["effect"] = effect.into();
+    v["revision"] = 2.into();
+    v["terminal_at"] = "2026-10-07T00:00:00Z".into();
+    v["terminal_reason"] = "client_decision".into();
+}
+
+#[test]
+fn approval_record_admits_only_coherent_state_decision_effect_and_bounds() {
+    approval(|_| ()).unwrap();
+    let ok: [(&str, Value, &str); 8] = [
+        ("accepted", "accept".into(), "dispatched"),
+        ("accepted", "accept".into(), "confirmed"),
+        ("indeterminate", "accept".into(), "unknown"),
+        ("declined", "decline".into(), "none"),
+        ("cancelled", "cancel".into(), "none"),
+        ("expired", Value::Null, "none"),
+        ("invalidated", Value::Null, "none"),
+        ("accepted", "accept".into(), "dispatched"),
+    ];
+    for (state, decision, effect) in ok {
+        approval(|v| decided(v, state, decision.clone(), effect))
+            .unwrap_or_else(|()| panic!("{state}/{decision}/{effect}"));
+    }
+    let bad: [(&str, Value, &str); 10] = [
+        ("accepted", "accept".into(), "none"),
+        ("accepted", "accept".into(), "unknown"),
+        ("accepted", "decline".into(), "dispatched"),
+        ("accepted", Value::Null, "dispatched"),
+        ("indeterminate", Value::Null, "unknown"),
+        ("indeterminate", "accept".into(), "dispatched"),
+        ("declined", "decline".into(), "dispatched"),
+        ("cancelled", "decline".into(), "none"),
+        ("expired", "accept".into(), "none"),
+        ("invalidated", Value::Null, "confirmed"),
+    ];
+    for (state, decision, effect) in bad {
+        assert!(
+            approval(|v| decided(v, state, decision.clone(), effect)).is_err(),
+            "{state}/{decision}/{effect}"
+        );
+    }
+    let changes: [&dyn Fn(&mut Value); 22] = [
+        &|v| v["command"] = "printf".into(),
+        &|v| v["state"] = "approved".into(),
+        &|v| v["kind"] = "network_access".into(),
+        &|v| v["decision"] = "accept".into(),
+        &|v| v["decision"] = "accept_for_session".into(),
+        &|v| v["effect"] = "dispatched".into(),
+        &|v| v["terminal_at"] = "2026-10-07T00:00:00Z".into(),
+        &|v| v["terminal_reason"] = "approval_timeout".into(),
+        &|v| v["revision"] = 0.into(),
+        &|v| v["admitted_lease_revision"] = 0.into(),
+        &|v| v["action_fingerprint"] = "A".repeat(64).into(),
+        &|v| v["action_fingerprint"] = "a".repeat(63).into(),
+        &|v| v["provider_item_id"] = "".into(),
+        &|v| v["provider_item_id"] = "call 1".into(),
+        &|v| v["provider_item_id"] = "c".repeat(129).into(),
+        &|v| v["expires_at"] = "2026-10-07T00:05:01Z".into(),
+        &|v| v["expires_at"] = "2026-10-07T00:00:00Z".into(),
+        &|v| v["updated_at"] = "2026-10-06T23:59:59Z".into(),
+        &|v| v["managed_turn_id"] = v["managed_approval_id"].clone(),
+        &|v| v["structure"]["files"] = 1.into(),
+        &|v| v["structure"]["command_bytes"] = 0.into(),
+        &|v| v["structure"]["command_bytes"] = (16 * 1024 + 1).into(),
+    ];
+    for (n, change) in changes.iter().enumerate() {
+        assert!(approval(change).is_err(), "change {n}");
+    }
+    // A file approval exists only for a complete, bounded proposal.
+    let file = |files: u64, diff: u64| {
+        approval(|v| {
+            v["kind"] = "file_change".into();
+            v["structure"] = serde_json::json!({"command_bytes": 0, "cwd_bytes": 0, "parsed_actions": 0, "files": files, "diff_bytes": diff});
+        })
+    };
+    file(1, 0).unwrap();
+    file(64, 256 * 1024).unwrap();
+    assert!(file(0, 0).is_err() && file(65, 0).is_err() && file(1, 256 * 1024 + 1).is_err());
+    // The terminal instant never lies after the last update.
+    assert!(
+        approval(|v| {
+            decided(v, "declined", "decline".into(), "none");
+            v["terminal_at"] = "2026-10-07T00:00:01Z".into();
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn approval_decisions_are_exactly_three_and_presentation_types_hide_their_content() {
+    use super::control::{
+        ApprovalDecision, ApprovalRespond, ApprovalState, ApprovalStatus, CommandPresentation,
+        ManagedApprovalRecord,
+    };
+    for (text, state) in [
+        ("accept", ApprovalState::Accepted),
+        ("decline", ApprovalState::Declined),
+        ("cancel", ApprovalState::Cancelled),
+    ] {
+        let d: ApprovalDecision = serde_json::from_value(text.into()).unwrap();
+        assert_eq!(d.state(), state);
+    }
+    for forbidden in [
+        "accept_for_session",
+        "acceptForSession",
+        "accept_with_execpolicy_amendment",
+        "acceptWithExecpolicyAmendment",
+        "apply_network_policy_amendment",
+        "Accept",
+    ] {
+        assert!(serde_json::from_value::<ApprovalDecision>(forbidden.into()).is_err());
+        assert!(
+            serde_json::from_value::<ApprovalRespond>(serde_json::json!({
+                "intent_id": "11111111-1111-4111-8111-111111111111",
+                "managed_approval_id": "22222222-2222-4222-8222-222222222222",
+                "expected_revision": 1,
+                "decision": forbidden
+            }))
+            .is_err()
+        );
+    }
+    assert!(
+        serde_json::from_value::<ApprovalRespond>(serde_json::json!({
+            "intent_id": "11111111-1111-4111-8111-111111111111",
+            "managed_approval_id": "22222222-2222-4222-8222-222222222222",
+            "expected_revision": 1,
+            "decision": "accept",
+            "amendment": ["rm"]
+        }))
+        .is_err()
+    );
+    let record: ManagedApprovalRecord = serde_json::from_value(serde_json::json!({
+        "managed_approval_id": "11111111-1111-4111-8111-111111111111",
+        "managed_turn_id": "22222222-2222-4222-8222-222222222222",
+        "managed_session_id": "33333333-3333-4333-8333-333333333333",
+        "runtime_instance_id": "44444444-4444-4444-8444-444444444444",
+        "kind": "command_execution",
+        "provider_item_id": "call_1",
+        "admitted_lease_id": "55555555-5555-4555-8555-555555555555",
+        "admitted_lease_revision": 1,
+        "state": "pending",
+        "revision": 1,
+        "action_fingerprint": "a".repeat(64),
+        "structure": {"command_bytes": 4, "cwd_bytes": 2, "parsed_actions": 0, "files": 0, "diff_bytes": 0},
+        "decision": null,
+        "effect": "none",
+        "created_at": "2026-10-07T00:00:00Z",
+        "updated_at": "2026-10-07T00:00:00Z",
+        "expires_at": "2026-10-07T00:05:00Z",
+        "terminal_at": null,
+        "terminal_reason": null,
+        "created_sequence": "7"
+    }))
+    .unwrap();
+    let status = ApprovalStatus {
+        approval: record,
+        acceptable: true,
+        command: Some(CommandPresentation {
+            command: "printf SECRET-COMMAND".into(),
+            cwd: "/w".into(),
+            parsed_actions: vec![],
+        }),
+        file_count: None,
+        file: None,
+    };
+    status.validate().unwrap();
+    assert_eq!(format!("{status:?}"), "ApprovalStatus(<sensitive>)");
+    let mut wrong_kind = status.clone();
+    wrong_kind.file_count = Some(1);
+    assert!(wrong_kind.validate().is_err());
+    let mut lost = status.clone();
+    lost.command = None;
+    assert!(
+        lost.validate().is_err(),
+        "acceptable requires the transient action"
+    );
+    lost.acceptable = false;
+    lost.validate().unwrap();
+}

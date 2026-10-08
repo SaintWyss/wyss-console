@@ -13,7 +13,12 @@ pub enum ExecutionScope {
     SessionCreate,
     SessionResume,
     TurnStart,
+    CommandExecute,
+    FileChange,
 }
+/// Length of the canonical stored encoding of every scope together: the sorted JSON array
+/// `["session_create","session_resume","turn_start","command_execute","file_change"]`.
+pub const MAX_SCOPES_TEXT: usize = 80;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LeaseState {
@@ -47,7 +52,7 @@ pub fn validate_scopes(scopes: &[ExecutionScope]) -> ControlResult<()> {
     let mut ordered = scopes.to_vec();
     ordered.sort();
     ordered.dedup();
-    if scopes.is_empty() || scopes.len() > 3 || ordered.len() != scopes.len() {
+    if scopes.is_empty() || scopes.len() > 5 || ordered.len() != scopes.len() {
         Err(E::InvalidRequest)
     } else {
         Ok(())

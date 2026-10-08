@@ -33,7 +33,7 @@ impl StartFingerprint {
             .map_err(db)
     }
 }
-fn read(c: &Connection, id: &str) -> ControlResult<ManagedTurnRecord> {
+pub(super) fn read(c: &Connection, id: &str) -> ControlResult<ManagedTurnRecord> {
     let raw: Option<String> = c.query_row("SELECT json_object('managed_turn_id',managed_turn_id,'managed_session_id',managed_session_id,'codex_thread_id',codex_thread_id,'codex_turn_id',codex_turn_id,'admitted_lease_id',admitted_lease_id,'admitted_lease_revision',admitted_lease_revision,'runtime_instance_id',runtime_instance_id,'state',state,'revision',revision,'created_at',created_at,'updated_at',updated_at,'terminal_at',terminal_at,'terminal_reason',terminal_reason) FROM managed_turns WHERE managed_turn_id=?1", [canonical(id)], |r|r.get(0)).optional().map_err(db)?;
     let t: ManagedTurnRecord =
         serde_json::from_str(&raw.ok_or(ControlError::TurnNotFound)?).map_err(invalid)?;

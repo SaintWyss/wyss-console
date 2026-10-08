@@ -1,3 +1,5 @@
+#[path = "approval_store.rs"]
+pub(in crate::control) mod approvals;
 #[path = "bindings.rs"]
 pub(in crate::control) mod bindings;
 #[path = "leases.rs"]
@@ -80,7 +82,7 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .map_err(invalid)?;
-        if version != 5 {
+        if version != 6 {
             return Err(ControlError::StorageIncompatible);
         }
         let stream = WireUuid::try_from(stream).map_err(invalid)?;
@@ -112,6 +114,7 @@ impl Store {
         let mut query=self.conn.prepare("SELECT event_id,stream_id,sequence,session_id,envelope FROM control_events ORDER BY sequence").map_err(invalid)?;
         let mut rows = query.query([]).map_err(invalid)?;
         let mut n = 0u64;
+        let mut approval_heads = approvals::AuditHeads::new();
         while let Some(r) = rows.next().map_err(invalid)? {
             n = n.checked_add(1).ok_or(ControlError::StorageIncompatible)?;
             let id: String = r.get(0).map_err(invalid)?;
@@ -130,6 +133,12 @@ impl Store {
                 return Err(ControlError::StorageIncompatible);
             }
             validate_audit(&v)?;
+            if v["event_type"]
+                .as_str()
+                .is_some_and(|k| k.starts_with("authority.managed_approval."))
+            {
+                approvals::fold_audit(&mut approval_heads, &v)?;
+            }
         }
         if head != n {
             return Err(ControlError::StorageIncompatible);
@@ -153,15 +162,22 @@ impl Store {
             .prepare("SELECT intent_id,mutation,result FROM processed_intents")
             .map_err(invalid)?;
         let mut rows = q.query([]).map_err(invalid)?;
+        let mut decided_approvals = std::collections::HashSet::new();
         while let Some(r) = rows.next().map_err(invalid)? {
             let id: String = r.get(0).map_err(invalid)?;
             WireUuid::try_from(id.clone()).map_err(invalid)?;
             let mutation: String = r.get(1).map_err(invalid)?;
             let result: String = r.get(2).map_err(invalid)?;
-            if unique_json(mutation.as_bytes()).map_err(invalid)?["method"]
-                == "managedSession/turn/start"
-            {
+            let method = unique_json(mutation.as_bytes()).map_err(invalid)?["method"].clone();
+            if method == "managedSession/turn/start" {
                 turns::verify_fingerprint_receipt(&id, &mutation, &result)?;
+                continue;
+            }
+            if method == approvals::METHOD {
+                // One decision receipt per approval, ever.
+                if !decided_approvals.insert(approvals::verify_receipt(&id, &mutation, &result)?) {
+                    return Err(ControlError::StorageIncompatible);
+                }
                 continue;
             }
             let op: Operation =
@@ -177,6 +193,7 @@ impl Store {
             let result: String = r.get(2).map_err(invalid)?;
             decode_receipt(&op, &result)?;
         }
+        self.verify_approvals(&approval_heads, &decided_approvals)?;
         if let Some(runtime) = self.runtime_control()? {
             runtime.validate()?;
         }
@@ -213,7 +230,7 @@ impl Store {
             protocol_version: 1,
             authority_instance_id: self.instance.clone(),
             service_version: env!("CARGO_PKG_VERSION").into(),
-            storage_schema_version: 5,
+            storage_schema_version: 6,
             stream_id: self.stream.clone(),
             last_sequence: if head == 0 {
                 None
@@ -494,6 +511,7 @@ impl Store {
 fn intent(op: &Operation) -> Option<&WireUuid> {
     match op {
         Operation::TurnCancel(p) => Some(&p.intent_id),
+        Operation::ApprovalRespond(p) => Some(&p.intent_id),
         Operation::BindingCreate(p) => Some(&p.intent_id),
         Operation::BindingResume(p) => Some(&p.intent_id),
         Operation::BindingAbandon(p) => Some(&p.intent_id),
@@ -572,6 +590,10 @@ fn decode_receipt(op: &Operation, raw: &str) -> ControlResult<ResultValue> {
         let t: ManagedTurnRecord = serde_json::from_str(raw).map_err(invalid)?;
         t.validate()?;
         Ok(ResultValue::Turn(t))
+    } else if matches!(op, Operation::ApprovalRespond(_)) {
+        let r: ApprovalReceipt = serde_json::from_str(raw).map_err(invalid)?;
+        r.validate()?;
+        Ok(ResultValue::ApprovalReceipt(r))
     } else if matches!(
         op,
         Operation::BindingCreate(_) | Operation::BindingResume(_)
@@ -642,6 +664,9 @@ fn validate_audit(v: &Value) -> ControlResult<()> {
         .ok_or(ControlError::StorageIncompatible)?;
     if kind.starts_with("authority.managed_turn.") {
         return turns::validate_audit(v);
+    }
+    if kind.starts_with("authority.managed_approval.") {
+        return approvals::validate_audit(v);
     }
     if kind.starts_with("authority.managed_session.runtime_") {
         return bindings::validate_audit(v);

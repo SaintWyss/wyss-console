@@ -225,6 +225,7 @@ pub fn run_from_environment() -> ControlResult<()> {
     let mut runtime = Runtime::new(&store, &paths.runtime)?;
     let core = thread::spawn(move || -> ControlResult<()> {
         store.recover_binding_operations()?;
+        store.recover_approvals()?;
         store.recover_turns()?;
         let mut turns = super::turns::Turns::default();
         let mut closing = false;

@@ -161,10 +161,10 @@ No production state is created by the test suite.
 
 `wyss-control` can supervise one shared, long-lived `codex app-server`, independently
 of Console clients. Durable desired running/stopped is separate from observed
-starting/initializing/ready/stopping/failed. Schema v1–v4 upgrades transactionally to
-v5, preserving sessions, leases, bindings, operation journal, receipts, stream,
-audit and runtime desired state. Migration creates no runtime desired state or
-managed turns; startup reconciles an existing desired-running record. Durable
+starting/initializing/ready/stopping/failed. Schema v1–v5 upgrades transactionally to
+v6, preserving sessions, leases, bindings, operation journal, turns, receipts, stream,
+audit and runtime desired state. Migration creates no runtime desired state,
+managed turns or managed approvals; startup reconciles an existing desired-running record. Durable
 conversation bindings use CodexThreadId; runtime attachment remains transient.
 
 The developer client exposes the new normalized control methods:
@@ -216,8 +216,22 @@ prompts, and answer no approvals or permission requests. A grant alone never exe
 Schema v3 adds only execution leases and a unique active-lease index; migration
 preserves sessions, runtime desired state, receipts and exact audit bytes, and
 creates zero leases. Each lease has its own ExecutionLeaseId and revision, explicit
-nonempty scopes (`session_create`, `session_resume`, `turn_start`), and an
-authority-time TTL of 1–3600 seconds. No scope implies another scope.
+nonempty scopes (`session_create`, `session_resume`, `turn_start`,
+`command_execute`, `file_change`), and an authority-time TTL of 1–3600 seconds.
+No scope implies another scope.
+
+Schema v6 rebuilds `execution_leases` so its stored scope encoding is bounded by the
+exact canonical maximum (80 characters, all five scopes) and adds
+`managed_approvals`: control metadata of one command or file-change approval. A row
+holds identities, the admitted lease, state, revision, decision, external-effect
+marker, deadlines, an authority-computed SHA-256 action fingerprint and bounded
+counts. It never holds a command, output, path, diff or file content. At most one
+approval is pending, a provider item is mediated at most once, and a schema trigger
+refuses any change that is not a legal single-revision transition; only `pending` is
+nonterminal. Startup invalidates an undecided approval and marks an accepted one
+without a confirmed outcome `indeterminate`; no provider response is ever replayed.
+This is the persistence layer only: the authority does not yet answer provider
+approval requests, so no runtime path creates an approval.
 
 The typed Rust client and developer client support `executionLease/grant`,
 `executionLease/get`, `executionLease/active`, `executionLease/renew` and
