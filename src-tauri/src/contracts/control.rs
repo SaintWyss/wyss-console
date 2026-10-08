@@ -455,7 +455,7 @@ fn validate_result(r: &ResultValue) -> ControlResult<()> {
     match r {
         ResultValue::Hello(s) | ResultValue::Status(s) => {
             if s.protocol_version != 1
-                || s.storage_schema_version != 6
+                || s.storage_schema_version != 7
                 || s.service_version.len() > 128
             {
                 return Err(ControlError::InvalidRequest);

@@ -1,4 +1,4 @@
-//! Explicit v0/v1/v2/v3/v4/v5 -> v6 migrations. Unknown/corrupt schemas fail closed.
+//! Explicit v0/v1/v2/v3/v4/v5/v6 -> v7 migrations. Unknown/corrupt schemas fail closed.
 use crate::contracts::control::{ControlError as E, ControlResult};
 use rusqlite::Connection;
 pub(crate) const V1_OBJECTS: &[(&str, &str)] = &[
@@ -119,7 +119,7 @@ pub(crate) const V5_OBJECTS: &[(&str, &str)] = &[
 /// v6 widens the stored scope encoding to the exact canonical maximum
 /// (`ExecutionScope` now has five members) and adds approval control metadata.
 /// `execution_leases` is rebuilt; no constraint is relaxed beyond that bound.
-pub(crate) const OBJECTS: &[(&str, &str)] = &[
+pub(crate) const V6_OBJECTS: &[(&str, &str)] = &[
     (
         "authority_metadata",
         "CREATE TABLE authority_metadata (id INTEGER PRIMARY KEY CHECK(id=1), schema_version INTEGER NOT NULL CHECK(schema_version=6), stream_id TEXT NOT NULL, last_sequence TEXT NOT NULL) STRICT",
@@ -160,6 +160,34 @@ pub(crate) const OBJECTS: &[(&str, &str)] = &[
         "CREATE TRIGGER managed_approvals_no_delete BEFORE DELETE ON managed_approvals BEGIN SELECT RAISE(ABORT,'append_only'); END",
     ),
 ];
+/// v7 records, next to the stream, the largest event vocabulary any build has brought to
+/// this store. No other object changes. Every store of schema v6 or older was written with
+/// vocabulary 1 or a subset of it, which is what a migrated store records.
+pub(crate) const OBJECTS: &[(&str, &str)] = &[
+    (
+        "authority_metadata",
+        "CREATE TABLE authority_metadata (id INTEGER PRIMARY KEY CHECK(id=1), schema_version INTEGER NOT NULL CHECK(schema_version=7), stream_id TEXT NOT NULL, last_sequence TEXT NOT NULL, event_vocabulary INTEGER NOT NULL CHECK(event_vocabulary>0)) STRICT",
+    ),
+    V6_OBJECTS[1],
+    V6_OBJECTS[2],
+    V6_OBJECTS[3],
+    V6_OBJECTS[4],
+    V6_OBJECTS[5],
+    V6_OBJECTS[6],
+    V6_OBJECTS[7],
+    V6_OBJECTS[8],
+    V6_OBJECTS[9],
+    V6_OBJECTS[10],
+    V6_OBJECTS[11],
+    V6_OBJECTS[12],
+    V6_OBJECTS[13],
+    V6_OBJECTS[14],
+    V6_OBJECTS[15],
+    V6_OBJECTS[16],
+    V6_OBJECTS[17],
+];
+/// Vocabulary of every build that wrote schema v6 or older.
+const FIRST_VOCABULARY: u32 = 1;
 fn validate(c: &Connection, objects: &[(&str, &str)]) -> ControlResult<()> {
     let integrity: String = c
         .query_row("PRAGMA quick_check", [], |r| r.get(0))
@@ -194,7 +222,7 @@ fn migrate_with(
     let version: i64 = c
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(|_| E::StorageIncompatible)?;
-    if version == 6 {
+    if version == 7 {
         return validate(c, OBJECTS);
     }
     let old = match version {
@@ -204,6 +232,7 @@ fn migrate_with(
         3 => V3_OBJECTS,
         4 => V4_OBJECTS,
         5 => V5_OBJECTS,
+        6 => V6_OBJECTS,
         _ => return Err(E::StorageIncompatible),
     };
     if version == 0 {
@@ -224,7 +253,8 @@ fn migrate_with(
     // rename rule, SQLite would rewrite the child REFERENCES clauses to the temporary
     // name. Both pragmas are connection settings and cannot change inside a transaction;
     // they are restored on every path and the result is checked before returning.
-    let rebuild_leases = old.iter().any(|(n, _)| *n == "execution_leases");
+    // Only v3 to v5 hold the lease table in its narrower form.
+    let rebuild_leases = (3..=5).contains(&version);
     let enforced: bool = c
         .pragma_query_value(None, "foreign_keys", |r| r.get(0))
         .map_err(|_| E::StorageUnavailable)?;
@@ -283,12 +313,18 @@ fn migrate_in_transaction(
     }
     if version == 0 {
         tx.execute(
-            "INSERT INTO authority_metadata VALUES(1,6,?1,'0')",
-            [uuid::Uuid::new_v4().to_string()],
+            "INSERT INTO authority_metadata VALUES(1,7,?1,'0',?2)",
+            rusqlite::params![uuid::Uuid::new_v4().to_string(), FIRST_VOCABULARY],
         )
         .map_err(|_| E::StorageUnavailable)?;
     } else {
-        tx.execute_batch("INSERT INTO authority_metadata SELECT id,6,stream_id,last_sequence FROM authority_metadata_old; DROP TABLE authority_metadata_old;").map_err(|_| E::StorageUnavailable)?;
+        tx.execute(
+            "INSERT INTO authority_metadata SELECT id,7,stream_id,last_sequence,?1 FROM authority_metadata_old",
+            [FIRST_VOCABULARY],
+        )
+        .map_err(|_| E::StorageUnavailable)?;
+        tx.execute_batch("DROP TABLE authority_metadata_old;")
+            .map_err(|_| E::StorageUnavailable)?;
     }
     if version == 1 {
         tx.execute_batch("INSERT INTO control_events SELECT * FROM control_events_old; DROP TABLE control_events_old;").map_err(|_| E::StorageUnavailable)?;
@@ -297,7 +333,7 @@ fn migrate_in_transaction(
         tx.execute_batch("INSERT INTO execution_leases SELECT * FROM execution_leases_old; DROP TABLE execution_leases_old;")
             .map_err(|_| E::StorageUnavailable)?;
     }
-    tx.pragma_update(None, "user_version", 6)
+    tx.pragma_update(None, "user_version", 7)
         .map_err(|_| E::StorageUnavailable)?;
     before_commit()?;
     tx.commit().map_err(|_| E::StorageUnavailable)

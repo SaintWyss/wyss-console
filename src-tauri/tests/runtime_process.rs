@@ -21,6 +21,14 @@ use wyss_console::{
 fn id() -> WireUuid {
     WireUuid::try_from(uuid::Uuid::new_v4().to_string()).unwrap()
 }
+/// Held while a fixture executable is written and across every fork of this test binary.
+/// A child forked while the file is open for writing inherits that descriptor until it
+/// execs, and running the file in that window fails with "text file busy".
+fn fork_lock() -> std::sync::MutexGuard<'static, ()> {
+    static FORK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    FORK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 fn bootstrap() -> [&'static str; 9] {
     [
         "initialize",
@@ -65,11 +73,15 @@ impl Sandbox {
         )
         .unwrap();
         let fake = root.join("bin/codex");
-        fs::write(&fake, include_str!("fixtures/codex_runtime.py")).unwrap();
-        fs::set_permissions(fake, fs::Permissions::from_mode(0o700)).unwrap();
+        {
+            let _forks = fork_lock();
+            fs::write(&fake, include_str!("fixtures/codex_runtime.py")).unwrap();
+            fs::set_permissions(fake, fs::Permissions::from_mode(0o700)).unwrap();
+        }
         Self { root, scenario }
     }
     fn start(&self) -> Authority {
+        let _forks = fork_lock();
         Authority(
             Command::new(env!("CARGO_BIN_EXE_wyss-control"))
                 .env("XDG_RUNTIME_DIR", self.root.join("run"))
@@ -178,16 +190,19 @@ fn dead(pid: i32) {
 fn authority_runtime_lifecycle_idempotency_clients_restarts_and_sigkill_containment() {
     nix::sys::prctl::set_child_subreaper(true).unwrap();
     let unrelated = Sandbox::new("happy");
-    let mut spectator = Authority(
-        Command::new(unrelated.root.join("bin/codex"))
-            .arg("app-server")
-            .env("WYSS_RUNTIME_FIXTURE", &unrelated.root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap(),
-    );
+    let mut spectator = {
+        let _forks = fork_lock();
+        Authority(
+            Command::new(unrelated.root.join("bin/codex"))
+                .arg("app-server")
+                .env("WYSS_RUNTIME_FIXTURE", &unrelated.root)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        )
+    };
     let env = Sandbox::new("happy");
     let mut a = env.start();
     let mut c = env.client();
@@ -1973,6 +1988,28 @@ fn local_tools_generation_is_isolated_attested_and_serves_only_its_workspace() {
         serde_json::json!(["managed_config.toml", "requirements.toml"])
     );
     assert_eq!(seen["user_home_entries"], serde_json::json!([]));
+    // Of the authority's control plane only the generation's own catalog and home exist:
+    // no control socket, no lock and no canonical database.
+    assert_eq!(
+        seen["authority_runtime"],
+        serde_json::json!(["codex-local-tools-catalog.json"])
+    );
+    assert_eq!(
+        seen["authority_state"],
+        serde_json::json!(["codex-local-tools"])
+    );
+    assert_eq!(seen["generation_state"], serde_json::json!(["home"]));
+    for hidden in [
+        "run/wyss-console/control.sock",
+        "run/wyss-console/control.lock",
+        "state/wyss-console/control.sqlite3",
+        "state/wyss-console/control.lock",
+    ] {
+        assert!(
+            env.root.join(hidden).exists(),
+            "{hidden} exists on the host"
+        );
+    }
     assert_eq!(seen["credential"], "FIXTURE-CREDENTIAL");
     assert_eq!(seen["credential_writable"], true);
     assert_eq!(seen["inherited"], serde_json::json!(["CODEX_HOME"]));
@@ -2306,9 +2343,13 @@ fn local_tools_thread_posture_is_verified_and_new_project_policy_stops_further_w
     let mut c = env.client();
     c.runtime_start(local_mutation(&workspace)).unwrap();
     env.wait(&mut c, ActualState::Ready);
-    // The runtime's own sandbox leaves an empty protective directory: that is not policy.
+    // The runtime's own sandbox leaves empty protective directories in the workspace it
+    // wrote to: that is not policy, and a workspace that now looks like a project root of
+    // its own does not shorten what the masks were created to hide.
     let layer = env.root.join("repo/sub/ws/.codex");
-    fs::create_dir(&layer).unwrap();
+    for marker in [".codex", ".git", ".agents"] {
+        fs::create_dir(env.root.join("repo/sub/ws").join(marker)).unwrap();
+    }
     let (s, _) = prepare_bound_session(&mut c, local_scopes());
     c.binding_create(BindingCreate {
         workspace_root: workspace.clone(),
@@ -2332,6 +2373,64 @@ fn local_tools_thread_posture_is_verified_and_new_project_policy_stops_further_w
     );
     drop(c);
     a.stop(false);
+}
+#[test]
+fn local_tools_generation_stops_once_the_bound_credential_is_not_the_one_validated() {
+    // An in-place refresh keeps the identity; anything else ends the proof before any
+    // further provider frame is written.
+    for change in ["refreshed", "replaced", "widened", "second_name", "removed"] {
+        let env = Sandbox::new("happy");
+        let workspace = local_layout(&env);
+        let auth = env.root.join("codex-home/auth.json");
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(local_mutation(&workspace)).unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, _) = prepare_bound_session(&mut c, local_scopes());
+        c.binding_create(BindingCreate {
+            workspace_root: workspace.clone(),
+            ..create_params(&env, &s)
+        })
+        .unwrap();
+        match change {
+            "refreshed" => fs::write(&auth, "FIXTURE-CREDENTIAL-REFRESHED-IN-PLACE").unwrap(),
+            "replaced" => {
+                let next = env.root.join("codex-home/auth.json.new");
+                fs::write(&next, "ANOTHER-CREDENTIAL").unwrap();
+                fs::set_permissions(&next, fs::Permissions::from_mode(0o600)).unwrap();
+                fs::rename(&next, &auth).unwrap();
+            }
+            "widened" => fs::set_permissions(&auth, fs::Permissions::from_mode(0o640)).unwrap(),
+            "second_name" => fs::hard_link(&auth, env.root.join("second-name")).unwrap(),
+            _ => fs::remove_file(&auth).unwrap(),
+        }
+        let frames = (count(&env, "thread/resume"), count(&env, "turn/start"));
+        if change == "refreshed" {
+            c.binding_resume(resume_params(&s)).unwrap();
+            assert_eq!(count(&env, "thread/resume"), frames.0 + 1);
+            assert_eq!(c.runtime_status().unwrap().actual_state, ActualState::Ready);
+        } else {
+            assert!(c.binding_resume(resume_params(&s)).is_err(), "{change}");
+            assert_eq!(
+                (count(&env, "thread/resume"), count(&env, "turn/start")),
+                frames,
+                "{change}"
+            );
+            env.wait(&mut c, ActualState::Failed);
+            assert_ne!(
+                c.binding_status(s.managed_session_id.clone())
+                    .unwrap()
+                    .state,
+                BindingState::BoundAttached,
+                "{change}"
+            );
+        }
+        drop(c);
+        a.stop(false);
+        for pid in env.pids() {
+            dead(pid);
+        }
+    }
 }
 #[test]
 fn local_tools_generation_executes_nothing_while_no_approval_can_be_answered() {

@@ -167,10 +167,11 @@ No production state is created by the test suite.
 
 `wyss-control` can supervise one shared, long-lived `codex app-server`, independently
 of Console clients. Durable desired running/stopped is separate from observed
-starting/initializing/ready/stopping/failed. Schema v1–v5 upgrades transactionally to
-v6, preserving sessions, leases, bindings, operation journal, turns, receipts, stream,
-audit and runtime desired state. Migration creates no runtime desired state,
-managed turns or managed approvals; startup reconciles an existing desired-running record. Durable
+starting/initializing/ready/stopping/failed. Schema v1–v6 upgrades transactionally to
+v7, preserving sessions, leases, bindings, operation journal, turns, approvals, receipts,
+stream, audit and runtime desired state. Migration creates no runtime desired state,
+managed turns or managed approvals; startup reconciles an existing desired-running record. An
+older build refuses a newer schema; there is no downgrade. Durable
 conversation bindings use CodexThreadId; runtime attachment remains transient.
 
 The developer client exposes the new normalized control methods:
@@ -229,20 +230,30 @@ back as inference, the least capable profile.
 The local-tools generation runs inside an unprivileged `bwrap` namespace whose argv
 is fixed by the authority and built without a shell or any client text:
 
-- `/etc/codex` is replaced by an authority-owned policy whose managed requirement
+- `/etc/codex` is an authority-owned policy whose managed requirement
   `unified_exec = false` removes the persistent command tool and `write_stdin`.
   Passing that flag as plain configuration is not enough: the runtime overrides it.
+  It is mounted on a private overlay of `/etc`, so no such directory has to exist on
+  the host and nothing of a host `/etc/codex` is visible.
 - `CODEX_HOME` is a private authority directory. The user's Codex home, and
   `~/.codex`, are hidden behind an empty tmpfs: no user configuration, rules, hooks or
   MCP servers. Only the pinned release directory returns, read-only.
+- The authority's own control plane does not exist inside the namespace: its runtime
+  and state directories (control socket, locks, canonical database) are hidden. The
+  generation gets back its private home and, read-only, its one model catalog file.
 - One credential capability crosses: the user's `auth.json`, bound read-write
-  because the runtime refreshes its token in place. It is never read, copied or
-  logged, and a symlinked, foreign-owned or group/world-accessible file is refused.
-  A token refresh by the isolated runtime therefore writes the user's own credential
-  file; narrowing that is deferred.
-- Every existing project policy layer (`.codex`) from the project root down to the
-  workspace is masked read-only, and every thread forces the project root and the
-  workspace `untrusted`. The authority creates nothing in the workspace.
+  because Codex 0.159.0 refreshes its token in place and has no other
+  non-interactive way to share one login. The authority opens it without following a
+  link and without read access, requires a private regular file of this user with a
+  single name in a home nobody else can write, and hands the launcher that open
+  descriptor: what enters the namespace is the inode that was validated. It is never
+  read, copied or logged. Before every conversation, turn and Accept the identity is
+  checked again; a replaced, widened, re-linked or removed credential ends the
+  generation. A token refresh by the isolated runtime writes the user's own file.
+- Every existing project policy layer (`.codex`) from the outermost enclosing
+  repository down to the workspace is masked read-only, and every thread forces the
+  workspace and every directory above it that holds a `.git` marker `untrusted`. The
+  authority creates nothing in the workspace.
 - The model catalog is the authority's normalized presentation, with direct tools
   and without code mode, sub-agents or experimental tools; it keeps the patch tool.
 
@@ -254,8 +265,9 @@ excluded, no network). Every thread must come back with approval policy
 `untrusted` and that sandbox. Anything unproven is `safety_unproven`, and the same
 attestation runs again before each conversation and turn; project policy that
 appears in an unmasked layer afterwards stops further work. The host must provide
-`/usr/bin/bwrap` and an existing `/etc/codex` directory; the authority never
-creates either.
+`/usr/bin/bwrap` with unprivileged overlay support (bubblewrap 0.11 or newer on a
+kernel that allows overlayfs in a user namespace). Without it the profile is
+unavailable; there is no unisolated fallback.
 
 A session attaches as `local_tools_v1` only for the generation's workspace, and
 the `command_execute` and `file_change` gate actions are denied under any other
@@ -470,10 +482,11 @@ sub-agents, collaboration, request-user-input, permission escalation, write-stdi
 terminal interaction, a second concurrent request, and any command or file effect the
 authority did not accept.
 
-Known limits: the user's `auth.json` is shared read-write with the isolated runtime
-(narrowing it is deferred); `bwrap` and a host `/etc/codex` directory are required;
-the profile does not survive an authority restart; compatibility is pinned to Codex
-0.159.0; and an independent review of this sprint is pending. See
+Known limits: the user's `auth.json` is shared read-write with the isolated runtime,
+as the one validated capability described above, and a command the user accepts can
+read it exactly as it can under the user's own Codex; `bwrap` with overlay support is
+required; the profile does not survive an authority restart; and compatibility is
+pinned to Codex 0.159.0. See
 [ADR 0016](docs/adr/0016-tool-and-approval-mediation.md).
 
 ## Durable event replay
@@ -482,7 +495,8 @@ Every canonical control mutation commits one or more EventEnvelope v1 events in 
 transaction, through a single append path. The stream is audit, history and
 observation. **It is not the authority**: canonical state is the control tables, nothing
 is derived from an event, and reading the stream starts, grants, answers and repeats
-nothing. Storage stays at schema version 6.
+nothing. Storage is at schema version 7, which records the event vocabulary next to
+the stream.
 
 `audit/read` replays committed history from a cursor the client owns:
 
@@ -516,8 +530,10 @@ A durable event is at most 2048 encoded bytes and holds control metadata only:
 identifiers, enumerations, revisions, timestamps, counts and SHA-256 fingerprints. An
 event that cannot be validated or appended fails its mutation, without a sequence gap.
 A valid event of a type this build does not define is replayed as stored and never
-interpreted. On open the log is compared with the tables and a store that disagrees
-with its own history is refused, never repaired.
+interpreted, but only in a store that a build with a larger event vocabulary has
+opened; in any other store such an event was written by no build and the store is
+refused. On open the log is compared with the tables and a store that disagrees with
+its own history is refused, never repaired.
 
 Assistant text, reasoning summaries, command output, diffs, prompts, provider frames
 and terminal bytes are not events. `managedSession/turn/events` remains a separate,

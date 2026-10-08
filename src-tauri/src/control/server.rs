@@ -264,11 +264,7 @@ pub fn run_from_environment() -> ControlResult<()> {
     let (sender, receiver) = mpsc::sync_channel::<CoreMessage>(QUEUE);
     let core_sender = sender.clone();
     let core_stop = stop.clone();
-    let mut runtime = Runtime::new(
-        &store,
-        &paths.runtime,
-        &paths.state.join("codex-local-tools"),
-    )?;
+    let mut runtime = Runtime::new(&store, &paths.runtime, &paths.state)?;
     let core = thread::spawn(move || -> ControlResult<()> {
         store.recover_binding_operations()?;
         store.recover_approvals()?;

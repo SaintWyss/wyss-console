@@ -79,16 +79,28 @@ impl Store {
             .map_err(db)?;
         conn.pragma_update(None, "trusted_schema", false)
             .map_err(db)?;
-        let (version, stream, head): (i64, String, String) = conn
+        let (version, stream, head, vocabulary): (i64, String, String, i64) = conn
             .query_row(
-                "SELECT schema_version,stream_id,last_sequence FROM authority_metadata WHERE id=1",
+                "SELECT schema_version,stream_id,last_sequence,event_vocabulary FROM authority_metadata WHERE id=1",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .map_err(invalid)?;
-        if version != 6 {
+        if version != 7 || vocabulary < 1 {
             return Err(ControlError::StorageIncompatible);
         }
+        // Before this build can append anything, the store records that its vocabulary
+        // has been here. Only a store a larger vocabulary has opened may hold event types
+        // this build does not know.
+        let own = i64::from(events::VOCABULARY);
+        if vocabulary < own {
+            conn.execute(
+                "UPDATE authority_metadata SET event_vocabulary=?1 WHERE id=1",
+                [own],
+            )
+            .map_err(db)?;
+        }
+        let newer_writer = vocabulary > own;
         let stream = WireUuid::try_from(stream).map_err(invalid)?;
         let store = Self {
             conn,
@@ -97,10 +109,12 @@ impl Store {
             clock: std::sync::Arc::new(leases::SystemClock),
             execution_available: true,
         };
-        store.verify(&head)?;
+        store.verify(&head, newer_writer)?;
         Ok(store)
     }
-    fn verify(&self, head: &str) -> ControlResult<()> {
+    /// `newer_writer`: a build with a larger event vocabulary has opened this store, so it
+    /// may hold valid events of types this build cannot name.
+    fn verify(&self, head: &str, newer_writer: bool) -> ControlResult<()> {
         let head = parse_head(head)?;
         let mut foreign = self
             .conn
@@ -141,6 +155,11 @@ impl Store {
             replay.observe(&v)?;
         }
         if head != n {
+            return Err(ControlError::StorageIncompatible);
+        }
+        // Inside this authority's own vocabulary every event has a type it knows: one that
+        // it cannot name was not written by any build that ever opened this store.
+        if replay.unknown != 0 && !newer_writer {
             return Err(ControlError::StorageIncompatible);
         }
         let mut q = self
@@ -256,7 +275,7 @@ impl Store {
             protocol_version: 1,
             authority_instance_id: self.instance.clone(),
             service_version: env!("CARGO_PKG_VERSION").into(),
-            storage_schema_version: 6,
+            storage_schema_version: 7,
             stream_id: self.stream.clone(),
             last_sequence: if head == 0 {
                 None

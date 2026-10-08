@@ -59,6 +59,20 @@ impl Conversations {
         id: &ManagedSessionId,
     ) -> ControlResult<ResultValue> {
         let mut s = store.binding_status(id)?;
+        // An open operation is in progress only while the core is still waiting for its
+        // outcome. One it no longer tracks could not be settled durably: its provider
+        // effect is unknown, and it is reported as exactly that until the next start
+        // reconciles it. It blocks the session either way.
+        if s.state == BindingState::Creating
+            && !self.pending.as_ref().is_some_and(|p| {
+                s.operation_id.as_ref().is_some_and(|open| {
+                    open.as_str()
+                        .eq_ignore_ascii_case(p.reservation.operation_id.as_str())
+                })
+            })
+        {
+            s.state = BindingState::Indeterminate;
+        }
         if s.binding.is_some()
             && store.gate_session(id)?.control_state == ControlState::Prepared
             && let Some(live) = runtime.status().runtime_instance_id
@@ -195,7 +209,11 @@ impl Conversations {
             admission: admission.clone(),
         };
         if !runtime.command(command) {
-            store.fail_binding(&reservation, true)?;
+            // Whatever keeps the uncertainty from being recorded closes execution.
+            if let Err(e) = store.fail_binding(&reservation, true) {
+                store.execution_available = false;
+                return Err(e);
+            }
             return Err(ControlError::ExternalEffectUnknown);
         }
         self.pending = Some(Pending {

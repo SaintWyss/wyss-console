@@ -137,16 +137,42 @@ struct Generation {
 /// Facts of an isolated generation, fixed when its namespace is created.
 struct Local<'a> {
     isolation: &'a isolation::Isolation,
+    /// Project directory chain the namespace was created for.
+    chain: Vec<std::path::PathBuf>,
     /// Project policy layers masked for the lifetime of the namespace.
     masked: Vec<std::path::PathBuf>,
     /// Roots forced untrusted on every thread.
     roots: Vec<String>,
     home: String,
     workspace: String,
+    /// The one credential capability bound into the namespace, if the user has one.
+    credential: Option<isolation::Credential>,
 }
 impl Local<'_> {
-    fn spawn(&self, executable: &Path, args: Vec<String>) -> ProbeResult<Command> {
-        self.isolation.command(executable, args, &self.masked)
+    fn spawn(
+        &self,
+        executable: &Path,
+        args: Vec<String>,
+        catalog: Option<&Path>,
+    ) -> ProbeResult<Command> {
+        self.isolation.command(
+            executable,
+            args,
+            &isolation::Grants {
+                masked: &self.masked,
+                catalog,
+                credential: self.credential.as_ref(),
+            },
+        )
+    }
+    /// Everything the namespace was created with still holds on the host: the project
+    /// policy masks and the identity of the bound credential.
+    fn holds(&self) -> ProbeResult<bool> {
+        Ok(self.isolation.masks_hold(&self.chain, &self.masked)?
+            && match &self.credential {
+                Some(credential) => self.isolation.credential_holds(credential)?,
+                None => true,
+            })
     }
 }
 pub(crate) struct Worker {
@@ -709,10 +735,12 @@ fn run(
             (|| -> ProbeResult<Local<'_>> {
                 Ok(Local {
                     isolation,
+                    chain: isolation.project_dirs()?,
                     masked: isolation.layers()?,
                     roots: isolation.trust_roots()?,
                     home: text(isolation.home())?,
                     workspace: text(isolation.workspace.clone())?,
+                    credential: isolation.credential()?,
                 })
             })()
             .map_err(|_| RuntimeDiagnostic::SafetyUnproven)?,
@@ -752,7 +780,7 @@ fn run(
         }
         Some(local) => safety::local_tools_args(&names, Some(&catalog))
             .map_err(|_| ProbeError::Protocol)
-            .and_then(|args| local.spawn(&executable, args))
+            .and_then(|args| local.spawn(&executable, args, Some(&catalog)))
             .map_err(|_| RuntimeDiagnostic::SafetyUnproven)?,
     };
     command.current_dir(&cwd);
@@ -1160,11 +1188,12 @@ fn safety_preflight(
     safety::mcp_names(&config, true).map_err(|_| ProbeError::Protocol)?;
     if let Some(local) = io.local {
         // The runtime reports its own managed requirements and its own home; the authority
-        // re-reads the workspace: project policy that appeared or vanished since the
-        // namespace was created is not masked by it.
+        // re-reads the host: project policy that appeared or vanished since the namespace
+        // was created is not masked by it, and a credential that is no longer the one
+        // bound into it is not the capability that was validated.
         let requirements = safety_query(io, cwd, Query::Requirements, correlation, report)?;
         safety::verify_requirements(&requirements).map_err(|_| ProbeError::Protocol)?;
-        if !io.home_proven || !local.isolation.masks_hold(&local.masked)? {
+        if !io.home_proven || !local.holds()? {
             return Err(ProbeError::Protocol);
         }
     }
@@ -1247,6 +1276,7 @@ fn discover_mcp(
         Some(local) => local.spawn(
             executable,
             safety::local_tools_args(&BTreeSet::new(), None).map_err(|_| ProbeError::Codec)?,
+            None,
         )?,
     };
     command.current_dir(cwd);
@@ -1416,13 +1446,16 @@ mod tests {
         let isolation = isolation::Isolation {
             workspace: dir.clone(),
             state: dir.clone(),
+            control: Vec::new(),
         };
         let local = Local {
             isolation: &isolation,
+            chain: Vec::new(),
             masked: Vec::new(),
             roots: Vec::new(),
             home: "/h".into(),
             workspace: "/w".into(),
+            credential: None,
         };
         let mut methods = RuntimeMethods::default();
         let mut notices = 0;

@@ -76,6 +76,9 @@ const LOCAL_TOOLS_SANDBOX: [(&str, bool); 3] = [
 pub const LOCAL_TOOLS_REQUIREMENTS: &str = "[features]\nunified_exec = false\n";
 pub const LOCAL_TOOLS_MANAGED_CONFIG: &str = "check_for_update_on_startup = false\n";
 const MAX_MCP: usize = 64;
+/// Project roots one generation forces untrusted: the workspace and the ancestors that
+/// hold a repository marker. A deeper nesting of repositories keeps the profile off.
+pub const MAX_TRUST_ROOTS: usize = 8;
 pub const MAX_CATALOG_BYTES: usize = 4 * 1024 * 1024;
 const MAX_CATALOG_MODELS: usize = 64;
 fn invalid() -> CodecError {
@@ -286,7 +289,10 @@ pub fn thread_config(names: &BTreeSet<String>) -> Result<Value> {
 /// here, as JSON values: a workspace path is never interpolated into TOML or a shell.
 pub fn local_tools_thread_config(names: &BTreeSet<String>, roots: &[String]) -> Result<Value> {
     local_tools_args(names, None)?;
-    if roots.is_empty() || roots.len() > 2 || roots.iter().any(|r| !Path::new(r).is_absolute()) {
+    if roots.is_empty()
+        || roots.len() > MAX_TRUST_ROOTS
+        || roots.iter().any(|r| !Path::new(r).is_absolute())
+    {
         return fail("trust_roots");
     }
     let mut config = clamps(names, true);
@@ -445,7 +451,7 @@ mod tests {
         for bad in [
             vec![],
             vec!["relative".to_owned()],
-            vec!["/a".to_owned(); 3],
+            vec!["/a".to_owned(); MAX_TRUST_ROOTS + 1],
         ] {
             assert!(local_tools_thread_config(&names, &bad).is_err());
         }

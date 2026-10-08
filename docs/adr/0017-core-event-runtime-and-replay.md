@@ -18,6 +18,11 @@ reading the stream cannot start, grant, answer or repeat anything.
 EventEnvelope v1 (ADR 0003) is unchanged. There is no envelope v2 and no schema bump:
 storage stays at version 6.
 
+> **Implementation status (Sprint 2K).** EventEnvelope v1 is still unchanged. Storage
+> is now schema version 7: `authority_metadata` records `event_vocabulary`, the
+> largest event vocabulary any build has opened the store with. See the status note
+> under Known, unknown and malformed events.
+
 ## EventEnvelope v1 stays frozen
 
 `schema_version` 1, `event_id` UUID, namespaced `event_type`, positive
@@ -217,6 +222,17 @@ authority itself cannot append a type outside its registry. Unknown events are h
 the stream invariants like any other row: contiguous sequence, the authority's stream
 id, columns equal to the envelope.
 
+> **Implementation status (Sprint 2K).** An unknown event is accepted only in a store
+> whose recorded `event_vocabulary` is larger than this build's: only a build with a
+> larger vocabulary can have written a type this build cannot name. In every other
+> store an unknown type is corruption and the store is refused, which closes the case
+> of a known event retyped into an unknown one inside the authority's own history,
+> including the observations no canonical row depends on. The vocabulary is number 1
+> for the 28 types above and for every store migrated from schema v6 or older; a build
+> records its own number before it can append, and the recorded number never
+> decreases. This detects damage, not forgery: a same-user process that rewrites the
+> database consistently can also rewrite that number.
+
 ## Event inventory
 
 Every row is written by `append` in the same `IMMEDIATE` or deferred transaction as its
@@ -338,7 +354,9 @@ optimization.
 - An unknown future event is tolerated so that the vocabulary can grow. Retyping a
   known event as an unknown one is caught only where a canonical row depends on it;
   `runtime.instance_ready`, `runtime.instance_exited`, `runtime_attached` and
-  `managed_turn.cancel_requested` have no row and could be hidden that way.
+  `managed_turn.cancel_requested` have no row and could be hidden that way. Since
+  Sprint 2K this holds only in a store a build with a larger vocabulary has opened;
+  everywhere else any unknown type is refused.
 - An uncertain operation recorded before this ADR has no `runtime_operation_indeterminate`
   event. Abandoning it is still accepted.
 - Watchers are woken at the top of the core loop, after the client that committed has
@@ -348,7 +366,9 @@ optimization.
 - A watch reports progress only for the single authority stream. There is no filter by
   session or type; clients filter.
 - `managed_turn.cancel_requested` carries the turn's last update as its timestamp, as it
-  always did. Order within the stream is the sequence, never the timestamp.
+  always did. Order within the stream is the sequence, never the timestamp. Since
+  Sprint 2K the event carries the authority time of the request itself, never earlier
+  than the turn's last update.
 
 ## Acceptance evidence
 

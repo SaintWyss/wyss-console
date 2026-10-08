@@ -40,6 +40,8 @@ pub(super) fn read(c: &Connection, id: &str) -> ControlResult<ManagedTurnRecord>
     t.validate().map_err(invalid)?;
     Ok(t)
 }
+/// One turn event. `at` is when what the event records happened: the turn's own update for
+/// a state change, the authority clock for an intent that changes no state.
 fn audit(
     tx: &Transaction<'_>,
     instance: &WireUuid,
@@ -47,7 +49,7 @@ fn audit(
     t: &ManagedTurnRecord,
     kind: &str,
     correlation: Option<&str>,
-    reason: Option<TurnReason>,
+    (reason, at): (Option<TurnReason>, &crate::contracts::UtcTimestamp),
 ) -> ControlResult<()> {
     events::append(
         tx,
@@ -57,7 +59,7 @@ fn audit(
             kind: &format!("authority.managed_turn.{kind}"),
             session: Some(t.managed_session_id.as_str()),
             correlation,
-            timestamp: enum_text(&t.updated_at)?,
+            timestamp: enum_text(at)?,
             payload: json!({"managed_turn_id":t.managed_turn_id,"codex_turn_id":t.codex_turn_id,"lease_id":t.admitted_lease_id,"lease_revision":t.admitted_lease_revision,"runtime_instance_id":t.runtime_instance_id,"state":t.state,"revision":t.revision,"reason":reason}),
         },
     )?;
@@ -244,7 +246,7 @@ impl Store {
             &t,
             "admitted",
             Some(f.intent_id.as_str()),
-            None,
+            (None, &t.updated_at),
         )?;
         tx.execute(
             "INSERT INTO processed_intents VALUES(?1,?2,?3)",
@@ -299,7 +301,7 @@ impl Store {
             &t,
             &enum_text(&state)?,
             None,
-            reason,
+            (reason, &t.updated_at),
         )?;
         tx.commit().map_err(db)?;
         Ok(t)
@@ -339,6 +341,15 @@ impl Store {
         if t.revision != p.expected_revision {
             return Err(ControlError::StaleRevision);
         }
+        // The request is recorded when it was made. The turn itself is unchanged, and the
+        // journal clock never runs behind the turn it describes.
+        let requested: crate::contracts::UtcTimestamp = self
+            .lease_now()
+            .max(timestamp(&t.updated_at)?)
+            .format(&Rfc3339)
+            .map_err(invalid)?
+            .try_into()
+            .map_err(invalid)?;
         let tx = self.conn.transaction().map_err(db)?;
         audit(
             &tx,
@@ -347,7 +358,7 @@ impl Store {
             &t,
             "cancel_requested",
             Some(p.intent_id.as_str()),
-            Some(reason),
+            (Some(reason), &requested),
         )?;
         tx.execute(
             "INSERT INTO processed_intents VALUES(?1,?2,?3)",

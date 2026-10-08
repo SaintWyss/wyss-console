@@ -118,9 +118,19 @@ fn envelope(c: &Connection, kind: &str, payload: Value, session: Option<&str>) -
         "payload":payload,"persistence":"durable","sensitivity":"internal","redaction":"none"});
     (n, v.to_string())
 }
-/// Appends it straight into the log with the head, bypassing this build's append path and
-/// its type registry.
+/// Records what a build with a larger event vocabulary records when it opens a store.
+/// Only from then on may the log hold a type this build cannot name.
+fn newer_writer(c: &Connection) {
+    c.execute(
+        "UPDATE authority_metadata SET event_vocabulary=?1",
+        [VOCABULARY + 1],
+    )
+    .unwrap();
+}
+/// Appends it straight into the log with the head, as that newer build would, bypassing
+/// this build's append path and its type registry.
 fn foreign(c: &Connection, kind: &str, payload: Value, session: Option<&str>) -> u64 {
+    newer_writer(c);
     let (n, raw) = envelope(c, kind, payload, session);
     c.execute(
         "INSERT INTO control_events SELECT json_extract(?1,'$.event_id'),json_extract(?1,'$.stream_id'),?2,?3,?1",
@@ -1261,8 +1271,9 @@ fn a_damaged_or_forged_log_is_refused_and_never_repaired() {
 }
 #[test]
 fn a_canonical_row_the_log_does_not_account_for_is_refused() {
-    // Each case hides one audited fact by retyping its event as a future one: every
-    // envelope stays valid and every table is untouched, so only coverage can notice.
+    // Each case hides one audited fact by retyping its event as a future one, in a store
+    // a newer build has opened: there an unknown type is legal, every envelope stays valid
+    // and every table is untouched, so only coverage can notice.
     for kind in [
         "authority.managed_session.prepared",
         "authority.managed_session.closed",
@@ -1279,6 +1290,7 @@ fn a_canonical_row_the_log_does_not_account_for_is_refused() {
     ] {
         let l = Life::full();
         let hidden = tamper(&l, |c| {
+            newer_writer(c);
             set(
                 c,
                 &first(c, kind),
@@ -1455,4 +1467,99 @@ fn an_uncommitted_event_is_never_the_announced_head() {
     l.store.conn.execute_batch("ROLLBACK").unwrap();
     assert_eq!(head(&l.store), 1);
     assert_eq!(read(&mut l.store, 0, 50).unwrap().0.len(), 1);
+}
+#[test]
+fn an_unknown_type_is_corruption_unless_a_larger_vocabulary_opened_the_store() {
+    let vocabulary = |c: &Connection| -> u32 {
+        c.query_row("SELECT event_vocabulary FROM authority_metadata", [], |r| {
+            r.get(0)
+        })
+        .unwrap()
+    };
+    let l = Life::full();
+    assert_eq!(vocabulary(&l.store.conn), VOCABULARY);
+    let written: std::collections::BTreeSet<String> = l
+        .store
+        .conn
+        .prepare("SELECT DISTINCT json_extract(envelope,'$.event_type') FROM control_events")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    // The lifecycle wrote the whole vocabulary of this build.
+    assert_eq!(
+        written,
+        KNOWN
+            .iter()
+            .map(|k| (*k).to_owned())
+            .collect::<std::collections::BTreeSet<_>>()
+    );
+    drop(l);
+    // No build with a larger vocabulary ever opened these stores. Whatever known event is
+    // retyped into a type this build cannot name, the envelope stays valid and the store
+    // is refused, including the observations no canonical row depends on.
+    for kind in KNOWN {
+        let l = Life::full();
+        let retyped = tamper(&l, |c| {
+            set(
+                c,
+                &first(c, kind),
+                "$.event_type",
+                json!("authority.future.observation"),
+            )
+        });
+        assert_eq!(retyped, Err(ControlError::StorageIncompatible), "{kind}");
+    }
+    // So is an event of an unknown type that was simply added at the head.
+    let l = Life::full();
+    let added = tamper(&l, |c| {
+        let (n, raw) = envelope(c, "vendor.future.note", json!({}), None);
+        c.execute(
+            "INSERT INTO control_events SELECT json_extract(?1,'$.event_id'),json_extract(?1,'$.stream_id'),?2,NULL,?1",
+            params![raw, key(n)],
+        )
+        .unwrap();
+        c.execute(
+            "UPDATE authority_metadata SET last_sequence=?1",
+            [n.to_string()],
+        )
+        .unwrap();
+    });
+    assert_eq!(added, Err(ControlError::StorageIncompatible));
+    // Forward compatibility is exactly this: once a larger vocabulary is recorded, the
+    // same unknown event is an observation, and the recorded vocabulary is never lowered.
+    let mut l = Life::full();
+    let head = foreign(&l.store.conn, "vendor.future.note", json!({}), None);
+    l.reopen();
+    assert_eq!(l.store.head().unwrap(), head);
+    assert_eq!(vocabulary(&l.store.conn), VOCABULARY + 1);
+    // What stays out of reach in such a store: an observation without a canonical row,
+    // retyped into an unknown type, cannot be told from one the newer build wrote.
+    for kind in [
+        "authority.runtime.instance_ready",
+        "authority.runtime.instance_exited",
+        "authority.managed_session.runtime_attached",
+        "authority.managed_turn.cancel_requested",
+    ] {
+        let l = Life::full();
+        let retyped = tamper(&l, |c| {
+            newer_writer(c);
+            set(
+                c,
+                &first(c, kind),
+                "$.event_type",
+                json!("authority.future.observation"),
+            )
+        });
+        assert_eq!(retyped, Ok(()), "{kind}");
+    }
+    // The append path itself never writes a type outside the vocabulary, in any store.
+    let mut l = Life::new();
+    newer_writer(&l.store.conn);
+    assert_eq!(
+        l.store
+            .runtime_event("authority.future.observation", json!({})),
+        Err(ControlError::InternalError)
+    );
 }

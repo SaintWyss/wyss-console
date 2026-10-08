@@ -2754,3 +2754,267 @@ fn command_output_is_chunked_on_characters_bounded_in_memory_and_reports_its_gap
     }
     assert!(!durable.windows(64).any(|w| w == &chunk.as_bytes()[..64]));
 }
+#[test]
+fn a_stopping_turn_has_no_approval_deadline_left_to_wake_the_core_for() {
+    // The provider offers no `cancel`, so an expired approval cannot be answered: the turn
+    // is interrupted and its held request stays unanswered until the provider ends it. From
+    // then on only the turn's own stop deadline may wake the core. A deadline that already
+    // passed would make every wait zero and spin the single writer until the turn ends.
+    let no_cancel = Offered {
+        accept: true,
+        decline: true,
+        cancel: false,
+    };
+    let mut rig = Rig::new();
+    let cwd = rig.workspace.clone();
+    assert_eq!(
+        rig.propose_command("call-1", "printf WYSS_OK", &cwd),
+        Verdict::Continue
+    );
+    assert_eq!(
+        rig.ask(
+            ActionKind::Command,
+            "req-1",
+            "call-1",
+            Some(("printf WYSS_OK", &cwd)),
+            no_cancel
+        ),
+        Verdict::Continue
+    );
+    let approval = rig.pending().expect("pending approval");
+    let deadline = rig.turns.approval_deadline().expect("approval deadline");
+    assert_eq!(deadline, timestamp(&approval.expires_at).unwrap());
+    rig.advance(APPROVAL_TTL_SECONDS + 1);
+    rig.enforce();
+    assert_eq!(rig.record(&approval).state, ApprovalState::Expired);
+    assert!(matches!(
+        rig.commands.try_recv(),
+        Ok(RuntimeCommand::Interrupt { .. })
+    ));
+    assert!(rig.turns.approval_deadline().is_none());
+    assert!(rig.turns.wait().is_some_and(|left| !left.is_zero()));
+    // Enforcing again changes nothing and still leaves no passed deadline behind.
+    rig.enforce();
+    assert!(rig.commands.try_recv().is_err());
+    assert!(rig.turns.approval_deadline().is_none());
+
+    // The same for a file request whose change set never arrived.
+    let mut rig = Rig::new();
+    assert_eq!(
+        rig.ask(ActionKind::File, "req-f", "patch-1", None, no_cancel),
+        Verdict::Continue
+    );
+    assert!(rig.pending().is_none());
+    assert!(rig.turns.approval_deadline().is_some());
+    rig.advance(crate::control::mediation::PROPOSAL_WAIT_SECONDS + 1);
+    rig.enforce();
+    assert!(matches!(
+        rig.commands.try_recv(),
+        Ok(RuntimeCommand::Interrupt { .. })
+    ));
+    assert!(rig.turns.approval_deadline().is_none());
+    assert!(rig.turns.wait().is_some_and(|left| !left.is_zero()));
+}
+#[test]
+fn a_cancel_request_is_audited_at_the_time_it_was_made() {
+    let mut rig = Rig::new();
+    let last_event = |rig: &Rig| -> serde_json::Value {
+        let raw: String = rig
+            .store
+            .conn
+            .query_row(
+                "SELECT envelope FROM control_events ORDER BY sequence DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        serde_json::from_str(&raw).unwrap()
+    };
+    let turn = rig.store.turn(&rig.turn.managed_turn_id).unwrap();
+    assert_eq!(turn.state, TurnState::Running);
+    // The turn was last updated when it started running; the request comes later.
+    rig.advance(90);
+    let requested_at = rig.store.lease_now();
+    let cancel = TurnCancel {
+        intent_id: uuid(),
+        managed_turn_id: turn.managed_turn_id.clone(),
+        expected_revision: turn.revision,
+    };
+    let ResultValue::Turn(receipt) = rig
+        .turns
+        .cancel(&mut rig.store, &mut rig.runtime, &cancel)
+        .unwrap()
+    else {
+        panic!()
+    };
+    // The intent changes no turn state: the receipt is the turn as it was.
+    assert_eq!(receipt, turn);
+    let event = last_event(&rig);
+    assert_eq!(
+        event["event_type"],
+        "authority.managed_turn.cancel_requested"
+    );
+    assert_eq!(event["payload"]["revision"], turn.revision);
+    let stamped = timestamp(&serde_json::from_value(event["timestamp"].clone()).unwrap()).unwrap();
+    assert_eq!(stamped, requested_at);
+    assert_eq!(
+        stamped - timestamp(&turn.updated_at).unwrap(),
+        time::Duration::seconds(90)
+    );
+    // The same intent returns the same receipt and records nothing again.
+    let events = rig.store.head().unwrap();
+    rig.advance(30);
+    let ResultValue::Turn(again) = rig
+        .turns
+        .cancel(&mut rig.store, &mut rig.runtime, &cancel)
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(again, turn);
+    assert_eq!(rig.store.head().unwrap(), events);
+    // A clock that stepped back never dates the request before the turn it is about.
+    rig.advance(-3600);
+    rig.turns
+        .cancel(
+            &mut rig.store,
+            &mut rig.runtime,
+            &TurnCancel {
+                intent_id: uuid(),
+                ..cancel.clone()
+            },
+        )
+        .unwrap();
+    let event = last_event(&rig);
+    assert_eq!(
+        event["event_type"],
+        "authority.managed_turn.cancel_requested"
+    );
+    assert_eq!(event["timestamp"], json!(turn.updated_at));
+    // The stream it leaves is one the authority accepts on its next start.
+    assert!(Store::open(&rig.root.join("db"), uuid()).is_ok());
+}
+#[test]
+fn an_uncertain_create_that_cannot_be_audited_stays_blocked_uncertain_and_closed() {
+    let mut rig = Rig::new();
+    let ResultValue::Session(session) = rig.apply(Operation::Prepare(Prepare {
+        intent_id: uuid(),
+        adapter_id: RuntimeTarget::codex().adapter_id,
+        runtime_kind: RuntimeTarget::codex().runtime_kind,
+    })) else {
+        panic!()
+    };
+    rig.apply(Operation::LeaseGrant(LeaseGrant {
+        intent_id: uuid(),
+        session_id: session.managed_session_id.clone(),
+        expected_session_revision: 1,
+        scopes: all_scopes(),
+        ttl_seconds: 3600,
+    }));
+    let create = |rig: &Rig| {
+        Operation::BindingCreate(BindingCreate {
+            intent_id: uuid(),
+            managed_session_id: session.managed_session_id.clone(),
+            expected_session_revision: 1,
+            workspace_root: rig.workspace.clone(),
+        })
+    };
+    let begin = |rig: &mut Rig, op: &Operation| {
+        let (reply, result) = sync_channel(1);
+        rig.conversations
+            .begin(&mut rig.store, &mut rig.runtime, op, reply);
+        result
+    };
+    let status = |rig: &Rig| {
+        rig.conversations
+            .projection(&rig.store, &rig.runtime, &session.managed_session_id)
+            .unwrap()
+    };
+    let first = create(&rig);
+    let pending = begin(&mut rig, &first);
+    assert!(matches!(
+        rig.commands.try_recv(),
+        Ok(RuntimeCommand::Conversation(_))
+    ));
+    // Dispatched and still awaited: this is the one state that is honestly "creating".
+    assert!(pending.try_recv().is_err());
+    let open = status(&rig);
+    assert_eq!(open.state, BindingState::Creating);
+    let operation = open.operation_id.clone().expect("open operation");
+    let head = rig.store.head().unwrap();
+    // The runtime is lost and the audit log refuses the uncertainty event.
+    rig.store
+        .conn
+        .execute_batch("CREATE TEMP TRIGGER injected BEFORE INSERT ON control_events BEGIN SELECT RAISE(ABORT,'injected'); END")
+        .unwrap();
+    rig.conversations.detach(&mut rig.store);
+    assert_eq!(
+        pending.try_recv().unwrap().unwrap_err(),
+        ControlError::ExternalEffectUnknown
+    );
+    // Nothing was recorded, so the durable journal still holds the dispatch marker. The
+    // uncertainty is not lost: the session reports it, and execution is closed.
+    assert_eq!(rig.store.head().unwrap(), head);
+    assert!(!rig.store.execution_available);
+    let stuck = status(&rig);
+    assert_eq!(stuck.state, BindingState::Indeterminate);
+    assert_eq!(stuck.operation_id.as_ref(), Some(&operation));
+    assert!(stuck.binding.is_none());
+    // No second create, no retry of the first, and no admission of anything at all.
+    for op in [create(&rig), first.clone()] {
+        let refused = begin(&mut rig, &op);
+        assert!(matches!(
+            refused.try_recv().unwrap(),
+            Err(ControlError::RuntimeOperationInProgress | ControlError::GateDenied)
+        ));
+    }
+    assert!(rig.commands.try_recv().is_err());
+    for scope in all_scopes() {
+        assert_eq!(
+            crate::control::gate::ExecutionGate::evaluate(
+                &rig.store,
+                &session.managed_session_id,
+                scope,
+                &rig.runtime.status()
+            )
+            .reason(),
+            GateReason::AuthorityUnavailable
+        );
+    }
+    // It cannot be abandoned as long as it was never declared uncertain.
+    let abandon = BindingAbandon {
+        intent_id: uuid(),
+        managed_session_id: session.managed_session_id.clone(),
+        operation_id: operation.clone(),
+    };
+    assert_eq!(
+        rig.store.abandon_binding(&abandon).unwrap_err(),
+        ControlError::InvalidTransition
+    );
+    // The explicit recovery path is the next authority start: it declares the operation
+    // uncertain with its audit event, and only then can the client abandon it.
+    rig.store
+        .conn
+        .execute_batch("DROP TRIGGER injected")
+        .unwrap();
+    let mut next = Store::open(&rig.root.join("db"), uuid()).unwrap();
+    next.recover_binding_operations().unwrap();
+    assert_eq!(next.head().unwrap(), head + 1);
+    let recovered = next.binding_status(&session.managed_session_id).unwrap();
+    assert_eq!(recovered.state, BindingState::Indeterminate);
+    assert_eq!(recovered.operation_id.as_ref(), Some(&operation));
+    assert!(matches!(
+        next.reserve_binding(&create(&rig)),
+        Err(ControlError::BindingIndeterminate)
+    ));
+    assert!(matches!(
+        next.abandon_binding(&abandon).unwrap(),
+        ResultValue::BindingAbandoned(_)
+    ));
+    assert_eq!(
+        next.binding_status(&session.managed_session_id)
+            .unwrap()
+            .state,
+        BindingState::Unbound
+    );
+}

@@ -64,6 +64,17 @@ holding. Anything unproven is `safety_unproven` and ends the generation. The hos
 provide `/usr/bin/bwrap` and an existing `/etc/codex` directory; the authority creates
 neither.
 
+> **Implementation status (Sprint 2K).** The namespace was hardened without changing
+> this decision. The managed policy is mounted on a private overlay of `/etc`, so a
+> host `/etc/codex` is no longer a prerequisite; `bwrap` needs unprivileged overlay
+> support instead. The authority's own runtime and state directories (control socket,
+> locks, canonical database) are hidden inside the namespace; the generation gets back
+> its private home and, read-only, its model catalog. The masked project chain starts
+> at the outermost ancestor holding a `.git` marker instead of the nearest, and every
+> such ancestor is forced `untrusted` together with the workspace, so a marker that
+> appears in the workspace can never shorten what is masked. The proof before each
+> conversation, turn and Accept also covers the identity of the bound credential.
+
 ### Credential capability
 
 One capability crosses into the namespace: the user's `auth.json`, bound read-write
@@ -73,6 +84,18 @@ world-accessible file. A token refresh by the isolated runtime therefore writes 
 user's own credential file. Narrowing this boundary (a dedicated credential, or a
 broker that owns the refresh) is deferred to Sprint 2K and is the main residual risk
 of this decision.
+
+> **Implementation status (Sprint 2K).** The read-write bind stays: Codex 0.159.0
+> rewrites `auth.json` in place when it refreshes a token, and a mirror or a
+> read-only bind would leave the user's own login with a rotated, stale refresh
+> token. It is now a narrow, validated capability. The file is opened without
+> following a link and without read access; it must be a private regular file of this
+> user with exactly one name, in a canonical home directory nobody else can write; and
+> the launcher binds that open descriptor, so the inode that enters the namespace is
+> the one that was validated, whatever its path names afterwards. Its identity is
+> checked again with every profile attestation, and a replaced, widened, re-linked or
+> removed credential ends the generation. A command the user accepts can still read
+> the file, exactly as under the user's own Codex.
 
 ## Mediated surface
 
@@ -272,8 +295,10 @@ durability.
 
 ## Limits and residual risk
 
-- The credential file is shared read-write with the isolated runtime (deferred to 2K).
-- `bwrap` and a host `/etc/codex` are prerequisites; without them the profile is off.
+- The credential file is shared read-write with the isolated runtime (deferred to 2K;
+  see the status note under Credential capability).
+- `bwrap` and a host `/etc/codex` are prerequisites; without them the profile is off
+  (since Sprint 2K: `bwrap` with overlay support, and no host directory).
 - The profile is not durable across an authority restart, by design.
 - The authority cannot stop a command the runtime decides to run without asking; it
   can only detect it and contain the runtime. With the posture above, real 0.159.0
@@ -285,7 +310,7 @@ durability.
   sandbox, not by the authority.
 - One approval at a time: a provider that asks for two at once is contained.
 - Compatibility is pinned to 0.159.0; other versions fail closed.
-- An independent review of this sprint is pending.
+- An independent review of this sprint is pending (carried out in Sprint 2K).
 
 ## Acceptance evidence
 

@@ -1806,7 +1806,7 @@ fn older(
     c.execute_batch(&format!("INSERT INTO authority_metadata SELECT id,{level},stream_id,last_sequence FROM source.authority_metadata; PRAGMA user_version={level};")).unwrap();
     path
 }
-/// A live v6 store without approvals, with every pre-v6 table populated.
+/// A live store without approvals, with every pre-v6 table populated.
 fn populated() -> Fixture {
     let mut f = Fixture::with(
         vec![
@@ -1869,10 +1869,10 @@ fn v5_migration_preserves_every_row_byte_and_sequence_adds_no_approval_and_rolls
         (enforced, 0)
     );
     schema::migrate(&mut c).unwrap();
-    assert_eq!(version(&c), 6);
+    assert_eq!(version(&c), 7);
     assert_eq!(master(&c), expected_master());
     assert_eq!(snapshot(&c, &TABLES), before);
-    assert_eq!(metadata(&c), (6, stream, head));
+    assert_eq!(metadata(&c), (7, stream, head));
     assert_eq!(count(&c, "SELECT count(*) FROM managed_approvals"), 0);
     assert_eq!(
         count(&c, "SELECT count(*) FROM pragma_foreign_key_check"),
@@ -1904,7 +1904,7 @@ fn v5_migration_preserves_every_row_byte_and_sequence_adds_no_approval_and_rolls
     // The migrated database is a fully working authority store, approvals included.
     let mut store = Store::open(&path, uuid()).unwrap();
     store.set_clock(f.clock.clone());
-    assert_eq!(store.status().unwrap().storage_schema_version, 6);
+    assert_eq!(store.status().unwrap().storage_schema_version, 7);
     assert_eq!(snapshot(&store.conn, &TABLES), before);
     let narrow = leases::active(&store.conn, f.session.managed_session_id.as_str())
         .unwrap()
@@ -1938,7 +1938,111 @@ fn v5_migration_preserves_every_row_byte_and_sequence_adds_no_approval_and_rolls
     Store::open(&path, uuid()).unwrap();
 }
 #[test]
-fn a_v4_database_upgraded_through_v5_reaches_v6_with_every_row_preserved() {
+fn v6_migration_records_the_first_vocabulary_preserves_every_row_and_rolls_back() {
+    // A v6 store with every table populated, approvals in three states included.
+    let (f, approvals) = mixed();
+    let tables: Vec<&str> = TABLES
+        .iter()
+        .copied()
+        .chain(["managed_approvals"])
+        .collect();
+    let path = older(&f, "v6", schema::V6_OBJECTS, 6, &tables);
+    let mut c = Connection::open(&path).unwrap();
+    let before = snapshot(&c, &tables);
+    let old_master = master(&c);
+    let (_, stream, head) = metadata(&c);
+    assert_eq!(version(&c), 6);
+    assert!(
+        c.prepare("SELECT event_vocabulary FROM authority_metadata")
+            .is_err()
+    );
+    // A failed migration leaves the v6 file exactly as it was.
+    assert!(schema::fail_migration(&mut c).is_err());
+    assert_eq!(version(&c), 6);
+    assert_eq!(master(&c), old_master);
+    assert_eq!(snapshot(&c, &tables), before);
+    assert_eq!(metadata(&c), (6, stream.clone(), head.clone()));
+    schema::migrate(&mut c).unwrap();
+    assert_eq!((version(&c), master(&c)), (7, expected_master()));
+    // Only the metadata row changed shape: every other row is byte for byte the same.
+    assert_eq!(snapshot(&c, &tables), before);
+    assert_eq!(metadata(&c), (7, stream, head));
+    assert_eq!(
+        count(&c, "SELECT event_vocabulary FROM authority_metadata"),
+        1
+    );
+    assert_eq!(count(&c, "SELECT count(*) FROM authority_metadata"), 1);
+    assert_eq!(
+        count(&c, "SELECT count(*) FROM pragma_foreign_key_check"),
+        0
+    );
+    assert_eq!(
+        count(
+            &c,
+            "SELECT count(*) FROM sqlite_master WHERE name LIKE '%_old'"
+        ),
+        0
+    );
+    // Idempotent: migrating a current database is validation only.
+    schema::migrate(&mut c).unwrap();
+    assert_eq!(snapshot(&c, &tables), before);
+    drop(c);
+    // The migrated database is a working authority store with its approvals intact.
+    let store = Store::open(&path, uuid()).unwrap();
+    assert_eq!(store.status().unwrap().storage_schema_version, 7);
+    assert_eq!(snapshot(&store.conn, &tables), before);
+    for a in &approvals {
+        assert_eq!(
+            store.approval(&a.managed_approval_id).unwrap(),
+            f.current(a)
+        );
+    }
+    drop(store);
+    // A v6 file that holds a type outside the first vocabulary was never written by a
+    // v6 build. One such event appended at the head disturbs no canonical row: the file
+    // migrates as a schema and is then refused as a store.
+    let (f, _) = mixed();
+    let path = older(&f, "v6-unknown", schema::V6_OBJECTS, 6, &tables);
+    let c = Connection::open(&path).unwrap();
+    let (last, raw): (String, String) = c
+        .query_row(
+            "SELECT last_sequence,(SELECT envelope FROM control_events ORDER BY sequence DESC LIMIT 1) FROM authority_metadata",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    let n = last.parse::<u64>().unwrap() + 1;
+    let mut event: Value = serde_json::from_str(&raw).unwrap();
+    event["event_id"] = json!(uuid());
+    event["sequence"] = json!(n.to_string());
+    event["event_type"] = json!("authority.future.observation");
+    event["payload"] = json!({});
+    c.execute(
+        "INSERT INTO control_events VALUES(?1,?2,?3,?4,?5)",
+        params![
+            event["event_id"].as_str(),
+            event["stream_id"].as_str(),
+            key(n),
+            event["session_id"].as_str(),
+            event.to_string()
+        ],
+    )
+    .unwrap();
+    c.execute(
+        "UPDATE authority_metadata SET last_sequence=?1",
+        [n.to_string()],
+    )
+    .unwrap();
+    drop(c);
+    assert_eq!(
+        Store::open(&path, uuid()).map(|_| ()),
+        Err(ControlError::StorageIncompatible)
+    );
+    // The schema step itself had committed: only the content is refused.
+    assert_eq!(version(&Connection::open(&path).unwrap()), 7);
+}
+#[test]
+fn a_v4_database_upgraded_through_v5_reaches_the_current_schema_with_every_row_preserved() {
     let v4_tables: Vec<&str> = TABLES
         .iter()
         .copied()
@@ -1983,14 +2087,14 @@ fn a_v4_database_upgraded_through_v5_reaches_v6_with_every_row_preserved() {
     assert_eq!(master(&c), v5);
     assert_eq!(snapshot(&c, &v4_tables), before);
     schema::migrate(&mut c).unwrap();
-    assert_eq!((version(&c), master(&c)), (6, expected_master()));
+    assert_eq!((version(&c), master(&c)), (7, expected_master()));
     assert_eq!(snapshot(&c, &v4_tables), before);
-    assert_eq!(metadata(&c), (6, stream, head));
+    assert_eq!(metadata(&c), (7, stream, head));
     assert_eq!(count(&c, "SELECT count(*) FROM managed_approvals"), 0);
     assert_eq!(count(&c, "SELECT count(*) FROM managed_turns"), 0);
 }
 #[test]
-fn every_supported_version_converges_on_the_one_v6_schema_and_others_fail_closed() {
+fn every_supported_version_converges_on_the_one_current_schema_and_others_fail_closed() {
     let root = std::env::temp_dir().join(format!("wyss-approval-schema-{}", uuid().as_str()));
     fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
     let stream = uuid();
@@ -2000,8 +2104,10 @@ fn every_supported_version_converges_on_the_one_v6_schema_and_others_fail_closed
             c.execute_batch(sql).unwrap();
         }
         if level > 0 {
+            // The vocabulary column exists from v7 on.
+            let vocabulary = if level >= 7 { ",1" } else { "" };
             c.execute(
-                &format!("INSERT INTO authority_metadata VALUES(1,{level},?1,'0')"),
+                &format!("INSERT INTO authority_metadata VALUES(1,{level},?1,'0'{vocabulary})"),
                 [stream.as_str()],
             )
             .unwrap();
@@ -2009,21 +2115,22 @@ fn every_supported_version_converges_on_the_one_v6_schema_and_others_fail_closed
         c.pragma_update(None, "user_version", level).unwrap();
         c
     };
-    let chain: [(i64, Objects); 7] = [
+    let chain: [(i64, Objects); 8] = [
         (0, &[]),
         (1, schema::V1_OBJECTS),
         (2, schema::V2_OBJECTS),
         (3, schema::V3_OBJECTS),
         (4, schema::V4_OBJECTS),
         (5, schema::V5_OBJECTS),
-        (6, schema::OBJECTS),
+        (6, schema::V6_OBJECTS),
+        (7, schema::OBJECTS),
     ];
     for (level, objects) in chain {
         let mut c = build(level, objects);
         schema::migrate(&mut c).unwrap();
         assert_eq!(
             (version(&c), master(&c)),
-            (6, expected_master()),
+            (7, expected_master()),
             "v{level}"
         );
         assert_eq!(count(&c, "SELECT count(*) FROM managed_approvals"), 0);
@@ -2032,44 +2139,65 @@ fn every_supported_version_converges_on_the_one_v6_schema_and_others_fail_closed
             0
         );
         let (schema_version, migrated_stream, head) = metadata(&c);
-        assert_eq!((schema_version, head.as_str()), (6, "0"));
+        assert_eq!((schema_version, head.as_str()), (7, "0"));
+        // Every store, new or migrated, starts with the first vocabulary.
+        assert_eq!(
+            count(&c, "SELECT event_vocabulary FROM authority_metadata"),
+            1
+        );
         if level > 0 {
             assert_eq!(migrated_stream, stream.as_str());
         }
     }
     // Future versions, and any schema that is not exactly the one it claims to be.
-    for level in [7, 99, -1] {
-        let mut c = build(6, schema::OBJECTS);
+    for level in [8, 99, -1] {
+        let mut c = build(7, schema::OBJECTS);
         c.pragma_update(None, "user_version", level).unwrap();
         assert_eq!(
             schema::migrate(&mut c),
             Err(ControlError::StorageIncompatible)
         );
     }
-    let corruptions: [(i64, Objects, &str); 8] = [
+    let corruptions: [(i64, Objects, &str); 11] = [
+        // The previous schema is validated exactly before it is migrated.
         (
             6,
-            schema::OBJECTS,
+            schema::V6_OBJECTS,
             "DROP TRIGGER managed_approvals_transition",
         ),
         (
             6,
+            schema::V6_OBJECTS,
+            "ALTER TABLE authority_metadata ADD COLUMN event_vocabulary INTEGER",
+        ),
+        (
+            7,
+            schema::OBJECTS,
+            "ALTER TABLE authority_metadata ADD COLUMN extra INTEGER",
+        ),
+        (
+            7,
+            schema::OBJECTS,
+            "DROP TRIGGER managed_approvals_transition",
+        ),
+        (
+            7,
             schema::OBJECTS,
             "DROP TRIGGER managed_approvals_no_delete",
         ),
         (
-            6,
+            7,
             schema::OBJECTS,
             "DROP INDEX managed_approvals_one_pending",
         ),
-        (6, schema::OBJECTS, "DROP TABLE managed_approvals"),
+        (7, schema::OBJECTS, "DROP TABLE managed_approvals"),
         (
-            6,
+            7,
             schema::OBJECTS,
             "CREATE TABLE approval_content (command TEXT)",
         ),
         (
-            6,
+            7,
             schema::OBJECTS,
             "CREATE INDEX extra ON managed_approvals(state)",
         ),

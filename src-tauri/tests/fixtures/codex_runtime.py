@@ -52,6 +52,10 @@ if local:
         'requirements': Path('/etc/codex/requirements.toml').read_text(),
         'managed_entries': sorted(os.listdir('/etc/codex')),
         'user_home_entries': sorted(os.listdir(user)),
+        # What is left of the authority's own control plane inside the namespace.
+        'authority_runtime': sorted(os.listdir(root / 'run' / 'wyss-console')),
+        'authority_state': sorted(os.listdir(root / 'state' / 'wyss-console')),
+        'generation_state': sorted(os.listdir(root / 'state' / 'wyss-console' / 'codex-local-tools')),
         'credential': (home / 'auth.json').read_text(),
         'credential_writable': os.access(home / 'auth.json', os.W_OK),
         'inherited': sorted(k for k in os.environ if k.startswith(('CODEX_', 'OPENAI'))),

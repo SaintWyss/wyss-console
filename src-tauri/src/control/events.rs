@@ -19,6 +19,11 @@ pub(super) const PAGE_BYTES: usize = MAX_FRAME - PAGE_OVERHEAD;
 // A page of events at the append bound always fits one frame, thirty at the very least.
 const _: () = assert!(PAGE_BYTES / (MAX_EVENT_BYTES + 1) >= 30);
 
+/// Number of the vocabulary below. It grows by one whenever `KNOWN` gains a type, and the
+/// store records the largest one any build has opened it with. An event type this build
+/// does not know can only have been written by a build with a larger vocabulary: in a
+/// store that never saw one, such an event is corruption and not a newer observation.
+pub(super) const VOCABULARY: u32 = 1;
 /// Every event type this authority writes and can hold to a payload contract.
 const KNOWN: [&str; 28] = [
     "authority.managed_session.prepared",
@@ -56,7 +61,8 @@ pub(super) enum Class {
     /// Written by this authority: its payload contract is enforced.
     Known,
     /// A valid envelope of a type this build does not define: an observation without
-    /// effect. It is replayed as stored and never read as one of the known types.
+    /// effect, written by a build with a larger vocabulary. It is replayed as stored and
+    /// never read as one of the known types.
     Unknown,
 }
 pub(super) fn classify(kind: &str) -> Class {

@@ -42,6 +42,8 @@ pub(super) struct Runtime {
     catalog_dir: std::path::PathBuf,
     /// Private authority directory of the isolated generation's home and policy.
     isolation_dir: std::path::PathBuf,
+    /// The authority's own private directories, hidden from an isolated generation.
+    control_plane: Vec<std::path::PathBuf>,
     /// Workspace of the local-tools profile requested by the latest explicit start. Memory
     /// only: after an authority restart a desired-running runtime comes back as inference.
     requested: Option<String>,
@@ -52,10 +54,12 @@ impl Runtime {
     pub fn owns_generation(&self, id: &AgentRuntimeInstanceId) -> bool {
         self.attempt.as_ref() == Some(id)
     }
+    /// `runtime` and `state` are the authority's private product directories. The model
+    /// catalog is written to the first and an isolated generation lives under the second.
     pub fn new(
         store: &Store,
-        catalog_dir: &std::path::Path,
-        isolation_dir: &std::path::Path,
+        runtime: &std::path::Path,
+        state: &std::path::Path,
     ) -> ControlResult<Self> {
         Ok(Self {
             control: store.runtime_control()?,
@@ -70,8 +74,9 @@ impl Runtime {
             safety: None,
             mcp_clamp: Default::default(),
             reclamped: false,
-            catalog_dir: catalog_dir.to_path_buf(),
-            isolation_dir: isolation_dir.to_path_buf(),
+            catalog_dir: runtime.to_path_buf(),
+            isolation_dir: state.join("codex-local-tools"),
+            control_plane: vec![runtime.to_path_buf(), state.to_path_buf()],
             requested: None,
             generation: None,
         })
@@ -200,6 +205,7 @@ impl Runtime {
                 Some(workspace) => LaunchProfile::LocalTools(Isolation {
                     workspace: workspace.into(),
                     state: self.isolation_dir.clone(),
+                    control: self.control_plane.clone(),
                 }),
             };
             let core = core.clone();

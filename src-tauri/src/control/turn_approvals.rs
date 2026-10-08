@@ -396,11 +396,14 @@ impl Turns {
         }
         Ok(Verdict::Continue)
     }
-    /// Deadline of what the turn is waiting on, on the authority clock.
+    /// Deadline of what the turn is waiting on, on the authority clock. A turn that is
+    /// already being stopped waits on nothing here: its own stop deadline bounds it, and a
+    /// deadline that has passed must never be handed to the core as its next wake.
     pub fn approval_deadline(&self) -> Option<OffsetDateTime> {
         let held = self
             .active
             .as_ref()
+            .filter(|a| a.cancel.is_none())
             .and_then(|a| a.mediation.held.as_ref())
             .filter(|h| !h.answered)?;
         match (held.expires, held.wait_until) {
