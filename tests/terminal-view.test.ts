@@ -144,7 +144,7 @@ it('serializes remount retirement, preventing leaked duplicate ownership', async
 it('keeps AppInfo IPC in the minimal application header', async () => {
   component = mount(App, { target: document.body });
   await flush();
-  expect(document.querySelector('h1')?.textContent).toBe('Wyss Console');
+  expect(document.querySelector('h1')?.textContent).toBe('Wyss AI');
   expect(document.querySelector('header')?.textContent).toContain('1B-test');
   expect(commands.filter((c) => c === 'get_app_info')).toHaveLength(1);
 });

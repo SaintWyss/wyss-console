@@ -7,6 +7,8 @@
   } from './session-manager';
   import type { ConsoleSessionId } from '../../contracts/identities';
   import TerminalPanel from './TerminalPanel.svelte';
+  let { onworkspace }: { onworkspace?: (state: WorkspaceState) => void } =
+    $props();
   let workspace = $state<WorkspaceState>({ sessions: [], creating: false });
   let manager = $state<TerminalSessionManager>();
   let strip: HTMLDivElement;
@@ -31,6 +33,7 @@
     observer.observe(strip);
     const lease = mountWorkspace((state) => {
       workspace = state;
+      onworkspace?.(state);
     });
     manager = lease.manager;
     return () => {

@@ -43,5 +43,7 @@
         · Output truncated{/if}
     </p>
   </div>
-  <div bind:this={host} class="terminal-host"></div>
+  <div class="terminal-surface">
+    <div bind:this={host} class="terminal-host"></div>
+  </div>
 </div>
