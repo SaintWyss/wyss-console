@@ -1,7 +1,7 @@
 # Wyss Console
 
 Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current validated status: **Sprint 2I authority-mediated commands and file changes** using Tauri 2,
+Linux-first, local-first. Current validated status: **Sprint 2J durable event replay and live watch** using Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -138,6 +138,8 @@ From another terminal:
 ./src-tauri/target/debug/examples/control_client prepare
 ./src-tauri/target/debug/examples/control_client list
 ./src-tauri/target/debug/examples/control_client audit
+./src-tauri/target/debug/examples/control_client audit 0 2
+./src-tauri/target/debug/examples/control_client audit/watch 12 50 30000
 ```
 
 The client also supports `hello`, `get UUID`, `close UUID revision`, and
@@ -152,8 +154,10 @@ SQLite WAL/FULL commits state, audit and intent receipts atomically. Do not dele
 WAL/SHM files or change/copy an active canonical database casually. Client EOF
 changes no state. Authority restart preserves committed state/stream/sequence.
 Same-UID SO_PEERCRED is a local boundary, not protection from compromised same-user
-processes. Maximum eight connected clients; idle connections expire after five
-seconds. Session/audit pages are bounded to fifty entries. See ADR 0011.
+processes. Maximum eight connected clients, of which at most four may be waiting in
+`audit/watch`; idle connections expire after five seconds. Session/audit pages are
+bounded to fifty entries, and an audit page also to the 64 KiB frame. See ADR 0011 and
+[Durable event replay](#durable-event-replay).
 
 `npm run rust:test` includes hermetic authority unit tests and actual process tests
 using isolated temporary XDG directories. They do not require or launch Codex.
@@ -471,3 +475,52 @@ Known limits: the user's `auth.json` is shared read-write with the isolated runt
 the profile does not survive an authority restart; compatibility is pinned to Codex
 0.159.0; and an independent review of this sprint is pending. See
 [ADR 0016](docs/adr/0016-tool-and-approval-mediation.md).
+
+## Durable event replay
+
+Every canonical control mutation commits one or more EventEnvelope v1 events in its own
+transaction, through a single append path. The stream is audit, history and
+observation. **It is not the authority**: canonical state is the control tables, nothing
+is derived from an event, and reading the stream starts, grants, answers and repeats
+nothing. Storage stays at schema version 6.
+
+`audit/read` replays committed history from a cursor the client owns:
+
+```sh
+./src-tauri/target/debug/examples/control_client audit                # from the beginning
+./src-tauri/target/debug/examples/control_client audit 40 10          # ten events after sequence 40
+./src-tauri/target/debug/examples/control_client audit/watch 52 50 30000
+```
+
+- `after_sequence` returns events with a greater sequence, ascending. `0` or no
+  argument in the developer client means from the beginning.
+- A page holds at most fifty events and always fits one 64 KiB frame, so it can stop
+  before the requested limit. `next` is the sequence of the last event returned and is
+  present only while a later committed event exists: follow it until it is absent.
+- A cursor past the durable head, or another stream id, is refused. Sequences are
+  decimal strings, never JSON numbers. Timestamps are not cursors.
+- `audit/watch after_sequence limit wait_ms` is the same read, answered at once when
+  history exists after the cursor and otherwise after the next durable commit or
+  `wait_ms` (at most 30000), whichever comes first. A waiting watch takes one of four
+  watcher slots; when all are taken it fails immediately with `capacity_exceeded`.
+
+The authority keeps no subscriber state, acknowledgement or offset. After a disconnect
+or an authority restart, graceful or not, a client sends the last sequence it processed
+and receives everything committed after it; the stream id and the head survive, and the
+next event is head + 1. A wakeup is only a hint: a woken watch reads SQLite again by
+the client's cursor, so a rolled back mutation is never announced and a lost wakeup
+cannot lose an event. Shutdown wakes every watcher; a watcher that disconnects changes
+nothing.
+
+A durable event is at most 2048 encoded bytes and holds control metadata only:
+identifiers, enumerations, revisions, timestamps, counts and SHA-256 fingerprints. An
+event that cannot be validated or appended fails its mutation, without a sequence gap.
+A valid event of a type this build does not define is replayed as stored and never
+interpreted. On open the log is compared with the tables and a store that disagrees
+with its own history is refused, never repaired.
+
+Assistant text, reasoning summaries, command output, diffs, prompts, provider frames
+and terminal bytes are not events. `managedSession/turn/events` remains a separate,
+memory-only stream: after an authority restart the durable history is intact and the
+transient stream of earlier turns is gone. See
+[ADR 0017](docs/adr/0017-core-event-runtime-and-replay.md).

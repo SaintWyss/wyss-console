@@ -3393,6 +3393,15 @@ fn replay(c: &mut ControlClient, limit: u16) -> Vec<serde_json::Value> {
             all.push(v);
         }
         if next.is_none() {
+            // One stream, and no event delivered under two identities or twice.
+            let mut ids: Vec<&str> = all
+                .iter()
+                .map(|e| e["event_id"].as_str().unwrap())
+                .collect();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), all.len());
+            assert!(all.iter().all(|e| e["stream_id"] == stream_id.as_str()));
             return all;
         }
         after = next;
@@ -3541,6 +3550,13 @@ fn replaying_accepted_cancelled_and_revoked_history_causes_no_effect_anywhere() 
         wait_turn(&mut p.client, &revoked, true).state,
         TurnState::Interrupted
     );
+    p.client
+        .close(Close {
+            intent_id: id(),
+            managed_session_id: p.session.managed_session_id.clone(),
+            expected_revision: 1,
+        })
+        .unwrap();
     assert_eq!(lines(&p.env, "executions"), 1);
     assert_eq!(
         decisions(&p.env).first().map(String::as_str),
@@ -3569,6 +3585,22 @@ fn replaying_accepted_cancelled_and_revoked_history_causes_no_effect_anywhere() 
         ["granted", "revoked"]
     );
     assert!(kinds(&history, "authority.managed_turn.").contains(&"cancel_requested".to_owned()));
+    // The whole lifecycle is there: prepare, runtime, lease, binding, turns, approvals,
+    // decisions, completion, cancellation and close.
+    for family in [
+        "authority.runtime.",
+        "authority.managed_session.",
+        "authority.execution_lease.",
+        "authority.managed_turn.",
+        "authority.managed_approval.",
+    ] {
+        assert!(!kinds(&history, family).is_empty(), "{family}");
+    }
+    let sessions = kinds(&history, "authority.managed_session.");
+    assert_eq!(
+        (sessions.first(), sessions.last()),
+        (Some(&"prepared".to_owned()), Some(&"closed".to_owned()))
+    );
     // Canonical state is what the tables say, and a decided intent retried after the
     // replay still returns its receipt without a second frame or a second execution.
     assert_eq!(

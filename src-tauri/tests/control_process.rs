@@ -1026,3 +1026,125 @@ fn a_failed_audit_append_in_the_running_authority_commits_nothing_and_wakes_nobo
     drop(c);
     b.stop(false);
 }
+fn resident_kib(pid: u32) -> u64 {
+    fs::read_to_string(format!("/proc/{pid}/status"))
+        .unwrap()
+        .lines()
+        .find_map(|l| l.strip_prefix("VmRSS:"))
+        .and_then(|v| v.split_whitespace().next()?.parse().ok())
+        .unwrap()
+}
+#[test]
+fn sustained_mutation_with_every_watcher_slot_following_loses_and_reorders_nothing() {
+    const TOTAL: u64 = 1_200;
+    let env = Sandbox::new();
+    let mut a = env.start();
+    let mut c = env.client();
+    let stream_id = c.hello_status().stream_id.clone();
+    // Three followers take watcher slots for the whole run, each with its own cursor; a
+    // fourth slot goes to a client that is woken once and never reads again.
+    let followers: Vec<_> = (0..3)
+        .map(|_| {
+            let mut w = env.client();
+            thread::spawn(move || {
+                let (mut cursor, mut pages, mut refused) = (0u64, 0u64, 0u64);
+                let end = Instant::now() + Duration::from_secs(60);
+                while cursor < TOTAL {
+                    assert!(Instant::now() < end, "follower stalled at {cursor}");
+                    match watch(&mut w, cursor, 2_000) {
+                        Ok((seen, _)) => {
+                            for n in sequences(&seen) {
+                                // No loss, no duplicate, no inversion: exactly the next one.
+                                assert_eq!(n, cursor + 1);
+                                cursor = n;
+                            }
+                            pages += 1;
+                        }
+                        Err(ControlError::CapacityExceeded) => {
+                            refused += 1;
+                            thread::sleep(Duration::from_millis(2));
+                        }
+                        Err(e) => panic!("follower: {e}"),
+                    }
+                }
+                (pages, refused)
+            })
+        })
+        .collect();
+    let silent = raw_watch(&env, &stream_id, 0, 30_000);
+    let session = c.prepare(prep(id())).unwrap();
+    let mut lease: Option<ExecutionLease> = None;
+    let mut slowest = Duration::ZERO;
+    let mut warm = 0;
+    while head(&mut c) < TOTAL {
+        let started = Instant::now();
+        match lease.take() {
+            None => {
+                lease = Some(
+                    c.lease_grant(LeaseGrant {
+                        intent_id: id(),
+                        session_id: session.managed_session_id.clone(),
+                        expected_session_revision: 1,
+                        scopes: vec![ExecutionScope::TurnStart, ExecutionScope::FileChange],
+                        ttl_seconds: 600,
+                    })
+                    .unwrap(),
+                )
+            }
+            Some(l) if l.revision < 3 => {
+                lease = Some(
+                    c.lease_renew(LeaseRenew {
+                        intent_id: id(),
+                        lease_id: l.lease_id,
+                        expected_revision: l.revision,
+                        ttl_seconds: 600,
+                    })
+                    .unwrap(),
+                )
+            }
+            Some(l) => {
+                c.lease_revoke(LeaseRevoke {
+                    intent_id: id(),
+                    lease_id: l.lease_id,
+                    expected_revision: l.revision,
+                })
+                .unwrap();
+            }
+        }
+        slowest = slowest.max(started.elapsed());
+        if warm == 0 && head(&mut c) >= 200 {
+            warm = resident_kib(a.pid());
+        }
+    }
+    let mut pages = 0;
+    for f in followers {
+        let (seen_pages, _) = f.join().unwrap();
+        pages += seen_pages;
+    }
+    assert!(pages >= 3, "every follower read the stream to its end");
+    assert!(
+        slowest < Duration::from_millis(750),
+        "slowest mutation {slowest:?}"
+    );
+    // A thousand more commits with every slot taken did not grow the authority: nothing
+    // is queued per watcher and nothing is retained per event.
+    let grown = resident_kib(a.pid()).saturating_sub(warm);
+    assert!(
+        warm > 0 && grown < 16 * 1024,
+        "resident set grew {grown} KiB"
+    );
+    let all = history(&mut c, 0, 50);
+    assert_eq!(all.len() as u64, head(&mut c));
+    let mut ids: Vec<&str> = all
+        .iter()
+        .map(|e| e["event_id"].as_str().unwrap())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), all.len(), "event ids are unique");
+    assert!(all.iter().all(|e| e["stream_id"] == stream_id.as_str()));
+    assert_eq!(history(&mut c, 0, 13), all);
+    drop(silent);
+    drop(c);
+    a.stop(false);
+}
