@@ -145,6 +145,22 @@ pub enum StreamKind {
     TurnInterrupted,
     TurnFailed,
     StreamGap,
+    /// The provider announced a command. Nothing has run.
+    CommandProposed,
+    /// An approval is pending; `managed_approval_id` names it.
+    ApprovalRequired,
+    /// That approval is terminal; `text` is its state.
+    ApprovalResolved,
+    /// The authority's Accept reached the provider.
+    CommandStarted,
+    CommandOutputDelta,
+    CommandCompleted,
+    CommandFailed,
+    /// The provider announced a change set. Nothing was written.
+    FileChangeProposed,
+    FileChangeStarted,
+    FileChangeCompleted,
+    FileChangeFailed,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -156,6 +172,9 @@ pub struct ManagedTurnStreamEventV1 {
     pub sequence: Sequence,
     pub kind: StreamKind,
     pub text: Option<String>,
+    /// Set on approval events only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_approval_id: Option<super::identities::ManagedApprovalId>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

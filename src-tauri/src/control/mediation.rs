@@ -30,6 +30,13 @@ impl Action {
             Self::File(_) => ApprovalKind::FileChange,
         }
     }
+    /// The provider item the action itself was built for.
+    pub fn item(&self) -> &str {
+        match self {
+            Self::Command(c) => c.provider_item_id(),
+            Self::File(f) => f.provider_item_id(),
+        }
+    }
     pub fn fingerprint(&self) -> String {
         match self {
             Self::Command(c) => c.fingerprint(),
@@ -90,7 +97,9 @@ pub(super) struct Mediation {
     proposals: BTreeMap<String, Proposal>,
     pub held: Option<Held>,
     /// Items whose Accept was dispatched: the only ones that may produce output or run.
-    accepted: BTreeMap<String, ManagedApprovalId>,
+    accepted: BTreeMap<String, (ManagedApprovalId, ApprovalKind)>,
+    /// Accepted commands whose output already reached the stream as deltas.
+    streamed: std::collections::BTreeSet<String>,
     /// A file change was accepted in this turn, so the provider may report applied changes.
     pub file_accepted: bool,
     /// The request whose one answer was handed to the supervisor and not yet reported on.
@@ -117,6 +126,9 @@ impl Mediation {
             },
         );
         true
+    }
+    pub fn announced(&self, item: &str) -> bool {
+        self.proposals.contains_key(item)
     }
     /// A change set may be announced in parts until its approval is requested. Returns
     /// false when the announcement cannot belong to a mediated flow.
@@ -200,14 +212,22 @@ impl Mediation {
         .ok()
     }
     pub fn accept(&mut self, item: &str, approval: ManagedApprovalId, kind: ApprovalKind) {
-        self.accepted.insert(item.to_owned(), approval);
+        self.accepted.insert(item.to_owned(), (approval, kind));
         self.file_accepted |= kind == ApprovalKind::FileChange;
     }
-    pub fn accepted(&self, item: &str) -> Option<&ManagedApprovalId> {
+    pub fn accepted(&self, item: &str) -> Option<&(ManagedApprovalId, ApprovalKind)> {
         self.accepted.get(item)
     }
+    /// Output of this item was streamed while it ran.
+    pub fn streamed(&mut self, item: &str) {
+        self.streamed.insert(item.to_owned());
+    }
+    /// True when the finished item's output has not been shown yet.
+    pub fn unshown(&mut self, item: &str) -> bool {
+        !self.streamed.remove(item)
+    }
     /// The item is over: nothing about it may be announced, asked or produced again.
-    pub fn ended(&mut self, item: &str) -> Option<ManagedApprovalId> {
+    pub fn ended(&mut self, item: &str) -> Option<(ManagedApprovalId, ApprovalKind)> {
         self.proposals.remove(item);
         if self.held.as_ref().is_some_and(|h| h.item == item) {
             self.held = None;

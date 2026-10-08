@@ -453,6 +453,8 @@ pub fn run_from_environment() -> ControlResult<()> {
                             Operation::TurnStatus(p) => turns.status(&store, p),
                             Operation::TurnEvents(p) => turns.events(&store, p),
                             Operation::TurnCancel(p) => turns.cancel(&mut store, &mut runtime, p),
+                            Operation::ApprovalPending(p) => turns.approval_pending(&store, p),
+                            Operation::ApprovalStatus(p) => turns.approval_status(&store, p),
                             Operation::BindingStatus(p) => {
                                 conversations.status(&store, &runtime, &p.managed_session_id)
                             }

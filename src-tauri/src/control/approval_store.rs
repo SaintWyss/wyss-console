@@ -308,8 +308,6 @@ fn bump(a: &mut ManagedApprovalRecord, at: OffsetDateTime) -> ControlResult<()> 
     }
     a.validate()
 }
-// Listings and lookups by item are consumed by the control protocol.
-#[allow(dead_code)]
 impl Store {
     pub(in crate::control) fn approval(
         &self,
@@ -332,6 +330,13 @@ impl Store {
         id.map(|id| read(&self.conn, &id)).transpose()
     }
     /// The approval that mediates one provider item of one turn, if any.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "journal read API without a consumer until the core event runtime"
+        )
+    )]
     pub(in crate::control) fn approval_for_item(
         &self,
         turn: &ManagedTurnId,
@@ -350,6 +355,13 @@ impl Store {
     }
     /// One page of a turn's approvals in request order. `next` is set only when the page
     /// is full, exactly like every other listing of this authority.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "journal read API without a consumer until the core event runtime"
+        )
+    )]
     pub(in crate::control) fn approvals(
         &self,
         turn: &ManagedTurnId,
@@ -707,6 +719,13 @@ impl Store {
         Ok(settled)
     }
     /// Deadline of the single pending approval, for the authority's own scheduler.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "journal read API without a consumer until the core event runtime"
+        )
+    )]
     pub(in crate::control) fn next_approval_expiry(&self) -> ControlResult<Option<OffsetDateTime>> {
         self.pending_approval()?
             .map(|a| timestamp(&a.expires_at))

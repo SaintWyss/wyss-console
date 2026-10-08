@@ -63,16 +63,27 @@ pub(super) fn settle_turn(
     store: &mut Store,
     turn: &ManagedTurnId,
     reason: TurnReason,
-) -> ControlResult<()> {
+) -> ControlResult<Vec<ManagedApprovalRecord>> {
     let primary = approval_reason(reason);
-    store.settle_approvals(Some(turn), primary)?;
+    let mut settled = store.settle_approvals(Some(turn), primary)?;
     if matches!(
         primary,
         ApprovalReason::ApprovalTimeout | ApprovalReason::LeaseExpired
     ) {
-        store.settle_approvals(Some(turn), ApprovalReason::TurnEnded)?;
+        settled.extend(store.settle_approvals(Some(turn), ApprovalReason::TurnEnded)?);
     }
-    Ok(())
+    Ok(settled)
+}
+pub(super) fn state_text(state: ApprovalState) -> &'static str {
+    match state {
+        ApprovalState::Pending => "pending",
+        ApprovalState::Accepted => "accepted",
+        ApprovalState::Declined => "declined",
+        ApprovalState::Cancelled => "cancelled",
+        ApprovalState::Expired => "expired",
+        ApprovalState::Invalidated => "invalidated",
+        ApprovalState::Indeterminate => "indeterminate",
+    }
 }
 fn verdict(mediated: bool) -> Verdict {
     if mediated {
@@ -82,6 +93,21 @@ fn verdict(mediated: bool) -> Verdict {
     }
 }
 impl Turns {
+    /// Tells the transient stream that these approvals are terminal. The stream names the
+    /// approval and its state; the action itself is never part of an event.
+    pub(super) fn announce(&mut self, settled: &[ManagedApprovalRecord]) {
+        let Some(a) = &self.active else {
+            return;
+        };
+        for record in settled {
+            self.streams.push_approval(
+                &a.turn,
+                StreamKind::ApprovalResolved,
+                &record.managed_approval_id,
+                Some(state_text(record.state)),
+            );
+        }
+    }
     /// Every notice of the mediated surface. Whatever does not fit the one legal order
     /// (announced, asked, accepted, then run) is a violation.
     pub(super) fn mediate(
@@ -99,15 +125,37 @@ impl Turns {
             return Ok(Verdict::Continue);
         };
         match kind {
-            NoticeKind::CommandProposed(p) => Ok(verdict(a.mediation.command_proposed(p))),
+            NoticeKind::CommandProposed(p) => {
+                if !a.mediation.command_proposed(p) {
+                    return Ok(Verdict::Violation);
+                }
+                self.streams
+                    .push(&a.turn, StreamKind::CommandProposed, None);
+                Ok(Verdict::Continue)
+            }
             NoticeKind::FileProposed(p) => self.file_proposed(store, runtime, p),
             NoticeKind::ApprovalRequested(r) => self.requested(store, runtime, r),
             // Output and applied changes exist only after the authority accepted the item.
-            NoticeKind::Output { item, .. } => {
-                Ok(verdict(a.mediation.accepted(item.as_str()).is_some()))
+            NoticeKind::Output { item, kind, delta } => {
+                if a.mediation.accepted(item.as_str()).is_none() {
+                    return Ok(Verdict::Violation);
+                }
+                // Transient and bounded by the stream itself: the oldest events give way
+                // and the gap is reported.
+                if kind == ActionKind::Command {
+                    a.mediation.streamed(item.as_str());
+                    self.streams
+                        .push(&a.turn, StreamKind::CommandOutputDelta, Some(&delta));
+                }
+                Ok(Verdict::Continue)
             }
             NoticeKind::DiffUpdated => Ok(verdict(a.mediation.file_accepted)),
-            NoticeKind::ItemEnded { item, end, .. } => self.item_ended(store, item.as_str(), end),
+            NoticeKind::ItemEnded {
+                item,
+                kind,
+                end,
+                output,
+            } => self.item_ended(store, item.as_str(), kind, end, output),
             NoticeKind::RequestResolved(request) => self.request_resolved(store, &request),
             _ => Ok(Verdict::Continue),
         }
@@ -187,6 +235,12 @@ impl Turns {
         match opened {
             Ok(record) => {
                 let expires = timestamp(&record.expires_at)?;
+                self.streams.push_approval(
+                    &a.turn,
+                    StreamKind::ApprovalRequired,
+                    &record.managed_approval_id,
+                    None,
+                );
                 let held = a.mediation.held.as_mut().expect("held request");
                 held.approval = Some(record.managed_approval_id);
                 held.expires = Some(expires);
@@ -232,8 +286,13 @@ impl Turns {
             let frozen = held.action.as_ref().map(Action::fingerprint);
             return Ok(verdict(restated.is_some() && restated == frozen));
         }
+        let first = !a.mediation.announced(item);
         if !a.mediation.file_proposed(item, p.changes) {
             return Ok(Verdict::Violation);
+        }
+        if first {
+            self.streams
+                .push(&a.turn, StreamKind::FileChangeProposed, None);
         }
         // A request that was waiting for exactly this change set can now be decided.
         let waiting = a.cancel.is_none()
@@ -257,7 +316,9 @@ impl Turns {
         &mut self,
         store: &mut Store,
         item: &str,
+        kind: ActionKind,
         end: ItemEnd,
+        output: Option<String>,
     ) -> ControlResult<Verdict> {
         let a = self.active.as_mut().expect("active turn");
         let undecided = a
@@ -267,7 +328,30 @@ impl Turns {
             .is_some_and(|h| h.item == item && !h.answered && h.approval.is_some());
         let accepted = a.mediation.ended(item);
         match (end, accepted) {
-            (ItemEnd::Completed | ItemEnd::Failed, Some(approval)) => {
+            (ItemEnd::Completed | ItemEnd::Failed, Some((approval, accepted_kind))) => {
+                // The provider reports the item as the kind that was accepted, or not at all.
+                let command = accepted_kind == ApprovalKind::CommandExecution;
+                if command != (kind == ActionKind::Command) {
+                    return Ok(Verdict::Violation);
+                }
+                // A one-shot command reports its output only when it finishes. It is shown
+                // once: not again when it was already streamed while the command ran.
+                if a.mediation.unshown(item)
+                    && let Some(output) = &output
+                {
+                    self.streams
+                        .push(&a.turn, StreamKind::CommandOutputDelta, Some(output));
+                }
+                self.streams.push(
+                    &a.turn,
+                    match (command, end == ItemEnd::Completed) {
+                        (true, true) => StreamKind::CommandCompleted,
+                        (true, false) => StreamKind::CommandFailed,
+                        (false, true) => StreamKind::FileChangeCompleted,
+                        (false, false) => StreamKind::FileChangeFailed,
+                    },
+                    None,
+                );
                 match store.confirm_approval(
                     &approval,
                     &a.turn.managed_turn_id,
@@ -284,10 +368,11 @@ impl Turns {
             (ItemEnd::Declined, _) => {
                 // The provider dropped the item on its own: nothing remains to decide.
                 if undecided {
-                    store.settle_approvals(
+                    let settled = store.settle_approvals(
                         Some(&a.turn.managed_turn_id),
                         ApprovalReason::TurnEnded,
                     )?;
+                    self.announce(&settled);
                 }
                 Ok(Verdict::Continue)
             }
@@ -305,7 +390,9 @@ impl Turns {
         // The provider stopped waiting before the authority answered: accepting it is no
         // longer possible, and neither is refusing it.
         if !held.answered && held.approval.is_some() {
-            store.settle_approvals(Some(&a.turn.managed_turn_id), ApprovalReason::TurnEnded)?;
+            let settled =
+                store.settle_approvals(Some(&a.turn.managed_turn_id), ApprovalReason::TurnEnded)?;
+            self.announce(&settled);
         }
         Ok(Verdict::Continue)
     }
@@ -322,7 +409,10 @@ impl Turns {
         }
     }
     /// The deadline passed: the approval expires durably and the turn has to stop.
-    pub(super) fn approval_overdue(&self, store: &mut Store) -> ControlResult<Option<TurnReason>> {
+    pub(super) fn approval_overdue(
+        &mut self,
+        store: &mut Store,
+    ) -> ControlResult<Option<TurnReason>> {
         let Some(held) = self
             .active
             .as_ref()
@@ -339,6 +429,7 @@ impl Turns {
             return Ok(None);
         }
         let expired = store.expire_approvals()?;
+        self.announce(&expired);
         Ok(Some(
             if expired
                 .iter()
@@ -454,7 +545,15 @@ impl Turns {
             .map(Action::fingerprint)
             .ok_or(ControlError::GateDenied)?;
         let receipt = match store.decide_approval(p, &fingerprint)? {
-            Decided::Fresh(_, receipt) => receipt,
+            Decided::Fresh(decided, receipt) => {
+                self.streams.push_approval(
+                    &a.turn,
+                    StreamKind::ApprovalResolved,
+                    &decided.managed_approval_id,
+                    Some(state_text(decided.state)),
+                );
+                receipt
+            }
             Decided::Replayed(receipt) => return Ok(receipt),
         };
         held.answered = true;
@@ -536,6 +635,7 @@ impl Turns {
             && held.offered.accept
             && held.item == record.provider_item_id
             // The complete action is the one that was fingerprinted, and is still confined.
+            && action.item() == record.provider_item_id
             && action.kind() == record.kind
             && action.fingerprint() == record.action_fingerprint
             && action.confined(&a.workspace);
@@ -622,6 +722,12 @@ impl Turns {
             Decided::Fresh(record, receipt) => {
                 held.answered = true;
                 let item = held.item.clone();
+                self.streams.push_approval(
+                    &a.turn,
+                    StreamKind::ApprovalResolved,
+                    &record.managed_approval_id,
+                    Some(state_text(record.state)),
+                );
                 a.mediation
                     .accept(&item, record.managed_approval_id, record.kind);
                 a.mediation.dispatched = Some(request.clone());
@@ -633,7 +739,9 @@ impl Turns {
     /// and nothing is ever sent again for it.
     fn uncertain(&mut self, store: &mut Store) -> ControlResult<Verdict> {
         if let Some(a) = &self.active {
-            store.settle_approvals(Some(&a.turn.managed_turn_id), ApprovalReason::EffectUnknown)?;
+            let settled = store
+                .settle_approvals(Some(&a.turn.managed_turn_id), ApprovalReason::EffectUnknown)?;
+            self.announce(&settled);
         }
         Ok(Verdict::Uncertain)
     }
@@ -646,13 +754,32 @@ impl Turns {
         written: bool,
     ) -> ControlResult<Verdict> {
         // Only the answer this turn is still waiting to hear about counts.
-        if self
-            .active
-            .as_mut()
-            .and_then(|a| a.mediation.dispatched.take_if(|d| d == request))
-            .is_none()
-            || written
-        {
+        let Some(a) = self.active.as_mut() else {
+            return Ok(Verdict::Continue);
+        };
+        if a.mediation.dispatched.take_if(|d| d == request).is_none() {
+            return Ok(Verdict::Continue);
+        }
+        if written {
+            // The Accept reached the provider: from here the item may run.
+            let started = a
+                .mediation
+                .held
+                .as_ref()
+                .filter(|h| h.request == *request)
+                .and_then(|h| a.mediation.accepted(&h.item))
+                .map(|(_, kind)| *kind);
+            if let (ProviderDecision::Accept, Some(kind)) = (decision, started) {
+                self.streams.push(
+                    &a.turn,
+                    if kind == ApprovalKind::CommandExecution {
+                        StreamKind::CommandStarted
+                    } else {
+                        StreamKind::FileChangeStarted
+                    },
+                    None,
+                );
+            }
             return Ok(Verdict::Continue);
         }
         if decision == ProviderDecision::Accept {
@@ -663,5 +790,71 @@ impl Turns {
             a.deadline = Some(Instant::now());
         }
         Ok(Verdict::Continue)
+    }
+    /// Canonical metadata of an approval and, only while the authority still holds its
+    /// request, the action to decide on. The action is never read from storage.
+    fn present(
+        &self,
+        approval: ManagedApprovalRecord,
+        file_index: Option<u16>,
+        offset: Option<u32>,
+    ) -> ControlResult<ApprovalStatus> {
+        let held = self
+            .active
+            .as_ref()
+            .filter(|a| a.turn.managed_turn_id == approval.managed_turn_id)
+            .and_then(|a| {
+                let held = a.mediation.held.as_ref()?;
+                (held.approval.as_ref() == Some(&approval.managed_approval_id)
+                    && approval.state == ApprovalState::Pending)
+                    .then_some((a, held))
+            });
+        let mut status = ApprovalStatus {
+            approval,
+            acceptable: false,
+            command: None,
+            file_count: None,
+            file: None,
+        };
+        let Some((a, held)) = held else {
+            return Ok(status);
+        };
+        match &held.action {
+            Some(Action::Command(command)) => {
+                if file_index.is_some() || offset.is_some() {
+                    return Err(ControlError::InvalidRequest);
+                }
+                status.command = Some(command.presentation());
+            }
+            Some(Action::File(file)) => {
+                status.file_count = Some(file.files());
+                status.file = Some(file.page(file_index.unwrap_or(0), offset.unwrap_or(0))?);
+            }
+            None => return Ok(status),
+        }
+        status.acceptable = !held.answered && held.offered.accept && a.cancel.is_none();
+        Ok(status)
+    }
+    pub fn approval_status(&self, store: &Store, p: &ApprovalGet) -> ControlResult<ResultValue> {
+        let record = store.approval(&p.managed_approval_id)?;
+        Ok(ResultValue::Approval(Box::new(self.present(
+            record,
+            p.file_index,
+            p.offset,
+        )?)))
+    }
+    /// The approval one turn is waiting on. A turn that waits on nothing has none.
+    pub fn approval_pending(
+        &self,
+        store: &Store,
+        p: &ApprovalPending,
+    ) -> ControlResult<ResultValue> {
+        let turn = store.turn(&p.managed_turn_id)?;
+        let pending = store
+            .pending_approval()?
+            .filter(|a| a.managed_turn_id == turn.managed_turn_id)
+            .map(|a| self.present(a, None, None))
+            .transpose()?;
+        Ok(ResultValue::PendingApproval(pending.map(Box::new)))
     }
 }

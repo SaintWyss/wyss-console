@@ -169,10 +169,18 @@ impl Turns {
         if a.cancel.is_none() {
             a.cancel = Some(reason);
             a.deadline = Some(Instant::now() + Duration::from_secs(5));
-            store.settle_approvals(
+            let settled = store.settle_approvals(
                 Some(&a.turn.managed_turn_id),
                 approvals::approval_reason(reason),
             )?;
+            for record in &settled {
+                self.streams.push_approval(
+                    &a.turn,
+                    StreamKind::ApprovalResolved,
+                    &record.managed_approval_id,
+                    Some(approvals::state_text(record.state)),
+                );
+            }
             if let Some(held) = a.mediation.held.as_mut()
                 && !held.answered
                 && held.offered.cancel
@@ -385,7 +393,15 @@ impl Turns {
             // Approvals end no later than their turn. An undecided one is terminalized; an
             // accepted one whose outcome the provider never reported is indeterminate.
             let settled = approvals::settle_turn(store, &a.turn.managed_turn_id, reason);
-            let t = match settled.and_then(|()| {
+            let t = match settled.and_then(|settled| {
+                for record in &settled {
+                    self.streams.push_approval(
+                        &a.turn,
+                        StreamKind::ApprovalResolved,
+                        &record.managed_approval_id,
+                        Some(approvals::state_text(record.state)),
+                    );
+                }
                 store.transition_turn(&a.turn.managed_turn_id, None, state, Some(reason))
             }) {
                 Ok(t) => t,

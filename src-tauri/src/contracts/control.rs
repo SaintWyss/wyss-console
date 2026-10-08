@@ -16,7 +16,7 @@ use std::fmt;
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_FRAME: usize = 65_536;
 pub const MAX_PAGE: u16 = 50;
-pub const METHODS: [&str; 25] = [
+pub const METHODS: [&str; 28] = [
     "managedSession/turn/start",
     "managedSession/turn/status",
     "managedSession/turn/events",
@@ -42,6 +42,9 @@ pub const METHODS: [&str; 25] = [
     "executionLease/renew",
     "executionLease/revoke",
     "executionGate/status",
+    "managedTurn/approval/pending",
+    "managedTurn/approval/status",
+    "managedTurn/approval/respond",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -187,6 +190,10 @@ pub enum Operation {
     LeaseRevoke(LeaseRevoke),
     #[serde(rename = "executionGate/status")]
     GateStatus(GateQuery),
+    #[serde(rename = "managedTurn/approval/pending")]
+    ApprovalPending(ApprovalPending),
+    #[serde(rename = "managedTurn/approval/status")]
+    ApprovalStatus(ApprovalGet),
     #[serde(rename = "managedTurn/approval/respond")]
     ApprovalRespond(ApprovalRespond),
 }
@@ -328,6 +335,10 @@ pub struct AuthorityStatus {
 )]
 pub enum ResultValue {
     ApprovalReceipt(ApprovalReceipt),
+    /// One approval: canonical metadata and, while it is held, its transient action.
+    Approval(Box<ApprovalStatus>),
+    /// The approval a turn is waiting on, if any.
+    PendingApproval(Option<Box<ApprovalStatus>>),
     Turn(ManagedTurnRecord),
     TurnStatus(ManagedTurnStatus),
     TurnEvents(TurnStreamPage),
@@ -447,6 +458,15 @@ fn validate_result(r: &ResultValue) -> ControlResult<()> {
         ResultValue::Turn(t) => t.validate()?,
         ResultValue::ApprovalReceipt(r) => {
             r.validate().map_err(|_| ControlError::InvalidRequest)?
+        }
+        ResultValue::Approval(s) => s.validate()?,
+        ResultValue::PendingApproval(s) => {
+            if let Some(s) = s {
+                s.validate()?;
+                if s.approval.state != ApprovalState::Pending {
+                    return Err(ControlError::InvalidRequest);
+                }
+            }
         }
         ResultValue::TurnStatus(s) => {
             s.turn.validate()?;

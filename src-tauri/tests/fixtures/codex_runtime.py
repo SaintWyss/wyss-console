@@ -78,7 +78,7 @@ initialize_id = None
 waiting = None
 
 
-def count(name):
+def tally(name):
     with (root / name).open('a') as record:
         record.write('1\n')
 
@@ -112,16 +112,16 @@ def resolve(tid, decision):
         return
     if scenario.endswith('_slow'):
         # Accepted and running: the outcome is never reported.
-        count('executions')
+        tally('executions')
         return
     if kind == 'command':
-        count('executions')
+        tally('executions')
         emit({'method': 'item/commandExecution/outputDelta', 'params': {
             'threadId': tid, 'turnId': turn['id'], 'itemId': 'call-1', 'delta': 'WYSS_FIXTURE_OUTPUT'}})
         finished('completed', exitCode=0, aggregatedOutput='WYSS_FIXTURE_OUTPUT')
     else:
         Path(workspace + '/wyss-fixture-probe.txt').write_text('WYSS_FIXTURE_PATCH\n')
-        count('mutations')
+        tally('mutations')
         emit({'method': 'turn/diff/updated', 'params': {'threadId': tid, 'turnId': turn['id'], 'diff': '+WYSS_FIXTURE_PATCH\n'}})
         finished('completed')
     emit({'method': 'turn/completed', 'params': {'threadId': tid, 'turn': dict(turn, status='completed')}})
@@ -216,6 +216,11 @@ for line in sys.stdin:
     elif method == 'hooks/list':
         hooks=[{'enabled':True}] if scenario=='hooks_enabled' or (root/'restore-hooks').exists() else []
         emit({'id':message['id'],'result':{'data':[{'hooks':hooks}]}})
+        if scenario.endswith('_deaf') and waiting:
+            # The provider proves its profile for the Accept and is gone before reading it.
+            os.close(0)
+            time.sleep(0.3)
+            os._exit(0)
     elif method in ('thread/start', 'thread/resume'):
         assert initialized
         params = message['params']

@@ -4,7 +4,7 @@ use wyss_console::{
         WireUuid,
         agent_adapter::{AgentAdapterId, AgentRuntimeKind},
         control::*,
-        identities::{ExecutionLeaseId, ManagedSessionId, ManagedTurnId},
+        identities::{ExecutionLeaseId, ManagedApprovalId, ManagedSessionId, ManagedTurnId},
     },
     control::client::ControlClient,
 };
@@ -24,6 +24,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some("managedSession/turn/status") if args.len()==2=>serde_json::to_value(c.turn_status_projection(ManagedTurnId::parse(&args[1])?)?)?,
         Some("managedSession/turn/events") if args.len()==4=>serde_json::to_value(c.turn_events(TurnEvents {managed_turn_id:ManagedTurnId::parse(&args[1])?,after_sequence:if args[2]=="0" {None} else {Some(args[2].parse()?)},limit:args[3].parse()?})?)?,
         Some("managedSession/turn/cancel") if args.len()==4=>serde_json::to_value(c.turn_cancel(TurnCancel {intent_id:WireUuid::try_from(args[3].clone())?,managed_turn_id:ManagedTurnId::parse(&args[1])?,expected_revision:args[2].parse()?})?)?,
+        Some("managedTurn/approval/pending") if args.len()==2=>serde_json::to_value(c.approval_pending(ManagedTurnId::parse(&args[1])?)?)?,
+        Some("managedTurn/approval/status") if args.len()==2||args.len()==4=>serde_json::to_value(c.approval_status(ApprovalGet{managed_approval_id:ManagedApprovalId::parse(&args[1])?,file_index:args.get(2).map(|s|s.parse()).transpose()?,offset:args.get(3).map(|s|s.parse()).transpose()?})?)?,
+        // The decision is an intent: the authority derives and revalidates everything else.
+        Some("managedTurn/approval/respond") if args.len()==5=>serde_json::to_value(c.approval_respond(ApprovalRespond{intent_id:WireUuid::try_from(args[4].clone())?,managed_approval_id:ManagedApprovalId::parse(&args[1])?,expected_revision:args[2].parse()?,decision:serde_json::from_value(serde_json::json!(args[3]))?})?)?,
         Some("managedSession/runtime/create") if args.len()==5=>serde_json::to_value(c.binding_create(BindingCreate{intent_id:WireUuid::try_from(args[4].clone())?,managed_session_id:ManagedSessionId::parse(&args[1])?,expected_session_revision:args[2].parse()?,workspace_root:args[3].clone()})?)?,
         Some("managedSession/runtime/resume") if args.len()==4=>serde_json::to_value(c.binding_resume(BindingResume{intent_id:WireUuid::try_from(args[3].clone())?,managed_session_id:ManagedSessionId::parse(&args[1])?,expected_session_revision:args[2].parse()?})?)?,
         Some("managedSession/runtime/status") if args.len()==2=>serde_json::to_value(c.binding_status(ManagedSessionId::parse(&args[1])?)?)?,
@@ -46,9 +50,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some("prepare") if args.len()<=2=>serde_json::to_value(c.prepare(Prepare{intent_id:if let Some(i)=args.get(1){WireUuid::try_from(i.clone())?}else{id()},adapter_id:AgentAdapterId::parse("codex")?,runtime_kind:AgentRuntimeKind::Codex})?)?,
         Some("get") if args.len()==2=>serde_json::to_value(c.get(ManagedSessionId::parse(&args[1])?)?)?,
         Some("list") if args.len()==1=>serde_json::to_value(c.list(List{after:None,limit:50})?)?,
-        Some("audit") if args.len()==1=>serde_json::to_value(c.audit(AuditRead{stream_id:c.hello_status().stream_id.clone(),after_sequence:None,limit:50})?)?,
+        Some("audit") if args.len()<=2=>serde_json::to_value(c.audit(AuditRead{stream_id:c.hello_status().stream_id.clone(),after_sequence:args.get(1).map(|s|s.parse()).transpose()?,limit:50})?)?,
         Some("close") if args.len()==3=>serde_json::to_value(c.close(Close{intent_id:id(),managed_session_id:ManagedSessionId::parse(&args[1])?,expected_revision:args[2].parse()?})?)?,
-        _=>return Err("usage: control_client managedSession/turn/start session revision intent (prompt on stdin)|managedSession/turn/status turn|managedSession/turn/events turn after_sequence limit|managedSession/turn/cancel turn revision intent|managedSession/runtime/create session revision workspace intent|managedSession/runtime/status session|managedSession/runtime/resume session revision intent|managedSession/runtime/abandon session operation intent|executionLease/grant session revision ttl scopes_csv intent|executionLease/get lease|executionLease/active session|executionLease/renew lease revision ttl intent|executionLease/revoke lease revision intent|executionGate/status session action|hello|status|prepare [intent UUID]|get UUID|list|audit|close UUID revision|runtime/status|runtime/model/list|runtime/start [intent UUID]|runtime/start/local-tools workspace [intent UUID]|runtime/stop [intent UUID]".into()),
+        _=>return Err("usage: control_client managedSession/turn/start session revision intent (prompt on stdin)|managedSession/turn/status turn|managedSession/turn/events turn after_sequence limit|managedSession/turn/cancel turn revision intent|managedTurn/approval/pending turn|managedTurn/approval/status approval [file_index offset]|managedTurn/approval/respond approval revision accept|decline|cancel intent|managedSession/runtime/create session revision workspace intent|managedSession/runtime/status session|managedSession/runtime/resume session revision intent|managedSession/runtime/abandon session operation intent|executionLease/grant session revision ttl scopes_csv intent|executionLease/get lease|executionLease/active session|executionLease/renew lease revision ttl intent|executionLease/revoke lease revision intent|executionGate/status session action|hello|status|prepare [intent UUID]|get UUID|list|audit [after_sequence]|close UUID revision|runtime/status|runtime/model/list|runtime/start [intent UUID]|runtime/start/local-tools workspace [intent UUID]|runtime/stop [intent UUID]".into()),
     };
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())

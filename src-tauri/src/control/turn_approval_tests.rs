@@ -699,6 +699,30 @@ fn local_tools_items_are_classified_and_stay_forbidden_for_inference() {
         // The same frame on an inference generation is an execution surface.
         assert!(safety::notification(&m).is_err(), "inference: {value}");
     }
+    let finished =
+        |value: serde_json::Value| match safety::local_notification(&frame(value)).unwrap() {
+            Some(TurnNotice {
+                kind: NoticeKind::ItemEnded { output, end, .. },
+                ..
+            }) => (end == ItemEnd::Completed, output),
+            _ => panic!(),
+        };
+    let mut reported = with("item/completed", command("completed", "agent"));
+    reported["params"]["item"]["aggregatedOutput"] = json!("WYSS_OK");
+    assert_eq!(
+        finished(reported.clone()),
+        (true, Some("WYSS_OK".to_owned()))
+    );
+    reported["params"]["item"]["aggregatedOutput"] = json!("");
+    assert_eq!(finished(reported), (true, None));
+    assert_eq!(
+        finished(with("item/completed", command("completed", "agent"))),
+        (true, None)
+    );
+    assert_eq!(
+        finished(with("item/completed", patch("failed"))),
+        (false, None)
+    );
     let Some(TurnNotice {
         kind: NoticeKind::FileProposed(p),
         ..
@@ -832,6 +856,7 @@ fn accept_is_attested_committed_once_and_answered_exactly_once() {
     );
     assert_eq!(
         rig.notice(NoticeKind::ItemEnded {
+            output: None,
             item: item("call-1"),
             kind: ActionKind::Command,
             end: ItemEnd::Completed
@@ -872,11 +897,13 @@ fn nothing_runs_before_the_authority_accepted_that_exact_item() {
             }),
             "diff" => rig.notice(NoticeKind::DiffUpdated),
             "unannounced" => rig.notice(NoticeKind::ItemEnded {
+                output: None,
                 item: item("never-announced"),
                 kind: ActionKind::Command,
                 end: ItemEnd::Completed,
             }),
             end => rig.notice(NoticeKind::ItemEnded {
+                output: None,
                 item: item("call-1"),
                 kind: ActionKind::Command,
                 end: if end == "failed" {
@@ -894,12 +921,26 @@ fn nothing_runs_before_the_authority_accepted_that_exact_item() {
     let a = rig.command_approval();
     rig.decide(&Rig::intent(&a, Accept)).unwrap();
     assert_eq!(rig.notice(NoticeKind::DiffUpdated), Verdict::Violation);
+    // Nor does the item it was accepted for finish as another kind of action.
+    let mut rig = Rig::new();
+    let a = rig.command_approval();
+    rig.decide(&Rig::intent(&a, Accept)).unwrap();
+    assert_eq!(
+        rig.notice(NoticeKind::ItemEnded {
+            output: None,
+            item: item("call-1"),
+            kind: ActionKind::File,
+            end: ItemEnd::Completed
+        }),
+        Verdict::Violation
+    );
     // A command the runtime ran on its own, without ever asking, is not mediated.
     let mut rig = Rig::new();
     let cwd = rig.workspace.clone();
     rig.propose_command("call-9", "ls", &cwd);
     assert_eq!(
         rig.notice(NoticeKind::ItemEnded {
+            output: None,
             item: item("call-9"),
             kind: ActionKind::Command,
             end: ItemEnd::Completed
@@ -1153,6 +1194,9 @@ fn accept_gate_denies_each_missing_fact_with_zero_accept_answers() {
         },
     );
     let a = rig.pending().unwrap();
+    // It is shown, and shown as not acceptable.
+    let shown = pending_status(&rig).unwrap();
+    assert!(shown.command.is_some() && !shown.acceptable);
     assert_eq!(
         rig.decide(&Rig::intent(&a, Accept)),
         Err(ControlError::GateDenied)
@@ -1405,6 +1449,7 @@ fn public_decline_and_cancel_map_to_the_weakest_offered_provider_answer() {
         assert!(rig.answers().is_empty());
         assert_eq!(
             rig.notice(NoticeKind::ItemEnded {
+                output: None,
                 item: item("call-1"),
                 kind: ActionKind::Command,
                 end: ItemEnd::Declined
@@ -1438,6 +1483,7 @@ fn public_decline_and_cancel_map_to_the_weakest_offered_provider_answer() {
     rig.decide(&Rig::intent(&a, Decline)).unwrap();
     assert_eq!(rig.answers(), [ProviderDecision::Decline]);
     rig.notice(NoticeKind::ItemEnded {
+        output: None,
         item: item("patch-1"),
         kind: ActionKind::File,
         end: ItemEnd::Declined,
@@ -2084,6 +2130,7 @@ fn no_command_output_path_or_diff_reaches_the_database_wal_or_audit() {
         delta: output.clone(),
     });
     rig.notice(NoticeKind::ItemEnded {
+        output: None,
         item: item("call-1"),
         kind: ActionKind::Command,
         end: ItemEnd::Completed,
@@ -2133,4 +2180,577 @@ fn no_command_output_path_or_diff_reaches_the_database_wal_or_audit() {
         next.approval(&b.managed_approval_id).unwrap().state,
         ApprovalState::Declined
     );
+}
+fn stream(rig: &Rig, after: Option<crate::contracts::Sequence>) -> TurnStreamPage {
+    let ResultValue::TurnEvents(page) = rig
+        .turns
+        .events(
+            &rig.store,
+            &TurnEvents {
+                managed_turn_id: rig.turn.managed_turn_id.clone(),
+                after_sequence: after,
+                limit: 50,
+            },
+        )
+        .unwrap()
+    else {
+        panic!()
+    };
+    page
+}
+fn kinds(rig: &Rig) -> Vec<StreamKind> {
+    stream(rig, None).events.iter().map(|e| e.kind).collect()
+}
+/// What a client actually receives: the result survives the control frame codec.
+fn over_the_wire(result: ResultValue) -> ResultValue {
+    let bytes = Response {
+        request_id: uuid(),
+        authority_instance_id: uuid(),
+        outcome: Ok(result),
+    }
+    .encode()
+    .expect("one control frame");
+    assert!(bytes.len() <= MAX_FRAME);
+    Response::parse(&bytes).unwrap().outcome.unwrap()
+}
+fn pending_status(rig: &Rig) -> Option<ApprovalStatus> {
+    let result = rig
+        .turns
+        .approval_pending(
+            &rig.store,
+            &ApprovalPending {
+                managed_turn_id: rig.turn.managed_turn_id.clone(),
+            },
+        )
+        .unwrap();
+    match over_the_wire(result) {
+        ResultValue::PendingApproval(s) => s.map(|s| *s),
+        _ => panic!(),
+    }
+}
+fn status(
+    rig: &Rig,
+    a: &ManagedApprovalRecord,
+    file_index: Option<u16>,
+    offset: Option<u32>,
+) -> ControlResult<ApprovalStatus> {
+    let result = rig.turns.approval_status(
+        &rig.store,
+        &ApprovalGet {
+            managed_approval_id: a.managed_approval_id.clone(),
+            file_index,
+            offset,
+        },
+    )?;
+    match over_the_wire(result) {
+        ResultValue::Approval(s) => Ok(*s),
+        _ => panic!(),
+    }
+}
+#[test]
+fn approval_queries_present_the_held_action_and_only_metadata_once_it_is_gone() {
+    let mut rig = Rig::new();
+    assert!(pending_status(&rig).is_none());
+    let a = rig.command_approval();
+    let shown = pending_status(&rig).expect("pending approval");
+    assert_eq!(shown.approval, a);
+    assert!(shown.acceptable);
+    let command = shown.command.as_ref().unwrap();
+    assert_eq!(command.command, "printf WYSS_OK");
+    assert_eq!(command.cwd, rig.workspace);
+    assert_eq!(command.parsed_actions, ["unknown"]);
+    assert!(shown.file_count.is_none() && shown.file.is_none());
+    // The same approval by identity, any number of times, without changing anything.
+    for _ in 0..3 {
+        assert!(status(&rig, &a, None, None).unwrap() == shown);
+    }
+    assert_eq!(rig.record(&a), a);
+    assert!(rig.answers().is_empty());
+    // A command has no file pages; unknown identities are not found.
+    assert_eq!(
+        status(&rig, &a, Some(0), None).err(),
+        Some(ControlError::InvalidRequest)
+    );
+    let mut unknown = a.clone();
+    unknown.managed_approval_id =
+        crate::contracts::identities::ManagedApprovalId::parse(uuid().as_str()).unwrap();
+    assert_eq!(
+        status(&rig, &unknown, None, None).err(),
+        Some(ControlError::ApprovalNotFound)
+    );
+    assert_eq!(
+        rig.turns
+            .approval_pending(
+                &rig.store,
+                &ApprovalPending {
+                    managed_turn_id: crate::contracts::identities::ManagedTurnId::parse(
+                        uuid().as_str()
+                    )
+                    .unwrap()
+                }
+            )
+            .err(),
+        Some(ControlError::TurnNotFound)
+    );
+    // While an Accept is being attested the approval is still pending and still shown.
+    let reply = rig.respond(&Rig::intent(&a, Accept));
+    assert!(pending_status(&rig).unwrap().acceptable);
+    rig.attest(true);
+    assert!(reply.try_recv().unwrap().is_ok());
+    // Decided: nothing is pending, and the status is canonical metadata only.
+    assert!(pending_status(&rig).is_none());
+    let decided = status(&rig, &a, None, None).unwrap();
+    assert_eq!(decided.approval.state, ApprovalState::Accepted);
+    assert!(!decided.acceptable && decided.command.is_none());
+    // A turn that is being stopped still shows what it held, but not as acceptable.
+    let mut rig = Rig::new();
+    let a = rig.command_approval();
+    let reply = rig.respond(&Rig::intent(&a, Accept));
+    assert!(reply.try_recv().is_err());
+    rig.revoke();
+    rig.enforce();
+    assert!(pending_status(&rig).is_none());
+    let revoked = status(&rig, &a, None, None).unwrap();
+    assert_eq!(revoked.approval.state, ApprovalState::Invalidated);
+    assert!(!revoked.acceptable && revoked.command.is_none());
+    // The pending approval belongs to one turn: an earlier turn is waiting on nothing.
+    let mut rig = Rig::new();
+    let earlier = rig.turn.managed_turn_id.clone();
+    rig.end_turn(TurnOutcome::Completed);
+    rig.start_turn();
+    let a = rig.command_approval();
+    assert_eq!(pending_status(&rig).unwrap().approval, a);
+    let ResultValue::PendingApproval(none) = rig
+        .turns
+        .approval_pending(
+            &rig.store,
+            &ApprovalPending {
+                managed_turn_id: earlier,
+            },
+        )
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert!(none.is_none());
+    // After an authority restart the action is gone with the process that held it.
+    let mut rig = Rig::new();
+    let a = rig.file_approval();
+    let mut next = Store::open(&rig.root.join("db"), uuid()).unwrap();
+    next.recover_approvals().unwrap();
+    next.recover_turns().unwrap();
+    let ResultValue::Approval(after) = Turns::default()
+        .approval_status(
+            &next,
+            &ApprovalGet {
+                managed_approval_id: a.managed_approval_id.clone(),
+                file_index: Some(0),
+                offset: Some(0),
+            },
+        )
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(after.approval.state, ApprovalState::Invalidated);
+    assert!(!after.acceptable && after.file_count.is_none() && after.file.is_none());
+}
+#[test]
+fn file_approval_presents_the_complete_change_set_in_exact_pages() {
+    let mut rig = Rig::new();
+    fs::write(rig.root.join("ws/old.txt"), "x").unwrap();
+    // Multibyte content, so that a page boundary would fall inside a character.
+    let diff = "+ñ😃línea\n".repeat(2500);
+    assert!(diff.len() > 2 * DIFF_PAGE_BYTES);
+    let (b, old, moved) = (
+        rig.path("b.txt"),
+        rig.path("old.txt"),
+        rig.path("sub/new.txt"),
+    );
+    rig.propose_file(
+        "patch-1",
+        vec![
+            change(&old, FileChangeKind::Move, Some(&moved), "@@ move\n"),
+            change(&b, FileChangeKind::Add, None, &diff),
+        ],
+    );
+    rig.ask(ActionKind::File, "req-f", "patch-1", None, FILE_OFFER);
+    let a = rig.pending().unwrap();
+    let shown = pending_status(&rig).unwrap();
+    assert_eq!(shown.file_count, Some(2));
+    assert!(shown.command.is_none() && shown.acceptable);
+    // Files are presented in path order, whatever order the provider listed them in.
+    let first = shown.file.unwrap();
+    assert_eq!((first.index, first.path.as_str()), (0, b.as_str()));
+    assert_eq!(first.kind, FileChangeKind::Add);
+    assert_eq!(first.diff_bytes as usize, diff.len());
+    // Paging the diff reconstructs exactly what was fingerprinted.
+    let mut rebuilt = String::new();
+    let mut offset = Some(0);
+    let mut pages = 0;
+    while let Some(at) = offset {
+        let page = status(&rig, &a, Some(0), Some(at)).unwrap().file.unwrap();
+        assert!(page.chunk.len() <= DIFF_PAGE_BYTES && !page.chunk.is_empty());
+        assert_eq!(page.offset, at);
+        rebuilt.push_str(&page.chunk);
+        offset = page.next_offset;
+        pages += 1;
+    }
+    assert!(rebuilt == diff && pages >= 3);
+    let second = status(&rig, &a, Some(1), None).unwrap().file.unwrap();
+    assert_eq!(second.path, old);
+    assert_eq!(second.kind, FileChangeKind::Move);
+    assert_eq!(second.move_path.as_deref(), Some(moved.as_str()));
+    assert_eq!(
+        (second.chunk.as_str(), second.next_offset),
+        ("@@ move\n", None)
+    );
+    // Out-of-range pages are refused, never clamped to some other content.
+    for (index, at) in [
+        (2, 0),
+        (0, diff.len() as u32 + 1),
+        (0, 2), // inside the two-byte `ñ`
+    ] {
+        assert_eq!(
+            status(&rig, &a, Some(index), Some(at)).err(),
+            Some(ControlError::InvalidRequest),
+            "{index}/{at}"
+        );
+    }
+    assert_eq!(rig.record(&a), a);
+    // The presentation is the decision surface: accepting covers exactly those pages.
+    rig.decide(&Rig::intent(&a, Accept)).unwrap();
+    assert_eq!(rig.answers(), [ProviderDecision::Accept]);
+    assert!(status(&rig, &a, Some(0), Some(0)).unwrap().file.is_none());
+}
+#[test]
+fn command_that_cannot_be_presented_whole_is_never_approvable() {
+    // The largest plain command fits one control frame with its directory and actions.
+    let mut rig = Rig::new();
+    let cwd = rig.workspace.clone();
+    let largest = "c".repeat(MAX_COMMAND_BYTES);
+    rig.notice(NoticeKind::ApprovalRequested(ApprovalRequest {
+        request: request("req-1"),
+        item: item("call-1"),
+        kind: ActionKind::Command,
+        command: Some(largest.clone()),
+        cwd: Some(cwd.clone()),
+        actions: vec!["a".repeat(MAX_PARSED_ACTION_BYTES); MAX_PARSED_ACTIONS],
+        offered: COMMAND_OFFER,
+    }));
+    let shown = pending_status(&rig).expect("presentable whole");
+    assert!(shown.command.unwrap().command == largest);
+    // A command whose encoding would overflow the frame is not truncated: it is refused.
+    let mut rig = Rig::new();
+    let cwd = rig.workspace.clone();
+    let unprintable = "\u{1}".repeat(MAX_COMMAND_BYTES);
+    assert_eq!(
+        rig.ask(
+            ActionKind::Command,
+            "req-1",
+            "call-1",
+            Some((&unprintable, &cwd)),
+            COMMAND_OFFER
+        ),
+        Verdict::Continue
+    );
+    assert!(rig.pending().is_none());
+    assert_eq!(rig.answers(), [ProviderDecision::Cancel]);
+}
+#[test]
+fn stream_reports_the_mediated_lifecycle_in_order_and_never_the_action() {
+    use StreamKind::*;
+    let mut rig = Rig::new();
+    let cwd = rig.workspace.clone();
+    let secret = "printf WYSS_STREAM_SECRET_COMMAND";
+    rig.propose_command("call-1", secret, &cwd);
+    rig.ask(
+        ActionKind::Command,
+        "req-1",
+        "call-1",
+        Some((secret, &cwd)),
+        COMMAND_OFFER,
+    );
+    let a = rig.pending().unwrap();
+    assert_eq!(
+        kinds(&rig),
+        [TurnStarted, CommandProposed, ApprovalRequired]
+    );
+    rig.decide(&Rig::intent(&a, Accept)).unwrap();
+    rig.answers();
+    assert_eq!(
+        rig.turns
+            .delivered(
+                &mut rig.store,
+                &request("req-1"),
+                ProviderDecision::Accept,
+                true
+            )
+            .unwrap(),
+        Verdict::Continue
+    );
+    rig.notice(NoticeKind::RequestResolved(request("req-1")));
+    rig.notice(NoticeKind::Output {
+        item: item("call-1"),
+        kind: ActionKind::Command,
+        delta: "WYSS_STREAM_OUTPUT".into(),
+    });
+    // The finished item repeats the output that was already streamed: it is shown once.
+    rig.notice(NoticeKind::ItemEnded {
+        output: Some("WYSS_STREAM_OUTPUT".into()),
+        item: item("call-1"),
+        kind: ActionKind::Command,
+        end: ItemEnd::Failed,
+    });
+    // A file change in the same turn, declined.
+    let target = rig.path("probe.txt");
+    rig.propose_file(
+        "patch-1",
+        vec![change(
+            &target,
+            FileChangeKind::Add,
+            None,
+            "+WYSS_STREAM_SECRET_PATCH\n",
+        )],
+    );
+    rig.propose_file(
+        "patch-1",
+        vec![change(
+            &target,
+            FileChangeKind::Add,
+            None,
+            "+WYSS_STREAM_SECRET_PATCH\n",
+        )],
+    );
+    rig.ask(ActionKind::File, "req-f", "patch-1", None, FILE_OFFER);
+    let b = rig.pending().unwrap();
+    rig.decide(&Rig::intent(&b, Decline)).unwrap();
+    assert_eq!(rig.answers(), [ProviderDecision::Decline]);
+    rig.notice(NoticeKind::ItemEnded {
+        output: None,
+        item: item("patch-1"),
+        kind: ActionKind::File,
+        end: ItemEnd::Declined,
+    });
+    // And one that is accepted and applied.
+    let other = rig.path("second.txt");
+    rig.propose_file(
+        "patch-2",
+        vec![change(&other, FileChangeKind::Add, None, "+x\n")],
+    );
+    rig.ask(ActionKind::File, "req-g", "patch-2", None, FILE_OFFER);
+    let c = rig.pending().unwrap();
+    rig.decide(&Rig::intent(&c, Accept)).unwrap();
+    rig.turns
+        .delivered(
+            &mut rig.store,
+            &request("req-g"),
+            ProviderDecision::Accept,
+            true,
+        )
+        .unwrap();
+    rig.notice(NoticeKind::Output {
+        item: item("patch-2"),
+        kind: ActionKind::File,
+        delta: "Success".into(),
+    });
+    rig.notice(NoticeKind::ItemEnded {
+        output: None,
+        item: item("patch-2"),
+        kind: ActionKind::File,
+        end: ItemEnd::Completed,
+    });
+    rig.end_turn(TurnOutcome::Completed);
+    let page = stream(&rig, None);
+    assert_eq!(
+        page.events.iter().map(|e| e.kind).collect::<Vec<_>>(),
+        [
+            TurnStarted,
+            CommandProposed,
+            ApprovalRequired,
+            ApprovalResolved,
+            CommandStarted,
+            CommandOutputDelta,
+            CommandFailed,
+            FileChangeProposed,
+            ApprovalRequired,
+            ApprovalResolved,
+            FileChangeProposed,
+            ApprovalRequired,
+            ApprovalResolved,
+            FileChangeStarted,
+            FileChangeCompleted,
+            TurnCompleted,
+        ]
+    );
+    // One per-turn sequence, positive and strictly increasing.
+    let sequences: Vec<u64> = page.events.iter().map(|e| e.sequence.get()).collect();
+    assert_eq!(sequences, (1..=16).collect::<Vec<u64>>());
+    assert!(page.terminal && !page.gap && page.dropped_events == 0);
+    // Approval events name the approval and its state; nothing else carries either.
+    let approvals: Vec<_> = page
+        .events
+        .iter()
+        .filter(|e| e.managed_approval_id.is_some())
+        .map(|e| {
+            (
+                e.kind,
+                e.managed_approval_id.clone().unwrap(),
+                e.text.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        approvals,
+        [
+            (ApprovalRequired, a.managed_approval_id.clone(), None),
+            (
+                ApprovalResolved,
+                a.managed_approval_id.clone(),
+                Some("accepted".into())
+            ),
+            (ApprovalRequired, b.managed_approval_id.clone(), None),
+            (
+                ApprovalResolved,
+                b.managed_approval_id.clone(),
+                Some("declined".into())
+            ),
+            (ApprovalRequired, c.managed_approval_id.clone(), None),
+            (
+                ApprovalResolved,
+                c.managed_approval_id.clone(),
+                Some("accepted".into())
+            ),
+        ]
+    );
+    // The stream carries command output and never the command, the paths or the diff.
+    let raw = serde_json::to_string(&page).unwrap();
+    assert!(raw.contains("WYSS_STREAM_OUTPUT"));
+    for absent in ["WYSS_STREAM_SECRET", "probe.txt", "second.txt", "Success"] {
+        assert!(!raw.contains(absent), "{absent}");
+    }
+    // Reductive authority outcomes are announced with their state as well.
+    for (cause, state) in [("expiry", "expired"), ("revoke", "invalidated")] {
+        let mut rig = Rig::new();
+        rig.command_approval();
+        if cause == "expiry" {
+            rig.advance(APPROVAL_TTL_SECONDS);
+        } else {
+            rig.revoke();
+        }
+        rig.enforce();
+        let last = stream(&rig, None).events.pop().unwrap();
+        assert_eq!(
+            (last.kind, last.text.as_deref()),
+            (ApprovalResolved, Some(state))
+        );
+    }
+    // A one-shot command reports its output only when it finishes: shown then, once.
+    let mut rig = Rig::new();
+    let a = rig.command_approval();
+    rig.decide(&Rig::intent(&a, Accept)).unwrap();
+    rig.notice(NoticeKind::ItemEnded {
+        output: Some("WYSS_FINAL_OUTPUT".into()),
+        item: item("call-1"),
+        kind: ActionKind::Command,
+        end: ItemEnd::Completed,
+    });
+    let tail: Vec<_> = stream(&rig, None)
+        .events
+        .into_iter()
+        .rev()
+        .take(2)
+        .map(|e| (e.kind, e.text))
+        .collect();
+    assert_eq!(
+        tail,
+        [
+            (CommandCompleted, None),
+            (CommandOutputDelta, Some("WYSS_FINAL_OUTPUT".to_owned())),
+        ]
+    );
+    // A violation ends the stream with the approval invalidated and the turn failed.
+    let mut rig = Rig::new();
+    rig.command_approval();
+    rig.turns
+        .lost(&mut rig.store, TurnReason::InferenceIsolationViolation)
+        .unwrap();
+    let tail: Vec<_> = kinds(&rig).into_iter().rev().take(2).collect();
+    assert_eq!(tail, [TurnFailed, ApprovalResolved]);
+}
+#[test]
+fn command_output_is_chunked_on_characters_bounded_in_memory_and_reports_its_gap() {
+    let mut rig = Rig::new();
+    let a = rig.command_approval();
+    rig.decide(&Rig::intent(&a, Accept)).unwrap();
+    let before = stream(&rig, None).latest_sequence.unwrap();
+    // One provider delta far above the per-event bound, made of multibyte characters.
+    let output = "ñ😃".repeat(3000);
+    assert_eq!(
+        rig.notice(NoticeKind::Output {
+            item: item("call-1"),
+            kind: ActionKind::Command,
+            delta: output.clone(),
+        }),
+        Verdict::Continue
+    );
+    let mut rebuilt = String::new();
+    let mut after = Some(before);
+    loop {
+        let page = stream(&rig, after);
+        if page.events.is_empty() {
+            break;
+        }
+        for event in &page.events {
+            assert_eq!(event.kind, StreamKind::CommandOutputDelta);
+            let text = event.text.as_ref().unwrap();
+            assert!(text.len() <= 4096);
+            rebuilt.push_str(text);
+        }
+        after = page.next_sequence;
+    }
+    assert!(rebuilt == output);
+    // A flood: memory stays bounded, the oldest events give way and the gap is explicit.
+    let chunk = "o".repeat(4096);
+    for _ in 0..200 {
+        rig.notice(NoticeKind::Output {
+            item: item("call-1"),
+            kind: ActionKind::Command,
+            delta: chunk.clone(),
+        });
+    }
+    let page = stream(&rig, None);
+    assert!(page.gap && page.dropped_events > 0);
+    assert_eq!(page.events[0].kind, StreamKind::StreamGap);
+    assert!(serde_json::to_vec(&page).unwrap().len() < MAX_FRAME);
+    let mut retained = 0;
+    let mut after = None;
+    loop {
+        let page = stream(&rig, after);
+        let texts: usize = page
+            .events
+            .iter()
+            .filter_map(|e| e.text.as_ref())
+            .map(String::len)
+            .sum();
+        if page.events.iter().all(|e| e.kind == StreamKind::StreamGap) {
+            break;
+        }
+        retained += texts;
+        after = page.next_sequence;
+    }
+    assert!(
+        retained <= 256 * 1024,
+        "retained {retained} bytes of output"
+    );
+    assert!(retained > 128 * 1024);
+    // Whatever was dropped, the sequence never goes backwards and never repeats.
+    let latest = stream(&rig, None).latest_sequence.unwrap().get();
+    assert!(latest > 200);
+    // Raw output is never durable.
+    let mut durable = Vec::new();
+    for file in ["db", "db-wal", "db-shm"] {
+        durable.extend(fs::read(rig.root.join(file)).unwrap_or_default());
+    }
+    assert!(!durable.windows(64).any(|w| w == &chunk.as_bytes()[..64]));
 }

@@ -743,18 +743,17 @@ pub(crate) enum NoticeKind {
     /// The provider asks whether the announced action may happen.
     ApprovalRequested(ApprovalRequest),
     /// Output of an action. Legal only after the authority accepted that exact item.
-    // Content and kind are presented by the transient stream of the control protocol.
-    #[allow(dead_code)]
     Output {
         item: super::CodexItemId,
         kind: ActionKind,
         delta: String,
     },
-    #[allow(dead_code)]
     ItemEnded {
         item: super::CodexItemId,
         kind: ActionKind,
         end: ItemEnd,
+        /// Complete output the provider reports with a finished command, if any.
+        output: Option<String>,
     },
     /// The provider no longer waits for an answer to this request.
     RequestResolved(super::CodexRequestId),
@@ -1030,10 +1029,16 @@ fn local_action(method: &str, p: &Value) -> Result<Option<TurnNotice>> {
                     Some("declined") => ItemEnd::Declined,
                     _ => return violation(),
                 };
+                let output = item
+                    .get("aggregatedOutput")
+                    .and_then(Value::as_str)
+                    .filter(|o| kind == ActionKind::Command && !o.is_empty())
+                    .map(str::to_owned);
                 return notice(NoticeKind::ItemEnded {
                     item: id,
                     kind,
                     end,
+                    output,
                 });
             }
             // An item that starts in any other state already ran without being asked.

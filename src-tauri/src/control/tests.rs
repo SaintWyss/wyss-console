@@ -529,7 +529,10 @@ fn protocol_hello_and_method_allowlist() {
             "executionLease/active",
             "executionLease/renew",
             "executionLease/revoke",
-            "executionGate/status"
+            "executionGate/status",
+            "managedTurn/approval/pending",
+            "managedTurn/approval/status",
+            "managedTurn/approval/respond"
         ]
     );
     for forbidden in [
@@ -540,6 +543,14 @@ fn protocol_hello_and_method_allowlist() {
         "approve",
         "permission/grant",
         "authority/shutdown",
+        // No generic provider response, raw provider RPC or provider request identity.
+        "managedTurn/approval/accept",
+        "provider/respond",
+        "provider/request/respond",
+        "codex/rpc",
+        "item/commandExecution/requestApproval",
+        "item/fileChange/requestApproval",
+        "config/write",
     ] {
         let v = json!({"schema_version":1,"request_id":uuid(),"method":forbidden,"params":{}});
         assert!(matches!(

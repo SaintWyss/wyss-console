@@ -2756,3 +2756,616 @@ fn inference_generation_answers_no_approval_request_even_when_well_formed() {
         }
     }
 }
+use wyss_console::contracts::identities::ManagedApprovalId;
+/// A local-tools generation with one attached session whose turn waits on an approval.
+struct Pending {
+    env: Sandbox,
+    authority: Authority,
+    client: ControlClient,
+    workspace: String,
+    session: ManagedSessionRecord,
+    lease: ExecutionLease,
+    turn: ManagedTurnRecord,
+    shown: ApprovalStatus,
+}
+fn pending(scenario: &'static str, scopes: Vec<ExecutionScope>) -> Pending {
+    let env = Sandbox::new(scenario);
+    let workspace = local_layout(&env);
+    let authority = env.start();
+    let mut client = env.client();
+    client.runtime_start(local_mutation(&workspace)).unwrap();
+    env.wait(&mut client, ActualState::Ready);
+    let (session, lease) = local_session(&env, &mut client, &workspace, scopes);
+    let turn = client.turn_start(turn_params(&session)).unwrap();
+    wait_approval(&mut client, "requested");
+    let shown = client
+        .approval_pending(turn.managed_turn_id.clone())
+        .unwrap()
+        .expect("pending approval");
+    Pending {
+        env,
+        authority,
+        client,
+        workspace,
+        session,
+        lease,
+        turn,
+        shown,
+    }
+}
+impl Pending {
+    fn intent(&self, decision: ApprovalDecision) -> ApprovalRespond {
+        ApprovalRespond {
+            intent_id: id(),
+            managed_approval_id: self.shown.approval.managed_approval_id.clone(),
+            expected_revision: self.shown.approval.revision,
+            decision,
+        }
+    }
+    fn status(&mut self) -> ApprovalStatus {
+        self.client
+            .approval_status(ApprovalGet {
+                managed_approval_id: self.shown.approval.managed_approval_id.clone(),
+                file_index: None,
+                offset: None,
+            })
+            .unwrap()
+    }
+    fn stream(&mut self) -> Vec<ManagedTurnStreamEventV1> {
+        let mut events = Vec::new();
+        let mut after = None;
+        loop {
+            let page = self
+                .client
+                .turn_events(TurnEvents {
+                    managed_turn_id: self.turn.managed_turn_id.clone(),
+                    after_sequence: after,
+                    limit: 50,
+                })
+                .unwrap();
+            if page.events.is_empty() {
+                return events;
+            }
+            after = page.next_sequence;
+            events.extend(page.events);
+        }
+    }
+    /// Nothing the provider or the client said about the action is durable.
+    fn assert_private(&self, transient: &[&str]) {
+        for name in [
+            "control.sqlite3",
+            "control.sqlite3-wal",
+            "control.sqlite3-shm",
+        ] {
+            let bytes =
+                fs::read(self.env.root.join("state/wyss-console").join(name)).unwrap_or_default();
+            for raw in transient {
+                assert!(
+                    !bytes.windows(raw.len()).any(|w| w == raw.as_bytes()),
+                    "{raw} is durable in {name}"
+                );
+            }
+        }
+    }
+    fn finish(mut self) {
+        drop(self.client);
+        self.authority.stop(false);
+        for pid in self.env.pids() {
+            dead(pid);
+        }
+    }
+}
+fn lines(env: &Sandbox, name: &str) -> usize {
+    fs::read_to_string(env.root.join(name))
+        .unwrap_or_default()
+        .lines()
+        .count()
+}
+#[test]
+fn approval_protocol_accepts_one_command_exactly_once_after_attestation() {
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    let mut p = pending("approval_command", local_scopes());
+    // The presentation is the authority's own: the complete command, never a provider frame.
+    assert!(p.shown.acceptable);
+    assert_eq!(p.shown.approval.kind, ApprovalKind::CommandExecution);
+    let command = p.shown.command.as_ref().unwrap();
+    assert_eq!(command.command, "printf WYSS_FIXTURE_COMMAND");
+    assert_eq!(command.cwd, p.workspace);
+    assert_eq!(
+        command.parsed_actions,
+        ["unknown: printf WYSS_FIXTURE_COMMAND"]
+    );
+    // Another connection sees the same approval; closing it decides nothing.
+    let mut other = p.env.client();
+    assert!(
+        other
+            .approval_pending(p.turn.managed_turn_id.clone())
+            .unwrap()
+            .unwrap()
+            == p.shown
+    );
+    drop(other);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(p.status().approval, p.shown.approval);
+    assert!(decisions(&p.env).is_empty());
+    assert_eq!(effects(&p.env, &p.workspace), 0);
+    // Intents that cannot be about this pending approval change nothing.
+    let mut stale = p.intent(ApprovalDecision::Accept);
+    stale.expected_revision += 1;
+    assert_eq!(
+        p.client.approval_respond(stale),
+        Err(ControlError::StaleRevision)
+    );
+    let mut missing = p.intent(ApprovalDecision::Accept);
+    missing.managed_approval_id = ManagedApprovalId::parse(id().as_str()).unwrap();
+    assert_eq!(
+        p.client.approval_respond(missing),
+        Err(ControlError::ApprovalNotFound)
+    );
+    assert!(decisions(&p.env).is_empty());
+    let before = p.env.methods().len();
+    let accept = p.intent(ApprovalDecision::Accept);
+    let receipt = p.client.approval_respond(accept.clone()).unwrap();
+    assert_eq!(
+        (receipt.decision, receipt.state, receipt.revision),
+        (
+            ApprovalDecision::Accept,
+            ApprovalState::Accepted,
+            p.shown.approval.revision + 1
+        )
+    );
+    assert_eq!(
+        receipt.action_fingerprint,
+        p.shown.approval.action_fingerprint
+    );
+    let done = wait_turn(&mut p.client, &p.turn, true);
+    assert_eq!(done.state, TurnState::Completed);
+    // The runtime re-proved its profile, and only then was exactly one frame written.
+    assert_eq!(
+        p.env.methods()[before..],
+        [
+            "config/read",
+            "configRequirements/read",
+            "hooks/list",
+            "RESPONSE"
+        ]
+    );
+    assert_eq!(decisions(&p.env), ["\"accept\""]);
+    assert_eq!(lines(&p.env, "executions"), 1);
+    // The same intent, from any connection, returns the original receipt and no frame.
+    assert_eq!(
+        p.client.approval_respond(accept.clone()),
+        Ok(receipt.clone())
+    );
+    let mut reconnected = p.env.client();
+    assert_eq!(reconnected.approval_respond(accept.clone()), Ok(receipt));
+    let mut conflict = accept.clone();
+    conflict.decision = ApprovalDecision::Cancel;
+    assert_eq!(
+        reconnected.approval_respond(conflict),
+        Err(ControlError::IntentConflict)
+    );
+    let mut again = p.intent(ApprovalDecision::Accept);
+    again.expected_revision += 1;
+    assert_eq!(
+        reconnected.approval_respond(again),
+        Err(ControlError::InvalidTransition)
+    );
+    drop(reconnected);
+    assert_eq!(decisions(&p.env), ["\"accept\""]);
+    assert_eq!(count(&p.env, "RESPONSE"), 1);
+    assert_eq!(lines(&p.env, "executions"), 1);
+    let methods = p.client.runtime_status().unwrap().outbound_methods;
+    assert_eq!(
+        (
+            methods.approval_accept,
+            methods.approval_decline,
+            methods.approval_cancel,
+            methods.turn_interrupt
+        ),
+        (1, 0, 0, 0)
+    );
+    // Canonical journal: requested, accepted with the dispatch marker, confirmed.
+    let journal: Vec<_> = approval_events(&mut p.client)
+        .iter()
+        .map(|e| {
+            (
+                e["event_type"]
+                    .as_str()
+                    .unwrap()
+                    .rsplit('.')
+                    .next()
+                    .unwrap()
+                    .to_owned(),
+                e["payload"]["effect"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        journal,
+        [
+            ("requested".to_owned(), "none".to_owned()),
+            ("accepted".to_owned(), "dispatched".to_owned()),
+            ("confirmed".to_owned(), "confirmed".to_owned()),
+        ]
+    );
+    let settled = p.status();
+    assert_eq!(settled.approval.effect, ApprovalEffect::Confirmed);
+    assert!(!settled.acceptable && settled.command.is_none());
+    assert!(
+        p.client
+            .approval_pending(p.turn.managed_turn_id.clone())
+            .unwrap()
+            .is_none()
+    );
+    // The one transient stream reports the whole lifecycle with the output and without
+    // the command.
+    let events = p.stream();
+    let lifecycle: Vec<_> = events
+        .iter()
+        .map(|e| e.kind)
+        .filter(|k| !matches!(k, StreamKind::AssistantMessageDelta))
+        .collect();
+    assert_eq!(
+        lifecycle,
+        [
+            StreamKind::TurnStarted,
+            StreamKind::CommandProposed,
+            StreamKind::ApprovalRequired,
+            StreamKind::ApprovalResolved,
+            StreamKind::CommandStarted,
+            StreamKind::CommandOutputDelta,
+            StreamKind::CommandCompleted,
+            StreamKind::TurnCompleted,
+        ]
+    );
+    assert!(events.windows(2).all(|w| w[0].sequence < w[1].sequence));
+    let raw = serde_json::to_string(&events).unwrap();
+    assert!(raw.contains("WYSS_FIXTURE_OUTPUT") && !raw.contains("WYSS_FIXTURE_COMMAND"));
+    assert!(
+        events
+            .iter()
+            .filter(|e| e.managed_approval_id.is_some())
+            .all(|e| e.managed_approval_id.as_ref() == Some(&p.shown.approval.managed_approval_id))
+    );
+    p.assert_private(&["WYSS_FIXTURE", "printf"]);
+    p.finish();
+}
+#[test]
+fn approval_protocol_presents_and_applies_one_file_change_exactly_once() {
+    let mut p = pending("approval_file", local_scopes());
+    let target = PathBuf::from(&p.workspace).join("wyss-fixture-probe.txt");
+    assert_eq!(p.shown.approval.kind, ApprovalKind::FileChange);
+    assert_eq!(p.shown.file_count, Some(1));
+    let file = p.shown.file.as_ref().unwrap();
+    assert_eq!(file.path, target.to_str().unwrap());
+    assert_eq!(file.kind, FileChangeKind::Add);
+    assert_eq!(
+        (file.chunk.as_str(), file.next_offset, file.diff_bytes),
+        ("+WYSS_FIXTURE_PATCH\n", None, 20)
+    );
+    // The complete proposal is visible and nothing was written while it is pending.
+    thread::sleep(Duration::from_millis(300));
+    assert!(!target.exists());
+    assert_eq!(effects(&p.env, &p.workspace), 0);
+    let accept = p.intent(ApprovalDecision::Accept);
+    let receipt = p.client.approval_respond(accept.clone()).unwrap();
+    assert_eq!(receipt.kind, ApprovalKind::FileChange);
+    assert_eq!(
+        wait_turn(&mut p.client, &p.turn, true).state,
+        TurnState::Completed
+    );
+    assert_eq!(fs::read_to_string(&target).unwrap(), "WYSS_FIXTURE_PATCH\n");
+    assert_eq!(lines(&p.env, "mutations"), 1);
+    assert_eq!(p.client.approval_respond(accept), Ok(receipt));
+    assert_eq!(decisions(&p.env), ["\"accept\""]);
+    assert_eq!(lines(&p.env, "mutations"), 1);
+    assert_eq!(p.status().approval.effect, ApprovalEffect::Confirmed);
+    let lifecycle: Vec<_> = p
+        .stream()
+        .iter()
+        .map(|e| e.kind)
+        .filter(|k| !matches!(k, StreamKind::AssistantMessageDelta))
+        .collect();
+    assert_eq!(
+        lifecycle,
+        [
+            StreamKind::TurnStarted,
+            StreamKind::FileChangeProposed,
+            StreamKind::ApprovalRequired,
+            StreamKind::ApprovalResolved,
+            StreamKind::FileChangeStarted,
+            StreamKind::FileChangeCompleted,
+            StreamKind::TurnCompleted,
+        ]
+    );
+    // Neither the diff nor the path of the change is durable or streamed.
+    let raw = serde_json::to_string(&p.stream()).unwrap();
+    assert!(!raw.contains("WYSS_FIXTURE_PATCH") && !raw.contains("wyss-fixture-probe"));
+    p.assert_private(&["WYSS_FIXTURE", "wyss-fixture-probe"]);
+    p.finish();
+}
+#[test]
+fn approval_protocol_refusals_map_to_the_provider_and_execute_nothing() {
+    use ApprovalDecision::{Cancel, Decline};
+    for (scenario, decision, answer, state, turn) in [
+        (
+            "approval_command",
+            Decline,
+            "\"cancel\"",
+            ApprovalState::Declined,
+            TurnState::Interrupted,
+        ),
+        (
+            "approval_command",
+            Cancel,
+            "\"cancel\"",
+            ApprovalState::Cancelled,
+            TurnState::Interrupted,
+        ),
+        (
+            "approval_file",
+            Decline,
+            "\"decline\"",
+            ApprovalState::Declined,
+            TurnState::Completed,
+        ),
+        (
+            "approval_file",
+            Cancel,
+            "\"cancel\"",
+            ApprovalState::Cancelled,
+            TurnState::Interrupted,
+        ),
+    ] {
+        let mut p = pending(scenario, local_scopes());
+        let label = format!("{scenario}/{decision:?}");
+        let before = p.env.methods().len();
+        let intent = p.intent(decision);
+        let receipt = p.client.approval_respond(intent.clone()).unwrap();
+        assert_eq!(
+            (receipt.decision, receipt.state),
+            (decision, state),
+            "{label}"
+        );
+        let done = wait_turn(&mut p.client, &p.turn, true);
+        assert_eq!(done.state, turn, "{label}");
+        if turn == TurnState::Interrupted {
+            assert_eq!(
+                done.terminal_reason,
+                Some(TurnReason::UserCancel),
+                "{label}"
+            );
+        }
+        // A refusal needs no attestation: the one frame written is the refusal itself.
+        assert_eq!(p.env.methods()[before..], ["RESPONSE"], "{label}");
+        assert_eq!(decisions(&p.env), [answer], "{label}");
+        assert_eq!(p.client.approval_respond(intent), Ok(receipt), "{label}");
+        assert_eq!(decisions(&p.env), [answer], "{label}");
+        assert_eq!(count(&p.env, "turn/interrupt"), 0, "{label}");
+        assert_eq!(effects(&p.env, &p.workspace), 0, "{label}");
+        let settled = p.status();
+        assert_eq!(
+            (settled.approval.state, settled.approval.effect),
+            (state, ApprovalEffect::None),
+            "{label}"
+        );
+        // Accepting what was refused is impossible.
+        let mut late = p.intent(ApprovalDecision::Accept);
+        late.expected_revision = settled.approval.revision;
+        assert_eq!(
+            p.client.approval_respond(late),
+            Err(ControlError::InvalidTransition),
+            "{label}"
+        );
+        let resolved = p
+            .stream()
+            .into_iter()
+            .find(|e| e.kind == StreamKind::ApprovalResolved)
+            .unwrap();
+        assert_eq!(
+            resolved.text.as_deref(),
+            Some(if decision == Decline {
+                "declined"
+            } else {
+                "cancelled"
+            })
+        );
+        p.finish();
+    }
+}
+#[test]
+fn approval_protocol_denies_accept_without_authority_and_writes_no_accept_frame() {
+    // The ORIGINAL lease lacks the scope of the action.
+    let scopes: Vec<_> = local_scopes()
+        .into_iter()
+        .filter(|s| *s != ExecutionScope::CommandExecute)
+        .collect();
+    let mut p = pending("approval_command", scopes);
+    assert_eq!(
+        p.client
+            .approval_respond(p.intent(ApprovalDecision::Accept)),
+        Err(ControlError::GateDenied)
+    );
+    assert!(decisions(&p.env).is_empty());
+    assert_eq!(p.status().approval.state, ApprovalState::Pending);
+    assert_eq!(
+        p.client
+            .gate_status(GateQuery {
+                session_id: p.session.managed_session_id.clone(),
+                action: ExecutionScope::CommandExecute,
+            })
+            .unwrap()
+            .reason,
+        GateReason::ScopeNotGranted
+    );
+    // Refusing it needs no scope.
+    p.client
+        .approval_respond(p.intent(ApprovalDecision::Cancel))
+        .unwrap();
+    wait_turn(&mut p.client, &p.turn, true);
+    assert_eq!(decisions(&p.env), ["\"cancel\""]);
+    assert_eq!(effects(&p.env, &p.workspace), 0);
+    p.finish();
+
+    // The original lease was revoked: a replacement with every scope transfers nothing.
+    let mut p = pending("approval_command", local_scopes());
+    p.client
+        .lease_revoke(LeaseRevoke {
+            intent_id: id(),
+            lease_id: p.lease.lease_id.clone(),
+            expected_revision: p.lease.revision,
+        })
+        .unwrap();
+    p.client
+        .lease_grant(LeaseGrant {
+            intent_id: id(),
+            session_id: p.session.managed_session_id.clone(),
+            expected_session_revision: 1,
+            scopes: local_scopes(),
+            ttl_seconds: 300,
+        })
+        .unwrap();
+    assert_eq!(
+        p.client
+            .approval_respond(p.intent(ApprovalDecision::Accept)),
+        Err(ControlError::InvalidTransition)
+    );
+    let done = wait_turn(&mut p.client, &p.turn, true);
+    assert_eq!(done.terminal_reason, Some(TurnReason::LeaseRevoked));
+    assert_eq!(decisions(&p.env), ["\"cancel\""]);
+    assert_eq!(effects(&p.env, &p.workspace), 0);
+    assert_eq!(
+        (
+            p.status().approval.state,
+            p.status().approval.terminal_reason
+        ),
+        (
+            ApprovalState::Invalidated,
+            Some(ApprovalReason::LeaseRevoked)
+        )
+    );
+    p.finish();
+
+    // Safety drift between the request and the Accept: the profile cannot be re-proven.
+    for drift in ["hooks", "project_policy"] {
+        let mut p = pending("approval_command", local_scopes());
+        if drift == "hooks" {
+            fs::write(p.env.root.join("restore-hooks"), "").unwrap();
+        } else {
+            let layer = PathBuf::from(&p.workspace).join(".codex");
+            fs::create_dir(&layer).unwrap();
+            fs::write(layer.join("config.toml"), "approval_policy = \"never\"\n").unwrap();
+        }
+        assert_eq!(
+            p.client
+                .approval_respond(p.intent(ApprovalDecision::Accept)),
+            Err(ControlError::GateDenied),
+            "{drift}"
+        );
+        let failed = p.env.wait(&mut p.client, ActualState::Failed);
+        assert_eq!(
+            failed.diagnostic,
+            Some(RuntimeDiagnostic::SafetyUnproven),
+            "{drift}"
+        );
+        let turn = wait_turn(&mut p.client, &p.turn, true);
+        assert_eq!(turn.state, TurnState::Indeterminate, "{drift}");
+        let lost = p.status().approval;
+        assert_eq!(
+            (lost.state, lost.terminal_reason, lost.decision),
+            (
+                ApprovalState::Invalidated,
+                Some(ApprovalReason::RuntimeLost),
+                None
+            ),
+            "{drift}"
+        );
+        // No response of any kind was written, and nothing ran.
+        assert!(decisions(&p.env).is_empty(), "{drift}");
+        assert_eq!(count(&p.env, "RESPONSE"), 0, "{drift}");
+        assert_eq!(effects(&p.env, &p.workspace), 0, "{drift}");
+        p.finish();
+    }
+}
+#[test]
+fn accepted_answer_with_an_unknown_outcome_is_indeterminate_and_never_sent_or_run_again() {
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    // The runtime dies after the Accept was written and before it reported any outcome.
+    let mut p = pending("approval_command_slow", local_scopes());
+    let accept = p.intent(ApprovalDecision::Accept);
+    let receipt = p.client.approval_respond(accept.clone()).unwrap();
+    wait_file(&p.env, "executions");
+    let provider = *p.env.pids().last().unwrap();
+    kill(Pid::from_raw(provider), Signal::SIGKILL).unwrap();
+    p.env.wait(&mut p.client, ActualState::Failed);
+    let turn = wait_turn(&mut p.client, &p.turn, true);
+    assert_eq!(turn.state, TurnState::Indeterminate);
+    let unknown = p.status().approval;
+    assert_eq!(
+        (unknown.state, unknown.effect, unknown.decision),
+        (
+            ApprovalState::Indeterminate,
+            ApprovalEffect::Unknown,
+            Some(ApprovalDecision::Accept)
+        )
+    );
+    // The original receipt is still the answer to the same intent; nothing is resent.
+    assert_eq!(
+        p.client.approval_respond(accept.clone()),
+        Ok(receipt.clone())
+    );
+    assert_eq!(decisions(&p.env), ["\"accept\""]);
+    assert_eq!(lines(&p.env, "executions"), 1);
+    // An authority restart and a new generation replay neither the answer nor the action.
+    drop(p.client);
+    p.authority.stop(false);
+    p.authority = p.env.start();
+    p.client = p.env.client();
+    assert_eq!(p.status().approval, unknown);
+    assert_eq!(p.client.approval_respond(accept), Ok(receipt));
+    p.client.runtime_stop(mutation()).unwrap();
+    p.env.wait(&mut p.client, ActualState::Stopped);
+    p.client
+        .runtime_start(local_mutation(&p.workspace))
+        .unwrap();
+    p.env.wait(&mut p.client, ActualState::Ready);
+    assert_eq!(decisions(&p.env), ["\"accept\""]);
+    assert_eq!(lines(&p.env, "executions"), 1);
+    assert_eq!(count(&p.env, "turn/start"), 1);
+    assert_eq!(
+        p.client
+            .binding_status(p.session.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundDetached
+    );
+    p.finish();
+
+    // The provider is gone between the durable dispatch marker and the response frame.
+    let mut p = pending("approval_command_deaf", local_scopes());
+    let accept = p.intent(ApprovalDecision::Accept);
+    let receipt = p.client.approval_respond(accept.clone()).unwrap();
+    assert_eq!(receipt.state, ApprovalState::Accepted);
+    p.env.wait(&mut p.client, ActualState::Failed);
+    let turn = wait_turn(&mut p.client, &p.turn, true);
+    assert_eq!(turn.state, TurnState::Indeterminate);
+    let unknown = p.status().approval;
+    assert_eq!(
+        (unknown.state, unknown.effect),
+        (ApprovalState::Indeterminate, ApprovalEffect::Unknown)
+    );
+    assert_eq!(p.client.approval_respond(accept), Ok(receipt));
+    // The provider never read an answer and nothing ran; the authority wrote at most one.
+    assert!(decisions(&p.env).is_empty());
+    assert_eq!(effects(&p.env, &p.workspace), 0);
+    assert!(
+        p.client
+            .runtime_status()
+            .unwrap()
+            .outbound_methods
+            .approval_accept
+            <= 1
+    );
+    p.finish();
+}

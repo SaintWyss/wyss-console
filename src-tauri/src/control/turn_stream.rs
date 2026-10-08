@@ -19,6 +19,25 @@ pub(super) struct Streams {
 }
 impl Streams {
     pub fn push(&mut self, t: &ManagedTurnRecord, kind: StreamKind, text: Option<&str>) {
+        self.push_event(t, kind, text, None)
+    }
+    /// An approval event: the approval is named, and `text` is its state when terminal.
+    pub fn push_approval(
+        &mut self,
+        t: &ManagedTurnRecord,
+        kind: StreamKind,
+        approval: &crate::contracts::identities::ManagedApprovalId,
+        text: Option<&str>,
+    ) {
+        self.push_event(t, kind, text, Some(approval))
+    }
+    fn push_event(
+        &mut self,
+        t: &ManagedTurnRecord,
+        kind: StreamKind,
+        text: Option<&str>,
+        approval: Option<&crate::contracts::identities::ManagedApprovalId>,
+    ) {
         let key = t.managed_turn_id.as_str().to_ascii_lowercase();
         if !self.rings.contains_key(&key) {
             while self.order.len() >= MAX_TURNS {
@@ -48,6 +67,7 @@ impl Streams {
                 sequence: ring.latest.to_string().parse().unwrap(),
                 kind,
                 text: chunk.map(str::to_owned),
+                managed_approval_id: approval.cloned(),
             };
             let size = serde_json::to_vec(&e)
                 .expect("typed stream serialization")
@@ -93,6 +113,7 @@ impl Streams {
                 sequence: sequence.to_string().parse().unwrap(),
                 kind: StreamKind::StreamGap,
                 text: None,
+                managed_approval_id: None,
             });
         }
         if let Some(r) = ring {

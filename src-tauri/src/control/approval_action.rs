@@ -115,14 +115,12 @@ fn kind_text(kind: FileChangeKind) -> &'static [u8] {
     }
 }
 // Deliberately no Debug on any action type.
-// The presentation accessors are consumed by the control protocol.
 pub(in crate::control) struct CommandAction {
     provider_item_id: String,
     command: String,
     cwd: String,
     parsed_actions: Vec<String>,
 }
-#[allow(dead_code)]
 impl CommandAction {
     pub fn new(
         provider_item_id: &str,
@@ -141,16 +139,25 @@ impl CommandAction {
         {
             return Err(ControlError::InvalidRequest);
         }
-        Ok(Self {
+        let action = Self {
             provider_item_id: provider_item_id.to_owned(),
             command: command.to_owned(),
             cwd: normal_path(cwd, MAX_CWD_BYTES)?,
             parsed_actions,
-        })
+        };
+        // The client is shown the whole command or nothing: never a truncated one.
+        let encoded = serde_json::to_vec(&action.presentation())
+            .map_err(|_| ControlError::InvalidRequest)?
+            .len();
+        if encoded > MAX_COMMAND_PRESENTATION_BYTES {
+            return Err(ControlError::InvalidRequest);
+        }
+        Ok(action)
     }
     pub fn provider_item_id(&self) -> &str {
         &self.provider_item_id
     }
+    #[cfg(test)]
     pub fn cwd(&self) -> &str {
         &self.cwd
     }
@@ -195,7 +202,6 @@ pub(in crate::control) struct FileAction {
     provider_item_id: String,
     changes: Vec<FileChange>,
 }
-#[allow(dead_code)]
 impl FileAction {
     /// The complete proposal: every path normalized, every destination distinct, the set
     /// ordered by path so that the provider's enumeration order carries no meaning.
@@ -236,8 +242,39 @@ impl FileAction {
     pub fn provider_item_id(&self) -> &str {
         &self.provider_item_id
     }
+    #[cfg(test)]
     pub fn changes(&self) -> &[FileChange] {
         &self.changes
+    }
+    pub fn files(&self) -> u16 {
+        self.changes.len() as u16
+    }
+    /// One page of one proposed file: its paths, kind and a bounded part of its complete
+    /// diff. Pages are contiguous and split only on character boundaries, so the client
+    /// reads exactly the change set that was fingerprinted.
+    pub fn page(&self, index: u16, offset: u32) -> ControlResult<FilePresentation> {
+        let change = self
+            .changes
+            .get(usize::from(index))
+            .ok_or(ControlError::InvalidRequest)?;
+        let start = offset as usize;
+        if start > change.diff.len() || !change.diff.is_char_boundary(start) {
+            return Err(ControlError::InvalidRequest);
+        }
+        let mut end = (start + DIFF_PAGE_BYTES).min(change.diff.len());
+        while !change.diff.is_char_boundary(end) {
+            end -= 1;
+        }
+        Ok(FilePresentation {
+            index,
+            path: change.path.clone(),
+            kind: change.kind,
+            move_path: change.move_path.clone(),
+            diff_bytes: change.diff.len() as u32,
+            offset,
+            chunk: change.diff[start..end].to_owned(),
+            next_offset: (end < change.diff.len()).then_some(end as u32),
+        })
     }
     /// SHA-256 over the kind, the provider item and the complete normalized change set:
     /// every path, change kind, move destination and diff.

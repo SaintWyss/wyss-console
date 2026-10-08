@@ -125,6 +125,28 @@ impl ControlClient {
     pub fn turn_cancel(&mut self, p: TurnCancel) -> ControlResult<ManagedTurnRecord> {
         turn(self.call(Operation::TurnCancel(p))?)
     }
+    /// The approval a turn is waiting on, with its action while the authority holds it.
+    pub fn approval_pending(&mut self, id: ManagedTurnId) -> ControlResult<Option<ApprovalStatus>> {
+        match self.call(Operation::ApprovalPending(ApprovalPending {
+            managed_turn_id: id,
+        }))? {
+            ResultValue::PendingApproval(s) => Ok(s.map(|s| *s)),
+            _ => Err(ControlError::InvalidRequest),
+        }
+    }
+    pub fn approval_status(&mut self, p: ApprovalGet) -> ControlResult<ApprovalStatus> {
+        match self.call(Operation::ApprovalStatus(p))? {
+            ResultValue::Approval(s) => Ok(*s),
+            _ => Err(ControlError::InvalidRequest),
+        }
+    }
+    /// A decision intent. The authority derives and revalidates everything else.
+    pub fn approval_respond(&mut self, p: ApprovalRespond) -> ControlResult<ApprovalReceipt> {
+        match self.call(Operation::ApprovalRespond(p))? {
+            ResultValue::ApprovalReceipt(r) => Ok(r),
+            _ => Err(ControlError::InvalidRequest),
+        }
+    }
     pub fn turn_events(&mut self, p: TurnEvents) -> ControlResult<TurnStreamPage> {
         match self.call(Operation::TurnEvents(p))? {
             ResultValue::TurnEvents(page) => Ok(page),
@@ -240,7 +262,10 @@ pub(super) fn exchange(stream: &mut UnixStream, request: &Request) -> ControlRes
     let deadline = Instant::now()
         + if matches!(
             request.operation,
-            Operation::BindingCreate(_) | Operation::BindingResume(_)
+            // These reply only after the runtime answered the authority.
+            Operation::BindingCreate(_)
+                | Operation::BindingResume(_)
+                | Operation::ApprovalRespond(_)
         ) {
             Duration::from_secs(16)
         } else {

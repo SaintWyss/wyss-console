@@ -17,6 +17,9 @@ pub const MAX_FILES: usize = 64;
 pub const MAX_FILE_DIFF_BYTES: usize = 128 * 1024;
 pub const MAX_TOTAL_DIFF_BYTES: usize = 256 * 1024;
 pub const MAX_PROVIDER_ITEM_BYTES: usize = 128;
+/// A command is presented whole, in one control frame. A command whose encoded
+/// presentation would not fit can never be shown in full, so it is never approvable.
+pub const MAX_COMMAND_PRESENTATION_BYTES: usize = 56 * 1024;
 /// Upper bound of a pending approval; the admitted lease expiry may shorten it.
 pub const APPROVAL_TTL_SECONDS: i64 = 300;
 
