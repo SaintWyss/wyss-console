@@ -128,26 +128,18 @@ fn audit(
     kind: &str,
     correlation: Option<&str>,
 ) -> ControlResult<u64> {
-    let n = next_sequence(tx)?;
-    let value = json!({"schema_version":1,"event_id":uuid(),"event_type":format!("authority.managed_approval.{kind}"),"payload_schema_version":1,"timestamp":a.updated_at,"stream_id":stream,"sequence":n.to_string(),"session_id":a.managed_session_id,"source":{"component":"wyss_control","instance_id":instance},"correlation_id":correlation,"causation_id":null,"payload":{"managed_approval_id":a.managed_approval_id,"managed_turn_id":a.managed_turn_id,"kind":a.kind,"lease_id":a.admitted_lease_id,"lease_revision":a.admitted_lease_revision,"runtime_instance_id":a.runtime_instance_id,"state":a.state,"revision":a.revision,"decision":a.decision,"effect":a.effect,"reason":a.terminal_reason,"action_fingerprint":a.action_fingerprint},"persistence":"durable","sensitivity":"internal","redaction":"none"});
-    validate_audit(&value)?;
-    tx.execute(
-        "INSERT INTO control_events VALUES(?1,?2,?3,?4,?5)",
-        params![
-            value["event_id"].as_str().unwrap(),
-            stream.as_str(),
-            key(n),
-            a.managed_session_id.as_str(),
-            serde_json::to_string(&value).map_err(db)?
-        ],
+    events::append(
+        tx,
+        instance,
+        stream,
+        events::Draft {
+            kind: &format!("authority.managed_approval.{kind}"),
+            session: Some(a.managed_session_id.as_str()),
+            correlation,
+            timestamp: enum_text(&a.updated_at)?,
+            payload: json!({"managed_approval_id":a.managed_approval_id,"managed_turn_id":a.managed_turn_id,"kind":a.kind,"lease_id":a.admitted_lease_id,"lease_revision":a.admitted_lease_revision,"runtime_instance_id":a.runtime_instance_id,"state":a.state,"revision":a.revision,"decision":a.decision,"effect":a.effect,"reason":a.terminal_reason,"action_fingerprint":a.action_fingerprint}),
+        },
     )
-    .map_err(db)?;
-    tx.execute(
-        "UPDATE authority_metadata SET last_sequence=?1 WHERE id=1",
-        [n.to_string()],
-    )
-    .map_err(db)?;
-    Ok(n)
 }
 pub(super) fn validate_audit(v: &Value) -> ControlResult<()> {
     let p = v["payload"]

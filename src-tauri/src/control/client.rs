@@ -241,6 +241,16 @@ impl ControlClient {
             Err(ControlError::InvalidRequest)
         }
     }
+    /// Durable events after the caller's own cursor, waiting up to `wait_ms` for the next
+    /// commit when there are none yet. The cursor is the caller's: nothing is consumed.
+    pub fn audit_watch(&mut self, p: AuditWatch) -> ControlResult<ResultValue> {
+        let r = self.call(Operation::AuditWatch(p))?;
+        if matches!(r, ResultValue::Audit { .. }) {
+            Ok(r)
+        } else {
+            Err(ControlError::InvalidRequest)
+        }
+    }
     pub fn audit(&mut self, p: AuditRead) -> ControlResult<ResultValue> {
         let r = self.call(Operation::AuditRead(p))?;
         if matches!(r, ResultValue::Audit { .. }) {
@@ -260,7 +270,10 @@ fn session(r: ResultValue) -> ControlResult<ManagedSessionRecord> {
 pub(super) fn exchange(stream: &mut UnixStream, request: &Request) -> ControlResult<Response> {
     let stop = AtomicBool::new(false);
     let deadline = Instant::now()
-        + if matches!(
+        + if let Operation::AuditWatch(p) = &request.operation {
+            // The authority answers within the requested wait; the margin is transport.
+            Duration::from_millis(p.wait_ms.into()) + Duration::from_secs(5)
+        } else if matches!(
             request.operation,
             // These reply only after the runtime answered the authority.
             Operation::BindingCreate(_)

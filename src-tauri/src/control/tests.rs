@@ -520,6 +520,7 @@ fn protocol_hello_and_method_allowlist() {
             "managedSession/list",
             "managedSession/close",
             "audit/read",
+            "audit/watch",
             "runtime/start",
             "runtime/status",
             "runtime/model/list",

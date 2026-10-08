@@ -93,30 +93,22 @@ fn event(
     kind: &str,
     now: OffsetDateTime,
 ) -> ControlResult<()> {
-    let n = next_sequence(tx)?;
     let mut payload = json!({"lease_id":l.lease_id,"scopes":l.scopes,"lease_state":l.state,"revision":l.revision,"expires_at":l.expires_at});
     if let Some(reason) = l.revocation_reason {
         payload["revocation_reason"] = json!(reason);
     }
-    let v = json!({"schema_version":1,"event_id":uuid(),"event_type":kind,"payload_schema_version":1,"timestamp":text(now)?,"stream_id":stream,"sequence":n.to_string(),"session_id":l.session_id,"source":{"component":"wyss_control","instance_id":instance},"correlation_id":intent,"causation_id":null,"payload":payload,"persistence":"durable","sensitivity":"internal","redaction":"none"});
-    validate_audit(&v)?;
-    let e = EventEnvelopeV1::from_value(v.clone()).map_err(invalid)?;
-    tx.execute(
-        "INSERT INTO control_events VALUES(?1,?2,?3,?4,?5)",
-        params![
-            v["event_id"].as_str().unwrap(),
-            stream.as_str(),
-            key(n),
-            l.session_id.as_str(),
-            serde_json::to_string(&e).map_err(db)?
-        ],
-    )
-    .map_err(db)?;
-    tx.execute(
-        "UPDATE authority_metadata SET last_sequence=?1 WHERE id=1",
-        [n.to_string()],
-    )
-    .map_err(db)?;
+    events::append(
+        tx,
+        instance,
+        stream,
+        events::Draft {
+            kind,
+            session: Some(l.session_id.as_str()),
+            correlation: intent,
+            timestamp: text(now)?,
+            payload,
+        },
+    )?;
     Ok(())
 }
 fn expire(
@@ -264,19 +256,36 @@ impl Store {
     pub(in crate::control) fn set_clock(&mut self, c: Arc<dyn Clock>) {
         self.clock = c;
     }
-    pub(super) fn verify_leases(&self) -> ControlResult<()> {
+    /// Every lease row is the latest revision the log recorded for it, and nothing else is.
+    pub(super) fn verify_leases(
+        &self,
+        heads: &std::collections::HashMap<String, events::Head>,
+    ) -> ControlResult<()> {
         let mut q = self
             .conn
             .prepare("SELECT lease_id FROM execution_leases")
             .map_err(invalid)?;
         let ids = q
             .query_map([], |r| r.get::<_, String>(0))
+            .map_err(invalid)?
+            .collect::<Result<Vec<_>, _>>()
             .map_err(invalid)?;
+        if ids.len() != heads.len() {
+            return Err(ControlError::StorageIncompatible);
+        }
         for id in ids {
-            let l = read(&self.conn, &id.map_err(invalid)?)?;
+            let l = read(&self.conn, &id)?;
             if l.state == LeaseState::Active
                 && get_session(&self.conn, l.session_id.as_str())?.control_state
                     != ControlState::Prepared
+            {
+                return Err(ControlError::StorageIncompatible);
+            }
+            if heads.get(&id)
+                != Some(&events::Head {
+                    state: enum_text(&l.state).map_err(invalid)?,
+                    revision: l.revision,
+                })
             {
                 return Err(ControlError::StorageIncompatible);
             }

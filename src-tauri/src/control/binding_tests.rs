@@ -225,11 +225,42 @@ fn audit_failure_rolls_back_binding_receipt_and_success_marker() {
             .is_none()
     );
     assert_eq!(f.store.status().unwrap().last_sequence, n);
+    // Declaring the operation uncertain needs its own audit event: without it the
+    // operation stays open, which blocks the session just as closed.
+    assert!(f.store.fail_binding(&r, true).is_err());
+    assert!(matches!(
+        f.store.binding_receipt(&op),
+        Err(ControlError::RuntimeOperationInProgress)
+    ));
+    assert!(matches!(
+        f.store.reserve_binding(&f.create()),
+        Err(ControlError::BindingIndeterminate)
+    ));
+    assert_eq!(f.store.status().unwrap().last_sequence, n);
+    f.store.conn.execute_batch("DROP TRIGGER injected").unwrap();
     f.store.fail_binding(&r, true).unwrap();
     assert!(matches!(
         f.store.binding_receipt(&op),
         Err(ControlError::BindingIndeterminate)
     ));
+    let (kind, operation): (String, String) = f
+        .store
+        .conn
+        .query_row(
+            "SELECT json_extract(envelope,'$.event_type'),json_extract(envelope,'$.payload.operation_id') FROM control_events ORDER BY sequence DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        kind,
+        "authority.managed_session.runtime_operation_indeterminate"
+    );
+    assert_eq!(operation, r.operation_id.as_str());
+    // Settling twice records the uncertainty once.
+    let head = f.store.status().unwrap().last_sequence;
+    f.store.fail_binding(&r, true).unwrap();
+    assert_eq!(f.store.status().unwrap().last_sequence, head);
 }
 #[test]
 fn resume_uses_immutable_binding_and_preserves_binding_revision() {

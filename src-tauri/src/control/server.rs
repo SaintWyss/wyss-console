@@ -4,6 +4,7 @@ use super::{
     runtime::{Observation, Runtime},
     store::{Store, uuid},
     turns::Verdict,
+    watch::{EventSignal, Wake},
 };
 use crate::contracts::{WireUuid, control::*};
 use nix::{
@@ -129,11 +130,54 @@ pub(crate) fn peer(stream: &UnixStream) -> ControlResult<()> {
         getsockopt(stream, sockopt::PeerCredentials).map_err(|_| ControlError::PeerRejected)?;
     check_uid(creds.uid())
 }
+/// One request to the single-writer core. The connection never touches the store itself.
+fn ask(core: &SyncSender<CoreMessage>, op: Operation) -> ControlResult<ResultValue> {
+    let (reply, rx) = mpsc::sync_channel(1);
+    match core.try_send(CoreMessage::Client(Job { op, reply })) {
+        Ok(()) => rx
+            .recv_timeout(Duration::from_secs(15))
+            .unwrap_or(Err(ControlError::StorageUnavailable)),
+        Err(mpsc::TrySendError::Full(_)) => Err(ControlError::CapacityExceeded),
+        Err(_) => Err(ControlError::StorageUnavailable),
+    }
+}
+/// A durable-event watch. Both reads run in the core and finish before this returns to
+/// the socket; the wait in between holds no transaction, no core slot and no store lock,
+/// only one of the bounded watcher slots. `None` means there is nobody left to answer.
+fn watch(
+    core: &SyncSender<CoreMessage>,
+    signal: &Arc<EventSignal>,
+    stream: &UnixStream,
+    p: &AuditWatch,
+) -> Option<ControlResult<ResultValue>> {
+    let read = || ask(core, Operation::AuditWatch(p.clone()));
+    let first = match read() {
+        Ok(r) => r,
+        Err(e) => return Some(Err(e)),
+    };
+    if p.wait_ms == 0 || !matches!(&first, ResultValue::Audit { events, .. } if events.is_empty()) {
+        return Some(Ok(first));
+    }
+    let mut waiter = match signal.register() {
+        Ok(w) => w,
+        Err(e) => return Some(Err(e)),
+    };
+    let deadline = Instant::now() + Duration::from_millis(p.wait_ms.into());
+    let woke = waiter.wait(p.after_sequence.map_or(0, |s| s.get()), stream, deadline);
+    drop(waiter);
+    match woke {
+        // The wakeup is only a hint: the events come from SQLite, by the client's cursor.
+        Wake::Advanced => Some(read()),
+        Wake::Elapsed | Wake::ClientSpoke => Some(Ok(first)),
+        Wake::Closed | Wake::ClientGone => None,
+    }
+}
 fn connection(
     mut stream: UnixStream,
     core: SyncSender<CoreMessage>,
     instance: WireUuid,
     stop: Arc<AtomicBool>,
+    signal: Arc<EventSignal>,
 ) {
     if peer(&stream).is_err() || stream.set_nonblocking(true).is_err() {
         return;
@@ -171,18 +215,13 @@ fn connection(
             Err(ControlError::HandshakeRequired)
         } else if hello && is_hello {
             Err(ControlError::InvalidRequest)
-        } else {
-            let (reply, rx) = mpsc::sync_channel(1);
-            match core.try_send(CoreMessage::Client(Job {
-                op: request.operation,
-                reply,
-            })) {
-                Ok(()) => rx
-                    .recv_timeout(Duration::from_secs(15))
-                    .unwrap_or(Err(ControlError::StorageUnavailable)),
-                Err(mpsc::TrySendError::Full(_)) => Err(ControlError::CapacityExceeded),
-                Err(_) => Err(ControlError::StorageUnavailable),
+        } else if let Operation::AuditWatch(p) = &request.operation {
+            match watch(&core, &signal, &stream, p) {
+                Some(outcome) => outcome,
+                None => return,
             }
+        } else {
+            ask(&core, request.operation)
         };
         let success = outcome.is_ok();
         let response = Response {
@@ -220,6 +259,8 @@ pub fn run_from_environment() -> ControlResult<()> {
     let mut store = Store::open(&paths.state.join("control.sqlite3"), instance.clone())?;
     let (listener, _socket) = bind(&paths.runtime.join("control.sock"))?;
     let stop = Arc::new(AtomicBool::new(false));
+    let signal = EventSignal::new();
+    let core_signal = signal.clone();
     let (sender, receiver) = mpsc::sync_channel::<CoreMessage>(QUEUE);
     let core_sender = sender.clone();
     let core_stop = stop.clone();
@@ -238,6 +279,12 @@ pub fn run_from_environment() -> ControlResult<()> {
         let mut next_expiry = refresh_expiry(&mut store);
         runtime.reconcile(&mut store, &core_sender, true)?;
         loop {
+            // Every path of this loop returns here, after its transactions committed or
+            // rolled back. Watchers are told the committed head and nothing else; a failed
+            // read announces nothing, which costs them latency and never an event.
+            if let Ok(head) = store.head() {
+                core_signal.publish(head);
+            }
             // A bounded wall-clock recheck handles clock changes, without SQLite polling.
             if next_expiry.is_some_and(|t| store.lease_now() >= t) {
                 conversations.invalidate_admission();
@@ -587,14 +634,17 @@ pub fn run_from_environment() -> ControlResult<()> {
                 let tx = sender.clone();
                 let instance = instance.clone();
                 let stop = stop.clone();
+                let signal = signal.clone();
                 workers.push(thread::spawn(move || {
-                    connection(stream, tx, instance, stop)
+                    connection(stream, tx, instance, stop, signal)
                 }));
             }
         }
         Ok(())
     })();
     stop.store(true, Ordering::Release);
+    // No watcher delays shutdown for the rest of its wait.
+    signal.close();
     drop(listener);
     // Cancel owned provider IO before waiting for clients blocked on a pending operation.
     let _ = sender.send(CoreMessage::Shutdown);

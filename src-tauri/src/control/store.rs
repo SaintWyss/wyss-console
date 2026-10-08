@@ -2,6 +2,8 @@
 pub(in crate::control) mod approvals;
 #[path = "bindings.rs"]
 pub(in crate::control) mod bindings;
+#[path = "events.rs"]
+pub(in crate::control) mod events;
 #[path = "leases.rs"]
 mod leases;
 #[cfg(test)]
@@ -116,7 +118,8 @@ impl Store {
         let mut query=self.conn.prepare("SELECT event_id,stream_id,sequence,session_id,envelope FROM control_events ORDER BY sequence").map_err(invalid)?;
         let mut rows = query.query([]).map_err(invalid)?;
         let mut n = 0u64;
-        let mut approval_heads = approvals::AuditHeads::new();
+        // A read-only view of what the log says happened, compared below with the tables.
+        let mut replay = events::Replay::default();
         while let Some(r) = rows.next().map_err(invalid)? {
             n = n.checked_add(1).ok_or(ControlError::StorageIncompatible)?;
             let id: String = r.get(0).map_err(invalid)?;
@@ -124,23 +127,18 @@ impl Store {
             let order: String = r.get(2).map_err(invalid)?;
             let session: Option<String> = r.get(3).map_err(invalid)?;
             let raw: String = r.get(4).map_err(invalid)?;
-            let v: Value = serde_json::from_str(&raw).map_err(invalid)?;
-            let e = EventEnvelopeV1::from_value(v.clone()).map_err(invalid)?;
+            let (v, e) = events::decode(&raw)?;
             if id != v["event_id"]
                 || stream != self.stream.as_str()
+                || v["stream_id"] != self.stream.as_str()
                 || order != key(n)
                 || e.sequence().get() != n
                 || serde_json::to_value(session).map_err(invalid)? != v["session_id"]
             {
                 return Err(ControlError::StorageIncompatible);
             }
-            validate_audit(&v)?;
-            if v["event_type"]
-                .as_str()
-                .is_some_and(|k| k.starts_with("authority.managed_approval."))
-            {
-                approvals::fold_audit(&mut approval_heads, &v)?;
-            }
+            // A known event is held to its contract; an unknown future one is only counted.
+            replay.observe(&v)?;
         }
         if head != n {
             return Err(ControlError::StorageIncompatible);
@@ -151,13 +149,27 @@ impl Store {
             .map_err(invalid)?;
         let ids = q
             .query_map([], |r| r.get::<_, String>(0))
+            .map_err(invalid)?
+            .collect::<Result<Vec<_>, _>>()
             .map_err(invalid)?;
-        for id in ids {
-            get_session(&self.conn, &id.map_err(invalid)?)?.validate()?;
+        if ids.len() != replay.sessions.len() {
+            return Err(ControlError::StorageIncompatible);
         }
-        self.verify_leases()?;
-        self.verify_bindings()?;
-        self.verify_turns()?;
+        for id in ids {
+            let s = get_session(&self.conn, &id)?;
+            s.validate()?;
+            if replay.sessions.get(&id)
+                != Some(&events::Head {
+                    state: enum_text(&s.control_state).map_err(invalid)?,
+                    revision: s.revision,
+                })
+            {
+                return Err(ControlError::StorageIncompatible);
+            }
+        }
+        self.verify_leases(&replay.leases)?;
+        self.verify_bindings(&replay)?;
+        self.verify_turns(&replay.turns)?;
         // Receipts contain only typed minimal mutations and their original session projection.
         let mut q = self
             .conn
@@ -195,9 +207,21 @@ impl Store {
             let result: String = r.get(2).map_err(invalid)?;
             decode_receipt(&op, &result)?;
         }
-        self.verify_approvals(&approval_heads, &decided_approvals)?;
-        if let Some(runtime) = self.runtime_control()? {
+        self.verify_approvals(&replay.approvals, &decided_approvals)?;
+        let runtime = self.runtime_control()?;
+        if let Some(runtime) = &runtime {
             runtime.validate()?;
+        }
+        let desired = runtime
+            .map(|r| {
+                Ok::<_, ControlError>(events::Head {
+                    state: enum_text(&r.desired_state).map_err(invalid)?,
+                    revision: r.revision,
+                })
+            })
+            .transpose()?;
+        if desired != replay.runtime {
+            return Err(ControlError::StorageIncompatible);
         }
         let count: i64 = self
             .conn
@@ -270,34 +294,9 @@ impl Store {
                 };
                 Ok(ResultValue::Sessions { sessions, next })
             }
-            Operation::AuditRead(p) => {
-                if canonical(p.stream_id.as_str()) != self.stream.as_str() {
-                    return Err(ControlError::InvalidRequest);
-                }
-                let mut q=self.conn.prepare("SELECT envelope FROM control_events WHERE stream_id=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3").map_err(db)?;
-                let rows = q
-                    .query_map(
-                        params![
-                            self.stream.as_str(),
-                            key(p.after_sequence.map_or(0, |s| s.get())),
-                            p.limit
-                        ],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .map_err(db)?;
-                let mut events = Vec::new();
-                for row in rows {
-                    let raw = row.map_err(db)?;
-                    let event: EventEnvelopeV1 = serde_json::from_str(&raw).map_err(invalid)?;
-                    events.push(event);
-                }
-                let next = if events.len() == p.limit as usize {
-                    events.last().map(|e| e.sequence())
-                } else {
-                    None
-                };
-                Ok(ResultValue::Audit { events, next })
-            }
+            Operation::AuditRead(p) => self.replay(&p.stream_id, p.after_sequence, p.limit),
+            // The wait happens outside the core; here a watch is the same bounded read.
+            Operation::AuditWatch(p) => self.replay(&p.stream_id, p.after_sequence, p.limit),
             Operation::LeaseGet(p) => Ok(ResultValue::Lease(
                 leases::read(&self.conn, p.lease_id.as_str())?.effective_at(self.clock.now())?,
             )),
@@ -325,7 +324,18 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(db)?;
-        append_runtime_event(&tx, &self.instance, &self.stream, None, kind, payload)?;
+        events::append(
+            &tx,
+            &self.instance,
+            &self.stream,
+            events::Draft {
+                kind,
+                session: None,
+                correlation: None,
+                timestamp: now()?,
+                payload,
+            },
+        )?;
         tx.commit().map_err(db)
     }
     fn mutate(&mut self, op: &Operation) -> ControlResult<ResultValue> {
@@ -415,13 +425,17 @@ impl Store {
                 updated_at: time.clone().try_into().map_err(invalid)?,
             };
             tx.execute("INSERT INTO managed_runtimes VALUES('codex','codex',?1,?2,?3,?4) ON CONFLICT(adapter_id) DO UPDATE SET desired_state=excluded.desired_state,revision=excluded.revision,updated_at=excluded.updated_at",params![enum_text(&runtime.desired_state)?,revision as i64,enum_text(&runtime.created_at)?,time]).map_err(db)?;
-            append_runtime_event(
+            events::append(
                 &tx,
                 &self.instance,
                 &self.stream,
-                Some(&intent_id),
-                "authority.runtime.desired_state_changed",
-                json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":runtime.desired_state,"revision":revision}),
+                events::Draft {
+                    kind: "authority.runtime.desired_state_changed",
+                    session: None,
+                    correlation: Some(&intent_id),
+                    timestamp: now()?,
+                    payload: json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":runtime.desired_state,"revision":revision}),
+                },
             )?;
             tx.execute(
                 "INSERT INTO processed_intents VALUES(?1,?2,?3)",
@@ -437,9 +451,12 @@ impl Store {
         }
         let time = now()?;
         let mut append = true;
+        // The sequence a new session records as its own must be the one its event takes.
+        let mut created = None;
         let (session, kind) = match op {
             Operation::Prepare(p) => {
                 let n = next_sequence(&tx)?;
+                created = Some(n);
                 let session = ManagedSessionRecord {
                     managed_session_id: ManagedSessionId::parse(uuid().as_str())
                         .map_err(invalid)?,
@@ -490,15 +507,21 @@ impl Store {
             _ => return Err(ControlError::InvalidRequest),
         };
         if append {
-            append_event(
+            let appended = events::append(
                 &tx,
                 &self.instance,
                 &self.stream,
-                &intent_id,
-                &session,
-                kind,
-                &time,
+                events::Draft {
+                    kind,
+                    session: Some(session.managed_session_id.as_str()),
+                    correlation: Some(&intent_id),
+                    timestamp: time.clone(),
+                    payload: json!({"adapter_id":session.adapter_id,"runtime_kind":session.runtime_kind,"control_state":session.control_state,"revision":session.revision}),
+                },
             )?;
+            if created.is_some_and(|n| n != appended) {
+                return Err(ControlError::InternalError);
+            }
         }
         let result = serde_json::to_string(&session).map_err(db)?;
         tx.execute(
@@ -552,41 +575,6 @@ fn next_sequence(tx: &Transaction<'_>) -> ControlResult<u64> {
         .checked_add(1)
         .ok_or(ControlError::CapacityExceeded)
 }
-fn append_event(
-    tx: &Transaction<'_>,
-    instance: &WireUuid,
-    stream: &WireUuid,
-    intent: &str,
-    s: &ManagedSessionRecord,
-    kind: &str,
-    time: &str,
-) -> ControlResult<()> {
-    let n = next_sequence(tx)?;
-    let value = json!({"schema_version":1,"event_id":uuid(),"event_type":kind,"payload_schema_version":1,
-        "timestamp":time,"stream_id":stream,"sequence":n.to_string(),"session_id":s.managed_session_id,
-        "source":{"component":"wyss_control","instance_id":instance},"correlation_id":intent,"causation_id":null,
-        "payload":{"adapter_id":s.adapter_id,"runtime_kind":s.runtime_kind,"control_state":s.control_state,"revision":s.revision},
-        "persistence":"durable","sensitivity":"internal","redaction":"none"});
-    validate_audit(&value)?;
-    let event = EventEnvelopeV1::from_value(value.clone()).map_err(invalid)?;
-    tx.execute(
-        "INSERT INTO control_events VALUES(?1,?2,?3,?4,?5)",
-        params![
-            value["event_id"].as_str().unwrap(),
-            stream.as_str(),
-            key(n),
-            s.managed_session_id.as_str(),
-            serde_json::to_string(&event).map_err(db)?
-        ],
-    )
-    .map_err(db)?;
-    tx.execute(
-        "UPDATE authority_metadata SET last_sequence=?1 WHERE id=1",
-        [n.to_string()],
-    )
-    .map_err(db)?;
-    Ok(())
-}
 fn decode_receipt(op: &Operation, raw: &str) -> ControlResult<ResultValue> {
     if matches!(op, Operation::TurnCancel(_)) {
         let t: ManagedTurnRecord = serde_json::from_str(raw).map_err(invalid)?;
@@ -630,35 +618,6 @@ fn read_runtime(c: &Connection) -> ControlResult<Option<RuntimeControlRecord>> {
         let r:RuntimeControlRecord=serde_json::from_value(json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":state,"revision":revision,"created_at":created,"updated_at":updated})).map_err(invalid)?;
         r.validate()?; Ok(r)
     }).transpose()
-}
-fn append_runtime_event(
-    tx: &Transaction<'_>,
-    instance: &WireUuid,
-    stream: &WireUuid,
-    intent: Option<&str>,
-    kind: &str,
-    payload: Value,
-) -> ControlResult<()> {
-    let n = next_sequence(tx)?;
-    let value = json!({"schema_version":1,"event_id":uuid(),"event_type":kind,"payload_schema_version":1,"timestamp":now()?,"stream_id":stream,"sequence":n.to_string(),"session_id":null,"source":{"component":"wyss_control","instance_id":instance},"correlation_id":intent,"causation_id":null,"payload":payload,"persistence":"durable","sensitivity":"internal","redaction":"none"});
-    validate_audit(&value)?;
-    let event = EventEnvelopeV1::from_value(value.clone()).map_err(invalid)?;
-    tx.execute(
-        "INSERT INTO control_events VALUES(?1,?2,?3,NULL,?4)",
-        params![
-            value["event_id"].as_str().unwrap(),
-            stream.as_str(),
-            key(n),
-            serde_json::to_string(&event).map_err(db)?
-        ],
-    )
-    .map_err(db)?;
-    tx.execute(
-        "UPDATE authority_metadata SET last_sequence=?1 WHERE id=1",
-        [n.to_string()],
-    )
-    .map_err(db)?;
-    Ok(())
 }
 fn validate_audit(v: &Value) -> ControlResult<()> {
     let kind = v["event_type"]

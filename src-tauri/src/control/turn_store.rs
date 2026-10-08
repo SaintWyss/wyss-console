@@ -49,25 +49,18 @@ fn audit(
     correlation: Option<&str>,
     reason: Option<TurnReason>,
 ) -> ControlResult<()> {
-    let n = next_sequence(tx)?;
-    let value = json!({"schema_version":1,"event_id":uuid(),"event_type":format!("authority.managed_turn.{kind}"),"payload_schema_version":1,"timestamp":t.updated_at,"stream_id":stream,"sequence":n.to_string(),"session_id":t.managed_session_id,"source":{"component":"wyss_control","instance_id":instance},"correlation_id":correlation,"causation_id":null,"payload":{"managed_turn_id":t.managed_turn_id,"codex_turn_id":t.codex_turn_id,"lease_id":t.admitted_lease_id,"lease_revision":t.admitted_lease_revision,"runtime_instance_id":t.runtime_instance_id,"state":t.state,"revision":t.revision,"reason":reason},"persistence":"durable","sensitivity":"internal","redaction":"none"});
-    validate_audit(&value)?;
-    tx.execute(
-        "INSERT INTO control_events VALUES(?1,?2,?3,?4,?5)",
-        params![
-            value["event_id"].as_str().unwrap(),
-            stream.as_str(),
-            key(n),
-            t.managed_session_id.as_str(),
-            serde_json::to_string(&value).map_err(db)?
-        ],
-    )
-    .map_err(db)?;
-    tx.execute(
-        "UPDATE authority_metadata SET last_sequence=?1 WHERE id=1",
-        [n.to_string()],
-    )
-    .map_err(db)?;
+    events::append(
+        tx,
+        instance,
+        stream,
+        events::Draft {
+            kind: &format!("authority.managed_turn.{kind}"),
+            session: Some(t.managed_session_id.as_str()),
+            correlation,
+            timestamp: enum_text(&t.updated_at)?,
+            payload: json!({"managed_turn_id":t.managed_turn_id,"codex_turn_id":t.codex_turn_id,"lease_id":t.admitted_lease_id,"lease_revision":t.admitted_lease_revision,"runtime_instance_id":t.runtime_instance_id,"state":t.state,"revision":t.revision,"reason":reason}),
+        },
+    )?;
     Ok(())
 }
 pub(super) fn validate_audit(v: &Value) -> ControlResult<()> {
@@ -85,7 +78,6 @@ pub(super) fn validate_audit(v: &Value) -> ControlResult<()> {
         "failed",
         "indeterminate",
         "cancel_requested",
-        "isolation_violation",
     ]
     .iter()
     .any(|k| kind == format!("authority.managed_turn.{k}"))
@@ -107,6 +99,7 @@ pub(super) fn validate_audit(v: &Value) -> ControlResult<()> {
         || v["redaction"] != "none"
         || v["source"]["component"] != "wyss_control"
         || !v["causation_id"].is_null()
+        || v["payload_schema_version"] != 1
     {
         return Err(ControlError::StorageIncompatible);
     }
@@ -385,7 +378,18 @@ impl Store {
         }
         Ok(())
     }
-    pub(super) fn verify_turns(&self) -> ControlResult<()> {
+    /// Every turn row is the latest revision the log recorded for it, and nothing else is.
+    pub(super) fn verify_turns(
+        &self,
+        heads: &std::collections::HashMap<String, events::Head>,
+    ) -> ControlResult<()> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT count(*) FROM managed_turns", [], |r| r.get(0))
+            .map_err(invalid)?;
+        if usize::try_from(count).map_err(invalid)? != heads.len() {
+            return Err(ControlError::StorageIncompatible);
+        }
         let mut q = self
             .conn
             .prepare("SELECT managed_turn_id,intent_id,intent_mutation,prompt_fingerprint,prompt_byte_length FROM managed_turns")
@@ -404,6 +408,14 @@ impl Store {
         for row in rows {
             let (id, intent, mutation, digest, bytes) = row.map_err(invalid)?;
             let t = read(&self.conn, &id)?;
+            if heads.get(&id)
+                != Some(&events::Head {
+                    state: enum_text(&t.state).map_err(invalid)?,
+                    revision: t.revision,
+                })
+            {
+                return Err(ControlError::StorageIncompatible);
+            }
             let manifest: Value = serde_json::from_str(&mutation).map_err(invalid)?;
             let fingerprint: StartFingerprint =
                 serde_json::from_value(manifest["params"].clone()).map_err(invalid)?;

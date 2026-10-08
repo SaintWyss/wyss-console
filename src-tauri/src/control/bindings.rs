@@ -220,14 +220,46 @@ impl Store {
         r: &Reservation,
         uncertain: bool,
     ) -> ControlResult<()> {
-        self.conn.execute("UPDATE managed_session_operations SET state=CASE WHEN kind='resume' THEN 'failed' ELSE ?1 END,updated_at=?2 WHERE operation_id=?3 AND state IN ('reserved','dispatching')",params![if uncertain{"indeterminate"}else{"failed"},now()?,canonical(r.operation_id.as_str())]).map_err(db)?;
-        Ok(())
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db)?;
+        settle_operation(
+            &tx,
+            &self.instance,
+            &self.stream,
+            &canonical(r.operation_id.as_str()),
+            uncertain,
+        )?;
+        tx.commit().map_err(db)
     }
     pub(in crate::control) fn recover_binding_operations(&mut self) -> ControlResult<()> {
-        // A dispatch marker is committed before enqueue/write; conservatively uncertain even
-        // if the parent died before the worker received it. Reserved is provably not dispatched.
-        self.conn.execute("UPDATE managed_session_operations SET state=CASE WHEN state='reserved' OR kind='resume' THEN 'failed' ELSE 'indeterminate' END,updated_at=?1 WHERE state IN ('reserved','dispatching')",[now()?]).map_err(db)?;
-        Ok(())
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db)?;
+        let open = {
+            let mut q = tx
+                .prepare("SELECT operation_id,state FROM managed_session_operations WHERE state IN ('reserved','dispatching') ORDER BY created_at,operation_id")
+                .map_err(db)?;
+            q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                .map_err(db)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(db)?
+        };
+        for (id, state) in open {
+            // A dispatch marker is committed before enqueue/write; conservatively uncertain
+            // even if the parent died before the worker received it. Reserved is provably
+            // not dispatched.
+            settle_operation(
+                &tx,
+                &self.instance,
+                &self.stream,
+                &id,
+                state == "dispatching",
+            )?;
+        }
+        tx.commit().map_err(db)
     }
     pub(in crate::control) fn commit_binding(
         &mut self,
@@ -353,16 +385,46 @@ impl Store {
         tx.commit().map_err(db)?;
         Ok(ResultValue::BindingAbandoned(result))
     }
-    pub(super) fn verify_bindings(&self) -> ControlResult<()> {
+    /// Every binding row is the one the log recorded, and an operation the log declared
+    /// uncertain is still uncertain or was abandoned.
+    pub(super) fn verify_bindings(&self, replay: &events::Replay) -> ControlResult<()> {
         let mut q = self
             .conn
             .prepare("SELECT managed_session_id FROM managed_session_bindings")
             .map_err(invalid)?;
-        for id in q
+        let ids = q
             .query_map([], |r| r.get::<_, String>(0))
             .map_err(invalid)?
-        {
-            read(&self.conn, &id.map_err(invalid)?)?.ok_or(ControlError::StorageIncompatible)?;
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(invalid)?;
+        if ids.len() != replay.bound.len() {
+            return Err(ControlError::StorageIncompatible);
+        }
+        for id in ids {
+            let b = read(&self.conn, &id)?.ok_or(ControlError::StorageIncompatible)?;
+            if replay.bound.get(&id).map(String::as_str) != Some(b.runtime_session_id.as_str()) {
+                return Err(ControlError::StorageIncompatible);
+            }
+        }
+        for (operation, abandoned) in &replay.uncertain {
+            let state: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT state FROM managed_session_operations WHERE operation_id=?1 AND kind='create'",
+                    [operation],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(invalid)?;
+            if state.as_deref()
+                != Some(if *abandoned {
+                    "failed"
+                } else {
+                    "indeterminate"
+                })
+            {
+                return Err(ControlError::StorageIncompatible);
+            }
         }
         let mut q=self.conn.prepare("SELECT operation_id,managed_session_id,kind,mutation,state,provider_request_id,created_at,updated_at,provider_thread_id,provider_stage FROM managed_session_operations").map_err(invalid)?;
         let mut rows = q.query([]).map_err(invalid)?;
@@ -420,6 +482,51 @@ impl Store {
         Ok(())
     }
 }
+/// Ends one open operation without a binding. A resume has no external effect to lose and
+/// a definite failure leaves the authority exactly as before the attempt, so neither is
+/// an event. An uncertain create may have left a provider thread behind: that outcome
+/// blocks the session until it is abandoned, and it is audited in the same transaction.
+fn settle_operation(
+    tx: &Transaction<'_>,
+    instance: &WireUuid,
+    stream: &WireUuid,
+    operation: &str,
+    uncertain: bool,
+) -> ControlResult<()> {
+    let open: Option<(String, String)> = tx
+        .query_row(
+            "SELECT managed_session_id,kind FROM managed_session_operations WHERE operation_id=?1 AND state IN ('reserved','dispatching')",
+            [operation],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(db)?;
+    let Some((session, kind)) = open else {
+        return Ok(());
+    };
+    let uncertain = uncertain && kind == "create";
+    tx.execute(
+        "UPDATE managed_session_operations SET state=?1,updated_at=?2 WHERE operation_id=?3",
+        params![
+            if uncertain { "indeterminate" } else { "failed" },
+            now()?,
+            operation
+        ],
+    )
+    .map_err(db)?;
+    if uncertain {
+        append_binding_event(
+            tx,
+            instance,
+            stream,
+            &ManagedSessionId::parse(&session).map_err(invalid)?,
+            operation,
+            "authority.managed_session.runtime_operation_indeterminate",
+            json!({"operation_id":operation}),
+        )?;
+    }
+    Ok(())
+}
 fn append_binding_event(
     tx: &Transaction<'_>,
     instance: &WireUuid,
@@ -429,26 +536,18 @@ fn append_binding_event(
     kind: &str,
     payload: Value,
 ) -> ControlResult<()> {
-    let n = next_sequence(tx)?;
-    let v = json!({"schema_version":1,"event_id":uuid(),"event_type":kind,"payload_schema_version":1,"timestamp":now()?,"stream_id":stream,"sequence":n.to_string(),"session_id":session,"source":{"component":"wyss_control","instance_id":instance},"correlation_id":canonical(intent),"causation_id":null,"payload":payload,"persistence":"durable","sensitivity":"internal","redaction":"none"});
-    validate_audit(&v)?;
-    let e = EventEnvelopeV1::from_value(v.clone()).map_err(invalid)?;
-    tx.execute(
-        "INSERT INTO control_events VALUES(?1,?2,?3,?4,?5)",
-        params![
-            v["event_id"].as_str().unwrap(),
-            stream.as_str(),
-            key(n),
-            canonical(session.as_str()),
-            serde_json::to_string(&e).map_err(db)?
-        ],
-    )
-    .map_err(db)?;
-    tx.execute(
-        "UPDATE authority_metadata SET last_sequence=?1 WHERE id=1",
-        [n.to_string()],
-    )
-    .map_err(db)?;
+    events::append(
+        tx,
+        instance,
+        stream,
+        events::Draft {
+            kind,
+            session: Some(session.as_str()),
+            correlation: Some(intent),
+            timestamp: now()?,
+            payload,
+        },
+    )?;
     Ok(())
 }
 pub(super) fn validate_audit(v: &Value) -> ControlResult<()> {
@@ -479,7 +578,8 @@ pub(super) fn validate_audit(v: &Value) -> ControlResult<()> {
         "authority.managed_session.runtime_attached" => {
             &["runtime_session_id", "runtime_instance_id"]
         }
-        "authority.managed_session.runtime_operation_abandoned" => &["operation_id"],
+        "authority.managed_session.runtime_operation_abandoned"
+        | "authority.managed_session.runtime_operation_indeterminate" => &["operation_id"],
         _ => return Err(ControlError::StorageIncompatible),
     };
     if p.len() != keys.len() || keys.iter().any(|k| !p.contains_key(*k)) {

@@ -12,6 +12,7 @@ mod server;
 mod store;
 mod turn_stream;
 mod turns;
+mod watch;
 pub use server::run_from_environment;
 #[cfg(test)]
 mod tests;

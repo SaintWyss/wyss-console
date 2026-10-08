@@ -16,7 +16,9 @@ use std::fmt;
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_FRAME: usize = 65_536;
 pub const MAX_PAGE: u16 = 50;
-pub const METHODS: [&str; 28] = [
+/// Longest a durable-event watch may wait for a commit before answering empty.
+pub const MAX_WATCH_MS: u32 = 30_000;
+pub const METHODS: [&str; 29] = [
     "managedSession/turn/start",
     "managedSession/turn/status",
     "managedSession/turn/events",
@@ -32,6 +34,7 @@ pub const METHODS: [&str; 28] = [
     "managedSession/list",
     "managedSession/close",
     "audit/read",
+    "audit/watch",
     "runtime/start",
     "runtime/status",
     "runtime/model/list",
@@ -136,6 +139,17 @@ pub struct AuditRead {
     pub after_sequence: Option<Sequence>,
     pub limit: u16,
 }
+/// The same bounded read as `audit/read`, answered at once when history exists after the
+/// cursor and otherwise after the next durable commit or `wait_ms`, whichever is first.
+/// The cursor belongs to the client: the authority keeps no subscriber state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuditWatch {
+    pub stream_id: WireUuid,
+    pub after_sequence: Option<Sequence>,
+    pub limit: u16,
+    pub wait_ms: u32,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", deny_unknown_fields)]
@@ -178,6 +192,8 @@ pub enum Operation {
     RuntimeModels(RuntimeModels),
     #[serde(rename = "audit/read")]
     AuditRead(AuditRead),
+    #[serde(rename = "audit/watch")]
+    AuditWatch(AuditWatch),
     #[serde(rename = "executionLease/grant")]
     LeaseGrant(LeaseGrant),
     #[serde(rename = "executionLease/get")]
@@ -233,6 +249,11 @@ impl Operation {
                 Err(ControlError::InvalidRequest)
             }
             Self::AuditRead(p) if p.limit == 0 || p.limit > MAX_PAGE => {
+                Err(ControlError::InvalidRequest)
+            }
+            Self::AuditWatch(p)
+                if p.limit == 0 || p.limit > MAX_PAGE || p.wait_ms > MAX_WATCH_MS =>
+            {
                 Err(ControlError::InvalidRequest)
             }
             Self::Close(p) if !(1..=2).contains(&p.expected_revision) => {

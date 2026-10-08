@@ -3369,3 +3369,391 @@ fn accepted_answer_with_an_unknown_outcome_is_indeterminate_and_never_sent_or_ru
     );
     p.finish();
 }
+
+// Durable replay across the provider boundary: observation only, and content free.
+
+/// The complete durable history through the public replay contract, in pages of `limit`.
+fn replay(c: &mut ControlClient, limit: u16) -> Vec<serde_json::Value> {
+    let stream_id = c.hello_status().stream_id.clone();
+    let (mut all, mut after) = (Vec::new(), None);
+    loop {
+        let ResultValue::Audit { events, next } = c
+            .audit(AuditRead {
+                stream_id: stream_id.clone(),
+                after_sequence: after,
+                limit,
+            })
+            .unwrap()
+        else {
+            panic!("audit expected")
+        };
+        for e in &events {
+            let v = serde_json::to_value(e).unwrap();
+            assert_eq!(v["sequence"], (all.len() + 1).to_string(), "contiguous");
+            all.push(v);
+        }
+        if next.is_none() {
+            return all;
+        }
+        after = next;
+    }
+}
+/// Every row of every table of the live database, read without the authority.
+fn canonical(env: &Sandbox) -> String {
+    let c = rusqlite::Connection::open_with_flags(
+        env.root.join("state/wyss-console/control.sqlite3"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let tables: Vec<String> = c
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let mut out = String::new();
+    for table in tables {
+        let mut q = c
+            .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+            .unwrap();
+        let columns = q.column_count();
+        let mut rows = q.query([]).unwrap();
+        while let Some(r) = rows.next().unwrap() {
+            out.push_str(&table);
+            for i in 0..columns {
+                out.push_str(&format!("|{:?}", r.get_ref(i).unwrap()));
+            }
+            out.push('\n');
+        }
+    }
+    out
+}
+/// Everything a new provider frame, command or file write would have to change.
+fn footprint(env: &Sandbox, c: &mut ControlClient, workspace: &str) -> serde_json::Value {
+    let mut files: Vec<String> = fs::read_dir(workspace)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    files.sort();
+    serde_json::json!({
+        "frames_written_to_the_provider": env.methods(),
+        "answers": decisions(env),
+        "executions": lines(env, "executions"),
+        "mutations": lines(env, "mutations"),
+        "workspace": files,
+        "outbound": c.runtime_status().unwrap().outbound_methods,
+        "processes": env.pids(),
+    })
+}
+/// Replays the whole history every way the contract allows and proves nothing moved.
+fn replay_changes_nothing(env: &Sandbox, c: &mut ControlClient, workspace: &str) -> usize {
+    let stream_id = c.hello_status().stream_id.clone();
+    let before = (footprint(env, c, workspace), canonical(env));
+    let status = serde_json::to_value(c.status().unwrap()).unwrap();
+    let whole = replay(c, 50);
+    for limit in [1, 7, 50] {
+        assert_eq!(replay(c, limit), whole, "limit {limit}");
+        assert_eq!(
+            replay(&mut env.client(), limit),
+            whole,
+            "another connection"
+        );
+    }
+    let head = whole.len() as u64;
+    for (after, wait_ms) in [(None, 0), (seq(head - 1), 5_000), (seq(head), 250)] {
+        let ResultValue::Audit { events, .. } = c
+            .audit_watch(AuditWatch {
+                stream_id: stream_id.clone(),
+                after_sequence: after,
+                limit: 50,
+                wait_ms,
+            })
+            .unwrap()
+        else {
+            panic!("audit expected")
+        };
+        assert_eq!(
+            events.is_empty(),
+            wait_ms == 250,
+            "caught up only at the head"
+        );
+    }
+    assert_eq!(serde_json::to_value(c.status().unwrap()).unwrap(), status);
+    assert_eq!((footprint(env, c, workspace), canonical(env)), before);
+    whole.len()
+}
+fn seq(n: u64) -> Option<wyss_console::contracts::Sequence> {
+    (n > 0).then(|| n.to_string().parse().unwrap())
+}
+fn kinds(history: &[serde_json::Value], family: &str) -> Vec<String> {
+    history
+        .iter()
+        .filter_map(|e| e["event_type"].as_str()?.strip_prefix(family))
+        .map(str::to_owned)
+        .collect()
+}
+fn wait_pending(c: &mut ControlClient, t: &ManagedTurnRecord) -> ApprovalStatus {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        if let Some(shown) = c.approval_pending(t.managed_turn_id.clone()).unwrap() {
+            return shown;
+        }
+        assert!(Instant::now() < deadline, "no pending approval");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+#[test]
+fn replaying_accepted_cancelled_and_revoked_history_causes_no_effect_anywhere() {
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    // One history: an accepted command, a cancelled turn and a revoked lease.
+    let mut p = pending("approval_command", local_scopes());
+    let accept = p.intent(ApprovalDecision::Accept);
+    p.client.approval_respond(accept.clone()).unwrap();
+    assert_eq!(
+        wait_turn(&mut p.client, &p.turn, true).state,
+        TurnState::Completed
+    );
+    let cancelled = p.client.turn_start(turn_params(&p.session)).unwrap();
+    wait_pending(&mut p.client, &cancelled);
+    let running = wait_turn(&mut p.client, &cancelled, false);
+    p.client
+        .turn_cancel(TurnCancel {
+            intent_id: id(),
+            managed_turn_id: cancelled.managed_turn_id.clone(),
+            expected_revision: running.revision,
+        })
+        .unwrap();
+    assert_eq!(
+        wait_turn(&mut p.client, &cancelled, true).state,
+        TurnState::Interrupted
+    );
+    let revoked = p.client.turn_start(turn_params(&p.session)).unwrap();
+    wait_pending(&mut p.client, &revoked);
+    p.client
+        .lease_revoke(LeaseRevoke {
+            intent_id: id(),
+            lease_id: p.lease.lease_id.clone(),
+            expected_revision: p.lease.revision,
+        })
+        .unwrap();
+    assert_eq!(
+        wait_turn(&mut p.client, &revoked, true).state,
+        TurnState::Interrupted
+    );
+    assert_eq!(lines(&p.env, "executions"), 1);
+    assert_eq!(
+        decisions(&p.env).first().map(String::as_str),
+        Some("\"accept\"")
+    );
+    let accepts = |env: &Sandbox| decisions(env).iter().filter(|d| *d == "\"accept\"").count();
+    assert_eq!(accepts(&p.env), 1);
+
+    let events = replay_changes_nothing(&p.env, &mut p.client, &p.workspace);
+    let history = replay(&mut p.client, 50);
+    assert_eq!(history.len(), events);
+    assert_eq!(
+        kinds(&history, "authority.managed_approval."),
+        [
+            "requested",
+            "accepted",
+            "confirmed",
+            "requested",
+            "invalidated",
+            "requested",
+            "invalidated"
+        ]
+    );
+    assert_eq!(
+        kinds(&history, "authority.execution_lease."),
+        ["granted", "revoked"]
+    );
+    assert!(kinds(&history, "authority.managed_turn.").contains(&"cancel_requested".to_owned()));
+    // Canonical state is what the tables say, and a decided intent retried after the
+    // replay still returns its receipt without a second frame or a second execution.
+    assert_eq!(
+        p.client.lease_get(p.lease.lease_id.clone()).unwrap().state,
+        LeaseState::Revoked
+    );
+    let answers = decisions(&p.env).len();
+    assert!(p.client.approval_respond(accept).is_ok());
+    assert_eq!(decisions(&p.env).len(), answers);
+    assert_eq!(lines(&p.env, "executions"), 1);
+    // After a restart the committed history is intact, and replaying it into the new
+    // process starts no runtime work, resumes no thread and answers nothing.
+    let (turns, resumes) = (count(&p.env, "turn/start"), count(&p.env, "thread/resume"));
+    drop(p.client);
+    p.authority.stop(false);
+    let mut b = p.env.start();
+    let mut c = p.env.client();
+    p.env.wait(&mut c, ActualState::Ready);
+    assert_eq!(replay(&mut c, 50)[..events], history[..]);
+    replay_changes_nothing(&p.env, &mut c, &p.workspace);
+    assert_eq!(
+        (count(&p.env, "turn/start"), count(&p.env, "thread/resume")),
+        (turns, resumes)
+    );
+    assert_eq!((accepts(&p.env), lines(&p.env, "executions")), (1, 1));
+    assert_eq!(decisions(&p.env).len(), answers);
+    drop(c);
+    b.stop(false);
+    for pid in p.env.pids() {
+        dead(pid);
+    }
+}
+#[test]
+fn replaying_an_accepted_file_change_writes_nothing_again() {
+    let mut p = pending("approval_file", local_scopes());
+    let target = PathBuf::from(&p.workspace).join("wyss-fixture-probe.txt");
+    p.client
+        .approval_respond(p.intent(ApprovalDecision::Accept))
+        .unwrap();
+    assert_eq!(
+        wait_turn(&mut p.client, &p.turn, true).state,
+        TurnState::Completed
+    );
+    let written = fs::metadata(&target).unwrap();
+    fs::remove_file(&target).unwrap();
+    // Even with the file gone, replaying the history that accepted it never recreates it.
+    let events = replay_changes_nothing(&p.env, &mut p.client, &p.workspace);
+    let history = replay(&mut p.client, 50);
+    assert_eq!(history.len(), events);
+    assert_eq!(
+        kinds(&history, "authority.managed_approval."),
+        ["requested", "accepted", "confirmed"]
+    );
+    assert!(!target.exists());
+    assert_eq!(lines(&p.env, "mutations"), 1);
+    assert_eq!(decisions(&p.env), ["\"accept\""]);
+    assert!(written.len() > 0);
+    p.finish();
+}
+/// No sentinel in the replayed history or in any byte of any file the authority keeps,
+/// database, write-ahead log and shared memory included, while it is running.
+fn assert_content_free(env: &Sandbox, c: &mut ControlClient, sentinels: &[&str]) -> usize {
+    let history = serde_json::to_string(&replay(c, 50)).unwrap();
+    let mut scanned = 0;
+    let mut pending = vec![env.root.join("state"), env.root.join("run")];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let kind = fs::symlink_metadata(&path).unwrap().file_type();
+            if kind.is_dir() {
+                pending.push(path);
+            } else if kind.is_file() {
+                let bytes = fs::read(&path).unwrap_or_default();
+                scanned += 1;
+                for s in sentinels {
+                    assert!(
+                        !bytes.windows(s.len()).any(|w| w == s.as_bytes()),
+                        "{s} is durable in {}",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+    for s in sentinels {
+        assert!(!history.contains(s), "{s} is replayed");
+    }
+    for name in [
+        "control.sqlite3",
+        "control.sqlite3-wal",
+        "control.sqlite3-shm",
+    ] {
+        assert!(
+            env.root.join("state/wyss-console").join(name).exists(),
+            "{name} is live"
+        );
+    }
+    scanned
+}
+#[test]
+fn durable_replay_and_every_authority_file_hold_no_content() {
+    // Inference: the prompt, the answer and both kinds of reasoning.
+    let env = Sandbox::new("happy");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = inference_session(&env, &mut c);
+    let params = turn_params(&s);
+    let t = c.turn_start(params.clone()).unwrap();
+    assert_eq!(wait_turn(&mut c, &t, true).state, TurnState::Completed);
+    let stream = |c: &mut ControlClient| {
+        serde_json::to_string(
+            &c.turn_events(TurnEvents {
+                managed_turn_id: t.managed_turn_id.clone(),
+                after_sequence: None,
+                limit: 50,
+            })
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    // The sentinels are real: the transient stream carries them while the process lives.
+    assert!(stream(&mut c).contains("ASSISTANT_SENTINEL"));
+    let content = [
+        params.prompt.as_str(),
+        "WYSS_2H_SECRET_PROMPT_",
+        "ASSISTANT_SENTINEL",
+        "SUMMARY_SENTINEL",
+        "RAW_PRIVATE_REASONING_SENTINEL",
+    ];
+    assert!(assert_content_free(&env, &mut c, &content) >= 3);
+    let before = replay(&mut c, 50);
+    drop(c);
+    a.stop(false);
+    a = env.start();
+    let mut c = env.client();
+    env.wait(&mut c, ActualState::Ready);
+    // Across a restart the durable history survives and the transient stream does not.
+    assert_eq!(replay(&mut c, 50)[..before.len()], before[..]);
+    assert!(!stream(&mut c).contains("ASSISTANT_SENTINEL"));
+    assert_content_free(&env, &mut c, &content);
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    drop(c);
+    a.stop(false);
+    for pid in env.pids() {
+        dead(pid);
+    }
+    // Local tools: the command, its output, the file path, its content and the diff, and
+    // the provider credential the isolated runtime can read.
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    for (scenario, action) in [
+        ("approval_command", vec!["WYSS_FIXTURE_COMMAND", "printf "]),
+        (
+            "approval_file",
+            vec!["WYSS_FIXTURE_PATCH", "wyss-fixture-probe"],
+        ),
+    ] {
+        let mut p = pending(scenario, local_scopes());
+        p.client
+            .approval_respond(p.intent(ApprovalDecision::Accept))
+            .unwrap();
+        assert_eq!(
+            wait_turn(&mut p.client, &p.turn, true).state,
+            TurnState::Completed
+        );
+        let shown = serde_json::to_string(&p.shown).unwrap();
+        let streamed = serde_json::to_string(&p.stream()).unwrap();
+        assert!(
+            shown.contains(action[0]),
+            "the presentation is transient and real"
+        );
+        let mut content = action.clone();
+        content.extend([
+            "WYSS_2H_SECRET_PROMPT_",
+            "FIXTURE-CREDENTIAL",
+            "ASSISTANT_SENTINEL",
+        ]);
+        assert_content_free(&p.env, &mut p.client, &content);
+        // What replay does carry is the fingerprint of the action and nothing of it.
+        let history = serde_json::to_string(&replay(&mut p.client, 50)).unwrap();
+        assert!(history.contains(&p.shown.approval.action_fingerprint));
+        // The transient stream announces the action and carries none of it either.
+        assert!(!streamed.contains(action[0]) || scenario == "approval_command");
+        p.finish();
+    }
+}
