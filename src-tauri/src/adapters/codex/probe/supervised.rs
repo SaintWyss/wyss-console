@@ -26,6 +26,24 @@ pub(crate) enum RuntimeCommand {
         thread_id: CodexThreadId,
         turn_id: CodexTurnId,
     },
+    /// Re-proves the profile of this generation while it holds the named approval request.
+    Attest {
+        request: CodexRequestId,
+        workspace: String,
+    },
+    /// The one answer to the one approval request this generation holds.
+    Resolve {
+        request: CodexRequestId,
+        decision: ProviderDecision,
+    },
+}
+/// Every answer the authority can give a provider approval request. There is no session
+/// grant, no policy amendment and no free-form response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProviderDecision {
+    Accept,
+    Decline,
+    Cancel,
 }
 pub(crate) struct TurnCommand {
     pub managed_turn_id: crate::contracts::identities::ManagedTurnId,
@@ -79,6 +97,19 @@ pub(crate) enum Observation {
     },
     IsolationViolation,
     TurnNotice(safety::TurnNotice),
+    /// Outcome of an `Attest` command: the profile still holds and the request is live.
+    Attested {
+        request: CodexRequestId,
+        valid: bool,
+    },
+    /// Outcome of a `Resolve` command. `written` is true only when the complete response
+    /// frame reached the provider's input; nothing is ever written twice for a request.
+    Delivered {
+        request: CodexRequestId,
+        decision: ProviderDecision,
+        written: bool,
+        methods: RuntimeMethods,
+    },
     SafetyConfigChanged(BTreeSet<String>),
     Discovering,
     Spawned,
@@ -136,7 +167,9 @@ impl Worker {
         let (wake, reader) = UnixStream::pair()?;
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = cancel.clone();
-        let (commands, rx) = mpsc::sync_channel(1);
+        // Commands run strictly one at a time. The few queued slots only let a reductive
+        // answer or an interrupt wait behind a command that is still running.
+        let (commands, rx) = mpsc::sync_channel(4);
         let generation = Generation {
             forced_mcp,
             catalog_dir,
@@ -191,9 +224,25 @@ impl Drop for Worker {
         let _ = self.stop();
     }
 }
+#[cfg(test)]
+impl Worker {
+    /// A worker without a process: the test reads the commands the core dispatches.
+    pub(crate) fn detached() -> (Self, Receiver<RuntimeCommand>, UnixStream) {
+        let (wake, reader) = UnixStream::pair().expect("socket pair");
+        let (commands, rx) = mpsc::sync_channel(4);
+        let worker = Self {
+            cancel: Arc::new(AtomicBool::new(false)),
+            wake,
+            thread: None,
+            commands,
+        };
+        (worker, rx, reader)
+    }
+}
 fn diagnostic(error: ProbeError) -> RuntimeDiagnostic {
     match error {
         ProbeError::InferenceIsolationViolation => RuntimeDiagnostic::InferenceIsolationViolation,
+        ProbeError::Unproven => RuntimeDiagnostic::SafetyUnproven,
         ProbeError::RuntimeUnavailable => RuntimeDiagnostic::Unavailable,
         ProbeError::Spawn => RuntimeDiagnostic::SpawnFailed,
         ProbeError::Transport | ProbeError::Shutdown => RuntimeDiagnostic::TransportFailed,
@@ -219,8 +268,116 @@ struct RuntimeIo<'a> {
     local: Option<&'a Local<'a>>,
     /// The process itself reported the private Codex home in its initialize response.
     home_proven: bool,
+    /// The one provider approval request of the local-tools generation.
+    request: Option<LiveRequest>,
+    /// Identity of the last answered request, until the provider reports it resolved.
+    settled: Option<CodexRequestId>,
+}
+/// A provider approval request the authority has not finished with. The frame is kept only
+/// to build its one response; it is never forwarded, stored or formatted.
+struct LiveRequest {
+    message: WireMessage,
+    thread: CodexThreadId,
+    turn: CodexTurnId,
+    offered: safety::Offered,
+    answered: bool,
 }
 impl RuntimeIo<'_> {
+    /// Requests and action items exist only on the thread-capable local-tools process.
+    fn mediating(&self) -> bool {
+        self.local.is_some() && !self.discovery
+    }
+    fn holds(&self, request: &CodexRequestId) -> bool {
+        self.request
+            .as_ref()
+            .is_some_and(|r| r.message.id() == Some(request) && !r.answered)
+    }
+    /// Admits one approval request of the active turn. A request for another turn, or a
+    /// second one while the first is unanswered, is a violation: there is no queue.
+    fn hold(&mut self, message: &WireMessage, notice: &safety::TurnNotice) -> ProbeResult<()> {
+        let safety::NoticeKind::ApprovalRequested(request) = &notice.kind else {
+            return Ok(());
+        };
+        let active = self
+            .active_pair
+            .as_ref()
+            .is_some_and(|(thread, turn)| thread == &notice.thread && turn == &notice.turn);
+        if !active || self.request.as_ref().is_some_and(|r| !r.answered) {
+            return Err(self.isolation_failure());
+        }
+        if let Some(previous) = self.request.take() {
+            self.settled = previous.message.id().cloned();
+        }
+        self.request = Some(LiveRequest {
+            message: message.clone(),
+            thread: notice.thread.clone(),
+            turn: notice.turn.clone(),
+            offered: request.offered,
+            answered: false,
+        });
+        Ok(())
+    }
+    /// The provider stopped waiting for a request. The notice carries no authority: it can
+    /// only end the held request, and naming anything else changes nothing.
+    fn resolved(&mut self, message: &WireMessage) {
+        let Some(id) = message
+            .params()
+            .and_then(|p| CodexRequestId::from_value(&p["requestId"]).ok())
+        else {
+            return;
+        };
+        if self.settled.as_ref() == Some(&id) {
+            self.settled = None;
+        }
+        if self
+            .request
+            .as_ref()
+            .is_some_and(|live| live.message.id() == Some(&id))
+            && let Some(live) = self.request.take()
+        {
+            self.emit(Observation::TurnNotice(safety::TurnNotice {
+                thread: live.thread,
+                turn: live.turn,
+                kind: safety::NoticeKind::RequestResolved(id),
+            }));
+        }
+    }
+    /// The only way a response frame leaves the authority: one of three fixed decisions,
+    /// built from the held request itself, at most once per request and only when the
+    /// provider offers it. `Ok(false)` means no byte was written.
+    fn answer(
+        &mut self,
+        request: &CodexRequestId,
+        decision: ProviderDecision,
+    ) -> ProbeResult<bool> {
+        if !self.holds(request) {
+            return Ok(false);
+        }
+        let live = self.request.as_mut().expect("held request");
+        let (offered, wire) = match decision {
+            ProviderDecision::Accept => (live.offered.accept, ApprovalDecision::Accept),
+            ProviderDecision::Decline => (live.offered.decline, ApprovalDecision::Decline),
+            ProviderDecision::Cancel => (live.offered.cancel, ApprovalDecision::Cancel),
+        };
+        if !offered {
+            return Ok(false);
+        }
+        let mut bytes = encode_approval_response(&live.message, wire)
+            .and_then(|response| response.encode())
+            .map_err(|_| ProbeError::Codec)?;
+        bytes.push(b'\n');
+        // Answered before the write: an uncertain write is never repeated.
+        live.answered = true;
+        self.stdio
+            .send(&bytes, Instant::now() + Duration::from_secs(3))?;
+        let count = match decision {
+            ProviderDecision::Accept => &mut self.methods.approval_accept,
+            ProviderDecision::Decline => &mut self.methods.approval_decline,
+            ProviderDecision::Cancel => &mut self.methods.approval_cancel,
+        };
+        *count = count.saturating_add(1);
+        Ok(true)
+    }
     fn isolation_failure(&mut self) -> ProbeError {
         self.isolation_violation = true;
         if let Some((thread_id, turn_id)) = self.active_pair.clone()
@@ -438,27 +595,35 @@ impl ProbeIo for RuntimeIo<'_> {
         Ok(())
     }
     fn receive(&mut self, deadline: Instant) -> ProbeResult<Option<WireMessage>> {
-        let message = match self.stdio.receive(deadline) {
-            Err(_)
-                if self.stdio.rejected.as_ref().is_some_and(|s| {
-                    s.category_candidate == "request" || s.external_action_candidate
-                }) =>
+        loop {
+            let message = match self.stdio.receive(deadline) {
+                Err(_)
+                    if self.stdio.rejected.as_ref().is_some_and(|s| {
+                        s.category_candidate == "request" || s.external_action_candidate
+                    }) =>
+                {
+                    return Err(self.isolation_failure());
+                }
+                result => result?,
+            };
+            if let (Some(m), Some(local)) = (&message, self.local)
+                && m.kind() == WireKind::SuccessResponse
+                && let Some(home) = m.result().and_then(|r| r.get("codexHome"))
             {
-                return Err(self.isolation_failure());
+                if home.as_str() != Some(&local.home) {
+                    return Err(ProbeError::Protocol);
+                }
+                self.home_proven = true;
             }
-            result => result?,
-        };
-        if let (Some(m), Some(local)) = (&message, self.local)
-            && m.kind() == WireKind::SuccessResponse
-            && let Some(home) = m.result().and_then(|r| r.get("codexHome"))
-        {
-            if home.as_str() != Some(&local.home) {
-                return Err(ProbeError::Protocol);
-            }
-            self.home_proven = true;
-        }
-        if let Some(m) = &message {
-            let notice = match safety::notification(m) {
+            let Some(m) = &message else {
+                return Ok(message);
+            };
+            let classified = if self.mediating() {
+                safety::local_notification(m)
+            } else {
+                safety::notification(m)
+            };
+            let notice = match classified {
                 Ok(n) => n,
                 Err(e) => {
                     if e.code == "inference_isolation_violation" {
@@ -467,6 +632,15 @@ impl ProbeIo for RuntimeIo<'_> {
                     return Err(ProbeError::Protocol);
                 }
             };
+            if self.mediating()
+                && m.kind() == WireKind::Notification
+                && m.method() == Some("serverRequest/resolved")
+            {
+                self.resolved(m);
+            }
+            if let Some(n) = &notice {
+                self.hold(m, n)?;
+            }
             if notice.as_ref().is_some_and(|n| {
                 matches!(n.kind, safety::NoticeKind::Terminal(_))
                     && self
@@ -475,12 +649,18 @@ impl ProbeIo for RuntimeIo<'_> {
                         .is_some_and(|(thread, turn)| thread == &n.thread && turn == &n.turn)
             }) {
                 self.active_pair = None;
+                // The turn is over: whatever it still asked can no longer be answered.
+                self.request = None;
             }
             if let (Some(notice), Some(forward)) = (notice, self.forward.as_mut()) {
                 forward(Observation::TurnNotice(notice));
             }
+            // A held approval request is not a response: no waiter ever sees it.
+            if m.kind() == WireKind::ServerRequest {
+                continue;
+            }
+            return Ok(message);
         }
-        Ok(message)
     }
     fn close_input(&mut self) {
         self.stdio.close_input();
@@ -598,6 +778,8 @@ fn run(
             catalog: Some(&catalog),
             local: local.as_ref(),
             home_proven: false,
+            request: None,
+            settled: None,
         };
         let mut correlation = handshake(&mut io, &mut report)?;
         // A catalog RPC error is safe degradation in the standalone probe, but not runtime readiness.
@@ -625,7 +807,7 @@ fn run(
         // cancellation wakes poll immediately. Counters saturate; maps and buffers remain bounded.
         loop {
             if let Ok(command) = commands.try_recv() {
-                let uncertain = match command {
+                let failure = match command {
                     RuntimeCommand::Conversation(c) => {
                         let result = conversation(
                             &mut io,
@@ -644,7 +826,7 @@ fn run(
                             result,
                             methods,
                         });
-                        unknown
+                        unknown.then_some(ProbeError::Protocol)
                     }
                     RuntimeCommand::Start(c) => {
                         let result = start_turn(&mut io, &c, &names, &mut correlation, &mut report);
@@ -657,7 +839,7 @@ fn run(
                             result,
                             methods,
                         });
-                        unknown
+                        unknown.then_some(ProbeError::Protocol)
                     }
                     RuntimeCommand::Interrupt {
                         managed_turn_id,
@@ -682,11 +864,43 @@ fn run(
                             success,
                             methods,
                         });
-                        !success
+                        (!success).then_some(ProbeError::Protocol)
+                    }
+                    RuntimeCommand::Attest { request, workspace } => {
+                        // The same proof that precedes every turn, taken again while the
+                        // request is held: configuration, managed requirements, private
+                        // home, project policy masks and hooks.
+                        let held = io.holds(&request)
+                            && io.local.is_some_and(|l| l.workspace == workspace);
+                        let proven = held
+                            && safety_preflight(
+                                &mut io,
+                                &names,
+                                &workspace,
+                                &mut correlation,
+                                &mut report,
+                            )
+                            .is_ok();
+                        // The provider may have withdrawn the request while it was proven.
+                        let valid = proven && io.holds(&request);
+                        io.emit(Observation::Attested { request, valid });
+                        // A generation that cannot re-prove its profile does not continue.
+                        (held && !proven).then_some(ProbeError::Unproven)
+                    }
+                    RuntimeCommand::Resolve { request, decision } => {
+                        let outcome = io.answer(&request, decision);
+                        let methods = io.methods.clone();
+                        io.emit(Observation::Delivered {
+                            request,
+                            decision,
+                            written: matches!(outcome, Ok(true)),
+                            methods,
+                        });
+                        outcome.err()
                     }
                 };
-                if uncertain {
-                    return Err(ProbeError::Protocol);
+                if let Some(error) = failure {
+                    return Err(error);
                 }
                 // Another command may already be queued. Do not lose its wake to the RPC waiter.
                 continue;
@@ -1054,6 +1268,8 @@ fn discover_mcp(
             catalog: None,
             local,
             home_proven: false,
+            request: None,
+            settled: None,
         };
         let mut report = initial_report(cwd.to_owned());
         let mut correlation = handshake(&mut io, &mut report)?;
@@ -1173,4 +1389,169 @@ fn start_turn(
     .map_err(|_| ConversationFailure::Unknown)?;
     io.active_pair = Some((c.thread_id.clone(), turn.clone()));
     Ok(turn)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn approval(id: &str, turn: &str, decisions: serde_json::Value) -> WireMessage {
+        WireMessage::from_value(
+            json!({"id": id, "method": "item/commandExecution/requestApproval", "params": {
+                "threadId": "thread", "turnId": turn, "itemId": "call-1", "startedAtMs": 1,
+                "command": "printf x", "cwd": "/w", "availableDecisions": decisions}}),
+            Direction::ServerToClient,
+        )
+        .unwrap()
+    }
+    #[test]
+    fn supervisor_writes_one_offered_answer_per_held_request_and_never_another_frame() {
+        let dir = env::temp_dir().join(format!("wyss-answer-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let written = dir.join("stdin");
+        // The child records every byte the authority writes to the provider.
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg("cat > \"$0\"").arg(&written);
+        let mut owner = OwnedProcess::spawn(&mut command).unwrap();
+        let isolation = isolation::Isolation {
+            workspace: dir.clone(),
+            state: dir.clone(),
+        };
+        let local = Local {
+            isolation: &isolation,
+            masked: Vec::new(),
+            roots: Vec::new(),
+            home: "/h".into(),
+            workspace: "/w".into(),
+        };
+        let mut methods = RuntimeMethods::default();
+        let mut notices = 0;
+        let mut violations = 0;
+        let mut forward = |o: Observation| match o {
+            Observation::TurnNotice(_) => notices += 1,
+            Observation::IsolationViolation => violations += 1,
+            _ => (),
+        };
+        let id = |s: &str| CodexRequestId::String(s.to_owned());
+        {
+            let mut io = RuntimeIo {
+                stdio: Stdio {
+                    owner: &mut owner,
+                    frames: Frames::default(),
+                    rejected: None,
+                    config_response_id: None,
+                },
+                methods: &mut methods,
+                discovery: false,
+                forward: Some(&mut forward),
+                active_pair: Some((
+                    CodexThreadId::parse("thread").unwrap(),
+                    CodexTurnId::parse("turn").unwrap(),
+                )),
+                isolation_violation: false,
+                catalog: None,
+                local: Some(&local),
+                home_proven: true,
+                request: None,
+                settled: None,
+            };
+            let hold = |io: &mut RuntimeIo<'_>, m: &WireMessage| {
+                let notice = safety::local_notification(m).unwrap().unwrap();
+                io.hold(m, &notice)
+            };
+            // Nothing is held: nothing can be answered.
+            assert!(
+                !io.answer(&id("approval-1"), ProviderDecision::Accept)
+                    .unwrap()
+            );
+            let first = approval("approval-1", "turn", json!(["accept", "cancel"]));
+            hold(&mut io, &first).unwrap();
+            // Another identity, and a decision the provider does not offer, write nothing.
+            assert!(
+                !io.answer(&id("approval-9"), ProviderDecision::Accept)
+                    .unwrap()
+            );
+            assert!(
+                !io.answer(&id("approval-1"), ProviderDecision::Decline)
+                    .unwrap()
+            );
+            assert!(
+                io.answer(&id("approval-1"), ProviderDecision::Accept)
+                    .unwrap()
+            );
+            // One answer per request: neither a repeat nor a change of mind is written.
+            for again in [ProviderDecision::Accept, ProviderDecision::Cancel] {
+                assert!(!io.answer(&id("approval-1"), again).unwrap());
+            }
+            // The next request of the turn is a new one.
+            let next = approval("approval-2", "turn", json!(["accept", "cancel"]));
+            hold(&mut io, &next).unwrap();
+            assert!(
+                !io.answer(&id("approval-1"), ProviderDecision::Cancel)
+                    .unwrap()
+            );
+            assert!(
+                io.answer(&id("approval-2"), ProviderDecision::Cancel)
+                    .unwrap()
+            );
+            // While a request is unanswered a second one is a violation, and so is a
+            // request of a turn that is not the active one.
+            let third = approval("approval-3", "turn", json!(["accept", "cancel"]));
+            hold(&mut io, &third).unwrap();
+            let fourth = approval("approval-4", "turn", json!(["accept", "cancel"]));
+            assert_eq!(
+                hold(&mut io, &fourth).unwrap_err(),
+                ProbeError::InferenceIsolationViolation
+            );
+            assert!(io.holds(&id("approval-3")) && !io.holds(&id("approval-4")));
+            io.request = None;
+            let foreign = approval("approval-5", "another-turn", json!(["accept"]));
+            assert_eq!(
+                hold(&mut io, &foreign).unwrap_err(),
+                ProbeError::InferenceIsolationViolation
+            );
+            assert!(io.request.is_none());
+            // A turn that ended voids whatever it still asked.
+            hold(&mut io, &third).unwrap();
+            io.request = None;
+            assert!(
+                !io.answer(&id("approval-3"), ProviderDecision::Accept)
+                    .unwrap()
+            );
+        }
+        owner.shutdown().unwrap();
+        assert_eq!(
+            (
+                methods.approval_accept,
+                methods.approval_decline,
+                methods.approval_cancel
+            ),
+            (1, 0, 1)
+        );
+        assert_eq!((notices, violations), (0, 2));
+        let frames: Vec<serde_json::Value> = fs::read_to_string(&written)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let answers: Vec<_> = frames
+            .iter()
+            .filter(|f| f.get("result").is_some())
+            .collect();
+        assert_eq!(
+            answers,
+            [
+                &json!({"id": "approval-1", "result": {"decision": "accept"}}),
+                &json!({"id": "approval-2", "result": {"decision": "cancel"}}),
+            ]
+        );
+        // Everything else the violations caused is the best-effort interrupt.
+        assert!(
+            frames
+                .iter()
+                .filter(|f| f.get("result").is_none())
+                .all(|f| f["method"] == "turn/interrupt")
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
 }

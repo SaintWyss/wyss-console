@@ -31,6 +31,21 @@ pub(super) struct Conversations {
     pending: Option<Pending>,
     attachments: BTreeMap<String, AgentRuntimeInstanceId>,
 }
+#[cfg(test)]
+impl Conversations {
+    /// Marks a session attached to a generation, as a completed resume would.
+    pub(super) fn attach_for_test(
+        &mut self,
+        session: &ManagedSessionId,
+        id: &AgentRuntimeInstanceId,
+    ) {
+        self.attachments
+            .insert(session.as_str().to_ascii_lowercase(), id.clone());
+    }
+    pub(super) fn detach_for_test(&mut self) {
+        self.attachments.clear();
+    }
+}
 impl Conversations {
     pub fn invalidate_admission(&self) {
         if let Some(p) = &self.pending {

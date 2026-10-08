@@ -79,6 +79,10 @@ pub enum TurnReason {
     DispatchUnknown,
     InferenceIsolationViolation,
     InterruptTimeout,
+    /// The approval the turn was waiting on reached its deadline undecided.
+    ApprovalExpired,
+    /// The provider asked for an action that can never be accepted.
+    ActionRejected,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

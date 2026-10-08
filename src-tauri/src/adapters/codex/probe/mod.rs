@@ -52,6 +52,8 @@ enum ProbeError {
     Codec,
     Wake,
     InferenceIsolationViolation,
+    /// The isolated profile could not be proven again.
+    Unproven,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

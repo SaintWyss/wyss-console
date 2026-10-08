@@ -1,7 +1,5 @@
 //! Sole-writer durable approval journal. No command, output, path or diff enters this module:
 //! only the authority-computed fingerprint and bounded structural counts.
-// The approval state machine is the only caller of the write path.
-#![cfg_attr(not(test), allow(dead_code))]
 use super::*;
 use crate::contracts::identities::{
     AgentRuntimeInstanceId, ExecutionLeaseId, ManagedApprovalId, ManagedTurnId,
@@ -310,6 +308,8 @@ fn bump(a: &mut ManagedApprovalRecord, at: OffsetDateTime) -> ControlResult<()> 
     }
     a.validate()
 }
+// Listings and lookups by item are consumed by the control protocol.
+#[allow(dead_code)]
 impl Store {
     pub(in crate::control) fn approval(
         &self,
@@ -469,6 +469,32 @@ impl Store {
         }
         tx.commit().map_err(db)?;
         Ok(a)
+    }
+    /// The original receipt of a decision intent that already committed, if it did. The
+    /// same intent with any other payload is a conflict. Read-only.
+    pub(in crate::control) fn approval_replay(
+        &self,
+        p: &ApprovalRespond,
+    ) -> ControlResult<Option<ApprovalReceipt>> {
+        let p = canonical_respond(p)?;
+        let prior: Option<(String, String)> = self
+            .conn
+            .query_row(
+                "SELECT mutation,result FROM processed_intents WHERE intent_id=?1",
+                [p.intent_id.as_str()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(db)?;
+        let Some((original, result)) = prior else {
+            return Ok(None);
+        };
+        if original != mutation(&p)? {
+            return Err(ControlError::IntentConflict);
+        }
+        let receipt: ApprovalReceipt = serde_json::from_str(&result).map_err(invalid)?;
+        receipt.validate()?;
+        Ok(Some(receipt))
     }
     /// Commits one client decision: state, decision, the external-effect dispatch marker for
     /// Accept, minimal audit and the fingerprint-only receipt, in a single transaction.

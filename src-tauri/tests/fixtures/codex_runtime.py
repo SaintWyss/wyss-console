@@ -74,11 +74,71 @@ threads_file = root / "threads.json"
 threads = json.loads(threads_file.read_text()) if threads_file.exists() else {}
 initialized = False
 initialize_id = None
+# The one approval request this provider is waiting on, and what it would act on.
+waiting = None
+
+
+def count(name):
+    with (root / name).open('a') as record:
+        record.write('1\n')
+
+
+def command_item(workspace, status, **extra):
+    return {'type': 'commandExecution', 'id': 'call-1', 'command': 'printf WYSS_FIXTURE_COMMAND', 'cwd': workspace,
+            'commandActions': [{'type': 'unknown', 'command': 'printf WYSS_FIXTURE_COMMAND'}], 'status': status,
+            'source': 'unifiedExecStartup', 'processId': '1', **extra}
+
+
+def file_item(workspace, status):
+    return {'type': 'fileChange', 'id': 'patch-1', 'status': status, 'changes': [
+        {'path': workspace + '/wyss-fixture-probe.txt', 'kind': {'type': 'add'}, 'diff': '+WYSS_FIXTURE_PATCH\n'}]}
+
+
+def resolve(tid, decision):
+    """What the real runtime does once its one request is answered."""
+    global waiting
+    kind, workspace, turn = waiting['kind'], waiting['workspace'], waiting['turn']
+    request_id = waiting['id']
+    waiting = None
+    item = command_item if kind == 'command' else file_item
+    emit({'method': 'serverRequest/resolved', 'params': {'threadId': tid, 'requestId': request_id}})
+    finished = lambda status, **extra: emit({'method': 'item/completed', 'params': {
+        'threadId': tid, 'turnId': turn['id'], 'completedAtMs': 2, 'item': item(workspace, status, **extra)}})
+    if decision != 'accept':
+        finished('declined')
+        # `decline` keeps the turn; `cancel` interrupts it.
+        emit({'method': 'turn/completed', 'params': {'threadId': tid, 'turn': dict(
+            turn, status='completed' if decision == 'decline' else 'interrupted')}})
+        return
+    if scenario.endswith('_slow'):
+        # Accepted and running: the outcome is never reported.
+        count('executions')
+        return
+    if kind == 'command':
+        count('executions')
+        emit({'method': 'item/commandExecution/outputDelta', 'params': {
+            'threadId': tid, 'turnId': turn['id'], 'itemId': 'call-1', 'delta': 'WYSS_FIXTURE_OUTPUT'}})
+        finished('completed', exitCode=0, aggregatedOutput='WYSS_FIXTURE_OUTPUT')
+    else:
+        Path(workspace + '/wyss-fixture-probe.txt').write_text('WYSS_FIXTURE_PATCH\n')
+        count('mutations')
+        emit({'method': 'turn/diff/updated', 'params': {'threadId': tid, 'turnId': turn['id'], 'diff': '+WYSS_FIXTURE_PATCH\n'}})
+        finished('completed')
+    emit({'method': 'turn/completed', 'params': {'threadId': tid, 'turn': dict(turn, status='completed')}})
+
+
 for line in sys.stdin:
     message = json.loads(line)
     method = message.get('method')
     with (root / 'methods').open('a') as record:
         record.write((method or 'RESPONSE') + '\n')
+    if method is None:
+        # Every response frame the authority ever writes, and the decision it carries.
+        with (root / 'decisions').open('a') as record:
+            record.write(json.dumps(message.get('result', {}).get('decision')) + '\n')
+        if waiting and message.get('id') == waiting['id']:
+            resolve(tid, message['result']['decision'])
+        continue
     if method == 'initialize':
         assert message['params']['capabilities']['experimentalApi'] is False
         initialize_id = message['id']
@@ -294,6 +354,53 @@ for line in sys.stdin:
             else:notice('item/started',item={'type':kind,'id':'external-item'})
             (root/'responses').write_text(str(sum(1 for line in sys.stdin if '"method"' not in line)))
             break
+        if scenario.startswith('approval_'):
+            # The mediated surface of the local-tools generation, as 0.159.0 emits it:
+            # the action is announced, then asked about, and only an answer makes it run.
+            variant = scenario[len('approval_'):]
+            workspace = threads[tid]['thread']['cwd']
+            kind = 'file' if variant.startswith('file') else 'command'
+            started = lambda item: emit({'method': 'item/started', 'params': {
+                'threadId': tid, 'turnId': turn_id, 'startedAtMs': 1, 'item': item}})
+            ask = {'threadId': tid, 'turnId': turn_id, 'itemId': 'call-1' if kind == 'command' else 'patch-1', 'startedAtMs': 1}
+            if kind == 'command':
+                ask.update(command='printf WYSS_FIXTURE_COMMAND', cwd=workspace, kind='command', environmentId='local',
+                           commandActions=[{'type': 'unknown', 'command': 'printf WYSS_FIXTURE_COMMAND'}],
+                           proposedExecpolicyAmendment=['printf', 'WYSS_FIXTURE_COMMAND'],
+                           availableDecisions=['accept', {'acceptWithExecpolicyAmendment': {'execpolicy_amendment': ['printf']}}, 'cancel'])
+            if variant == 'command_nocancel':
+                ask['availableDecisions'] = ['accept']
+            if variant == 'command_stdin':
+                ask['kind'] = 'writeStdin'
+            if variant == 'command_permissions':
+                ask['additionalPermissions'] = {'network': {'enabled': True}}
+            if variant == 'command_network':
+                ask['networkApprovalContext'] = {'host': 'example.com', 'protocol': 'https'}
+            if variant == 'file_grant':
+                ask['grantRoot'] = '/'
+            if variant == 'command_outside':
+                ask['cwd'] = '/'
+            if variant == 'command_remote':
+                ask['environmentId'] = 'remote'
+            request = {'id': 'approval-1', 'method': 'item/%s/requestApproval' % ('commandExecution' if kind == 'command' else 'fileChange'), 'params': ask}
+            if variant == 'command_unasked':
+                # The runtime ran a command on its own: nothing was ever asked.
+                started(command_item(workspace, 'inProgress'))
+                emit({'method': 'item/completed', 'params': {'threadId': tid, 'turnId': turn_id, 'completedAtMs': 2,
+                                                              'item': command_item(workspace, 'completed', exitCode=0)}})
+                continue
+            if variant != 'command_outside':
+                started(command_item(workspace, 'inProgress') if kind == 'command' else file_item(workspace, 'inProgress'))
+            waiting = {'id': 'approval-1', 'kind': kind, 'workspace': workspace, 'turn': current_turn}
+            emit(request)
+            (root / 'asked').touch()
+            if variant == 'command_double':
+                emit(dict(request, id='approval-2'))
+            if variant == 'command_early':
+                # Output before any answer: an effect the authority never accepted.
+                emit({'method': 'item/commandExecution/outputDelta', 'params': {
+                    'threadId': tid, 'turnId': turn_id, 'itemId': 'call-1', 'delta': 'early'}})
+            continue
         if scenario in ['turn_long','interrupt_timeout']:continue
         notice('item/reasoning/summaryTextDelta',itemId='reasoning-item',summaryIndex=0,delta='SUMMARY_SENTINEL')
         notice('item/reasoning/textDelta',itemId='reasoning-item',contentIndex=0,delta='RAW_PRIVATE_REASONING_SENTINEL')
@@ -308,5 +415,9 @@ for line in sys.stdin:
         assert set(message['params'])=={'threadId','turnId'}
         assert message['params']=={'threadId':tid,'turnId':turn_id}
         emit({'id':message['id'],'result':{}})
+        if waiting:
+            # An interrupted turn withdraws the request it was waiting on.
+            emit({'method': 'serverRequest/resolved', 'params': {'threadId': tid, 'requestId': waiting['id']}})
+            waiting = None
         if scenario!='interrupt_timeout':
             emit({'method':'turn/completed','params':{'threadId':tid,'turn':dict(current_turn,status='interrupted')}})

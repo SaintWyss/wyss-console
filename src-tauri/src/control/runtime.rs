@@ -1,8 +1,8 @@
 //! Authority-core projection and reconciliation. The core remains the sole durable writer.
 use super::{server::CoreMessage, store::Store};
 pub(super) use crate::adapters::codex::probe::supervised::{
-    ConversationCommand, ConversationFailure, MaterializationStage, Observation, RuntimeCommand,
-    TurnCommand,
+    ConversationCommand, ConversationFailure, MaterializationStage, Observation, ProviderDecision,
+    RuntimeCommand, TurnCommand,
 };
 use crate::{
     adapters::codex::probe::{
@@ -275,9 +275,11 @@ impl Runtime {
             Observation::Materialization { .. }
             | Observation::TurnNotice(_)
             | Observation::IsolationViolation
+            | Observation::Attested { .. }
             | Observation::SafetyConfigChanged(_) => (),
             Observation::Conversation { methods, .. }
             | Observation::TurnResult { methods, .. }
+            | Observation::Delivered { methods, .. }
             | Observation::InterruptResult { methods, .. } => {
                 self.methods = methods;
             }
@@ -355,6 +357,54 @@ impl Runtime {
             store.runtime_event("authority.runtime.instance_exited",json!({"adapter_id":"codex","runtime_kind":"codex","runtime_instance_id":id,"exit_kind":reason,"expected":expected,"desired_state":self.desired()}))?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+impl Runtime {
+    /// A ready generation without a process: the test reads every command the core
+    /// dispatches. `workspace` selects the local-tools profile.
+    pub(super) fn ready_for_test(
+        store: &mut Store,
+        instance: &AgentRuntimeInstanceId,
+        workspace: Option<&str>,
+    ) -> (
+        Self,
+        std::sync::mpsc::Receiver<RuntimeCommand>,
+        std::os::unix::net::UnixStream,
+    ) {
+        let target = RuntimeTarget::codex();
+        store
+            .apply(&Operation::RuntimeStart(RuntimeMutation {
+                intent_id: super::store::uuid(),
+                adapter_id: target.adapter_id,
+                runtime_kind: target.runtime_kind,
+                expected_revision: None,
+                safety_profile: workspace.map(|_| RuntimeSafetyProfile::CodexLocalToolsV1),
+                workspace_root: workspace.map(str::to_owned),
+            }))
+            .expect("desired running");
+        let directory = std::env::temp_dir();
+        let mut runtime = Self::new(store, &directory, &directory).expect("runtime");
+        let (worker, commands, wake) = Worker::detached();
+        runtime.worker = Some(worker);
+        runtime.state = ActualState::Ready;
+        runtime.attempt = Some(instance.clone());
+        runtime.live = Some(instance.clone());
+        runtime.generation = workspace.map(str::to_owned);
+        runtime.set_profile_for_test(Some(if workspace.is_some() {
+            RuntimeSafetyProfile::CodexLocalToolsV1
+        } else {
+            RuntimeSafetyProfile::CodexInferenceV1
+        }));
+        (runtime, commands, wake)
+    }
+    pub(super) fn set_profile_for_test(&mut self, profile: Option<RuntimeSafetyProfile>) {
+        self.safety = profile;
+    }
+    pub(super) fn set_instance_for_test(&mut self, instance: &AgentRuntimeInstanceId) {
+        self.attempt = Some(instance.clone());
+        self.live = Some(instance.clone());
     }
 }
 

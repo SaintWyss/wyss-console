@@ -727,6 +727,7 @@ pub(crate) struct TurnNotice {
     pub turn: super::CodexTurnId,
     pub kind: NoticeKind,
 }
+// Deliberately no Debug on any notice type: commands, output and diffs travel in them.
 #[derive(Clone)]
 pub(crate) enum NoticeKind {
     Started,
@@ -734,15 +735,346 @@ pub(crate) enum NoticeKind {
     MessageCompleted,
     SummaryPart,
     Terminal(super::TurnOutcome),
+    /// Local-tools profile only, from here on. The provider announced a command it wants
+    /// to run. Nothing has executed.
+    CommandProposed(CommandProposal),
+    /// The provider announced the change set it wants to apply. Nothing was written.
+    FileProposed(FileProposal),
+    /// The provider asks whether the announced action may happen.
+    ApprovalRequested(ApprovalRequest),
+    /// Output of an action. Legal only after the authority accepted that exact item.
+    // Content and kind are presented by the transient stream of the control protocol.
+    #[allow(dead_code)]
+    Output {
+        item: super::CodexItemId,
+        kind: ActionKind,
+        delta: String,
+    },
+    #[allow(dead_code)]
+    ItemEnded {
+        item: super::CodexItemId,
+        kind: ActionKind,
+        end: ItemEnd,
+    },
+    /// The provider no longer waits for an answer to this request.
+    RequestResolved(super::CodexRequestId),
+    /// The provider reports applied file changes in this turn.
+    DiffUpdated,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActionKind {
+    Command,
+    File,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ItemEnd {
+    Completed,
+    Failed,
+    Declined,
+}
+#[derive(Clone)]
+pub(crate) struct CommandProposal {
+    pub item: super::CodexItemId,
+    pub command: String,
+    pub cwd: String,
+    pub actions: Vec<String>,
+}
+#[derive(Clone)]
+pub(crate) struct ProposedChange {
+    pub path: String,
+    pub kind: crate::contracts::approval::FileChangeKind,
+    pub move_path: Option<String>,
+    pub diff: String,
+}
+#[derive(Clone)]
+pub(crate) struct FileProposal {
+    pub item: super::CodexItemId,
+    pub changes: Vec<ProposedChange>,
+}
+/// Decisions the provider lets this request be answered with. The authority only ever
+/// emits `accept`, `decline` or `cancel`, and only one that is offered.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Offered {
+    pub accept: bool,
+    pub decline: bool,
+    pub cancel: bool,
+}
+#[derive(Clone)]
+pub(crate) struct ApprovalRequest {
+    pub request: super::CodexRequestId,
+    pub item: super::CodexItemId,
+    pub kind: ActionKind,
+    /// Command and working directory as the request itself states them, when it does.
+    pub command: Option<String>,
+    pub cwd: Option<String>,
+    pub actions: Vec<String>,
+    pub offered: Offered,
+}
+/// Exact parameter sets of the two approval requests of the pinned 0.159.0 protocol,
+/// experimental fields included. Anything else is an unknown decision surface.
+const COMMAND_APPROVAL_FIELDS: [&str; 16] = [
+    "threadId",
+    "turnId",
+    "itemId",
+    "startedAtMs",
+    "approvalId",
+    "command",
+    "commandActions",
+    "cwd",
+    "environmentId",
+    "kind",
+    "networkApprovalContext",
+    "proposedExecpolicyAmendment",
+    "proposedNetworkPolicyAmendments",
+    "reason",
+    "additionalPermissions",
+    "availableDecisions",
+];
+const FILE_APPROVAL_FIELDS: [&str; 6] = [
+    "threadId",
+    "turnId",
+    "itemId",
+    "startedAtMs",
+    "reason",
+    "grantRoot",
+];
+const ACTION_LABEL_BYTES: usize = crate::contracts::approval::MAX_PARSED_ACTION_BYTES;
+fn violation<T>() -> Result<T> {
+    fail("inference_isolation_violation")
+}
+/// Everything malformed on the mediated surface is a violation, never a protocol detail.
+fn guard<T>(r: Result<T>) -> Result<T> {
+    r.or_else(|_| violation())
+}
+fn pair(p: &Value) -> Result<(super::CodexThreadId, super::CodexTurnId)> {
+    let text = |k: &str| p[k].as_str().ok_or_else(invalid);
+    guard((|| {
+        Ok((
+            super::CodexThreadId::parse(text("threadId")?)?,
+            super::CodexTurnId::parse(text("turnId")?)?,
+        ))
+    })())
+}
+fn item_id(v: &Value) -> Result<super::CodexItemId> {
+    guard(super::CodexItemId::parse(v.as_str().unwrap_or_default()))
+}
+fn present(p: &Value, key: &str) -> bool {
+    p.get(key).is_some_and(|v| !v.is_null())
+}
+/// Friendly labels of the provider's best-effort parse. Display only: the fingerprint and
+/// the decision cover the exact command, never these.
+fn action_labels(v: Option<&Value>) -> Result<Vec<String>> {
+    let Some(list) = v.filter(|v| !v.is_null()) else {
+        return Ok(Vec::new());
+    };
+    let mut labels = Vec::new();
+    for action in list.as_array().ok_or_else(invalid)? {
+        let kind = action["type"].as_str().ok_or_else(invalid)?;
+        if kind.is_empty() || kind.len() > 32 || !kind.bytes().all(|c| c.is_ascii_alphanumeric()) {
+            return Err(invalid());
+        }
+        let full = action["command"]
+            .as_str()
+            .map(|command| format!("{kind}: {command}"))
+            .filter(|label| label.len() <= ACTION_LABEL_BYTES && !label.contains('\0'));
+        labels.push(full.unwrap_or_else(|| kind.to_owned()));
+    }
+    Ok(labels)
+}
+fn proposed_changes(v: &Value) -> Result<Vec<ProposedChange>> {
+    use crate::contracts::approval::FileChangeKind;
+    let mut changes = Vec::new();
+    for c in v.as_array().ok_or_else(invalid)? {
+        let text = |v: &Value| v.as_str().map(str::to_owned).ok_or_else(invalid);
+        let kind = c["kind"].as_object().ok_or_else(invalid)?;
+        if kind.keys().any(|k| k != "type" && k != "move_path") {
+            return Err(invalid());
+        }
+        let move_path = kind
+            .get("move_path")
+            .filter(|v| !v.is_null())
+            .map(text)
+            .transpose()?;
+        let kind = match (kind.get("type").and_then(Value::as_str), &move_path) {
+            (Some("add"), None) => FileChangeKind::Add,
+            (Some("delete"), None) => FileChangeKind::Delete,
+            (Some("update"), None) => FileChangeKind::Update,
+            (Some("update"), Some(_)) => FileChangeKind::Move,
+            _ => return Err(invalid()),
+        };
+        changes.push(ProposedChange {
+            path: text(&c["path"])?,
+            kind,
+            move_path,
+            diff: text(&c["diff"])?,
+        });
+    }
+    Ok(changes)
+}
+/// One of the two approval requests the local-tools profile mediates, reduced to what the
+/// authority decides on. Every other request, and every request that asks for more than
+/// the one announced action, is a violation: it is never answered.
+fn approval_request(m: &super::WireMessage) -> Result<TurnNotice> {
+    use super::{ApprovalKind, approval_kind};
+    let kind = match m.method().and_then(approval_kind) {
+        Some(ApprovalKind::Command) => ActionKind::Command,
+        Some(ApprovalKind::FileChange) => ActionKind::File,
+        _ => return violation(),
+    };
+    let p = m.params().unwrap_or(&Value::Null);
+    let fields: &[&str] = match kind {
+        ActionKind::Command => &COMMAND_APPROVAL_FIELDS,
+        ActionKind::File => &FILE_APPROVAL_FIELDS,
+    };
+    if p.as_object()
+        .is_none_or(|o| o.keys().any(|k| !fields.contains(&k.as_str())))
+    {
+        return violation();
+    }
+    // Permission escalation, network approvals, callbacks of another terminal and
+    // persistent write grants are not this action.
+    for forbidden in [
+        "additionalPermissions",
+        "networkApprovalContext",
+        "approvalId",
+        "grantRoot",
+    ] {
+        if present(p, forbidden) {
+            return violation();
+        }
+    }
+    // The pinned runtime names its own process environment `local`. Any other environment
+    // is somewhere this generation was never isolated for.
+    if p.get("proposedNetworkPolicyAmendments")
+        .is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty()))
+        || p.get("kind").is_some_and(|k| k != "command")
+        || p.get("environmentId")
+            .is_some_and(|e| !e.is_null() && e != "local")
+    {
+        return violation();
+    }
+    let (thread, turn) = pair(p)?;
+    let offered = match p.get("availableDecisions").filter(|v| !v.is_null()) {
+        // The pinned protocol defines the full set when the request does not narrow it.
+        None => Offered {
+            accept: true,
+            decline: true,
+            cancel: true,
+        },
+        Some(list) => {
+            let list = guard(list.as_array().ok_or_else(invalid))?;
+            let has = |name: &str| list.iter().any(|d| d == name);
+            Offered {
+                accept: has("accept"),
+                decline: has("decline"),
+                cancel: has("cancel"),
+            }
+        }
+    };
+    let text = |k: &str| {
+        p.get(k)
+            .filter(|v| !v.is_null())
+            .map(|v| v.as_str().map(str::to_owned).ok_or_else(invalid))
+            .transpose()
+    };
+    Ok(TurnNotice {
+        thread,
+        turn,
+        kind: NoticeKind::ApprovalRequested(ApprovalRequest {
+            request: m.id().ok_or_else(invalid)?.clone(),
+            item: item_id(&p["itemId"])?,
+            kind,
+            command: guard(text("command"))?,
+            cwd: guard(text("cwd"))?,
+            actions: guard(action_labels(p.get("commandActions")))?,
+            offered,
+        }),
+    })
+}
+/// Notifications of the mediated surface. `None` means the frame is not part of it.
+fn local_action(method: &str, p: &Value) -> Result<Option<TurnNotice>> {
+    let notice = |kind| {
+        let (thread, turn) = pair(p)?;
+        Ok(Some(TurnNotice { thread, turn, kind }))
+    };
+    match method {
+        "turn/diff/updated" if p["diff"].as_str() != Some("") => notice(NoticeKind::DiffUpdated),
+        "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" => {
+            notice(NoticeKind::Output {
+                item: item_id(&p["itemId"])?,
+                kind: if method == "item/fileChange/outputDelta" {
+                    ActionKind::File
+                } else {
+                    ActionKind::Command
+                },
+                delta: guard(p["delta"].as_str().map(str::to_owned).ok_or_else(invalid))?,
+            })
+        }
+        "item/fileChange/patchUpdated" => notice(NoticeKind::FileProposed(FileProposal {
+            item: item_id(&p["itemId"])?,
+            changes: guard(proposed_changes(&p["changes"]))?,
+        })),
+        "item/started" | "item/completed" => {
+            let item = &p["item"];
+            let kind = match item["type"].as_str() {
+                Some("commandExecution") => ActionKind::Command,
+                Some("fileChange") => ActionKind::File,
+                _ => return Ok(None),
+            };
+            let id = item_id(&item["id"])?;
+            let status = item["status"].as_str();
+            if method == "item/completed" {
+                let end = match status {
+                    Some("completed") => ItemEnd::Completed,
+                    Some("failed") => ItemEnd::Failed,
+                    Some("declined") => ItemEnd::Declined,
+                    _ => return violation(),
+                };
+                return notice(NoticeKind::ItemEnded {
+                    item: id,
+                    kind,
+                    end,
+                });
+            }
+            // An item that starts in any other state already ran without being asked.
+            if status != Some("inProgress") {
+                return violation();
+            }
+            if kind == ActionKind::File {
+                return notice(NoticeKind::FileProposed(FileProposal {
+                    item: id,
+                    changes: guard(proposed_changes(&item["changes"]))?,
+                }));
+            }
+            // A user shell command or input to a running terminal is not a proposal.
+            if item
+                .get("source")
+                .is_some_and(|s| s != "agent" && s != "unifiedExecStartup")
+            {
+                return violation();
+            }
+            let text = |k: &str| guard(item[k].as_str().map(str::to_owned).ok_or_else(invalid));
+            notice(NoticeKind::CommandProposed(CommandProposal {
+                item: id,
+                command: text("command")?,
+                cwd: text("cwd")?,
+                actions: guard(action_labels(item.get("commandActions")))?,
+            }))
+        }
+        _ => Ok(None),
+    }
 }
 /// Fail closed on execution surfaces before ordinary notification processing.
 /// No provider body, user-message content, raw reasoning or free-form error escapes.
 pub(crate) fn external_action_candidate(method: &str, p: &Value) -> bool {
+    action_candidate(method, p, false)
+}
+fn action_candidate(method: &str, p: &Value, local: bool) -> bool {
     let allowed_item = |i: &Value| {
         matches!(
             i["type"].as_str(),
             Some("userMessage" | "agentMessage" | "reasoning" | "plan")
-        )
+        ) || (local && matches!(i["type"].as_str(), Some("commandExecution" | "fileChange")))
     };
     method.starts_with("hook/")
         || method.starts_with("mcpServer/")
@@ -753,19 +1085,35 @@ pub(crate) fn external_action_candidate(method: &str, p: &Value) -> bool {
                 .as_array()
                 .is_some_and(|a| a.iter().any(|i| !allowed_item(i)))
 }
+/// Inference profile: no server request and no action surface exists at all.
 pub(crate) fn notification(m: &super::WireMessage) -> Result<Option<TurnNotice>> {
+    classify(m, false)
+}
+/// Local-tools profile: the same classifier plus the two mediated approval requests and
+/// the command and file-change items they are about. Nothing else is added.
+pub(crate) fn local_notification(m: &super::WireMessage) -> Result<Option<TurnNotice>> {
+    classify(m, true)
+}
+fn classify(m: &super::WireMessage, local: bool) -> Result<Option<TurnNotice>> {
     use super::*;
     use crate::contracts::turn::StreamKind;
     if m.kind() == WireKind::ServerRequest {
-        return fail("inference_isolation_violation");
+        return if local {
+            approval_request(m).map(Some)
+        } else {
+            violation()
+        };
     }
     if m.kind() != WireKind::Notification {
         return Ok(None);
     }
     let method = m.method().ok_or_else(invalid)?;
     let p = m.params().unwrap_or(&Value::Null);
-    if external_action_candidate(method, p) {
-        return fail("inference_isolation_violation");
+    if local && let Some(notice) = local_action(method, p)? {
+        return Ok(Some(notice));
+    }
+    if action_candidate(method, p, local) {
+        return violation();
     }
     if method == "item/reasoning/textDelta" {
         return Ok(None);
@@ -809,7 +1157,7 @@ pub(crate) fn notification(m: &super::WireMessage) -> Result<Option<TurnNotice>>
                 ContentKind::AgentMessage => StreamKind::AssistantMessageDelta,
                 ContentKind::ReasoningSummary => StreamKind::ReasoningSummaryDelta,
                 ContentKind::Plan => return Ok(None),
-                _ => return fail("inference_isolation_violation"),
+                _ => return violation(),
             };
             Ok(Some(TurnNotice {
                 thread: thread_id,
@@ -839,6 +1187,8 @@ pub(crate) fn notification(m: &super::WireMessage) -> Result<Option<TurnNotice>>
         }
         CodexObservation::Session { .. } => Ok(None),
         CodexObservation::SuppressedPrivateReasoning => Ok(None),
+        // The supervisor correlates this against the one request it holds.
+        CodexObservation::ApprovalResolved { .. } if local => Ok(None),
         CodexObservation::UnknownNotification { .. }
             if matches!(
                 method,
@@ -856,6 +1206,6 @@ pub(crate) fn notification(m: &super::WireMessage) -> Result<Option<TurnNotice>>
         {
             Ok(None)
         }
-        _ => fail("inference_isolation_violation"),
+        _ => violation(),
     }
 }

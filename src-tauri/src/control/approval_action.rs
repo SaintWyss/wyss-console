@@ -1,11 +1,85 @@
 //! The action under approval. It lives only in authority memory: it is bounded, normalized,
 //! fingerprinted and measured here, and never reaches the store, the audit log or a log line.
-// The approval state machine is the only constructor of actions.
-#![cfg_attr(not(test), allow(dead_code))]
 use crate::contracts::control::*;
 use sha2::{Digest, Sha256};
+use std::{
+    fs,
+    os::unix::fs::MetadataExt,
+    path::{Component, Path},
+};
 
 const DOMAIN: &[u8] = b"wyss.approval.action.v1";
+/// Names the runtime's own sandbox protects inside every writable root. An action that
+/// names one would plant project policy or repository hooks: it is never acceptable.
+const PROTECTED: [&str; 3] = [".codex", ".git", ".agents"];
+
+/// What the last component of a confined path has to be.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::control) enum Leaf {
+    Directory,
+    ExistingFile,
+    FileOrMissing,
+}
+/// Proves that the normalized absolute `path` names something inside the canonical
+/// `workspace`. The proof never compares strings as prefixes and never follows a link: the
+/// path must extend the workspace component by component, every component that exists must
+/// be a real directory on the workspace's own filesystem, and the leaf must be what the
+/// action needs. A symbolic link anywhere, a hard-linked file, a mount point, a protected
+/// name or anything that cannot be inspected makes the proof fail, and without the proof
+/// an action is never accepted. The check is repeated immediately before every Accept; the
+/// runtime's own sandbox remains the enforcement against a change after it.
+pub(in crate::control) fn confine(workspace: &str, path: &str, leaf: Leaf) -> bool {
+    let root = Path::new(workspace);
+    let Ok(root_meta) = fs::symlink_metadata(root) else {
+        return false;
+    };
+    // The workspace is still the canonical directory the session was bound to.
+    if !root_meta.is_dir() || !fs::canonicalize(root).is_ok_and(|p| p == root) {
+        return false;
+    }
+    let Ok(relative) = Path::new(path).strip_prefix(root) else {
+        return false;
+    };
+    let mut names = Vec::new();
+    for part in relative.components() {
+        let Component::Normal(name) = part else {
+            return false;
+        };
+        if PROTECTED.iter().any(|p| name == *p) {
+            return false;
+        }
+        names.push(name);
+    }
+    if names.is_empty() {
+        return leaf == Leaf::Directory;
+    }
+    let mut current = root.to_path_buf();
+    for (index, name) in names.iter().enumerate() {
+        current.push(name);
+        let last = index + 1 == names.len();
+        match fs::symlink_metadata(&current) {
+            Ok(m) if m.file_type().is_symlink() || m.dev() != root_meta.dev() => return false,
+            Ok(m) if !last => {
+                if !m.is_dir() {
+                    return false;
+                }
+            }
+            Ok(m) => {
+                return match leaf {
+                    Leaf::Directory => m.is_dir(),
+                    // A second name for the same file may live outside the workspace.
+                    Leaf::ExistingFile | Leaf::FileOrMissing => m.is_file() && m.nlink() == 1,
+                };
+            }
+            // Nothing exists below a missing component: creating it stays inside.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return leaf == Leaf::FileOrMissing;
+            }
+            Err(_) => return false,
+        }
+    }
+    false
+}
 
 /// Lexical normal form of an absolute path: no empty or `.` component and no trailing
 /// slash. A `..` component is refused rather than resolved, because resolving it lexically
@@ -41,12 +115,14 @@ fn kind_text(kind: FileChangeKind) -> &'static [u8] {
     }
 }
 // Deliberately no Debug on any action type.
+// The presentation accessors are consumed by the control protocol.
 pub(in crate::control) struct CommandAction {
     provider_item_id: String,
     command: String,
     cwd: String,
     parsed_actions: Vec<String>,
 }
+#[allow(dead_code)]
 impl CommandAction {
     pub fn new(
         provider_item_id: &str,
@@ -104,6 +180,10 @@ impl CommandAction {
             parsed_actions: self.parsed_actions.clone(),
         }
     }
+    /// The command runs in an existing directory of the workspace.
+    pub fn confined(&self, workspace: &str) -> bool {
+        confine(workspace, &self.cwd, Leaf::Directory)
+    }
 }
 pub(in crate::control) struct FileChange {
     pub path: String,
@@ -115,6 +195,7 @@ pub(in crate::control) struct FileAction {
     provider_item_id: String,
     changes: Vec<FileChange>,
 }
+#[allow(dead_code)]
 impl FileAction {
     /// The complete proposal: every path normalized, every destination distinct, the set
     /// ordered by path so that the provider's enumeration order carries no meaning.
@@ -188,6 +269,21 @@ impl FileAction {
             files: self.changes.len() as u16,
             diff_bytes: self.changes.iter().map(|c| c.diff.len()).sum::<usize>() as u32,
         }
+    }
+    /// Every source and destination of the change set stays inside the workspace.
+    pub fn confined(&self, workspace: &str) -> bool {
+        self.changes.iter().all(|c| {
+            let source = match c.kind {
+                FileChangeKind::Add => Leaf::FileOrMissing,
+                FileChangeKind::Delete | FileChangeKind::Update | FileChangeKind::Move => {
+                    Leaf::ExistingFile
+                }
+            };
+            confine(workspace, &c.path, source)
+                && c.move_path
+                    .as_deref()
+                    .is_none_or(|to| confine(workspace, to, Leaf::FileOrMissing))
+        })
     }
 }
 #[cfg(test)]

@@ -2374,3 +2374,385 @@ fn local_tools_generation_executes_nothing_while_no_approval_can_be_answered() {
         }
     }
 }
+/// Every approval event of the durable audit stream, in order.
+fn approval_events(c: &mut ControlClient) -> Vec<serde_json::Value> {
+    let stream = c.hello_status().stream_id.clone();
+    let mut after = None;
+    let mut found = Vec::new();
+    loop {
+        let ResultValue::Audit { events, next } = c
+            .audit(AuditRead {
+                stream_id: stream.clone(),
+                after_sequence: after,
+                limit: 50,
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        for event in &events {
+            let value = serde_json::to_value(event).unwrap();
+            if value["event_type"]
+                .as_str()
+                .unwrap()
+                .starts_with("authority.managed_approval.")
+            {
+                found.push(value);
+            }
+        }
+        if next.is_none() {
+            return found;
+        }
+        after = next;
+    }
+}
+fn wait_approval(c: &mut ControlClient, kind: &str) -> serde_json::Value {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        let events = approval_events(c);
+        if let Some(event) = events
+            .iter()
+            .find(|e| e["event_type"] == format!("authority.managed_approval.{kind}"))
+        {
+            return event.clone();
+        }
+        assert!(Instant::now() < deadline, "no {kind} approval: {events:?}");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+/// The decision of every response frame the authority wrote to the provider.
+fn decisions(env: &Sandbox) -> Vec<String> {
+    fs::read_to_string(env.root.join("decisions"))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+/// What an executed command or an applied patch would have left behind.
+fn effects(env: &Sandbox, workspace: &str) -> usize {
+    ["executions", "mutations"]
+        .iter()
+        .filter(|name| env.root.join(name).exists())
+        .count()
+        + usize::from(
+            PathBuf::from(workspace)
+                .join("wyss-fixture-probe.txt")
+                .exists(),
+        )
+}
+fn local_session(
+    env: &Sandbox,
+    c: &mut ControlClient,
+    workspace: &str,
+    scopes: Vec<ExecutionScope>,
+) -> (ManagedSessionRecord, ExecutionLease) {
+    let (s, l) = prepare_bound_session(c, scopes);
+    c.binding_create(BindingCreate {
+        workspace_root: workspace.to_owned(),
+        ..create_params(env, &s)
+    })
+    .unwrap();
+    c.binding_resume(resume_params(&s)).unwrap();
+    (s, l)
+}
+#[test]
+fn local_tools_approval_request_is_admitted_pending_and_only_ever_refused_without_a_decision() {
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    for (scenario, kind) in [
+        ("approval_command", "command_execution"),
+        ("approval_file", "file_change"),
+    ] {
+        for cause in ["cancel", "revoke", "expiry", "close", "stop", "restart"] {
+            let env = Sandbox::new(scenario);
+            let workspace = local_layout(&env);
+            let mut a = env.start();
+            let mut c = env.client();
+            c.runtime_start(local_mutation(&workspace)).unwrap();
+            env.wait(&mut c, ActualState::Ready);
+            let (s, l) = local_session(&env, &mut c, &workspace, local_scopes());
+            let lease = if cause == "expiry" {
+                c.lease_renew(LeaseRenew {
+                    intent_id: id(),
+                    lease_id: l.lease_id.clone(),
+                    expected_revision: l.revision,
+                    ttl_seconds: 2,
+                })
+                .unwrap()
+            } else {
+                l
+            };
+            let t = c.turn_start(turn_params(&s)).unwrap();
+            let requested = wait_approval(&mut c, "requested");
+            let label = format!("{scenario}/{cause}");
+            let payload = &requested["payload"];
+            assert_eq!(payload["kind"], kind, "{label}");
+            assert_eq!(payload["state"], "pending");
+            assert_eq!(payload["managed_turn_id"], t.managed_turn_id.as_str());
+            // The ORIGINAL lease of the turn, as admitted.
+            assert_eq!(payload["lease_id"], lease.lease_id.as_str());
+            assert_eq!(payload["lease_revision"], lease.revision);
+            assert_eq!(payload["action_fingerprint"].as_str().unwrap().len(), 64);
+            assert_eq!(requested["session_id"], s.managed_session_id.as_str());
+            // Pending means exactly that: no answer was written, so nothing ran.
+            let running = wait_turn(&mut c, &t, false);
+            thread::sleep(Duration::from_millis(150));
+            assert!(decisions(&env).is_empty(), "{label}");
+            assert_eq!(effects(&env, &workspace), 0, "{label}");
+            match cause {
+                "cancel" => {
+                    c.turn_cancel(TurnCancel {
+                        intent_id: id(),
+                        managed_turn_id: t.managed_turn_id.clone(),
+                        expected_revision: running.revision,
+                    })
+                    .unwrap();
+                }
+                "revoke" => {
+                    c.lease_revoke(LeaseRevoke {
+                        intent_id: id(),
+                        lease_id: lease.lease_id.clone(),
+                        expected_revision: lease.revision,
+                    })
+                    .unwrap();
+                }
+                "close" => {
+                    c.close(Close {
+                        intent_id: id(),
+                        managed_session_id: s.managed_session_id.clone(),
+                        expected_revision: 1,
+                    })
+                    .unwrap();
+                }
+                "stop" => {
+                    c.runtime_stop(mutation()).unwrap();
+                }
+                "restart" => {
+                    a.stop(true);
+                    for pid in env.pids() {
+                        dead(pid);
+                    }
+                    a = env.start();
+                    c = env.client();
+                    env.wait(&mut c, ActualState::Ready);
+                }
+                _ => (),
+            }
+            let done = wait_turn(&mut c, &t, true);
+            let (state, reason, approval, why, answers): (_, _, _, _, &[&str]) = match cause {
+                "cancel" => (
+                    TurnState::Interrupted,
+                    TurnReason::UserCancel,
+                    "invalidated",
+                    "turn_cancelled",
+                    &["\"cancel\""],
+                ),
+                "revoke" => (
+                    TurnState::Interrupted,
+                    TurnReason::LeaseRevoked,
+                    "invalidated",
+                    "lease_revoked",
+                    &["\"cancel\""],
+                ),
+                "expiry" => (
+                    TurnState::Interrupted,
+                    TurnReason::LeaseExpired,
+                    "expired",
+                    "lease_expired",
+                    &["\"cancel\""],
+                ),
+                "close" => (
+                    TurnState::Interrupted,
+                    TurnReason::SessionClosed,
+                    "invalidated",
+                    "session_closed",
+                    &["\"cancel\""],
+                ),
+                "stop" => (
+                    TurnState::Indeterminate,
+                    TurnReason::RuntimeStopped,
+                    "invalidated",
+                    "runtime_lost",
+                    &[],
+                ),
+                _ => (
+                    TurnState::Indeterminate,
+                    TurnReason::AuthorityRestarted,
+                    "invalidated",
+                    "authority_restarted",
+                    &[],
+                ),
+            };
+            assert_eq!(
+                (done.state, done.terminal_reason),
+                (state, Some(reason)),
+                "{label}"
+            );
+            let settled = wait_approval(&mut c, approval);
+            assert_eq!(settled["payload"]["reason"], why, "{label}");
+            assert!(settled["payload"]["decision"].is_null(), "{label}");
+            assert_eq!(settled["payload"]["effect"], "none", "{label}");
+            assert_eq!(
+                settled["payload"]["action_fingerprint"],
+                payload["action_fingerprint"]
+            );
+            assert_eq!(approval_events(&mut c).len(), 2, "{label}");
+            // Exactly the reductive answer, or none at all; never an accept, never twice,
+            // never an interrupt on top of it, and nothing ran.
+            assert_eq!(decisions(&env), answers, "{label}");
+            assert_eq!(count(&env, "RESPONSE"), answers.len(), "{label}");
+            assert_eq!(count(&env, "turn/interrupt"), 0, "{label}");
+            assert_eq!(count(&env, "turn/start"), 1, "{label}");
+            assert_eq!(effects(&env, &workspace), 0, "{label}");
+            // The audit stream holds control metadata only.
+            let audit = serde_json::to_string(&approval_events(&mut c)).unwrap();
+            for transient in ["WYSS_FIXTURE", "printf", "wyss-fixture-probe"] {
+                assert!(!audit.contains(transient), "{label}");
+            }
+            drop(c);
+            a.stop(false);
+            for pid in env.pids() {
+                dead(pid);
+            }
+        }
+    }
+}
+#[test]
+fn local_tools_request_beyond_the_one_announced_action_is_contained_and_never_answered() {
+    for (scenario, opened) in [
+        ("approval_command_stdin", false),
+        ("approval_command_permissions", false),
+        ("approval_command_network", false),
+        ("approval_command_remote", false),
+        ("approval_file_grant", false),
+        ("approval_command_unasked", false),
+        ("approval_command_double", true),
+        ("approval_command_early", true),
+    ] {
+        let env = Sandbox::new(scenario);
+        let workspace = local_layout(&env);
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(local_mutation(&workspace)).unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, _) = local_session(&env, &mut c, &workspace, local_scopes());
+        let t = c.turn_start(turn_params(&s)).unwrap();
+        let failed = env.wait(&mut c, ActualState::Failed);
+        assert_eq!(
+            failed.diagnostic,
+            Some(RuntimeDiagnostic::InferenceIsolationViolation),
+            "{scenario}"
+        );
+        let turn = wait_turn(&mut c, &t, true);
+        assert_eq!(
+            (turn.state, turn.terminal_reason),
+            (
+                TurnState::Failed,
+                Some(TurnReason::InferenceIsolationViolation)
+            ),
+            "{scenario}"
+        );
+        // Never approved, never answered: the request that was legal is void as well.
+        assert!(decisions(&env).is_empty(), "{scenario}");
+        assert_eq!(count(&env, "RESPONSE"), 0, "{scenario}");
+        let events = approval_events(&mut c);
+        if opened {
+            assert_eq!(events.len(), 2, "{scenario}");
+            assert_eq!(
+                events[1]["event_type"],
+                "authority.managed_approval.invalidated"
+            );
+            assert_eq!(events[1]["payload"]["reason"], "isolation_violation");
+        } else {
+            assert!(events.is_empty(), "{scenario}: {events:?}");
+        }
+        assert_eq!(
+            c.binding_status(s.managed_session_id).unwrap().state,
+            BindingState::BoundDetached
+        );
+        drop(c);
+        a.stop(false);
+        for pid in env.pids() {
+            dead(pid);
+        }
+    }
+}
+#[test]
+fn local_tools_unacceptable_proposal_is_refused_reductively_without_an_approval() {
+    // A command outside the workspace can never be accepted: the provider is refused,
+    // the turn stops and the runtime stays healthy.
+    let env = Sandbox::new("approval_command_outside");
+    let workspace = local_layout(&env);
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(local_mutation(&workspace)).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = local_session(&env, &mut c, &workspace, local_scopes());
+    let t = c.turn_start(turn_params(&s)).unwrap();
+    let done = wait_turn(&mut c, &t, true);
+    assert_eq!(
+        (done.state, done.terminal_reason),
+        (TurnState::Interrupted, Some(TurnReason::ActionRejected))
+    );
+    assert!(approval_events(&mut c).is_empty());
+    assert_eq!(decisions(&env), ["\"cancel\""]);
+    assert_eq!(effects(&env, &workspace), 0);
+    assert_eq!(c.runtime_status().unwrap().actual_state, ActualState::Ready);
+    drop(c);
+    a.stop(false);
+
+    // A request that offers no refusal is never answered: the turn is interrupted instead.
+    let env = Sandbox::new("approval_command_nocancel");
+    let workspace = local_layout(&env);
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(local_mutation(&workspace)).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = local_session(&env, &mut c, &workspace, local_scopes());
+    let t = c.turn_start(turn_params(&s)).unwrap();
+    wait_approval(&mut c, "requested");
+    let running = wait_turn(&mut c, &t, false);
+    c.turn_cancel(TurnCancel {
+        intent_id: id(),
+        managed_turn_id: t.managed_turn_id.clone(),
+        expected_revision: running.revision,
+    })
+    .unwrap();
+    assert_eq!(wait_turn(&mut c, &t, true).state, TurnState::Interrupted);
+    assert_eq!(
+        wait_approval(&mut c, "invalidated")["payload"]["reason"],
+        "turn_cancelled"
+    );
+    assert!(decisions(&env).is_empty());
+    assert_eq!(count(&env, "turn/interrupt"), 1);
+    assert_eq!(effects(&env, &workspace), 0);
+    assert_eq!(c.runtime_status().unwrap().actual_state, ActualState::Ready);
+    drop(c);
+    a.stop(false);
+}
+#[test]
+fn inference_generation_answers_no_approval_request_even_when_well_formed() {
+    for scenario in ["approval_command", "approval_file"] {
+        let env = Sandbox::new(scenario);
+        let mut a = env.start();
+        let mut c = env.client();
+        c.runtime_start(mutation()).unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, _) = inference_session(&env, &mut c);
+        let t = c.turn_start(turn_params(&s)).unwrap();
+        env.wait(&mut c, ActualState::Failed);
+        let failed = wait_turn(&mut c, &t, true);
+        assert_eq!(
+            failed.terminal_reason,
+            Some(TurnReason::InferenceIsolationViolation),
+            "{scenario}"
+        );
+        assert!(approval_events(&mut c).is_empty(), "{scenario}");
+        assert!(decisions(&env).is_empty(), "{scenario}");
+        assert_eq!(count(&env, "RESPONSE"), 0, "{scenario}");
+        assert_eq!(effects(&env, env.root.to_str().unwrap()), 0);
+        a.stop(false);
+        for pid in env.pids() {
+            dead(pid);
+        }
+    }
+}

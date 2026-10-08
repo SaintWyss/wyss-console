@@ -1,7 +1,10 @@
 //! Core-owned single active turn; provider IO remains exclusively in the supervisor.
+#[path = "turn_approvals.rs"]
+mod approvals;
 use super::{
     conversations::Conversations,
     gate::{ExecutionDecision, ExecutionGate},
+    mediation::Mediation,
     runtime::{ConversationFailure, Runtime, RuntimeCommand, TurnCommand},
     store::{Store, turns::StartFingerprint},
     turn_stream::Streams,
@@ -24,6 +27,16 @@ use std::{
     },
     time::{Duration, Instant},
 };
+/// What the core has to do after a runtime observation, beyond what the turn already did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Verdict {
+    Continue,
+    /// The provider left the mediated surface: stop the stream, never answer, reap the
+    /// runtime and fail the turn.
+    Violation,
+    /// An accepted answer may or may not have reached the provider: contain conservatively.
+    Uncertain,
+}
 struct Active {
     turn: ManagedTurnRecord,
     admission: Arc<AtomicBool>,
@@ -33,11 +46,16 @@ struct Active {
     interrupt_sent: bool,
     provider_started: bool,
     deadline: Option<Instant>,
+    /// Canonical workspace of the session this turn belongs to.
+    workspace: String,
+    mediation: Mediation,
 }
 #[derive(Default)]
 pub(super) struct Turns {
     active: Option<Active>,
     streams: Streams,
+    /// The one Accept whose profile attestation is in flight. Nothing is decided yet.
+    accepting: Option<approvals::Accepting>,
 }
 impl Turns {
     pub fn start(
@@ -78,6 +96,8 @@ impl Turns {
             interrupt_sent: false,
             provider_started: false,
             deadline: None,
+            workspace: b.workspace_root.clone(),
+            mediation: Mediation::default(),
         });
         let command = RuntimeCommand::Start(TurnCommand {
             managed_turn_id: t.managed_turn_id.clone(),
@@ -128,18 +148,48 @@ impl Turns {
             .as_ref()
             .is_some_and(|a| a.turn.managed_turn_id == p.managed_turn_id)
         {
-            self.request_cancel(runtime, TurnReason::UserCancel);
+            self.request_cancel(store, runtime, TurnReason::UserCancel)?;
         }
         Ok(ResultValue::Turn(t))
     }
-    fn request_cancel(&mut self, runtime: &mut Runtime, reason: TurnReason) {
+    /// Stops the turn. The first request for it makes every approval of the turn terminal
+    /// before any provider frame is written, so nothing can be accepted from that instant.
+    /// A held request that offers `cancel` is answered with it, which also ends the turn;
+    /// otherwise the turn is interrupted.
+    fn request_cancel(
+        &mut self,
+        store: &mut Store,
+        runtime: &mut Runtime,
+        reason: TurnReason,
+    ) -> ControlResult<()> {
         let Some(a) = self.active.as_mut() else {
-            return;
+            return Ok(());
         };
         a.admission.store(false, Ordering::Release);
         if a.cancel.is_none() {
             a.cancel = Some(reason);
             a.deadline = Some(Instant::now() + Duration::from_secs(5));
+            store.settle_approvals(
+                Some(&a.turn.managed_turn_id),
+                approvals::approval_reason(reason),
+            )?;
+            if let Some(held) = a.mediation.held.as_mut()
+                && !held.answered
+                && held.offered.cancel
+            {
+                held.answered = true;
+                let request = held.request.clone();
+                a.mediation.dispatched = Some(request.clone());
+                // The reductive answer itself ends the turn: no interrupt follows it.
+                a.interrupt_sent = true;
+                if !runtime.turn_command(RuntimeCommand::Resolve {
+                    request,
+                    decision: super::runtime::ProviderDecision::Cancel,
+                }) {
+                    a.deadline = Some(Instant::now());
+                }
+                return Ok(());
+            }
         }
         if !a.interrupt_sent
             && a.provider_started
@@ -154,21 +204,31 @@ impl Turns {
                 a.deadline = Some(Instant::now());
             }
         }
+        Ok(())
     }
-    pub fn shutdown(&mut self, runtime: &mut Runtime) {
-        self.request_cancel(runtime, TurnReason::AuthorityShutdown);
+    pub fn shutdown(&mut self, store: &mut Store, runtime: &mut Runtime) {
+        if self
+            .request_cancel(store, runtime, TurnReason::AuthorityShutdown)
+            .is_err()
+        {
+            store.execution_available = false;
+        }
     }
     pub fn active(&self) -> bool {
         self.active.is_some()
     }
     pub fn wait(&self) -> Option<Duration> {
-        self.active
-            .as_ref()
-            .and_then(|a| a.deadline)
-            .map(|d| d.saturating_duration_since(Instant::now()))
+        let turn = self.active.as_ref().and_then(|a| a.deadline);
+        let accepting = self.accepting.as_ref().map(|p| p.deadline);
+        match (turn, accepting) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+        .map(|d| d.saturating_duration_since(Instant::now()))
     }
     /// Called on state-change/deadline wakeups, never via busy SQLite polling.
     pub fn enforce(&mut self, store: &mut Store, runtime: &mut Runtime) -> ControlResult<bool> {
+        self.expire_accepting();
         let Some(a) = self.active.as_ref() else {
             return Ok(false);
         };
@@ -180,7 +240,7 @@ impl Turns {
         if let Some(reason) = a.cancel {
             // turn/start acknowledges enqueueing before the provider is interruptible.
             // A correlated turn/started activates the one pending reductive request.
-            self.request_cancel(runtime, reason);
+            self.request_cancel(store, runtime, reason)?;
             return Ok(false);
         }
         let reason = if !store.execution_available {
@@ -200,11 +260,11 @@ impl Turns {
             } else if lease.state != LeaseState::Active {
                 Some(TurnReason::LeaseRevoked)
             } else {
-                None
+                self.approval_overdue(store)?
             }
         };
         if let Some(r) = reason {
-            self.request_cancel(runtime, r);
+            self.request_cancel(store, runtime, r)?;
         }
         Ok(false)
     }
@@ -215,11 +275,11 @@ impl Turns {
         instance: &AgentRuntimeInstanceId,
         id: &ManagedTurnId,
         result: Result<CodexTurnId, ConversationFailure>,
-    ) -> ControlResult<()> {
+    ) -> ControlResult<Verdict> {
         if !self.active.as_ref().is_some_and(|a| {
             a.turn.managed_turn_id == *id && a.turn.runtime_instance_id == *instance
         }) {
-            return Ok(());
+            return Ok(Verdict::Continue);
         }
         match result {
             Ok(provider) => {
@@ -230,10 +290,13 @@ impl Turns {
                 let notices = std::mem::take(&mut a.provisional);
                 a.provisional_bytes = 0;
                 for n in notices {
-                    self.notice(store, instance, n)?;
+                    let verdict = self.notice(store, runtime, instance, n)?;
+                    if verdict != Verdict::Continue {
+                        return Ok(verdict);
+                    }
                 }
                 if let Some(reason) = self.active.as_ref().and_then(|a| a.cancel) {
-                    self.request_cancel(runtime, reason);
+                    self.request_cancel(store, runtime, reason)?;
                 }
             }
             Err(ConversationFailure::Rejected) => {
@@ -249,34 +312,40 @@ impl Turns {
             }
             Err(ConversationFailure::Unknown) => self.lost(store, TurnReason::DispatchUnknown)?,
         }
-        Ok(())
+        Ok(Verdict::Continue)
     }
     pub fn notice(
         &mut self,
         store: &mut Store,
+        runtime: &mut Runtime,
         instance: &AgentRuntimeInstanceId,
         n: TurnNotice,
-    ) -> ControlResult<()> {
+    ) -> ControlResult<Verdict> {
         let Some(a) = self.active.as_mut() else {
-            return Ok(());
+            return Ok(Verdict::Continue);
         };
         if a.turn.runtime_instance_id != *instance || a.turn.codex_thread_id != n.thread {
-            return Ok(());
+            return Ok(Verdict::Continue);
         }
         if a.turn.codex_turn_id.is_none() {
             let bytes = match &n.kind {
                 NoticeKind::Delta(_, s) => s.len(),
-                _ => 0,
+                NoticeKind::Started
+                | NoticeKind::MessageCompleted
+                | NoticeKind::SummaryPart
+                | NoticeKind::Terminal(_) => 0,
+                // No action can be announced or asked before the provider named the turn.
+                _ => return Ok(Verdict::Violation),
             };
             if a.provisional.len() >= 32 || a.provisional_bytes + bytes > 128 * 1024 {
                 return Err(ControlError::CapacityExceeded);
             }
             a.provisional_bytes += bytes;
             a.provisional.push_back(n);
-            return Ok(());
+            return Ok(Verdict::Continue);
         }
         if a.turn.codex_turn_id.as_ref() != Some(&n.turn) {
-            return Ok(());
+            return Ok(Verdict::Continue);
         }
         match n.kind {
             NoticeKind::Started => a.provider_started = true,
@@ -297,12 +366,13 @@ impl Turns {
                         a.cancel.unwrap_or(TurnReason::UserCancel),
                     ),
                     TurnOutcome::Failed => (TurnState::Failed, TurnReason::ProviderFailed),
-                    TurnOutcome::InProgress => return Ok(()),
+                    TurnOutcome::InProgress => return Ok(Verdict::Continue),
                 };
                 self.finish(store, state, reason)?;
             }
+            mediated => return self.mediate(store, runtime, mediated),
         }
-        Ok(())
+        Ok(Verdict::Continue)
     }
     fn finish(
         &mut self,
@@ -310,9 +380,14 @@ impl Turns {
         state: TurnState,
         reason: TurnReason,
     ) -> ControlResult<()> {
+        self.reject_accepting(ControlError::InvalidTransition);
         if let Some(a) = &self.active {
-            let t = match store.transition_turn(&a.turn.managed_turn_id, None, state, Some(reason))
-            {
+            // Approvals end no later than their turn. An undecided one is terminalized; an
+            // accepted one whose outcome the provider never reported is indeterminate.
+            let settled = approvals::settle_turn(store, &a.turn.managed_turn_id, reason);
+            let t = match settled.and_then(|()| {
+                store.transition_turn(&a.turn.managed_turn_id, None, state, Some(reason))
+            }) {
                 Ok(t) => t,
                 Err(e) => {
                     // Storage uncertainty is terminal for in-memory admission. The durable

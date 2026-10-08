@@ -3,6 +3,7 @@ use super::{
     paths::Paths,
     runtime::{Observation, Runtime},
     store::{Store, uuid},
+    turns::Verdict,
 };
 use crate::contracts::{WireUuid, control::*};
 use nix::{
@@ -255,11 +256,11 @@ pub fn run_from_environment() -> ControlResult<()> {
                 break;
             }
             let expiry = next_expiry.map(|t| expiry_wait(t, store.lease_now()));
-            let wait = match (expiry, turns.wait()) {
-                (Some(a), Some(b)) => Some(a.min(b)),
-                (a, None) => a,
-                (None, b) => b,
-            };
+            // The pending approval has its own deadline on the same authority clock.
+            let approval = turns
+                .approval_deadline()
+                .map(|t| expiry_wait(t, store.lease_now()));
+            let wait = [expiry, approval, turns.wait()].into_iter().flatten().min();
             let received = match wait {
                 Some(t) => receiver.recv_timeout(t),
                 None => receiver
@@ -274,7 +275,7 @@ pub fn run_from_environment() -> ControlResult<()> {
             match message {
                 CoreMessage::Shutdown => {
                     closing = true;
-                    turns.shutdown(&mut runtime);
+                    turns.shutdown(&mut store, &mut runtime);
                 }
                 CoreMessage::Runtime(id, observation) => {
                     if !runtime.owns_generation(&id) {
@@ -289,8 +290,10 @@ pub fn run_from_environment() -> ControlResult<()> {
                         }
                         continue;
                     }
-                    let turn_result = match &observation {
-                        Observation::TurnNotice(n) => turns.notice(&mut store, &id, n.clone()),
+                    let verdict = match &observation {
+                        Observation::TurnNotice(n) => {
+                            turns.notice(&mut store, &mut runtime, &id, n.clone())
+                        }
                         Observation::TurnResult {
                             managed_turn_id,
                             result,
@@ -302,6 +305,19 @@ pub fn run_from_environment() -> ControlResult<()> {
                             managed_turn_id,
                             result.clone(),
                         ),
+                        Observation::Attested { request, valid } => turns.attested(
+                            &mut store,
+                            &mut runtime,
+                            &conversations,
+                            request,
+                            *valid,
+                        ),
+                        Observation::Delivered {
+                            request,
+                            decision,
+                            written,
+                            ..
+                        } => turns.delivered(&mut store, request, *decision, *written),
                         Observation::InterruptResult {
                             managed_turn_id,
                             success,
@@ -313,30 +329,48 @@ pub fn run_from_environment() -> ControlResult<()> {
                                 .flatten()
                                 .is_some_and(|t| t.managed_turn_id == *managed_turn_id)
                             {
-                                turns.lost(&mut store, TurnReason::InterruptTimeout)
+                                turns
+                                    .lost(&mut store, TurnReason::InterruptTimeout)
+                                    .map(|()| Verdict::Continue)
                             } else {
-                                Ok(())
+                                Ok(Verdict::Continue)
                             }
                         }
-                        Observation::IsolationViolation => {
-                            let result =
-                                turns.lost(&mut store, TurnReason::InferenceIsolationViolation);
-                            let _ = runtime.contain(
+                        Observation::IsolationViolation => Ok(Verdict::Violation),
+                        Observation::Exited { reason, .. } => turns
+                            .lost(
                                 &mut store,
-                                RuntimeDiagnostic::InferenceIsolationViolation,
-                            );
+                                if *reason == RuntimeDiagnostic::InferenceIsolationViolation {
+                                    TurnReason::InferenceIsolationViolation
+                                } else {
+                                    TurnReason::RuntimeFailed
+                                },
+                            )
+                            .map(|()| Verdict::Continue),
+                        _ => Ok(Verdict::Continue),
+                    };
+                    // Containment: the turn is terminal, the owned runtime is reaped and no
+                    // attachment survives. Nothing is answered and nothing is replayed.
+                    let turn_result = match verdict {
+                        Ok(Verdict::Continue) => Ok(()),
+                        Ok(contained) => {
+                            let (turn, diagnostic) = if contained == Verdict::Violation {
+                                (
+                                    TurnReason::InferenceIsolationViolation,
+                                    RuntimeDiagnostic::InferenceIsolationViolation,
+                                )
+                            } else {
+                                (
+                                    TurnReason::DispatchUnknown,
+                                    RuntimeDiagnostic::TransportFailed,
+                                )
+                            };
+                            let result = turns.lost(&mut store, turn);
+                            let _ = runtime.contain(&mut store, diagnostic);
                             conversations.detach(&mut store);
                             result
                         }
-                        Observation::Exited { reason, .. } => turns.lost(
-                            &mut store,
-                            if *reason == RuntimeDiagnostic::InferenceIsolationViolation {
-                                TurnReason::InferenceIsolationViolation
-                            } else {
-                                TurnReason::RuntimeFailed
-                            },
-                        ),
-                        _ => Ok(()),
+                        Err(e) => Err(e),
                     };
                     if turn_result.is_err() {
                         store.execution_available = false;
@@ -391,6 +425,13 @@ pub fn run_from_environment() -> ControlResult<()> {
                             continue;
                         }
                         conversations.begin(&mut store, &mut runtime, &job.op, job.reply);
+                        continue;
+                    }
+                    // An Accept replies only after the runtime re-proved its profile.
+                    if let Operation::ApprovalRespond(p) = &job.op
+                        && !core_stop.load(Ordering::Acquire)
+                    {
+                        turns.respond(&mut store, &mut runtime, &conversations, p, job.reply);
                         continue;
                     }
                     if matches!(

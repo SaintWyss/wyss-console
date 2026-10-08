@@ -716,6 +716,13 @@ pub struct RuntimeMethods {
     pub turn_interrupt: u64,
     #[serde(default)]
     pub config_requirements_read: u64,
+    /// Approval responses actually written to the provider, by decision.
+    #[serde(default)]
+    pub approval_accept: u64,
+    #[serde(default)]
+    pub approval_decline: u64,
+    #[serde(default)]
+    pub approval_cancel: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

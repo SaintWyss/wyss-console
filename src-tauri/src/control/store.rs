@@ -4,6 +4,8 @@ pub(in crate::control) mod approvals;
 pub(in crate::control) mod bindings;
 #[path = "leases.rs"]
 mod leases;
+#[cfg(test)]
+pub(in crate::control) use leases::Clock;
 #[path = "turn_store.rs"]
 pub(in crate::control) mod turns;
 use super::{paths, schema};

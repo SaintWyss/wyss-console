@@ -4,6 +4,7 @@ pub mod client;
 mod conversations;
 mod framing;
 mod gate;
+mod mediation;
 mod paths;
 mod runtime;
 mod schema;
@@ -15,5 +16,7 @@ pub use server::run_from_environment;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod turn_approval_tests;
 #[cfg(test)]
 mod turn_tests;
