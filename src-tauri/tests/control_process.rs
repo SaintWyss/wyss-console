@@ -2482,3 +2482,124 @@ fn what_the_authority_does_on_its_own_wakes_a_waiting_watcher_at_once() {
     drop(c);
     a.stop(false);
 }
+
+#[test]
+fn a_receipt_is_returned_only_for_a_head_the_witness_holds() {
+    let env = Sandbox::new();
+    let file = |name: &str| env.root.join("state/wyss-console").join(name);
+    let witnessed = || -> u64 {
+        let v: serde_json::Value =
+            serde_json::from_slice(&fs::read(file("control.anchor")).unwrap()).unwrap();
+        v["head"].as_str().unwrap().parse().unwrap()
+    };
+    let head = |c: &mut ControlClient| c.status().unwrap().last_sequence.map_or(0, |s| s.get());
+    let mut a = env.start();
+    let mut c = env.client();
+    assert_eq!(witnessed(), 0);
+    // Whoever holds a receipt holds one the witness already covers.
+    let kept = c.prepare(prep(id())).unwrap();
+    assert_eq!(witnessed(), 1);
+    let closing = c.prepare(prep(id())).unwrap();
+    assert_eq!((witnessed(), head(&mut c)), (2, 2));
+    // Something that is not a staging file stands where the next one goes, so the witness
+    // cannot be replaced. The database still commits; nothing it commits is acknowledged.
+    fs::create_dir(file("control.anchor.tmp")).unwrap();
+    let intent = id();
+    let close = Close {
+        intent_id: id(),
+        managed_session_id: closing.managed_session_id.clone(),
+        expected_revision: 1,
+    };
+    assert_eq!(
+        c.prepare(prep(intent.clone())),
+        Err(ControlError::StorageUnavailable)
+    );
+    assert_eq!(
+        c.close(close.clone()),
+        Err(ControlError::StorageUnavailable)
+    );
+    assert_eq!((witnessed(), head(&mut c)), (2, 4));
+    // Reads answer from what is there: the close is canonical, it only has no receipt.
+    assert_eq!(
+        c.get(closing.managed_session_id.clone())
+            .unwrap()
+            .control_state,
+        ControlState::Closed
+    );
+    // The authority is alive and has closed execution.
+    assert!(a.child.try_wait().unwrap().is_none());
+    let grant = |c: &mut ControlClient| {
+        c.lease_grant(LeaseGrant {
+            intent_id: id(),
+            session_id: kept.managed_session_id.clone(),
+            expected_session_revision: 1,
+            scopes: vec![ExecutionScope::TurnStart],
+            ttl_seconds: 60,
+        })
+    };
+    let gate = |c: &mut ControlClient| {
+        c.gate_status(GateQuery {
+            session_id: kept.managed_session_id.clone(),
+            action: ExecutionScope::SessionCreate,
+        })
+        .unwrap()
+        .reason
+    };
+    assert_eq!(
+        grant(&mut c).err(),
+        Some(ControlError::AuthorityUnavailable)
+    );
+    assert_eq!(gate(&mut c), GateReason::AuthorityUnavailable);
+    // Once the witness can be replaced, the same intents return the receipts of what they
+    // committed then: witnessed first, and committed once.
+    fs::remove_dir(file("control.anchor.tmp")).unwrap();
+    let record = c.prepare(prep(intent.clone())).unwrap();
+    assert_eq!(witnessed(), 4);
+    let closed = c.close(close.clone()).unwrap();
+    assert_eq!(closed.control_state, ControlState::Closed);
+    assert_eq!((witnessed(), head(&mut c)), (4, 4));
+    // Execution stays closed for the rest of this authority's life.
+    assert_eq!(gate(&mut c), GateReason::AuthorityUnavailable);
+    drop(c);
+    a.stop(false);
+    // A restart opens the same history, with the same receipts, and execution again.
+    let mut a = env.start();
+    let mut c = env.client();
+    assert_eq!(head(&mut c), 4);
+    assert_eq!(c.prepare(prep(intent)).unwrap(), record);
+    assert_eq!(c.close(close).unwrap(), closed);
+    assert_ne!(gate(&mut c), GateReason::AuthorityUnavailable);
+    grant(&mut c).unwrap();
+    assert_eq!((witnessed(), head(&mut c)), (5, 5));
+    drop(c);
+    a.stop(false);
+    assert_eq!(witnessed(), 5);
+}
+
+#[test]
+fn an_authority_that_cannot_make_its_first_witness_serves_nobody() {
+    let env = Sandbox::new();
+    let dir = env.root.join("state/wyss-console");
+    fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+    fs::create_dir(dir.join("control.anchor.tmp")).unwrap();
+    for _ in 0..2 {
+        assert_eq!(refused(&env), "unsafe_path");
+        assert!(!dir.join("control.anchor").exists());
+        assert!(dir.join("control.anchor.tmp").is_dir());
+    }
+    // With nothing in the way the same state directory starts, and has its witness before
+    // it has a socket.
+    fs::remove_dir(dir.join("control.anchor.tmp")).unwrap();
+    let mut a = env.start();
+    let mut c = env.client();
+    let status = c.status().unwrap();
+    assert_eq!(status.last_sequence, None);
+    let v: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.join("control.anchor")).unwrap()).unwrap();
+    assert_eq!(
+        v,
+        serde_json::json!({"schema_version": 1, "stream_id": status.stream_id, "head": "0"})
+    );
+    drop(c);
+    a.stop(false);
+}

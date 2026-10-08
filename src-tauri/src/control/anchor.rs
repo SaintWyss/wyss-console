@@ -7,16 +7,25 @@
 //! derived from it except the refusal to open a store that is not the one it names or that
 //! went backwards. It detects loss and damage, not forgery: whoever can rewrite the database
 //! as this user can rewrite the witness too.
+//!
+//! A head counts as witnessed only behind the whole barrier: the new witness written and
+//! synced under a staging name, renamed over the old one, and the state directory synced.
+//! Syncing the file makes its content durable, not its name: without the last step a power
+//! loss can bring the previous witness back, or none.
 use super::{paths, store::Store};
 use crate::contracts::{
     WireUuid,
     control::{ControlError as E, ControlResult, unique_json},
 };
+use nix::{
+    fcntl::renameat,
+    unistd::{UnlinkatFlags, unlinkat},
+};
 use serde_json::json;
 use std::{
-    fs,
+    fs::{self, File},
     io::{Read, Write},
-    os::unix::fs::OpenOptionsExt,
+    os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
     path::{Path, PathBuf},
 };
 
@@ -109,6 +118,10 @@ pub(crate) fn admit(db: &Path) -> ControlResult<Option<Witnessed>> {
 }
 
 pub(crate) struct Anchor {
+    /// The state directory, held from the moment it was validated. The witness is replaced
+    /// through this descriptor and this descriptor is what is synced, so the directory made
+    /// durable is the one the replacement happened in, whatever its path names by then.
+    dir: File,
     path: PathBuf,
     stream: String,
     head: u64,
@@ -128,30 +141,63 @@ impl Anchor {
         {
             return Err(E::StorageIncompatible);
         }
+        let path = witness_path(db);
+        let dir = paths::private_dir(path.parent().ok_or(E::UnsafePath)?)?;
         let mut anchor = Self {
-            path: witness_path(db),
+            dir,
+            path,
             stream,
             head,
         };
         if witnessed.is_none_or(|w| w.head != head) {
-            anchor.write(head)?;
+            anchor.write(head, File::sync_all)?;
+        } else {
+            // The witness that was read may be a replacement an earlier run was killed
+            // before making durable: nothing is served on a name the directory may lose.
+            anchor.dir.sync_all().map_err(unavailable)?;
         }
         Ok(anchor)
     }
     /// Records a committed head. Called after the commit, so the witness never runs ahead
     /// of the database and a crash in between only leaves it lower.
     pub(crate) fn advance(&mut self, head: u64) -> ControlResult<()> {
+        self.advance_with(head, File::sync_all)
+    }
+    /// `sync_dir` is the last step of the barrier. It is a parameter because no real
+    /// directory fails to sync on demand, and what follows that failure has to be shown.
+    pub(super) fn advance_with(
+        &mut self,
+        head: u64,
+        sync_dir: impl FnOnce(&File) -> std::io::Result<()>,
+    ) -> ControlResult<()> {
         if head > self.head {
-            self.write(head)?;
+            self.write(head, sync_dir)?;
         }
         Ok(())
     }
-    fn write(&mut self, head: u64) -> ControlResult<()> {
+    fn write(
+        &mut self,
+        head: u64,
+        sync_dir: impl FnOnce(&File) -> std::io::Result<()>,
+    ) -> ControlResult<()> {
         let content =
             json!({"schema_version": 1, "stream_id": self.stream, "head": head.to_string()})
                 .to_string();
         let staging = self.path.with_extension("anchor.tmp");
-        let _ = fs::remove_file(&staging);
+        let staged = staging.file_name().ok_or(E::UnsafePath)?;
+        let witness = self.path.file_name().ok_or(E::UnsafePath)?;
+        let dir = Some(self.dir.as_raw_fd());
+        // An interrupted replacement leaves its staging file behind, and only that is
+        // removed: a private file of this user with one name. Anything else found under
+        // that name was not left by an authority and stays as it is.
+        match fs::symlink_metadata(&staging) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(_) => return Err(E::UnsafePath),
+            Ok(_) => {
+                paths::validate_file(&staging)?;
+                unlinkat(dir, staged, UnlinkatFlags::NoRemoveDir).map_err(unavailable)?;
+            }
+        }
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -160,10 +206,18 @@ impl Anchor {
             .open(&staging)
             .map_err(unavailable)?;
         // Durable before it replaces the previous witness: it is whole or it is the old one.
-        file.write_all(content.as_bytes())
+        let replaced = file
+            .write_all(content.as_bytes())
             .and_then(|()| file.sync_all())
-            .and_then(|()| fs::rename(&staging, &self.path))
-            .map_err(unavailable)?;
+            .and_then(|()| Ok(renameat(dir, staged, dir, witness)?));
+        if replaced.is_err() {
+            // What this call created, and what never became the witness.
+            let _ = unlinkat(dir, staged, UnlinkatFlags::NoRemoveDir);
+            return Err(E::StorageUnavailable);
+        }
+        // The new name is in the directory, not in the file. Until the directory is synced
+        // the replacement is not recorded, and the head is not counted as witnessed.
+        sync_dir(&self.dir).map_err(unavailable)?;
         self.head = head;
         Ok(())
     }

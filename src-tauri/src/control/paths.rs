@@ -107,6 +107,21 @@ impl Paths {
         Ok((runtime, state))
     }
 }
+/// A private directory of this user, opened as itself: no link is followed to reach it,
+/// and what is checked last is the descriptor that is returned.
+pub(crate) fn private_dir(path: &Path) -> ControlResult<File> {
+    owned_dir(path, true)?;
+    let dir = OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW | nix::libc::O_CLOEXEC)
+        .open(path)
+        .map_err(err)?;
+    let m = dir.metadata().map_err(err)?;
+    if !m.is_dir() || m.uid() != geteuid().as_raw() || m.mode() & 0o777 != 0o700 {
+        return Err(E::UnsafePath);
+    }
+    Ok(dir)
+}
 pub(crate) fn validate_file(path: &Path) -> ControlResult<()> {
     let m = fs::symlink_metadata(path).map_err(err)?;
     if !m.is_file()

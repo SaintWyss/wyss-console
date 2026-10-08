@@ -600,7 +600,22 @@ pub fn run_from_environment() -> ControlResult<()> {
                             job.op,
                             Operation::RuntimeStart(_) | Operation::RuntimeStop(_)
                         );
-                    // Canonical receipt is returned before any external side effect.
+                    // Canonical receipt is returned before any external side effect, and
+                    // never for a head the witness does not hold: a transition somebody was
+                    // told about is one whose later loss can be told. What committed stays
+                    // committed; its intent returns this receipt once the witness holds it.
+                    let result = match result {
+                        Ok(value) if receipt(&job.op) => {
+                            match store.head().and_then(|head| anchor.advance(head)) {
+                                Ok(()) => Ok(value),
+                                Err(_) => {
+                                    store.execution_available = false;
+                                    Err(ControlError::StorageUnavailable)
+                                }
+                            }
+                        }
+                        other => other,
+                    };
                     let _ = job.reply.try_send(result);
                     if reconcile && matches!(job.op, Operation::RuntimeStop(_)) {
                         conversations.detach(&mut store);
@@ -683,6 +698,31 @@ pub fn run_from_environment() -> ControlResult<()> {
     drop(sender);
     core.join().map_err(|_| ControlError::InternalError)??;
     result
+}
+
+/// Whether a successful answer is the receipt of something this request may have
+/// committed, as opposed to a reading of what is there. An operation not named here is
+/// taken for one that commits.
+fn receipt(op: &Operation) -> bool {
+    !matches!(
+        op,
+        Operation::Hello(_)
+            | Operation::Status(_)
+            | Operation::Get(_)
+            | Operation::List(_)
+            | Operation::AuditRead(_)
+            | Operation::AuditWatch(_)
+            | Operation::LeaseGet(_)
+            | Operation::LeaseActive(_)
+            | Operation::GateStatus(_)
+            | Operation::TurnStatus(_)
+            | Operation::TurnEvents(_)
+            | Operation::ApprovalPending(_)
+            | Operation::ApprovalStatus(_)
+            | Operation::BindingStatus(_)
+            | Operation::RuntimeStatus(_)
+            | Operation::RuntimeModels(_)
+    )
 }
 
 // A failed expiry write latches execution closed. No retry loop or second writer.

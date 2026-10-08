@@ -1196,3 +1196,153 @@ fn storage_witness_is_a_strict_monotonic_lower_bound_of_one_stream() {
     fs::write(t.root.join("control.sqlite3-wal"), b"left behind").unwrap();
     assert_eq!(anchor::admit(&db), Err(ControlError::StorageIncompatible));
 }
+
+#[test]
+fn a_head_is_witnessed_only_once_its_replacement_reached_the_directory() {
+    let t = Temp::new();
+    let db = t.root.join("control.sqlite3");
+    let witness = t.root.join("control.anchor");
+    let staging = t.root.join("control.anchor.tmp");
+    let head = |path: &std::path::Path| -> String {
+        let v: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        v["head"].as_str().unwrap().to_owned()
+    };
+    let inode = |path: &std::path::Path| fs::metadata(path).unwrap().ino();
+    let mut s = t.store();
+    // The first witness. Something that is not a staging file stands where one goes: it is
+    // left alone, no witness appears and there is no anchor to serve on.
+    fs::create_dir(&staging).unwrap();
+    assert_eq!(
+        anchor::Anchor::confirm(&db, None, &s).err(),
+        Some(ControlError::UnsafePath)
+    );
+    assert!(!witness.exists() && staging.is_dir());
+    fs::remove_dir(&staging).unwrap();
+    // Nor is it made in a directory that is not the private one, or reached through a link.
+    fs::set_permissions(&t.root, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(
+        anchor::Anchor::confirm(&db, None, &s).err(),
+        Some(ControlError::UnsafePath)
+    );
+    fs::set_permissions(&t.root, fs::Permissions::from_mode(0o700)).unwrap();
+    let elsewhere = Temp::new();
+    let link = elsewhere.root.join("state");
+    std::os::unix::fs::symlink(&t.root, &link).unwrap();
+    assert_eq!(
+        anchor::Anchor::confirm(&link.join("control.sqlite3"), None, &s).err(),
+        Some(ControlError::UnsafePath)
+    );
+    assert!(!witness.exists());
+    let mut a = anchor::Anchor::confirm(&db, None, &s).unwrap();
+    assert_eq!(head(&witness), "0");
+    assert_eq!(fs::metadata(&witness).unwrap().mode() & 0o777, 0o600);
+    assert!(!staging.exists());
+    for _ in 0..4 {
+        s.apply(&prepare()).unwrap();
+    }
+    // A replacement is a new file under the same name, and leaves nothing else behind.
+    let first = inode(&witness);
+    a.advance(1).unwrap();
+    assert_eq!(head(&witness), "1");
+    assert_ne!(inode(&witness), first);
+    assert!(!staging.exists());
+    // A failure before the rename keeps the previous witness, byte for byte and the same
+    // file, and whatever was in the way: only a staging file is ever removed.
+    let kept = (fs::read(&witness).unwrap(), inode(&witness));
+    let target = t.root.join("unrelated");
+    fs::write(&target, b"unrelated").unwrap();
+    type Obstacle = fn(&std::path::Path, &std::path::Path);
+    let obstacles: [(&str, Obstacle); 4] = [
+        ("a directory", |staging, _| fs::create_dir(staging).unwrap()),
+        ("a link", |staging, target| {
+            std::os::unix::fs::symlink(target, staging).unwrap()
+        }),
+        ("a file readable by others", |staging, _| {
+            fs::write(staging, b"{").unwrap();
+            fs::set_permissions(staging, fs::Permissions::from_mode(0o644)).unwrap();
+        }),
+        ("a file with a second name", |staging, target| {
+            fs::set_permissions(target, fs::Permissions::from_mode(0o600)).unwrap();
+            fs::hard_link(target, staging).unwrap();
+        }),
+    ];
+    for (name, obstacle) in obstacles {
+        obstacle(&staging, &target);
+        let found = fs::symlink_metadata(&staging).unwrap();
+        assert_eq!(a.advance(2), Err(ControlError::UnsafePath), "{name}");
+        assert_eq!(
+            (fs::read(&witness).unwrap(), inode(&witness)),
+            kept,
+            "{name}"
+        );
+        let left = fs::symlink_metadata(&staging).unwrap();
+        assert_eq!(
+            (left.ino(), left.mode(), left.nlink()),
+            (found.ino(), found.mode(), found.nlink()),
+            "{name}"
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"unrelated", "{name}");
+        if found.is_dir() {
+            fs::remove_dir(&staging).unwrap();
+        } else {
+            fs::remove_file(&staging).unwrap();
+        }
+    }
+    // The staging file of an interrupted replacement is exactly what is removed. The head
+    // the failures did not record is recorded now.
+    fs::write(&staging, b"{\"schema_version\":1,\"stream_id\":\"").unwrap();
+    fs::set_permissions(&staging, fs::Permissions::from_mode(0o600)).unwrap();
+    a.advance(2).unwrap();
+    assert_eq!(head(&witness), "2");
+    assert!(!staging.exists());
+    // The directory is synced last, once, and it is the state directory: by then the new
+    // witness is whole under its name and the staging name is gone.
+    let state = fs::metadata(&t.root).unwrap();
+    let mut seen = Vec::new();
+    a.advance_with(3, |dir| {
+        let m = dir.metadata()?;
+        seen.push((
+            (m.dev(), m.ino()),
+            m.is_dir(),
+            head(&witness),
+            staging.exists(),
+        ));
+        dir.sync_all()
+    })
+    .unwrap();
+    assert_eq!(
+        seen,
+        [((state.dev(), state.ino()), true, "3".to_owned(), false)]
+    );
+    // A head that is already witnessed touches nothing, the directory included.
+    a.advance_with(3, |_| panic!("nothing was replaced"))
+        .unwrap();
+    // When the directory cannot be synced the rename has happened, and the head is still
+    // not witnessed: the next attempt replaces the witness again, in full.
+    let before = inode(&witness);
+    assert_eq!(
+        a.advance_with(4, |_| Err(std::io::Error::other("injected"))),
+        Err(ControlError::StorageUnavailable)
+    );
+    let renamed = inode(&witness);
+    assert_ne!(renamed, before);
+    assert_eq!(head(&witness), "4");
+    a.advance(4).unwrap();
+    let durable = inode(&witness);
+    assert_ne!(durable, renamed);
+    assert_eq!(head(&witness), "4");
+    a.advance(4).unwrap();
+    assert_eq!(inode(&witness), durable);
+    drop(a);
+    // A restart on a valid witness of the same head replaces nothing; one on a database
+    // that went further than its witness records where it is before anything else.
+    let witnessed = anchor::admit(&db).unwrap();
+    assert!(witnessed.is_some());
+    drop(anchor::Anchor::confirm(&db, witnessed, &s).unwrap());
+    assert_eq!(inode(&witness), durable);
+    s.apply(&prepare()).unwrap();
+    let witnessed = anchor::admit(&db).unwrap();
+    drop(anchor::Anchor::confirm(&db, witnessed, &s).unwrap());
+    assert_eq!(head(&witness), "5");
+    assert!(!staging.exists());
+}

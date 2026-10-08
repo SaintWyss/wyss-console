@@ -377,6 +377,108 @@ because its launcher removes the variable that enables the trace. It is establis
 the attested configuration, by the normalized catalog and by the fact that every
 surface other than the two mediated tools is a violation, of which there were none.
 
+## External review closure
+
+An external review of the build above (`0dec46f`) reported that the witness was not
+durable in the sense this ADR claimed. It was right, and closing it showed a second
+defect in how a failed witness was handled. Both were Medium and both are fixed. No
+finding of this ADR is withdrawn and nothing else in the core changed.
+
+**The replacement was not recorded in the directory.** The witness was written to a
+staging file, synced and renamed over the previous one. Syncing a file makes its
+content durable, not its name: the rename lives in the directory, which was never
+synced. After a power loss the directory could still hold the previous witness, or
+none, and with none the database that is there is accepted as found. Tests that kill
+the process cannot see this, because a killed process loses nothing the kernel holds.
+
+The sequence is now, in this order and with nothing skipped:
+
+```text
+state directory opened once, at admission: O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+  no link in its path, owned and 0700, checked again on the descriptor, then held
+control.anchor.tmp created: O_CREAT | O_EXCL | O_NOFOLLOW, 0600
+  -> the whole witness written (at most 256 bytes)
+  -> fsync of the staging file
+  -> renameat over control.anchor, both names relative to the held directory
+  -> fsync of the held directory
+  -> only then does the authority count the head as witnessed
+```
+
+A step that fails ends the attempt: the head is not counted, execution closes until
+the authority is restarted, and the next attempt redoes the whole sequence. An fsync
+alone is never retried, since the kernel may not report the same error twice. A
+staging file left by an interrupted attempt is removed only if it is a private
+regular file of this user with one name; anything else under that name is left as it
+is and refused with `unsafe_path`. The first witness of a new authority goes through
+the same sequence before the control socket is bound, and a restart that finds a
+witness of the current head syncs the directory before binding too, because an earlier
+run may have been killed between the rename and its sync.
+
+**A receipt could outrun a witness that never came.** The core answered a client and
+advanced the witness on its next iteration. With a witness that could not be written,
+execution closed but closes and preparations went on committing and being
+acknowledged, each one further ahead of the last witnessed head. A mutation the
+core answers itself (prepare, close, lease grant, renew and revoke, runtime start and
+stop, turn start and cancel, binding abandon) now gets its receipt only after the
+witness holds its head. If the witness cannot be written the answer is
+`storage_unavailable`: the transition is committed and stays committed, reads show it,
+and its intent returns the same receipt once the witness holds it.
+
+What each layer guarantees:
+
+| Layer                        | Guarantee                                                                                                                                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SQLite commit (WAL, FULL)    | A committed transaction survives a killed process and a power loss, by itself and whatever happens to the witness                                                                                       |
+| witness                      | At the next start, a store of another stream or behind the witnessed head is refused. It is a lower bound and nothing is derived from it                                                                |
+| receipt of a direct mutation | Sent after the commit and after the whole witness sequence for its head. A receipt is not evidence of anything else: a mutation may be committed and witnessed with its answer lost                     |
+| hard kill of the authority   | Nothing the kernel holds is lost. The store reopens whole, a witness behind the database is brought to its head before the socket is bound, and a staging file left behind goes at the next replacement |
+| filesystem or power loss     | What was synced is there, as far as the filesystem and the device honour fsync. Between a commit and the end of its witness sequence the witness may name the previous head; no receipt was sent for it |
+
+What a start does with each state of the witness is unchanged:
+
+| State                                                                  | Result                                                                  |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| no witness, a database with content                                    | accepted as found; its witness is made before the socket is bound       |
+| no witness, database missing or empty, no WAL, SHM or journal          | a new authority                                                         |
+| no witness, database missing or empty, a WAL, SHM or journal present   | `storage_incompatible`                                                  |
+| witness that is not exactly one the authority writes, or over its size | `storage_incompatible`                                                  |
+| witness that is a link, not private or with a second name              | `unsafe_path`                                                           |
+| witness behind the database                                            | accepted; the witness is brought to the head before the socket is bound |
+| database behind the witness, or of another stream                      | `storage_incompatible`, left exactly as found                           |
+
+Removing the witness stays the operator act that accepts the database that is there.
+It was audited and kept: the alternative, refusing every store without a witness,
+turns the loss of a 100-byte file into the loss of the authority, and the cases a
+removal could hide are the ones the same-user boundary already leaves open.
+
+Limits of this closure:
+
+- No test here cuts power. The evidence is the order of system calls of the unmodified
+  binary and deterministic tests of each failure, the directory sync included. A device
+  that acknowledges a flush it did not perform, or a filesystem that keeps nothing
+  across a reboot, is outside what the sequence can give.
+- A witness lost through storage damage alone, with its database intact or older,
+  cannot be told from the operator removing it.
+- When the directory sync fails, the file under the witness's name may already hold
+  the new head while the authority does not count it. It is still never ahead of the
+  database.
+- What the authority commits on its own (an expiry, an enforcement, a runtime
+  observation, the events of a turn) has no receipt and is witnessed before the core
+  waits for its next message. The answers given from an observation
+  (`managedSession/runtime/create`, `managedSession/runtime/resume`,
+  `managedTurn/approval/respond`) keep the bound this ADR accepted: they may leave
+  first and the witness follows before the core waits again, while it can be written.
+  Once it cannot, execution is closed and no gate opens, so no turn, lease or Accept
+  follows.
+- Every direct mutation now waits for two more fsyncs and a rename before its answer.
+
+Evidence: `a_head_is_witnessed_only_once_its_replacement_reached_the_directory`
+(first witness, replacement, each obstacle before the rename, a failing directory
+sync, restart), `a_receipt_is_returned_only_for_a_head_the_witness_holds` and
+`an_authority_that_cannot_make_its_first_witness_serves_nobody` (the real binary),
+the first two failing against the code they replaced, and a trace of the unmodified
+binary showing the sequence above before `bind` and before every receipt.
+
 ## Accepted residual risks
 
 - The credential capability and its two residuals above.
@@ -384,7 +486,9 @@ surface other than the two mediated tools is a violation, of which there were no
   pre-existing hard link in a workspace reaches outside it.
 - The same-user boundary: no protection against another process of this user.
 - Integrity checks detect damage, not forgery. The witness trails the head by at most
-  one iteration of the core loop.
+  one iteration of the core loop, and only for what the authority commits on its own
+  and for the deferred answers named in the external review closure: a receipt of any
+  other mutation is never ahead of it.
 - Unknown event types remain tolerated in a store a newer build has opened.
 - Exactly-once execution by the provider is not claimed.
 - The local-tools profile is not durable across an authority restart, by design.
@@ -395,8 +499,8 @@ surface other than the two mediated tools is a violation, of which there were no
   has to replace it.
 - `sha2`, `serde` and `serde_json` are caret requirements; the lockfile and `--locked`
   pin them. No dependency was added, removed or upgraded by this sprint.
-- This review was one independent pass. The fixes it made have not themselves been
-  reviewed by a second party.
+- This review was one independent pass. An external review afterwards reported one
+  defect, in the witness; see the external review closure.
 
 ## Deferred, outside the core
 
