@@ -5,6 +5,11 @@
   import type { WorkspaceState } from './lib/features/terminal/session-manager';
   import Sidebar from './lib/shell/Sidebar.svelte';
   import TopBar from './lib/shell/TopBar.svelte';
+  import {
+    followAuthority,
+    pendingAuthority,
+    type AuthorityObservation,
+  } from './lib/shell/authority';
   import { NAV_ITEMS, type ViewId } from './lib/shell/nav';
   import {
     idleRuntime,
@@ -15,6 +20,7 @@
   let version = $state('');
   let activeView = $state<ViewId>('console');
   let runtime = $state<RuntimeSummary>(idleRuntime);
+  let authority = $state<AuthorityObservation>(pendingAuthority);
   const current = $derived(NAV_ITEMS.find((item) => item.id === activeView));
 
   onMount(() => {
@@ -25,8 +31,13 @@
       },
       () => undefined,
     );
+    // Read-only and separate from the terminal workspace: neither waits on the other.
+    const unfollow = followAuthority((observation) => {
+      authority = observation;
+    });
     return () => {
       active = false;
+      unfollow();
     };
   });
 
@@ -45,6 +56,7 @@
     title={current?.label ?? ''}
     subtitle={current?.subtitle ?? ''}
     {runtime}
+    {authority}
     {version}
   />
   <Sidebar active={activeView} onselect={(id) => (activeView = id)} />

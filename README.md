@@ -4,8 +4,10 @@ Desktop client for local terminals and, progressively, managed-agent control.
 Linux-first, local-first. Current validated status: **Core complete**: the managed-agent
 core (external authority, leases, managed turns, approval mediation, durable event
 replay) is implemented, hardened and accepted through
-[ADR 0018](docs/adr/0018-core-hardening-and-completion.md). The product is not: there
-is no agent UI yet and the desktop does not connect to the authority. Built with Tauri 2,
+[ADR 0018](docs/adr/0018-core-hardening-and-completion.md), and the desktop follows
+that authority read-only: its top bar shows the real authority and managed-agent status
+([ADR 0019](docs/adr/0019-desktop-authority-link.md)). The product is not complete:
+there is no agent UI yet and the desktop sends the authority nothing but reads. Built with Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -122,7 +124,8 @@ available through the authority developer client, with no product chat UI:
 inference-only by default, and with authority-mediated commands and file changes
 in the isolated local-tools profile.
 Human terminal tabs remain Console-local; the read-only Codex probe above remains
-a separate developer tool. The desktop does not start or connect to the authority.
+a separate developer tool. The desktop never starts the authority; when one is running
+it connects to it and only reads ([Desktop authority link](#desktop-authority-link)).
 
 Build the independent binary and developer client:
 
@@ -167,13 +170,72 @@ accepts whatever database is there. Client EOF
 changes no state. Authority restart preserves committed state/stream/sequence.
 Same-UID SO_PEERCRED is a local boundary, not protection from compromised same-user
 processes. Maximum eight connected clients, of which at most four may be waiting in
-`audit/watch`; idle connections expire after five seconds. Session/audit pages are
+`audit/watch` (a running desktop is one of each); idle connections expire after five seconds. Session/audit pages are
 bounded to fifty entries, and an audit page also to the 64 KiB frame. See ADR 0011 and
 [Durable event replay](#durable-event-replay).
 
 `npm run rust:test` includes hermetic authority unit tests and actual process tests
 using isolated temporary XDG directories. They do not require or launch Codex.
 No production state is created by the test suite.
+
+## Desktop authority link
+
+The desktop owns one application-lifetime, read-only link to `wyss-control`, through the
+same typed `ControlClient` the developer client uses:
+
+```text
+Svelte  ->  Tauri desktop  ->  shared ControlClient  ->  Unix socket  ->  wyss-control
+```
+
+`wyss-control` stays the only authority. The desktop makes no authorization or security
+decision, never opens the authority's database and never starts, stops or configures
+the authority or its runtime. The requests it sends are `authority/hello`,
+`authority/status`, `runtime/status`, `audit/read` and `audit/watch`.
+
+The window cannot speak the control protocol. Its one authority command,
+`authority_state`, returns the desktop's own projection (AuthorityView v1): the link
+state, why the last attempt ended, the authority's version, session counts and durable
+head, and the managed runtime's desired and actual state, version and model count.
+No instance, stream or session identity, runtime diagnostic or workspace path reaches
+the window. The top bar renders it as two statuses next to the local terminal's:
+
+| Status    | Shows                                                                                                                                                                                                                                                  |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Terminal  | The local human terminal. It never depends on the authority.                                                                                                                                                                                           |
+| Codex     | The managed runtime as the authority reports it; `Agent · Unknown` while the authority is not connected.                                                                                                                                               |
+| Authority | `Connected`, or why not: `Offline` (nothing is listening), `Reconnecting` (it stopped answering), `Incompatible` (another protocol or storage version), `Rejected` (it broke the protocol), `Unsafe` (the runtime directory or socket is not private). |
+
+The authority pill's tooltip carries the session summary (prepared and closed counts)
+and the event head; the count is also shown inline in windows wider than 1040 px.
+
+Try it with the authority and developer client built [above](#external-control-authority):
+
+```sh
+npm run desktop:run                                    # Authority: Offline
+./src-tauri/target/debug/wyss-control                  # another terminal: Connected
+./src-tauri/target/debug/examples/control_client prepare   # the session count moves
+```
+
+Behavior worth knowing:
+
+- An absent authority is retried with a delay that doubles from 250 ms to 5 s, so a
+  started authority is found within five seconds. A lost one is noticed at once.
+- A restarted authority is a new instance of the same stream: the desktop reads its
+  canonical state again and replays the events it missed with `audit/read` (up to 2000;
+  a longer gap moves the cursor to the head, which the snapshot already describes).
+- What is shown is always a canonical reading, never something derived from an event.
+  Events only say when to read again; a change that writes no event is picked up within
+  twenty seconds, one second while the runtime is starting or stopping.
+- A connected desktop holds one of the authority's eight client slots and one of its
+  four `audit/watch` slots. If the watch slots are full it reads once a second instead.
+- Nothing shown is stale: when the link is not connected, authority and agent facts
+  are cleared instead of kept.
+- Closing the desktop closes its connection and tells the authority nothing.
+
+Local terminals are independent of all of it: typing, paste, output, tabs, resize,
+scrollback and Ctrl+C work the same with the authority absent, starting, restarting,
+killed, incompatible or malformed. See
+[ADR 0019](docs/adr/0019-desktop-authority-link.md).
 
 ## Authority-owned Codex runtime
 

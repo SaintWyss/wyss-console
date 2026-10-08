@@ -2,6 +2,7 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "get_app_info",
+            "authority_state",
             "create_terminal",
             "terminal_write",
             "terminal_read_output",

@@ -1,0 +1,39 @@
+{
+  "connected": {
+    "schema_version": 1,
+    "revision": 3,
+    "connection": "connected",
+    "reason": null,
+    "authority": {
+      "service_version": "9.9.9-test",
+      "protocol_version": 1,
+      "restarts": 0,
+      "last_sequence": "1",
+      "prepared_sessions": 1,
+      "closed_sessions": 0
+    },
+    "agent": {
+      "adapter": "codex",
+      "desired": "running",
+      "actual": "failed",
+      "runtime_version": null,
+      "model_count": 0
+    }
+  },
+  "waiting_absent": {
+    "schema_version": 1,
+    "revision": 1,
+    "connection": "waiting",
+    "reason": "absent",
+    "authority": null,
+    "agent": null
+  },
+  "stopped": {
+    "schema_version": 1,
+    "revision": 4,
+    "connection": "stopped",
+    "reason": null,
+    "authority": null,
+    "agent": null
+  }
+}

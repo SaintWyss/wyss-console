@@ -454,10 +454,15 @@ impl Response {
 fn validate_result(r: &ResultValue) -> ControlResult<()> {
     match r {
         ResultValue::Hello(s) | ResultValue::Status(s) => {
-            if s.protocol_version != 1
-                || s.storage_schema_version != 7
-                || s.service_version.len() > 128
-            {
+            // A well-formed answer from another version is named as such, so a client
+            // can tell an authority it cannot speak to from a peer that is broken.
+            if s.protocol_version != PROTOCOL_VERSION {
+                return Err(ControlError::ProtocolVersionUnsupported);
+            }
+            if s.storage_schema_version != 7 {
+                return Err(ControlError::StorageIncompatible);
+            }
+            if s.service_version.len() > 128 {
                 return Err(ControlError::InvalidRequest);
             }
         }

@@ -166,8 +166,10 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   const { default: config } = await import('../src-tauri/tauri.conf.json');
   const { default: capability } =
     await import('../src-tauri/capabilities/main.json');
+  // One authority permission, and it is a read of the desktop's own projection.
   expect(capability.permissions).toEqual([
     'allow-get-app-info',
+    'allow-authority-state',
     'allow-create-terminal',
     'allow-terminal-write',
     'allow-terminal-read-output',

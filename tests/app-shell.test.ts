@@ -10,6 +10,7 @@ import {
 } from '../src/lib/contracts/identities';
 import { NAV_ITEMS } from '../src/lib/shell/nav';
 import { summarizeRuntime } from '../src/lib/shell/runtime';
+import views from './fixtures/authority-view-v1.json';
 
 const fakes = vi.hoisted(() => ({ factory: vi.fn() }));
 vi.mock('../src/lib/features/terminal/renderer', () => ({
@@ -31,6 +32,28 @@ const flush = async () => {
   for (let i = 0; i < 25; i++) await Promise.resolve();
   flushSync();
 };
+const never = () => new Promise(() => undefined);
+const pill = (name: 'terminal' | 'agent' | 'authority') =>
+  document.querySelector(`.pill.${name}`);
+/** Terminal IPC that works, with the authority projection answered by `authority`. */
+function ipc(
+  authority: (after: number | null) => unknown,
+  terminal: (command: string) => unknown = () => info,
+) {
+  const commands: string[] = [];
+  mockIPC((command, payload) => {
+    commands.push(command);
+    if (command === 'authority_state')
+      return authority(
+        (payload as { request: { after: number | null } }).request.after,
+      );
+    if (command === 'terminal_read_output') return never();
+    if (command === 'get_app_info')
+      return { schema_version: 1, name: 'Wyss Console', version: '2.0-test' };
+    return terminal(command);
+  });
+  return commands;
+}
 const session = (state: 'starting' | 'running' | 'failed' | 'exited') => ({
   id: parseConsoleSessionId('00000000-0000-4000-8000-000000000001'),
   title: 'Terminal 1',
@@ -59,13 +82,7 @@ beforeEach(() => {
     focus: vi.fn(),
     dispose: vi.fn(),
   }));
-  mockIPC((command) => {
-    if (command === 'create_terminal') return info;
-    if (command === 'terminal_read_output') return new Promise(() => undefined);
-    if (command === 'get_app_info')
-      return { schema_version: 1, name: 'Wyss Console', version: '2.0-test' };
-    return info;
-  });
+  ipc(never);
 });
 afterEach(async () => {
   if (component) await unmount(component);
@@ -139,25 +156,101 @@ it('renders the shell with brand, navigation placeholders and Console selected',
   expect(nav[0].getAttribute('aria-current')).toBe('page');
   expect(nav.slice(1).every((b) => b.disabled)).toBe(true);
   expect(document.querySelector('.context-title')?.textContent).toBe('Console');
-  expect(document.querySelector('header')?.textContent).toContain('Runtime');
   // The workspace opens one terminal on mount, so the pill reports it running.
-  expect(document.querySelector('.pill[data-tone]')?.textContent).toContain(
-    'Running',
-  );
+  expect(pill('terminal')?.textContent).toContain('Terminal');
+  expect(pill('terminal')?.textContent).toContain('Running');
+  // Nothing was read from the authority yet, and nothing is claimed about it.
+  expect(pill('authority')?.textContent).toContain('Connecting');
+  expect(pill('agent')?.textContent).toContain('Unknown');
 });
 
 it('reports a failed terminal in the top-bar runtime status', async () => {
-  mockIPC((command) => {
-    if (command === 'create_terminal')
-      return Promise.reject({ code: 'spawn_failed', diagnostic: 'private' });
-    return info;
-  });
+  ipc(
+    (after) => (after === null ? views.connected : never()),
+    (command) =>
+      command === 'create_terminal'
+        ? Promise.reject({ code: 'spawn_failed', diagnostic: 'private' })
+        : info,
+  );
   component = mount(App, { target: document.body });
   await flush();
-  const pill = document.querySelector('.pill[data-tone]');
-  expect(pill?.getAttribute('data-tone')).toBe('error');
-  expect(pill?.textContent).toContain('Failed');
+  expect(pill('terminal')?.getAttribute('data-tone')).toBe('error');
+  expect(pill('terminal')?.textContent).toContain('Failed');
   expect(document.querySelector('header')?.textContent).not.toContain(
     'private',
   );
+  // A terminal that failed says nothing about the authority.
+  expect(pill('authority')?.textContent).toContain('Connected');
+});
+
+it('shows the authority, its sessions and the managed agent from the projection', async () => {
+  ipc((after) => (after === null ? views.connected : never()));
+  component = mount(App, { target: document.body });
+  await flush();
+  const authority = pill('authority');
+  expect(authority?.getAttribute('data-tone')).toBe('ok');
+  expect(authority?.textContent).toContain('Connected');
+  expect(authority?.querySelector('.pill-note')?.textContent).toBe('1 session');
+  expect(authority?.getAttribute('title')).toContain('1 prepared, 0 closed');
+  const agent = pill('agent');
+  expect(agent?.textContent).toContain('Codex');
+  expect(agent?.textContent).toContain('Failed');
+  expect(agent?.getAttribute('data-tone')).toBe('error');
+  // The projection is all the window gets: the status area renders no identity.
+  expect(document.querySelector('.status-cluster')?.innerHTML).not.toMatch(
+    /[0-9a-f]{8}-[0-9a-f]{4}-/i,
+  );
+});
+
+it('keeps the human terminal working whatever the authority does', async () => {
+  for (const [authority, label, tone] of [
+    [() => views.waiting_absent, 'Offline', 'idle'],
+    [() => Promise.reject({ code: 'busy' }), 'Unavailable', 'error'],
+    [() => ({ method: 'runtime/start' }), 'Unavailable', 'error'],
+    [never, 'Connecting', 'pending'],
+  ] as const) {
+    const commands = ipc((after) => (after === null ? authority() : never()));
+    component = mount(App, { target: document.body });
+    await flush();
+    expect(pill('authority')?.textContent, label).toContain(label);
+    expect(pill('authority')?.getAttribute('data-tone')).toBe(tone);
+    expect(pill('agent')?.textContent).toContain('Unknown');
+    // The terminal was created, is running and has its tab.
+    expect(pill('terminal')?.textContent).toContain('Running');
+    expect(pill('terminal')?.getAttribute('data-tone')).toBe('ok');
+    expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+    expect(commands.filter((c) => c === 'create_terminal')).toHaveLength(1);
+    await unmount(component);
+    component = undefined;
+    document.body.replaceChildren();
+  }
+});
+
+it('follows authority restarts without touching the terminal workspace', async () => {
+  const answers: ((view: unknown) => void)[] = [];
+  const commands = ipc(() => new Promise((resolve) => answers.push(resolve)));
+  component = mount(App, { target: document.body });
+  await flush();
+  const lost = { ...views.waiting_absent, revision: 7, reason: 'lost' };
+  const back = {
+    ...views.connected,
+    revision: 9,
+    authority: { ...views.connected.authority, restarts: 1 },
+    agent: { ...views.connected.agent, actual: 'ready', model_count: 7 },
+  };
+  for (const [view, authority, agent] of [
+    [views.waiting_absent, 'Offline', 'Unknown'],
+    [views.connected, 'Connected', 'Failed'],
+    [lost, 'Reconnecting', 'Unknown'],
+    [back, 'Connected', 'Ready'],
+  ] as const) {
+    answers.shift()!(view);
+    await flush();
+    expect(pill('authority')?.textContent).toContain(authority);
+    expect(pill('agent')?.textContent).toContain(agent);
+    expect(pill('terminal')?.textContent).toContain('Running');
+  }
+  expect(commands.filter((c) => c === 'create_terminal')).toHaveLength(1);
+  expect(commands.filter((c) => c === 'close_terminal')).toHaveLength(0);
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
 });

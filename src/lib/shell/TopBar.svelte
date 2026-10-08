@@ -1,17 +1,27 @@
 <script lang="ts">
+  import {
+    summarizeAgent,
+    summarizeAuthority,
+    type AuthorityObservation,
+  } from './authority';
   import type { RuntimeSummary } from './runtime';
 
   let {
     title,
     subtitle,
     runtime,
+    authority,
     version,
   }: {
     title: string;
     subtitle: string;
+    /** The local human terminal. It never depends on the authority. */
     runtime: RuntimeSummary;
+    authority: AuthorityObservation;
     version: string;
   } = $props();
+  const agent = $derived(summarizeAgent(authority));
+  const link = $derived(summarizeAuthority(authority));
 </script>
 
 <header class="top-bar">
@@ -39,18 +49,25 @@
     <p class="context-subtitle">{subtitle}</p>
   </div>
   <div class="status-cluster">
-    <span class="pill" data-tone={runtime.tone}>
-      <span class="pill-key">Runtime</span>
+    <span
+      class="pill terminal"
+      data-tone={runtime.tone}
+      title="Local terminal. It runs with or without the authority."
+    >
+      <span class="pill-key">Terminal</span>
       <span class="dot" aria-hidden="true"></span>
       {runtime.label}
     </span>
-    <span
-      class="pill authority"
-      title="The console does not read authority state yet"
-    >
+    <span class="pill agent" data-tone={agent.tone} title={agent.detail}>
+      <span class="pill-key">{agent.key}</span>
+      <span class="dot" aria-hidden="true"></span>
+      {agent.label}
+    </span>
+    <span class="pill authority" data-tone={link.tone} title={link.detail}>
       <span class="pill-key">Authority</span>
       <span class="dot" aria-hidden="true"></span>
-      Not linked
+      {link.label}
+      {#if link.note}<span class="pill-note">{link.note}</span>{/if}
     </span>
     {#if version}<span class="version">v{version}</span>{/if}
   </div>

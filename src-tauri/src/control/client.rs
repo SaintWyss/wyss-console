@@ -1,4 +1,4 @@
-//! Future desktop bridge depends on this client, never raw provider/socket IO.
+//! The desktop bridge depends on this client, never raw provider/socket IO.
 use super::{
     framing::{read_frame, write_frame},
     paths::runtime_product,
@@ -22,10 +22,12 @@ use std::{
         fs::{FileTypeExt, MetadataExt},
         net::UnixStream,
     },
-    path::Path,
-    sync::{OnceLock, atomic::AtomicBool},
+    path::{Path, PathBuf},
+    sync::{Arc, OnceLock, atomic::AtomicBool},
     time::{Duration, Instant},
 };
+
+const SOCKET: &str = "control.sock";
 
 /// Managed references cannot be replaced with local terminal identities.
 /// ```compile_fail
@@ -40,15 +42,27 @@ pub struct ControlClient {
     stream: UnixStream,
     instance: WireUuid,
     status: AuthorityStatus,
+    cancel: Arc<AtomicBool>,
 }
 impl ControlClient {
+    /// Where an authority of this runtime directory listens. Naming the path validates
+    /// nothing: only `connect` decides whether what is there may be spoken to.
+    pub fn socket_path(root: &Path) -> PathBuf {
+        root.join("wyss-console").join(SOCKET)
+    }
     pub fn connect() -> ControlResult<Self> {
         let root = env::var_os("XDG_RUNTIME_DIR").ok_or(ControlError::UnsafePath)?;
         Self::connect_in_runtime(Path::new(&root))
     }
     /// Validates the same private runtime policy; useful for isolated developer clients.
     pub fn connect_in_runtime(root: &Path) -> ControlResult<Self> {
-        let path = runtime_product(root, false)?.join("control.sock");
+        Self::connect_cancellable(root, Arc::new(AtomicBool::new(false)))
+    }
+    /// The same connection, owned by a caller that can abandon it: once `cancel` is set,
+    /// the handshake and every later exchange end with `transport_error` within one poll
+    /// interval instead of at their deadline. Nothing is sent to the authority on cancel.
+    pub fn connect_cancellable(root: &Path, cancel: Arc<AtomicBool>) -> ControlResult<Self> {
+        let path = runtime_product(root, false)?.join(SOCKET);
         let m = std::fs::symlink_metadata(&path).map_err(|_| ControlError::TransportError)?;
         if !m.file_type().is_socket() || m.uid() != geteuid().as_raw() || m.mode() & 0o777 != 0o600
         {
@@ -77,7 +91,7 @@ impl ControlClient {
                 client_instance_id: client_instance_id(),
             }),
         };
-        let response = exchange(&mut stream, &request)?;
+        let response = exchange(&mut stream, &request, &cancel)?;
         let instance = response.authority_instance_id.clone();
         let ResultValue::Hello(status) = response.outcome? else {
             return Err(ControlError::InvalidRequest);
@@ -89,6 +103,7 @@ impl ControlClient {
             stream,
             instance,
             status,
+            cancel,
         })
     }
     pub fn hello_status(&self) -> &AuthorityStatus {
@@ -99,7 +114,7 @@ impl ControlClient {
             request_id: uuid(),
             operation: op,
         };
-        let response = exchange(&mut self.stream, &request)?;
+        let response = exchange(&mut self.stream, &request, &self.cancel)?;
         if response.authority_instance_id != self.instance {
             return Err(ControlError::CorrelationError);
         }
@@ -267,8 +282,11 @@ fn session(r: ResultValue) -> ControlResult<ManagedSessionRecord> {
         Err(ControlError::InvalidRequest)
     }
 }
-pub(super) fn exchange(stream: &mut UnixStream, request: &Request) -> ControlResult<Response> {
-    let stop = AtomicBool::new(false);
+pub(super) fn exchange(
+    stream: &mut UnixStream,
+    request: &Request,
+    stop: &AtomicBool,
+) -> ControlResult<Response> {
     let deadline = Instant::now()
         + if let Operation::AuditWatch(p) = &request.operation {
             // The authority answers within the requested wait; the margin is transport.
@@ -284,8 +302,8 @@ pub(super) fn exchange(stream: &mut UnixStream, request: &Request) -> ControlRes
         } else {
             Duration::from_secs(5)
         };
-    write_frame(stream, &request.encode()?, deadline, &stop)?;
-    let bytes = read_frame(stream, deadline, &stop)?.ok_or(ControlError::TransportError)?;
+    write_frame(stream, &request.encode()?, deadline, stop)?;
+    let bytes = read_frame(stream, deadline, stop)?.ok_or(ControlError::TransportError)?;
     let response = Response::parse(&bytes)?;
     if response.request_id != request.request_id {
         return Err(ControlError::CorrelationError);

@@ -4,6 +4,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use tauri::Manager;
+mod authority;
 mod glass;
 mod terminal;
 
@@ -52,8 +53,11 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| open_main_window(app))
         .manage(TerminalService::default())
+        // Read-only and independent: no terminal operation waits on, or learns of, it.
+        .manage(authority::AuthorityService::from_environment())
         .invoke_handler(tauri::generate_handler![
             get_app_info,
+            authority::authority_state,
             terminal::create_terminal,
             terminal::terminal_write,
             terminal::terminal_read_output,
@@ -69,10 +73,19 @@ pub fn run() {
             {
                 api.prevent_exit();
                 let service = handle.state::<TerminalService>().inner().clone();
+                let authority = handle
+                    .state::<authority::AuthorityService>()
+                    .inner()
+                    .clone();
                 let app = handle.clone();
                 tauri::async_runtime::spawn(async move {
-                    let result =
-                        tauri::async_runtime::spawn_blocking(move || service.shutdown()).await;
+                    let result = tauri::async_runtime::spawn_blocking(move || {
+                        // Terminals first: the link's bounded stop never delays them.
+                        let result = service.shutdown();
+                        authority.shutdown();
+                        result
+                    })
+                    .await;
                     let code = if matches!(result, Ok(Ok(()))) { 0 } else { 1 };
                     app.exit(code);
                 });

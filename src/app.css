@@ -211,6 +211,11 @@ button:focus-visible {
 .pill-key {
   color: var(--faint);
 }
+.pill-note {
+  padding-left: 7px;
+  border-left: 1px solid var(--glass-line-strong);
+  color: var(--muted);
+}
 .dot {
   width: 7px;
   height: 7px;
@@ -482,6 +487,24 @@ html[data-glass='transparent'] .shell {
   background: rgba(34, 38, 46, 0.88);
 }
 
+/* Status steps back before the view title does. Each width is where the widest labels
+   (Initializing, Reconnecting) stop fitting next to it. The session count stays in the
+   authority pill's tooltip. */
+@media (max-width: 1040px) {
+  .pill-note {
+    display: none;
+  }
+}
+@media (max-width: 940px) {
+  .version {
+    display: none;
+  }
+}
+@media (max-width: 800px) {
+  .pill.agent {
+    display: none;
+  }
+}
 /* Narrow windows: sidebar becomes an icon rail, secondary chrome steps back. */
 @media (max-width: 720px) {
   .shell {
@@ -508,11 +531,12 @@ html[data-glass='transparent'] .shell {
     left: -8px;
   }
 }
-@media (max-width: 520px) {
-  .pill.authority,
-  .version {
+@media (max-width: 560px) {
+  .pill.authority {
     display: none;
   }
+}
+@media (max-width: 520px) {
   .top-bar {
     gap: 10px;
   }

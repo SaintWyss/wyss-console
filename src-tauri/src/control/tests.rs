@@ -708,7 +708,7 @@ fn response_correlation_rejects_wrong_id() {
     });
     let r = request(Operation::Status(Empty {}));
     assert!(matches!(
-        client::exchange(&mut a, &r),
+        client::exchange(&mut a, &r, &AtomicBool::new(false)),
         Err(ControlError::CorrelationError)
     ));
     worker.join().unwrap();
