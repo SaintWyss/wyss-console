@@ -214,6 +214,35 @@ impl Turns {
         }
         Ok(())
     }
+    /// Withdraws the admission of the active turn before a mutation that may take its
+    /// authority away is committed: the revocation of its admitted lease, the close of its
+    /// session or a runtime stop. The supervisor reads this flag immediately before it
+    /// writes the prompt, so a turn that has not been dispatched is not dispatched after
+    /// that commit. Returns whether admission was withdrawn here.
+    pub fn suspend_admission(&self, op: &Operation) -> bool {
+        let Some(a) = self.active.as_ref().filter(|a| a.cancel.is_none()) else {
+            return false;
+        };
+        let targets = match op {
+            Operation::LeaseRevoke(p) => p
+                .lease_id
+                .as_str()
+                .eq_ignore_ascii_case(a.turn.admitted_lease_id.as_str()),
+            Operation::Close(p) => p
+                .managed_session_id
+                .as_str()
+                .eq_ignore_ascii_case(a.turn.managed_session_id.as_str()),
+            Operation::RuntimeStop(_) => true,
+            _ => false,
+        };
+        targets && a.admission.swap(false, Ordering::AcqRel)
+    }
+    /// The mutation changed nothing: the turn keeps the admission it had.
+    pub fn restore_admission(&self) {
+        if let Some(a) = self.active.as_ref().filter(|a| a.cancel.is_none()) {
+            a.admission.store(true, Ordering::Release);
+        }
+    }
     pub fn shutdown(&mut self, store: &mut Store, runtime: &mut Runtime) {
         if self
             .request_cancel(store, runtime, TurnReason::AuthorityShutdown)

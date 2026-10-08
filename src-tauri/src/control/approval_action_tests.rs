@@ -224,3 +224,56 @@ fn file_bounds_are_exact_and_inconsistent_proposals_are_refused() {
     assert_eq!(a.changes()[0].path, "/work/a.txt");
     assert_eq!(a.provider_item_id(), "call_2");
 }
+
+#[test]
+fn confinement_refuses_another_filesystem_and_a_workspace_reached_through_a_link() {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    // A mount point inside the workspace is another filesystem, wherever it leads. The
+    // root directory with the process filesystem mounted in it is one on every Linux host.
+    let root = fs::metadata("/").unwrap();
+    let mounted = fs::metadata("/proc").unwrap();
+    assert!(mounted.is_dir() && mounted.dev() != root.dev());
+    assert!(confine("/", "/", Leaf::Directory));
+    assert!(!confine("/", "/proc", Leaf::Directory));
+    assert!(!confine("/", "/proc/self", Leaf::Directory));
+    assert!(!confine("/", "/proc/version", Leaf::ExistingFile));
+    assert!(!confine("/", "/proc/wyss-new-file", Leaf::FileOrMissing));
+
+    let base = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("wyss-confine-{}", uuid::Uuid::new_v4()));
+    fs::DirBuilder::new().mode(0o700).create(&base).unwrap();
+    let text = |p: &std::path::Path| p.to_str().unwrap().to_owned();
+    let workspace = base.join("real/ws");
+    fs::create_dir_all(workspace.join("src")).unwrap();
+    fs::write(workspace.join("src/a.txt"), "a").unwrap();
+    let ws = text(&workspace);
+    let file = text(&workspace.join("src/a.txt"));
+    assert!(confine(&ws, &ws, Leaf::Directory));
+    assert!(confine(&ws, &file, Leaf::ExistingFile));
+    // The workspace keeps its name, but an ancestor is now a link to another tree that
+    // holds a directory of the same name: every component below still looks real.
+    let elsewhere = base.join("elsewhere");
+    fs::create_dir_all(elsewhere.join("ws/src")).unwrap();
+    fs::write(elsewhere.join("ws/src/a.txt"), "other").unwrap();
+    fs::rename(base.join("real"), base.join("moved")).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, base.join("real")).unwrap();
+    assert!(fs::symlink_metadata(&workspace).unwrap().is_dir());
+    assert!(!confine(&ws, &ws, Leaf::Directory));
+    assert!(!confine(&ws, &file, Leaf::ExistingFile));
+    assert!(!confine(
+        &ws,
+        &text(&workspace.join("new.txt")),
+        Leaf::FileOrMissing
+    ));
+    // The workspace itself replaced by a link, and a workspace that is gone.
+    fs::remove_file(base.join("real")).unwrap();
+    fs::rename(base.join("moved"), base.join("real")).unwrap();
+    assert!(confine(&ws, &file, Leaf::ExistingFile));
+    fs::rename(&workspace, base.join("real/ws-moved")).unwrap();
+    assert!(!confine(&ws, &file, Leaf::ExistingFile));
+    std::os::unix::fs::symlink(base.join("real/ws-moved"), &workspace).unwrap();
+    assert!(!confine(&ws, &ws, Leaf::Directory));
+    assert!(!confine(&ws, &file, Leaf::ExistingFile));
+    fs::remove_dir_all(&base).unwrap();
+}

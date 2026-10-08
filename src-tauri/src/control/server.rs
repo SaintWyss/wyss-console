@@ -282,17 +282,6 @@ pub fn run_from_environment() -> ControlResult<()> {
         let mut next_expiry = refresh_expiry(&mut store);
         runtime.reconcile(&mut store, &core_sender, true)?;
         loop {
-            // Every path of this loop returns here, after its transactions committed or
-            // rolled back. Watchers are told the committed head and nothing else; a failed
-            // read announces nothing, which costs them latency and never an event.
-            if let Ok(head) = store.head() {
-                // The witness follows every commit. Without it a later loss of this
-                // history could not be told from its absence: execution closes.
-                if anchor.advance(head).is_err() {
-                    store.execution_available = false;
-                }
-                core_signal.publish(head);
-            }
             // A bounded wall-clock recheck handles clock changes, without SQLite polling.
             if next_expiry.is_some_and(|t| store.lease_now() >= t) {
                 conversations.invalidate_admission();
@@ -306,6 +295,19 @@ pub fn run_from_environment() -> ControlResult<()> {
                     conversations.detach(&mut store);
                 }
                 Ok(false) => (),
+            }
+            // Every path of this loop returns here, after its transactions committed or
+            // rolled back, and what the authority just did on its own (an expiry, an
+            // enforcement) has committed too: nothing it wrote waits for the next message
+            // to be announced. Watchers are told the committed head and nothing else; a
+            // failed read announces nothing, which costs them latency and never an event.
+            if let Ok(head) = store.head() {
+                // The witness follows every commit. Without it a later loss of this
+                // history could not be told from its absence: execution closes.
+                if anchor.advance(head).is_err() {
+                    store.execution_available = false;
+                }
+                core_signal.publish(head);
             }
             if closing && !turns.active() {
                 break;
@@ -498,6 +500,11 @@ pub fn run_from_environment() -> ControlResult<()> {
                     ) {
                         conversations.invalidate_admission();
                     }
+                    // A revocation, a close or a stop of what the active turn runs under
+                    // withdraws its admission before it commits: once the mutation is
+                    // durable, the prompt of a turn that was not yet dispatched can no
+                    // longer leave.
+                    let suspended = turns.suspend_admission(&job.op);
                     let result = if core_stop.load(Ordering::Acquire) {
                         Err(ControlError::StorageUnavailable)
                     } else {
@@ -565,6 +572,17 @@ pub fn run_from_environment() -> ControlResult<()> {
                         Err(ControlError::StorageUnavailable | ControlError::StorageIncompatible)
                     ) {
                         store.execution_available = false;
+                    }
+                    // A mutation that changed nothing took nothing away.
+                    let unchanged = match &result {
+                        Err(_) => true,
+                        Ok(ResultValue::RuntimeControl(r)) => {
+                            r.revision <= runtime.status().revision
+                        }
+                        Ok(_) => false,
+                    };
+                    if suspended && unchanged {
+                        turns.restore_admission();
                     }
                     if result.is_ok()
                         && matches!(

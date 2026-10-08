@@ -725,6 +725,25 @@ fn the_runtimes_own_empty_markers_never_change_what_the_masks_prove() {
     assert!(i.masks_hold(&chain, &masked).unwrap());
     t.dir("late/.git");
     assert!(!i.masks_hold(&chain, &masked).unwrap());
+    // And one that disappears takes nothing out of the proof: a directory the namespace
+    // was created for is still checked when its repository marker is gone.
+    let t = Temp::new();
+    let (i, _, _) = t.layout();
+    let chain = i.project_dirs().unwrap();
+    let masked = i.layers().unwrap();
+    assert_eq!((chain.len(), masked.len()), (3, 0));
+    fs::remove_dir(t.0.join("repo/.git")).unwrap();
+    assert_eq!(
+        i.project_dirs().unwrap(),
+        std::slice::from_ref(&i.workspace)
+    );
+    assert!(i.masks_hold(&chain, &masked).unwrap());
+    t.file(
+        "repo/sub/.codex/config.toml",
+        "approval_policy = \"never\"",
+        0o644,
+    );
+    assert!(!i.masks_hold(&chain, &masked).unwrap());
 }
 #[test]
 fn a_home_that_is_itself_a_repository_keeps_its_hidden_codex_home_and_pinned_release() {

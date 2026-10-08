@@ -260,6 +260,15 @@ any previous nonterminal turn indeterminate with a single durable audit; no thre
 turn/start or prompt resend is automatic. Indeterminate is terminal and queryable; a future
 new turn requires a new explicit admission. Exactly-once provider execution is not claimed.
 
+> **Implementation status (Sprint 2K).** Two edges of this section were tightened. The
+> supervisor reads a turn's admission flag immediately before it writes the prompt; that
+> flag is now withdrawn before a revocation of the turn's admitted lease, a close of its
+> session or a runtime stop commits, and given back only if the mutation changed
+> nothing, so a turn that was not yet dispatched is never dispatched after such a
+> commit. A turn that is already being stopped no longer offers the scheduler the
+> deadline of an approval it is not waiting on any more: before, a deadline that had
+> passed made every wait zero until the provider ended the turn.
+
 ## External actions remain forbidden
 
 Any hook/MCP-startup lifecycle, command/file/MCP/web/dynamic-tool/subagent item, non-empty

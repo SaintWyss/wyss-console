@@ -98,9 +98,16 @@ def file_item(workspace, status):
         {'path': workspace + '/wyss-fixture-probe.txt', 'kind': {'type': 'add'}, 'diff': '+WYSS_FIXTURE_PATCH\n'}]}
 
 
+def hold(step):
+    """A staged provider takes its next step only when the test releases it."""
+    while not (root / step).exists():
+        time.sleep(.005)
+
+
 def resolve(tid, decision):
     """What the real runtime does once its one request is answered."""
     global waiting
+    staged = scenario.endswith('_staged')
     kind, workspace, turn = waiting['kind'], waiting['workspace'], waiting['turn']
     request_id = waiting['id']
     waiting = None
@@ -118,17 +125,29 @@ def resolve(tid, decision):
         # Accepted and running: the outcome is never reported.
         tally('executions')
         return
+    if staged:
+        # The Accept was read. The effect and its report each wait for the test.
+        (root / 'accept-read').touch()
+        hold('release-effect')
     if kind == 'command':
         tally('executions')
+        if staged:
+            (root / 'effect-done').touch()
+            hold('release-report')
         emit({'method': 'item/commandExecution/outputDelta', 'params': {
             'threadId': tid, 'turnId': turn['id'], 'itemId': 'call-1', 'delta': 'WYSS_FIXTURE_OUTPUT'}})
         finished('completed', exitCode=0, aggregatedOutput='WYSS_FIXTURE_OUTPUT')
     else:
         Path(workspace + '/wyss-fixture-probe.txt').write_text('WYSS_FIXTURE_PATCH\n')
         tally('mutations')
+        if staged:
+            (root / 'effect-done').touch()
+            hold('release-report')
         emit({'method': 'turn/diff/updated', 'params': {'threadId': tid, 'turnId': turn['id'], 'diff': '+WYSS_FIXTURE_PATCH\n'}})
         finished('completed')
     emit({'method': 'turn/completed', 'params': {'threadId': tid, 'turn': dict(turn, status='completed')}})
+    if staged:
+        (root / 'reported').touch()
 
 
 for line in sys.stdin:
@@ -149,10 +168,14 @@ for line in sys.stdin:
         if scenario == 'timeout':
             continue
         emit({'method': 'remoteControl/status/changed', 'params': {}})
-        emit({'id': message['id'], 'result': {
+        answer = {
             'userAgent': 'fixture',
             'codexHome': os.environ['CODEX_HOME'] if local and scenario != 'local_wrong_home' else '/synthetic',
-            'platformFamily': 'unix', 'platformOs': 'linux'}})
+            'platformFamily': 'unix', 'platformOs': 'linux'}
+        if scenario == 'local_final_silent_home' and catalog:
+            # The thread-capable process never says which home it runs in.
+            del answer['codexHome']
+        emit({'id': message['id'], 'result': answer})
     elif method == 'initialized':
         initialized = True
     elif method == 'model/list':

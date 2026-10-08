@@ -91,6 +91,8 @@ impl Sandbox {
                 .env("WYSS_RUNTIME_FIXTURE", &self.root)
                 .env("WYSS_RUNTIME_SCENARIO", self.scenario)
                 .env("WYSS_FIXTURE_USER_HOME", self.root.join("codex-home"))
+                // A secret in the authority's own environment, for the privacy tests.
+                .env("WYSS_FIXTURE_SECRET", "ENVIRONMENT_SECRET_SENTINEL")
                 .env(
                     "WYSS_FIXTURE_LAYERS",
                     fs::read_to_string(self.root.join("layers.json")).unwrap_or("[]".into()),
@@ -2182,6 +2184,8 @@ fn local_tools_readiness_fails_closed_whenever_isolation_or_attestation_is_unpro
     // The runtime's own answers do not prove the profile.
     for (scenario, final_launch) in [
         ("local_wrong_home", false),
+        // Discovery proved its home; the process that would serve threads never did.
+        ("local_final_silent_home", true),
         ("local_mcp", false),
         ("local_no_requirement", true),
         ("local_tmp_writable", true),
@@ -3830,6 +3834,7 @@ fn durable_replay_and_every_authority_file_hold_no_content() {
         "ASSISTANT_SENTINEL",
         "SUMMARY_SENTINEL",
         "RAW_PRIVATE_REASONING_SENTINEL",
+        "ENVIRONMENT_SECRET_SENTINEL",
     ];
     assert!(assert_content_free(&env, &mut c, &content) >= 3);
     let before = replay(&mut c, 50);
@@ -3853,7 +3858,10 @@ fn durable_replay_and_every_authority_file_hold_no_content() {
     // the provider credential the isolated runtime can read.
     nix::sys::prctl::set_child_subreaper(true).unwrap();
     for (scenario, action) in [
-        ("approval_command", vec!["WYSS_FIXTURE_COMMAND", "printf "]),
+        (
+            "approval_command",
+            vec!["WYSS_FIXTURE_COMMAND", "printf ", "WYSS_FIXTURE_OUTPUT"],
+        ),
         (
             "approval_file",
             vec!["WYSS_FIXTURE_PATCH", "wyss-fixture-probe"],
@@ -3878,6 +3886,7 @@ fn durable_replay_and_every_authority_file_hold_no_content() {
             "WYSS_2H_SECRET_PROMPT_",
             "FIXTURE-CREDENTIAL",
             "ASSISTANT_SENTINEL",
+            "ENVIRONMENT_SECRET_SENTINEL",
         ]);
         assert_content_free(&p.env, &mut p.client, &content);
         // What replay does carry is the fingerprint of the action and nothing of it.
@@ -3887,4 +3896,397 @@ fn durable_replay_and_every_authority_file_hold_no_content() {
         assert!(!streamed.contains(action[0]) || scenario == "approval_command");
         p.finish();
     }
+}
+
+/// Lets a `_staged` provider take its next step.
+fn release(env: &Sandbox, step: &str) {
+    fs::write(env.root.join(step), b"").unwrap();
+}
+#[test]
+fn crash_matrix_around_an_accepted_action_never_replays_and_keeps_uncertainty_explicit() {
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    // Where the authority dies, for an accepted command and an accepted file change. The
+    // provider is staged: it reads the Accept, performs the effect and reports it only when
+    // released, so each death lands at an exact external-effect boundary.
+    let points = [
+        // The Accept reached the provider; the item has not started.
+        "accept_read_before_start",
+        // The effect happened; the provider has not reported it.
+        "effect_done_before_report",
+        // The provider reported it; the authority never read that report.
+        "reported_before_confirmation",
+        // The same boundaries while the authority is stopping the turn.
+        "during_cancel",
+        "during_revoke",
+        "during_close",
+    ];
+    for scenario in ["approval_command_staged", "approval_file_staged"] {
+        for point in points {
+            let label = format!("{scenario}/{point}");
+            let mut p = pending(scenario, local_scopes());
+            let accept = p.intent(ApprovalDecision::Accept);
+            let receipt = p.client.approval_respond(accept.clone()).unwrap();
+            assert_eq!(receipt.state, ApprovalState::Accepted, "{label}");
+            wait_file(&p.env, "accept-read");
+            assert_eq!(effects(&p.env, &p.workspace), 0, "{label}");
+            let authority = Pid::from_raw(p.authority.0.id() as i32);
+            let mut expected_effects = 0;
+            match point {
+                "accept_read_before_start" => (),
+                "effect_done_before_report" => {
+                    release(&p.env, "release-effect");
+                    wait_file(&p.env, "effect-done");
+                    expected_effects = effects(&p.env, &p.workspace);
+                }
+                "reported_before_confirmation" => {
+                    release(&p.env, "release-effect");
+                    wait_file(&p.env, "effect-done");
+                    expected_effects = effects(&p.env, &p.workspace);
+                    // The authority is frozen: the report is written and never read.
+                    kill(authority, Signal::SIGSTOP).unwrap();
+                    release(&p.env, "release-report");
+                    wait_file(&p.env, "reported");
+                }
+                "during_cancel" => {
+                    let running = wait_turn(&mut p.client, &p.turn, false);
+                    p.client
+                        .turn_cancel(TurnCancel {
+                            intent_id: id(),
+                            managed_turn_id: p.turn.managed_turn_id.clone(),
+                            expected_revision: running.revision,
+                        })
+                        .unwrap();
+                }
+                "during_revoke" => {
+                    p.client
+                        .lease_revoke(LeaseRevoke {
+                            intent_id: id(),
+                            lease_id: p.lease.lease_id.clone(),
+                            expected_revision: p.lease.revision,
+                        })
+                        .unwrap();
+                }
+                _ => {
+                    p.client
+                        .close(Close {
+                            intent_id: id(),
+                            managed_session_id: p.session.managed_session_id.clone(),
+                            expected_revision: 1,
+                        })
+                        .unwrap();
+                }
+            }
+            assert!(expected_effects <= 2, "{label}");
+            let providers = p.env.pids();
+            drop(p.client);
+            p.authority.stop(true);
+            // No provider outlives its authority, so nothing can still act on the Accept.
+            for pid in providers {
+                dead(pid);
+            }
+            assert_eq!(effects(&p.env, &p.workspace), expected_effects, "{label}");
+            assert_eq!(decisions(&p.env), ["\"accept\""], "{label}");
+
+            p.authority = p.env.start();
+            p.client = p.env.client();
+            // Uncertainty is explicit and terminal: the approval was accepted and its
+            // outcome is unknown, whatever really happened; the turn is over.
+            let approval = p.status().approval;
+            assert_eq!(
+                (approval.state, approval.effect, approval.decision),
+                (
+                    ApprovalState::Indeterminate,
+                    ApprovalEffect::Unknown,
+                    Some(ApprovalDecision::Accept)
+                ),
+                "{label}"
+            );
+            let turn = p
+                .client
+                .turn_status(p.turn.managed_turn_id.clone())
+                .unwrap();
+            assert!(
+                matches!(
+                    turn.state,
+                    TurnState::Indeterminate | TurnState::Interrupted
+                ),
+                "{label}: {:?}",
+                turn.state
+            );
+            if point == "during_close" {
+                assert_eq!(
+                    p.client
+                        .get(p.session.managed_session_id.clone())
+                        .unwrap()
+                        .control_state,
+                    ControlState::Closed,
+                    "{label}"
+                );
+            }
+            // The original intent still has its receipt; no other Accept decides anything.
+            assert_eq!(
+                p.client.approval_respond(accept.clone()),
+                Ok(receipt.clone()),
+                "{label}"
+            );
+            assert_eq!(
+                p.client
+                    .approval_respond(p.intent(ApprovalDecision::Accept)),
+                Err(ControlError::InvalidTransition),
+                "{label}"
+            );
+            // A new generation for the same workspace: no answer is written again, no
+            // turn is started again and the effect does not happen (again).
+            p.client.runtime_stop(mutation()).unwrap();
+            p.env.wait(&mut p.client, ActualState::Stopped);
+            p.client
+                .runtime_start(local_mutation(&p.workspace))
+                .unwrap();
+            p.env.wait(&mut p.client, ActualState::Ready);
+            thread::sleep(Duration::from_millis(150));
+            assert_eq!(decisions(&p.env), ["\"accept\""], "{label}");
+            assert_eq!(count(&p.env, "turn/start"), 1, "{label}");
+            assert_eq!(effects(&p.env, &p.workspace), expected_effects, "{label}");
+            assert_eq!(
+                p.client
+                    .runtime_status()
+                    .unwrap()
+                    .outbound_methods
+                    .approval_accept,
+                0,
+                "{label}"
+            );
+            if point != "during_close" {
+                assert_eq!(
+                    p.client
+                        .binding_status(p.session.managed_session_id.clone())
+                        .unwrap()
+                        .state,
+                    BindingState::BoundDetached,
+                    "{label}"
+                );
+            }
+            p.finish();
+        }
+    }
+}
+
+#[test]
+fn an_accept_racing_anything_has_one_outcome_at_most_one_answer_and_at_most_one_effect() {
+    use std::sync::{Arc, Barrier};
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    for contender in [
+        "accept",
+        "cancel_approval",
+        "cancel_turn",
+        "revoke",
+        "close",
+        "stop",
+    ] {
+        for round in 0..4 {
+            let label = format!("{contender}/{round}");
+            let mut p = pending("approval_command", local_scopes());
+            let running = wait_turn(&mut p.client, &p.turn, false);
+            let barrier = Arc::new(Barrier::new(2));
+            let accept = p.intent(ApprovalDecision::Accept);
+            let first = {
+                let mut c = p.env.client();
+                let barrier = barrier.clone();
+                let accept = accept.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    c.approval_respond(accept).map(|r| r.state)
+                })
+            };
+            let second = {
+                let mut c = p.env.client();
+                let barrier = barrier.clone();
+                let other = match contender {
+                    "accept" => p.intent(ApprovalDecision::Accept),
+                    _ => p.intent(ApprovalDecision::Cancel),
+                };
+                let turn = p.turn.managed_turn_id.clone();
+                let lease = p.lease.clone();
+                let session = p.session.managed_session_id.clone();
+                let revision = running.revision;
+                thread::spawn(move || {
+                    barrier.wait();
+                    match contender {
+                        "accept" | "cancel_approval" => c.approval_respond(other).map(|r| r.state),
+                        "cancel_turn" => c
+                            .turn_cancel(TurnCancel {
+                                intent_id: id(),
+                                managed_turn_id: turn,
+                                expected_revision: revision,
+                            })
+                            .map(|_| ApprovalState::Pending),
+                        "revoke" => c
+                            .lease_revoke(LeaseRevoke {
+                                intent_id: id(),
+                                lease_id: lease.lease_id,
+                                expected_revision: lease.revision,
+                            })
+                            .map(|_| ApprovalState::Pending),
+                        "close" => c
+                            .close(Close {
+                                intent_id: id(),
+                                managed_session_id: session,
+                                expected_revision: 1,
+                            })
+                            .map(|_| ApprovalState::Pending),
+                        _ => c.runtime_stop(mutation()).map(|_| ApprovalState::Pending),
+                    }
+                })
+            };
+            let accepted = first.join().unwrap();
+            let other = second.join().unwrap();
+            let done = wait_turn(&mut p.client, &p.turn, true);
+            // Whatever the turn is waiting on has settled by now.
+            thread::sleep(Duration::from_millis(100));
+            let approval = p.status().approval;
+            let answers = decisions(&p.env);
+            let accepts = answers.iter().filter(|d| *d == "\"accept\"").count();
+            let executions = lines(&p.env, "executions");
+            let summary = format!(
+                "{label}: accept={accepted:?} other={other:?} approval={:?}/{:?} turn={:?} answers={answers:?} executions={executions}",
+                approval.state, approval.effect, done.state
+            );
+            // The Accept that decided is the first one, or the contender when that is an
+            // Accept too.
+            let an_accept_decided = accepted == Ok(ApprovalState::Accepted)
+                || (contender == "accept" && other == Ok(ApprovalState::Accepted));
+            // One answer per request, ever; one execution at most; never without an Accept.
+            assert!(answers.len() <= 1, "{summary}");
+            assert!(executions <= accepts, "{summary}");
+            assert_ne!(approval.state, ApprovalState::Pending, "{summary}");
+            match approval.state {
+                // The Accept committed first. Its one answer was written; the action ran
+                // once, or its outcome is unknown because the contender stopped the turn.
+                ApprovalState::Accepted => {
+                    assert!(an_accept_decided, "{summary}");
+                    assert_eq!(approval.effect, ApprovalEffect::Confirmed, "{summary}");
+                    assert_eq!((accepts, executions), (1, 1), "{summary}");
+                }
+                ApprovalState::Indeterminate => {
+                    assert!(an_accept_decided, "{summary}");
+                    assert_eq!(approval.effect, ApprovalEffect::Unknown, "{summary}");
+                    assert!(accepts <= 1, "{summary}");
+                }
+                // The contender committed first: the Accept decided nothing, no Accept
+                // frame exists and nothing ran.
+                _ => {
+                    assert!(!an_accept_decided, "{summary}");
+                    assert_eq!((accepts, executions), (0, 0), "{summary}");
+                    assert_eq!(approval.effect, ApprovalEffect::None, "{summary}");
+                    assert_eq!(effects(&p.env, &p.workspace), 0, "{summary}");
+                }
+            }
+            if contender == "accept" {
+                // Two Accepts under two intents: exactly one of them is the decision.
+                assert_eq!(
+                    [&accepted, &other].iter().filter(|r| r.is_ok()).count(),
+                    1,
+                    "{summary}"
+                );
+                assert_eq!((accepts, executions), (1, 1), "{summary}");
+            }
+            // The intent that was answered keeps its receipt; nothing is decided twice.
+            if accepted.is_ok() {
+                assert_eq!(
+                    p.client.approval_respond(accept).map(|r| r.state),
+                    Ok(ApprovalState::Accepted),
+                    "{summary}"
+                );
+                assert_eq!(decisions(&p.env).len(), answers.len(), "{summary}");
+            }
+            p.finish();
+        }
+    }
+}
+
+#[test]
+fn repeated_generations_and_turns_leave_no_descriptor_thread_process_or_stream_behind() {
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    let env = Sandbox::new("happy");
+    let workspace = local_layout(&env);
+    let mut a = env.start();
+    let mut c = env.client();
+    let authority = a.0.id();
+    // Open descriptors and threads of the authority process itself.
+    let resources = |c: &mut ControlClient| -> (usize, usize) {
+        // Answered by the core, so every earlier job, and its cleanup, has finished.
+        c.status().unwrap();
+        let fds = fs::read_dir(format!("/proc/{authority}/fd"))
+            .unwrap()
+            .count();
+        let threads = fs::read_to_string(format!("/proc/{authority}/status"))
+            .unwrap()
+            .lines()
+            .find_map(|l| l.strip_prefix("Threads:"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        (fds, threads)
+    };
+    let settled = |c: &mut ControlClient, expected: (usize, usize)| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let now = resources(c);
+            if now == expected {
+                return;
+            }
+            assert!(Instant::now() < deadline, "{now:?} instead of {expected:?}");
+            thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let baseline = resources(&mut c);
+    let mut turns = Vec::new();
+    for cycle in 0..6 {
+        // Alternate the two profiles: each generation is a new process tree.
+        let local = cycle % 2 == 1;
+        c.runtime_start(if local {
+            local_mutation(&workspace)
+        } else {
+            mutation()
+        })
+        .unwrap();
+        env.wait(&mut c, ActualState::Ready);
+        let (s, _) = if local {
+            local_session(&env, &mut c, &workspace, local_scopes())
+        } else {
+            let (s, l) = prepare_bound_session(&mut c, local_scopes());
+            c.binding_create(create_params(&env, &s)).unwrap();
+            c.binding_resume(resume_params(&s)).unwrap();
+            (s, l)
+        };
+        for _ in 0..2 {
+            let t = c.turn_start(turn_params(&s)).unwrap();
+            let done = wait_turn(&mut c, &t, true);
+            assert_eq!(done.state, TurnState::Completed, "cycle {cycle}");
+            turns.push(t);
+        }
+        c.runtime_stop(mutation()).unwrap();
+        env.wait(&mut c, ActualState::Stopped);
+        // Every process of the generation is gone and the authority holds nothing of it.
+        for pid in env.pids() {
+            dead(pid);
+        }
+        settled(&mut c, baseline);
+    }
+    assert_eq!(turns.len(), 12);
+    // The transient streams are bounded by count: the oldest turns are no longer
+    // retained, the latest ones are, and their durable records are all still there.
+    let retained: Vec<bool> = turns
+        .iter()
+        .map(|t| {
+            c.turn_status_projection(t.managed_turn_id.clone())
+                .unwrap()
+                .stream_retained
+        })
+        .collect();
+    assert_eq!(retained.iter().filter(|r| **r).count(), 8, "{retained:?}");
+    assert!(retained[..4].iter().all(|r| !r) && retained[4..].iter().all(|r| *r));
+    drop(c);
+    a.stop(false);
 }

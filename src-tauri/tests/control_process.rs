@@ -2221,3 +2221,264 @@ fn a_write_failure_closes_execution_keeps_committed_state_and_recovers_on_restar
     drop(c);
     a.stop(false);
 }
+
+#[test]
+fn racing_clients_commit_each_contested_mutation_exactly_once() {
+    use std::sync::{Arc, Barrier};
+    let env = Sandbox::new();
+    let mut a = env.start();
+    // Every contender is its own connection and all of them send at the same instant.
+    type Contender<T> = Box<dyn FnOnce(&mut ControlClient) -> T + Send>;
+    fn race<T: Send + 'static>(env: &Sandbox, contenders: Vec<Contender<T>>) -> Vec<T> {
+        let barrier = Arc::new(Barrier::new(contenders.len()));
+        let threads: Vec<_> = contenders
+            .into_iter()
+            .map(|act| {
+                let mut c = env.client();
+                let barrier = barrier.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    act(&mut c)
+                })
+            })
+            .collect();
+        threads.into_iter().map(|t| t.join().unwrap()).collect()
+    }
+    let events_of = |c: &mut ControlClient, kind: &str| -> usize {
+        let status = c.status().unwrap();
+        let mut after = None;
+        let mut found = 0;
+        loop {
+            let ResultValue::Audit { events, next } = c
+                .audit(AuditRead {
+                    stream_id: status.stream_id.clone(),
+                    after_sequence: after,
+                    limit: 50,
+                })
+                .unwrap()
+            else {
+                panic!()
+            };
+            found += events
+                .iter()
+                .filter(|e| serde_json::to_value(e).unwrap()["event_type"] == kind)
+                .count();
+            match next {
+                Some(n) => after = Some(n),
+                None => return found,
+            }
+        }
+    };
+    for round in 0..12 {
+        // One intent sent by six clients at once is one session and one event.
+        let intent = id();
+        let prepared: Vec<ControlResult<ManagedSessionRecord>> = race(
+            &env,
+            (0..6)
+                .map(|_| {
+                    let intent = intent.clone();
+                    Box::new(move |c: &mut ControlClient| c.prepare(prep(intent))) as Contender<_>
+                })
+                .collect(),
+        );
+        let session = prepared[0].clone().unwrap();
+        assert!(
+            prepared.iter().all(|r| r.as_ref() == Ok(&session)),
+            "round {round}"
+        );
+        // Six different grants for one session: exactly one lease.
+        let grants: Vec<ControlResult<ExecutionLease>> = race(
+            &env,
+            (0..6)
+                .map(|_| {
+                    let session = session.managed_session_id.clone();
+                    Box::new(move |c: &mut ControlClient| {
+                        c.lease_grant(LeaseGrant {
+                            intent_id: id(),
+                            session_id: session,
+                            expected_session_revision: 1,
+                            scopes: vec![ExecutionScope::TurnStart],
+                            ttl_seconds: 600,
+                        })
+                    }) as Contender<_>
+                })
+                .collect(),
+        );
+        let granted: Vec<_> = grants.iter().filter_map(|r| r.as_ref().ok()).collect();
+        assert_eq!(granted.len(), 1, "round {round}");
+        assert!(
+            grants
+                .iter()
+                .filter(|r| r.is_err())
+                .all(|r| r == &Err(ControlError::LeaseAlreadyActive)),
+            "round {round}"
+        );
+        let lease = granted[0].clone();
+        // Renew against revoke, both at the revision they saw: one of them commits. A
+        // revocation that committed is final, whatever the renewal did before it.
+        let outcome: Vec<ControlResult<LeaseState>> = race(
+            &env,
+            vec![
+                {
+                    let lease = lease.clone();
+                    Box::new(move |c: &mut ControlClient| {
+                        c.lease_renew(LeaseRenew {
+                            intent_id: id(),
+                            lease_id: lease.lease_id,
+                            expected_revision: lease.revision,
+                            ttl_seconds: 900,
+                        })
+                        .map(|l| l.state)
+                    }) as Contender<_>
+                },
+                {
+                    let lease = lease.clone();
+                    Box::new(move |c: &mut ControlClient| {
+                        c.lease_revoke(LeaseRevoke {
+                            intent_id: id(),
+                            lease_id: lease.lease_id,
+                            expected_revision: lease.revision,
+                        })
+                        .map(|l| l.state)
+                    })
+                },
+            ],
+        );
+        let mut c = env.client();
+        let now = c.lease_get(lease.lease_id.clone()).unwrap();
+        match (&outcome[0], &outcome[1]) {
+            (Ok(_), Err(ControlError::StaleRevision)) => {
+                assert_eq!((now.state, now.revision), (LeaseState::Active, 2));
+            }
+            (Err(ControlError::StaleRevision | ControlError::InvalidTransition), Ok(_)) => {
+                assert_eq!((now.state, now.revision), (LeaseState::Revoked, 2));
+                assert!(
+                    c.lease_active(session.managed_session_id.clone())
+                        .unwrap()
+                        .is_none()
+                );
+            }
+            other => panic!("round {round}: {other:?}"),
+        }
+        // Close against a new grant: whichever commits first, the session ends closed and
+        // without an active lease.
+        let closing: Vec<ControlResult<()>> = race(
+            &env,
+            vec![
+                {
+                    let session = session.managed_session_id.clone();
+                    Box::new(move |c: &mut ControlClient| {
+                        c.close(Close {
+                            intent_id: id(),
+                            managed_session_id: session,
+                            expected_revision: 1,
+                        })
+                        .map(|_| ())
+                    }) as Contender<_>
+                },
+                {
+                    let session = session.managed_session_id.clone();
+                    Box::new(move |c: &mut ControlClient| {
+                        c.lease_grant(LeaseGrant {
+                            intent_id: id(),
+                            session_id: session,
+                            expected_session_revision: 1,
+                            scopes: vec![ExecutionScope::TurnStart],
+                            ttl_seconds: 600,
+                        })
+                        .map(|_| ())
+                    })
+                },
+            ],
+        );
+        assert_eq!(closing[0], Ok(()), "round {round}");
+        assert!(
+            matches!(
+                closing[1],
+                Ok(()) | Err(ControlError::InvalidTransition | ControlError::LeaseAlreadyActive)
+            ),
+            "round {round}: {:?}",
+            closing[1]
+        );
+        assert_eq!(
+            c.get(session.managed_session_id.clone())
+                .unwrap()
+                .control_state,
+            ControlState::Closed
+        );
+        assert!(
+            c.lease_active(session.managed_session_id.clone())
+                .unwrap()
+                .is_none(),
+            "round {round}: a closed session holds a lease"
+        );
+        assert_eq!(
+            c.gate_status(GateQuery {
+                session_id: session.managed_session_id.clone(),
+                action: ExecutionScope::TurnStart,
+            })
+            .unwrap()
+            .reason,
+            GateReason::SessionNotPrepared
+        );
+    }
+    let mut c = env.client();
+    let status = c.status().unwrap();
+    assert_eq!((status.prepared_count, status.closed_count), (0, 12));
+    // One prepared and one closed event per session, whatever raced.
+    assert_eq!(events_of(&mut c, "authority.managed_session.prepared"), 12);
+    assert_eq!(events_of(&mut c, "authority.managed_session.closed"), 12);
+    drop(c);
+    // The history those races left is one the authority accepts on its next start.
+    a.stop(true);
+    let mut a = env.start();
+    let mut c = env.client();
+    assert_eq!(c.status().unwrap().closed_count, 12);
+    drop(c);
+    a.stop(false);
+}
+
+#[test]
+fn what_the_authority_does_on_its_own_wakes_a_waiting_watcher_at_once() {
+    let env = Sandbox::new();
+    let mut a = env.start();
+    let mut c = env.client();
+    let session = c.prepare(prep(id())).unwrap();
+    let lease = c
+        .lease_grant(LeaseGrant {
+            intent_id: id(),
+            session_id: session.managed_session_id.clone(),
+            expected_session_revision: 1,
+            scopes: vec![ExecutionScope::TurnStart],
+            ttl_seconds: 1,
+        })
+        .unwrap();
+    let status = c.status().unwrap();
+    let head = status.last_sequence.unwrap();
+    // No client sends anything from here on. The lease expires by the authority's own
+    // scheduler; the watcher that is waiting for the next event must be told when that
+    // commits, not when its own wait runs out.
+    let started = Instant::now();
+    let ResultValue::Audit { events, .. } = c
+        .audit_watch(AuditWatch {
+            stream_id: status.stream_id.clone(),
+            after_sequence: Some(head),
+            limit: 10,
+            wait_ms: 20_000,
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+    let waited = started.elapsed();
+    let events = serde_json::to_value(&events).unwrap();
+    assert_eq!(events.as_array().unwrap().len(), 1, "{events}");
+    assert_eq!(events[0]["event_type"], "authority.execution_lease.expired");
+    assert_eq!(events[0]["payload"]["lease_id"], lease.lease_id.as_str());
+    assert!(
+        waited < Duration::from_secs(6),
+        "the watcher learned of the expiry after {waited:?}"
+    );
+    drop(c);
+    a.stop(false);
+}

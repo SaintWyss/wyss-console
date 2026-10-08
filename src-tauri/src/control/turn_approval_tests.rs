@@ -3018,3 +3018,165 @@ fn an_uncertain_create_that_cannot_be_audited_stays_blocked_uncertain_and_closed
         BindingState::Unbound
     );
 }
+#[test]
+fn admission_is_withdrawn_before_a_revocation_close_or_stop_of_the_turn_commits() {
+    use std::sync::atomic::Ordering;
+    let mut rig = Rig::new();
+    rig.end_turn(TurnOutcome::Completed);
+    // A turn that was admitted and whose prompt the supervisor has not written yet. The
+    // supervisor reads this flag immediately before the write.
+    let ResultValue::Turn(turn) = rig
+        .turns
+        .start(
+            &mut rig.store,
+            &mut rig.runtime,
+            &rig.conversations,
+            &TurnStart {
+                intent_id: uuid(),
+                managed_session_id: rig.session.managed_session_id.clone(),
+                expected_session_revision: 1,
+                prompt: "another thing".into(),
+            },
+        )
+        .unwrap()
+    else {
+        panic!()
+    };
+    let Ok(RuntimeCommand::Start(command)) = rig.commands.try_recv() else {
+        panic!("the turn was not handed to the supervisor")
+    };
+    let admitted = || command.admission.load(Ordering::Acquire);
+    assert!(admitted());
+    let revoke = |lease: &ExecutionLease| {
+        Operation::LeaseRevoke(LeaseRevoke {
+            intent_id: uuid(),
+            lease_id: lease.lease_id.clone(),
+            expected_revision: lease.revision,
+        })
+    };
+    let close = |session: &ManagedSessionRecord| {
+        Operation::Close(Close {
+            intent_id: uuid(),
+            managed_session_id: session.managed_session_id.clone(),
+            expected_revision: 1,
+        })
+    };
+    // Nothing that concerns another lease, another session or no authority at all.
+    let ResultValue::Session(other) = rig.apply(Operation::Prepare(Prepare {
+        intent_id: uuid(),
+        adapter_id: RuntimeTarget::codex().adapter_id,
+        runtime_kind: RuntimeTarget::codex().runtime_kind,
+    })) else {
+        panic!()
+    };
+    let ResultValue::Lease(other_lease) = rig.apply(Operation::LeaseGrant(LeaseGrant {
+        intent_id: uuid(),
+        session_id: other.managed_session_id.clone(),
+        expected_session_revision: 1,
+        scopes: all_scopes(),
+        ttl_seconds: 600,
+    })) else {
+        panic!()
+    };
+    for unrelated in [
+        revoke(&other_lease),
+        close(&other),
+        Operation::LeaseRenew(LeaseRenew {
+            intent_id: uuid(),
+            lease_id: rig.lease.lease_id.clone(),
+            expected_revision: rig.lease.revision,
+            ttl_seconds: 600,
+        }),
+        Operation::Status(Empty {}),
+    ] {
+        assert!(!rig.turns.suspend_admission(&unrelated));
+        assert!(admitted());
+    }
+    // The turn's own lease, its own session and the runtime: withdrawn before the commit,
+    // and given back only when the mutation turned out to change nothing.
+    let stop = Operation::RuntimeStop(RuntimeMutation {
+        intent_id: uuid(),
+        adapter_id: RuntimeTarget::codex().adapter_id,
+        runtime_kind: RuntimeTarget::codex().runtime_kind,
+        expected_revision: None,
+        safety_profile: None,
+        workspace_root: None,
+    });
+    let shouting = Operation::LeaseRevoke(LeaseRevoke {
+        intent_id: uuid(),
+        lease_id: serde_json::from_value(json!(rig.lease.lease_id.as_str().to_ascii_uppercase()))
+            .unwrap(),
+        expected_revision: rig.lease.revision,
+    });
+    for own in [revoke(&rig.lease), shouting, close(&rig.session), stop] {
+        assert!(rig.turns.suspend_admission(&own));
+        assert!(!admitted());
+        // Already withdrawn: a second mutation in flight withdraws nothing more.
+        assert!(!rig.turns.suspend_admission(&own));
+        rig.turns.restore_admission();
+        assert!(admitted());
+    }
+    // Once the turn is being stopped its admission never comes back.
+    let lease = rig.lease.clone();
+    assert!(rig.turns.suspend_admission(&revoke(&lease)));
+    rig.revoke();
+    rig.enforce();
+    assert!(!admitted());
+    rig.turns.restore_admission();
+    assert!(!admitted());
+    assert!(!rig.turns.suspend_admission(&revoke(&lease)));
+    // The supervisor, reading the flag, never writes the prompt: the turn ends undispatched.
+    assert_eq!(
+        rig.turns
+            .accepted(
+                &mut rig.store,
+                &mut rig.runtime,
+                &rig.instance,
+                &turn.managed_turn_id,
+                Err(crate::control::runtime::ConversationFailure::NotDispatched),
+            )
+            .unwrap(),
+        Verdict::Continue
+    );
+    let ended = rig.store.turn(&turn.managed_turn_id).unwrap();
+    assert_eq!(
+        (ended.state, ended.terminal_reason),
+        (TurnState::Interrupted, Some(TurnReason::LeaseRevoked))
+    );
+    assert!(ended.codex_turn_id.is_none());
+}
+#[test]
+fn a_turn_is_admitted_only_at_the_session_revision_the_client_saw() {
+    let mut rig = Rig::new();
+    rig.end_turn(TurnOutcome::Completed);
+    let head = rig.store.head().unwrap();
+    let start = |rig: &mut Rig, revision: u64| {
+        rig.turns.start(
+            &mut rig.store,
+            &mut rig.runtime,
+            &rig.conversations,
+            &TurnStart {
+                intent_id: uuid(),
+                managed_session_id: rig.session.managed_session_id.clone(),
+                expected_session_revision: revision,
+                prompt: "one more thing".into(),
+            },
+        )
+    };
+    // The session is prepared at revision 1. A client that expects any other revision
+    // has not seen this session: nothing is admitted, recorded or dispatched.
+    for stale in [2, 3] {
+        assert_eq!(
+            start(&mut rig, stale).unwrap_err(),
+            ControlError::StaleRevision
+        );
+        assert_eq!(rig.store.head().unwrap(), head);
+        assert!(rig.store.active_turn().unwrap().is_none());
+        assert!(rig.commands.try_recv().is_err());
+    }
+    assert!(matches!(start(&mut rig, 1), Ok(ResultValue::Turn(_))));
+    assert!(matches!(
+        rig.commands.try_recv(),
+        Ok(RuntimeCommand::Start(_))
+    ));
+}

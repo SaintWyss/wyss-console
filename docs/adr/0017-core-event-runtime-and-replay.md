@@ -360,7 +360,10 @@ optimization.
 - An uncertain operation recorded before this ADR has no `runtime_operation_indeterminate`
   event. Abandoning it is still accepted.
 - Watchers are woken at the top of the core loop, after the client that committed has
-  been answered. The delay is one loop iteration.
+  been answered. The delay is one loop iteration. Since Sprint 2K the head is announced
+  after the work the authority does on its own at that point (lease and approval
+  expiry, enforcement on the active turn), so those commits wake watchers at once
+  instead of at the next message.
 - Replay re-encodes a stored envelope through the typed contract. The JSON value is
   preserved; byte formatting of a foreign envelope (whitespace, escapes) is not.
 - A watch reports progress only for the single authority stream. There is no filter by
