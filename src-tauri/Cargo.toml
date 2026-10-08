@@ -10,6 +10,11 @@ default-run = "wyss-console"
 [build-dependencies]
 tauri-build = { version = "=2.7.1", features = [] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Same version Tauri already resolves for its GTK window. Used only to request
+# KWin's blur through GDK's property API (no shell, no FFI).
+gtk = "=0.18.2"
+
 [dependencies]
 sha2 = "0.10.9"
 tauri = { version = "=2.12.1", features = [] }

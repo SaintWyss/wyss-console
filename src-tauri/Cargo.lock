@@ -4406,6 +4406,7 @@ dependencies = [
 name = "wyss-console"
 version = "0.1.0"
 dependencies = [
+ "gtk",
  "nix",
  "portable-pty",
  "rusqlite",

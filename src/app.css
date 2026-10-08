@@ -480,6 +480,40 @@ button:focus-visible {
   }
 }
 
+/* Native window material. Rust sets data-glass before the page scripts run.
+   "opaque" (the default above) keeps the simulated glass for every other system. */
+html[data-glass='native'],
+html[data-glass='transparent'],
+html[data-glass='native'] body,
+html[data-glass='transparent'] body {
+  background: transparent;
+}
+html[data-glass='native'] .ambient,
+html[data-glass='transparent'] .ambient {
+  display: none;
+}
+/* KWin blurs behind the window in "native", so the panels only tint it.
+   "transparent" has no blur, so the veil must be heavier for legibility. */
+html[data-glass='native'] .glass,
+html[data-glass='transparent'] .glass {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html[data-glass='native'] .top-bar,
+html[data-glass='native'] .sidebar {
+  background: rgba(14, 19, 30, 0.42);
+}
+html[data-glass='native'] .content {
+  background: rgba(13, 18, 28, 0.74);
+}
+html[data-glass='transparent'] .top-bar,
+html[data-glass='transparent'] .sidebar {
+  background: rgba(14, 19, 30, 0.78);
+}
+html[data-glass='transparent'] .content {
+  background: rgba(13, 18, 28, 0.9);
+}
+
 /* Narrow windows: sidebar becomes an icon rail, secondary chrome steps back. */
 @media (max-width: 720px) {
   .shell {

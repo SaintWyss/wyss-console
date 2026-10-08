@@ -13,7 +13,8 @@
     "windows": [
       {
         "label": "main",
-        "title": "Wyss Console",
+        "create": false,
+        "title": "Wyss AI",
         "width": 960,
         "height": 640,
         "minWidth": 320,
