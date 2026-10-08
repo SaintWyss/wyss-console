@@ -5,7 +5,7 @@
     $props();
 </script>
 
-<nav class="sidebar glass" aria-label="Primary">
+<nav class="sidebar" aria-label="Primary">
   <p class="nav-section">Workspace</p>
   <ul>
     {#each NAV_ITEMS as item (item.id)}

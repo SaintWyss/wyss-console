@@ -14,7 +14,7 @@
   } = $props();
 </script>
 
-<header class="top-bar glass">
+<header class="top-bar">
   <div class="brand">
     <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
       <defs>

@@ -3,8 +3,7 @@
   --bg: #070b12;
   --glow-cyan: rgba(56, 189, 248, 0.2);
   --glow-violet: rgba(139, 92, 246, 0.16);
-  --glass: rgba(16, 21, 32, 0.66);
-  --panel: rgba(13, 18, 28, 0.9);
+  --frame: rgba(34, 38, 46, 0.7);
   --glass-line: rgba(148, 178, 230, 0.12);
   --glass-line-strong: rgba(148, 178, 230, 0.22);
   --text: #e6ecf5;
@@ -20,13 +19,9 @@
   --error-text: #fecaca;
   --terminal-bg: #0b0f17;
   --terminal-fg: #e6ecf5;
-  --radius-xl: 18px;
   --radius-lg: 14px;
   --radius-md: 10px;
   --radius-sm: 8px;
-  --shadow-panel:
-    0 24px 60px -28px rgba(0, 0, 0, 0.7),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --font-mono: ui-monospace, 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   --sidebar-w: 216px;
   --topbar-h: 56px;
@@ -76,7 +71,8 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
-/* Shell: floating panels over an ambient field, so the glass has something to blur. */
+/* Shell: one translucent frame for the whole window. Regions are divided by
+   hairlines, not floating cards. The frame's tint is set per window material below. */
 .shell {
   position: relative;
   isolation: isolate;
@@ -84,8 +80,7 @@ button:focus-visible {
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   grid-template-rows: var(--topbar-h) minmax(0, 1fr);
-  gap: 10px;
-  padding: 10px;
+  background: var(--frame);
 }
 .ambient {
   position: fixed;
@@ -124,15 +119,6 @@ button:focus-visible {
   );
 }
 
-.glass {
-  background: var(--glass);
-  -webkit-backdrop-filter: blur(22px) saturate(140%);
-  backdrop-filter: blur(22px) saturate(140%);
-  border: 1px solid var(--glass-line);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-panel);
-}
-
 .top-bar {
   grid-column: 1 / -1;
   grid-row: 1;
@@ -141,6 +127,7 @@ button:focus-visible {
   gap: 16px;
   min-width: 0;
   padding-right: 14px;
+  border-bottom: 1px solid var(--glass-line);
 }
 .sidebar {
   grid-column: 1;
@@ -148,6 +135,7 @@ button:focus-visible {
   min-height: 0;
   padding: 14px 10px;
   overflow: hidden;
+  border-right: 1px solid var(--glass-line);
 }
 .content {
   grid-column: 2;
@@ -156,11 +144,7 @@ button:focus-visible {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 12px;
-  /* Solid, not blurred: the terminal repaints constantly and must stay legible. */
-  background: var(--panel);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+  padding: 14px 16px 16px 14px;
   overflow: hidden;
 }
 
@@ -354,9 +338,6 @@ button:focus-visible {
   padding: 4px;
   overflow-x: auto;
   scrollbar-width: none;
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--glass-line);
 }
 .terminal-tabs::-webkit-scrollbar {
   display: none;
@@ -431,6 +412,7 @@ button:focus-visible {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+/* The one solid region: the terminal stays legible over any desktop. */
 .terminal-surface {
   flex: 1;
   min-height: 0;
@@ -439,7 +421,6 @@ button:focus-visible {
   padding: 12px;
   border-radius: var(--radius-lg);
   background: var(--terminal-bg);
-  border: 1px solid var(--glass-line);
 }
 .terminal-host {
   flex: 1;
@@ -492,26 +473,13 @@ html[data-glass='native'] .ambient,
 html[data-glass='transparent'] .ambient {
   display: none;
 }
-/* KWin blurs behind the window in "native", so the panels only tint it.
-   "transparent" has no blur, so the veil must be heavier for legibility. */
-html[data-glass='native'] .glass,
-html[data-glass='transparent'] .glass {
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+/* KWin blurs behind the window in "native", so the frame only tints it.
+   "transparent" has no blur, so the tint must be heavier for legibility. */
+html[data-glass='native'] .shell {
+  background: rgba(34, 38, 46, 0.45);
 }
-html[data-glass='native'] .top-bar,
-html[data-glass='native'] .sidebar {
-  background: rgba(14, 19, 30, 0.42);
-}
-html[data-glass='native'] .content {
-  background: rgba(13, 18, 28, 0.74);
-}
-html[data-glass='transparent'] .top-bar,
-html[data-glass='transparent'] .sidebar {
-  background: rgba(14, 19, 30, 0.78);
-}
-html[data-glass='transparent'] .content {
-  background: rgba(13, 18, 28, 0.9);
+html[data-glass='transparent'] .shell {
+  background: rgba(34, 38, 46, 0.88);
 }
 
 /* Narrow windows: sidebar becomes an icon rail, secondary chrome steps back. */
