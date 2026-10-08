@@ -1090,3 +1090,109 @@ fn runtime_lifecycle_audit_is_minimal_monotonic_and_reopens() {
         DesiredState::Running
     );
 }
+
+#[test]
+fn storage_witness_is_a_strict_monotonic_lower_bound_of_one_stream() {
+    let t = Temp::new();
+    let db = t.root.join("control.sqlite3");
+    let witness = t.root.join("control.anchor");
+    // Nothing was ever here: the database may be created.
+    assert_eq!(anchor::admit(&db), Ok(None));
+    let mut s = t.store();
+    let mut a = anchor::Anchor::confirm(&db, None, &s).unwrap();
+    let read = |path: &std::path::Path| -> Value {
+        serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+    };
+    let stream = s.status().unwrap().stream_id;
+    assert_eq!(
+        read(&witness),
+        json!({"schema_version": 1, "stream_id": stream, "head": "0"})
+    );
+    assert_eq!(fs::metadata(&witness).unwrap().mode() & 0o777, 0o600);
+    for _ in 0..3 {
+        s.apply(&prepare()).unwrap();
+    }
+    a.advance(s.head().unwrap()).unwrap();
+    assert_eq!(read(&witness)["head"], "3");
+    // It never moves back, and an unchanged head writes nothing.
+    let inode = fs::metadata(&witness).unwrap().ino();
+    a.advance(2).unwrap();
+    a.advance(3).unwrap();
+    assert_eq!(read(&witness)["head"], "3");
+    assert_eq!(fs::metadata(&witness).unwrap().ino(), inode);
+    drop(a);
+    // The same store is admitted again; a store behind its witness, or of another stream,
+    // is not.
+    let witnessed = anchor::admit(&db).unwrap();
+    assert!(witnessed.is_some());
+    assert!(anchor::Anchor::confirm(&db, witnessed.clone(), &s).is_ok());
+    let other = Temp::new();
+    let mut o = other.store();
+    assert_eq!(
+        anchor::Anchor::confirm(&db, witnessed.clone(), &o).err(),
+        Some(ControlError::StorageIncompatible)
+    );
+    for _ in 0..5 {
+        o.apply(&prepare()).unwrap();
+    }
+    assert_eq!(
+        anchor::Anchor::confirm(&db, witnessed, &o).err(),
+        Some(ControlError::StorageIncompatible)
+    );
+    // Every witness that is not exactly one it wrote is refused, never taken for none.
+    let good = fs::read_to_string(&witness).unwrap();
+    for bad in [
+        String::new(),
+        "{".to_owned(),
+        "[]".to_owned(),
+        good.replace("\"head\":\"3\"", "\"head\":3"),
+        good.replace("\"head\":\"3\"", "\"head\":\"03\""),
+        good.replace("\"head\":\"3\"", "\"head\":\"-1\""),
+        good.replace("\"schema_version\":1", "\"schema_version\":2"),
+        good.replace('}', ",\"extra\":1}"),
+        good.replace("\"head\":\"3\"", "\"head\":\"3\",\"head\":\"1\""),
+        good.replace(stream.as_str(), "not-a-stream"),
+        format!("{good}{}", " ".repeat(300)),
+    ] {
+        fs::write(&witness, &bad).unwrap();
+        assert_eq!(
+            anchor::admit(&db),
+            Err(ControlError::StorageIncompatible),
+            "{bad}"
+        );
+    }
+    fs::write(&witness, &good).unwrap();
+    assert!(anchor::admit(&db).unwrap().is_some());
+    // With a witness, or with any file SQLite leaves next to a database, a missing or
+    // empty database is never created.
+    drop(s);
+    let moved = t.root.join("moved.sqlite3");
+    fs::rename(&db, &moved).unwrap();
+    assert_eq!(anchor::admit(&db), Err(ControlError::StorageIncompatible));
+    fs::remove_file(&witness).unwrap();
+    for sidecar in [
+        "control.sqlite3-wal",
+        "control.sqlite3-shm",
+        "control.sqlite3-journal",
+    ] {
+        let _ = fs::remove_file(t.root.join(sidecar));
+    }
+    assert_eq!(anchor::admit(&db), Ok(None));
+    for sidecar in [
+        "control.sqlite3-wal",
+        "control.sqlite3-shm",
+        "control.sqlite3-journal",
+    ] {
+        fs::write(t.root.join(sidecar), b"left behind").unwrap();
+        assert_eq!(
+            anchor::admit(&db),
+            Err(ControlError::StorageIncompatible),
+            "{sidecar}"
+        );
+        fs::remove_file(t.root.join(sidecar)).unwrap();
+    }
+    fs::write(&db, b"").unwrap();
+    assert_eq!(anchor::admit(&db), Ok(None));
+    fs::write(t.root.join("control.sqlite3-wal"), b"left behind").unwrap();
+    assert_eq!(anchor::admit(&db), Err(ControlError::StorageIncompatible));
+}

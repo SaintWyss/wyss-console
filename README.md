@@ -151,7 +151,14 @@ Socket: `$XDG_RUNTIME_DIR/wyss-console/control.sock` (0700 directory, 0600 socke
 Missing/unsafe runtime directories fail closed. State: `$XDG_STATE_HOME/wyss-console/control.sqlite3`,
 fallback `$HOME/.local/state/wyss-console/control.sqlite3`. Product state is private.
 SQLite WAL/FULL commits state, audit and intent receipts atomically. Do not delete
-WAL/SHM files or change/copy an active canonical database casually. Client EOF
+WAL/SHM files or change/copy an active canonical database casually. Next to the
+database, `control.anchor` witnesses which stream the directory holds and the head it
+has reached. A database that is missing or empty is created only where nothing shows
+an earlier one (no witness, no WAL, SHM or journal), and a store of another stream or
+behind its witnessed head is refused: a lost database, a lost or damaged WAL and an
+older copy fail closed instead of opening as empty or earlier state. A refused store
+is left exactly as found. Removing the witness is the explicit operator act that
+accepts whatever database is there. Client EOF
 changes no state. Authority restart preserves committed state/stream/sequence.
 Same-UID SO_PEERCRED is a local boundary, not protection from compromised same-user
 processes. Maximum eight connected clients, of which at most four may be waiting in

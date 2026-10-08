@@ -70,6 +70,13 @@ impl Store {
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .map_err(invalid)?;
+        // A store that is refused is left as it was found: closing it must not fold its
+        // write-ahead log into the database. Checkpointing is restored on admission.
+        conn.set_db_config(
+            rusqlite::config::DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE,
+            true,
+        )
+        .map_err(db)?;
         conn.busy_timeout(Duration::from_secs(1)).map_err(db)?;
         conn.pragma_update(None, "foreign_keys", true).map_err(db)?;
         schema::migrate(&mut conn)?;
@@ -110,7 +117,19 @@ impl Store {
             execution_available: true,
         };
         store.verify(&head, newer_writer)?;
+        store.checkpoint_on_close(true)?;
         Ok(store)
+    }
+    /// Whether closing this store may checkpoint and remove its write-ahead log. Off while
+    /// the store is not, or not yet, admitted.
+    pub(crate) fn checkpoint_on_close(&self, enabled: bool) -> ControlResult<()> {
+        self.conn
+            .set_db_config(
+                rusqlite::config::DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE,
+                !enabled,
+            )
+            .map(|_| ())
+            .map_err(db)
     }
     /// `newer_writer`: a build with a larger event vocabulary has opened this store, so it
     /// may hold valid events of types this build cannot name.

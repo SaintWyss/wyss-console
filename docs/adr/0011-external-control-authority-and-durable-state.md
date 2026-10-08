@@ -123,6 +123,19 @@ sidecars inherit the private database mode inside the 0700 state directory, veri
 by tests. The single writer uses IMMEDIATE transactions. Closed records remain
 queryable; durable retention/compaction is deferred, not an in-memory list.
 
+> **Implementation status (Sprint 2K).** "Accepts an empty v0 database" above held even
+> where an earlier store had been: a database that was deleted or emptied, with or
+> without its write-ahead log, opened as a new empty authority with a new stream, and a
+> lost or damaged log opened as an earlier state. SQLite cannot tell those from a first
+> start. The authority now keeps a witness next to the database, `control.anchor`, with
+> the stream identity and the highest head it has seen committed, written durably
+> after commits and therefore always a lower bound. A missing or empty database is
+> created only where there is no witness and no WAL, SHM or journal left behind; a
+> store of another stream, or behind its witnessed head, is refused; and a refused
+> store is closed without checkpointing, so it stays exactly as found. Removing the
+> witness is the explicit operator act that accepts the database that is there. The
+> schema is at version 7 (see ADR 0017).
+
 Authority allocates a fresh ManagedSessionId on prepare and records only adapter ID,
 runtime kind, prepared state, revision 1, authority UTC timestamps and creation order.
 No runtime ID, process, thread, model or grants exist. Intentional close changes

@@ -256,7 +256,14 @@ pub fn run_from_environment() -> ControlResult<()> {
     let paths = Paths::from_environment()?;
     let _locks = paths.lock()?;
     let instance = uuid();
-    let mut store = Store::open(&paths.state.join("control.sqlite3"), instance.clone())?;
+    let database = paths.state.join("control.sqlite3");
+    // Canonical state is never created over the traces of an earlier one, and never
+    // accepted when it is another stream or older than it has been seen to be.
+    let witnessed = super::anchor::admit(&database)?;
+    let mut store = Store::open(&database, instance.clone())?;
+    store.checkpoint_on_close(false)?;
+    let mut anchor = super::anchor::Anchor::confirm(&database, witnessed, &store)?;
+    store.checkpoint_on_close(true)?;
     let (listener, _socket) = bind(&paths.runtime.join("control.sock"))?;
     let stop = Arc::new(AtomicBool::new(false));
     let signal = EventSignal::new();
@@ -279,6 +286,11 @@ pub fn run_from_environment() -> ControlResult<()> {
             // rolled back. Watchers are told the committed head and nothing else; a failed
             // read announces nothing, which costs them latency and never an event.
             if let Ok(head) = store.head() {
+                // The witness follows every commit. Without it a later loss of this
+                // history could not be told from its absence: execution closes.
+                if anchor.advance(head).is_err() {
+                    store.execution_available = false;
+                }
                 core_signal.publish(head);
             }
             // A bounded wall-clock recheck handles clock changes, without SQLite polling.
@@ -586,7 +598,10 @@ pub fn run_from_environment() -> ControlResult<()> {
         }
         // Process shutdown is not a canonical runtime/stop intent.
         conversations.detach(&mut store);
-        runtime.stop(&mut store, true)
+        let stopped = runtime.stop(&mut store, true);
+        // What shutdown itself recorded is witnessed too.
+        let witnessed = store.head().and_then(|head| anchor.advance(head));
+        stopped.and(witnessed)
     });
     let mut workers: Vec<thread::JoinHandle<()>> = Vec::new();
     let result = (|| -> ControlResult<()> {

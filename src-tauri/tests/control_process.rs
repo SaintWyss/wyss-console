@@ -1148,3 +1148,1076 @@ fn sustained_mutation_with_every_watcher_slot_following_loses_and_reorders_nothi
     drop(c);
     a.stop(false);
 }
+
+/// One raw JSON request on a connection that already said hello. `None` means the
+/// authority closed the connection without answering.
+fn raw_exchange(env: &Sandbox, body: &[u8]) -> Option<serde_json::Value> {
+    let mut s = UnixStream::connect(env.socket()).unwrap();
+    let hello = Request {
+        request_id: id(),
+        operation: Operation::Hello(Hello {
+            protocol_version: 1,
+            client_instance_id: id(),
+        }),
+    };
+    raw_send(&mut s, &hello.encode().unwrap());
+    assert!(raw_read(&mut s).outcome.is_ok());
+    raw_send(&mut s, body);
+    raw_reply(&mut s)
+}
+fn raw_reply(s: &mut UnixStream) -> Option<serde_json::Value> {
+    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let mut n = [0; 4];
+    match s.read_exact(&mut n) {
+        Ok(()) => (),
+        Err(_) => return None,
+    }
+    let n = u32::from_be_bytes(n) as usize;
+    assert!(n <= MAX_FRAME, "no response exceeds one frame");
+    let mut b = vec![0; n];
+    s.read_exact(&mut b).unwrap();
+    Some(serde_json::from_slice(&b).unwrap())
+}
+fn error_code(reply: &Option<serde_json::Value>) -> Option<String> {
+    reply
+        .as_ref()
+        .and_then(|v| v["error"]["code"].as_str().map(str::to_owned))
+}
+/// Everything durable about the authority, as a client can observe it.
+fn canonical(c: &mut ControlClient) -> String {
+    let status = c.status().unwrap();
+    let ResultValue::Sessions { sessions, .. } = c
+        .list(List {
+            after: None,
+            limit: 50,
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+    let ResultValue::Audit { events, .. } = c
+        .audit(AuditRead {
+            stream_id: status.stream_id.clone(),
+            after_sequence: None,
+            limit: 50,
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+    serde_json::json!({
+        "head": status.last_sequence, "prepared": status.prepared_count,
+        "closed": status.closed_count, "sessions": sessions, "events": events,
+    })
+    .to_string()
+}
+#[test]
+fn adversarial_requests_never_mutate_canonical_state_panic_or_stop_the_authority() {
+    let env = Sandbox::new();
+    let mut a = env.start();
+    let mut c = env.client();
+    let session = c.prepare(prep(id())).unwrap();
+    let lease = c
+        .lease_grant(LeaseGrant {
+            intent_id: id(),
+            session_id: session.managed_session_id.clone(),
+            expected_session_revision: 1,
+            scopes: vec![ExecutionScope::TurnStart],
+            ttl_seconds: 600,
+        })
+        .unwrap();
+    let stream = c.status().unwrap().stream_id;
+    let before = canonical(&mut c);
+    let request_id = id();
+    let frame = |method: &str, params: serde_json::Value| serde_json::json!({"schema_version": 1, "request_id": request_id, "method": method, "params": params});
+    let text = |v: serde_json::Value| v.to_string().into_bytes();
+    let read = |after: serde_json::Value, limit: serde_json::Value| {
+        frame(
+            "audit/read",
+            serde_json::json!({"stream_id": stream, "after_sequence": after, "limit": limit}),
+        )
+    };
+    let prepare =
+        serde_json::json!({"intent_id": id(), "adapter_id": "codex", "runtime_kind": "codex"});
+    let mut with_extra = prepare.clone();
+    with_extra["workspace_root"] = serde_json::json!("/tmp");
+    let duplicate_root = format!(
+        r#"{{"schema_version":1,"request_id":"{0}","method":"authority/status","method":"managedSession/prepare","params":{{}}}}"#,
+        request_id.as_str()
+    );
+    let duplicate_nested = format!(
+        r#"{{"schema_version":1,"request_id":"{0}","method":"managedSession/prepare","params":{{"intent_id":"{1}","intent_id":"{2}","adapter_id":"codex","runtime_kind":"codex"}}}}"#,
+        request_id.as_str(),
+        id().as_str(),
+        id().as_str()
+    );
+    let nested = format!(
+        r#"{{"schema_version":1,"request_id":"{}","method":"authority/status","params":{}{}}}"#,
+        request_id.as_str(),
+        "[".repeat(4096),
+        "]".repeat(4096)
+    );
+    let foreign =
+        |method: &str, key: &str, value: &str| frame(method, serde_json::json!({ key: value }));
+    // (case, raw request, the typed refusal; `None` means closed without an answer)
+    let cases: Vec<(&str, Vec<u8>, Option<&str>)> = vec![
+        ("not json", b"{bad}".to_vec(), None),
+        ("invalid utf-8", vec![b'{', 0xff, b'}'], None),
+        ("json array", b"[1,2,3]".to_vec(), None),
+        ("json scalar", b"42".to_vec(), None),
+        ("two documents", b"{}{}".to_vec(), None),
+        ("duplicate root member", duplicate_root.into_bytes(), None),
+        (
+            "duplicate nested member",
+            duplicate_nested.into_bytes(),
+            None,
+        ),
+        ("nesting beyond the parser bound", nested.into_bytes(), None),
+        (
+            "unknown root field",
+            text({
+                let mut v = frame("authority/status", serde_json::json!({}));
+                v["extra"] = serde_json::json!(1);
+                v
+            }),
+            Some("invalid_request"),
+        ),
+        (
+            "missing params",
+            text(
+                serde_json::json!({"schema_version": 1, "request_id": request_id, "method": "authority/status"}),
+            ),
+            Some("invalid_request"),
+        ),
+        (
+            "unknown nested field",
+            text(frame("managedSession/prepare", with_extra)),
+            Some("invalid_request"),
+        ),
+        (
+            "params of the wrong shape",
+            text(frame("managedSession/prepare", serde_json::json!([]))),
+            Some("invalid_request"),
+        ),
+        (
+            "unknown method",
+            text(frame("authority/shutdown", serde_json::json!({}))),
+            Some("unsupported_method"),
+        ),
+        (
+            "provider method",
+            text(frame("turn/start", serde_json::json!({}))),
+            Some("unsupported_method"),
+        ),
+        (
+            "method of the wrong type",
+            text({
+                let mut v = frame("x", serde_json::json!({}));
+                v["method"] = serde_json::json!(7);
+                v
+            }),
+            Some("invalid_request"),
+        ),
+        (
+            "schema version 2",
+            text({
+                let mut v = frame("authority/status", serde_json::json!({}));
+                v["schema_version"] = serde_json::json!(2);
+                v
+            }),
+            Some("protocol_version_unsupported"),
+        ),
+        (
+            "schema version as text",
+            text({
+                let mut v = frame("authority/status", serde_json::json!({}));
+                v["schema_version"] = serde_json::json!("1");
+                v
+            }),
+            Some("protocol_version_unsupported"),
+        ),
+        (
+            "schema version 0",
+            text({
+                let mut v = frame("authority/status", serde_json::json!({}));
+                v["schema_version"] = serde_json::json!(0);
+                v
+            }),
+            Some("protocol_version_unsupported"),
+        ),
+        (
+            "second hello",
+            text(frame(
+                "authority/hello",
+                serde_json::json!({"protocol_version": 1, "client_instance_id": id()}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "hello of another protocol",
+            text(frame(
+                "authority/hello",
+                serde_json::json!({"protocol_version": 2, "client_instance_id": id()}),
+            )),
+            Some("protocol_version_unsupported"),
+        ),
+        // Identity domains: an identifier of one kind never resolves as another.
+        (
+            "lease id as session",
+            text(foreign(
+                "managedSession/get",
+                "managed_session_id",
+                lease.lease_id.as_str(),
+            )),
+            Some("session_not_found"),
+        ),
+        (
+            "session id as lease",
+            text(foreign(
+                "executionLease/get",
+                "lease_id",
+                session.managed_session_id.as_str(),
+            )),
+            Some("lease_not_found"),
+        ),
+        (
+            "session id as turn",
+            text(foreign(
+                "managedSession/turn/status",
+                "managed_turn_id",
+                session.managed_session_id.as_str(),
+            )),
+            Some("turn_not_found"),
+        ),
+        (
+            "lease id as approval",
+            text(foreign(
+                "managedTurn/approval/status",
+                "managed_approval_id",
+                lease.lease_id.as_str(),
+            )),
+            Some("approval_not_found"),
+        ),
+        (
+            "identifier that is no uuid",
+            text(foreign(
+                "managedSession/get",
+                "managed_session_id",
+                "../../etc/passwd",
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "identifier without hyphens",
+            text(foreign(
+                "managedSession/get",
+                "managed_session_id",
+                &session.managed_session_id.as_str().replace('-', ""),
+            )),
+            Some("invalid_request"),
+        ),
+        // Decimal sequences are positive canonical strings within u64, never numbers.
+        (
+            "cursor zero",
+            text(read(serde_json::json!("0"), serde_json::json!(10))),
+            Some("invalid_request"),
+        ),
+        (
+            "cursor with a leading zero",
+            text(read(serde_json::json!("01"), serde_json::json!(10))),
+            Some("invalid_request"),
+        ),
+        (
+            "cursor as a number",
+            text(read(serde_json::json!(1), serde_json::json!(10))),
+            Some("invalid_request"),
+        ),
+        (
+            "negative cursor",
+            text(read(serde_json::json!("-1"), serde_json::json!(10))),
+            Some("invalid_request"),
+        ),
+        (
+            "cursor at u64::MAX",
+            text(read(
+                serde_json::json!("18446744073709551615"),
+                serde_json::json!(10),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "cursor past u64::MAX",
+            text(read(
+                serde_json::json!("18446744073709551616"),
+                serde_json::json!(10),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "cursor of 21 digits",
+            text(read(
+                serde_json::json!("100000000000000000000"),
+                serde_json::json!(10),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "cursor past the head",
+            text(read(serde_json::json!("3"), serde_json::json!(10))),
+            Some("invalid_request"),
+        ),
+        (
+            "limit zero",
+            text(read(serde_json::Value::Null, serde_json::json!(0))),
+            Some("invalid_request"),
+        ),
+        (
+            "limit over the page",
+            text(read(serde_json::Value::Null, serde_json::json!(51))),
+            Some("invalid_request"),
+        ),
+        (
+            "limit over u16",
+            text(read(serde_json::Value::Null, serde_json::json!(65536))),
+            Some("invalid_request"),
+        ),
+        (
+            "negative limit",
+            text(read(serde_json::Value::Null, serde_json::json!(-1))),
+            Some("invalid_request"),
+        ),
+        (
+            "fractional limit",
+            text(read(serde_json::Value::Null, serde_json::json!(1.5))),
+            Some("invalid_request"),
+        ),
+        (
+            "another stream",
+            text(frame(
+                "audit/read",
+                serde_json::json!({"stream_id": id(), "after_sequence": null, "limit": 10}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "watch beyond the longest wait",
+            text(frame(
+                "audit/watch",
+                serde_json::json!({"stream_id": stream, "after_sequence": null, "limit": 10, "wait_ms": 30001}),
+            )),
+            Some("invalid_request"),
+        ),
+        // Mutations that name nothing that exists, or nothing that is allowed.
+        (
+            "ttl zero",
+            text(frame(
+                "executionLease/grant",
+                serde_json::json!({"intent_id": id(), "session_id": session.managed_session_id, "expected_session_revision": 1, "scopes": ["turn_start"], "ttl_seconds": 0}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "ttl over the bound",
+            text(frame(
+                "executionLease/grant",
+                serde_json::json!({"intent_id": id(), "session_id": session.managed_session_id, "expected_session_revision": 1, "scopes": ["turn_start"], "ttl_seconds": 3601}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "unknown scope",
+            text(frame(
+                "executionLease/grant",
+                serde_json::json!({"intent_id": id(), "session_id": session.managed_session_id, "expected_session_revision": 1, "scopes": ["root"], "ttl_seconds": 60}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "repeated scope",
+            text(frame(
+                "executionLease/grant",
+                serde_json::json!({"intent_id": id(), "session_id": session.managed_session_id, "expected_session_revision": 1, "scopes": ["turn_start", "turn_start"], "ttl_seconds": 60}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "revision zero",
+            text(frame(
+                "managedSession/close",
+                serde_json::json!({"intent_id": id(), "managed_session_id": session.managed_session_id, "expected_revision": 0}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "revision past i64",
+            text(frame(
+                "executionLease/revoke",
+                serde_json::json!({"intent_id": id(), "lease_id": lease.lease_id, "expected_revision": 9223372036854775808u64}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "empty prompt",
+            text(frame(
+                "managedSession/turn/start",
+                serde_json::json!({"intent_id": id(), "managed_session_id": session.managed_session_id, "expected_session_revision": 1, "prompt": ""}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "oversized prompt",
+            text(frame(
+                "managedSession/turn/start",
+                serde_json::json!({"intent_id": id(), "managed_session_id": session.managed_session_id, "expected_session_revision": 1, "prompt": "x".repeat(8193)}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "runtime of another adapter",
+            text(frame(
+                "runtime/start",
+                serde_json::json!({"intent_id": id(), "adapter_id": "claude", "runtime_kind": "claude_code", "expected_revision": null}),
+            )),
+            Some("unsupported"),
+        ),
+        (
+            "client supplied executable",
+            text(frame(
+                "runtime/start",
+                serde_json::json!({"intent_id": id(), "adapter_id": "codex", "runtime_kind": "codex", "expected_revision": null, "executable": "/bin/sh"}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "client supplied argv",
+            text(frame(
+                "runtime/start",
+                serde_json::json!({"intent_id": id(), "adapter_id": "codex", "runtime_kind": "codex", "expected_revision": null, "args": ["-c", "x"]}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "client supplied environment",
+            text(frame(
+                "runtime/start",
+                serde_json::json!({"intent_id": id(), "adapter_id": "codex", "runtime_kind": "codex", "expected_revision": null, "env": {"CODEX_HOME": "/tmp"}}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "workspace without the local profile",
+            text(frame(
+                "runtime/start",
+                serde_json::json!({"intent_id": id(), "adapter_id": "codex", "runtime_kind": "codex", "expected_revision": null, "workspace_root": "/tmp"}),
+            )),
+            Some("invalid_request"),
+        ),
+        (
+            "relative workspace",
+            text(frame(
+                "runtime/start",
+                serde_json::json!({"intent_id": id(), "adapter_id": "codex", "runtime_kind": "codex", "expected_revision": null, "safety_profile": "codex_local_tools_v1", "workspace_root": "relative"}),
+            )),
+            Some("workspace_invalid"),
+        ),
+    ];
+    for (name, body, expected) in &cases {
+        let reply = raw_exchange(&env, body);
+        assert_eq!(error_code(&reply).as_deref(), *expected, "{name}");
+        if let Some(reply) = &reply {
+            // A refusal names the request it refuses and never carries a result.
+            assert_eq!(reply["request_id"], serde_json::json!(request_id), "{name}");
+            assert!(reply.get("result").is_none(), "{name}");
+        }
+        assert!(
+            a.child.try_wait().unwrap().is_none(),
+            "{name}: authority exited"
+        );
+    }
+    assert_eq!(canonical(&mut c), before, "a refused request changed state");
+
+    // Framing: the exact frame bound is served; one byte more is never read.
+    let mut exact = text(frame("authority/status", serde_json::json!({})));
+    exact.resize(MAX_FRAME, b' ');
+    let reply = raw_exchange(&env, &exact).expect("a frame of exactly the bound");
+    assert_eq!(reply["result"]["kind"], "status");
+    for declared in [MAX_FRAME as u32 + 1, u32::MAX, 0] {
+        let mut s = UnixStream::connect(env.socket()).unwrap();
+        s.write_all(&declared.to_be_bytes()).unwrap();
+        assert!(raw_reply(&mut s).is_none(), "declared {declared}");
+    }
+    // A frame cut short, before and after the handshake, and a client that leaves in the
+    // middle of a request.
+    for after_hello in [false, true] {
+        let mut s = UnixStream::connect(env.socket()).unwrap();
+        if after_hello {
+            let hello = Request {
+                request_id: id(),
+                operation: Operation::Hello(Hello {
+                    protocol_version: 1,
+                    client_instance_id: id(),
+                }),
+            };
+            raw_send(&mut s, &hello.encode().unwrap());
+            assert!(raw_read(&mut s).outcome.is_ok());
+        }
+        let body = Request {
+            request_id: id(),
+            operation: Operation::Prepare(prep(id())),
+        }
+        .encode()
+        .unwrap();
+        s.write_all(&(body.len() as u32).to_be_bytes()).unwrap();
+        s.write_all(&body[..body.len() / 2]).unwrap();
+        drop(s);
+    }
+    assert_eq!(canonical(&mut c), before, "a cut request changed state");
+
+    // Identifier case is normalized: the same intent and the same session in another
+    // case are the same intent and the same session, never a second mutation.
+    let intent = id();
+    let first = c.prepare(prep(intent.clone())).unwrap();
+    let upper = WireUuid::try_from(intent.as_str().to_ascii_uppercase()).unwrap();
+    assert_eq!(c.prepare(prep(upper)).unwrap(), first);
+    let shouting = serde_json::from_value(serde_json::json!(
+        first.managed_session_id.as_str().to_ascii_uppercase()
+    ))
+    .unwrap();
+    assert_eq!(c.get(shouting).unwrap(), first);
+    let after_prepare = canonical(&mut c);
+    // The same intent with another payload is a conflict, not a second session.
+    let conflicting = raw_exchange(
+        &env,
+        &text(frame(
+            "managedSession/close",
+            serde_json::json!({"intent_id": intent, "managed_session_id": first.managed_session_id, "expected_revision": 1}),
+        )),
+    );
+    assert_eq!(error_code(&conflicting).as_deref(), Some("intent_conflict"));
+    assert_eq!(canonical(&mut c), after_prepare);
+
+    // A client that outlives its authority learns it: the old connection is dead and the
+    // new instance has another identity over the same stream and history.
+    let old_instance = c.hello_status().authority_instance_id.clone();
+    a.stop(true);
+    assert!(c.status().is_err());
+    let mut next = env.start();
+    let mut c = env.client();
+    assert_ne!(c.hello_status().authority_instance_id, old_instance);
+    assert_eq!(c.hello_status().stream_id, stream);
+    assert_eq!(canonical(&mut c), after_prepare);
+    drop(c);
+    next.stop(false);
+}
+
+/// Starts the authority on a store it must refuse and returns its typed error.
+fn refused(env: &Sandbox) -> String {
+    let mut a = env.start();
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = a.child.try_wait().unwrap() {
+            assert!(!status.success(), "a damaged store was admitted");
+            break;
+        }
+        assert!(
+            Instant::now() < end && ControlClient::connect_in_runtime(&env.run()).is_err(),
+            "a damaged store is being served"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    let mut error = String::new();
+    a.child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut error)
+        .unwrap();
+    // The hard-killed authority may have left its socket file; nobody listens on it.
+    assert!(
+        UnixStream::connect(env.socket()).is_err(),
+        "a refused start is listening"
+    );
+    error
+        .trim()
+        .strip_prefix("wyss-control: ")
+        .unwrap_or(&error)
+        .to_owned()
+}
+/// Name, size and content digest of every file of the authority's state. Shared memory is
+/// left out, and so is a log that holds nothing: SQLite rebuilds the first and creates the
+/// second whenever it opens a database in this journal mode.
+fn state_files(env: &Sandbox) -> Vec<(String, usize, u64)> {
+    use std::hash::{Hash, Hasher};
+    let dir = env.root.join("state/wyss-console");
+    let mut files: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|name| !name.ends_with("-shm"))
+        .map(|name| {
+            let content = fs::read(dir.join(&name)).unwrap();
+            let mut digest = std::collections::hash_map::DefaultHasher::new();
+            content.hash(&mut digest);
+            (name, content.len(), digest.finish())
+        })
+        .filter(|(name, len, _)| !(name.ends_with("-wal") && *len == 0))
+        .collect();
+    files.sort();
+    files
+}
+/// A store with history, left by a hard kill: its latest commits live only in the log.
+fn populated(env: &Sandbox) -> (WireUuid, u64) {
+    let mut a = env.start();
+    let mut c = env.client();
+    let sessions: Vec<_> = (0..6).map(|_| c.prepare(prep(id())).unwrap()).collect();
+    let lease = c
+        .lease_grant(LeaseGrant {
+            intent_id: id(),
+            session_id: sessions[0].managed_session_id.clone(),
+            expected_session_revision: 1,
+            scopes: vec![ExecutionScope::TurnStart],
+            ttl_seconds: 600,
+        })
+        .unwrap();
+    c.lease_revoke(LeaseRevoke {
+        intent_id: id(),
+        lease_id: lease.lease_id,
+        expected_revision: lease.revision,
+    })
+    .unwrap();
+    c.close(Close {
+        intent_id: id(),
+        managed_session_id: sessions[1].managed_session_id.clone(),
+        expected_revision: 1,
+    })
+    .unwrap();
+    let status = c.status().unwrap();
+    drop(c);
+    a.stop(true);
+    (status.stream_id, status.last_sequence.unwrap().get())
+}
+#[test]
+fn lost_or_damaged_storage_is_refused_and_never_recreated_emptied_or_repaired() {
+    use std::os::unix::fs::PermissionsExt;
+    let file = |env: &Sandbox, name: &str| env.root.join("state/wyss-console").join(name);
+    let db = "control.sqlite3";
+    let wal = "control.sqlite3-wal";
+    let witness = "control.anchor";
+    // Control: the same hard-killed store, untouched, comes back whole.
+    let env = Sandbox::new();
+    let (stream, head) = populated(&env);
+    assert!(fs::metadata(file(&env, wal)).unwrap().len() > 0);
+    let mut a = env.start();
+    let mut c = env.client();
+    let status = c.status().unwrap();
+    assert_eq!(
+        (status.stream_id, status.last_sequence.unwrap().get()),
+        (stream, head)
+    );
+    drop(c);
+    a.stop(false);
+
+    type Damage = fn(&dyn Fn(&str) -> PathBuf);
+    let other_store = |target: PathBuf| {
+        // A healthy database of another authority, in place of this one's.
+        let other = Sandbox::new();
+        let mut a = other.start();
+        let mut c = other.client();
+        c.prepare(prep(id())).unwrap();
+        drop(c);
+        a.stop(false);
+        fs::copy(
+            other.root.join("state/wyss-console/control.sqlite3"),
+            target,
+        )
+        .unwrap();
+    };
+    // Changes made through SQLite itself, behind the append-only triggers, with the log
+    // folded into the database first so that the change is all that differs.
+    fn sql(f: &dyn Fn(&str) -> PathBuf, statement: &str) {
+        let c = rusqlite::Connection::open(f("control.sqlite3")).unwrap();
+        c.set_db_config(
+            rusqlite::config::DbConfig::SQLITE_DBCONFIG_ENABLE_TRIGGER,
+            false,
+        )
+        .unwrap();
+        c.execute_batch(statement).unwrap();
+    }
+    let cases: [(&str, Damage, &str); 21] = [
+        (
+            "schema of a future version",
+            |f| sql(f, "PRAGMA user_version=99"),
+            "storage_incompatible",
+        ),
+        (
+            "schema object removed",
+            |f| sql(f, "DROP TRIGGER control_events_no_delete"),
+            "storage_incompatible",
+        ),
+        (
+            "schema object added",
+            |f| sql(f, "CREATE TABLE extra (x TEXT)"),
+            "storage_incompatible",
+        ),
+        (
+            "event envelope damaged",
+            |f| {
+                sql(
+                    f,
+                    "UPDATE control_events SET envelope=replace(envelope,'\"durable\"','\"ephemeral\"') WHERE sequence=(SELECT min(sequence) FROM control_events)",
+                )
+            },
+            "storage_incompatible",
+        ),
+        (
+            "event removed from the middle",
+            |f| {
+                sql(
+                    f,
+                    "DELETE FROM control_events WHERE sequence=(SELECT sequence FROM control_events ORDER BY sequence LIMIT 1 OFFSET 2)",
+                )
+            },
+            "storage_incompatible",
+        ),
+        (
+            "database gone, its log left behind",
+            |f| fs::remove_file(f("control.sqlite3")).unwrap(),
+            "storage_incompatible",
+        ),
+        (
+            "database emptied",
+            |f| fs::write(f("control.sqlite3"), b"").unwrap(),
+            "storage_incompatible",
+        ),
+        (
+            "database and log gone",
+            |f| {
+                for name in [
+                    "control.sqlite3",
+                    "control.sqlite3-wal",
+                    "control.sqlite3-shm",
+                ] {
+                    fs::remove_file(f(name)).unwrap();
+                }
+            },
+            "storage_incompatible",
+        ),
+        (
+            "log gone",
+            |f| fs::remove_file(f("control.sqlite3-wal")).unwrap(),
+            "storage_incompatible",
+        ),
+        (
+            "log tail damaged",
+            |f| {
+                let mut raw = fs::read(f("control.sqlite3-wal")).unwrap();
+                let end = raw.len();
+                raw[end - 2000..].iter_mut().for_each(|b| *b ^= 0x5a);
+                fs::write(f("control.sqlite3-wal"), raw).unwrap();
+            },
+            "storage_incompatible",
+        ),
+        (
+            "log damaged whole",
+            |f| {
+                let len = fs::read(f("control.sqlite3-wal")).unwrap().len();
+                fs::write(f("control.sqlite3-wal"), vec![0xa5; len]).unwrap();
+            },
+            "storage_incompatible",
+        ),
+        (
+            "database cut in half",
+            |f| {
+                let raw = fs::read(f("control.sqlite3")).unwrap();
+                fs::write(f("control.sqlite3"), &raw[..raw.len() / 2]).unwrap();
+                fs::remove_file(f("control.sqlite3-wal")).unwrap();
+            },
+            "storage_incompatible",
+        ),
+        (
+            "witness unreadable",
+            |f| fs::write(f("control.anchor"), b"{").unwrap(),
+            "storage_incompatible",
+        ),
+        (
+            "witness of a later head",
+            |f| {
+                let raw = fs::read_to_string(f("control.anchor")).unwrap();
+                let mut v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+                let head: u64 = v["head"].as_str().unwrap().parse().unwrap();
+                v["head"] = serde_json::json!((head + 1).to_string());
+                fs::write(f("control.anchor"), v.to_string()).unwrap();
+            },
+            "storage_incompatible",
+        ),
+        (
+            "witness of another stream",
+            |f| {
+                let raw = fs::read_to_string(f("control.anchor")).unwrap();
+                let mut v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+                v["stream_id"] = serde_json::json!(uuid::Uuid::new_v4().to_string());
+                fs::write(f("control.anchor"), v.to_string()).unwrap();
+            },
+            "storage_incompatible",
+        ),
+        (
+            "witness readable by others",
+            |f| {
+                fs::set_permissions(f("control.anchor"), fs::Permissions::from_mode(0o644)).unwrap()
+            },
+            "unsafe_path",
+        ),
+        (
+            "witness is a link",
+            |f| {
+                fs::rename(f("control.anchor"), f("elsewhere")).unwrap();
+                std::os::unix::fs::symlink(f("elsewhere"), f("control.anchor")).unwrap();
+            },
+            "unsafe_path",
+        ),
+        (
+            "database readable by others",
+            |f| {
+                fs::set_permissions(f("control.sqlite3"), fs::Permissions::from_mode(0o644))
+                    .unwrap()
+            },
+            "unsafe_path",
+        ),
+        (
+            "database is a link",
+            |f| {
+                fs::rename(f("control.sqlite3"), f("real.sqlite3")).unwrap();
+                std::os::unix::fs::symlink(f("real.sqlite3"), f("control.sqlite3")).unwrap();
+            },
+            "unsafe_path",
+        ),
+        (
+            "database has a second name",
+            |f| fs::hard_link(f("control.sqlite3"), f("second-name")).unwrap(),
+            "unsafe_path",
+        ),
+        (
+            "log is a link",
+            |f| {
+                fs::rename(f("control.sqlite3-wal"), f("real-wal")).unwrap();
+                std::os::unix::fs::symlink(f("real-wal"), f("control.sqlite3-wal")).unwrap();
+            },
+            "unsafe_path",
+        ),
+    ];
+    for (name, damage, expected) in cases {
+        let env = Sandbox::new();
+        populated(&env);
+        damage(&|n| file(&env, n));
+        let damaged = state_files(&env);
+        // Refused twice, and each time left exactly as it was found: nothing is created
+        // in place of what is missing and nothing damaged is folded, emptied or rewritten.
+        for attempt in 0..2 {
+            assert_eq!(refused(&env), expected, "{name}, attempt {attempt}");
+            assert_eq!(
+                state_files(&env),
+                damaged,
+                "{name}: the refused store changed"
+            );
+        }
+    }
+    // The database of another authority in place of this one's is another stream.
+    let env = Sandbox::new();
+    populated(&env);
+    fs::remove_file(file(&env, wal)).unwrap();
+    other_store(file(&env, db));
+    assert_eq!(refused(&env), "storage_incompatible");
+    // An intact store whose witness the operator removed is accepted, whole, and gets a
+    // new witness: removing it is the explicit act that accepts whatever is there.
+    let env = Sandbox::new();
+    let (stream, head) = populated(&env);
+    fs::remove_file(file(&env, witness)).unwrap();
+    let mut a = env.start();
+    let mut c = env.client();
+    let status = c.status().unwrap();
+    assert_eq!(
+        (
+            status.stream_id.clone(),
+            status.last_sequence.unwrap().get()
+        ),
+        (stream, head)
+    );
+    drop(c);
+    a.stop(false);
+    let recorded: serde_json::Value =
+        serde_json::from_slice(&fs::read(file(&env, witness)).unwrap()).unwrap();
+    assert_eq!(recorded["stream_id"], serde_json::json!(status.stream_id));
+    assert!(recorded["head"].as_str().unwrap().parse::<u64>().unwrap() >= head);
+    assert_eq!(
+        fs::metadata(file(&env, witness))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    // A state directory emptied on purpose, witness included, is a new authority.
+    let dir = env.root.join("state/wyss-console");
+    for entry in fs::read_dir(&dir).unwrap() {
+        fs::remove_file(entry.unwrap().path()).unwrap();
+    }
+    let mut a = env.start();
+    let mut c = env.client();
+    let fresh = c.status().unwrap();
+    assert_ne!(fresh.stream_id, status.stream_id);
+    assert_eq!(fresh.last_sequence, None);
+    drop(c);
+    a.stop(false);
+}
+
+#[test]
+fn hard_kills_during_sustained_mutation_always_reopen_whole_and_keep_every_receipt() {
+    let env = Sandbox::new();
+    // Every intent a client was told committed, with the record it was told.
+    let mut acknowledged: Vec<(WireUuid, ManagedSessionRecord)> = Vec::new();
+    for round in 0..10u64 {
+        let mut a = env.start();
+        let mut c = env.client();
+        // Whatever the previous kill interrupted, the store opened: it verified its whole
+        // history against its tables and against the witness of its head.
+        let status = c.status().unwrap();
+        assert_eq!(
+            status.prepared_count as usize,
+            status.last_sequence.map_or(0, |s| s.get()) as usize,
+            "round {round}: every event is one prepared session"
+        );
+        assert!(status.prepared_count as usize >= acknowledged.len());
+        // An acknowledged intent is still exactly the record that was acknowledged.
+        for (intent, record) in acknowledged.iter().rev().take(8) {
+            assert_eq!(&c.prepare(prep(intent.clone())).unwrap(), record);
+        }
+        assert_eq!(c.status().unwrap().last_sequence, status.last_sequence);
+        drop(c);
+        let (done, results) = std::sync::mpsc::channel();
+        let writers: Vec<_> = (0..3)
+            .map(|_| {
+                let mut c = env.client();
+                let done = done.clone();
+                thread::spawn(move || {
+                    loop {
+                        let intent = id();
+                        match c.prepare(prep(intent.clone())) {
+                            Ok(record) => done.send((intent, record)).unwrap(),
+                            Err(_) => break,
+                        }
+                    }
+                })
+            })
+            .collect();
+        drop(done);
+        // The kill lands at a different point of the write path every round.
+        thread::sleep(Duration::from_millis(15 + round * 9));
+        a.stop(true);
+        for w in writers {
+            w.join().unwrap();
+        }
+        acknowledged.extend(results.try_iter());
+    }
+    assert!(acknowledged.len() > 30, "the rounds committed real work");
+    // After the last kill everything acknowledged is there, once.
+    let mut a = env.start();
+    let mut c = env.client();
+    for (intent, record) in &acknowledged {
+        assert_eq!(&c.prepare(prep(intent.clone())).unwrap(), record);
+        assert_eq!(&c.get(record.managed_session_id.clone()).unwrap(), record);
+    }
+    let unique: std::collections::BTreeSet<_> = acknowledged
+        .iter()
+        .map(|(_, r)| r.managed_session_id.as_str().to_owned())
+        .collect();
+    assert_eq!(unique.len(), acknowledged.len());
+    drop(c);
+    a.stop(false);
+}
+#[test]
+fn a_write_failure_closes_execution_keeps_committed_state_and_recovers_on_restart() {
+    let env = Sandbox::new();
+    // Create the store without a limit, then run the authority with a bound on the size
+    // of any file it writes and with the signal for exceeding it ignored, so that the
+    // write itself fails the way a full disk fails it.
+    let mut a = env.start();
+    drop(env.client());
+    a.stop(false);
+    let limit = fs::metadata(env.root.join("state/wyss-console/control.sqlite3"))
+        .unwrap()
+        .len()
+        + 96 * 1024;
+    let child = Command::new("/bin/sh")
+        .arg("-c")
+        .arg("trap '' XFSZ; exec prlimit --fsize=\"$1\" \"$0\"")
+        .arg(env!("CARGO_BIN_EXE_wyss-control"))
+        .arg(limit.to_string())
+        .env("XDG_RUNTIME_DIR", env.run())
+        .env("XDG_STATE_HOME", env.root.join("state"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut a = Authority { child };
+    let mut c = env.client();
+    let mut committed = Vec::new();
+    let failed = loop {
+        let intent = id();
+        match c.prepare(prep(intent.clone())) {
+            Ok(record) => committed.push((intent, record)),
+            Err(e) => break (intent, e),
+        }
+        assert!(committed.len() < 500, "the write limit never applied");
+    };
+    assert!(!committed.is_empty());
+    assert_eq!(failed.1, ControlError::StorageUnavailable);
+    // The authority is alive, still answers reads from what committed, and has closed
+    // execution: nothing is granted and no gate opens until it is restarted.
+    assert!(a.child.try_wait().unwrap().is_none());
+    let status = c.status().unwrap();
+    assert_eq!(status.prepared_count as usize, committed.len());
+    assert_eq!(
+        status.last_sequence.unwrap().get() as usize,
+        committed.len()
+    );
+    let (_, first) = &committed[0];
+    assert_eq!(&c.get(first.managed_session_id.clone()).unwrap(), first);
+    assert_eq!(
+        c.lease_grant(LeaseGrant {
+            intent_id: id(),
+            session_id: first.managed_session_id.clone(),
+            expected_session_revision: 1,
+            scopes: vec![ExecutionScope::TurnStart],
+            ttl_seconds: 60,
+        }),
+        Err(ControlError::AuthorityUnavailable)
+    );
+    assert_eq!(
+        c.gate_status(GateQuery {
+            session_id: first.managed_session_id.clone(),
+            action: ExecutionScope::SessionCreate,
+        })
+        .unwrap()
+        .reason,
+        GateReason::AuthorityUnavailable
+    );
+    drop(c);
+    a.stop(true);
+    // Without the limit the store opens whole: exactly what was acknowledged, no partial
+    // event, and the intent that failed commits now, once.
+    let mut a = env.start();
+    let mut c = env.client();
+    let status = c.status().unwrap();
+    assert_eq!(status.prepared_count as usize, committed.len());
+    for (intent, record) in &committed {
+        assert_eq!(&c.prepare(prep(intent.clone())).unwrap(), record);
+    }
+    let retried = c.prepare(prep(failed.0.clone())).unwrap();
+    assert_eq!(c.prepare(prep(failed.0)).unwrap(), retried);
+    assert_eq!(
+        c.status().unwrap().prepared_count as usize,
+        committed.len() + 1
+    );
+    drop(c);
+    a.stop(false);
+}
