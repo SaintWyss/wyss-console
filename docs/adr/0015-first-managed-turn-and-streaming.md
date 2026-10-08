@@ -278,3 +278,12 @@ reachable through managed control operations.
 Command/file/MCP/web/skills/apps/plugins/subagent execution and approval mediation remain
 disabled. Sprint 2I must deliberately establish authority mediation before replacing this
 inference-only boundary. No arbitrary tool-capable safety claim is made here.
+
+## Later boundary
+
+[ADR 0016](0016-tool-and-approval-mediation.md) establishes that mediation for one
+command and one file change set at a time, in a separate isolated runtime profile.
+Everything above still describes the inference profile exactly: it is the default,
+it offers the model no tool and it answers no server request. The supervisor's command
+channel now holds a few queued commands instead of one; commands still run strictly one
+at a time.

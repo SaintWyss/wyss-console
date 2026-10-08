@@ -1,7 +1,7 @@
 # Wyss Console
 
 Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current validated status: **Sprint 2H inference-only managed turns and structured streaming** using Tauri 2,
+Linux-first, local-first. Current validated status: **Sprint 2I authority-mediated commands and file changes** using Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -112,8 +112,10 @@ external authority.
 
 `wyss-control` independently owns prepared/closed managed-session identities,
 canonical control state, durable intent receipts and a minimal EventEnvelope audit.
-**Prepared is not execution permission.** Explicit, leased inference-only turns are
-available through the authority developer client, with no product chat UI.
+**Prepared is not execution permission.** Explicit, leased managed turns are
+available through the authority developer client, with no product chat UI:
+inference-only by default, and with authority-mediated commands and file changes
+in the isolated local-tools profile.
 Human terminal tabs remain Console-local; the read-only Codex probe above remains
 a separate developer tool. The desktop does not start or connect to the authority.
 
@@ -186,7 +188,7 @@ remediation. No raw Codex frames/stderr/auth/environment are exposed or persiste
 
 The shared 2C handshake sends only initialize, initialized and model/list. Stdout
 continues to be validated/drained after readiness and stderr remains bounded.
-Server requests are never answered; protocol failure reaps the child. Linux
+The inference profile answers no server request; protocol failure reaps the child. Linux
 parent-death SIGKILL plus parent-identity checking prevents an orphan App Server
 after authority crash. Graceful authority shutdown reaps the child but preserves
 desired running; restart obtains a fresh AgentRuntimeInstanceId and catalog.
@@ -253,9 +255,11 @@ creates either.
 
 A session attaches as `local_tools_v1` only for the generation's workspace, and
 the `command_execute` and `file_change` gate actions are denied under any other
-profile. The authority does not yet answer provider approval requests: a model
-action that needs one is treated as an isolation violation and nothing executes.
-A session bound under one profile keeps its Codex thread in that profile's home.
+profile. In this profile the authority mediates the provider's command and
+file-change approval requests, as described under
+[Tool and approval mediation](#tool-and-approval-mediation); nothing runs without
+its Accept. A session bound under one profile keeps its Codex thread in that
+profile's home.
 
 ## Execution leases and internal gate
 
@@ -282,8 +286,6 @@ approval is pending, a provider item is mediated at most once, and a schema trig
 refuses any change that is not a legal single-revision transition; only `pending` is
 nonterminal. Startup invalidates an undecided approval and marks an accepted one
 without a confirmed outcome `indeterminate`; no provider response is ever replayed.
-This is the persistence layer only: the authority does not yet answer provider
-approval requests, so no runtime path creates an approval.
 
 The typed Rust client and developer client support `executionLease/grant`,
 `executionLease/get`, `executionLease/active`, `executionLease/renew` and
@@ -317,8 +319,8 @@ The authority implementation adds gated conversation create/resume, schema v4,
 immutable ManagedSessionId-to-CodexThreadId bindings and an external-effect journal.
 Runtime attachment is transient and restart never automatically resumes a thread.
 Conversation create/resume itself sends no turn or prompt. Turns require the additional
-inference profiles and turn_start gate described below. Approval/permission responses
-remain disabled. Tauri/human terminal integration is unchanged.
+profiles and turn_start gate described below. Create and resume answer no approval or
+permission request. Tauri/human terminal integration is unchanged.
 
 Empty Codex 0.159.0 threads are materialized durably without a turn through an
 internal stable start→archive→unarchive persistence barrier. Create leaves the
@@ -376,8 +378,96 @@ Client disconnect has no turn effect. Runtime/authority restart clears both prof
 and attachments, preserves durable bindings, and never replays a prompt. Nonterminal
 turns recovered after a crash become indeterminate.
 
-**Tool, command, file, MCP, web, subagent and approval/permission execution remains
-disabled until Sprint 2I establishes authority mediation.** Any observed external
-action or server request fails closed and contains the runtime; no request is answered.
+**In the inference profile, tool, command, file, MCP, web, subagent and
+approval/permission execution is disabled.** Any observed external action or server
+request fails closed and contains the runtime; no request is answered.
 The standalone read-only probe, human terminals and Tauri capabilities are unchanged.
 See [ADR 0015](docs/adr/0015-first-managed-turn-and-streaming.md).
+
+## Tool and approval mediation
+
+In a `codex_local_tools_v1` generation the model is offered exactly two tools, a
+one-shot command and a patch, and neither does anything on its own. The provider
+announces the action and asks; the authority turns that into one pending
+`ManagedApproval`; the action runs only after the authority committed an Accept and
+wrote exactly one answer. There is at most one active managed turn and one pending
+approval, and no approval queue.
+
+```sh
+./src-tauri/target/debug/examples/control_client runtime/start/local-tools /abs/workspace
+./src-tauri/target/debug/examples/control_client executionLease/grant SESSION 1 600 session_create,session_resume,turn_start,command_execute,file_change INTENT
+./src-tauri/target/debug/examples/control_client managedTurn/approval/pending TURN
+./src-tauri/target/debug/examples/control_client managedTurn/approval/status APPROVAL
+./src-tauri/target/debug/examples/control_client managedTurn/approval/status APPROVAL 0 0
+./src-tauri/target/debug/examples/control_client managedTurn/approval/respond APPROVAL REVISION accept INTENT
+```
+
+`pending` returns the approval a turn is waiting on. `status` returns its canonical
+metadata and, only while the authority still holds the provider request, the action
+itself: the complete command with its directory, or one file of the change set
+(`status APPROVAL FILE_INDEX OFFSET`) with its complete diff in contiguous 8 KiB
+pages. `respond` takes the approval, its expected revision, `accept`, `decline` or
+`cancel`, and an intent UUID. There is no generic provider response, provider request
+identity or raw provider method. The same intent returns its original receipt from any
+connection and never a second provider answer; another payload under the same intent
+is `intent_conflict`; a client disconnect decides nothing.
+
+An approval exists only for a complete, bounded action that is provably inside the
+session workspace:
+
+- Command: 1–16 KiB, working directory up to 4 KiB, up to 64 parsed actions, and a
+  presentation that fits one control frame. Codex wraps the model's command as
+  `/usr/bin/bash -lc '<command>'`; that wrapped text is what is shown and approved.
+- File change: every path, change kind, move destination and diff; up to 64 files,
+  128 KiB per diff and 256 KiB in total. Nothing shown for approval is truncated. A
+  request without its complete change set cannot be accepted and is refused after ten
+  seconds. A persistent `grantRoot` is never honored.
+- Confinement: the working directory and every source and destination must extend the
+  canonical workspace component by component. No string-prefix comparison, no `..`,
+  no symbolic link anywhere, no hard-linked file, no mount point, no `.codex`, `.git`
+  or `.agents` component. The proof is repeated immediately before every Accept.
+
+Anything out of bounds or not provably confined never becomes an approval: the
+provider is refused and the turn stops with `action_rejected`.
+
+Accept is an intent the authority revalidates in full: the exact runtime generation,
+profile, attachment, turn, provider item, held request, fingerprint and confinement;
+a fresh attestation of the isolated profile by the runtime; and, in the committing
+transaction, the pending state, revision, deadline, session, turn and the ORIGINAL
+lease of the turn with the `command_execute` or `file_change` scope. A replacement
+lease never transfers authority. The deadline is the stricter of five minutes and the
+lease expiry at the time the approval opened. Decision, dispatch marker, audit and
+receipt commit before the one provider answer is written.
+
+Decline and cancel need no execution authority. A refused command is answered with
+provider `cancel`, which Codex 0.159.0 offers instead of `decline` and which ends the
+turn; a declined file change is answered with `decline` and keeps its turn. Session
+grants, exec-policy amendments, network-policy amendments and permission grants are
+never sent.
+
+Turn cancel, lease revocation or expiry, session close and shutdown terminalize the
+approval before any provider frame, refuse the held request and stop the turn. If the
+runtime is lost while an approval is pending it is `invalidated`. If an accepted
+answer cannot be proven delivered, or the runtime is lost before the provider reported
+the accepted item, the approval is `indeterminate` and the runtime is contained.
+Nothing is resent and no action is replayed, including after an authority restart.
+
+The per-turn transient stream additionally reports `command_proposed`,
+`file_change_proposed`, `approval_required`, `approval_resolved`, `command_started`,
+`file_change_started`, `command_output_delta` and the completed/failed events, under
+the same bounds as assistant output. Commands, output, paths and diffs never enter
+SQLite, its WAL/SHM, the audit stream or intent receipts: storage holds a SHA-256
+fingerprint and bounded counts. Codex keeps its own conversation history in the
+private runtime home.
+
+Everything else stays an isolation violation in this profile too, never answered and
+contained: hooks, MCP, web and network tools, plugins, apps, skills, dynamic tools,
+sub-agents, collaboration, request-user-input, permission escalation, write-stdin,
+terminal interaction, a second concurrent request, and any command or file effect the
+authority did not accept.
+
+Known limits: the user's `auth.json` is shared read-write with the isolated runtime
+(narrowing it is deferred); `bwrap` and a host `/etc/codex` directory are required;
+the profile does not survive an authority restart; compatibility is pinned to Codex
+0.159.0; and an independent review of this sprint is pending. See
+[ADR 0016](docs/adr/0016-tool-and-approval-mediation.md).
