@@ -18,7 +18,7 @@ reading the stream cannot start, grant, answer or repeat anything.
 EventEnvelope v1 (ADR 0003) is unchanged. There is no envelope v2 and no schema bump:
 storage stays at version 6.
 
-> **Implementation status (Sprint 2K).** EventEnvelope v1 is still unchanged. Storage
+> **Implementation status (Sprint 2K, ADR 0018).** EventEnvelope v1 is still unchanged. Storage
 > is now schema version 7: `authority_metadata` records `event_vocabulary`, the
 > largest event vocabulary any build has opened the store with. See the status note
 > under Known, unknown and malformed events.

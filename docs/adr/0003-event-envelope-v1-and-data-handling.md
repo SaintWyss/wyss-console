@@ -129,3 +129,13 @@ control event types, append-only SQLite audit, stable stream and transactional
 sequence/state/intent receipts. Audit append failure rolls back the state mutation.
 Envelope v1 fields and semantics are unchanged. This is a bounded audit reader,
 not an Event Bus or content-persistence system. See ADR 0011.
+
+## Later implementation status
+
+The deferrals above describe Sprint 0B. EventEnvelope v1 itself is unchanged. Durable
+events have since been implemented by the external authority only: ADR 0011 added the
+append-only audit stream, and ADR 0017 the single transactional append path,
+payload contracts for every authority event type, bounded replay (`audit/read`) and a
+live wait (`audit/watch`). ADR 0018 records the event vocabulary a store was written
+with. There is still no Event Bus, no terminal event and no event sourcing: canonical
+state is the authority's control tables.

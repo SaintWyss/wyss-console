@@ -64,7 +64,7 @@ holding. Anything unproven is `safety_unproven` and ends the generation. The hos
 provide `/usr/bin/bwrap` and an existing `/etc/codex` directory; the authority creates
 neither.
 
-> **Implementation status (Sprint 2K).** The namespace was hardened without changing
+> **Implementation status (Sprint 2K, ADR 0018).** The namespace was hardened without changing
 > this decision. The managed policy is mounted on a private overlay of `/etc`, so a
 > host `/etc/codex` is no longer a prerequisite; `bwrap` needs unprivileged overlay
 > support instead. The authority's own runtime and state directories (control socket,
@@ -85,7 +85,7 @@ user's own credential file. Narrowing this boundary (a dedicated credential, or 
 broker that owns the refresh) is deferred to Sprint 2K and is the main residual risk
 of this decision.
 
-> **Implementation status (Sprint 2K).** The read-write bind stays: Codex 0.159.0
+> **Implementation status (Sprint 2K, ADR 0018).** The read-write bind stays: Codex 0.159.0
 > rewrites `auth.json` in place when it refreshes a token, and a mirror or a
 > read-only bind would leave the user's own login with a rotated, stale refresh
 > token. It is now a narrow, validated capability. The file is opened without

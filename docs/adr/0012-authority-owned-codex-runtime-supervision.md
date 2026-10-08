@@ -190,3 +190,15 @@ identity snapshots and no raw protocol recording.
 ADR 0015 replaces plain supervised startup with an immutable inference process
 profile, a discovery-only MCP preflight and a freshly attested runtime generation.
 Runtime readiness remains only one necessary execution-gate condition.
+
+## Later implementation status
+
+ADR 0016 adds a second runtime profile. A generation started as `codex_local_tools_v1`
+does not inherit the local Codex environment and configuration described above: it
+runs in an authority-built namespace with a private Codex home and policy, and one
+validated credential capability (ADR 0016, hardened in ADR 0018). The authority still
+reads no token file in either profile: the credential is opened without read access
+and bound by descriptor. The schema is at version 7. The working directory of the
+runtime process is still the repository root compiled into the binary, so a binary
+moved away from its build tree cannot start a runtime; it fails closed. Packaging has
+to replace that before distribution (ADR 0018, residual risks).

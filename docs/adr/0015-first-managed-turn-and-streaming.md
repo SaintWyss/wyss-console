@@ -179,7 +179,7 @@ The authority computes SHA-256 using sha2 0.10.9. Canonical intent comparison in
 method, canonical session/intent identity, expected session revision, digest and byte
 length. No client-supplied digest is trusted. No other UserInput variant is encoded.
 
-Schema v5 explicitly migrates v1–v4, preserving existing rows, EventEnvelope bytes,
+Schema v5 (the current schema is version 7, see ADRs 0016 to 0018) explicitly migrates v1–v4, preserving existing rows, EventEnvelope bytes,
 stream ID and sequence. Migration creates zero turns or provider activity. managed_turns
 stores only identities, admitted lease revision, runtime generation, canonical lifecycle,
 SHA-256/length, fingerprint-only intent manifest, dispatch marker and timestamps/reason.
@@ -260,7 +260,7 @@ any previous nonterminal turn indeterminate with a single durable audit; no thre
 turn/start or prompt resend is automatic. Indeterminate is terminal and queryable; a future
 new turn requires a new explicit admission. Exactly-once provider execution is not claimed.
 
-> **Implementation status (Sprint 2K).** Two edges of this section were tightened. The
+> **Implementation status (Sprint 2K, ADR 0018).** Two edges of this section were tightened. The
 > supervisor reads a turn's admission flag immediately before it writes the prompt; that
 > flag is now withdrawn before a revocation of the turn's admitted lease, a close of its
 > session or a runtime stop commits, and given back only if the mutation changed

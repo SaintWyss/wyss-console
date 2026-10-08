@@ -123,7 +123,7 @@ sidecars inherit the private database mode inside the 0700 state directory, veri
 by tests. The single writer uses IMMEDIATE transactions. Closed records remain
 queryable; durable retention/compaction is deferred, not an in-memory list.
 
-> **Implementation status (Sprint 2K).** "Accepts an empty v0 database" above held even
+> **Implementation status (Sprint 2K, ADR 0018).** "Accepts an empty v0 database" above held even
 > where an earlier store had been: a database that was deleted or emptied, with or
 > without its write-ahead log, opened as a new empty authority with a new stream, and a
 > lost or damaged log opened as an earlier state. SQLite cannot tell those from a first
@@ -203,3 +203,13 @@ probe remain unchanged.
 Sprint 2E adds authority-owned runtime process supervision and schema v2 as specified
 in ADR 0012. The authority/client boundary and durable session ownership remain in
 force. Runtime readiness still grants no managed-work permission.
+
+Everything the "Deferred boundary" above lists as required before managed work has
+since been decided and implemented, each behind this authority: execution leases and
+the internal gate (ADR 0013, schema v3), conversation bindings (ADR 0014, schema v4),
+managed turns and the transient stream (ADR 0015, schema v5), command and file
+approval mediation in an isolated runtime profile (ADR 0016, schema v6), the durable
+event runtime and replay (ADR 0017) and the hardening and completion of this core
+(ADR 0018, schema v7). The control protocol is still version 1 and now has 29
+methods. Installation, autostart, remote transport, policies and retention remain
+deferred. The desktop still does not start or connect to the authority.

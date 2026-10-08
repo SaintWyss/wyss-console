@@ -1,7 +1,11 @@
 # Wyss Console
 
 Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current validated status: **Sprint 2J durable event replay and live watch** using Tauri 2,
+Linux-first, local-first. Current validated status: **Core complete**: the managed-agent
+core (external authority, leases, managed turns, approval mediation, durable event
+replay) is implemented, hardened and accepted through
+[ADR 0018](docs/adr/0018-core-hardening-and-completion.md). The product is not: there
+is no agent UI yet and the desktop does not connect to the authority. Built with Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -64,7 +68,8 @@ clipboard permissions. External terminal hyperlinks are disabled.
 
 Human terminal survival across Console process crash is not guaranteed at this stage.
 Graceful application exit closes its local terminals. ADRs 0005–0007 record backend
-ownership, renderer flow and local session ownership. No agents, Event Bus or persistence exist.
+ownership, renderer flow and local session ownership. The desktop itself runs no
+agent and persists nothing; managed agents exist only behind the external authority below.
 
 ## Agent adapter contracts
 
@@ -494,7 +499,9 @@ as the one validated capability described above, and a command the user accepts 
 read it exactly as it can under the user's own Codex; `bwrap` with overlay support is
 required; the profile does not survive an authority restart; and compatibility is
 pinned to Codex 0.159.0. See
-[ADR 0016](docs/adr/0016-tool-and-approval-mediation.md).
+[ADR 0016](docs/adr/0016-tool-and-approval-mediation.md) and, for what an accepted
+command was measured to be able to do, the trust boundaries and the accepted residual
+risks, [ADR 0018](docs/adr/0018-core-hardening-and-completion.md).
 
 ## Durable event replay
 

@@ -173,3 +173,13 @@ No managed turn or prompt is enabled.
 ADR 0015 hardens explicit resume with a process safety preflight and an
 inference-only attachment profile. Thread identity, persistence and separately
 gated resume semantics above remain unchanged.
+
+## Later implementation status
+
+Managed turns are enabled since ADR 0015, and a local-tools attachment profile exists
+since ADR 0016; a session bound under one runtime profile keeps its thread in that
+profile's Codex home. The binding, the journal and the zero-turn create described
+above are unchanged. Since ADR 0017 a create whose provider outcome is unknown is
+audited as `runtime_operation_indeterminate`, and since ADR 0018 an open operation
+the authority is no longer waiting on is reported as indeterminate, never as still
+being created. The schema is at version 7.

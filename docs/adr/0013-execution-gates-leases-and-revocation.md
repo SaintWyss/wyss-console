@@ -148,3 +148,14 @@ Process tests exercise concurrent grants, autonomous expiry, disconnects,
 graceful/SIGKILL restart, parent-death containment and the unchanged Codex method
 allowlist. Isolated real-Codex acceptance observes permission/readiness separation
 without creating threads or turns. Sprint 2G remains unimplemented.
+
+## Later implementation status
+
+Sprints 2G to 2K are implemented (ADRs 0014 to 0018). A lease now holds up to five
+exact scopes: `command_execute` and `file_change` were added by ADR 0016 with schema
+v6, with the same rule that no scope implies another. The gate additionally requires
+the profile and attachment facts of ADRs 0015 and 0016. A turn and every approval of
+it stay bound to the lease the turn was admitted under: renewing that lease extends
+it, a replacement never transfers authority. Since ADR 0018 the admission of a turn
+that was not yet dispatched is withdrawn before a revocation of its lease or a close
+of its session commits. The schema is at version 7.
