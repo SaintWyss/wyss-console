@@ -1212,6 +1212,8 @@ button:focus-visible {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 0 8px;
   align-items: baseline;
+  /* Side by side the two are as tall as the longer one: the text stays at the top. */
+  align-content: start;
   padding: 6px 10px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-sm);
