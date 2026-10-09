@@ -202,3 +202,5 @@ and bound by descriptor. The schema is at version 7. The working directory of th
 runtime process is still the repository root compiled into the binary, so a binary
 moved away from its build tree cannot start a runtime; it fails closed. Packaging has
 to replace that before distribution (ADR 0018, residual risks).
+Since ADR 0021 the desktop can ask for `runtime/start`, with the default profile, as
+part of activating a session; it still launches and supervises nothing.

@@ -159,3 +159,5 @@ it stay bound to the lease the turn was admitted under: renewing that lease exte
 it, a replacement never transfers authority. Since ADR 0018 the admission of a turn
 that was not yet dispatched is withdrawn before a revocation of its lease or a close
 of its session commits. The schema is at version 7.
+Since ADRs 0020 and 0021 the desktop asks for leases too: exactly `session_resume` or
+`session_create`, for seconds, around one operation of its own, and revokes them.

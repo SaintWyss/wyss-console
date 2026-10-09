@@ -331,7 +331,9 @@ passed, with captures of each state:
 
 ## Later implementation status
 
-Since ADR 0020 the desktop also sends three managed-session intents. They travel over
+Since ADRs 0020 and 0021 the desktop also sends managed-session intents, including
+binding a workspace and asking for the runtime to be started. They travel over
 separate short-lived connections owned by another service; the link described here is
-unchanged, still sends only the five reads above, and is what wakes the Sessions view.
+unchanged, still sends only the five reads above, and is what wakes the Sessions view
+and ends the wait of an activation.
 "The desktop only reads" above describes this link, no longer the whole desktop.

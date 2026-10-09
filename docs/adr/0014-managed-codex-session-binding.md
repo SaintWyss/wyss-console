@@ -183,3 +183,5 @@ above are unchanged. Since ADR 0017 a create whose provider outcome is unknown i
 audited as `runtime_operation_indeterminate`, and since ADR 0018 an open operation
 the authority is no longer waiting on is reported as indeterminate, never as still
 being created. The schema is at version 7.
+Since ADR 0021 the desktop asks for create, resume and abandon as part of activating a
+session, composing the operations above unchanged.

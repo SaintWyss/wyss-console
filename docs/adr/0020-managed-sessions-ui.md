@@ -458,3 +458,15 @@ bridge disabled (`NO_AT_BRIDGE=1`, GTK's switch for a session without that bus) 
 25 launches started, and the run above was made that way with no crash recorded by the
 kernel. The crash is in the bridge and depends on that bus, not on this change; it was
 not looked for in a real desktop session.
+
+## Later implementation status
+
+Since ADR 0021 the desktop also binds a workspace and asks the authority to start the
+runtime. `SessionPage` is version 2, with two more hints (`activatable`, `recoverable`);
+the bridge has two more intents (activate, abandon) and one native folder dialog; and
+a new session is created together with its activation, no longer by itself. The lease
+sequence described above for Resume is unchanged and is now shared with binding, under
+`session_create`. A lease the desktop could not give back is remembered and settled by
+the next call for that session instead of only being left to expire. "Binding is not in
+this phase" and the reach described under Security boundary describe this ADR's phase,
+no longer the desktop.

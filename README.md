@@ -6,11 +6,14 @@ core (external authority, leases, managed turns, approval mediation, durable eve
 replay) is implemented, hardened and accepted through
 [ADR 0018](docs/adr/0018-core-hardening-and-completion.md). The desktop follows that
 authority: its top bar shows the real authority and managed-agent status
-([ADR 0019](docs/adr/0019-desktop-authority-link.md)), and its Sessions view lists the
-managed sessions the authority holds and can create, resume and close them
-([ADR 0020](docs/adr/0020-managed-sessions-ui.md)). The product is not complete: there
-is no agent chat, turn or approval UI yet, and a workspace is still bound to a session
-with the developer client. Built with Tauri 2,
+([ADR 0019](docs/adr/0019-desktop-authority-link.md)), its Sessions view lists the
+managed sessions the authority holds and can resume and close them
+([ADR 0020](docs/adr/0020-managed-sessions-ui.md)), and a session can be created and
+activated from the window: bound to a project folder chosen in a native dialog and
+attached to the managed Codex runtime, which the authority starts when asked
+([ADR 0021](docs/adr/0021-session-activation.md)). The product is not complete: there
+is no agent chat, turn or approval UI yet, so a ready session cannot be talked to from
+the window. Built with Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -245,48 +248,80 @@ killed, incompatible or malformed. See
 ## Managed sessions
 
 The `Sessions` view shows the managed sessions the authority holds, newest first, and
-sends three product intents. The desktop requests; `wyss-control` decides.
+sends five product intents. The desktop requests; `wyss-control` decides.
 
 ```text
-Svelte  ->  four narrow Tauri commands  ->  SessionService  ->  shared ControlClient  ->  wyss-control
+Svelte  ->  narrow Tauri commands  ->  SessionService  ->  shared ControlClient  ->  wyss-control
 ```
 
-| In the window   | What the desktop asks the authority                                                                              |
-| --------------- | ---------------------------------------------------------------------------------------------------------------- |
-| The list        | `managedSession/list`, then `managedSession/runtime/status` for each session shown. Twenty-five to a page.       |
-| **New session** | `managedSession/prepare`, always for Codex. The session is prepared and has no workspace yet.                    |
-| **Resume**      | `managedSession/runtime/resume`: attaches a session that is already bound to a workspace to the running runtime. |
-| **Close**       | `managedSession/close`, after one confirmation. Closing is final and revokes the session's lease.                |
+| In the window                 | What the desktop asks the authority                                                                                                                                                                   |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The list                      | `managedSession/list`, then `managedSession/runtime/status` for each session shown. Twenty-five to a page.                                                                                            |
+| **New session**, **Activate** | One step at a time until the session is ready: `managedSession/prepare` for a new one, `runtime/start` if no runtime is on its way, `managedSession/runtime/create`, `managedSession/runtime/resume`. |
+| **Resume**                    | `managedSession/runtime/resume`: attaches a session that is already bound to a workspace to the running runtime.                                                                                      |
+| **Discard attempt**           | `managedSession/runtime/abandon`, after one confirmation, for a binding attempt the authority could not confirm.                                                                                      |
+| **Close**                     | `managedSession/close`, after one confirmation. Closing is final and revokes the session's lease.                                                                                                     |
 
 Each session shows its control state, agent, binding state and workspace, revision,
 times and identity. The Codex thread, runtime instance, lease and operation identities
 never reach the window, and the window cannot name a control method, an adapter, a
-workspace, a scope or a lease: it sends a session it was shown, the revision it saw and
-the identity of its own action.
+scope, a lease, a lifetime or a safety profile: it sends a session it was shown, the
+revision it saw and the identity of its own action. The only path it can send is a
+folder the user selected in the native dialog.
+
+### Creating and activating a session
+
+```text
+New session  ->  Choose folder (native dialog)  ->  Create & activate
+Preparing session…  ->  Starting Codex…  ->  Creating workspace binding…  ->  Attaching…  ->  Ready
+```
+
+- **The folder comes from a native dialog.** `Choose folder` opens GTK's folder
+  chooser. The window has no filesystem access: it cannot list, read or write, and an
+  activation is accepted only for a folder that dialog returned in this run. Selecting
+  a folder is a request; whether it may be a workspace is the authority's to say.
+- **The authority starts Codex.** If no runtime is running or starting, the desktop
+  asks `wyss-control` to start it with the default profile and waits for the authority
+  to report it ready. The desktop never launches Codex and never asks while a runtime
+  is already starting. A runtime the authority contained for safety is not restarted
+  from the window.
+- **The binding takes a lease for that alone.** The authority admits a binding under a
+  lease that grants `session_create`. The desktop asks; if the authority says a lease
+  is what is missing, the desktop asks it to grant one for that single scope and
+  fifteen seconds, asks again, and asks it to revoke that lease. The attachment that
+  follows does the same with `session_resume` and thirty seconds. A lease another
+  client holds is used as it is and never touched.
+- **It is not a transaction.** Each step can succeed and the next one fail, and the
+  window shows what the authority holds: no workspace, binding, detached, ready or
+  uncertain. `Ready` is shown when a read says so. An existing session with no
+  workspace is activated the same way from its details; one that is bound and detached
+  is resumed.
+- **Uncertain is not failed.** If the authority cannot confirm whether Codex created the
+  binding, the session is shown as uncertain and nothing asks again: not a retry, not a
+  new click, not a restart. `Discard attempt` gives up on that attempt explicitly; a
+  thread Codex may have created for it is left behind. There is no exactly-once
+  guarantee for a binding, and none is claimed.
 
 Behavior worth knowing:
 
-- **One action, one intent.** A click names its action with an identity that is sent to
-  the authority unchanged. A second click while it is pending sends nothing. If the
-  authority does not answer, the outcome is unknown and Retry sends the same identity
-  again: the authority's processed-intent record makes it the same action, so a session
-  is never created or closed twice.
-- **Resume is gated.** The authority admits a resume only under a lease that grants
-  `session_resume`, with the runtime ready. The desktop asks; if the authority says a
-  lease is what is missing, the desktop asks it to grant one for that single scope and
-  thirty seconds, asks again, and asks it to revoke that lease. A lease another client
-  holds is used as it is and never touched. The window does not offer Resume while the
-  runtime is not ready.
-- **Binding a workspace is not in the desktop yet.** A session created in the window is
-  unbound; bind one with the developer client (`executionLease/grant` with
-  `session_create`, then `managedSession/runtime/create`). Starting the runtime is the
-  developer client's `runtime/start` too.
+- **One action, one identity.** A click names its action with one identity. Every
+  authority mutation the action leads to has an identity of its own derived from it, so
+  a step sent again is the same intent with the same payload. A second click while it
+  is pending sends nothing. If the authority does not answer, the outcome is unknown
+  and Retry continues the same action: a session is never created, bound or closed
+  twice by it.
+- **Resume is gated** the same way, under `session_resume`. The window does not offer
+  Resume while the runtime is not ready.
 - **What is shown is what was read.** The list is re-read when the authority's durable
-  head moves, using the same observation the top bar follows: no second watcher exists.
-  Nothing is shown optimistically, and when the authority is not connected the sessions
-  are cleared, every action is disabled and the view says why.
+  head moves, using the same observation the top bar follows: no second watcher exists,
+  and it is also what ends an activation's wait. Nothing is shown optimistically, and
+  when the authority is not connected the sessions are cleared, every action is
+  disabled and the view says why.
+- **Closing the window during an activation** sends nothing more. What the authority
+  holds is what the next launch shows, and a lease the desktop could not give back
+  expires by itself within seconds.
 - **The Console keeps running.** Both views stay mounted: going to Sessions and back
-  ends no terminal and starts none.
+  ends no terminal and starts none, and an activation goes on whichever view is shown.
 - The list is walked forward, because the protocol pages oldest first. A page costs one
   request per fifty sessions held, and past two thousand sessions the newest are not
   reachable from the window.
@@ -295,11 +330,13 @@ Try it with the authority and developer client built [above](#external-control-a
 
 ```sh
 ./src-tauri/target/debug/wyss-control      # one terminal
-npm run desktop:run                        # Sessions -> New session -> Create session
+npm run desktop:run                        # Sessions -> New session -> Choose folder -> Create & activate
 ./src-tauri/target/debug/examples/control_client list
+./src-tauri/target/debug/examples/control_client runtime/status
 ```
 
-See [ADR 0020](docs/adr/0020-managed-sessions-ui.md).
+See [ADR 0020](docs/adr/0020-managed-sessions-ui.md) and
+[ADR 0021](docs/adr/0021-session-activation.md).
 
 ## Authority-owned Codex runtime
 
@@ -342,7 +379,8 @@ intent admits one recovery attempt.
 **Runtime process readiness is not execution authorization.** Runtime supervision
 creates no Codex threads or turns, submits no prompts, and answers no approvals or
 permission requests.
-Tauri has no runtime command/capability or authority connection. Human terminal
+The desktop does not launch or supervise a runtime: since ADR 0021 it can ask the
+authority to start one as part of activating a session, and nothing else. Human terminal
 behavior and the standalone read-only probe remain unchanged. See ADR 0012.
 
 Rust tests include seeded v1 migration, idempotency/audit rollback, deterministic
