@@ -429,8 +429,9 @@ So:
   asked for, names its action for it (**Restart Codex & activate**) and, for an existing
   session, asks for one confirmation.
 - **It is never asked while a managed turn is running**: the action is refused as "A turn
-  is running". This is a check and then a request; the core itself does not refuse a
-  stop under a turn.
+  is running". `wyss-control` enforces it: a `runtime/stop` while a managed turn is
+  active is answered `active_turn_exists` and changes nothing, whichever client sends
+  it. The window also reads first, so as not to ask.
 - **A session keeps the mode it was created in.** Codex keeps a conversation in the
   home of the profile that created it and refuses to resume it under the other one. An
   Inference session cannot be given tools: Local Tools needs a session of its own.
@@ -502,7 +503,9 @@ The inference profile answers no server request; protocol failure reaps the chil
 parent-death SIGKILL plus parent-identity checking prevents an orphan App Server
 after authority crash. Graceful authority shutdown reaps the child but preserves
 desired running; restart obtains a fresh AgentRuntimeInstanceId and catalog.
-Explicit runtime/stop persists stopped and suppresses startup reconciliation.
+Explicit runtime/stop persists stopped and suppresses startup reconciliation. It is
+refused with `active_turn_exists` while a managed turn is active: a turn is cancelled
+before the runtime it runs on is stopped.
 Unexpected runtime failure does not create an automatic restart loop; a new start
 intent admits one recovery attempt.
 

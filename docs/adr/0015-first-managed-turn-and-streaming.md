@@ -269,6 +269,12 @@ new turn requires a new explicit admission. Exactly-once provider execution is n
 > deadline of an approval it is not waiting on any more: before, a deadline that had
 > passed made every wait zero until the provider ended the turn.
 
+> **Implementation status (ADR 0023, security closure).** An explicit runtime stop no
+> longer terminates an active turn. It is refused with `active_turn_exists` while a turn
+> is starting or running, on the thread that admits turns, so the two cannot interleave;
+> the admission flag is therefore not withdrawn for a stop any more. `runtime_stopped`
+> stays in the vocabulary of terminal reasons and is no longer produced by a stop.
+
 ## External actions remain forbidden
 
 Any hook/MCP-startup lifecycle, command/file/MCP/web/dynamic-tool/subagent item, non-empty

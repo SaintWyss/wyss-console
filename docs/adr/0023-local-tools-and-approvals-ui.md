@@ -48,9 +48,10 @@ This is the fact the rest follows from, read from the core and measured with Cod
   starting another.** `runtime/start` on a live generation that names another profile or
   workspace is refused (`invalid_transition`). `runtime/stop` detaches **every** session
   attached to the runtime, whichever session asked.
-- **The core does not refuse a stop under a running turn.** The turn ends
-  `indeterminate` / `runtime_stopped`. Keeping that from happening by accident is the
-  desktop's job, below.
+- **A stop is refused while a managed turn is active.** `wyss-control` answers
+  `runtime/stop` with `active_turn_exists` and changes nothing: the turn, the runtime
+  and every attachment stay as they were. This is the authority's rule since the
+  security closure of this phase, described below; the desktop does not carry it.
 - **A session keeps the mode it was bound in.** Codex keeps a conversation in the home
   of the profile that created it. `managedSession/runtime/resume` of an inference
   session under a local-tools runtime is refused by the provider (`provider_rejected`),
@@ -157,14 +158,39 @@ bound, attached in the mode asked                 -> nothing                    
 
 ### Never under a running turn
 
-Before a stop is asked, the desktop reads from the authority whether a managed turn is
-running: the last turn the durable stream names as admitted, and its status. If it has
-not ended the action is refused as **"A turn is running"** and nothing is asked of the
-runtime. This holds for either mode: an Inference session created while Codex runs in Local Tools goes through the same check.
+**`wyss-control` enforces it.** A `runtime/stop` is admitted only while no managed turn
+is active, whichever client sends it: the desktop, the developer client or any other.
+While one is, the request is answered `active_turn_exists` before anything durable
+changes. No admission is withdrawn, no session is detached, no event is written and the
+turn is not touched.
 
-This is a check and then an act, on two requests. A turn admitted between them is ended
-by the stop. Closing that window needs the authority to refuse a stop under a turn,
-which is a core change and was not made here.
+- **Active** is what the authority holds as not ended: a turn that was admitted and not
+  yet written to Codex, one that runs, one that waits on an approval, and one whose
+  cancel was asked for and has not ended yet. Both the core's own active turn and the
+  durable record are consulted; either is enough to refuse.
+- **It cannot be raced.** The core admits a turn and takes a stop on the same thread,
+  one request at a time. Whichever of the two it takes first decides: a turn admitted
+  first makes the stop a refusal, and a stop admitted first leaves no ready runtime for
+  the gate to admit a turn on. There is no order in which both are accepted, and
+  nothing a client read earlier takes part in the decision.
+- **It is not a permanent block.** Once the turn is terminal the same stop is admitted.
+  A turn that does not end by itself is cancelled, and a cancel the provider does not
+  confirm ends the turn by the interrupt deadline.
+- **The refusal comes before the receipt lookup**, as the admission of a start does: a
+  stop repeated under its own identity while a turn runs is refused, not answered with
+  an earlier receipt.
+- A stop is the one explicit request this applies to. The runtime exiting by itself, a
+  containment by the authority and the authority's own shutdown still end a turn, as
+  ADRs 0015 and 0016 describe.
+
+**The desktop reads first, as a courtesy.** Before it would ask for a stop it reads
+whether a managed turn is running: the last turn the durable stream names as admitted,
+and its status. If it has not ended the action is refused as **"A turn is running"**
+and no stop is sent. This holds for either mode: an Inference session created while
+Codex runs in Local Tools goes through the same reading. That reading spares a request
+that would be refused; it is not what keeps the runtime up. When the reading is stale
+and the stop is sent, the authority's `active_turn_exists` is shown with the same
+sentence, and the action can be asked again once the turn ended.
 
 ## Workspace and isolation
 
@@ -355,7 +381,7 @@ shows the approval's record without it.
   `invalidated` / `authority_restarted`, its turn `indeterminate`, the sessions
   detached, and the runtime in Inference. A Local Tools session has to be entered
   again, explicitly.
-- **The runtime stops while an approval waits.** The approval ends `invalidated`, with the reason the authority recorded, and the turn `indeterminate`.
+- **The runtime goes away while an approval waits**, because it exited or the authority contained it; a stop is refused while the turn is active. The approval ends `invalidated`, with the reason the authority recorded, and the turn `indeterminate`.
 - **A decision's answer is lost.** Shown as an unknown outcome with **Retry**, which
   sends the same decision. A reconnection sends nothing by itself.
 - Nothing here ever resends a turn, answers an approval the user did not answer, or
@@ -392,8 +418,10 @@ shows the approval's record without it.
 
 ## Limits and residual risk
 
-- **Check then stop.** The guard against stopping a runtime under a turn is two
-  requests, described above.
+- **A stop under a turn is the authority's to refuse, and it does.** The desktop's own
+  reading before a stop is two requests and can be stale; nothing depends on it. What a
+  client cannot do any more is use `runtime/stop` to end a turn that hangs: the turn is
+  cancelled first.
 - **A session has no mode while it is detached.** The window cannot say, before trying,
   that a detached session was created in the other mode. It says so after the provider
   refused, and by then the runtime was switched. The confirmation says this can happen.
@@ -422,8 +450,8 @@ shows the approval's record without it.
 ## Deferred
 
 Remembering a decision in any form (always allow, trusted folders, rules, policy);
-editing a proposed action; more than one runtime, or one per session; refusing a stop
-under a turn in the core; a durable record of a session's mode; an event and history
+editing a proposed action; more than one runtime, or one per session; a durable record
+of a session's mode; an event and history
 view (Phase 3F); rendering Markdown; other adapters.
 
 ## Acceptance evidence
@@ -456,10 +484,12 @@ authority's real namespace), five tests:
   after an authority restart the runtime is back in inference and both sessions are
   detached.
 - An approval that ends undecided: its lease expiring (three seconds, another client's
-  lease), the runtime stopped under it, the authority restarted under it. Each is read
-  as what the authority recorded, and no decision is sent for any of them.
+  lease) and the authority restarted under it, each read as what the authority
+  recorded, with no Accept sent for either. A stop of the runtime under a pending
+  approval is refused, and the approval stays pending and decidable at the revision it
+  had.
 
-**Tests.** 510 Rust tests and 458 window tests pass. Eighty-three mutation controls, one
+**Tests.** 510 Rust tests and 458 window tests passed when the phase was accepted; 513 and 458 pass since the security closure below. Eighty-three mutation controls, one
 per adversarial focus, are each killed by a test: 54 in the window (a second decision
 while one is pending, Approve sent as Deny, a decision at another revision, a lost
 decision retried under a new identity, a refused decision retried, an unsettled decision
@@ -578,3 +608,68 @@ than nine files, and a Resume that Codex refuses because the session was created
 other mode (measured against real Codex at the protocol, before the window was built).
 The real-desktop run used a synthetic session with GTK's accessibility bridge disabled,
 as in ADRs 0020 to 0022.
+
+## Security closure
+
+An independent review of this phase found no critical or high issue and one medium:
+the guard against stopping the runtime under a turn lived in the desktop. It read
+whether a managed turn was running and then sent `runtime/stop`, two requests with
+nothing to keep another client from starting a turn between them, and the authority
+admitted the stop. The turn ended `indeterminate` / `runtime_stopped`. This record had
+listed it as a known limit; it is closed here, in the core.
+
+**The fix.** `wyss-control` refuses `runtime/stop` with `active_turn_exists` while a
+managed turn is starting or running, as described under "Never under a running turn".
+The check is one function of the core's turn owner, called where the core takes a
+client's request, before the receipt lookup and before anything that withdraws an
+admission, detaches a session or writes an event. Turn admission happens on that same
+thread, so no lock was added. The code that ended a turn as `runtime_stopped` after a
+stop is gone, and a stop no longer withdraws a turn's admission. `active_turn_exists`
+already existed in Control Protocol v1; nothing was added to it. In the desktop the one
+change is that this refusal of a stop is said as "A turn is running".
+
+**Evidence.**
+
+- Unit, in the core (`control/turn_approval_tests.rs`): a stop is refused for a turn
+  that is admitted and not yet dispatched, running, waiting on an approval and being
+  cancelled; refusing changes nothing of the turn; the durable record alone is enough
+  to refuse; once the turn completed, failed or was interrupted the stop is admitted.
+- The exact ordering, against the real `wyss-control` process
+  (`tests/turns_process.rs`): one client reads that no turn is running; another starts a
+  turn, which the authority admits; the first sends `runtime/stop` and is refused,
+  three times, with and without an expected revision. The runtime keeps its revision
+  and instance and stays ready, the session stays attached, the turn stays running at
+  its revision under its lease, and the durable stream gains no event. The desktop
+  service, given a reading that says no turn runs, asks for the other mode: the
+  authority refuses its stop and the action fails as a running turn. The turn is then
+  cancelled and ends `interrupted` / `user_cancel`; the same stop is admitted, the
+  runtime stops, and after a new start and a resume the session runs another turn,
+  which is protected the same way.
+- Racing, against the real process: ten rounds of a turn start and a stop released
+  together from two connections, the stop held back on half of them. Every round ends
+  with exactly one of the two accepted, and no turn the authority holds was ever ended
+  by a stop.
+- The other process suites: a stop under a pending approval is refused and the approval
+  stays pending and decidable; a stop racing an Accept is refused and the Accept
+  decides; the mode switch of this phase still stops, starts and attaches when no turn
+  runs, and is refused under one.
+- Thirteen mutation controls, each killed by a test: the guard removed; inverted; not
+  consulted where turns are admitted, so that only the desktop's reading is left; a stop
+  that proceeds after being refused; a turn ended by a refused stop; sessions detached
+  by a refused stop; the durable record ignored; a refused stop withdrawing a turn's
+  admission; the refusal not said as a running turn.
+- Desktop smoke on the release build of `1e7fad0`, in the nested compositor: with a turn
+  running, the developer client's `runtime/stop` answers `active_turn_exists` and the
+  runtime stays ready at its revision with no new event; asking for Local Tools from the
+  window is refused as "A turn is running"; the terminal opened at launch takes input;
+  the turn is still `Running`, is cancelled and ends `Interrupted`; the same request for
+  Local Tools then stops the runtime, starts it for the folder and leaves the session
+  Ready in Local Tools.
+
+**Seen while closing it, and left as it is.** A `runtime/stop` repeated under an identity
+that already committed is answered with its earlier receipt and changes neither the
+desired state nor the running child, yet the core still detaches every attached session
+for it. Reproduced against the real process: stop, start, resume, the first stop again,
+and the session is `bound_detached` on a runtime that is ready. Under an active turn
+that repeat is now refused like any stop. It is a separate defect of the receipt path
+and was not part of this closure.

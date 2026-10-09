@@ -208,3 +208,7 @@ Since ADR 0023 it can also ask for the local-tools profile for the workspace of 
 session, and for `runtime/stop` when the runtime serves another profile or workspace
 and it read that no managed turn is running. One runtime, in one profile, is still all
 there is.
+Since the security closure of ADR 0023, `runtime/stop` is admitted only while no managed
+turn is active. Otherwise it is answered `active_turn_exists`, before the receipt lookup
+and before anything durable changes: desired state, revision and the running child are
+as they were.

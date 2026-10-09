@@ -412,3 +412,9 @@ this ADR's phase. A turn of a session attached in Local Tools is now admitted un
 lease that also carries `command_execute` and `file_change`; a turn of an inference
 session is admitted as described here. A turn ended `user_cancel` is worded "Stopped at
 your request", because the authority records a denied command that way too.
+
+Since the security closure of ADR 0023 the authority refuses a runtime stop while a
+managed turn is active. "A runtime stopped under a turn: `indeterminate` /
+`runtime_stopped`" describes what the core did when this ADR was accepted; that process
+test now shows the refusal, with the turn running and the session attached, and the stop
+admitted once the turn ended.
