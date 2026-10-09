@@ -252,6 +252,15 @@ it('activates an existing session that has no workspace, and only such a session
   expect(h.state().composing).toBe(false);
   h.controller.activate();
   expect(h.steps).toHaveLength(2);
+
+  // While the page it was shown on is being read again, the session cannot be acted
+  // on: nothing is sent for a session that is not on a page that was read.
+  const paged = await showing({ ...loaded, older: '1' });
+  await composed(paged, FOLDER, fresh.id);
+  paged.controller.older();
+  expect(paged.state()).toMatchObject({ page: null, composing: true });
+  paged.controller.activate();
+  expect([paged.steps.length, paged.intents.length]).toEqual([0, 0]);
 });
 
 it('waits for the authority to report a change and never past its limit', async () => {
@@ -519,12 +528,14 @@ it('stops a waiting activation when it is disposed', async () => {
   h.controller.activate();
   h.steps[0].resolve({ stage: 'runtime_starting' });
   await settle();
+  expect(vi.getTimerCount()).toBe(1);
   h.controller.dispose();
+  // The wait ends with it: no timer is left behind to fire later.
+  expect(vi.getTimerCount()).toBe(0);
   await settle();
   await vi.advanceTimersByTimeAsync(ACTIVATION_WAIT_MS * 2);
   h.controller.observe(connected('30'));
   await settle();
-  // Nothing more is asked and no timer is left behind.
+  // Nothing more is asked.
   expect(h.steps).toHaveLength(1);
-  expect(vi.getTimerCount()).toBe(0);
 });

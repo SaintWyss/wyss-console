@@ -140,6 +140,14 @@ export function failureMessage(
   return `${ACTION[kind]}. ${SPECIFIC[kind]?.[code] ?? FAILURE[code]}`;
 }
 
+/**
+ * Whether a failed action is one whose outcome is not known, as opposed to one that
+ * was refused. It is shown as a caution, not as an error.
+ */
+export function outcomeUnknown(code: SessionFailureCode): boolean {
+  return code === 'unavailable' || code === 'uncertain';
+}
+
 export function readFailureMessage(code: SessionFailureCode): string {
   return code === 'unavailable'
     ? 'Sessions could not be read: wyss-control did not answer.'

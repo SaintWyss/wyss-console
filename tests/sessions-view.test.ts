@@ -536,6 +536,8 @@ it('explains a failed action and retries it as the same action', async () => {
   let alert = view().querySelector('.sessions-status.failed')!;
   expect(alert.getAttribute('role')).toBe('alert');
   expect(alert.textContent).toContain('wyss-control did not answer');
+  // An answer that never came is a caution, not an error.
+  expect(alert.classList.contains('unknown')).toBe(true);
   // Product wording only.
   expect(alert.textContent).not.toMatch(/unavailable|_|\{/);
   button('Retry', alert).click();
@@ -550,6 +552,7 @@ it('explains a failed action and retries it as the same action', async () => {
   alert = view().querySelector('.sessions-status.failed')!;
   expect(alert.textContent).toContain('The session is not ready.');
   expect(alert.textContent).toContain('did not accept that folder');
+  expect(alert.classList.contains('unknown')).toBe(false);
   expect(button('Retry', alert)).toBeUndefined();
   button('Dismiss', alert).click();
   await flush();
@@ -562,6 +565,7 @@ it('explains a failed action and retries it as the same action', async () => {
   expect(sent.at(-2)!.request.intent_id).not.toBe(sent[0].request.intent_id);
   alert = view().querySelector('.sessions-status.failed')!;
   expect(alert.textContent).toContain('Activation outcome uncertain');
+  expect(alert.classList.contains('unknown')).toBe(true);
   expect(alert.textContent).not.toMatch(/not ready|refused|failed|_/);
   expect(button('Retry', alert)).toBeUndefined();
   expect(ipc.sent()).toHaveLength(sent.length);

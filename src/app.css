@@ -559,6 +559,12 @@ button:focus-visible {
   flex: 1 1 240px;
   min-width: 0;
 }
+/* An outcome that is not known is a caution, not an error. */
+.sessions-status.failed.unknown {
+  color: var(--text);
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.35);
+}
 .session-composer {
   display: flex;
   flex-wrap: wrap;

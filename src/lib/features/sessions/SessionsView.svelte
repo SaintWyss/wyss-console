@@ -10,6 +10,7 @@
     chooseFailureMessage,
     failureMessage,
     localTime,
+    outcomeUnknown,
     pendingMessage,
     readFailureMessage,
     resumeHint,
@@ -88,7 +89,11 @@
       {pendingMessage(sessions.operation.kind, sessions.operation.step)}
     </p>
   {:else if sessions.operation?.failure}
-    <div class="sessions-status failed" role="alert">
+    <div
+      class="sessions-status failed"
+      class:unknown={outcomeUnknown(sessions.operation.failure.code)}
+      role="alert"
+    >
       <p>
         {failureMessage(
           sessions.operation.kind,

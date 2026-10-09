@@ -411,6 +411,12 @@ fn the_runtime_is_asked_to_start_once_and_never_while_it_is_starting() {
     world.lock().unwrap().actual = ActualState::Ready;
     assert_eq!(stage(step()), ActivationStage::Bound);
     assert_eq!(world.lock().unwrap().revision, 1, "one start was asked for");
+    // The binding is another operation: it does not borrow the identity of the start.
+    for op in peer.requests() {
+        if let Operation::BindingCreate(asked) = op {
+            assert_ne!(asked.intent_id, start_intent);
+        }
+    }
 
     // The start this action asked for did not bring a runtime up: it is not asked again.
     let other = session_id();
