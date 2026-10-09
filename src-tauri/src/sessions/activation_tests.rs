@@ -999,3 +999,35 @@ fn only_the_attempt_the_authority_holds_as_uncertain_can_be_abandoned() {
         assert_eq!(since(&peer, sent), [STATUS]);
     }
 }
+
+#[test]
+fn a_lease_on_record_past_its_lifetime_is_dropped_and_nothing_is_asked_for_it() {
+    let session = session_id();
+    let (peer, _) = authority(World::new(&session).fault(REVOKE, 1, Fault::Lost));
+    let service = peer.service();
+    let operation = uuid();
+    let step = || service.activate(operation.clone(), session.clone(), 1, WORKSPACE.into());
+    assert_eq!(stage(step()), ActivationStage::Bound);
+    // The revoke was not answered: the lease stays on record, to be asked about again.
+    assert_eq!(service.leases_on_record_for_test(), 1);
+    // By now it has expired by itself, whatever happened to it.
+    service.age_leases_for_test();
+    let sent = peer.requests().len();
+    let _ = step();
+    // No revoke is sent for it: the step starts with what the session is.
+    assert_eq!(since(&peer, sent)[..2], [STATUS, CREATE]);
+    assert_eq!(service.leases_on_record_for_test(), 0);
+
+    // A record nobody comes back for does not stay either: the next lease this desktop
+    // asks for, for any session, clears what has expired before adding its own.
+    let (peer, _) = authority(World::new(&session).fault(REVOKE, 1, Fault::AnswerLost));
+    let service = peer.service();
+    assert_eq!(
+        stage(service.activate(uuid(), session.clone(), 1, WORKSPACE.into())),
+        ActivationStage::Bound
+    );
+    assert_eq!(service.leases_on_record_for_test(), 1);
+    service.age_leases_for_test();
+    service.resume(uuid(), session_id(), 1).unwrap();
+    assert_eq!(service.leases_on_record_for_test(), 0);
+}

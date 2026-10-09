@@ -280,15 +280,20 @@ impl SessionService {
         };
         // Recorded before it is sent: if no answer comes back, the next call for this
         // session finds out whether it was taken.
-        self.slots().insert(
+        let now = Instant::now();
+        let mut slots = self.slots();
+        // A record nobody came back for describes a lease that has expired: it goes.
+        slots.retain(|_, slot| slot.until > now);
+        slots.insert(
             key(id),
             LeaseSlot {
                 grant: grant.clone(),
                 lease: None,
                 revoke: fresh(),
-                until: Instant::now() + Duration::from_secs(ttl_seconds.into()) + LEASE_MARGIN,
+                until: now + Duration::from_secs(ttl_seconds.into()) + LEASE_MARGIN,
             },
         );
+        drop(slots);
         let lease = match client.lease_grant(grant) {
             Ok(lease) => lease,
             Err(error) => {
@@ -481,4 +486,18 @@ fn walk(client: &mut ControlClient, before: Option<Sequence>) -> ControlResult<W
     }
     walk.truncated = true;
     Ok(walk)
+}
+
+#[cfg(test)]
+impl SessionService {
+    /// As if every lease on record had outlived its lifetime.
+    pub(super) fn age_leases_for_test(&self) {
+        let now = Instant::now();
+        for slot in self.slots().values_mut() {
+            slot.until = now;
+        }
+    }
+    pub(super) fn leases_on_record_for_test(&self) -> usize {
+        self.slots().len()
+    }
 }

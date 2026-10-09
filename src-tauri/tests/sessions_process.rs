@@ -1339,7 +1339,15 @@ fn a_binding_the_provider_never_answered_is_uncertain_until_it_is_abandoned() {
 
     // The same action, a new action, and across an authority restart: no second thread
     // is ever asked for, and the answer stays "uncertain".
-    let settled = head(&mut other);
+    // (The authority reaps that runtime on its own time: its events are not this
+    // session's, so they are left out of what is compared.)
+    let written = |other: &mut ControlClient| {
+        kinds(&trail(other))
+            .iter()
+            .filter(|kind| !kind.starts_with("authority.runtime."))
+            .count()
+    };
+    let settled = written(&mut other);
     for action in [operation.clone(), id()] {
         assert_eq!(
             failed(sessions.activate(action, session.clone(), 1, env.workspace())),
@@ -1347,7 +1355,7 @@ fn a_binding_the_provider_never_answered_is_uncertain_until_it_is_abandoned() {
         );
     }
     assert_eq!(
-        (head(&mut other), env.methods("thread/start")),
+        (written(&mut other), env.methods("thread/start")),
         (settled, 1)
     );
     drop(other);
