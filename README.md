@@ -505,7 +505,9 @@ after authority crash. Graceful authority shutdown reaps the child but preserves
 desired running; restart obtains a fresh AgentRuntimeInstanceId and catalog.
 Explicit runtime/stop persists stopped and suppresses startup reconciliation. It is
 refused with `active_turn_exists` while a managed turn is active: a turn is cancelled
-before the runtime it runs on is stopped.
+before the runtime it runs on is stopped. A runtime mutation sent again under an intent
+that already committed is answered with its receipt and has no effect: nothing is
+detached, stopped or launched for it.
 Unexpected runtime failure does not create an automatic restart loop; a new start
 intent admits one recovery attempt.
 

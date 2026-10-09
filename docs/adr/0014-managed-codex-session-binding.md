@@ -185,3 +185,7 @@ the authority is no longer waiting on is reported as indeterminate, never as sti
 being created. The schema is at version 7.
 Since ADR 0021 the desktop asks for create, resume and abandon as part of activating a
 session, composing the operations above unchanged.
+Since the receipt-replay closure of ADR 0023, a runtime stop answered again with its
+receipt detaches no session and does not make a binding request in flight indeterminate,
+and the admission of such a request, withdrawn before a stop, a lease mutation or a
+close commits, is given back when that mutation changed nothing.

@@ -211,4 +211,6 @@ there is.
 Since the security closure of ADR 0023, `runtime/stop` is admitted only while no managed
 turn is active. Otherwise it is answered `active_turn_exists`, before the receipt lookup
 and before anything durable changes: desired state, revision and the running child are
-as they were.
+as they were. A `runtime/start` or `runtime/stop` answered again with the receipt of an
+intent that already committed has no effect left: the core carries out a runtime
+transition once, when it commits.

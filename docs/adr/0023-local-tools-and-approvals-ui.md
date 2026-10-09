@@ -489,7 +489,7 @@ authority's real namespace), five tests:
   approval is refused, and the approval stays pending and decidable at the revision it
   had.
 
-**Tests.** 510 Rust tests and 458 window tests passed when the phase was accepted; 513 and 458 pass since the security closure below. Eighty-three mutation controls, one
+**Tests.** 510 Rust tests and 458 window tests passed when the phase was accepted; 519 and 458 pass since the two closures below. Eighty-three mutation controls, one
 per adversarial focus, are each killed by a test: 54 in the window (a second decision
 while one is pending, Approve sent as Deny, a decision at another revision, a lost
 decision retried under a new identity, a refused decision retried, an unsettled decision
@@ -666,10 +666,96 @@ change is that this refusal of a stop is said as "A turn is running".
   Local Tools then stops the runtime, starts it for the folder and leaves the session
   Ready in Local Tools.
 
-**Seen while closing it, and left as it is.** A `runtime/stop` repeated under an identity
-that already committed is answered with its earlier receipt and changes neither the
-desired state nor the running child, yet the core still detaches every attached session
-for it. Reproduced against the real process: stop, start, resume, the first stop again,
-and the session is `bound_detached` on a runtime that is ready. Under an active turn
-that repeat is now refused like any stop. It is a separate defect of the receipt path
-and was not part of this closure.
+## Receipt replay
+
+The security closure left one defect it had found and described: a `runtime/stop` sent
+again under an intent that had already committed was answered with its durable receipt
+and changed no desired state, yet the core still ran what follows a stop. Every attached
+session was detached, and a binding request that happened to be in flight became
+indeterminate, on a runtime that kept running. The independent review confirmed it as a
+medium defect of idempotency. It is closed here.
+
+**The invariant.** A runtime mutation that already committed, sent again with the same
+payload, is answered with the same receipt and causes no new runtime or attachment side
+effect: no session is detached, the desired state, the actual state, the revision and
+the instance are as they were, no child is stopped or launched, no managed turn is
+touched and no event is written.
+
+**The fix.** After the store answers a runtime mutation, the core decides what is left
+to carry out from whether a transition committed now. The store gives every committed
+runtime mutation the next revision, and the core carries a revision out before it takes
+another request; a receipt at or below the revision already carried out is one whose
+effects happened, and it has none left. Only a stop that committed now detaches and
+reconciles, and only a start that committed now reconciles. That decision is one
+function of the request, the store's answer and that revision. No identity is compared
+outside the store and nothing about idempotency is kept in memory. When the receipt
+becomes durable, when the witness advances and what an intent is answered with are
+unchanged, and so is Control Protocol v1.
+
+- **The active-turn guard is still asked first.** An old stop intent sent while a turn is
+  active is refused with `active_turn_exists`, like a new one, and is not answered with
+  its receipt.
+- **A new stop is still a stop.** Under a new intent it commits the next revision,
+  detaches every session and reaps the child.
+- **A start was already harmless.** On the code before this closure a start sent again
+  changed nothing that can be observed, attached or stopped; what ran for it was a
+  reconciliation that finds nothing to do at an unchanged revision. It now runs nothing,
+  by the same decision.
+- **A binding request in flight keeps its admission.** The admission of a binding request
+  the supervisor has not written yet is withdrawn before a stop, a lease revocation or
+  renewal, or a close commits, so that nothing leaves after that commit. It used to stay
+  withdrawn even when the mutation turned out to change nothing, and the request then
+  failed as not dispatched. It is now given back in that case, as a turn's admission
+  already was: for a receipt answered again and for a mutation the store refused. One
+  that did change something leaves it withdrawn.
+- The other things the core does after the store answers were read for the same
+  pattern. Recomputing the next lease expiry after a lease operation or a close only
+  catches up with the clock and is the same whether or not the answer is a receipt. A
+  lease operation or a close answered again with its receipt still leaves a binding
+  request in flight withdrawn; telling such a receipt from a fresh commit is not
+  something the core can read from the answer today, and it was left as it is.
+
+**Evidence.**
+
+- Unit, in the core: the decision returns nothing to carry out for a receipt at or below
+  the carried revision, for a stop and for a start, for the latest transition repeated
+  and for an older one, and for a mutation the store refused; a stop that committed now
+  detaches and reconciles and a start reconciles. A binding request in flight loses its
+  admission once, gets it back, keeps it withdrawn after a change, and has none to give
+  back once a stop ended it.
+- The exact ordering, against the real `wyss-control` process
+  (`tests/runtime_process.rs`): start, a session bound and attached, stop A, the runtime
+  stopped and the session detached; start B, the session resumed; stop A again, four
+  times, on two connections. Each answer is the receipt of A. The runtime is ready on
+  the same instance at the revision of start B, the same child runs, the session is
+  attached, and the durable stream is as long as it was, with three changes of desired
+  state in it. The session then runs a turn; under it the old stop intent and a new one
+  are both refused, and both starts sent again are their receipts and change nothing of
+  the turn. After the turn, stop C under a new intent commits the next revision, the
+  session is detached and the child is gone; starts sent again then launch nothing. On
+  the code before this closure the test fails where the session is found detached.
+- Across restarts: stop A commits and the authority restarts; A is answered with its
+  receipt while the runtime stays stopped, again after a later start and resume, and
+  again after a second restart in which the authority brought the runtime up by itself.
+  Nothing changes any of the three times, and a new stop still stops.
+- A binding request kept in flight by the fixture, before it is written to the provider:
+  stop A sent again and a stop at a stale revision arrive meanwhile; released, the
+  request is written once and the session is bound. On the code before this closure
+  that binding became indeterminate. With its lease revoked instead, the request is
+  never written and the session stays unbound.
+- Thirteen mutation controls, each killed by a test, one of them only after the last
+  test above was added: the unchanged answer ignored; a detach on every stop the core
+  answers; a receipt answered again that still reconciles; the latest receipt taken for
+  a fresh transition; the receipt compared against nothing carried out; a new stop
+  suppressed, or reconciled without detaching; a new start suppressed; the admission of
+  a binding request not given back, given back after a change, or never withdrawn. A
+  reconciliation on an unchanged revision changes nothing a process test can see, so
+  that control is killed at the decision.
+- Desktop smoke on the release build of `06d479b`, in the nested compositor: a session
+  in Inference, a Local Tools session that restarts the runtime, **Use Inference** back
+  again; the developer client stops the runtime under intent A and starts it, the
+  session is resumed from the window and is Ready; A sent twice more answers revision 6
+  while the runtime stays ready at revision 7 on the same instance with no new event,
+  and the window still shows the session Ready after a refresh; a new stop takes
+  revision 8, the runtime stops and the window shows the session detached; the terminal
+  opened at launch takes input throughout.
