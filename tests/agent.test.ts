@@ -718,6 +718,33 @@ it('keeps what was read through an authority restart and reads what became of th
   expect(h.shown().turns[0].items).toHaveLength(2);
 });
 
+it('never takes an older record of a turn over a newer one', async () => {
+  const h = await showing();
+  h.controller.setDraft('Say hello.');
+  h.controller.start();
+  h.starts[0].resolve({ id: T1 });
+  await settle();
+  // The follower reads the turn to its end before the list, asked earlier, answers.
+  h.reads[0].resolve(
+    reading(turn(T1, 'completed', 3), [
+      [1, 'text', 'done'],
+      [2, 'completed'],
+    ]),
+  );
+  await settle();
+  expect(h.shown().turns[0].turn?.state).toBe('completed');
+  h.lists[1].resolve(listing([turn(T1, 'running', 2)]));
+  await settle();
+  // What the list read was already behind: the turn stays ended, and is not followed.
+  expect(h.shown().turns[0].turn).toMatchObject({
+    state: 'completed',
+    revision: 3,
+  });
+  expect(h.shown().active).toBeNull();
+  expect(h.reads).toHaveLength(1);
+  expect(h.cancels).toHaveLength(0);
+});
+
 it('says nothing is held for an ended turn the authority kept no output of', async () => {
   const h = await showing([turn(T1, 'completed', 3, { output: false })]);
   // Nothing to read, so nothing is read; and no gap is claimed in output never seen.
@@ -963,6 +990,24 @@ it('holds a bounded amount of everything it shows', async () => {
     await settle();
   }
   expect(many.shown().turns.length).toBeLessThanOrEqual(20);
+  // A full list, and a turn started here that the list does not name yet: still twenty,
+  // before the list is read and after it.
+  const listed = Array.from({ length: 20 }, (_, n) =>
+    turn(parseTurn(100 + n), 'completed', 3, { output: false }),
+  );
+  const full = await showing(listed);
+  expect(full.shown().turns).toHaveLength(20);
+  full.controller.setDraft('one more');
+  full.controller.start();
+  full.starts[0].resolve({ id: T9 });
+  await settle();
+  expect(full.shown().turns).toHaveLength(20);
+  expect(full.shown().turns.at(-1)!.id).toBe(T9);
+  full.lists.at(-1)!.resolve(listing(listed));
+  await settle();
+  expect(full.shown().turns).toHaveLength(20);
+  // The one that runs is the one that is kept.
+  expect(full.shown().turns.at(-1)!.id).toBe(T9);
 
   // Tabs: a bounded number. The oldest idle one gives way; one with a turn does not.
   const tabs = await showing();
