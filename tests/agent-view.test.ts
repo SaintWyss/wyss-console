@@ -499,7 +499,7 @@ it('asks for a cancel and shows the turn as cancelling until the authority says 
   expect(text(turns()[0].querySelector('.turn-head .pill'))).toBe(
     'Interrupted',
   );
-  expect(text(turns()[0])).toContain('Cancelled at your request.');
+  expect(text(turns()[0])).toContain('Stopped at your request.');
   expect(text(turns()[0])).not.toContain('Cancelling…');
   expect(button('Cancel turn')).toBeUndefined();
   expect(button('Cancelling…')).toBeUndefined();

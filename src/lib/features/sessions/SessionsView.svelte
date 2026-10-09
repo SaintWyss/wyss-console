@@ -13,6 +13,7 @@
     chooseFailureMessage,
     failureMessage,
     localTime,
+    composeImpact,
     modeImpact,
     modeLabel,
     modeOffers,
@@ -62,6 +63,12 @@
   const runtime = $derived(page?.runtime ?? { mode: null, workspace: null });
   const offers = $derived(selected ? modeOffers(selected, runtime) : []);
   const running = $derived(page ? runtimeLine(page.runtime) : null);
+  /** What the composer's action does to the runtime that runs now, when it is known. */
+  const restart = $derived(
+    page && sessions.composing
+      ? composeImpact(sessions.mode, sessions.workspace, page.runtime)
+      : null,
+  );
 </script>
 
 <section
@@ -176,13 +183,14 @@
           keeps the mode it is created in.
         </p>
         {#if sessions.mode === 'local_tools'}
-          <p class="composer-note caution" role="note">
+          <p class="composer-note">
             Local Tools gives Codex more to work with, not more authority: every
             command and file change waits for your approval. wyss-control runs
-            one Codex runtime, so if it is running in another mode or for
-            another folder it is restarted and the sessions attached to it are
-            detached.
+            one Codex runtime, in one mode and for one folder at a time.
           </p>
+        {/if}
+        {#if restart}
+          <p class="composer-note caution" role="note">{restart}</p>
         {/if}
         {#if sessions.chooseFailure}
           <p class="composer-note failed" role="alert">
@@ -206,7 +214,11 @@
           sessions.choosing ||
           !sessions.workspace}
         onclick={() => controller.activate()}
-        >{target ? 'Activate' : 'Create & activate'}</button
+        >{restart
+          ? 'Restart Codex & activate'
+          : target
+            ? 'Activate'
+            : 'Create & activate'}</button
       >
       <button
         type="button"

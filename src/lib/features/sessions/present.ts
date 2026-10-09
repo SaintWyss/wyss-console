@@ -93,6 +93,30 @@ export function modeImpact(mode: AgentMode): string {
     ? 'This restarts the managed Codex runtime in Local Tools for this workspace. Sessions attached now are detached. A session created in Inference cannot be resumed in Local Tools. Every command and file change still waits for your approval.'
     : 'This restarts the managed Codex runtime in Inference. Sessions attached now are detached. A session created in Local Tools cannot be resumed in Inference.';
 }
+/**
+ * What activating a session in `mode` does to the runtime that is running now, when it
+ * is known to serve something else. Null when nothing is restarted, or when that cannot
+ * be told yet. Folders are compared as text, so the same folder spelled another way is
+ * announced as a restart that wyss-control then has no need for.
+ */
+export function composeImpact(
+  mode: AgentMode,
+  workspace: string | null,
+  runtime: RuntimeFacts,
+): string | null {
+  if (runtime.mode === null) return null;
+  const elsewhere =
+    mode === 'local_tools' &&
+    workspace !== null &&
+    runtime.workspace !== workspace;
+  if (runtime.mode === mode && !elsewhere) return null;
+  const to = `${AGENT_MODE[mode].label}${mode === 'local_tools' ? ' for this folder' : ''}`;
+  const kept =
+    runtime.mode === mode
+      ? ''
+      : ` A session created in ${AGENT_MODE[runtime.mode].label} cannot be resumed in ${AGENT_MODE[mode].label}.`;
+  return `${runtimeLine(runtime)} now, and wyss-control runs one Codex runtime. Activating this session restarts it in ${to}, and the sessions attached to it are detached.${kept}`;
+}
 /** Which change of mode to offer for a session that is bound and not attached. */
 export function modeOffers(
   session: SessionSummary,
@@ -190,6 +214,11 @@ const SPECIFIC: Partial<
     rejected:
       'Codex refused to resume this session in that mode. A session resumes only in the mode it was created in. The runtime now runs in the mode that was asked for.',
     not_bound: 'This session has no workspace to run a mode for.',
+  },
+  resume: {
+    // A detached session has no mode the authority reports: this is where it shows.
+    rejected:
+      'Codex refused to resume this session. A session resumes only in the mode it was created in: if Codex runs in the other one now, change the mode for this session instead.',
   },
   abandon: {
     not_allowed:

@@ -929,15 +929,13 @@ it('creates a session in Local Tools only when that mode is chosen, and says wha
   modes()[1].click();
   await flush();
   expect(modes().map((m) => m.checked)).toEqual([false, true]);
-  // More capability is not more authority, and the runtime is shared: both are said
+  // More capability is not more authority, and the runtime is one: both are said
   // before anything is asked.
-  const caution = text(composer().querySelector('.composer-note.caution'));
-  expect(caution).toMatch(
-    /every command and file change waits for your approval/,
+  expect(text(composer())).toMatch(
+    /not more authority: every command and file change waits for your approval\. wyss-control runs one Codex runtime, in one mode and for one folder at a time\./,
   );
-  expect(caution).toMatch(
-    /it is restarted and the sessions attached to it are detached/,
-  );
+  // No runtime is running: nothing is restarted, and nothing says it would be.
+  expect(composer().querySelector('.composer-note.caution')).toBeNull();
 
   button('Choose folder', composer()).click();
   await flush();
@@ -954,6 +952,68 @@ it('creates a session in Local Tools only when that mode is chosen, and says wha
   });
   expect(text(view().querySelector('.sessions-status'))).toBe(
     'Starting Codex in Local Tools…',
+  );
+});
+
+it('says what activating does to the runtime that is running, before it is asked', async () => {
+  const composer = () =>
+    view().querySelector<HTMLElement>('.session-composer')!;
+  const caution = () =>
+    text(composer().querySelector('.composer-note.caution'));
+  const modes = () =>
+    Array.from(
+      composer().querySelectorAll<HTMLInputElement>('input[type="radio"]'),
+    );
+  // Codex runs in Local Tools for another folder, with a session attached to it.
+  const ipc = await start({
+    page: () => attachedIn('local_tools'),
+    activate: () => ({ stage: 'runtime_stopping' }),
+  });
+  button('New session').click();
+  await flush();
+  // Inference is what is selected, and here it is the mode that costs a restart.
+  expect(modes().map((m) => m.checked)).toEqual([true, false]);
+  expect(caution()).toBe(
+    'Codex runs in Local Tools for rag-corp now, and wyss-control runs one Codex runtime. Activating this session restarts it in Inference, and the sessions attached to it are detached. A session created in Local Tools cannot be resumed in Inference.',
+  );
+  // The action is named for what it does. Nothing is asked until it is pressed.
+  expect(button('Create & activate', composer())).toBeUndefined();
+  expect(button('Restart Codex & activate', composer())!.disabled).toBe(true);
+  expect(ipc.sent('managed_session_activate')).toHaveLength(0);
+  // Local Tools for another folder is a restart as well: one runtime, one folder.
+  modes()[1].click();
+  await flush();
+  button('Choose folder', composer()).click();
+  await flush();
+  expect(caution()).toBe(
+    'Codex runs in Local Tools for rag-corp now, and wyss-control runs one Codex runtime. Activating this session restarts it in Local Tools for this folder, and the sessions attached to it are detached.',
+  );
+  button('Restart Codex & activate', composer())!.click();
+  await flush();
+  expect(ipc.sent('managed_session_activate')[0].request).toMatchObject({
+    workspace: FOLDER,
+    mode: 'local_tools',
+  });
+  expect(text(view().querySelector('.sessions-status'))).toBe(
+    'Stopping the managed runtime…',
+  );
+});
+
+it('announces no restart when the runtime already runs what is asked', async () => {
+  const composer = () =>
+    view().querySelector<HTMLElement>('.session-composer')!;
+  await start({ page: () => attachedIn('inference') });
+  button('New session').click();
+  await flush();
+  expect(composer().querySelector('.composer-note.caution')).toBeNull();
+  expect(button('Create & activate', composer())).toBeDefined();
+  // Local Tools from a runtime in Inference: said as soon as it is chosen.
+  composer()
+    .querySelectorAll<HTMLInputElement>('input[type="radio"]')[1]
+    .click();
+  await flush();
+  expect(text(composer().querySelector('.composer-note.caution'))).toBe(
+    'Codex runs in Inference now, and wyss-control runs one Codex runtime. Activating this session restarts it in Local Tools for this folder, and the sessions attached to it are detached. A session created in Inference cannot be resumed in Local Tools.',
   );
 });
 

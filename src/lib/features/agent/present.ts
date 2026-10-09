@@ -28,7 +28,8 @@ export const TURN_STATE: Record<
 /** Why a turn ended, in one sentence. Empty when the state already says it. */
 export const TURN_REASON: Record<TurnReason, string> = {
   completed: '',
-  user_cancel: 'Cancelled at your request.',
+  // Both a cancelled turn and a denied command end this way at the authority.
+  user_cancel: 'Stopped at your request.',
   lease_expired: 'Its execution lease expired, so wyss-control stopped it.',
   lease_revoked: 'Its execution lease was revoked, so wyss-control stopped it.',
   session_closed: 'The session was closed while it ran.',

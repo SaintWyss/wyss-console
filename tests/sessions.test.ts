@@ -760,4 +760,9 @@ it('words sessions, hints and failures without protocol text', () => {
     'was not closed',
   );
   expect(failureMessage('close', 'changed')).toContain('was not closed');
+  // A detached session has no mode to show: a resume the provider refused says where
+  // to look, and what to do about it.
+  expect(failureMessage('resume', 'rejected')).toBe(
+    'The session was not resumed. Codex refused to resume this session. A session resumes only in the mode it was created in: if Codex runs in the other one now, change the mode for this session instead.',
+  );
 });
