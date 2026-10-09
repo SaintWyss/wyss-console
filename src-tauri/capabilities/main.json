@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Local application information, one read of the authority projection, one read and five intents for managed sessions, one native folder dialog, and narrow human-terminal operations for the main window.",
+  "description": "Local application information, one read of the authority projection, one read and five intents for managed sessions, one native folder dialog, two reads and two intents for managed turns, and narrow human-terminal operations for the main window.",
   "windows": ["main"],
   "permissions": [
     "allow-get-app-info",
@@ -13,6 +13,10 @@
     "allow-managed-session-activate",
     "allow-managed-session-abandon",
     "allow-choose-workspace",
+    "allow-managed-turns",
+    "allow-managed-turn-read",
+    "allow-managed-turn-start",
+    "allow-managed-turn-cancel",
     "allow-create-terminal",
     "allow-terminal-write",
     "allow-terminal-read-output",

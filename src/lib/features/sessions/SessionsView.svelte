@@ -3,6 +3,7 @@
     summarizeAuthority,
     type AuthorityObservation,
   } from '../../shell/authority';
+  import type { SessionSummary } from '../../contracts/sessions';
   import type { SessionsController, SessionsState } from './controller';
   import {
     agentName,
@@ -23,12 +24,15 @@
     controller,
     authority,
     visible,
+    onagent,
   }: {
     sessions: SessionsState;
     controller: SessionsController;
     /** The shell's one authority observation. Read here for wording only. */
     authority: AuthorityObservation;
     visible: boolean;
+    /** Opens a session in the Agent view. Offered for a session with a workspace. */
+    onagent?: (session: SessionSummary) => void;
   } = $props();
 
   const connected = $derived(sessions.link === 'connected');
@@ -350,6 +354,14 @@
               </div>
             {/if}
             <div class="session-actions">
+              {#if onagent && selected.state === 'prepared' && selected.workspace}
+                <button
+                  type="button"
+                  class="action"
+                  class:primary={selected.binding === 'bound_attached'}
+                  onclick={() => onagent(selected)}>Open agent</button
+                >
+              {/if}
               {#if selected.activatable}
                 <button
                   type="button"

@@ -8,6 +8,7 @@ mod authority;
 mod glass;
 mod sessions;
 mod terminal;
+mod turns;
 mod workspace;
 
 #[tauri::command]
@@ -52,13 +53,16 @@ fn build_main_window(
 
 pub fn run() {
     let stopping = Arc::new(AtomicBool::new(false));
+    let managed_sessions = sessions::SessionService::from_environment();
     tauri::Builder::default()
         .setup(|app| open_main_window(app))
         .manage(TerminalService::default())
         // Read-only and independent: no terminal operation waits on, or learns of, it.
         .manage(authority::AuthorityService::from_environment())
         // Its own short-lived connections: the observer above is never borrowed.
-        .manage(sessions::SessionService::from_environment())
+        // Turns send their intents through the session service and stop with it.
+        .manage(turns::TurnService::new(managed_sessions.clone()))
+        .manage(managed_sessions)
         // What the native folder dialog returned: the only paths an activation may name.
         .manage(workspace::WorkspaceSelections::default())
         .invoke_handler(tauri::generate_handler![
@@ -71,6 +75,10 @@ pub fn run() {
             sessions::managed_session_activate,
             sessions::managed_session_abandon,
             workspace::choose_workspace,
+            turns::managed_turns,
+            turns::managed_turn_read,
+            turns::managed_turn_start,
+            turns::managed_turn_cancel,
             terminal::create_terminal,
             terminal::terminal_write,
             terminal::terminal_read_output,

@@ -28,7 +28,7 @@
 //! indeterminate this desktop sends no binding request at all for that session; the one
 //! way out is `abandon`, which the authority audits and which is the user's to ask for.
 use super::{
-    service::{RESUME_LEASE_SECONDS, SessionService, session_revision},
+    service::{Grant, RESUME_LEASE_SECONDS, SessionService, session_revision},
     view::{ActivationProgress, ActivationStage, SessionError, SessionFailure, SessionReceipt},
 };
 use crate::{
@@ -114,8 +114,11 @@ impl SessionService {
                             client,
                             &id,
                             expected_revision,
-                            ExecutionScope::SessionCreate,
-                            CREATE_LEASE_SECONDS,
+                            Grant {
+                                scope: ExecutionScope::SessionCreate,
+                                ttl_seconds: CREATE_LEASE_SECONDS,
+                                hold: false,
+                            },
                             |client| client.binding_create(create.clone()),
                         )
                         .map_err(SessionError::binding)?;
@@ -150,8 +153,11 @@ impl SessionService {
                             client,
                             &id,
                             expected_revision,
-                            ExecutionScope::SessionResume,
-                            RESUME_LEASE_SECONDS,
+                            Grant {
+                                scope: ExecutionScope::SessionResume,
+                                ttl_seconds: RESUME_LEASE_SECONDS,
+                                hold: false,
+                            },
                             |client| client.binding_resume(resume.clone()),
                         )?;
                         // What the session is now is read, not taken from the receipt: a

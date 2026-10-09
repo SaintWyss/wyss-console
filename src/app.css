@@ -331,7 +331,8 @@ button:focus-visible {
 }
 /* A view that is not shown stays mounted and takes no space. */
 .terminal-feature[hidden],
-.sessions-feature[hidden] {
+.sessions-feature[hidden],
+.agent-feature[hidden] {
   display: none;
 }
 .workspace-toolbar {
@@ -501,7 +502,8 @@ button:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.sessions-feature .action {
+.sessions-feature .action,
+.agent-feature .action {
   flex-shrink: 0;
   min-height: 36px;
   padding: 0 14px;
@@ -509,28 +511,34 @@ button:focus-visible {
   white-space: nowrap;
   transition: background-color 150ms ease;
 }
-.sessions-feature .action:hover:not(:disabled) {
+.sessions-feature .action:hover:not(:disabled),
+.agent-feature .action:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
 }
-.sessions-feature .action:disabled {
+.sessions-feature .action:disabled,
+.agent-feature .action:disabled {
   opacity: 0.5;
 }
-.sessions-feature .action.primary {
+.sessions-feature .action.primary,
+.agent-feature .action.primary {
   border-color: rgba(95, 212, 245, 0.35);
   background: var(--accent-soft);
   color: var(--accent-strong);
   font-weight: 600;
 }
-.sessions-feature .action.primary:hover:not(:disabled) {
+.sessions-feature .action.primary:hover:not(:disabled),
+.agent-feature .action.primary:hover:not(:disabled) {
   background: rgba(95, 212, 245, 0.22);
 }
-.sessions-feature .action.danger {
+.sessions-feature .action.danger,
+.agent-feature .action.danger {
   border-color: rgba(248, 113, 113, 0.3);
   background: rgba(248, 113, 113, 0.1);
   color: var(--error-text);
   font-weight: 600;
 }
-.sessions-feature .action.danger:hover:not(:disabled) {
+.sessions-feature .action.danger:hover:not(:disabled),
+.agent-feature .action.danger:hover:not(:disabled) {
   background: rgba(248, 113, 113, 0.18);
 }
 .sessions-status {
@@ -827,6 +835,334 @@ button:focus-visible {
   }
   .sessions-heading {
     flex-basis: 100%;
+  }
+}
+
+/* Agent: the turns of one managed session, as the authority holds them */
+.agent-feature {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  container-type: inline-size;
+}
+.agent-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.agent-tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.agent-tabs::-webkit-scrollbar {
+  display: none;
+}
+.agent-tab {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  max-width: 220px;
+  border-radius: var(--radius-sm);
+}
+.agent-tab:has([aria-selected='true']) {
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+}
+.agent-tab > button {
+  min-height: 32px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-tab > button:hover:not(:disabled) {
+  color: var(--text);
+}
+.agent-tab [aria-selected='true'] {
+  color: var(--text);
+  font-weight: 600;
+}
+.agent-tab .tab-close {
+  flex-shrink: 0;
+  min-width: 28px;
+  padding: 0 6px;
+  color: var(--faint);
+  font-size: 16px;
+  line-height: 1;
+}
+.agent-tab .tab-close:disabled {
+  opacity: 0.4;
+}
+.agent-session {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+}
+.agent-session h2 {
+  margin: 0;
+  flex-shrink: 0;
+  max-width: 40%;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-session .pill {
+  flex-shrink: 0;
+}
+.agent-path {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.agent-who {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--faint);
+}
+/* The one solid region of the view: an answer stays legible over any desktop. */
+.agent-transcript {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  border-radius: var(--radius-lg);
+  background: var(--terminal-bg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-line-strong) transparent;
+}
+.agent-blank {
+  margin: auto;
+  max-width: 44ch;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+.agent-blank .empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--glass-line);
+}
+.turn:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.turn-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 12px;
+  color: var(--faint);
+}
+.turn-reason {
+  flex: 1 1 200px;
+  min-width: 0;
+  color: var(--muted);
+}
+.turn-prompt,
+.turn-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.turn-prompt {
+  align-self: flex-end;
+  max-width: min(100%, 72ch);
+  padding: 8px 12px;
+  border: 1px solid rgba(95, 212, 245, 0.22);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+.turn-who {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+/* What was written, as it was written: line breaks kept, nothing interpreted. */
+.turn-text {
+  max-width: 88ch;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.turn-note,
+.turn-gap,
+.turn-activity {
+  font-size: 12px;
+  color: var(--muted);
+}
+.turn-gap {
+  padding: 4px 10px;
+  border-left: 2px solid var(--warn);
+  color: var(--text);
+}
+.turn-activity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+}
+.turn-activity.live {
+  font-family: inherit;
+  color: var(--text);
+}
+.turn-activity.live .dot {
+  flex-shrink: 0;
+  background: var(--pending);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.turn-approval {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 72ch;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(251, 191, 36, 0.08);
+}
+.approval-title {
+  font-weight: 600;
+  color: var(--warn);
+}
+.turn-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  max-width: 88ch;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--error-text);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: var(--radius-md);
+  background: rgba(248, 113, 113, 0.1);
+}
+.turn-alert p {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+/* An outcome that is not known is a caution, not an error. */
+.turn-alert.unknown {
+  color: var(--text);
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.35);
+}
+.agent-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.03);
+}
+.agent-composer:focus-within {
+  border-color: var(--glass-line-strong);
+}
+.agent-composer textarea {
+  width: 100%;
+  min-height: 64px;
+  max-height: 30dvh;
+  padding: 4px 2px;
+  resize: none;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  field-sizing: content;
+}
+.agent-composer textarea::placeholder {
+  color: var(--faint);
+}
+.agent-composer textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.composer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.composer-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.composer-hint.warn {
+  color: var(--warn);
+}
+/* Not enough room on one line: the session's path steps back, then the hint wraps. */
+@container (max-width: 520px) {
+  .agent-path,
+  .agent-who {
+    display: none;
+  }
+  .agent-session h2 {
+    max-width: none;
+    flex: 1;
+  }
+  .composer-row {
+    flex-wrap: wrap;
+  }
+  .composer-hint {
+    flex-basis: 100%;
+  }
+  .composer-row .action {
+    flex: 1;
   }
 }
 

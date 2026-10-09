@@ -1,0 +1,107 @@
+{
+  "empty": {
+    "schema_version": 1,
+    "head": "9",
+    "session": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "state": "prepared",
+      "revision": 1,
+      "binding": "bound_attached",
+      "workspace": "/home/dev/rag-corp"
+    },
+    "turns": [],
+    "runnable": true,
+    "partial": false
+  },
+  "list": {
+    "schema_version": 1,
+    "head": "14",
+    "session": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "state": "prepared",
+      "revision": 1,
+      "binding": "bound_attached",
+      "workspace": "/home/dev/rag-corp"
+    },
+    "turns": [
+      {
+        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "session": "22222222-2222-4222-8222-222222222222",
+        "state": "interrupted",
+        "revision": 4,
+        "started_at": "2026-10-09T10:05:00Z",
+        "updated_at": "2026-10-09T10:05:40Z",
+        "ended_at": "2026-10-09T10:05:40Z",
+        "reason": "user_cancel",
+        "output": true,
+        "cancellable": false
+      },
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "session": "22222222-2222-4222-8222-222222222222",
+        "state": "completed",
+        "revision": 3,
+        "started_at": "2026-10-09T10:00:00Z",
+        "updated_at": "2026-10-09T10:00:30Z",
+        "ended_at": "2026-10-09T10:00:30Z",
+        "reason": "completed",
+        "output": false,
+        "cancellable": false
+      }
+    ],
+    "runnable": true,
+    "partial": false
+  },
+  "view": {
+    "schema_version": 1,
+    "turn": {
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "session": "22222222-2222-4222-8222-222222222222",
+      "state": "running",
+      "revision": 2,
+      "started_at": "2026-10-09T10:10:00Z",
+      "updated_at": "2026-10-09T10:10:01Z",
+      "ended_at": null,
+      "reason": null,
+      "output": true,
+      "cancellable": true
+    },
+    "events": [
+      { "sequence": "1", "kind": "started", "text": null },
+      { "sequence": "2", "kind": "thinking", "text": null },
+      { "sequence": "3", "kind": "text", "text": "Hello, " },
+      { "sequence": "4", "kind": "text", "text": "world." },
+      { "sequence": "5", "kind": "message_end", "text": null }
+    ],
+    "next": "5",
+    "more": false,
+    "gap": false,
+    "approval": null
+  },
+  "waiting": {
+    "schema_version": 1,
+    "turn": {
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "session": "22222222-2222-4222-8222-222222222222",
+      "state": "running",
+      "revision": 2,
+      "started_at": "2026-10-09T10:10:00Z",
+      "updated_at": "2026-10-09T10:10:01Z",
+      "ended_at": null,
+      "reason": null,
+      "output": true,
+      "cancellable": true
+    },
+    "events": [
+      { "sequence": "6", "kind": "command_proposed", "text": null },
+      { "sequence": "7", "kind": "approval_required", "text": null }
+    ],
+    "next": "7",
+    "more": false,
+    "gap": false,
+    "approval": {
+      "kind": "command_execution",
+      "expires_at": "2026-10-09T10:15:00Z"
+    }
+  }
+}

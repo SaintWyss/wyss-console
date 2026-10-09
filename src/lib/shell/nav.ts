@@ -30,9 +30,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   {
     id: 'agents',
     label: 'Agents',
-    subtitle: 'Coming soon',
+    subtitle: 'Managed turns',
     icon: 'M5 8h14v11H5zM12 4v4M9.5 13h.01M14.5 13h.01',
-    available: false,
+    available: true,
   },
   {
     id: 'approvals',

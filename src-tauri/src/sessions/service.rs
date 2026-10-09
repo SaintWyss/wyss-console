@@ -18,6 +18,11 @@
 //! what it was granted. A lease somebody else holds is used as it is and never touched.
 //! Every one of those steps is a request the authority may refuse.
 //!
+//! **A lease that is kept.** A managed turn runs under the lease it was admitted under
+//! for as long as it runs, so that one is not given back when the turn is admitted: it
+//! is held until the turn has ended, and it is the turn's time budget if nobody is
+//! there to give it back.
+//!
 //! **A lease that could not be given back.** When the answer to a grant or a revoke is
 //! lost, the lease is remembered until the moment it would have expired by itself. The
 //! next call for that session settles it first, with the identities it already used.
@@ -25,7 +30,7 @@ use super::view::{
     PAGE_SCHEMA_VERSION, PAGE_SIZE, SessionError, SessionFailure, SessionPage, SessionReceipt,
     SessionSummary,
 };
-use crate::contracts::identities::ExecutionLeaseId;
+use crate::contracts::identities::{ExecutionLeaseId, ManagedTurnId};
 use crate::{
     contracts::{
         Sequence, WireUuid,
@@ -67,6 +72,23 @@ struct LeaseSlot {
     /// Names the revoke, however many times it has to be asked.
     revoke: WireUuid,
     until: Instant,
+    /// Kept on purpose, for a turn that runs under it. Not settled until it is released.
+    held: Option<Held>,
+}
+/// What a lease is being kept for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Held {
+    /// The turn admitted under it, once the authority named it.
+    pub turn: Option<ManagedTurnId>,
+}
+
+/// The lease a gated operation may ask the authority for.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Grant {
+    pub scope: ExecutionScope,
+    pub ttl_seconds: u32,
+    /// Keep the lease after the operation was admitted, instead of giving it back.
+    pub hold: bool,
 }
 
 /// Counters of what the service did. For tests and diagnostics: none of it is shown.
@@ -125,8 +147,8 @@ impl SessionService {
         self.inner.stop.store(true, Ordering::Release);
     }
 
-    /// One connection, from its handshake to the end of `work`.
-    pub(super) fn call<T>(
+    /// One connection, from its handshake to the end of `work`. One at a time.
+    pub(crate) fn call<T>(
         &self,
         work: impl FnOnce(&mut ControlClient) -> Result<T, SessionError>,
     ) -> Result<T, SessionError> {
@@ -135,7 +157,12 @@ impl SessionService {
             .turn
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if self.inner.stop.load(Ordering::Acquire) {
+        work(&mut self.connect()?)
+    }
+    /// A greeted connection to the authority, cancelled when the service stops. The
+    /// caller owns how many it holds at once.
+    pub(crate) fn connect(&self) -> Result<ControlClient, SessionError> {
+        if self.stopping() {
             return Err(SessionError::new(SessionFailure::Unavailable));
         }
         let root = self
@@ -144,16 +171,21 @@ impl SessionService {
             .as_deref()
             .ok_or(SessionError::of(ControlError::UnsafePath))?;
         // Whatever kept an authority from greeting, nothing was sent to one.
-        let mut client = ControlClient::connect_cancellable(root, self.inner.stop.clone())
-            .map_err(|error| SessionError {
-                cause: Some(error),
-                ..SessionError::new(match SessionError::of(error).code {
-                    SessionFailure::Incompatible => SessionFailure::Incompatible,
-                    _ => SessionFailure::Unavailable,
-                })
+        let client =
+            ControlClient::connect_cancellable(root, self.inner.stop.clone()).map_err(|error| {
+                SessionError {
+                    cause: Some(error),
+                    ..SessionError::new(match SessionError::of(error).code {
+                        SessionFailure::Incompatible => SessionFailure::Incompatible,
+                        _ => SessionFailure::Unavailable,
+                    })
+                }
             })?;
         self.inner.connections.fetch_add(1, Ordering::AcqRel);
-        work(&mut client)
+        Ok(client)
+    }
+    pub(crate) fn stopping(&self) -> bool {
+        self.inner.stop.load(Ordering::Acquire)
     }
 
     /// The newest sessions, or those created before `before`.
@@ -237,8 +269,11 @@ impl SessionService {
                 client,
                 &id,
                 expected_revision,
-                ExecutionScope::SessionResume,
-                RESUME_LEASE_SECONDS,
+                Grant {
+                    scope: ExecutionScope::SessionResume,
+                    ttl_seconds: RESUME_LEASE_SECONDS,
+                    hold: false,
+                },
                 |client| client.binding_resume(request.clone()),
             )
             .map(|_| SessionReceipt { id: id.clone() })
@@ -249,16 +284,21 @@ impl SessionService {
     ///
     /// An intent the authority already holds, or a lease already in place, needs nothing
     /// more. Only when the gate names a lease as what is missing is one asked for: that
-    /// scope alone, for `ttl_seconds`, and given back as soon as `ask` was answered.
-    pub(super) fn gated<T>(
+    /// scope alone, for `ttl_seconds`, and given back as soon as `ask` was answered,
+    /// unless the grant says to hold it and the operation was admitted.
+    pub(crate) fn gated<T>(
         &self,
         client: &mut ControlClient,
         id: &ManagedSessionId,
         expected_revision: u64,
-        scope: ExecutionScope,
-        ttl_seconds: u32,
+        grant: Grant,
         mut ask: impl FnMut(&mut ControlClient) -> ControlResult<T>,
     ) -> Result<T, SessionError> {
+        let Grant {
+            scope,
+            ttl_seconds,
+            hold,
+        } = grant;
         match ask(client) {
             Ok(value) => return Ok(value),
             Err(ControlError::GateDenied) => (),
@@ -291,6 +331,7 @@ impl SessionService {
                 lease: None,
                 revoke: fresh(),
                 until: now + Duration::from_secs(ttl_seconds.into()) + LEASE_MARGIN,
+                held: None,
             },
         );
         drop(slots);
@@ -310,8 +351,20 @@ impl SessionService {
         let reason = matches!(result, Err(ControlError::GateDenied))
             .then(|| gate(client, id, scope))
             .flatten();
-        // The lease was asked for this one action.
-        self.release(client, id);
+        // An answer that never came may be an admission: a lease to be held stays, and
+        // the same intent tells later what was admitted under it.
+        let admitted = match &result {
+            Ok(_) => true,
+            Err(error) => SessionError::unknown(*error),
+        };
+        if hold && admitted {
+            if let Some(slot) = self.slots().get_mut(&key(id)) {
+                slot.held = Some(Held { turn: None });
+            }
+        } else {
+            // The lease was asked for this one action.
+            self.release(client, id);
+        }
         match result {
             Ok(value) => Ok(value),
             Err(ControlError::GateDenied) => Err(denied(reason)),
@@ -353,13 +406,40 @@ impl SessionService {
             }
         }
     }
+    /// The lease this desktop keeps for a turn of the session, if it keeps one.
+    pub(crate) fn held(&self, id: &ManagedSessionId) -> Option<Held> {
+        self.slots()
+            .get(&key(id))
+            .and_then(|slot| slot.held.clone())
+    }
+    /// Names the turn that was admitted under the lease being kept.
+    pub(crate) fn hold_for(&self, id: &ManagedSessionId, turn: &ManagedTurnId) {
+        if let Some(held) = self
+            .slots()
+            .get_mut(&key(id))
+            .and_then(|slot| slot.held.as_mut())
+        {
+            held.turn = Some(turn.clone());
+        }
+    }
+    /// Gives back the lease kept for a turn: the turn has ended, or was never admitted.
+    /// Without an answer it stays on record, no longer kept, and is settled like any other.
+    pub(crate) fn release_held(&self, client: &mut ControlClient, id: &ManagedSessionId) {
+        match self.slots().get_mut(&key(id)) {
+            Some(slot) if slot.held.is_some() => slot.held = None,
+            _ => return,
+        }
+        self.settle(client, id);
+    }
     /// Settles what an earlier call for this session could not: a grant or a revoke
     /// whose answer never came. Nothing here is reported: it ends when the authority
-    /// answers or when the lease has expired by itself.
-    pub(super) fn settle(&self, client: &mut ControlClient, id: &ManagedSessionId) {
+    /// answers or when the lease has expired by itself. A lease kept for a turn is not
+    /// touched.
+    pub(crate) fn settle(&self, client: &mut ControlClient, id: &ManagedSessionId) {
         let Some((grant, known, until)) = self
             .slots()
             .get(&key(id))
+            .filter(|slot| slot.held.is_none() || Instant::now() >= slot.until)
             .map(|slot| (slot.grant.clone(), slot.lease.is_some(), slot.until))
         else {
             return;
@@ -407,7 +487,7 @@ fn fresh() -> WireUuid {
 }
 
 /// A managed session is at revision one (prepared) or two (closed).
-pub(super) fn session_revision(revision: u64) -> Result<(), SessionError> {
+pub(crate) fn session_revision(revision: u64) -> Result<(), SessionError> {
     if (1..=2).contains(&revision) {
         Ok(())
     } else {

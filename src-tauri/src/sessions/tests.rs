@@ -20,13 +20,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-fn uuid() -> WireUuid {
+pub(crate) fn uuid() -> WireUuid {
     WireUuid::try_from(uuid::Uuid::new_v4().to_string()).unwrap()
 }
-fn session_id() -> ManagedSessionId {
+pub(crate) fn session_id() -> ManagedSessionId {
     ManagedSessionId::parse(uuid().as_str()).unwrap()
 }
-fn record(id: &ManagedSessionId, sequence: u64) -> ManagedSessionRecord {
+pub(crate) fn record(id: &ManagedSessionId, sequence: u64) -> ManagedSessionRecord {
     serde_json::from_value(json!({
         "managed_session_id": id, "adapter_id": "codex", "runtime_kind": "codex",
         "control_state": "prepared", "revision": 1,
@@ -35,7 +35,7 @@ fn record(id: &ManagedSessionId, sequence: u64) -> ManagedSessionRecord {
     }))
     .unwrap()
 }
-fn binding(id: &ManagedSessionId) -> SessionBinding {
+pub(crate) fn binding(id: &ManagedSessionId) -> SessionBinding {
     serde_json::from_value(json!({
         "managed_session_id": id, "adapter_id": "codex", "runtime_kind": "codex",
         "runtime_session_id": "0199a213-81c0-7800-8aa1-bbab2a035a53",
@@ -53,7 +53,7 @@ fn unbound(id: &ManagedSessionId) -> ResultValue {
         .unwrap(),
     )
 }
-fn lease(session: &ManagedSessionId) -> ExecutionLease {
+pub(crate) fn lease(session: &ManagedSessionId) -> ExecutionLease {
     serde_json::from_value(json!({
         "lease_id": uuid(), "session_id": session, "state": "active",
         "scopes": ["session_resume"], "revision": 1,
@@ -71,31 +71,33 @@ fn gate(session: &ManagedSessionId, reason: GateReason) -> ResultValue {
 }
 
 /// What the peer does with one request after the handshake.
-enum Reply {
+pub(crate) enum Reply {
     Answer(Box<ControlResult<ResultValue>>),
     /// Takes the request and closes the connection without answering.
     HangUp,
     /// Takes the request and never answers.
     Silent,
 }
-fn answer(outcome: ControlResult<ResultValue>) -> Reply {
+pub(crate) fn answer(outcome: ControlResult<ResultValue>) -> Reply {
     Reply::Answer(Box::new(outcome))
 }
-type Script = Box<dyn FnMut(&Operation) -> Reply + Send>;
+pub(crate) type Script = Box<dyn FnMut(&Operation) -> Reply + Send>;
 
 /// A private runtime directory with one scripted authority on its socket.
-struct Peer {
-    root: PathBuf,
+pub(crate) struct Peer {
+    pub(crate) root: PathBuf,
     /// Every request after a handshake, in arrival order.
     log: Arc<Mutex<Vec<Operation>>>,
-    hellos: Arc<Mutex<u64>>,
+    pub(crate) hellos: Arc<Mutex<u64>>,
     /// Connections accepted, whether or not anything was said on them.
-    accepted: Arc<Mutex<u64>>,
+    pub(crate) accepted: Arc<Mutex<u64>>,
+    /// The durable head the next handshake reports.
+    pub(crate) head: Arc<Mutex<u64>>,
     stop: Arc<AtomicBool>,
     accept: Option<thread::JoinHandle<()>>,
 }
 impl Peer {
-    fn start(hello: ControlResult<()>, mut script: Script) -> Self {
+    pub(crate) fn start(hello: ControlResult<()>, mut script: Script) -> Self {
         let root = std::env::temp_dir().join(format!("wyss-{}", uuid::Uuid::new_v4()));
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         fs::DirBuilder::new()
@@ -112,9 +114,10 @@ impl Peer {
             Arc::new(Mutex::new(0)),
             Arc::new(AtomicBool::new(false)),
         );
+        let head = Arc::new(Mutex::new(41));
         let accept = thread::spawn({
             let (log, hellos, stop) = (log.clone(), hellos.clone(), stop.clone());
-            let accepted = accepted.clone();
+            let (accepted, head) = (accepted.clone(), head.clone());
             move || {
                 let instance = uuid();
                 let stream_id = uuid();
@@ -140,7 +143,7 @@ impl Peer {
                                     service_version: "9.9.9-test".into(),
                                     storage_schema_version: 7,
                                     stream_id: stream_id.clone(),
-                                    last_sequence: "41".parse().ok(),
+                                    last_sequence: head.lock().unwrap().to_string().parse().ok(),
                                     prepared_count: 0,
                                     closed_count: 0,
                                 })
@@ -178,20 +181,21 @@ impl Peer {
             log,
             hellos,
             accepted,
+            head,
             stop,
             accept: Some(accept),
         }
     }
-    fn canonical(script: impl FnMut(&Operation) -> Reply + Send + 'static) -> Self {
+    pub(crate) fn canonical(script: impl FnMut(&Operation) -> Reply + Send + 'static) -> Self {
         Self::start(Ok(()), Box::new(script))
     }
-    fn service(&self) -> SessionService {
+    pub(crate) fn service(&self) -> SessionService {
         SessionService::new(Some(self.root.clone()))
     }
-    fn requests(&self) -> Vec<Operation> {
+    pub(crate) fn requests(&self) -> Vec<Operation> {
         self.log.lock().unwrap().clone()
     }
-    fn methods(&self) -> Vec<String> {
+    pub(crate) fn methods(&self) -> Vec<String> {
         self.requests()
             .iter()
             .map(|op| {
@@ -724,7 +728,7 @@ fn every_authority_error_has_one_product_meaning() {
         (E::HandshakeRequired, F::Internal, false),
         (E::FrameTooLarge, F::Internal, false),
         (E::BindingAlreadyExists, F::AlreadyBound, false),
-        (E::TurnNotFound, F::Internal, false),
+        (E::TurnNotFound, F::NotFound, false),
         (E::ApprovalNotFound, F::Internal, false),
     ];
     for (error, code, retry) in table {

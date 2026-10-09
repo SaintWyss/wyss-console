@@ -12,6 +12,7 @@ mod activation;
 mod service;
 mod view;
 
+pub(crate) use service::{Grant, Held, session_revision};
 pub use service::{SessionService, SessionStats};
 pub use view::{
     ActivationProgress, ActivationStage, PAGE_SIZE, SessionError, SessionFailure, SessionPage,
@@ -19,4 +20,4 @@ pub use view::{
 };
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

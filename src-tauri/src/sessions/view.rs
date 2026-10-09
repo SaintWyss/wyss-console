@@ -150,7 +150,7 @@ impl SessionError {
             cause: None,
         }
     }
-    pub(super) fn of(error: ControlError) -> Self {
+    pub(crate) fn of(error: ControlError) -> Self {
         use ControlError as E;
         use SessionFailure as F;
         let code = match error {
@@ -163,7 +163,7 @@ impl SessionError {
             | E::UnsafePath
             | E::PeerRejected => F::Unavailable,
             E::ProtocolVersionUnsupported | E::StorageIncompatible => F::Incompatible,
-            E::SessionNotFound => F::NotFound,
+            E::SessionNotFound | E::TurnNotFound => F::NotFound,
             E::StaleRevision => F::Changed,
             E::InvalidTransition => F::NotAllowed,
             E::BindingNotFound => F::NotBound,
@@ -193,11 +193,11 @@ impl SessionError {
         }
     }
     /// Whether nothing was answered: the request may or may not have been taken.
-    pub(super) fn unknown(error: ControlError) -> bool {
+    pub(crate) fn unknown(error: ControlError) -> bool {
         Self::of(error).code == SessionFailure::Unavailable
     }
     /// A denial by the execution gate, named by the authority's own diagnostic.
-    pub(super) fn denied(reason: GateReason) -> Self {
+    pub(crate) fn denied(reason: GateReason) -> Self {
         use GateReason as R;
         use SessionFailure as F;
         let code = match reason {
@@ -206,6 +206,14 @@ impl SessionError {
             | R::RuntimeNotReady
             | R::RuntimeIdentityMissing
             | R::RuntimeIncompatible => F::RuntimeUnavailable,
+            // The session is not attached to the runtime that would run the turn.
+            R::BindingDetached
+            | R::AttachmentRuntimeMismatch
+            | R::InferenceProfileMissing
+            | R::LocalToolsProfileMissing
+            | R::RuntimeSafetyProfileMissing => F::RuntimeUnavailable,
+            R::BindingNotFound => F::NotBound,
+            R::ActiveTurnExists => F::Busy,
             R::SessionNotFound => F::NotFound,
             R::SessionNotPrepared => F::NotAllowed,
             R::AuthorityUnavailable => F::Unavailable,
