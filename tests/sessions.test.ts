@@ -649,7 +649,10 @@ it('words sessions, hints and failures without protocol text', () => {
   expect(sessionLabel({ ...bound, workspace: '/' })).toBe('Session 22222222');
   expect(resumeHint(bound, true)).toBeNull();
   expect(resumeHint(bound, false)).toContain('not ready');
-  expect(resumeHint(fresh, true)).toContain('No workspace');
+  expect(resumeHint(fresh, true)).toContain('needs a workspace bound');
+  expect(resumeHint({ ...fresh, binding: 'indeterminate' }, true)).toContain(
+    'until the workspace binding is settled',
+  );
   expect(resumeHint(closed, true)).toContain('closed');
   expect(
     resumeHint({ ...bound, binding: 'bound_attached', resumable: false }, true),

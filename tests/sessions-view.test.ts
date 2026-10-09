@@ -250,7 +250,7 @@ it('shows the details of the selected session with the actions its state allows'
   await flush();
   expect(button('Resume', details()!).disabled).toBe(true);
   expect(details()!.querySelector('.session-hint')?.textContent).toContain(
-    'No workspace is bound',
+    'Resume needs a workspace bound to the session.',
   );
   expect(button('Close', details()!).disabled).toBe(false);
   // Closed: nothing to do with it.
@@ -261,10 +261,20 @@ it('shows the details of the selected session with the actions its state allows'
   expect(details()!.querySelector('.session-hint')?.textContent).toContain(
     'closed session cannot be resumed',
   );
-  // Selecting it again closes the panel.
+  // Selecting it again hides the panel, and so does the panel's own control.
   rows()[2].click();
   await flush();
   expect(details()).toBeNull();
+  rows()[1].click();
+  await flush();
+  details()!
+    .querySelector<HTMLButtonElement>('[aria-label="Hide details"]')!
+    .click();
+  await flush();
+  expect(details()).toBeNull();
+  expect(rows().some((r) => r.getAttribute('aria-pressed') === 'true')).toBe(
+    false,
+  );
 });
 
 it('does not offer resume while the agent runtime is not ready', async () => {

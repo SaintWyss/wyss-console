@@ -33,7 +33,7 @@ export const BINDING: Record<
   unbound: {
     label: 'No workspace',
     tone: 'idle',
-    detail: 'No workspace is bound to this session yet.',
+    detail: 'No workspace is bound to this session.',
   },
   creating: {
     label: 'Binding',
@@ -120,7 +120,11 @@ export function resumeHint(
   if (session.state === 'closed') return 'A closed session cannot be resumed.';
   if (session.binding === 'bound_attached')
     return 'Already attached to the running agent.';
-  if (!session.resumable) return BINDING[session.binding].detail;
+  // The binding itself is described next to it; this says what it means for Resume.
+  if (!session.resumable)
+    return session.binding === 'unbound'
+      ? 'Resume needs a workspace bound to the session.'
+      : 'Resume has to wait until the workspace binding is settled.';
   if (!agentReady)
     return 'The agent runtime is not ready, so there is nothing to attach to.';
   return null;

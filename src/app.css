@@ -718,6 +718,21 @@ button:focus-visible {
   flex: 1;
   min-width: 0;
 }
+.details-close {
+  flex-shrink: 0;
+  min-width: 28px;
+  min-height: 28px;
+  margin: -4px -6px -4px -4px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  font-size: 16px;
+  line-height: 1;
+}
+.details-close:hover {
+  color: var(--text);
+}
 .session-facts {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -761,6 +776,15 @@ button:focus-visible {
   .session-details {
     order: -1;
     max-height: 50dvh;
+  }
+}
+/* At the narrowest windows the heading takes its own line instead of one letter. */
+@container (max-width: 340px) {
+  .sessions-toolbar {
+    flex-wrap: wrap;
+  }
+  .sessions-heading {
+    flex-basis: 100%;
   }
 }
 

@@ -236,6 +236,12 @@
               <span class="dot" aria-hidden="true"></span>
               {STATE[selected.state].label}
             </span>
+            <button
+              type="button"
+              class="details-close"
+              aria-label="Hide details"
+              onclick={() => controller.select(null)}>×</button
+            >
           </div>
           {#if sessions.confirmingClose === selected.id}
             <div class="close-confirm" role="group" aria-label="Confirm close">
