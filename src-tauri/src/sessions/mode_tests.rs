@@ -542,6 +542,70 @@ fn a_runtime_is_never_asked_to_stop_while_a_turn_is_read_as_running() {
 }
 
 #[test]
+fn a_stop_the_authority_refuses_under_a_turn_is_said_as_a_running_turn_and_changes_nothing() {
+    let session = session_id();
+    // The desktop reads that no turn runs. By the time its stop arrives one was admitted,
+    // and the authority, not the desktop, is what keeps the runtime up.
+    let idle = Turn::default();
+    for (generation, mode) in [
+        (None, AgentMode::LocalTools),
+        (Some(WORKSPACE), AgentMode::Inference),
+        (Some(OTHER), AgentMode::LocalTools),
+    ] {
+        let refuse = Fault::Refuse(ControlError::ActiveTurnExists);
+        let (peer, machine) = authority(
+            Machine::ready(&session, generation)
+                .fault(STOP, 1, refuse)
+                .fault(STOP, 2, refuse),
+        );
+        let service = peer.service();
+        let before = {
+            let machine = machine.lock().unwrap();
+            (machine.revision, machine.mode())
+        };
+        let operation = uuid();
+        for asked in 1..=2 {
+            // Not a refusal to start Codex, not "busy": the turn that is running.
+            assert_eq!(
+                failed(service.activate_in(
+                    operation.clone(),
+                    session.clone(),
+                    1,
+                    WORKSPACE.into(),
+                    mode,
+                    &idle.guard()
+                )),
+                (SessionFailure::TurnActive, false)
+            );
+            // The stop was asked, once per attempt, and nothing followed it: no start
+            // of another generation, nothing bound.
+            let methods = peer.methods();
+            assert_eq!(methods.iter().filter(|m| *m == STOP).count(), asked);
+            assert_eq!(methods.last().map(String::as_str), Some(STOP));
+            assert!(!methods.iter().any(|m| m == CREATE));
+        }
+        {
+            let machine = machine.lock().unwrap();
+            assert_eq!((machine.revision, machine.mode()), before);
+            assert_eq!(machine.binding, BindingState::Unbound);
+            assert_eq!(machine.desired, DesiredState::Running);
+        }
+        // The turn ended: the same action goes on from where it was refused.
+        assert_eq!(
+            stage(service.activate_in(
+                operation,
+                session.clone(),
+                1,
+                WORKSPACE.into(),
+                mode,
+                &idle.guard()
+            )),
+            ActivationStage::RuntimeStopping
+        );
+    }
+}
+
+#[test]
 fn a_runtime_that_already_serves_the_mode_is_left_alone() {
     let session = session_id();
     let turn = Turn::default();

@@ -23,9 +23,10 @@
 //! generation of it has one profile for its whole life: inference, or local tools for
 //! exactly one workspace. A session that needs another one needs the runtime stopped and
 //! started again, which detaches every session attached to it. That is asked for only as
-//! part of an action that names the mode, and never while a managed turn is running. The
-//! profile is chosen here from the product's two modes; no profile or path of the
-//! window's own reaches the authority.
+//! part of an action that names the mode. The authority refuses a stop while a managed
+//! turn is active, and that refusal is the guard; this desktop also reads whether one
+//! runs and does not ask when it does. The profile is chosen here from the product's two
+//! modes; no profile or path of the window's own reaches the authority.
 //!
 //! **A session keeps the mode it was bound in.** The provider keeps a conversation in
 //! the home of the profile that created it, so the authority can attach a binding only
@@ -70,7 +71,8 @@ use sha2::{Digest, Sha256};
 const CREATE_LEASE_SECONDS: u32 = 15;
 
 /// Whether a managed turn is running, read from the authority. Asked before a runtime
-/// is stopped, and only then.
+/// is stopped, and only then. It spares a request that would be refused; what keeps a
+/// runtime up under a turn is the authority's own refusal of the stop.
 pub type TurnGuard<'a> = &'a dyn Fn(&mut ControlClient) -> Result<bool, SessionError>;
 
 /// The authority mutations one activation can lead to.
@@ -388,7 +390,8 @@ fn runtime(
                 return Ok(None);
             }
             // It serves another mode or another workspace, and it is the only one there
-            // is. Stopping it ends whatever runs on it, so nothing may be running.
+            // is. The authority does not stop it under a turn; when one is read as
+            // running the stop is not even asked.
             if turn_active(client)? {
                 return Err(SessionError::new(SessionFailure::TurnActive));
             }
@@ -469,6 +472,12 @@ fn stop(
             Err(SessionError::new(SessionFailure::RuntimeUnavailable))
         }
         Ok(_) => Ok(ActivationStage::RuntimeStopping),
+        // The authority's own refusal: a turn was admitted after this desktop read that
+        // none was running. Nothing was stopped, and it is said as what it is.
+        Err(error @ ControlError::ActiveTurnExists) => Err(SessionError {
+            cause: Some(error),
+            ..SessionError::new(SessionFailure::TurnActive)
+        }),
         Err(error) => Err(refused(error)),
     }
 }

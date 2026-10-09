@@ -1787,7 +1787,7 @@ fn crash_after_prompt_write_before_rpc_response_is_indeterminate_and_never_repla
     a.stop(false);
 }
 #[test]
-fn graceful_shutdown_and_runtime_stop_never_leave_a_running_turn_or_replay() {
+fn graceful_shutdown_never_leaves_a_running_turn_or_replay_and_a_stop_is_refused_under_one() {
     for stop_runtime in [false, true] {
         let env = Sandbox::new("turn_long");
         let mut a = env.start();
@@ -1798,9 +1798,30 @@ fn graceful_shutdown_and_runtime_stop_never_leave_a_running_turn_or_replay() {
         let t = c.turn_start(turn_params(&s)).unwrap();
         wait_turn(&mut c, &t, false);
         if stop_runtime {
-            c.runtime_stop(mutation()).unwrap();
-            env.wait(&mut c, ActualState::Stopped);
-            assert!(wait_turn(&mut c, &t, true).state.terminal());
+            // A stop is not admitted while the turn is active: the runtime stays up and
+            // the turn goes on. What ends it here is the shutdown that follows.
+            let before = c.runtime_status().unwrap();
+            assert_eq!(
+                c.runtime_stop(mutation()).unwrap_err(),
+                ControlError::ActiveTurnExists
+            );
+            let after = c.runtime_status().unwrap();
+            assert_eq!(
+                (
+                    after.actual_state,
+                    after.revision,
+                    after.runtime_instance_id
+                ),
+                (
+                    ActualState::Ready,
+                    before.revision,
+                    before.runtime_instance_id
+                )
+            );
+            assert_eq!(
+                c.turn_status(t.managed_turn_id.clone()).unwrap().state,
+                TurnState::Running
+            );
         }
         a.stop(false);
         for pid in env.pids() {
@@ -2565,7 +2586,7 @@ fn local_tools_approval_request_is_admitted_pending_and_only_ever_refused_withou
         ("approval_command", "command_execution"),
         ("approval_file", "file_change"),
     ] {
-        for cause in ["cancel", "revoke", "expiry", "close", "stop", "restart"] {
+        for cause in ["cancel", "revoke", "expiry", "close", "restart"] {
             let env = Sandbox::new(scenario);
             let workspace = local_layout(&env);
             let mut a = env.start();
@@ -2601,6 +2622,15 @@ fn local_tools_approval_request_is_admitted_pending_and_only_ever_refused_withou
             thread::sleep(Duration::from_millis(150));
             assert!(decisions(&env).is_empty(), "{label}");
             assert_eq!(effects(&env, &workspace), 0, "{label}");
+            // A stop of the runtime is not one of the ways it ends: the authority refuses
+            // it while the turn waits, and the approval is as pending as it was.
+            assert_eq!(
+                c.runtime_stop(mutation()).unwrap_err(),
+                ControlError::ActiveTurnExists,
+                "{label}"
+            );
+            assert_eq!(approval_events(&mut c).len(), 1, "{label}");
+            assert!(decisions(&env).is_empty(), "{label}");
             match cause {
                 "cancel" => {
                     c.turn_cancel(TurnCancel {
@@ -2625,9 +2655,6 @@ fn local_tools_approval_request_is_admitted_pending_and_only_ever_refused_withou
                         expected_revision: 1,
                     })
                     .unwrap();
-                }
-                "stop" => {
-                    c.runtime_stop(mutation()).unwrap();
                 }
                 "restart" => {
                     a.stop(true);
@@ -2669,13 +2696,6 @@ fn local_tools_approval_request_is_admitted_pending_and_only_ever_refused_withou
                     "invalidated",
                     "session_closed",
                     &["\"cancel\""],
-                ),
-                "stop" => (
-                    TurnState::Indeterminate,
-                    TurnReason::RuntimeStopped,
-                    "invalidated",
-                    "runtime_lost",
-                    &[],
                 ),
                 _ => (
                     TurnState::Indeterminate,
@@ -4140,6 +4160,12 @@ fn an_accept_racing_anything_has_one_outcome_at_most_one_answer_and_at_most_one_
             };
             let accepted = first.join().unwrap();
             let other = second.join().unwrap();
+            if contender == "stop" {
+                // A stop contends for nothing: the turn is active, so the authority
+                // refuses it in whichever order the two arrive, and the Accept decides.
+                assert_eq!(other, Err(ControlError::ActiveTurnExists), "{label}");
+                assert_eq!(accepted, Ok(ApprovalState::Accepted), "{label}");
+            }
             let done = wait_turn(&mut p.client, &p.turn, true);
             // Whatever the turn is waiting on has settled by now.
             thread::sleep(Duration::from_millis(100));

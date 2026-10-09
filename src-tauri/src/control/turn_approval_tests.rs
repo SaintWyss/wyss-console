@@ -3019,7 +3019,7 @@ fn an_uncertain_create_that_cannot_be_audited_stays_blocked_uncertain_and_closed
     );
 }
 #[test]
-fn admission_is_withdrawn_before_a_revocation_close_or_stop_of_the_turn_commits() {
+fn admission_is_withdrawn_before_a_revocation_or_close_of_the_turn_commits_and_a_stop_is_refused() {
     use std::sync::atomic::Ordering;
     let mut rig = Rig::new();
     rig.end_turn(TurnOutcome::Completed);
@@ -3092,8 +3092,8 @@ fn admission_is_withdrawn_before_a_revocation_close_or_stop_of_the_turn_commits(
         assert!(!rig.turns.suspend_admission(&unrelated));
         assert!(admitted());
     }
-    // The turn's own lease, its own session and the runtime: withdrawn before the commit,
-    // and given back only when the mutation turned out to change nothing.
+    // A stop of the runtime the turn runs on is not one of them: it is refused before it
+    // could take anything, so it withdraws nothing, however often it is asked.
     let stop = Operation::RuntimeStop(RuntimeMutation {
         intent_id: uuid(),
         adapter_id: RuntimeTarget::codex().adapter_id,
@@ -3108,7 +3108,17 @@ fn admission_is_withdrawn_before_a_revocation_close_or_stop_of_the_turn_commits(
             .unwrap(),
         expected_revision: rig.lease.revision,
     });
-    for own in [revoke(&rig.lease), shouting, close(&rig.session), stop] {
+    for _ in 0..2 {
+        assert_eq!(
+            rig.turns.admit_stop(&rig.store),
+            Err(ControlError::ActiveTurnExists)
+        );
+        assert!(!rig.turns.suspend_admission(&stop));
+        assert!(admitted());
+    }
+    // The turn's own lease and its own session: withdrawn before the commit, and given
+    // back only when the mutation turned out to change nothing.
+    for own in [revoke(&rig.lease), shouting, close(&rig.session)] {
         assert!(rig.turns.suspend_admission(&own));
         assert!(!admitted());
         // Already withdrawn: a second mutation in flight withdraws nothing more.
@@ -3144,6 +3154,82 @@ fn admission_is_withdrawn_before_a_revocation_close_or_stop_of_the_turn_commits(
         (TurnState::Interrupted, Some(TurnReason::LeaseRevoked))
     );
     assert!(ended.codex_turn_id.is_none());
+    // The turn ended: a stop is admitted again.
+    assert_eq!(rig.turns.admit_stop(&rig.store), Ok(()));
+}
+#[test]
+fn a_runtime_stop_is_admitted_only_while_no_managed_turn_is_active() {
+    let refused = Err(ControlError::ActiveTurnExists);
+    // Running, from the moment the provider named the turn.
+    let mut rig = Rig::new();
+    assert_eq!(
+        rig.store.turn(&rig.turn.managed_turn_id).unwrap().state,
+        TurnState::Running
+    );
+    assert_eq!(rig.turns.admit_stop(&rig.store), refused);
+    // Waiting on an approval is running.
+    let approval = rig.command_approval();
+    assert_eq!(approval.state, ApprovalState::Pending);
+    assert_eq!(rig.turns.admit_stop(&rig.store), refused);
+    // A cancel that was asked for has not ended the turn yet: it is active until the
+    // provider, or the deadline, says so.
+    let running = rig.store.turn(&rig.turn.managed_turn_id).unwrap();
+    rig.turns
+        .cancel(
+            &mut rig.store,
+            &mut rig.runtime,
+            &TurnCancel {
+                intent_id: uuid(),
+                managed_turn_id: running.managed_turn_id.clone(),
+                expected_revision: running.revision,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        rig.store.turn(&running.managed_turn_id).unwrap().state,
+        TurnState::Running
+    );
+    assert_eq!(rig.turns.admit_stop(&rig.store), refused);
+    // The refusals changed nothing: the turn is the one it was, at the same revision.
+    assert_eq!(
+        rig.store.turn(&running.managed_turn_id).unwrap().revision,
+        running.revision
+    );
+    // Ended, in whatever way: nothing is left to protect.
+    let ended = rig.end_turn(TurnOutcome::Interrupted);
+    assert_eq!(ended.state, TurnState::Interrupted);
+    assert_eq!(rig.turns.admit_stop(&rig.store), Ok(()));
+
+    // Admitted and not yet written to the provider is active as well.
+    let ResultValue::Turn(starting) = rig
+        .turns
+        .start(
+            &mut rig.store,
+            &mut rig.runtime,
+            &rig.conversations,
+            &TurnStart {
+                intent_id: uuid(),
+                managed_session_id: rig.session.managed_session_id.clone(),
+                expected_session_revision: 1,
+                prompt: "one more".into(),
+            },
+        )
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(starting.state, TurnState::Starting);
+    assert_eq!(rig.turns.admit_stop(&rig.store), refused);
+    // The durable record alone is enough: a core that holds no turn of its own does not
+    // admit a stop over one the store still records as not ended.
+    assert_eq!(Turns::default().admit_stop(&rig.store), refused);
+    for outcome in [TurnOutcome::Completed, TurnOutcome::Failed] {
+        let mut rig = Rig::new();
+        assert_eq!(rig.turns.admit_stop(&rig.store), refused);
+        rig.end_turn(outcome);
+        assert_eq!(rig.turns.admit_stop(&rig.store), Ok(()));
+        assert_eq!(Turns::default().admit_stop(&rig.store), Ok(()));
+    }
 }
 #[test]
 fn a_turn_is_admitted_only_at_the_session_revision_the_client_saw() {

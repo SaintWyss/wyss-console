@@ -998,7 +998,9 @@ fn an_approval_that_ends_undecided_is_shown_ended_and_is_never_answered_afterwar
     assert_eq!(tally(&env, "executions"), 0);
     assert!(decisions(&env).iter().all(|d| d != "\"accept\""));
 
-    // The runtime is stopped under a pending approval: the approval is invalidated.
+    // A stop of the runtime under a pending approval is refused by the authority: the
+    // turn that waits is active. The approval is still there to decide, at the revision
+    // it had, and the runtime is the one it was.
     let again = turns
         .start(id(), session.clone(), 1, PROMPT.into())
         .unwrap();
@@ -1009,25 +1011,51 @@ fn an_approval_that_ends_undecided_is_shown_ended_and_is_never_answered_afterwar
         .unwrap()
         .approval
         .revision;
-    other.runtime_stop(mutation()).unwrap();
-    env.ready(ActualState::Stopped);
-    let lost = turns.approval(notice.id.clone(), None, None).unwrap();
-    assert_eq!(
-        (lost.approval.state, lost.approval.decidable),
-        (ApprovalState::Invalidated, false)
-    );
-    assert_eq!(
-        failed(turns.decide(id(), notice.id.clone(), revision, Decision::Approve)).0,
-        SessionFailure::NotAllowed
-    );
+    let before = other.runtime_status().unwrap();
     let answered = decisions(&env).len();
+    assert_eq!(
+        other.runtime_stop(mutation()).unwrap_err(),
+        ControlError::ActiveTurnExists
+    );
+    let after = other.runtime_status().unwrap();
+    assert_eq!(
+        (
+            after.actual_state,
+            after.revision,
+            after.runtime_instance_id
+        ),
+        (
+            ActualState::Ready,
+            before.revision,
+            before.runtime_instance_id
+        )
+    );
+    let held = turns.approval(notice.id.clone(), None, None).unwrap();
+    assert_eq!(
+        (
+            held.approval.state,
+            held.approval.decidable,
+            held.approval.revision
+        ),
+        (ApprovalState::Pending, true, revision)
+    );
+    assert!(held.command.is_some());
+    assert_eq!(decisions(&env).len(), answered);
+    assert_eq!(
+        turns
+            .read(again.id.clone(), None, false)
+            .unwrap()
+            .turn
+            .state,
+        TurnState::Running
+    );
 
-    // The authority restarts. What it holds is what is shown: nothing pending, nothing
-    // decided on anyone's behalf, and no turn started again.
+    // The authority restarts under it. What it holds is what is shown: nothing pending,
+    // nothing accepted on anyone's behalf, and no turn started again.
     drop(other);
     authority.stop(false);
     let mut authority = env.start();
-    env.ready(ActualState::Stopped);
+    env.ready(ActualState::Ready);
     let list = turns.approvals().unwrap();
     assert!(list.pending.is_empty());
     assert_eq!(list.recent.len(), 2);
@@ -1036,7 +1064,11 @@ fn an_approval_that_ends_undecided_is_shown_ended_and_is_never_answered_afterwar
             .iter()
             .all(|a| a.decision.is_none() && !a.decidable)
     );
-    assert_eq!(decisions(&env).len(), answered);
+    assert_eq!(
+        failed(turns.decide(id(), notice.id.clone(), revision, Decision::Approve)).0,
+        SessionFailure::NotAllowed
+    );
+    assert!(decisions(&env).iter().all(|d| d != "\"accept\""));
     assert_eq!(tally(&env, "executions"), 0);
     assert_eq!(env.sent("turn/start"), 2);
     authority.stop(false);

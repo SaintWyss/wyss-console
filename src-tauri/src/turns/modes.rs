@@ -6,10 +6,11 @@
 //! to "is a turn running?", read from the authority through the same connection, right
 //! before a stop would be asked for.
 //!
-//! That reading and the stop are two requests. A turn another client starts between them
-//! is ended by the authority as `runtime_stopped`: the core admits a stop under a running
-//! turn, and nothing on this side can close that window. What this side guarantees is
-//! that it never asks for a stop while it reads a turn as running.
+//! That reading is a courtesy, not the guard. It and the stop are two requests, and a
+//! turn another client starts between them is not this side's to see. The authority
+//! refuses a stop while a managed turn is active, on the thread that admits turns; a
+//! stop that arrives too late is answered `active_turn_exists` and said here as a
+//! running turn. What this side adds is that it does not ask at all when it can tell.
 use super::service::TurnService;
 use crate::{
     contracts::{WireUuid, identities::ManagedSessionId},

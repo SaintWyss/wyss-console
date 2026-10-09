@@ -22,7 +22,7 @@ use wyss_console::{
         identities::{ManagedSessionId, ManagedTurnId},
     },
     control::client::ControlClient,
-    sessions::{ActivationStage, SessionError, SessionFailure, SessionService},
+    sessions::{ActivationStage, AgentMode, SessionError, SessionFailure, SessionService},
     turns::{TurnEventKind, TurnService, TurnView},
 };
 
@@ -647,13 +647,46 @@ fn a_turn_the_authority_fails_is_shown_as_failed_with_its_reason() {
     authority.stop(false);
 }
 
+/// What a rejected request must leave alone: the runtime, the session's attachment, the
+/// turn and its lease, and the durable stream.
+fn untouched(
+    other: &mut ControlClient,
+    session: &ManagedSessionId,
+    turn: &ManagedTurnId,
+) -> String {
+    let runtime = other.runtime_status().unwrap();
+    let binding = other.binding_status(session.clone()).unwrap();
+    let record = other.turn_status(turn.clone()).unwrap();
+    format!(
+        "{:?}",
+        (
+            (
+                runtime.desired_state,
+                runtime.actual_state,
+                runtime.revision,
+                runtime.runtime_instance_id,
+            ),
+            (binding.state, binding.attachment_profile),
+            (record.state, record.revision, record.terminal_reason),
+            other.lease_active(session.clone()).unwrap(),
+            trail(other).len(),
+        )
+    )
+}
+
 #[test]
-fn a_runtime_stopped_under_a_turn_ends_it_and_the_session_runs_again_once_resumed() {
+fn a_runtime_stop_is_refused_by_the_authority_while_a_turn_is_active_whatever_the_client_last_read()
+{
     let _serial = serial();
     let env = Sandbox::new("turn_long");
     let mut authority = env.start();
     let (sessions, turns) = env.services();
     let session = env.activated(&sessions);
+
+    // Client A reads that no turn is running. That reading is about to be stale.
+    let mut other = env.client();
+    assert!(!turns.active(&mut other).unwrap());
+    // Client B starts a turn, on its own connection, and the authority admits it.
     let started = turns
         .start(id(), session.clone(), 1, PROMPT.into())
         .unwrap();
@@ -662,57 +695,183 @@ fn a_runtime_stopped_under_a_turn_ends_it_and_the_session_runs_again_once_resume
         .last()
         .unwrap()
         .next;
+    let before = untouched(&mut other, &session, &started.id);
 
-    // Somebody stops the runtime while the turn runs. The desktop asked for nothing.
-    let mut other = env.client();
-    other.runtime_stop(mutation()).unwrap();
-    env.ready(ActualState::Stopped);
-    let stopped = follow_from(&turns, &started.id, cursor, ended);
-    let last = stopped.views.last().unwrap();
+    // Client A acts on what it read: it asks for the runtime to be stopped. The authority
+    // refuses, however often it is asked and whatever revision it is asked at.
+    let at = other.runtime_status().unwrap().revision;
+    for expected_revision in [None, Some(at), None] {
+        assert_eq!(
+            other
+                .runtime_stop(RuntimeMutation {
+                    expected_revision,
+                    ..mutation()
+                })
+                .unwrap_err(),
+            ControlError::ActiveTurnExists
+        );
+    }
+    // Nothing was taken: the runtime is the one it was and is ready, the session is
+    // attached, the turn runs at the revision it had under the lease it had, and the
+    // durable stream holds no event more. Nothing was stopped, detached or ended.
+    assert_eq!(untouched(&mut other, &session, &started.id), before);
+    let status = other.runtime_status().unwrap();
+    assert_eq!(
+        (status.desired_state, status.actual_state),
+        (DesiredState::Running, ActualState::Ready)
+    );
+    assert_eq!(
+        other.binding_status(session.clone()).unwrap().state,
+        BindingState::BoundAttached
+    );
+    let recorded = kinds(&trail(&mut other));
+    assert_eq!(
+        recorded
+            .iter()
+            .filter(|k| *k == "runtime.desired_state_changed")
+            .count(),
+        1
+    );
+    assert!(!recorded.iter().any(|k| k.starts_with("managed_turn.")
+        && !matches!(k.as_str(), "managed_turn.admitted" | "managed_turn.running")));
+
+    // The desktop itself, made to believe no turn runs: its own request for the other
+    // mode reaches the authority, is refused there, and is said as what it is.
+    let tools = sessions.prepare(id()).unwrap().id;
+    let before = untouched(&mut other, &session, &started.id);
+    let believed_idle = |_: &mut ControlClient| Ok(false);
+    for _ in 0..2 {
+        assert_eq!(
+            failed(sessions.activate_in(
+                id(),
+                tools.clone(),
+                1,
+                env.workspace(),
+                AgentMode::LocalTools,
+                &believed_idle,
+            )),
+            (SessionFailure::TurnActive, false)
+        );
+    }
+    assert_eq!(untouched(&mut other, &session, &started.id), before);
+
+    // The turn is still the running turn, and it still answers to its owner.
+    let view = turns.read(started.id.clone(), cursor, false).unwrap();
+    assert_eq!(view.turn.state, TurnState::Running);
+    turns
+        .cancel(id(), started.id.clone(), view.turn.revision)
+        .unwrap();
+    let ended_view = follow_from(&turns, &started.id, cursor, ended);
+    let last = ended_view.views.last().unwrap();
+    // It ended as a cancelled turn. Nothing ever ended it as stopped under.
     assert_eq!(
         (last.turn.state, last.turn.reason),
-        (TurnState::Indeterminate, Some(TurnReason::RuntimeStopped))
+        (TurnState::Interrupted, Some(TurnReason::UserCancel))
     );
-    // That is the authority's word for it: the runtime went away before the provider
-    // confirmed anything, and the desktop shows it as that rather than as interrupted.
-    // What it had said is still held, and the lease kept for it is given back.
-    assert!(last.turn.output);
-    assert_eq!(other.lease_active(session.clone()).unwrap(), None);
-    // The session is what the authority says: bound, and attached to nothing.
+
+    // Ended: the same stop is admitted now, and the runtime goes down normally.
+    assert!(!turns.active(&mut other).unwrap());
+    let stopped = other.runtime_stop(mutation()).unwrap();
+    assert_eq!(stopped.desired_state, DesiredState::Stopped);
+    env.ready(ActualState::Stopped);
     let listed = turns.list(session.clone()).unwrap();
     assert_eq!(listed.session.binding, BindingState::BoundDetached);
-    assert!(!listed.runnable);
-    assert_eq!(
-        failed(turns.start(id(), session.clone(), 1, PROMPT.into())),
-        (SessionFailure::RuntimeUnavailable, false)
-    );
-    assert_eq!(other.lease_active(session.clone()).unwrap(), None);
+    assert_eq!(listed.turns[0].state, TurnState::Interrupted);
     assert_eq!(env.sent("turn/start"), 1);
 
     // Started again and resumed, the same session runs another turn.
     other.runtime_start(mutation()).unwrap();
     env.ready(ActualState::Ready);
     sessions.resume(id(), session.clone(), 1).unwrap();
-    assert!(turns.list(session.clone()).unwrap().runnable);
     let again = turns
         .start(id(), session.clone(), 1, PROMPT.into())
         .unwrap();
     let running = follow(&turns, &again.id, |v| v.turn.state == TurnState::Running);
     assert_eq!(running.text, "ASSISTANT_SENTINEL");
     assert_eq!(env.sent("turn/start"), 2);
-    let listed = turns.list(session.clone()).unwrap();
+    // And that one is protected the same way.
     assert_eq!(
-        listed
-            .turns
-            .iter()
-            .map(|t| (t.id.clone(), t.state))
-            .collect::<Vec<_>>(),
-        [
-            (again.id.clone(), TurnState::Running),
-            (started.id.clone(), TurnState::Indeterminate),
-        ]
+        other.runtime_stop(mutation()).unwrap_err(),
+        ControlError::ActiveTurnExists
     );
+    let revision = turns
+        .read(again.id.clone(), None, false)
+        .unwrap()
+        .turn
+        .revision;
+    turns.cancel(id(), again.id.clone(), revision).unwrap();
+    follow(&turns, &again.id, ended);
+    other.runtime_stop(mutation()).unwrap();
+    env.ready(ActualState::Stopped);
+    drop(other);
+    authority.stop(false);
+}
 
+#[test]
+fn a_stop_and_a_turn_start_that_race_never_end_with_a_turn_stopped_under() {
+    let _serial = serial();
+    let env = Sandbox::new("turn_long");
+    let mut authority = env.start();
+    let (sessions, turns) = env.services();
+    let session = env.activated(&sessions);
+    let mut other = env.client();
+    let (mut turn_first, mut stop_first) = (0, 0);
+    for round in 0..10u64 {
+        // Two clients, two connections, released together; on half of the rounds the stop
+        // is held back a little so that both orders are taken.
+        let gate = std::sync::Barrier::new(2);
+        let (start, stop) = thread::scope(|scope| {
+            let starting = scope.spawn(|| {
+                gate.wait();
+                turns.start(id(), session.clone(), 1, PROMPT.into())
+            });
+            let stopping = scope.spawn(|| {
+                gate.wait();
+                thread::sleep(Duration::from_millis((round % 2) * (4 + round)));
+                other.runtime_stop(mutation())
+            });
+            (starting.join().unwrap(), stopping.join().unwrap())
+        });
+        match (start, stop) {
+            // The turn was admitted first: the stop was refused and the turn runs on a
+            // runtime that is up, until its owner ends it.
+            (Ok(turn), Err(refused)) => {
+                turn_first += 1;
+                assert_eq!(refused, ControlError::ActiveTurnExists, "round {round}");
+                let view = follow(&turns, &turn.id, |v| v.turn.state == TurnState::Running);
+                let running = view.views.last().unwrap();
+                assert_eq!(
+                    other.runtime_status().unwrap().actual_state,
+                    ActualState::Ready
+                );
+                turns
+                    .cancel(id(), turn.id.clone(), running.turn.revision)
+                    .unwrap();
+                let over = follow(&turns, &turn.id, ended);
+                let last = over.views.last().unwrap();
+                assert_eq!(
+                    (last.turn.state, last.turn.reason),
+                    (TurnState::Interrupted, Some(TurnReason::UserCancel)),
+                    "round {round}"
+                );
+            }
+            // The stop was admitted first: no turn was admitted on the runtime it took.
+            (Err(_), Ok(_)) => {
+                stop_first += 1;
+                env.ready(ActualState::Stopped);
+                other.runtime_start(mutation()).unwrap();
+                env.ready(ActualState::Ready);
+                sessions.resume(id(), session.clone(), 1).unwrap();
+            }
+            (start, stop) => panic!("round {round}: both or neither: {start:?} / {stop:?}"),
+        }
+    }
+    // Whatever the order, no turn the authority holds was ever ended by a stop.
+    for turn in turns.list(session.clone()).unwrap().turns {
+        assert_eq!(turn.state, TurnState::Interrupted, "{turn:?}");
+    }
+    assert!(turn_first > 0, "{turn_first} / {stop_first}");
+    assert_eq!(turn_first + stop_first, 10);
     other.runtime_stop(mutation()).unwrap();
     env.ready(ActualState::Stopped);
     drop(other);

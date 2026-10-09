@@ -491,6 +491,23 @@ pub fn run_from_environment() -> ControlResult<()> {
                         turns.respond(&mut store, &mut runtime, &conversations, p, job.reply);
                         continue;
                     }
+                    // A stop is refused while a managed turn is active, before it takes
+                    // anything away: no admission is withdrawn, nothing is detached and
+                    // nothing durable changes. This thread is also where a turn is
+                    // admitted, so whichever of the two requests it takes first decides.
+                    if matches!(job.op, Operation::RuntimeStop(_))
+                        && !core_stop.load(Ordering::Acquire)
+                        && let Err(refused) = turns.admit_stop(&store)
+                    {
+                        if matches!(
+                            refused,
+                            ControlError::StorageUnavailable | ControlError::StorageIncompatible
+                        ) {
+                            store.execution_available = false;
+                        }
+                        let _ = job.reply.try_send(Err(refused));
+                        continue;
+                    }
                     if matches!(
                         job.op,
                         Operation::LeaseRevoke(_)
@@ -500,10 +517,9 @@ pub fn run_from_environment() -> ControlResult<()> {
                     ) {
                         conversations.invalidate_admission();
                     }
-                    // A revocation, a close or a stop of what the active turn runs under
-                    // withdraws its admission before it commits: once the mutation is
-                    // durable, the prompt of a turn that was not yet dispatched can no
-                    // longer leave.
+                    // A revocation or a close of what the active turn runs under withdraws
+                    // its admission before it commits: once the mutation is durable, the
+                    // prompt of a turn that was not yet dispatched can no longer leave.
                     let suspended = turns.suspend_admission(&job.op);
                     let result = if core_stop.load(Ordering::Acquire) {
                         Err(ControlError::StorageUnavailable)
@@ -622,9 +638,6 @@ pub fn run_from_environment() -> ControlResult<()> {
                     }
                     if reconcile && runtime.reconcile(&mut store, &core_sender, false).is_err() {
                         let _ = runtime.audit_failed(&mut store);
-                    }
-                    if reconcile && matches!(job.op, Operation::RuntimeStop(_)) {
-                        let _ = turns.lost(&mut store, TurnReason::RuntimeStopped);
                     }
                 }
             }

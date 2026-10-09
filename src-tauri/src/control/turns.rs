@@ -214,11 +214,23 @@ impl Turns {
         }
         Ok(())
     }
+    /// Admission of an explicit runtime stop, before anything durable changes. A stop
+    /// takes the runtime away from whatever runs on it, so none is admitted while a
+    /// managed turn is active: neither the one the core holds nor one the store still
+    /// records as not ended. Turns are admitted on this same thread, one request at a
+    /// time, so no turn can be admitted between this answer and the stop it allows.
+    pub fn admit_stop(&self, store: &Store) -> ControlResult<()> {
+        if self.active.is_some() || store.active_turn()?.is_some() {
+            return Err(ControlError::ActiveTurnExists);
+        }
+        Ok(())
+    }
     /// Withdraws the admission of the active turn before a mutation that may take its
-    /// authority away is committed: the revocation of its admitted lease, the close of its
-    /// session or a runtime stop. The supervisor reads this flag immediately before it
-    /// writes the prompt, so a turn that has not been dispatched is not dispatched after
-    /// that commit. Returns whether admission was withdrawn here.
+    /// authority away is committed: the revocation of its admitted lease or the close of
+    /// its session. The supervisor reads this flag immediately before it writes the
+    /// prompt, so a turn that has not been dispatched is not dispatched after that
+    /// commit. A runtime stop is not among them: none is admitted while a turn is active.
+    /// Returns whether admission was withdrawn here.
     pub fn suspend_admission(&self, op: &Operation) -> bool {
         let Some(a) = self.active.as_ref().filter(|a| a.cancel.is_none()) else {
             return false;
@@ -232,7 +244,6 @@ impl Turns {
                 .managed_session_id
                 .as_str()
                 .eq_ignore_ascii_case(a.turn.managed_session_id.as_str()),
-            Operation::RuntimeStop(_) => true,
             _ => false,
         };
         targets && a.admission.swap(false, Ordering::AcqRel)
