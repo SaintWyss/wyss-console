@@ -52,6 +52,21 @@ impl Conversations {
             p.admission.store(false, Ordering::Release)
         }
     }
+    /// Withdraws the admission of the binding request in flight before a mutation that
+    /// may take its authority away is committed. The supervisor reads this flag
+    /// immediately before it writes to the provider. Returns whether it was withdrawn
+    /// here: one that was already withdrawn is not this caller's to give back.
+    pub fn suspend_admission(&self) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|p| p.admission.swap(false, Ordering::AcqRel))
+    }
+    /// The mutation changed nothing: the request keeps the admission it had.
+    pub fn restore_admission(&self) {
+        if let Some(p) = &self.pending {
+            p.admission.store(true, Ordering::Release)
+        }
+    }
     pub fn status(
         &self,
         store: &Store,

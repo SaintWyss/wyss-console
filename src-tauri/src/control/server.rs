@@ -508,15 +508,15 @@ pub fn run_from_environment() -> ControlResult<()> {
                         let _ = job.reply.try_send(Err(refused));
                         continue;
                     }
-                    if matches!(
+                    // A binding request in flight loses its admission before any of these
+                    // commits, and gets it back if the mutation turned out to change nothing.
+                    let withdrawn = matches!(
                         job.op,
                         Operation::LeaseRevoke(_)
                             | Operation::LeaseRenew(_)
                             | Operation::Close(_)
                             | Operation::RuntimeStop(_)
-                    ) {
-                        conversations.invalidate_admission();
-                    }
+                    ) && conversations.suspend_admission();
                     // A revocation or a close of what the active turn runs under withdraws
                     // its admission before it commits: once the mutation is durable, the
                     // prompt of a turn that was not yet dispatched can no longer leave.
@@ -589,16 +589,20 @@ pub fn run_from_environment() -> ControlResult<()> {
                     ) {
                         store.execution_available = false;
                     }
+                    // What a runtime mutation leaves to do, decided against the revision the
+                    // core already carried out, before anything below moves it.
+                    let effects = runtime_effects(&job.op, &result, runtime.status().revision);
                     // A mutation that changed nothing took nothing away.
                     let unchanged = match &result {
                         Err(_) => true,
-                        Ok(ResultValue::RuntimeControl(r)) => {
-                            r.revision <= runtime.status().revision
-                        }
+                        Ok(ResultValue::RuntimeControl(_)) => effects == RuntimeEffects::None,
                         Ok(_) => false,
                     };
                     if suspended && unchanged {
                         turns.restore_admission();
+                    }
+                    if withdrawn && unchanged {
+                        conversations.restore_admission();
                     }
                     if result.is_ok()
                         && matches!(
@@ -611,11 +615,6 @@ pub fn run_from_environment() -> ControlResult<()> {
                     {
                         next_expiry = refresh_expiry(&mut store);
                     }
-                    let reconcile = result.is_ok()
-                        && matches!(
-                            job.op,
-                            Operation::RuntimeStart(_) | Operation::RuntimeStop(_)
-                        );
                     // Canonical receipt is returned before any external side effect, and
                     // never for a head the witness does not hold: a transition somebody was
                     // told about is one whose later loss can be told. What committed stays
@@ -633,10 +632,14 @@ pub fn run_from_environment() -> ControlResult<()> {
                         other => other,
                     };
                     let _ = job.reply.try_send(result);
-                    if reconcile && matches!(job.op, Operation::RuntimeStop(_)) {
+                    // Only a transition that committed now is carried out. A receipt that
+                    // is answered again detaches nothing and reconciles nothing.
+                    if effects == RuntimeEffects::DetachAndReconcile {
                         conversations.detach(&mut store);
                     }
-                    if reconcile && runtime.reconcile(&mut store, &core_sender, false).is_err() {
+                    if effects != RuntimeEffects::None
+                        && runtime.reconcile(&mut store, &core_sender, false).is_err()
+                    {
                         let _ = runtime.audit_failed(&mut store);
                     }
                 }
@@ -716,6 +719,38 @@ pub fn run_from_environment() -> ControlResult<()> {
 /// Whether a successful answer is the receipt of something this request may have
 /// committed, as opposed to a reading of what is there. An operation not named here is
 /// taken for one that commits.
+/// What the core still has to carry out for a runtime mutation the store answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeEffects {
+    /// Nothing: it failed, it is not a runtime mutation, or the store answered an intent
+    /// that had already committed with the receipt it has kept for it.
+    None,
+    /// A start that committed now.
+    Reconcile,
+    /// A stop that committed now: every attachment ends, then the child is reaped.
+    DetachAndReconcile,
+}
+/// Tells a runtime transition that committed now from a receipt answered again. The store
+/// gives every committed runtime mutation the next revision, and the core carries a
+/// revision out before it takes another request: a receipt at or below `carried` is one
+/// whose effects already happened, and it has none left.
+fn runtime_effects(
+    op: &Operation,
+    result: &ControlResult<ResultValue>,
+    carried: u64,
+) -> RuntimeEffects {
+    let Ok(ResultValue::RuntimeControl(record)) = result else {
+        return RuntimeEffects::None;
+    };
+    if record.revision <= carried {
+        return RuntimeEffects::None;
+    }
+    match op {
+        Operation::RuntimeStop(_) => RuntimeEffects::DetachAndReconcile,
+        Operation::RuntimeStart(_) => RuntimeEffects::Reconcile,
+        _ => RuntimeEffects::None,
+    }
+}
 fn receipt(op: &Operation) -> bool {
     !matches!(
         op,
@@ -753,6 +788,87 @@ fn expiry_wait(deadline: time::OffsetDateTime, now: time::OffsetDateTime) -> Dur
     Duration::try_from(deadline - now)
         .unwrap_or(Duration::ZERO)
         .min(Duration::from_secs(30))
+}
+#[cfg(test)]
+mod runtime_effects_tests {
+    use super::*;
+    fn mutation() -> RuntimeMutation {
+        RuntimeMutation {
+            intent_id: serde_json::from_value(serde_json::json!(
+                "11111111-1111-4111-8111-111111111111"
+            ))
+            .unwrap(),
+            adapter_id: RuntimeTarget::codex().adapter_id,
+            runtime_kind: RuntimeTarget::codex().runtime_kind,
+            expected_revision: None,
+            safety_profile: None,
+            workspace_root: None,
+        }
+    }
+    fn receipt(revision: u64, desired: &str) -> ControlResult<ResultValue> {
+        Ok(ResultValue::RuntimeControl(
+            serde_json::from_value(serde_json::json!({
+                "adapter_id": "codex", "runtime_kind": "codex", "desired_state": desired,
+                "revision": revision, "created_at": "2026-10-09T00:00:00Z",
+                "updated_at": "2026-10-09T00:00:00Z",
+            }))
+            .unwrap(),
+        ))
+    }
+    #[test]
+    fn only_a_runtime_transition_that_committed_now_has_effects_left_to_carry_out() {
+        let stop = Operation::RuntimeStop(mutation());
+        let start = Operation::RuntimeStart(mutation());
+        // The store gave the mutation the revision after the one the core carried out.
+        assert_eq!(
+            runtime_effects(&stop, &receipt(4, "stopped"), 3),
+            RuntimeEffects::DetachAndReconcile
+        );
+        assert_eq!(
+            runtime_effects(&start, &receipt(4, "running"), 3),
+            RuntimeEffects::Reconcile
+        );
+        // The very first one, with nothing carried out before it.
+        assert_eq!(
+            runtime_effects(&start, &receipt(1, "running"), 0),
+            RuntimeEffects::Reconcile
+        );
+        // A receipt answered again has none: neither the latest transition repeated, nor
+        // one from before later transitions, whatever the runtime is doing by now.
+        for (op, desired) in [(&stop, "stopped"), (&start, "running")] {
+            for (revision, carried) in [(4, 4), (2, 4), (1, 9), (3, u64::MAX)] {
+                assert_eq!(
+                    runtime_effects(op, &receipt(revision, desired), carried),
+                    RuntimeEffects::None,
+                    "{desired} {revision}/{carried}"
+                );
+            }
+        }
+        // A mutation the store refused changed nothing.
+        for refused in [
+            ControlError::StaleRevision,
+            ControlError::IntentConflict,
+            ControlError::StorageUnavailable,
+        ] {
+            assert_eq!(
+                runtime_effects(&stop, &Err(refused), 3),
+                RuntimeEffects::None
+            );
+            assert_eq!(
+                runtime_effects(&start, &Err(refused), 3),
+                RuntimeEffects::None
+            );
+        }
+        // Nothing else the core answers is a runtime transition.
+        assert_eq!(
+            runtime_effects(&Operation::Status(Empty {}), &receipt(4, "stopped"), 3),
+            RuntimeEffects::None
+        );
+        assert_eq!(
+            runtime_effects(&stop, &Ok(ResultValue::ActiveLease(None)), 3),
+            RuntimeEffects::None
+        );
+    }
 }
 #[cfg(test)]
 mod expiry_wait_tests {

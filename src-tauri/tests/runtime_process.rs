@@ -4316,3 +4316,372 @@ fn repeated_generations_and_turns_leave_no_descriptor_thread_process_or_stream_b
     drop(c);
     a.stop(false);
 }
+
+// Receipts answered again: a runtime mutation that already committed has no effect left.
+
+/// Everything a runtime receipt that is answered again must leave alone, as one value:
+/// the runtime's desired and actual state, revision, instance and profile, the session's
+/// attachment, the length of the durable stream and every child ever launched.
+fn runtime_and_session(env: &Sandbox, c: &mut ControlClient, s: &ManagedSessionRecord) -> String {
+    let runtime = c.runtime_status().unwrap();
+    let binding = c.binding_status(s.managed_session_id.clone()).unwrap();
+    format!(
+        "{:?}",
+        (
+            (
+                runtime.desired_state,
+                runtime.actual_state,
+                runtime.revision,
+                runtime.runtime_instance_id,
+                runtime.runtime_safety_profile,
+                runtime.diagnostic,
+            ),
+            (
+                binding.state,
+                binding.attachment_profile,
+                binding.runtime_instance_id,
+            ),
+            replay(c, 50).len(),
+            env.pids(),
+        )
+    )
+}
+fn desired_changes(c: &mut ControlClient) -> usize {
+    replay(c, 50)
+        .iter()
+        .filter(|e| e["event_type"] == "authority.runtime.desired_state_changed")
+        .count()
+}
+fn alive(pid: i32) -> bool {
+    fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| !stat.contains(") Z "))
+}
+
+#[test]
+fn a_runtime_stop_answered_again_with_its_receipt_detaches_nothing_and_a_new_stop_still_stops() {
+    let env = Sandbox::new("turn_long");
+    let mut a = env.start();
+    let mut c = env.client();
+    let start_a = mutation();
+    let started_a = c.runtime_start(start_a.clone()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = inference_session(&env, &mut c);
+    let binding = |c: &mut ControlClient| {
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state
+    };
+
+    // Stop A commits: the runtime stops and the session is detached.
+    let stop_a = mutation();
+    let stopped_a = c.runtime_stop(stop_a.clone()).unwrap();
+    assert_eq!(stopped_a.desired_state, DesiredState::Stopped);
+    env.wait(&mut c, ActualState::Stopped);
+    assert_eq!(binding(&mut c), BindingState::BoundDetached);
+    // Asked again while nothing else happened: its receipt, and nothing more.
+    let quiet = runtime_and_session(&env, &mut c, &s);
+    assert_eq!(c.runtime_stop(stop_a.clone()).unwrap(), stopped_a);
+    assert_eq!(runtime_and_session(&env, &mut c, &s), quiet);
+
+    // Start B: a new generation, and the same session attached to it.
+    let start_b = mutation();
+    let started_b = c.runtime_start(start_b.clone()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    c.binding_resume(resume_params(&s)).unwrap();
+    assert_eq!(binding(&mut c), BindingState::BoundAttached);
+    let child = *env.pids().last().unwrap();
+    let before = runtime_and_session(&env, &mut c, &s);
+    assert_eq!(desired_changes(&mut c), 3);
+
+    // Stop A again, the intent that committed two transitions ago, on this connection and
+    // on another. The authority answers the receipt it kept. The runtime is ready on the
+    // same instance at the same revision, the same child runs, the session is attached,
+    // and the durable stream holds no event more.
+    for _ in 0..3 {
+        assert_eq!(c.runtime_stop(stop_a.clone()).unwrap(), stopped_a);
+    }
+    let mut other = env.client();
+    assert_eq!(other.runtime_stop(stop_a.clone()).unwrap(), stopped_a);
+    assert_eq!(runtime_and_session(&env, &mut c, &s), before);
+    let status = c.runtime_status().unwrap();
+    assert_eq!(
+        (status.desired_state, status.actual_state, status.revision),
+        (
+            DesiredState::Running,
+            ActualState::Ready,
+            started_b.revision
+        )
+    );
+    assert_eq!(binding(&mut c), BindingState::BoundAttached);
+    assert_eq!(desired_changes(&mut c), 3);
+    assert!(alive(child));
+    // The same payload under that identity only: anything else is a conflict, as before.
+    assert_eq!(
+        c.runtime_stop(RuntimeMutation {
+            expected_revision: Some(1),
+            ..stop_a.clone()
+        })
+        .unwrap_err(),
+        ControlError::IntentConflict
+    );
+    assert_eq!(runtime_and_session(&env, &mut c, &s), before);
+
+    // The attachment is real: the session runs a turn. While it runs a stop is refused,
+    // the old intent like a new one: the guard is asked before the receipt.
+    let t = c.turn_start(turn_params(&s)).unwrap();
+    let running = wait_turn(&mut c, &t, false);
+    let during = runtime_and_session(&env, &mut c, &s);
+    for stop in [stop_a.clone(), mutation()] {
+        assert_eq!(
+            c.runtime_stop(stop).unwrap_err(),
+            ControlError::ActiveTurnExists
+        );
+    }
+    // A start answered again is its receipt too, the latest one or the first, and leaves
+    // the turn, the runtime and the attachment as they were.
+    assert_eq!(c.runtime_start(start_b.clone()).unwrap(), started_b);
+    assert_eq!(c.runtime_start(start_a.clone()).unwrap(), started_a);
+    assert_eq!(runtime_and_session(&env, &mut c, &s), during);
+    let still = c.turn_status(t.managed_turn_id.clone()).unwrap();
+    assert_eq!(
+        (still.state, still.revision),
+        (TurnState::Running, running.revision)
+    );
+    c.turn_cancel(TurnCancel {
+        intent_id: id(),
+        managed_turn_id: t.managed_turn_id.clone(),
+        expected_revision: running.revision,
+    })
+    .unwrap();
+    assert_eq!(wait_turn(&mut c, &t, true).state, TurnState::Interrupted);
+    assert_eq!(binding(&mut c), BindingState::BoundAttached);
+    assert_eq!(c.runtime_stop(stop_a.clone()).unwrap(), stopped_a);
+    assert_eq!(binding(&mut c), BindingState::BoundAttached);
+
+    // Stop C, a new intent: a transition that commits now. It detaches and it stops.
+    let stopped_c = c.runtime_stop(mutation()).unwrap();
+    assert_eq!(
+        (stopped_c.desired_state, stopped_c.revision),
+        (DesiredState::Stopped, started_b.revision + 1)
+    );
+    env.wait(&mut c, ActualState::Stopped);
+    assert_eq!(binding(&mut c), BindingState::BoundDetached);
+    dead(child);
+    assert_eq!(desired_changes(&mut c), 4);
+    // Stopped: a start answered again launches nothing and wants nothing.
+    let stopped = runtime_and_session(&env, &mut c, &s);
+    assert_eq!(c.runtime_start(start_b).unwrap(), started_b);
+    assert_eq!(c.runtime_start(start_a).unwrap(), started_a);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(runtime_and_session(&env, &mut c, &s), stopped);
+    assert_eq!(
+        c.runtime_status().unwrap().desired_state,
+        DesiredState::Stopped
+    );
+    assert_eq!(count(&env, "turn/start"), 1);
+    a.stop(false);
+}
+
+#[test]
+fn a_stop_receipt_kept_across_an_authority_restart_is_answered_again_without_effect() {
+    let env = Sandbox::new("happy");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _) = inference_session(&env, &mut c);
+    let stop_a = mutation();
+    let stopped_a = c.runtime_stop(stop_a.clone()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+
+    // The authority restarts. The stop it committed is still what it wants, and the
+    // receipt of that intent is still the answer to it.
+    a.stop(false);
+    let mut a = env.start();
+    let mut c = env.client();
+    assert_eq!(
+        c.runtime_status().unwrap().actual_state,
+        ActualState::Stopped
+    );
+    let quiet = runtime_and_session(&env, &mut c, &s);
+    assert_eq!(c.runtime_stop(stop_a.clone()).unwrap(), stopped_a);
+    assert_eq!(runtime_and_session(&env, &mut c, &s), quiet);
+
+    // A later start, and the session attached again. The old stop changes nothing.
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    c.binding_resume(resume_params(&s)).unwrap();
+    let before = runtime_and_session(&env, &mut c, &s);
+    assert_eq!(c.runtime_stop(stop_a.clone()).unwrap(), stopped_a);
+    assert_eq!(runtime_and_session(&env, &mut c, &s), before);
+
+    // Restarted once more, now with a runtime it brings up by itself: the core read the
+    // revision it carries out from the store, and the old receipt is still at or below it.
+    a.stop(true);
+    for pid in env.pids() {
+        dead(pid);
+    }
+    let mut a = env.start();
+    let mut c = env.client();
+    env.wait(&mut c, ActualState::Ready);
+    c.binding_resume(resume_params(&s)).unwrap();
+    let child = *env.pids().last().unwrap();
+    let before = runtime_and_session(&env, &mut c, &s);
+    assert_eq!(c.runtime_stop(stop_a.clone()).unwrap(), stopped_a);
+    assert_eq!(runtime_and_session(&env, &mut c, &s), before);
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundAttached
+    );
+    assert!(alive(child));
+
+    // And a new stop is still a stop.
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundDetached
+    );
+    dead(child);
+    a.stop(false);
+}
+
+#[test]
+fn a_binding_request_in_flight_is_not_disturbed_by_a_stop_that_changes_nothing() {
+    let env = Sandbox::new("happy");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    // An intent that committed earlier: stop A, then a later start.
+    let stop_a = mutation();
+    let stopped_a = c.runtime_stop(stop_a.clone()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    c.runtime_start(mutation()).unwrap();
+    let ready = env.wait(&mut c, ActualState::Ready);
+
+    // A binding request is kept in flight: the supervisor took it and has not written it
+    // to the provider yet.
+    let (s, _) = prepare_bound_session(
+        &mut c,
+        vec![ExecutionScope::SessionCreate, ExecutionScope::SessionResume],
+    );
+    fs::write(env.root.join("hold-preflight"), "").unwrap();
+    let create = create_params(&env, &s);
+    let creating = {
+        let mut client = env.client();
+        thread::spawn(move || client.binding_create(create))
+    };
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while !(env.root.join("preflight-held").exists()
+        && c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state
+            == BindingState::Creating)
+    {
+        assert!(Instant::now() < deadline, "the request never got in flight");
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(count(&env, "thread/start"), 0);
+
+    // Two stops that change nothing arrive meanwhile: the receipt of A answered again,
+    // and a stop the store refuses. Neither takes anything from the request.
+    assert_eq!(c.runtime_stop(stop_a.clone()).unwrap(), stopped_a);
+    assert_eq!(
+        c.runtime_stop(RuntimeMutation {
+            expected_revision: Some(1),
+            ..mutation()
+        })
+        .unwrap_err(),
+        ControlError::StaleRevision
+    );
+    let status = c.runtime_status().unwrap();
+    assert_eq!(
+        (
+            status.actual_state,
+            status.revision,
+            status.runtime_instance_id
+        ),
+        (
+            ActualState::Ready,
+            ready.revision,
+            ready.runtime_instance_id
+        )
+    );
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::Creating
+    );
+
+    // Released, it is written to the provider once and the session is bound.
+    fs::write(env.root.join("release-preflight"), "").unwrap();
+    creating.join().unwrap().unwrap();
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::BoundDetached
+    );
+    assert_eq!(count(&env, "thread/start"), 1);
+    c.binding_resume(resume_params(&s)).unwrap();
+
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    a.stop(false);
+}
+
+#[test]
+fn a_binding_request_in_flight_is_not_written_once_its_lease_was_revoked() {
+    let env = Sandbox::new("happy");
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, lease) = prepare_bound_session(
+        &mut c,
+        vec![ExecutionScope::SessionCreate, ExecutionScope::SessionResume],
+    );
+    fs::write(env.root.join("hold-preflight"), "").unwrap();
+    let create = create_params(&env, &s);
+    let creating = {
+        let mut client = env.client();
+        thread::spawn(move || client.binding_create(create))
+    };
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while !(env.root.join("preflight-held").exists()
+        && c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state
+            == BindingState::Creating)
+    {
+        assert!(Instant::now() < deadline, "the request never got in flight");
+        thread::sleep(Duration::from_millis(5));
+    }
+    // A mutation that does change something: the lease the request was admitted under is
+    // revoked. What was withdrawn before that commit stays withdrawn.
+    c.lease_revoke(LeaseRevoke {
+        intent_id: id(),
+        lease_id: lease.lease_id.clone(),
+        expected_revision: lease.revision,
+    })
+    .unwrap();
+    fs::write(env.root.join("release-preflight"), "").unwrap();
+    assert!(creating.join().unwrap().is_err());
+    // Nothing was written to the provider for it, and the session is not bound.
+    assert_eq!(count(&env, "thread/start"), 0);
+    assert_eq!(
+        c.binding_status(s.managed_session_id.clone())
+            .unwrap()
+            .state,
+        BindingState::Unbound
+    );
+    assert_eq!(c.runtime_status().unwrap().actual_state, ActualState::Ready);
+    c.runtime_stop(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Stopped);
+    a.stop(false);
+}

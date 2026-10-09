@@ -224,6 +224,10 @@ for line in sys.stdin:
 
     elif method == 'config/read':
         assert message['params']['includeLayers'] is False
+        if (root / 'hold-preflight').exists():
+            # A request kept in flight: its preflight waits here until the test releases it.
+            (root / 'preflight-held').touch()
+            hold('release-preflight')
         counter=root/'config-count'
         calls=int(counter.read_text()) if counter.exists() else 0
         counter.write_text(str(calls+1))

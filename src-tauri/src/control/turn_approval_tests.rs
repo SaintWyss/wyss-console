@@ -3158,6 +3158,70 @@ fn admission_is_withdrawn_before_a_revocation_or_close_of_the_turn_commits_and_a
     assert_eq!(rig.turns.admit_stop(&rig.store), Ok(()));
 }
 #[test]
+fn a_binding_request_in_flight_gets_back_the_admission_a_mutation_that_changed_nothing_took() {
+    use std::sync::atomic::Ordering;
+    let mut rig = Rig::new();
+    rig.end_turn(TurnOutcome::Completed);
+    // Nothing is in flight: there is nothing to withdraw and nothing to give back.
+    assert!(!rig.conversations.suspend_admission());
+    rig.conversations.restore_admission();
+    // Another session asks to be bound. The request is handed to the supervisor, which
+    // reads this flag immediately before it writes to the provider.
+    let ResultValue::Session(other) = rig.apply(Operation::Prepare(Prepare {
+        intent_id: uuid(),
+        adapter_id: RuntimeTarget::codex().adapter_id,
+        runtime_kind: RuntimeTarget::codex().runtime_kind,
+    })) else {
+        panic!()
+    };
+    rig.apply(Operation::LeaseGrant(LeaseGrant {
+        intent_id: uuid(),
+        session_id: other.managed_session_id.clone(),
+        expected_session_revision: 1,
+        scopes: all_scopes(),
+        ttl_seconds: 600,
+    }));
+    let (reply, answer) = sync_channel(1);
+    rig.conversations.begin(
+        &mut rig.store,
+        &mut rig.runtime,
+        &Operation::BindingCreate(BindingCreate {
+            intent_id: uuid(),
+            managed_session_id: other.managed_session_id.clone(),
+            expected_session_revision: 1,
+            workspace_root: rig.workspace.clone(),
+        }),
+        reply,
+    );
+    assert!(answer.try_recv().is_err(), "the request was answered early");
+    let Ok(RuntimeCommand::Conversation(command)) = rig.commands.try_recv() else {
+        panic!("the request was not handed to the supervisor")
+    };
+    let admitted = || command.admission.load(Ordering::Acquire);
+    assert!(admitted());
+    // A mutation that may take its authority away withdraws it before it commits, once.
+    assert!(rig.conversations.suspend_admission());
+    assert!(!admitted());
+    assert!(!rig.conversations.suspend_admission());
+    // It changed nothing: the request is admitted as it was.
+    rig.conversations.restore_admission();
+    assert!(admitted());
+    // One that did change something leaves it withdrawn, and a later one that changes
+    // nothing has nothing of its own to give back.
+    assert!(rig.conversations.suspend_admission());
+    assert!(!rig.conversations.suspend_admission());
+    assert!(!admitted());
+    // A stop that committed ends the request: nothing brings its admission back.
+    rig.conversations.detach(&mut rig.store);
+    assert!(matches!(
+        answer.try_recv(),
+        Ok(Err(ControlError::ExternalEffectUnknown))
+    ));
+    rig.conversations.restore_admission();
+    assert!(!admitted());
+    assert!(!rig.conversations.suspend_admission());
+}
+#[test]
 fn a_runtime_stop_is_admitted_only_while_no_managed_turn_is_active() {
     let refused = Err(ControlError::ActiveTurnExists);
     // Running, from the moment the provider named the turn.
