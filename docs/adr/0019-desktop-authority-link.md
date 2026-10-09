@@ -328,3 +328,10 @@ passed, with captures of each state:
 - `_KDE_NET_WM_BLUR_BEHIND_REGION` was set on the window under the composited KDE
   session: the native glass mode was selected. The blur itself was not looked at on a
   GPU session, and nothing in `desktop/glass.rs` or window creation changed.
+
+## Later implementation status
+
+Since ADR 0020 the desktop also sends three managed-session intents. They travel over
+separate short-lived connections owned by another service; the link described here is
+unchanged, still sends only the five reads above, and is what wakes the Sessions view.
+"The desktop only reads" above describes this link, no longer the whole desktop.

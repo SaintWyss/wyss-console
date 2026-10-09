@@ -4,10 +4,13 @@ Desktop client for local terminals and, progressively, managed-agent control.
 Linux-first, local-first. Current validated status: **Core complete**: the managed-agent
 core (external authority, leases, managed turns, approval mediation, durable event
 replay) is implemented, hardened and accepted through
-[ADR 0018](docs/adr/0018-core-hardening-and-completion.md), and the desktop follows
-that authority read-only: its top bar shows the real authority and managed-agent status
-([ADR 0019](docs/adr/0019-desktop-authority-link.md)). The product is not complete:
-there is no agent UI yet and the desktop sends the authority nothing but reads. Built with Tauri 2,
+[ADR 0018](docs/adr/0018-core-hardening-and-completion.md). The desktop follows that
+authority: its top bar shows the real authority and managed-agent status
+([ADR 0019](docs/adr/0019-desktop-authority-link.md)), and its Sessions view lists the
+managed sessions the authority holds and can create, resume and close them
+([ADR 0020](docs/adr/0020-managed-sessions-ui.md)). The product is not complete: there
+is no agent chat, turn or approval UI yet, and a workspace is still bound to a session
+with the developer client. Built with Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -125,7 +128,8 @@ inference-only by default, and with authority-mediated commands and file changes
 in the isolated local-tools profile.
 Human terminal tabs remain Console-local; the read-only Codex probe above remains
 a separate developer tool. The desktop never starts the authority; when one is running
-it connects to it and only reads ([Desktop authority link](#desktop-authority-link)).
+it connects to it, follows it ([Desktop authority link](#desktop-authority-link)) and
+sends it three session intents ([Managed sessions](#managed-sessions)).
 
 Build the independent binary and developer client:
 
@@ -189,10 +193,11 @@ Svelte  ->  Tauri desktop  ->  shared ControlClient  ->  Unix socket  ->  wyss-c
 
 `wyss-control` stays the only authority. The desktop makes no authorization or security
 decision, never opens the authority's database and never starts, stops or configures
-the authority or its runtime. The requests it sends are `authority/hello`,
-`authority/status`, `runtime/status`, `audit/read` and `audit/watch`.
+the authority or its runtime. The requests this link sends are `authority/hello`,
+`authority/status`, `runtime/status`, `audit/read` and `audit/watch`. Session requests
+go over separate short-lived connections ([Managed sessions](#managed-sessions)).
 
-The window cannot speak the control protocol. Its one authority command,
+The window cannot speak the control protocol. Its one command for this link,
 `authority_state`, returns the desktop's own projection (AuthorityView v1): the link
 state, why the last attempt ended, the authority's version, session counts and durable
 head, and the managed runtime's desired and actual state, version and model count.
@@ -236,6 +241,65 @@ Local terminals are independent of all of it: typing, paste, output, tabs, resiz
 scrollback and Ctrl+C work the same with the authority absent, starting, restarting,
 killed, incompatible or malformed. See
 [ADR 0019](docs/adr/0019-desktop-authority-link.md).
+
+## Managed sessions
+
+The `Sessions` view shows the managed sessions the authority holds, newest first, and
+sends three product intents. The desktop requests; `wyss-control` decides.
+
+```text
+Svelte  ->  four narrow Tauri commands  ->  SessionService  ->  shared ControlClient  ->  wyss-control
+```
+
+| In the window   | What the desktop asks the authority                                                                              |
+| --------------- | ---------------------------------------------------------------------------------------------------------------- |
+| The list        | `managedSession/list`, then `managedSession/runtime/status` for each session shown. Twenty-five to a page.       |
+| **New session** | `managedSession/prepare`, always for Codex. The session is prepared and has no workspace yet.                    |
+| **Resume**      | `managedSession/runtime/resume`: attaches a session that is already bound to a workspace to the running runtime. |
+| **Close**       | `managedSession/close`, after one confirmation. Closing is final and revokes the session's lease.                |
+
+Each session shows its control state, agent, binding state and workspace, revision,
+times and identity. The Codex thread, runtime instance, lease and operation identities
+never reach the window, and the window cannot name a control method, an adapter, a
+workspace, a scope or a lease: it sends a session it was shown, the revision it saw and
+the identity of its own action.
+
+Behavior worth knowing:
+
+- **One action, one intent.** A click names its action with an identity that is sent to
+  the authority unchanged. A second click while it is pending sends nothing. If the
+  authority does not answer, the outcome is unknown and Retry sends the same identity
+  again: the authority's processed-intent record makes it the same action, so a session
+  is never created or closed twice.
+- **Resume is gated.** The authority admits a resume only under a lease that grants
+  `session_resume`, with the runtime ready. The desktop asks; if the authority says a
+  lease is what is missing, the desktop asks it to grant one for that single scope and
+  thirty seconds, asks again, and asks it to revoke that lease. A lease another client
+  holds is used as it is and never touched. The window does not offer Resume while the
+  runtime is not ready.
+- **Binding a workspace is not in the desktop yet.** A session created in the window is
+  unbound; bind one with the developer client (`executionLease/grant` with
+  `session_create`, then `managedSession/runtime/create`). Starting the runtime is the
+  developer client's `runtime/start` too.
+- **What is shown is what was read.** The list is re-read when the authority's durable
+  head moves, using the same observation the top bar follows: no second watcher exists.
+  Nothing is shown optimistically, and when the authority is not connected the sessions
+  are cleared, every action is disabled and the view says why.
+- **The Console keeps running.** Both views stay mounted: going to Sessions and back
+  ends no terminal and starts none.
+- The list is walked forward, because the protocol pages oldest first. A page costs one
+  request per fifty sessions held, and past two thousand sessions the newest are not
+  reachable from the window.
+
+Try it with the authority and developer client built [above](#external-control-authority):
+
+```sh
+./src-tauri/target/debug/wyss-control      # one terminal
+npm run desktop:run                        # Sessions -> New session -> Create session
+./src-tauri/target/debug/examples/control_client list
+```
+
+See [ADR 0020](docs/adr/0020-managed-sessions-ui.md).
 
 ## Authority-owned Codex runtime
 
