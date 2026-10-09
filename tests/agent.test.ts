@@ -13,6 +13,7 @@ import {
 import { runHint } from '../src/lib/features/agent/present';
 import { parseManagedSessionId } from '../src/lib/contracts/identities';
 import {
+  A1,
   harness,
   listing,
   reading,
@@ -560,6 +561,7 @@ it('shows mediated actions as what happened and reasoning as nothing but its occ
   expect(h.shown().turns[0].thinking).toBe(true);
   // What the turn waits on is what the last reading says, and gone when it ends.
   const notice = {
+    id: A1,
     kind: 'file_change',
     expires_at: '2026-10-09T10:15:00Z',
   } as const;

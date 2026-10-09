@@ -8,7 +8,7 @@ use crate::{
         Sequence, WireUuid,
         control::*,
         event_envelope::EventEnvelopeV1,
-        identities::{ManagedSessionId, ManagedTurnId},
+        identities::{ManagedApprovalId, ManagedSessionId, ManagedTurnId},
     },
     sessions::{
         SessionFailure, SessionService,
@@ -24,6 +24,8 @@ use std::{
 };
 
 const START: &str = "managedSession/turn/start";
+/// Read before every start: the profile the session is attached under.
+const BINDING: &str = "managedSession/runtime/status";
 const STATUS: &str = "managedSession/turn/status";
 const EVENTS: &str = "managedSession/turn/events";
 const CANCEL: &str = "managedSession/turn/cancel";
@@ -69,11 +71,23 @@ struct World {
     /// What the running turn still puts out, and then completes, right after its events
     /// are read the next time: a turn that ends between two questions.
     ends_after_read: Option<Vec<(StreamKind, Option<&'static str>)>>,
+    /// The profile the session is attached under.
+    profile: &'static str,
+    /// Approvals, each as the authority would answer a read of it.
+    approvals: Vec<ApprovalStatus>,
+    /// Which durable event, by its place in `audit`, names which approval.
+    named: HashMap<usize, ManagedApprovalId>,
+    /// Decisions the authority committed, by the intent that asked for them.
+    decided: HashMap<String, ApprovalReceipt>,
 }
 impl World {
     fn new(session: &ManagedSessionId) -> Self {
         Self {
             ends_after_read: None,
+            profile: "inference_only_v1",
+            approvals: Vec::new(),
+            named: HashMap::new(),
+            decided: HashMap::new(),
             session: session.clone(),
             gate: GateReason::Allowed,
             lease: None,
@@ -246,7 +260,88 @@ impl World {
                 self.advance(&id, TurnState::Interrupted, Some(TurnReason::UserCancel));
                 Ok(ResultValue::Turn(self.turn(&id)?.record.clone()))
             }
-            Operation::ApprovalPending(_) => Ok(ResultValue::PendingApproval(None)),
+            Operation::ApprovalPending(p) => Ok(ResultValue::PendingApproval(
+                self.approvals
+                    .iter()
+                    .find(|a| {
+                        a.approval.managed_turn_id == p.managed_turn_id
+                            && a.approval.state == ApprovalState::Pending
+                    })
+                    .cloned()
+                    .map(Box::new),
+            )),
+            Operation::ApprovalStatus(p) => {
+                let status = self
+                    .approvals
+                    .iter()
+                    .find(|a| a.approval.managed_approval_id == p.managed_approval_id)
+                    .ok_or(ControlError::ApprovalNotFound)?;
+                let mut status = status.clone();
+                match (&mut status.file, p.file_index) {
+                    // A command has no file to select.
+                    (None, Some(_)) => return Err(ControlError::InvalidRequest),
+                    (Some(file), index) => {
+                        let index = index.unwrap_or(0);
+                        if index >= status.file_count.unwrap_or(0) {
+                            return Err(ControlError::InvalidRequest);
+                        }
+                        file.index = index;
+                        file.path = format!("/work/space/file-{index}.txt");
+                        file.offset = p.offset.unwrap_or(0);
+                    }
+                    (None, None) => (),
+                }
+                Ok(ResultValue::Approval(Box::new(status)))
+            }
+            Operation::ApprovalRespond(p) => {
+                if let Some(receipt) = self.decided.get(p.intent_id.as_str()) {
+                    return if receipt.decision == p.decision {
+                        Ok(ResultValue::ApprovalReceipt(receipt.clone()))
+                    } else {
+                        Err(ControlError::IntentConflict)
+                    };
+                }
+                let status = self
+                    .approvals
+                    .iter_mut()
+                    .find(|a| a.approval.managed_approval_id == p.managed_approval_id)
+                    .ok_or(ControlError::ApprovalNotFound)?;
+                if status.approval.state != ApprovalState::Pending {
+                    return Err(ControlError::InvalidTransition);
+                }
+                if status.approval.revision != p.expected_revision {
+                    return Err(ControlError::StaleRevision);
+                }
+                let mut v = serde_json::to_value(&status.approval).unwrap();
+                v["state"] = json!(p.decision.state());
+                v["decision"] = json!(p.decision);
+                v["revision"] = json!(status.approval.revision + 1);
+                v["effect"] = json!(if p.decision == ApprovalDecision::Accept {
+                    "dispatched"
+                } else {
+                    "none"
+                });
+                v["updated_at"] = json!("2026-10-08T00:00:09Z");
+                v["terminal_at"] = v["updated_at"].clone();
+                v["terminal_reason"] = json!("client_decision");
+                status.approval = serde_json::from_value(v).unwrap();
+                status.approval.validate().unwrap();
+                // Decided: the authority no longer presents the action.
+                (status.acceptable, status.command) = (false, None);
+                (status.file_count, status.file) = (None, None);
+                let receipt: ApprovalReceipt = serde_json::from_value(json!({
+                    "managed_approval_id": status.approval.managed_approval_id,
+                    "managed_turn_id": status.approval.managed_turn_id,
+                    "kind": status.approval.kind, "decision": p.decision,
+                    "state": status.approval.state, "revision": status.approval.revision,
+                    "action_fingerprint": status.approval.action_fingerprint,
+                    "decided_at": "2026-10-08T00:00:09Z",
+                }))
+                .unwrap();
+                self.decided
+                    .insert(p.intent_id.as_str().to_owned(), receipt.clone());
+                Ok(ResultValue::ApprovalReceipt(receipt))
+            }
             Operation::GateStatus(q) => Ok(ResultValue::GateStatus(GateStatus {
                 session_id: q.session_id.clone(),
                 action: q.action,
@@ -280,6 +375,7 @@ impl World {
                     "managed_session_id": p.managed_session_id, "state": "bound_attached",
                     "binding": binding(&p.managed_session_id),
                     "runtime_instance_id": uuid(), "operation_id": null,
+                    "attachment_profile": self.profile,
                 }))
                 .unwrap(),
             )),
@@ -292,7 +388,7 @@ impl World {
                     .skip(after)
                     .take(usize::from(p.limit))
                     .map(|(i, (kind, session, turn))| {
-                        envelope(&p.stream_id, i + 1, kind, session, turn)
+                        envelope(&p.stream_id, i + 1, kind, session, turn, self.named.get(&i))
                     })
                     .collect();
                 let reached = after + events.len();
@@ -313,14 +409,20 @@ fn envelope(
     kind: &str,
     session: &ManagedSessionId,
     turn: &ManagedTurnId,
+    approval: Option<&ManagedApprovalId>,
 ) -> EventEnvelopeV1 {
+    let mut payload =
+        json!({"managed_turn_id": turn, "lease_id": uuid(), "runtime_instance_id": uuid()});
+    if let Some(approval) = approval {
+        payload["managed_approval_id"] = json!(approval);
+    }
     EventEnvelopeV1::from_value(json!({
         "schema_version": 1, "event_id": uuid(), "event_type": kind,
         "payload_schema_version": 1, "timestamp": "2026-10-08T00:00:00Z",
         "stream_id": stream, "sequence": sequence.to_string(), "session_id": session,
         "source": {"component": "wyss_control", "instance_id": uuid()},
         "correlation_id": null, "causation_id": null,
-        "payload": {"managed_turn_id": turn, "lease_id": uuid(), "runtime_instance_id": uuid()},
+        "payload": payload,
         "persistence": "durable", "sensitivity": "internal", "redaction": "none",
     }))
     .unwrap()
@@ -382,9 +484,9 @@ fn a_turn_is_admitted_under_a_lease_that_is_kept_until_the_turn_has_ended() {
     let started = turns
         .start(intent.clone(), session.clone(), 1, PROMPT.into())
         .unwrap();
-    assert_eq!(peer.methods(), [START, GATE, GRANT, START]);
+    assert_eq!(peer.methods(), [BINDING, START, GATE, GRANT, START]);
     let requests = peer.requests();
-    let (Operation::TurnStart(asked), Operation::TurnStart(again)) = (&requests[0], &requests[3])
+    let (Operation::TurnStart(asked), Operation::TurnStart(again)) = (&requests[1], &requests[4])
     else {
         unreachable!()
     };
@@ -399,7 +501,7 @@ fn a_turn_is_admitted_under_a_lease_that_is_kept_until_the_turn_has_ended() {
         ),
         (&intent, &session, 1, PROMPT)
     );
-    let Operation::LeaseGrant(grant) = &requests[2] else {
+    let Operation::LeaseGrant(grant) = &requests[3] else {
         unreachable!()
     };
     // Exactly the scope a turn needs: no session scope, no command or file scope.
@@ -459,7 +561,7 @@ fn a_turn_is_admitted_under_a_lease_that_is_kept_until_the_turn_has_ended() {
             .unwrap(),
         started
     );
-    assert_eq!(since(&peer, sent), [STATUS, START]);
+    assert_eq!(since(&peer, sent), [BINDING, STATUS, START]);
     assert_eq!(world.lock().unwrap().turns.len(), 2);
 }
 
@@ -493,7 +595,7 @@ fn a_turn_whose_end_nobody_read_does_not_lend_its_lease_to_the_next_one() {
     // under one of its own: its time budget is its own, not what was left of another's.
     assert_eq!(
         since(&peer, sent),
-        [STATUS, REVOKE, START, GATE, GRANT, START]
+        [BINDING, STATUS, REVOKE, START, GATE, GRANT, START]
     );
     assert_eq!(sessions.stats().leases, 2);
     assert_ne!(
@@ -514,7 +616,7 @@ fn a_lost_start_answer_is_settled_by_the_same_intent_and_never_starts_a_second_t
         (SessionFailure::Unavailable, true)
     );
     // The turn may be running under the lease: it is kept, not revoked.
-    assert_eq!(peer.methods(), [START, GATE, GRANT, START]);
+    assert_eq!(peer.methods(), [BINDING, START, GATE, GRANT, START]);
     assert_eq!(world.lock().unwrap().turns.len(), 1);
     assert!(world.lock().unwrap().lease.is_some());
     let admitted = world.lock().unwrap().turns[0]
@@ -528,7 +630,7 @@ fn a_lost_start_answer_is_settled_by_the_same_intent_and_never_starts_a_second_t
         .start(intent, session.clone(), 1, PROMPT.into())
         .unwrap();
     assert_eq!(receipt.id, admitted);
-    assert_eq!(since(&peer, sent), [START]);
+    assert_eq!(since(&peer, sent), [BINDING, START]);
     assert_eq!(
         (world.lock().unwrap().turns.len(), sessions.stats().leases),
         (1, 1)
@@ -539,7 +641,7 @@ fn a_lost_start_answer_is_settled_by_the_same_intent_and_never_starts_a_second_t
         failed(turns.start(uuid(), session.clone(), 1, PROMPT.into())),
         (SessionFailure::Busy, true)
     );
-    assert_eq!(since(&peer, sent), [STATUS, START]);
+    assert_eq!(since(&peer, sent), [BINDING, STATUS, START]);
     assert_eq!(world.lock().unwrap().turns.len(), 1);
     // The lease learned from the receipt is given back when the turn has ended.
     world.lock().unwrap().advance(
@@ -603,7 +705,7 @@ fn a_refused_start_leaves_no_lease_and_a_lease_somebody_else_holds_is_never_touc
                 .start(uuid(), session.clone(), 1, PROMPT.into())
                 .is_err()
         );
-        assert_eq!(peer.methods(), [START, GATE, GRANT, START, REVOKE]);
+        assert_eq!(peer.methods(), [BINDING, START, GATE, GRANT, START, REVOKE]);
         assert!(world.lock().unwrap().lease.is_none());
     }
     // A lease somebody else holds that allows a turn: used as it is, and still theirs
@@ -616,7 +718,7 @@ fn a_refused_start_leaves_no_lease_and_a_lease_somebody_else_holds_is_never_touc
     let started = turns
         .start(uuid(), session.clone(), 1, PROMPT.into())
         .unwrap();
-    assert_eq!(peer.methods(), [START]);
+    assert_eq!(peer.methods(), [BINDING, START]);
     world.lock().unwrap().advance(
         &started.id,
         TurnState::Completed,
@@ -636,7 +738,7 @@ fn a_refused_start_leaves_no_lease_and_a_lease_somebody_else_holds_is_never_touc
         failed(turns.start(uuid(), session.clone(), 1, PROMPT.into())),
         (SessionFailure::PermissionDenied, false)
     );
-    assert_eq!(peer.methods(), [START, GATE]);
+    assert_eq!(peer.methods(), [BINDING, START, GATE]);
     assert_eq!(world.lock().unwrap().lease, Some(narrow));
 }
 
@@ -1080,6 +1182,7 @@ fn the_turns_of_a_session_are_found_in_the_durable_stream_and_read_from_the_auth
         json!({
             "id": session, "state": "prepared", "revision": 1,
             "binding": "bound_attached", "workspace": "/work/space",
+            "mode": "inference",
         })
     );
 
@@ -1269,6 +1372,7 @@ fn a_stream_or_a_record_out_of_contract_fails_the_list_instead_of_being_shown() 
                     "authority.managed_turn.admitted",
                     &stuck,
                     &turn,
+                    None,
                 )],
                 next: "1".parse().ok(),
             })),
@@ -1302,7 +1406,7 @@ fn an_input_the_protocol_cannot_carry_is_refused_before_anything_is_asked() {
     // Exactly the bound is carried, whole.
     let exact = "x".repeat(8192);
     turns.start(uuid(), session, 1, exact.clone()).unwrap();
-    let Operation::TurnStart(asked) = &peer.requests()[0] else {
+    let Operation::TurnStart(asked) = &peer.requests()[1] else {
         unreachable!()
     };
     assert_eq!(asked.prompt, exact);
@@ -1323,13 +1427,14 @@ fn the_window_s_fixture_has_exactly_the_shape_of_this_projection() {
     let mut view =
         serde_json::to_value(turns.read(started.id.clone(), None, false).unwrap()).unwrap();
     view["approval"] = serde_json::to_value(ApprovalNotice {
+        id: ManagedApprovalId::parse(uuid().as_str()).unwrap(),
         kind: ApprovalKind::CommandExecution,
         expires_at: serde_json::from_value(json!("2026-10-09T10:15:00Z")).unwrap(),
     })
     .unwrap();
     let list = serde_json::to_value(turns.list(session).unwrap()).unwrap();
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../../../tests/fixtures/turn-view-v1.json")).unwrap();
+        serde_json::from_str(include_str!("../../../tests/fixtures/turn-view-v2.json")).unwrap();
     let keys = |v: &serde_json::Value| -> Vec<String> {
         let mut keys: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
         keys.sort();
@@ -1361,3 +1466,6 @@ fn the_window_s_fixture_has_exactly_the_shape_of_this_projection() {
         assert!(serde_json::from_value::<TurnReason>(turn["reason"].clone()).is_ok());
     }
 }
+
+#[path = "approval_tests.rs"]
+mod approvals;

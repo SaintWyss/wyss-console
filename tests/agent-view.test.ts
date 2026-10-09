@@ -7,7 +7,7 @@ import { parseTerminalId } from '../src/lib/contracts/identities';
 import type { TurnSummary } from '../src/lib/contracts/turns';
 import { listing, reading, S, S2, T1, T2, turn } from './agent-harness';
 import views from './fixtures/authority-view-v1.json';
-import pages from './fixtures/session-page-v2.json';
+import pages from './fixtures/session-page-v3.json';
 
 const fakes = vi.hoisted(() => ({ factory: vi.fn() }));
 vi.mock('../src/lib/features/terminal/renderer', () => ({
@@ -226,7 +226,9 @@ it('opens the Agent view from the sidebar and from a session that has a workspac
   expect(nav('Agents').getAttribute('aria-current')).toBe('page');
   // The session every turn here belongs to is named, with what the authority says of it.
   const header = agent().querySelector('.agent-session');
-  expect(text(header)).toBe('rag-corp Ready /home/dev/rag-corp Codex');
+  expect(text(header)).toBe(
+    'rag-corp Ready /home/dev/rag-corp Codex · Inference',
+  );
   expect(
     text(agent().querySelector('[role="tab"][aria-selected="true"]')),
   ).toBe('rag-corp');
@@ -505,66 +507,6 @@ it('asks for a cancel and shows the turn as cancelling until the authority says 
   expect(text(turns()[0].querySelector('.turn-answer'))).toBe('Codex Working');
 });
 
-it('shows a turn waiting on an approval as waiting, with nothing to answer it', async () => {
-  const ipc = await opened();
-  await run(ipc, 'List the files.');
-  ipc.last('managed_turn_read').resolve(
-    reading(
-      turn(T1, 'running', 2),
-      [
-        [1, 'started'],
-        [2, 'command_proposed'],
-        [3, 'approval_required'],
-      ],
-      {
-        approval: {
-          kind: 'command_execution',
-          expires_at: '2026-10-09T10:15:00Z',
-        },
-      },
-    ),
-  );
-  await flush();
-  const waiting = agent().querySelector('.turn-approval')!;
-  expect(waiting.getAttribute('role')).toBe('status');
-  expect(text(waiting)).toMatch(
-    /^Waiting for approval Codex asked to run a command\. wyss-control holds the turn until that is decided, or until .+\. This view cannot answer it\.$/,
-  );
-  // The turn is what the authority says it is: running.
-  expect(text(turns()[0].querySelector('.turn-head .pill'))).toBe('Running');
-  expect(
-    Array.from(turns()[0].querySelectorAll('.turn-activity')).map(text),
-  ).toEqual(['Command proposed', 'Approval requested']);
-  // Nothing in the whole window approves, denies, edits or always-allows.
-  const labels = Array.from(document.querySelectorAll('button')).map((b) =>
-    text(b),
-  );
-  expect(
-    labels.filter((label) =>
-      /approve|accept|deny|decline|allow|edit/i.test(label),
-    ),
-  ).toEqual([]);
-  expect(waiting.querySelectorAll('button, a, input')).toHaveLength(0);
-  // Cancelling the turn is the one thing offered, and reading goes on.
-  expect(button('Cancel turn')!.disabled).toBe(false);
-  const commands = new Set(ipc.calls.map((c) => c.command));
-  expect(
-    [...commands].filter((c) => /approv|decision|respond/.test(c)),
-  ).toEqual([]);
-
-  // Decided elsewhere: the notice goes with the next reading.
-  ipc.last('managed_turn_read').resolve(
-    reading(turn(T1, 'running', 2), [
-      [4, 'approval_resolved', 'declined'],
-      [5, 'text', 'I was not allowed to.'],
-    ]),
-  );
-  await flush();
-  expect(agent().querySelector('.turn-approval')).toBeNull();
-  expect(text(turns()[0])).toContain('Approval declined');
-  expect(text(turns()[0])).toContain('I was not allowed to.');
-});
-
 it('goes on with a turn while another view is shown, and leaves the terminal alone', async () => {
   const ipc = await opened();
   await run(ipc, 'Keep going.');
@@ -632,7 +574,7 @@ it('keeps two sessions as two transcripts, two drafts and two tabs', async () =>
     'true',
   ]);
   expect(text(agent().querySelector('.agent-session'))).toBe(
-    'other Ready /home/dev/other Codex',
+    'other Ready /home/dev/other Codex · Inference',
   );
   // Nothing of the first session is on screen.
   expect(turns()).toHaveLength(0);

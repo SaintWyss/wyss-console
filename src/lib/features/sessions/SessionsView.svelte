@@ -5,16 +5,22 @@
   } from '../../shell/authority';
   import type { SessionSummary } from '../../contracts/sessions';
   import type { SessionsController, SessionsState } from './controller';
+  import { AGENT_MODES } from '../../contracts/sessions';
   import {
+    AGENT_MODE,
     agentName,
     BINDING,
     chooseFailureMessage,
     failureMessage,
     localTime,
+    modeImpact,
+    modeLabel,
+    modeOffers,
     outcomeUnknown,
     pendingMessage,
     readFailureMessage,
     resumeHint,
+    runtimeLine,
     sessionLabel,
     STATE,
   } from './present';
@@ -52,6 +58,10 @@
     page?.sessions.find((s) => s.id === sessions.composeFor),
   );
   const acting = (id: string) => pending && sessions.operation?.session === id;
+  /** The one managed runtime every session shares, as the page read it. */
+  const runtime = $derived(page?.runtime ?? { mode: null, workspace: null });
+  const offers = $derived(selected ? modeOffers(selected, runtime) : []);
+  const running = $derived(page ? runtimeLine(page.runtime) : null);
 </script>
 
 <section
@@ -66,6 +76,7 @@
       <p class="sessions-count">
         {#if connected && counts}
           {counts.prepared_sessions} prepared · {counts.closed_sessions} closed
+          {#if running}· {running}{/if}
         {:else if sessions.link === 'connecting'}
           Connecting to the authority
         {:else}
@@ -90,7 +101,11 @@
   {#if sessions.operation?.status === 'pending'}
     <p class="sessions-status" role="status">
       <span class="dot" aria-hidden="true"></span>
-      {pendingMessage(sessions.operation.kind, sessions.operation.step)}
+      {pendingMessage(
+        sessions.operation.kind,
+        sessions.operation.step,
+        sessions.operation.mode,
+      )}
     </p>
   {:else if sessions.operation?.failure}
     <div
@@ -102,6 +117,7 @@
         {failureMessage(
           sessions.operation.kind,
           sessions.operation.failure.code,
+          sessions.operation.mode,
         )}
       </p>
       {#if sessions.operation.failure.retry}
@@ -136,10 +152,38 @@
           <dt>Agent</dt>
           <dd>Codex</dd>
         </dl>
+        <!-- An explicit choice, every time: Inference unless the user says otherwise. -->
+        <fieldset class="mode-choice">
+          <legend>Mode</legend>
+          {#each AGENT_MODES as mode (mode)}
+            <label class="mode-option">
+              <input
+                type="radio"
+                name="agent-mode"
+                value={mode}
+                checked={sessions.mode === mode}
+                disabled={pending}
+                onchange={() => controller.setMode(mode)}
+              />
+              <span class="mode-name">{AGENT_MODE[mode].label}</span>
+              <span class="mode-detail">{AGENT_MODE[mode].detail}</span>
+            </label>
+          {/each}
+        </fieldset>
         <p class="composer-note">
           wyss-control decides whether the folder can be a workspace, starts
-          Codex if it is not running, and binds the session to it.
+          Codex if it is not running, and binds the session to it. A session
+          keeps the mode it is created in.
         </p>
+        {#if sessions.mode === 'local_tools'}
+          <p class="composer-note caution" role="note">
+            Local Tools gives Codex more to work with, not more authority: every
+            command and file change waits for your approval. wyss-control runs
+            one Codex runtime, so if it is running in another mode or for
+            another folder it is restarted and the sessions attached to it are
+            detached.
+          </p>
+        {/if}
         {#if sessions.chooseFailure}
           <p class="composer-note failed" role="alert">
             {chooseFailureMessage(sessions.chooseFailure.code)}
@@ -237,6 +281,9 @@
                 <span class="session-meta">
                   {agentName(session.adapter)} ·
                   {BINDING[session.binding].label}
+                  {#if session.mode !== 'unknown'}
+                    · {modeLabel(session.mode)}
+                  {/if}
                   {#if session.workspace}
                     · <span class="session-path">{session.workspace}</span>
                   {/if}
@@ -342,6 +389,36 @@
                 >
               </div>
             </div>
+          {:else if sessions.confirmingMode?.session === selected.id}
+            {@const asked = sessions.confirmingMode.mode}
+            <div
+              class="close-confirm mode-confirm"
+              role="group"
+              aria-label="Confirm mode"
+            >
+              <p>
+                {asked === 'local_tools'
+                  ? 'Enable Local Tools'
+                  : 'Use Inference'}
+                for {sessionLabel(selected)}? {modeImpact(asked)}
+              </p>
+              <div class="session-actions">
+                <button
+                  type="button"
+                  class="action primary"
+                  disabled={!connected || pending}
+                  onclick={() => controller.enterMode()}
+                  >{asked === 'local_tools'
+                    ? 'Enable Local Tools'
+                    : 'Use Inference'}</button
+                >
+                <button
+                  type="button"
+                  class="action"
+                  onclick={() => controller.confirmMode(null)}>Cancel</button
+                >
+              </div>
+            </div>
           {:else}
             {#if selected.recoverable}
               <div class="session-uncertain" role="status">
@@ -386,6 +463,17 @@
                   onclick={() => controller.resume(selected.id)}>Resume</button
                 >
               {/if}
+              {#each offers as mode (mode)}
+                <button
+                  type="button"
+                  class="action"
+                  disabled={!connected || pending}
+                  onclick={() => controller.confirmMode(selected.id, mode)}
+                  >{mode === 'local_tools'
+                    ? 'Enable Local Tools'
+                    : 'Use Inference'}</button
+                >
+              {/each}
               <button
                 type="button"
                 class="action"
@@ -394,6 +482,25 @@
                 >Close</button
               >
             </div>
+            {#if selected.mode === 'inference'}
+              <p class="session-hint">
+                This session runs in Inference: Codex is offered no tool. Local
+                Tools needs a session of its own, because a conversation stays
+                in the mode it was created in.
+                <button
+                  type="button"
+                  class="link"
+                  disabled={!connected || pending || sessions.composing}
+                  onclick={() => controller.compose(true, null, 'local_tools')}
+                  >New Local Tools session</button
+                >
+              </p>
+            {:else if selected.mode === 'local_tools'}
+              <p class="session-hint">
+                This session runs in Local Tools. Every command and file change
+                Codex proposes waits for your approval.
+              </p>
+            {/if}
             {#if selected.activatable}
               <p class="session-hint">
                 Activate binds a project folder and attaches the session to
@@ -411,6 +518,15 @@
             <dd>
               {BINDING[selected.binding].label}
               <span class="fact-note">{BINDING[selected.binding].detail}</span>
+            </dd>
+            <dt>Mode</dt>
+            <dd>
+              {modeLabel(selected.mode)}
+              {#if selected.mode === 'unknown' && selected.workspace}
+                <span class="fact-note"
+                  >wyss-control reports a session's mode while it is attached.</span
+                >
+              {/if}
             </dd>
             <dt>Workspace</dt>
             <dd class:mono={!!selected.workspace}>

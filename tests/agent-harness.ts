@@ -1,4 +1,5 @@
 import {
+  parseManagedApprovalId,
   parseManagedSessionId,
   parseManagedTurnId,
   type ManagedSessionId,
@@ -30,6 +31,10 @@ const turnId = (digit: string) =>
   );
 export const [T1, T2, T3] = ['a', 'b', 'c'].map(turnId);
 export const T9 = turnId('9');
+/** The handle of an approval a turn waits on. */
+export const A1 = parseManagedApprovalId(
+  'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+);
 
 const REASON = {
   completed: 'completed',
@@ -68,7 +73,7 @@ export function listing(
 ): TurnList {
   const { session, ...rest } = over;
   return {
-    schema_version: 1,
+    schema_version: 2,
     head: '9',
     turns,
     runnable: turns.every((t) => turnEnded(t.state)),
@@ -80,6 +85,7 @@ export function listing(
       revision: 1,
       binding: 'bound_attached',
       workspace: '/home/dev/rag-corp',
+      mode: 'inference',
       ...session,
     },
   };
@@ -92,7 +98,7 @@ export function reading(
   over: Partial<TurnView> = {},
 ): TurnView {
   return {
-    schema_version: 1,
+    schema_version: 2,
     turn: of,
     events: events.map(([n, kind, text]) => ({
       sequence: String(n),

@@ -2,6 +2,7 @@ import type { ManagedSessionId } from '../../contracts/identities';
 import type {
   ActivationProgress,
   ActivationStage,
+  AgentMode,
   SessionFailure,
   SessionPage,
   SessionReceipt,
@@ -12,6 +13,7 @@ import {
   activateSession,
   chooseWorkspace,
   closeSession,
+  enterSessionMode,
   prepareSession,
   readSessionsPage,
   resumeSession,
@@ -20,12 +22,14 @@ import {
 import type { AuthorityObservation } from '../../shell/authority';
 
 export type SessionsLink = 'connecting' | 'offline' | 'connected';
-export type OperationKind = 'activate' | 'resume' | 'close' | 'abandon';
+export type OperationKind =
+  'activate' | 'mode' | 'resume' | 'close' | 'abandon';
 /**
  * What an activation is doing now. Each one is justified by something that was read:
  * the request in flight, or what the authority last answered or reported.
  */
-export type ActivationStep = 'preparing' | 'starting' | 'binding' | 'attaching';
+export type ActivationStep =
+  'preparing' | 'stopping' | 'starting' | 'binding' | 'attaching';
 
 export interface SessionOperation {
   kind: OperationKind;
@@ -33,8 +37,10 @@ export interface SessionOperation {
   session: ManagedSessionId | null;
   status: 'pending' | 'failed';
   failure?: SessionFailure;
-  /** Only for an activation that is pending. */
+  /** Only for an activation, or a change of mode, that is pending. */
   step?: ActivationStep;
+  /** The mode an activation or a change of mode asked for. */
+  mode?: AgentMode;
 }
 
 /** Everything the Sessions view renders. Canonical data is only ever a page that was read. */
@@ -53,6 +59,10 @@ export interface SessionsState {
   composeFor: ManagedSessionId | null;
   /** The folder the user selected for the composer, as the native dialog returned it. */
   workspace: string | null;
+  /** The mode the composer creates the session in. Inference unless the user says so. */
+  mode: AgentMode;
+  /** The session and mode a change of mode was asked for, while it is being confirmed. */
+  confirmingMode: { session: ManagedSessionId; mode: AgentMode } | null;
   /** The native folder dialog is open. */
   choosing: boolean;
   chooseFailure: SessionFailure | null;
@@ -81,6 +91,13 @@ export interface SessionsClient {
     session: ManagedSessionId,
     revision: number,
     workspace: string,
+    mode: AgentMode,
+  ): Promise<ActivationProgress>;
+  enter(
+    operation: string,
+    session: ManagedSessionId,
+    revision: number,
+    mode: AgentMode,
   ): Promise<ActivationProgress>;
   abandon(intent: string, session: ManagedSessionId): Promise<SessionReceipt>;
   chooseWorkspace(): Promise<string | null>;
@@ -91,6 +108,7 @@ const desktop: SessionsClient = {
   resume: resumeSession,
   close: closeSession,
   activate: activateSession,
+  enter: enterSessionMode,
   abandon: abandonSession,
   chooseWorkspace,
 };
@@ -116,6 +134,7 @@ interface Intent {
   session: ManagedSessionId | null;
   revision: number;
   workspace?: string;
+  mode?: AgentMode;
 }
 
 function sequence(text: string | null | undefined): bigint {
@@ -157,6 +176,11 @@ export class SessionsController {
   private composing = false;
   private composeFor: ManagedSessionId | null = null;
   private workspace: string | null = null;
+  private mode: AgentMode = 'inference';
+  private confirmingMode: {
+    session: ManagedSessionId;
+    mode: AgentMode;
+  } | null = null;
   private choosing = false;
   private chooseFailure: SessionFailure | null = null;
   private confirmingClose: ManagedSessionId | null = null;
@@ -186,6 +210,8 @@ export class SessionsController {
       composing: this.composing,
       composeFor: this.composeFor,
       workspace: this.workspace,
+      mode: this.mode,
+      confirmingMode: this.confirmingMode,
       choosing: this.choosing,
       chooseFailure: this.chooseFailure,
       confirmingClose: this.confirmingClose,
@@ -227,6 +253,7 @@ export class SessionsController {
       this.composing = false;
       this.confirmingClose = null;
       this.confirmingDiscard = null;
+      this.confirmingMode = null;
     }
     this.publish();
     this.sync();
@@ -241,6 +268,7 @@ export class SessionsController {
       this.composing = false;
       this.confirmingClose = null;
       this.confirmingDiscard = null;
+      this.confirmingMode = null;
       this.publish();
     }
     this.sync();
@@ -306,6 +334,8 @@ export class SessionsController {
       !this.find(this.confirmingDiscard)?.recoverable
     )
       this.confirmingDiscard = null;
+    if (this.confirmingMode && !this.switchable(this.confirmingMode.session))
+      this.confirmingMode = null;
     // The session the composer was opened for is no longer one to activate.
     if (
       this.composing &&
@@ -338,6 +368,7 @@ export class SessionsController {
     this.cursors = cursors;
     this.confirmingClose = null;
     this.confirmingDiscard = null;
+    this.confirmingMode = null;
     this.publish();
     this.sync(true);
   }
@@ -347,18 +378,25 @@ export class SessionsController {
     this.selected = id;
     this.confirmingClose = null;
     this.confirmingDiscard = null;
+    this.confirmingMode = null;
     this.publish();
   }
   /**
    * Opens the composer for a new session, or for an existing one that has no workspace
    * yet, and closes it. It always opens without a folder: one is chosen each time.
    */
-  compose(open: boolean, session: ManagedSessionId | null = null) {
+  compose(
+    open: boolean,
+    session: ManagedSessionId | null = null,
+    mode: AgentMode = 'inference',
+  ) {
     if (open) {
       if (this.link !== 'connected' || this.busy() || this.choosing) return;
       if (session !== null && !this.find(session)?.activatable) return;
       this.composeFor = session;
       this.workspace = null;
+      // Inference, unless whoever opened it asked for local tools by name.
+      this.mode = mode;
       this.chooseFailure = null;
     }
     this.composing = open;
@@ -390,11 +428,50 @@ export class SessionsController {
       },
     );
   }
+  /** The mode the composer creates its session in. An explicit choice, every time. */
+  setMode(mode: AgentMode) {
+    if (this.disposed || !this.composing || this.busy()) return;
+    this.mode = mode;
+    this.publish();
+  }
+  /** Whether a session has a workspace to run a mode for: prepared and bound. */
+  private switchable(id: ManagedSessionId): boolean {
+    const session = this.find(id);
+    return (
+      session?.state === 'prepared' &&
+      (session.binding === 'bound_detached' ||
+        session.binding === 'bound_attached')
+    );
+  }
+  /**
+   * Asks before a change of mode: it restarts the one managed runtime, which detaches
+   * every session attached to it.
+   */
+  confirmMode(id: ManagedSessionId | null, mode: AgentMode = 'local_tools') {
+    if (id !== null && (!this.switchable(id) || this.busy())) return;
+    this.confirmingMode = id === null ? null : { session: id, mode };
+    this.confirmingClose = null;
+    this.confirmingDiscard = null;
+    this.publish();
+  }
+  /** Enters the mode that was confirmed, with the session it was confirmed for. */
+  enterMode() {
+    const asked = this.confirmingMode;
+    const session = asked && this.find(asked.session);
+    if (!asked || !session || !this.switchable(asked.session)) return;
+    this.send({
+      kind: 'mode',
+      session: asked.session,
+      revision: session.revision,
+      mode: asked.mode,
+    });
+  }
   /** Asks before a close: it is the one action that cannot be taken back. */
   confirmClose(id: ManagedSessionId | null) {
     if (id !== null && (!this.find(id)?.closable || this.busy())) return;
     this.confirmingClose = id;
     this.confirmingDiscard = null;
+    this.confirmingMode = null;
     this.publish();
   }
   /** Asks before giving up on an uncertain attempt: what Codex did stays unknown. */
@@ -402,6 +479,7 @@ export class SessionsController {
     if (id !== null && (!this.find(id)?.recoverable || this.busy())) return;
     this.confirmingDiscard = id;
     this.confirmingClose = null;
+    this.confirmingMode = null;
     this.publish();
   }
 
@@ -417,6 +495,7 @@ export class SessionsController {
       // A session that does not exist yet will be at the revision it is prepared at.
       revision: shown?.revision ?? 1,
       workspace: this.workspace,
+      mode: this.mode,
     });
   }
   resume(id: ManagedSessionId) {
@@ -461,7 +540,8 @@ export class SessionsController {
     this.composing = false;
     this.confirmingClose = null;
     this.confirmingDiscard = null;
-    if (intent.kind === 'activate') {
+    this.confirmingMode = null;
+    if (intent.kind === 'activate' || intent.kind === 'mode') {
       void this.activation(intent);
       return;
     }
@@ -497,6 +577,7 @@ export class SessionsController {
       session: intent.session,
       status: 'failed',
       failure: failureOf(error),
+      mode: intent.mode,
     };
     this.publish();
     // A refusal usually means the session is not what was shown: read it again.
@@ -512,10 +593,11 @@ export class SessionsController {
     const live = () => !this.disposed && this.intent === intent;
     const doing = (step: ActivationStep) => {
       this.operation = {
-        kind: 'activate',
+        kind: intent.kind,
         session: intent.session,
         status: 'pending',
         step,
+        mode: intent.mode,
       };
       this.publish();
     };
@@ -536,12 +618,17 @@ export class SessionsController {
       let last: ActivationStage | null = null;
       for (;;) {
         doing(this.step(session, last));
-        const { stage } = await this.client.activate(
-          intent.id,
-          session,
-          intent.revision,
-          intent.workspace!,
-        );
+        // A change of mode names the mode and nothing else. An activation also names
+        // the folder the user selected.
+        const { stage } = await (intent.kind === 'mode'
+          ? this.client.enter(intent.id, session, intent.revision, intent.mode!)
+          : this.client.activate(
+              intent.id,
+              session,
+              intent.revision,
+              intent.workspace!,
+              intent.mode ?? 'inference',
+            ));
         if (!live()) return;
         if (stage === 'ready') break;
         last = stage;
@@ -576,6 +663,8 @@ export class SessionsController {
     session: ManagedSessionId,
     last: ActivationStage | null,
   ): ActivationStep {
+    // Asked to stop, and still reported up: it is on its way down.
+    if (last === 'runtime_stopping' && this.agentReady) return 'stopping';
     if (last === 'bound') return 'attaching';
     if (last === 'creating') return 'binding';
     const binding = this.find(session)?.binding;

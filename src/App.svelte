@@ -4,6 +4,8 @@
   import { getAppInfo } from './lib/desktop/client';
   import AgentView from './lib/features/agent/AgentView.svelte';
   import { AgentController } from './lib/features/agent/controller';
+  import ApprovalsView from './lib/features/approvals/ApprovalsView.svelte';
+  import { ApprovalsController } from './lib/features/approvals/controller';
   import { SessionsController } from './lib/features/sessions/controller';
   import { sessionLabel } from './lib/features/sessions/present';
   import SessionsView from './lib/features/sessions/SessionsView.svelte';
@@ -37,6 +39,11 @@
     agent = next;
   });
   let agent = $state(agentController.state());
+  // And for approvals: one reader, for the Approvals view and for the card under a turn.
+  const approvalsController = new ApprovalsController((next) => {
+    approvals = next;
+  });
+  let approvals = $state(approvalsController.state());
   const current = $derived(NAV_ITEMS.find((item) => item.id === activeView));
 
   // Sessions are read only while their view is shown.
@@ -45,6 +52,14 @@
   });
   $effect(() => {
     agentController.setVisible(activeView === 'agents');
+  });
+  // Approvals are read while their view is shown or a turn is being followed: an
+  // approval exists only for a turn that runs. Nothing is read for them otherwise.
+  $effect(() => {
+    approvalsController.setVisible(activeView === 'approvals');
+  });
+  $effect(() => {
+    approvalsController.setWatching(agent.following);
   });
 
   onMount(() => {
@@ -61,12 +76,14 @@
       authority = observation;
       sessionsController.observe(observation);
       agentController.observe(observation);
+      approvalsController.observe(observation);
     });
     return () => {
       active = false;
       unfollow();
       sessionsController.dispose();
       agentController.dispose();
+      approvalsController.dispose();
     };
   });
 
@@ -94,7 +111,11 @@
     {authority}
     {version}
   />
-  <Sidebar active={activeView} onselect={(id) => (activeView = id)} />
+  <Sidebar
+    active={activeView}
+    onselect={(id) => (activeView = id)}
+    waiting={approvals.pending?.length ?? 0}
+  />
   <main class="content">
     <!-- Every view stays mounted: leaving the Console never ends a terminal. -->
     <TerminalView
@@ -113,7 +134,15 @@
       {agent}
       controller={agentController}
       {authority}
+      {approvals}
+      {approvalsController}
       onsessions={() => (activeView = 'sessions')}
+    />
+    <ApprovalsView
+      visible={activeView === 'approvals'}
+      {approvals}
+      controller={approvalsController}
+      {authority}
     />
   </main>
 </div>

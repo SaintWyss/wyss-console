@@ -27,14 +27,16 @@ use crate::{
     contracts::{
         Sequence, WireUuid,
         control::{
-            AuditRead, BindingState, ControlError, ControlResult, ControlState, ExecutionScope,
-            MAX_PAGE, ResultValue, TurnCancel, TurnEvents, TurnStart, TurnStreamPage,
-            validate_prompt,
+            AttachmentProfile, AuditRead, BindingState, ControlError, ControlResult, ControlState,
+            ExecutionScope, MAX_PAGE, ResultValue, TurnCancel, TurnEvents, TurnStart,
+            TurnStreamPage, validate_prompt,
         },
-        identities::{ManagedSessionId, ManagedTurnId},
+        identities::{ManagedApprovalId, ManagedSessionId, ManagedTurnId},
     },
     control::client::ControlClient,
-    sessions::{Grant, Held, SessionError, SessionFailure, SessionService, session_revision},
+    sessions::{
+        Grant, Held, SessionError, SessionFailure, SessionMode, SessionService, session_revision,
+    },
 };
 use std::{
     collections::{HashMap, VecDeque},
@@ -59,22 +61,52 @@ const SCAN_EVENTS: u64 = SCAN_PAGES as u64 * MAX_PAGE as u64;
 /// Turns remembered for one session, and sessions remembered.
 const KEEP_TURNS: usize = 32;
 const KEEP_SESSIONS: usize = 64;
+/// Approvals remembered, newest last. The authority holds one pending at a time.
+pub(super) const KEEP_APPROVALS: usize = 16;
+
+/// What a turn's lease is asked with. In inference a turn needs nothing but its own
+/// admission. In local tools the model may propose a command or a file change, and the
+/// authority accepts one only under the lease the turn was admitted under, carrying that
+/// action's scope: so the scopes are asked for with the turn or not at all. Which of the
+/// two applies is read from the authority's own record of the attachment, never chosen
+/// by the window.
+const INFERENCE_SCOPES: &[ExecutionScope] = &[ExecutionScope::TurnStart];
+const LOCAL_TOOLS_SCOPES: &[ExecutionScope] = &[
+    ExecutionScope::TurnStart,
+    ExecutionScope::CommandExecute,
+    ExecutionScope::FileChange,
+];
 
 /// Which turns the durable stream says each session has. It is an index, not state: a
 /// turn listed here is read from the authority before anything is said about it.
 #[derive(Default)]
-struct Index {
+pub(super) struct Index {
     stream: Option<String>,
     /// Audit sequence the stream was read up to.
     scanned: u64,
     /// A read began after where the one before it ended, or after the beginning.
-    partial: bool,
+    pub(super) partial: bool,
     turns: HashMap<String, VecDeque<ManagedTurnId>>,
     /// Sessions in the order they were first seen: the oldest is forgotten first.
     order: VecDeque<String>,
+    /// The turn admitted last, whichever session it belongs to. The authority runs one
+    /// turn at a time, so if any turn is running it is this one.
+    last: Option<ManagedTurnId>,
+    /// Approvals the stream says were asked for, oldest first.
+    pub(super) approvals: VecDeque<ManagedApprovalId>,
 }
 impl Index {
+    fn request(&mut self, approval: ManagedApprovalId) {
+        if self.approvals.contains(&approval) {
+            return;
+        }
+        if self.approvals.len() == KEEP_APPROVALS {
+            self.approvals.pop_front();
+        }
+        self.approvals.push_back(approval);
+    }
     fn admit(&mut self, session: &str, turn: ManagedTurnId) {
+        self.last = Some(turn.clone());
         let key = session.to_ascii_lowercase();
         if !self.turns.contains_key(&key) {
             if self.order.len() == KEEP_SESSIONS
@@ -95,19 +127,19 @@ impl Index {
     }
 }
 
-struct Inner {
-    sessions: SessionService,
+pub(super) struct Inner {
+    pub(super) sessions: SessionService,
     /// One follower's read at a time.
     reading: Mutex<()>,
     /// One list at a time, and the index they share.
-    index: Mutex<Index>,
+    pub(super) index: Mutex<Index>,
 }
 
 /// Application-lifetime door to managed turns. Cloning shares it. It stops with the
 /// `SessionService` it was made from.
 #[derive(Clone)]
 pub struct TurnService {
-    inner: Arc<Inner>,
+    pub(super) inner: Arc<Inner>,
 }
 impl TurnService {
     pub fn new(sessions: SessionService) -> Self {
@@ -143,6 +175,16 @@ impl TurnService {
         let sessions = &self.inner.sessions;
         sessions.call(|client| {
             sessions.settle(client, &session);
+            // The profile the session is attached under decides what the turn can lead
+            // to, and with it what its lease has to carry.
+            let scopes = match client
+                .binding_status(session.clone())
+                .map_err(SessionError::of)?
+                .attachment_profile
+            {
+                Some(AttachmentProfile::LocalToolsV1) => LOCAL_TOOLS_SCOPES,
+                _ => INFERENCE_SCOPES,
+            };
             // A lease kept for an earlier turn is given back once that turn has ended,
             // so this turn is admitted under a lease, and a time budget, of its own.
             if let Some(Held {
@@ -159,7 +201,7 @@ impl TurnService {
                 &session,
                 expected_revision,
                 Grant {
-                    scope: ExecutionScope::TurnStart,
+                    scopes,
                     ttl_seconds: TURN_LEASE_SECONDS,
                     hold: true,
                 },
@@ -279,6 +321,30 @@ impl TurnService {
         });
     }
 
+    /// Whether a managed turn is running, in any session, read through `client`.
+    ///
+    /// The authority has no operation that says so. It runs one turn at a time and
+    /// records every admission in its durable stream, so the turn admitted last is the
+    /// only one that can be running, and its record says whether it is.
+    pub fn active(&self, client: &mut ControlClient) -> Result<bool, SessionError> {
+        let last = {
+            let mut index = self
+                .inner
+                .index
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            scan(client, &mut index).map_err(SessionError::of)?;
+            index.last.clone()
+        };
+        match last {
+            None => Ok(false),
+            Some(turn) => client
+                .turn_status(turn)
+                .map(|turn| !turn.state.terminal())
+                .map_err(SessionError::of),
+        }
+    }
+
     /// The recent turns of a session, newest first, each as the authority holds it now.
     pub fn list(&self, session: ManagedSessionId) -> Result<TurnList, SessionError> {
         let mut index = self
@@ -321,6 +387,7 @@ impl TurnService {
                 id: record.managed_session_id,
                 state: record.control_state,
                 revision: record.revision,
+                mode: SessionMode::of(&binding),
                 binding: binding.state,
                 workspace: binding.binding.map(|b| b.workspace_root),
             },
@@ -359,7 +426,7 @@ fn stream(
 
 /// Brings the index up to the head of the durable stream: a bounded read of what was
 /// appended since the last one, and never of more than the last `SCAN_EVENTS` events.
-fn scan(client: &mut ControlClient, index: &mut Index) -> ControlResult<()> {
+pub(super) fn scan(client: &mut ControlClient, index: &mut Index) -> ControlResult<()> {
     let (stream, head) = {
         let hello = client.hello_status();
         (
@@ -411,6 +478,14 @@ fn scan(client: &mut ControlClient, index: &mut Index) -> ControlResult<()> {
                 return Err(ControlError::CorrelationError);
             }
             index.scanned = sequence;
+            if event["event_type"] == "authority.managed_approval.requested" {
+                let approval = event["payload"]["managed_approval_id"]
+                    .as_str()
+                    .and_then(|id| ManagedApprovalId::parse(id).ok())
+                    .ok_or(ControlError::CorrelationError)?;
+                index.request(approval);
+                continue;
+            }
             if event["event_type"] != "authority.managed_turn.admitted" {
                 continue;
             }

@@ -1,4 +1,5 @@
-//! The window's door to managed turns: two reads and two product intents.
+//! The window's door to managed turns and their approvals: for turns two reads and two
+//! product intents, for approvals two reads and two decisions.
 //!
 //! Each command takes one narrow request and names no control method. The window cannot
 //! choose a scope, a lease, a lifetime, a runtime, a provider thread, a model, a tool or a
@@ -6,7 +7,11 @@
 //! identity of its own action and, for a start, the text the user wrote. That text goes to
 //! the authority as one typed field and is never part of a command line, a path or a log.
 //!
-//! No command here answers an approval, and none exists anywhere in the window's surface.
+//! An approval is answered with one of two commands, Approve or Deny, for one approval at
+//! the revision the window was shown. Neither takes a decision as text, a command to run
+//! instead, a scope, a rule or anything that outlives that one approval. The approval's
+//! identity is a handle the window was given; whether it is still pending, still inside
+//! its workspace and still covered by the turn's lease is the authority's to check.
 use serde::Deserialize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::State;
@@ -14,10 +19,13 @@ use tauri::State;
 use super::sessions::{SessionError, SessionFailure};
 use crate::contracts::{
     Sequence, WireUuid,
-    identities::{ManagedSessionId, ManagedTurnId},
+    identities::{ManagedApprovalId, ManagedSessionId, ManagedTurnId},
 };
 #[cfg(target_os = "linux")]
-pub use crate::turns::{TurnList, TurnReceipt, TurnService, TurnView};
+pub use crate::turns::{
+    ApprovalDetail, ApprovalList, Decision, DecisionReceipt, TurnList, TurnReceipt, TurnService,
+    TurnView,
+};
 
 /// Intents admitted at once. They run one at a time, with the session intents.
 const MAX_INTENTS: usize = 2;
@@ -71,6 +79,28 @@ pub struct ReadTurnRequest {
 #[serde(deny_unknown_fields)]
 pub struct TurnsRequest {
     session_id: ManagedSessionId,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApprovalsRequest {}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadApprovalRequest {
+    /// The handle of an approval the window was shown.
+    approval_id: ManagedApprovalId,
+    /// Which file of a change set, and where in its diff. Null is the first of each.
+    file: Option<u16>,
+    offset: Option<u32>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecideApprovalRequest {
+    /// Names this user action. The same value sent again is the same decision.
+    intent_id: WireUuid,
+    approval_id: ManagedApprovalId,
+    /// The approval revision the window was shown.
+    expected_revision: u64,
 }
 
 /// Admission occurs before `spawn_blocking`, with counters of its own: a turn read, which
@@ -155,15 +185,86 @@ pub async fn managed_turn_cancel(
     .await
 }
 
+/// The latest approvals: those waiting for a decision, with what they are about.
+#[tauri::command]
+pub async fn managed_approvals(
+    service: State<'_, TurnService>,
+    request: ApprovalsRequest,
+) -> Result<ApprovalList, SessionError> {
+    let ApprovalsRequest {} = request;
+    blocking(
+        (&READS, MAX_READS),
+        service.inner().clone(),
+        move |service| service.approvals(),
+    )
+    .await
+}
+#[tauri::command]
+pub async fn managed_approval_read(
+    service: State<'_, TurnService>,
+    request: ReadApprovalRequest,
+) -> Result<ApprovalDetail, SessionError> {
+    blocking(
+        (&READS, MAX_READS),
+        service.inner().clone(),
+        move |service| service.approval(request.approval_id, request.file, request.offset),
+    )
+    .await
+}
+async fn decide_in(
+    service: TurnService,
+    request: DecideApprovalRequest,
+    decision: Decision,
+) -> Result<DecisionReceipt, SessionError> {
+    blocking((&INTENTS, MAX_INTENTS), service, move |service| {
+        service.decide(
+            request.intent_id,
+            request.approval_id,
+            request.expected_revision,
+            decision,
+        )
+    })
+    .await
+}
+/// Asks the authority to accept this one approval. Which decision a command means is
+/// fixed here: the window cannot send one as data.
+#[tauri::command]
+pub async fn managed_approval_approve(
+    service: State<'_, TurnService>,
+    request: DecideApprovalRequest,
+) -> Result<DecisionReceipt, SessionError> {
+    decide_in(service.inner().clone(), request, Decision::Approve).await
+}
+#[tauri::command]
+pub async fn managed_approval_deny(
+    service: State<'_, TurnService>,
+    request: DecideApprovalRequest,
+) -> Result<DecisionReceipt, SessionError> {
+    decide_in(service.inner().clone(), request, Decision::Deny).await
+}
+
 /// Where there is no authority to ask, every call says so.
 #[cfg(not(target_os = "linux"))]
 mod unsupported {
+    use super::super::sessions::{ActivationProgress, AgentMode};
     use super::{SessionError, SessionFailure};
     use crate::contracts::{
         Sequence, WireUuid,
-        identities::{ManagedSessionId, ManagedTurnId},
+        identities::{ManagedApprovalId, ManagedSessionId, ManagedTurnId},
     };
     use serde::Serialize;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Decision {
+        Approve,
+        Deny,
+    }
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    pub struct ApprovalList {}
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    pub struct ApprovalDetail {}
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    pub struct DecisionReceipt {}
 
     #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
     pub struct TurnList {}
@@ -199,10 +300,52 @@ mod unsupported {
         pub fn cancel(&self, _: WireUuid, _: ManagedTurnId, _: u64) -> Refused<TurnReceipt> {
             Self::absent()
         }
+        pub fn activate(
+            &self,
+            _: WireUuid,
+            _: ManagedSessionId,
+            _: u64,
+            _: String,
+            _: AgentMode,
+        ) -> Refused<ActivationProgress> {
+            Self::absent()
+        }
+        pub fn enter(
+            &self,
+            _: WireUuid,
+            _: ManagedSessionId,
+            _: u64,
+            _: AgentMode,
+        ) -> Refused<ActivationProgress> {
+            Self::absent()
+        }
+        pub fn approvals(&self) -> Refused<ApprovalList> {
+            Self::absent()
+        }
+        pub fn approval(
+            &self,
+            _: ManagedApprovalId,
+            _: Option<u16>,
+            _: Option<u32>,
+        ) -> Refused<ApprovalDetail> {
+            Self::absent()
+        }
+        pub fn decide(
+            &self,
+            _: WireUuid,
+            _: ManagedApprovalId,
+            _: u64,
+            _: Decision,
+        ) -> Refused<DecisionReceipt> {
+            Self::absent()
+        }
     }
 }
 #[cfg(not(target_os = "linux"))]
-pub use unsupported::{TurnList, TurnReceipt, TurnService, TurnView};
+pub use unsupported::{
+    ApprovalDetail, ApprovalList, Decision, DecisionReceipt, TurnList, TurnReceipt, TurnService,
+    TurnView,
+};
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
@@ -328,6 +471,106 @@ mod tests {
         ] {
             assert!(turns(rejected.clone()).is_err(), "{rejected}");
         }
+    }
+
+    #[test]
+    fn an_approval_is_read_by_its_handle_and_decided_with_nothing_but_its_revision() {
+        const APPROVAL: &str = "44444444-4444-4444-8444-444444444444";
+        let decide = serde_json::from_value::<DecideApprovalRequest>;
+        let full = json!({"intent_id": INTENT, "approval_id": APPROVAL, "expected_revision": 1});
+        let accepted = decide(full.clone()).unwrap();
+        assert_eq!(accepted.intent_id.as_str(), INTENT);
+        assert_eq!(accepted.approval_id.as_str(), APPROVAL);
+        assert_eq!(accepted.expected_revision, 1);
+        // Which decision a request means is the command it was sent to, never data: no
+        // decision, no replacement action, nothing that outlives this one approval.
+        for extra in [
+            "decision",
+            "accept",
+            "command",
+            "cwd",
+            "edited",
+            "amendment",
+            "execpolicy_amendment",
+            "for_session",
+            "always",
+            "remember",
+            "rule",
+            "scope",
+            "scopes",
+            "lease_id",
+            "fingerprint",
+            "action_fingerprint",
+            "turn_id",
+            "session_id",
+            "method",
+        ] {
+            let mut tampered = full.clone();
+            tampered[extra] = json!("accept");
+            assert!(decide(tampered.clone()).is_err(), "{tampered}");
+        }
+        for (field, value) in [
+            ("intent_id", json!("x")),
+            ("approval_id", json!("approval-1")),
+            ("approval_id", json!(null)),
+            ("expected_revision", json!("1")),
+            ("expected_revision", json!(-1)),
+        ] {
+            let mut tampered = full.clone();
+            tampered[field] = value;
+            assert!(decide(tampered.clone()).is_err(), "{tampered}");
+        }
+        for missing in ["intent_id", "approval_id", "expected_revision"] {
+            let mut tampered = full.clone();
+            tampered.as_object_mut().unwrap().remove(missing);
+            assert!(decide(tampered.clone()).is_err(), "{tampered}");
+        }
+
+        let read = serde_json::from_value::<ReadApprovalRequest>;
+        let page = read(json!({"approval_id": APPROVAL, "file": 2, "offset": 8192})).unwrap();
+        assert_eq!(
+            (page.approval_id.as_str(), page.file, page.offset),
+            (APPROVAL, Some(2), Some(8192))
+        );
+        let first = read(json!({"approval_id": APPROVAL, "file": null, "offset": null})).unwrap();
+        assert_eq!((first.file, first.offset), (None, None));
+        for tampered in [
+            json!({"approval_id": APPROVAL, "file": -1, "offset": 0}),
+            json!({"approval_id": APPROVAL, "file": 70000, "offset": 0}),
+            json!({"approval_id": APPROVAL, "file": 0, "offset": "0"}),
+            json!({"approval_id": APPROVAL, "file": 0, "offset": 0, "path": "/etc/passwd"}),
+            json!({"approval_id": APPROVAL, "file": 0, "offset": 0, "limit": 1000000}),
+            json!({"approval_id": "x", "file": null, "offset": null}),
+        ] {
+            assert!(read(tampered.clone()).is_err(), "{tampered}");
+        }
+        // The list takes nothing at all.
+        assert!(serde_json::from_value::<ApprovalsRequest>(json!({})).is_ok());
+        assert!(
+            serde_json::from_value::<ApprovalsRequest>(json!({"session_id": SESSION})).is_err()
+        );
+
+        // Without an authority a decision reaches nobody, and a revision that cannot be
+        // one is refused before anything is asked.
+        let sessions = crate::sessions::SessionService::new(None);
+        let service = TurnService::new(sessions.clone());
+        let request = |revision| DecideApprovalRequest {
+            intent_id: WireUuid::try_from(INTENT.to_owned()).unwrap(),
+            approval_id: ManagedApprovalId::parse(APPROVAL).unwrap(),
+            expected_revision: revision,
+        };
+        for decision in [Decision::Approve, Decision::Deny] {
+            assert_eq!(
+                code(block(decide_in(service.clone(), request(0), decision)).unwrap_err()),
+                json!({"code": "invalid", "retry": false})
+            );
+            assert_eq!(
+                code(block(decide_in(service.clone(), request(1), decision)).unwrap_err()),
+                json!({"code": "unavailable", "retry": true})
+            );
+        }
+        assert_eq!(sessions.stats().connections, 0);
+        assert_eq!(INTENTS.load(Ordering::Acquire), 0);
     }
 
     #[test]

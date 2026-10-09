@@ -1,6 +1,9 @@
 import type {
+  AgentMode,
+  RuntimeFacts,
   SessionBinding,
   SessionFailureCode,
+  SessionMode,
   SessionSummary,
 } from '../../contracts/sessions';
 import type { RuntimeTone } from '../../shell/runtime';
@@ -58,13 +61,61 @@ export const BINDING: Record<
   },
 };
 
-const PENDING: Record<Exclude<OperationKind, 'activate'>, string> = {
+/** The two modes, in the words the product uses for them. */
+export const AGENT_MODE: Record<AgentMode, { label: string; detail: string }> =
+  {
+    inference: {
+      label: 'Inference',
+      detail: 'Text only. Codex is offered no tool.',
+    },
+    local_tools: {
+      label: 'Local Tools',
+      detail:
+        'Codex may propose commands and file changes in this folder. Each one waits for your approval.',
+    },
+  };
+export function modeLabel(mode: SessionMode): string {
+  return mode === 'unknown' ? 'Not attached' : AGENT_MODE[mode].label;
+}
+/** What the one managed runtime is doing now, for the Sessions heading. */
+export function runtimeLine(runtime: RuntimeFacts): string | null {
+  if (runtime.mode === null) return null;
+  return runtime.mode === 'local_tools'
+    ? `Codex runs in Local Tools for ${runtime.workspace?.split('/').filter(Boolean).at(-1) ?? 'a workspace'}`
+    : 'Codex runs in Inference';
+}
+/**
+ * What a change of mode does, said before it is asked for. The runtime is one and
+ * shared: nothing here softens that.
+ */
+export function modeImpact(mode: AgentMode): string {
+  return mode === 'local_tools'
+    ? 'This restarts the managed Codex runtime in Local Tools for this workspace. Sessions attached now are detached. A session created in Inference cannot be resumed in Local Tools. Every command and file change still waits for your approval.'
+    : 'This restarts the managed Codex runtime in Inference. Sessions attached now are detached. A session created in Local Tools cannot be resumed in Inference.';
+}
+/** Which change of mode to offer for a session that is bound and not attached. */
+export function modeOffers(
+  session: SessionSummary,
+  runtime: RuntimeFacts,
+): AgentMode[] {
+  if (session.state !== 'prepared' || session.binding !== 'bound_detached')
+    return [];
+  const offers: AgentMode[] = [];
+  // Not offered when plain Resume already means it: the runtime serves that mode.
+  if (runtime.mode !== 'local_tools' || runtime.workspace !== session.workspace)
+    offers.push('local_tools');
+  if (runtime.mode === 'local_tools') offers.push('inference');
+  return offers;
+}
+
+const PENDING: Record<Exclude<OperationKind, 'activate' | 'mode'>, string> = {
   resume: 'Resuming session…',
   close: 'Closing session…',
   abandon: 'Discarding the uncertain attempt…',
 };
 const ACTIVATING: Record<ActivationStep, string> = {
   preparing: 'Preparing session…',
+  stopping: 'Stopping the managed runtime…',
   starting: 'Starting Codex…',
   binding: 'Creating workspace binding…',
   attaching: 'Attaching…',
@@ -73,12 +124,20 @@ const ACTIVATING: Record<ActivationStep, string> = {
 export function pendingMessage(
   kind: OperationKind,
   step: ActivationStep | undefined,
+  mode?: AgentMode,
 ): string {
-  return kind === 'activate' ? ACTIVATING[step ?? 'starting'] : PENDING[kind];
+  if (kind !== 'activate' && kind !== 'mode') return PENDING[kind];
+  const doing = ACTIVATING[step ?? 'starting'];
+  // Local Tools is the mode that is asked for by name: when it is the one coming up,
+  // that is part of what is happening.
+  return step === 'starting' && mode === 'local_tools'
+    ? `Starting Codex in ${AGENT_MODE[mode].label}…`
+    : doing;
 }
 
 const ACTION: Record<OperationKind, string> = {
   activate: 'The session is not ready',
+  mode: 'The session is not ready in that mode',
   resume: 'The session was not resumed',
   close: 'The session was not closed',
   abandon: 'The attempt was not discarded',
@@ -96,6 +155,10 @@ const FAILURE: Record<SessionFailureCode, string> = {
   runtime_unavailable:
     'The authority denied it because the agent runtime is not ready.',
   start_refused: 'wyss-control refused to start Codex.',
+  turn_active:
+    'A turn is running, and the runtime it runs on is not restarted under it. Wait for it or cancel it.',
+  mode_fixed:
+    'This session is attached in the other mode: its conversation exists only there.',
   workspace_invalid:
     'wyss-control did not accept that folder as a workspace. Nothing was bound.',
   already_bound:
@@ -120,6 +183,14 @@ const SPECIFIC: Partial<
       'Codex is not ready, so the session could not be bound or attached.',
     rejected: 'Codex refused the request.',
   },
+  mode: {
+    not_allowed: 'The authority refused: the session no longer allows it.',
+    runtime_unavailable:
+      'Codex did not come up in that mode. The runtime is as wyss-control reports it.',
+    rejected:
+      'Codex refused to resume this session in that mode. A session resumes only in the mode it was created in. The runtime now runs in the mode that was asked for.',
+    not_bound: 'This session has no workspace to run a mode for.',
+  },
   abandon: {
     not_allowed:
       'The authority holds no uncertain attempt for this session any more.',
@@ -133,8 +204,12 @@ const SPECIFIC: Partial<
 export function failureMessage(
   kind: OperationKind,
   code: SessionFailureCode,
+  mode?: AgentMode,
 ): string {
   if (code === 'unavailable') return FAILURE[code];
+  // Local Tools runs only inside the isolation the authority can set up and prove.
+  if (code === 'start_refused' && mode === 'local_tools')
+    return `${ACTION[kind]}. wyss-control refused to start Codex in Local Tools: it could not set up or prove the isolation that mode requires. Nothing runs without it.`;
   if (kind === 'activate' && code === 'uncertain')
     return 'Activation outcome uncertain: wyss-control could not confirm whether Codex created the workspace binding. Nothing is sent again by itself.';
   return `${ACTION[kind]}. ${SPECIFIC[kind]?.[code] ?? FAILURE[code]}`;

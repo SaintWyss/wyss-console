@@ -1,27 +1,29 @@
 {
   "empty": {
-    "schema_version": 1,
+    "schema_version": 2,
     "head": "9",
     "session": {
       "id": "22222222-2222-4222-8222-222222222222",
       "state": "prepared",
       "revision": 1,
       "binding": "bound_attached",
-      "workspace": "/home/dev/rag-corp"
+      "workspace": "/home/dev/rag-corp",
+      "mode": "inference"
     },
     "turns": [],
     "runnable": true,
     "partial": false
   },
   "list": {
-    "schema_version": 1,
+    "schema_version": 2,
     "head": "14",
     "session": {
       "id": "22222222-2222-4222-8222-222222222222",
       "state": "prepared",
       "revision": 1,
       "binding": "bound_attached",
-      "workspace": "/home/dev/rag-corp"
+      "workspace": "/home/dev/rag-corp",
+      "mode": "inference"
     },
     "turns": [
       {
@@ -53,7 +55,7 @@
     "partial": false
   },
   "view": {
-    "schema_version": 1,
+    "schema_version": 2,
     "turn": {
       "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       "session": "22222222-2222-4222-8222-222222222222",
@@ -67,11 +69,31 @@
       "cancellable": true
     },
     "events": [
-      { "sequence": "1", "kind": "started", "text": null },
-      { "sequence": "2", "kind": "thinking", "text": null },
-      { "sequence": "3", "kind": "text", "text": "Hello, " },
-      { "sequence": "4", "kind": "text", "text": "world." },
-      { "sequence": "5", "kind": "message_end", "text": null }
+      {
+        "sequence": "1",
+        "kind": "started",
+        "text": null
+      },
+      {
+        "sequence": "2",
+        "kind": "thinking",
+        "text": null
+      },
+      {
+        "sequence": "3",
+        "kind": "text",
+        "text": "Hello, "
+      },
+      {
+        "sequence": "4",
+        "kind": "text",
+        "text": "world."
+      },
+      {
+        "sequence": "5",
+        "kind": "message_end",
+        "text": null
+      }
     ],
     "next": "5",
     "more": false,
@@ -79,7 +101,7 @@
     "approval": null
   },
   "waiting": {
-    "schema_version": 1,
+    "schema_version": 2,
     "turn": {
       "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       "session": "22222222-2222-4222-8222-222222222222",
@@ -93,13 +115,22 @@
       "cancellable": true
     },
     "events": [
-      { "sequence": "6", "kind": "command_proposed", "text": null },
-      { "sequence": "7", "kind": "approval_required", "text": null }
+      {
+        "sequence": "6",
+        "kind": "command_proposed",
+        "text": null
+      },
+      {
+        "sequence": "7",
+        "kind": "approval_required",
+        "text": null
+      }
     ],
     "next": "7",
     "more": false,
     "gap": false,
     "approval": {
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       "kind": "command_execution",
       "expires_at": "2026-10-09T10:15:00Z"
     }

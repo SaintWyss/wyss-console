@@ -81,6 +81,26 @@ pub(crate) enum Reply {
 pub(crate) fn answer(outcome: ControlResult<ResultValue>) -> Reply {
     Reply::Answer(Box::new(outcome))
 }
+/// The one managed runtime as the authority would report it: stopped, or ready in a
+/// profile and, for local tools, for a workspace.
+pub(crate) fn runtime_status(profile: Option<&str>, workspace: Option<&str>) -> ResultValue {
+    let ready = profile.is_some();
+    let mut status = json!({
+        "adapter_id": "codex", "runtime_kind": "codex",
+        "desired_state": if ready { "running" } else { "stopped" }, "revision": 1,
+        "actual_state": if ready { "ready" } else { "stopped" },
+        "runtime_instance_id": ready.then(uuid),
+        "runtime_version": ready.then_some("0.159.0"),
+        "compatibility": if ready { "compatible" } else { "unknown" },
+        "model_count": u8::from(ready), "diagnostic": null,
+        "outbound_methods": {"initialize": 1, "initialized": 1, "model_list": 1},
+        "runtime_safety_profile": profile,
+    });
+    if let Some(workspace) = workspace {
+        status["workspace_root"] = json!(workspace);
+    }
+    ResultValue::RuntimeStatus(serde_json::from_value(status).unwrap())
+}
 pub(crate) type Script = Box<dyn FnMut(&Operation) -> Reply + Send>;
 
 /// A private runtime directory with one scripted authority on its socket.
@@ -513,6 +533,7 @@ fn a_list_that_never_ends_is_walked_to_its_bound_and_no_further() {
                 }
             }
             Operation::BindingStatus(p) => unbound(&p.managed_session_id),
+            Operation::RuntimeStatus(_) => runtime_status(None, None),
             other => panic!("{other:?}"),
         }))
     });
@@ -533,8 +554,9 @@ fn a_list_that_never_ends_is_walked_to_its_bound_and_no_further() {
             .count(),
         40
     );
-    // One binding read per session shown, and none for the ones walked past.
-    assert_eq!(methods.len(), 40 + PAGE_SIZE);
+    // One read of the runtime, one binding read per session shown, and none for the
+    // ones walked past.
+    assert_eq!(methods.len(), 1 + 40 + PAGE_SIZE);
 }
 
 #[test]
@@ -551,6 +573,7 @@ fn answers_out_of_contract_fail_the_read_instead_of_being_shown() {
                             sessions: (0..MAX_PAGE).map(|_| stuck.clone()).collect(),
                             next: Some(stuck.created_sequence),
                         },
+                        Operation::RuntimeStatus(_) => runtime_status(None, None),
                         other => panic!("{other:?}"),
                     }))
                 }
@@ -566,6 +589,7 @@ fn answers_out_of_contract_fail_the_read_instead_of_being_shown() {
                             .collect(),
                         next: "3".parse().ok(),
                     },
+                    Operation::RuntimeStatus(_) => runtime_status(None, None),
                     other => panic!("{other:?}"),
                 }))
             }),
@@ -575,6 +599,7 @@ fn answers_out_of_contract_fail_the_read_instead_of_being_shown() {
             Box::new(|op: &Operation| {
                 answer(Ok(match op {
                     Operation::List(_) => ResultValue::ActiveLease(None),
+                    Operation::RuntimeStatus(_) => runtime_status(None, None),
                     other => panic!("{other:?}"),
                 }))
             }),
@@ -598,6 +623,7 @@ fn answers_out_of_contract_fail_the_read_instead_of_being_shown() {
                             status.binding = Some(binding(&session_id()));
                             ResultValue::BindingStatus(status)
                         }
+                        Operation::RuntimeStatus(_) => runtime_status(None, None),
                         other => panic!("{other:?}"),
                     }))
                 }
@@ -729,7 +755,7 @@ fn every_authority_error_has_one_product_meaning() {
         (E::FrameTooLarge, F::Internal, false),
         (E::BindingAlreadyExists, F::AlreadyBound, false),
         (E::TurnNotFound, F::NotFound, false),
-        (E::ApprovalNotFound, F::Internal, false),
+        (E::ApprovalNotFound, F::NotFound, false),
     ];
     for (error, code, retry) in table {
         let mapped = SessionError::of(error);
@@ -810,7 +836,7 @@ fn every_authority_error_has_one_product_meaning() {
 }
 
 #[test]
-fn the_page_projection_serializes_exactly_the_v2_fields() {
+fn the_page_projection_serializes_exactly_the_v3_fields() {
     let session = session_id();
     let (kept, target) = (record(&session, 9), session.clone());
     let peer = Peer::canonical(move |op| {
@@ -827,6 +853,7 @@ fn the_page_projection_serializes_exactly_the_v2_fields() {
                 }))
                 .unwrap(),
             ),
+            Operation::RuntimeStatus(_) => runtime_status(None, None),
             other => panic!("{other:?}"),
         }))
     });
@@ -834,11 +861,15 @@ fn the_page_projection_serializes_exactly_the_v2_fields() {
     assert_eq!(
         page,
         json!({
-            "schema_version": 2, "head": "41", "older": null, "truncated": false,
+            "schema_version": 3, "head": "41", "older": null, "truncated": false,
+            // No runtime is up: there is no mode to report for it.
+            "runtime": {"mode": null, "workspace": null},
             "sessions": [{
                 "id": session, "adapter": "codex", "state": "prepared", "revision": 1,
                 "created_at": "2026-10-08T00:00:00Z", "updated_at": "2026-10-08T00:00:00Z",
                 "position": "9", "binding": "bound_detached", "workspace": "/work/space",
+                // Detached: the authority reports no attachment, so no mode is claimed.
+                "mode": "unknown",
                 "resumable": true, "closable": true,
                 "activatable": false, "recoverable": false,
             }],
@@ -846,7 +877,7 @@ fn the_page_projection_serializes_exactly_the_v2_fields() {
     );
     // The window's own fixture is this shape.
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../../../tests/fixtures/session-page-v2.json")).unwrap();
+        serde_json::from_str(include_str!("../../../tests/fixtures/session-page-v3.json")).unwrap();
     let keys = |v: &serde_json::Value| -> Vec<String> {
         let mut keys: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
         keys.sort();
@@ -860,3 +891,6 @@ fn the_page_projection_serializes_exactly_the_v2_fields() {
 
 #[path = "activation_tests.rs"]
 mod activation;
+
+#[path = "mode_tests.rs"]
+mod modes;

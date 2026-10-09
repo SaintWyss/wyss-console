@@ -1,19 +1,26 @@
-//! The window's door to managed sessions: one read and five product intents.
+//! The window's door to managed sessions: one read and six product intents.
 //!
 //! Each command takes one narrow request and names no control method. The window cannot
 //! choose an adapter, a scope, a lease, a lifetime or a runtime: it names a session it was
 //! shown, the revision it saw and the identity of its own action. The one path it can name
 //! is a folder the user selected in the native dialog. What it gets back is the desktop's
 //! projection or a product failure code.
+//!
+//! A mode is one of the product's two, by name: `inference` or `local_tools`. Which
+//! runtime profile that means is decided on this side, and the workspace a mode is
+//! entered for is the one the authority holds for the session, never one the window
+//! sends with the request.
 use serde::Deserialize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::State;
 
+use super::turns::TurnService;
 use super::workspace::WorkspaceSelections;
 use crate::contracts::{Sequence, WireUuid, identities::ManagedSessionId};
 #[cfg(target_os = "linux")]
 pub use crate::sessions::{
-    ActivationProgress, SessionError, SessionFailure, SessionPage, SessionReceipt, SessionService,
+    ActivationProgress, AgentMode, SessionError, SessionFailure, SessionPage, SessionReceipt,
+    SessionService,
 };
 
 /// Calls that may be admitted at once. They run one at a time; the rest wait their turn.
@@ -56,6 +63,18 @@ pub struct ActivateSessionRequest {
     expected_revision: u64,
     /// The folder the user selected in the native dialog, exactly as it was returned.
     workspace: String,
+    /// The mode the session is created in. A session keeps it.
+    mode: AgentMode,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionModeRequest {
+    /// Names the whole user action. The same value sent again continues the same action.
+    operation_id: WireUuid,
+    session_id: ManagedSessionId,
+    expected_revision: u64,
+    /// The mode to run the session in. No workspace, profile or path comes with it.
+    mode: AgentMode,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -66,9 +85,9 @@ pub struct AbandonSessionRequest {
 
 /// Admission occurs before `spawn_blocking`, with its own counter: session calls never
 /// take a terminal permit or one of the authority view's waiting slots.
-async fn blocking<T: Send + 'static>(
-    service: SessionService,
-    operation: impl FnOnce(SessionService) -> Result<T, SessionError> + Send + 'static,
+async fn blocking<S: Send + 'static, T: Send + 'static>(
+    service: S,
+    operation: impl FnOnce(S) -> Result<T, SessionError> + Send + 'static,
 ) -> Result<T, SessionError> {
     CALLS
         .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
@@ -151,7 +170,7 @@ fn selected(
 /// authority reports, never by the window.
 #[tauri::command]
 pub async fn managed_session_activate(
-    service: State<'_, SessionService>,
+    service: State<'_, TurnService>,
     selections: State<'_, WorkspaceSelections>,
     request: ActivateSessionRequest,
 ) -> Result<ActivationProgress, SessionError> {
@@ -162,6 +181,25 @@ pub async fn managed_session_activate(
             request.session_id,
             request.expected_revision,
             request.workspace,
+            request.mode,
+        )
+    })
+    .await
+}
+/// One step of entering a mode with a session that has a workspace: the one managed
+/// runtime in that mode for that workspace, and the session attached to it. The window
+/// sends the same request until the answer is `ready`.
+#[tauri::command]
+pub async fn managed_session_mode(
+    service: State<'_, TurnService>,
+    request: SessionModeRequest,
+) -> Result<ActivationProgress, SessionError> {
+    blocking(service.inner().clone(), move |service| {
+        service.enter(
+            request.operation_id,
+            request.session_id,
+            request.expected_revision,
+            request.mode,
         )
     })
     .await
@@ -181,8 +219,14 @@ pub async fn managed_session_abandon(
 #[cfg(not(target_os = "linux"))]
 mod unsupported {
     use crate::contracts::{Sequence, WireUuid, identities::ManagedSessionId};
-    use serde::Serialize;
+    use serde::{Deserialize, Serialize};
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum AgentMode {
+        Inference,
+        LocalTools,
+    }
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
     #[serde(rename_all = "snake_case")]
     pub enum SessionFailure {
@@ -230,15 +274,6 @@ mod unsupported {
         pub fn close(&self, _: WireUuid, _: ManagedSessionId, _: u64) -> Refused<SessionReceipt> {
             Self::absent()
         }
-        pub fn activate(
-            &self,
-            _: WireUuid,
-            _: ManagedSessionId,
-            _: u64,
-            _: String,
-        ) -> Refused<ActivationProgress> {
-            Self::absent()
-        }
         pub fn abandon(&self, _: WireUuid, _: ManagedSessionId) -> Refused<SessionReceipt> {
             Self::absent()
         }
@@ -247,7 +282,8 @@ mod unsupported {
 }
 #[cfg(not(target_os = "linux"))]
 pub use unsupported::{
-    ActivationProgress, SessionError, SessionFailure, SessionPage, SessionReceipt, SessionService,
+    ActivationProgress, AgentMode, SessionError, SessionFailure, SessionPage, SessionReceipt,
+    SessionService,
 };
 
 #[cfg(all(test, target_os = "linux"))]
@@ -354,9 +390,10 @@ mod tests {
         let activate = serde_json::from_value::<ActivateSessionRequest>;
         let full = json!({
             "operation_id": INTENT, "session_id": SESSION, "expected_revision": 1,
-            "workspace": "/home/user/project",
+            "workspace": "/home/user/project", "mode": "inference",
         });
         let accepted = activate(full.clone()).unwrap();
+        assert_eq!(accepted.mode, AgentMode::Inference);
         assert_eq!(accepted.operation_id.as_str(), INTENT);
         assert_eq!(accepted.session_id.as_str(), SESSION);
         assert_eq!(
@@ -470,11 +507,16 @@ mod tests {
             "allow-managed-session-close",
             "allow-managed-session-activate",
             "allow-managed-session-abandon",
+            "allow-managed-session-mode",
             "allow-choose-workspace",
             "allow-managed-turns",
             "allow-managed-turn-read",
             "allow-managed-turn-start",
             "allow-managed-turn-cancel",
+            "allow-managed-approvals",
+            "allow-managed-approval-read",
+            "allow-managed-approval-approve",
+            "allow-managed-approval-deny",
             "allow-create-terminal",
             "allow-terminal-write",
             "allow-terminal-read-output",
@@ -496,6 +538,79 @@ mod tests {
             .map(|p| p.trim_start_matches("allow-").replace('-', "_"))
             .collect();
         assert_eq!(commands, permitted);
+    }
+
+    #[test]
+    fn a_mode_is_one_of_the_product_s_two_and_comes_with_no_profile_path_or_scope() {
+        let mode = serde_json::from_value::<SessionModeRequest>;
+        let full = json!({
+            "operation_id": INTENT, "session_id": SESSION, "expected_revision": 1,
+            "mode": "local_tools",
+        });
+        let accepted = mode(full.clone()).unwrap();
+        assert_eq!(accepted.operation_id.as_str(), INTENT);
+        assert_eq!(accepted.session_id.as_str(), SESSION);
+        assert_eq!(
+            (accepted.expected_revision, accepted.mode),
+            (1, AgentMode::LocalTools)
+        );
+        let mut inference = full.clone();
+        inference["mode"] = json!("inference");
+        assert_eq!(mode(inference).unwrap().mode, AgentMode::Inference);
+        // Not a profile of the authority, not a mode nobody defined, not a structure.
+        for other in [
+            json!("codex_local_tools_v1"),
+            json!("codex_inference_v1"),
+            json!("full_access"),
+            json!("danger-full-access"),
+            json!("LocalTools"),
+            json!(""),
+            json!(null),
+            json!(1),
+            json!(["local_tools"]),
+            json!({"profile": "codex_local_tools_v1"}),
+        ] {
+            let mut tampered = full.clone();
+            tampered["mode"] = other;
+            assert!(mode(tampered.clone()).is_err(), "{tampered}");
+            // The same holds where a session is created.
+            let mut activation = json!({
+                "operation_id": INTENT, "session_id": SESSION, "expected_revision": 1,
+                "workspace": "/home/user/project",
+            });
+            activation["mode"] = tampered["mode"].clone();
+            assert!(
+                serde_json::from_value::<ActivateSessionRequest>(activation.clone()).is_err(),
+                "{activation}"
+            );
+        }
+        // Entering a mode names no folder: the workspace is the one the authority holds
+        // for the session. Nor a profile, a scope, a lease or anything of the runtime.
+        for extra in [
+            "workspace",
+            "workspace_root",
+            "cwd",
+            "path",
+            "safety_profile",
+            "profile",
+            "sandbox",
+            "approval_policy",
+            "scopes",
+            "ttl_seconds",
+            "lease_id",
+            "runtime_instance_id",
+            "force",
+            "method",
+        ] {
+            let mut tampered = full.clone();
+            tampered[extra] = json!("/home/user/elsewhere");
+            assert!(mode(tampered.clone()).is_err(), "{tampered}");
+        }
+        for missing in ["operation_id", "session_id", "expected_revision", "mode"] {
+            let mut tampered = full.clone();
+            tampered.as_object_mut().unwrap().remove(missing);
+            assert!(mode(tampered.clone()).is_err(), "{tampered}");
+        }
     }
 
     #[test]

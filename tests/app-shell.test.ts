@@ -144,6 +144,7 @@ it('lists every planned view and enables the ones that exist', () => {
     'console',
     'sessions',
     'agents',
+    'approvals',
   ]);
 });
 
@@ -156,9 +157,11 @@ it('renders the shell with brand, navigation placeholders and Console selected',
   );
   expect(nav).toHaveLength(6);
   expect(nav[0].getAttribute('aria-current')).toBe('page');
-  expect(nav.slice(0, 3).every((b) => !b.disabled)).toBe(true);
-  // Approvals, Events and Settings do not exist yet.
-  expect(nav.slice(3).every((b) => b.disabled)).toBe(true);
+  expect(nav.slice(0, 4).every((b) => !b.disabled)).toBe(true);
+  // Events and Settings do not exist yet.
+  expect(nav.slice(4).every((b) => b.disabled)).toBe(true);
+  // Nothing waits for a decision: the Approvals item carries no count.
+  expect(document.querySelector('.nav-tag.waiting')).toBeNull();
   expect(document.querySelector('.context-title')?.textContent).toBe('Console');
   // The workspace opens one terminal on mount, so the pill reports it running.
   expect(pill('terminal')?.textContent).toContain('Terminal');

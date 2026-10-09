@@ -17,6 +17,7 @@ import {
   activateSession,
   chooseWorkspace,
   closeSession,
+  enterSessionMode,
   prepareSession,
   readSessionsPage,
   resumeSession,
@@ -33,7 +34,7 @@ import {
 } from '../src/lib/features/sessions/present';
 import type { AuthorityObservation } from '../src/lib/shell/authority';
 import views from './fixtures/authority-view-v1.json';
-import pages from './fixtures/session-page-v2.json';
+import pages from './fixtures/session-page-v3.json';
 import {
   at,
   bound,
@@ -61,7 +62,7 @@ it('accepts exactly the pages the desktop serializes', () => {
   expect(parseSessionPage(older).older).toBe('1');
 });
 
-it('rejects anything that is not a v2 page', () => {
+it('rejects anything that is not a v3 page', () => {
   const page = pages.loaded;
   const [first, second, third] = page.sessions;
   const session = (over: Record<string, unknown>) => ({
@@ -72,8 +73,24 @@ it('rejects anything that is not a v2 page', () => {
     null,
     [],
     'page',
-    { ...page, schema_version: 1 },
-    { ...page, schema_version: 3 },
+    { ...page, schema_version: 2 },
+    { ...page, schema_version: 4 },
+    // The runtime every session shares is part of the page: a mode it has no name
+    // for, a profile of the authority, or a workspace without local tools is not.
+    { ...page, runtime: undefined },
+    { ...page, runtime: null },
+    { ...page, runtime: { mode: 'local_tools', workspace: null } },
+    { ...page, runtime: { mode: 'inference', workspace: '/home/dev/x' } },
+    { ...page, runtime: { mode: null, workspace: '/home/dev/x' } },
+    { ...page, runtime: { mode: 'codex_local_tools_v1', workspace: '/x' } },
+    { ...page, runtime: { mode: 'full_access', workspace: null } },
+    { ...page, runtime: { mode: null, workspace: null, instance: 'x' } },
+    // A mode is what an attachment reports: a session that is not attached has none.
+    session({ mode: 'local_tools' }),
+    session({ mode: 'inference' }),
+    session({ mode: 'tools' }),
+    session({ mode: undefined }),
+    { ...page, sessions: [{ ...first, mode: 'inference' }] },
     { ...page, stream_id: 'x' },
     { ...page, head: 9 },
     { ...page, head: '09' },
@@ -177,7 +194,8 @@ it('sends narrow requests and nothing that names a control method', async () => 
     calls.push([command, payload]);
     return command === 'managed_sessions_page'
       ? pages.loaded
-      : command === 'managed_session_activate'
+      : command === 'managed_session_activate' ||
+          command === 'managed_session_mode'
         ? { stage: 'bound' }
         : command === 'choose_workspace'
           ? { path: FOLDER }
@@ -188,7 +206,13 @@ it('sends narrow requests and nothing that names a control method', async () => 
   expect(await prepareSession(INTENT)).toEqual({ id: bound.id });
   await resumeSession(INTENT, bound.id, 1);
   await closeSession(INTENT, bound.id, 1);
-  expect(await activateSession(INTENT, bound.id, 1, FOLDER)).toEqual({
+  expect(
+    await activateSession(INTENT, bound.id, 1, FOLDER, 'inference'),
+  ).toEqual({
+    stage: 'bound',
+  });
+  // A change of mode names the mode and nothing else: no folder, no profile.
+  expect(await enterSessionMode(INTENT, bound.id, 1, 'local_tools')).toEqual({
     stage: 'bound',
   });
   expect(await abandonSession(INTENT, bound.id)).toEqual({ id: bound.id });
@@ -213,6 +237,18 @@ it('sends narrow requests and nothing that names a control method', async () => 
           session_id: bound.id,
           expected_revision: 1,
           workspace: FOLDER,
+          mode: 'inference',
+        },
+      },
+    ],
+    [
+      'managed_session_mode',
+      {
+        request: {
+          operation_id: INTENT,
+          session_id: bound.id,
+          expected_revision: 1,
+          mode: 'local_tools',
         },
       },
     ],
@@ -269,7 +305,7 @@ it('reads activation progress and the chosen folder strictly', async () => {
   });
   mockIPC(() => ({ stage: 'attached' }));
   await expect(
-    activateSession(INTENT, bound.id, 1, FOLDER),
+    activateSession(INTENT, bound.id, 1, FOLDER, 'inference'),
   ).rejects.toMatchObject({ failure: { code: 'internal', retry: false } });
 });
 
@@ -651,6 +687,7 @@ it('stops answering once disposed', async () => {
     close: () => Promise.resolve({ id: fresh.id }),
     abandon: () => Promise.resolve({ id: fresh.id }),
     activate: () => Promise.resolve({ stage: 'ready' }),
+    enter: () => Promise.resolve({ stage: 'ready' }),
     chooseWorkspace: () => Promise.resolve(FOLDER),
   });
   controller.setVisible(true);

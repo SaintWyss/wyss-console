@@ -27,8 +27,8 @@
 //! lost, the lease is remembered until the moment it would have expired by itself. The
 //! next call for that session settles it first, with the identities it already used.
 use super::view::{
-    PAGE_SCHEMA_VERSION, PAGE_SIZE, SessionError, SessionFailure, SessionPage, SessionReceipt,
-    SessionSummary,
+    PAGE_SCHEMA_VERSION, PAGE_SIZE, RuntimeFacts, SessionError, SessionFailure, SessionPage,
+    SessionReceipt, SessionSummary,
 };
 use crate::contracts::identities::{ExecutionLeaseId, ManagedTurnId};
 use crate::{
@@ -85,7 +85,9 @@ pub(crate) struct Held {
 /// The lease a gated operation may ask the authority for.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Grant {
-    pub scope: ExecutionScope,
+    /// Exactly the scopes the lease is asked with. The first is the one the gate is
+    /// asked about: the operation's own.
+    pub scopes: &'static [ExecutionScope],
     pub ttl_seconds: u32,
     /// Keep the lease after the operation was admitted, instead of giving it back.
     pub hold: bool,
@@ -193,6 +195,7 @@ impl SessionService {
         self.call(|client| {
             // The head first, then what it describes: the page is never older than it.
             let head = client.hello_status().last_sequence;
+            let runtime = RuntimeFacts::of(&client.runtime_status().map_err(SessionError::of)?);
             let walk = walk(client, before).map_err(SessionError::of)?;
             let older = walk
                 .older
@@ -208,6 +211,7 @@ impl SessionService {
             Ok(SessionPage {
                 schema_version: PAGE_SCHEMA_VERSION,
                 head,
+                runtime,
                 sessions,
                 older,
                 truncated: walk.truncated,
@@ -270,7 +274,7 @@ impl SessionService {
                 &id,
                 expected_revision,
                 Grant {
-                    scope: ExecutionScope::SessionResume,
+                    scopes: &[ExecutionScope::SessionResume],
                     ttl_seconds: RESUME_LEASE_SECONDS,
                     hold: false,
                 },
@@ -283,8 +287,8 @@ impl SessionService {
     /// Asks the authority for `ask`, which its execution gate admits under `scope`.
     ///
     /// An intent the authority already holds, or a lease already in place, needs nothing
-    /// more. Only when the gate names a lease as what is missing is one asked for: that
-    /// scope alone, for `ttl_seconds`, and given back as soon as `ask` was answered,
+    /// more. Only when the gate names a lease as what is missing is one asked for:
+    /// those scopes alone, for `ttl_seconds`, and given back as soon as `ask` was answered,
     /// unless the grant says to hold it and the operation was admitted.
     pub(crate) fn gated<T>(
         &self,
@@ -295,10 +299,11 @@ impl SessionService {
         mut ask: impl FnMut(&mut ControlClient) -> ControlResult<T>,
     ) -> Result<T, SessionError> {
         let Grant {
-            scope,
+            scopes,
             ttl_seconds,
             hold,
         } = grant;
+        let scope = scopes[0];
         match ask(client) {
             Ok(value) => return Ok(value),
             Err(ControlError::GateDenied) => (),
@@ -315,7 +320,7 @@ impl SessionService {
             intent_id: fresh(),
             session_id: id.clone(),
             expected_session_revision: expected_revision,
-            scopes: vec![scope],
+            scopes: scopes.to_vec(),
             ttl_seconds,
         };
         // Recorded before it is sent: if no answer comes back, the next call for this

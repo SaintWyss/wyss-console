@@ -1,14 +1,22 @@
 {
   "empty": {
-    "schema_version": 2,
+    "schema_version": 3,
     "head": null,
+    "runtime": {
+      "mode": null,
+      "workspace": null
+    },
     "sessions": [],
     "older": null,
     "truncated": false
   },
   "loaded": {
-    "schema_version": 2,
+    "schema_version": 3,
     "head": "9",
+    "runtime": {
+      "mode": null,
+      "workspace": null
+    },
     "sessions": [
       {
         "id": "33333333-3333-4333-8333-333333333333",
@@ -20,6 +28,7 @@
         "position": "7",
         "binding": "unbound",
         "workspace": null,
+        "mode": "unknown",
         "resumable": false,
         "closable": true,
         "activatable": true,
@@ -35,6 +44,7 @@
         "position": "4",
         "binding": "bound_detached",
         "workspace": "/home/dev/rag-corp",
+        "mode": "unknown",
         "resumable": true,
         "closable": true,
         "activatable": false,
@@ -50,6 +60,7 @@
         "position": "1",
         "binding": "bound_detached",
         "workspace": "/home/dev/wyss",
+        "mode": "unknown",
         "resumable": false,
         "closable": false,
         "activatable": false,

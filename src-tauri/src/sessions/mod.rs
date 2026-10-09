@@ -12,11 +12,12 @@ mod activation;
 mod service;
 mod view;
 
+pub use activation::TurnGuard;
 pub(crate) use service::{Grant, Held, session_revision};
 pub use service::{SessionService, SessionStats};
 pub use view::{
-    ActivationProgress, ActivationStage, PAGE_SIZE, SessionError, SessionFailure, SessionPage,
-    SessionReceipt, SessionSummary,
+    ActivationProgress, ActivationStage, AgentMode, PAGE_SIZE, RuntimeFacts, SessionError,
+    SessionFailure, SessionMode, SessionPage, SessionReceipt, SessionSummary,
 };
 
 #[cfg(test)]

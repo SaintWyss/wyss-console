@@ -1,4 +1,4 @@
-import type { SessionFailureCode } from '../../contracts/sessions';
+import type { SessionFailureCode, SessionMode } from '../../contracts/sessions';
 import {
   PROMPT_MAX_BYTES,
   type ApprovalKind,
@@ -82,9 +82,22 @@ const ASKED: Record<ApprovalKind, string> = {
   command_execution: 'run a command',
   file_change: 'change files',
 };
-/** What the turn waits on. It names the kind of action, never the action. */
+/**
+ * What the turn waits on, while what the approval is about has not been read yet. It
+ * names the kind of action, never the action.
+ */
 export function approvalMessage(kind: ApprovalKind, until: string): string {
-  return `Codex asked to ${ASKED[kind]}. wyss-control holds the turn until that is decided, or until ${until}. This view cannot answer it.`;
+  return `Codex asked to ${ASKED[kind]}. wyss-control holds the turn until that is decided, or until ${until}.`;
+}
+
+const MODE: Record<SessionMode, string> = {
+  inference: 'Codex · Inference',
+  local_tools: 'Codex · Local Tools',
+  unknown: 'Codex',
+};
+/** Who answers in this session, and in which mode it is attached. */
+export function agentLabel(mode: SessionMode | undefined): string {
+  return MODE[mode ?? 'unknown'];
 }
 
 const COMMON: Record<SessionFailureCode, string> = {
@@ -98,6 +111,9 @@ const COMMON: Record<SessionFailureCode, string> = {
   runtime_unavailable:
     'The session is not attached to a running Codex. Resume it in Sessions.',
   start_refused: 'wyss-control refused to start Codex.',
+  turn_active: 'A turn is running. The runtime is not restarted under it.',
+  mode_fixed:
+    'The session is attached in the other mode: its conversation exists only there.',
   workspace_invalid: 'wyss-control did not accept the workspace.',
   already_bound: 'The session already has a workspace binding.',
   permission_denied:

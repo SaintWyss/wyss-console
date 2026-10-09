@@ -144,6 +144,7 @@ it('creates and activates a session as one action with one identity', async () =
     composing: false,
     operation: {
       kind: 'activate',
+      mode: 'inference',
       session: null,
       status: 'pending',
       step: 'preparing',
@@ -166,7 +167,7 @@ it('creates and activates a session as one action with one identity', async () =
     selected: fresh.id,
     operation: { session: fresh.id, step: 'starting' },
   });
-  expect(steps(h)).toEqual([['intent-1', fresh.id, 1, FOLDER]]);
+  expect(steps(h)).toEqual([['intent-1', fresh.id, 1, FOLDER, 'inference']]);
   expect(h.reads).toHaveLength(2);
   h.reads[1].resolve(loaded);
   await settle();
@@ -181,8 +182,8 @@ it('creates and activates a session as one action with one identity', async () =
   h.reads.at(-1)!.resolve(at(loaded, '10'));
   await settle();
   expect(steps(h)).toEqual([
-    ['intent-1', fresh.id, 1, FOLDER],
-    ['intent-1', fresh.id, 1, FOLDER],
+    ['intent-1', fresh.id, 1, FOLDER, 'inference'],
+    ['intent-1', fresh.id, 1, FOLDER, 'inference'],
   ]);
   expect(h.state().operation).toMatchObject({ step: 'binding' });
 
@@ -192,7 +193,13 @@ it('creates and activates a session as one action with one identity', async () =
   await settle();
   expect(h.state().operation).toMatchObject({ step: 'attaching' });
   expect(h.steps).toHaveLength(3);
-  expect(h.steps[2].args).toEqual(['intent-1', fresh.id, 1, FOLDER]);
+  expect(h.steps[2].args).toEqual([
+    'intent-1',
+    fresh.id,
+    1,
+    FOLDER,
+    'inference',
+  ]);
   expect(h.reads.length).toBeGreaterThan(reads);
   h.reads.at(-1)!.resolve(boundPage('bound_detached'));
   await settle();
@@ -227,10 +234,11 @@ it('activates an existing session that has no workspace, and only such a session
   h.controller.activate();
   // No new session is prepared: the one that was shown is activated at its revision.
   expect(h.intents).toHaveLength(0);
-  expect(steps(h)).toEqual([['intent-1', fresh.id, 1, FOLDER]]);
+  expect(steps(h)).toEqual([['intent-1', fresh.id, 1, FOLDER, 'inference']]);
   // The runtime is ready, as the authority view says: the first step is the binding.
   expect(h.state().operation).toEqual({
     kind: 'activate',
+    mode: 'inference',
     session: fresh.id,
     status: 'pending',
     step: 'binding',
@@ -309,6 +317,7 @@ it('waits for the authority to report a change and never past its limit', async 
   }
   expect(h.state().operation).toEqual({
     kind: 'activate',
+    mode: 'inference',
     session: fresh.id,
     status: 'failed',
     failure: { code: 'runtime_unavailable', retry: true },
@@ -321,7 +330,13 @@ it('waits for the authority to report a change and never past its limit', async 
   expect(h.steps).toHaveLength(asked);
   // Retry is the same action: the same identity, the same session, a fresh wait.
   h.controller.retry();
-  expect(h.steps.at(-1)!.args).toEqual(['intent-1', fresh.id, 1, FOLDER]);
+  expect(h.steps.at(-1)!.args).toEqual([
+    'intent-1',
+    fresh.id,
+    1,
+    FOLDER,
+    'inference',
+  ]);
 });
 
 it('goes on through navigation without a second activation or a second read loop', async () => {
@@ -345,6 +360,7 @@ it('goes on through navigation without a second activation or a second read loop
   expect(h.steps).toHaveLength(2);
   expect(h.state().operation).toMatchObject({
     kind: 'activate',
+    mode: 'inference',
     status: 'pending',
   });
   h.controller.setVisible(false);
@@ -371,6 +387,7 @@ it('reports a refusal once and an unknown outcome as unknown, and retries as the
   await settle();
   expect(h.state().operation).toEqual({
     kind: 'activate',
+    mode: 'inference',
     session: null,
     status: 'failed',
     failure: { code: 'unavailable', retry: true },
@@ -391,8 +408,8 @@ it('reports a refusal once and an unknown outcome as unknown, and retries as the
   h.controller.retry();
   expect(h.intents).toHaveLength(2);
   expect(steps(h)).toEqual([
-    ['intent-1', fresh.id, 1, FOLDER],
-    ['intent-1', fresh.id, 1, FOLDER],
+    ['intent-1', fresh.id, 1, FOLDER, 'inference'],
+    ['intent-1', fresh.id, 1, FOLDER, 'inference'],
   ]);
 
   // The folder was refused: said once, never retried under the same identity.
@@ -413,13 +430,20 @@ it('reports a refusal once and an unknown outcome as unknown, and retries as the
   await composed(h, OTHER, fresh.id);
   h.controller.activate();
   expect(h.intents).toHaveLength(2);
-  expect(h.steps.at(-1)!.args).toEqual(['intent-2', fresh.id, 1, OTHER]);
+  expect(h.steps.at(-1)!.args).toEqual([
+    'intent-2',
+    fresh.id,
+    1,
+    OTHER,
+    'inference',
+  ]);
 
   // The provider's outcome is unknown: not a refusal, and nothing is sent again.
   h.steps.at(-1)!.reject({ code: 'uncertain', retry: false });
   await settle();
   expect(h.state().operation).toEqual({
     kind: 'activate',
+    mode: 'inference',
     session: fresh.id,
     status: 'failed',
     failure: { code: 'uncertain', retry: false },
@@ -460,7 +484,13 @@ it('loses the authority in the middle and continues the same action when it is b
   // It returns: the same action goes on, and what the session is comes from its steps.
   h.controller.observe(connected('9', { restarts: 1 }));
   h.controller.retry();
-  expect(h.steps.at(-1)!.args).toEqual(['intent-1', fresh.id, 1, FOLDER]);
+  expect(h.steps.at(-1)!.args).toEqual([
+    'intent-1',
+    fresh.id,
+    1,
+    FOLDER,
+    'inference',
+  ]);
   h.steps.at(-1)!.resolve({ stage: 'ready' });
   await settle();
   expect(h.state().operation).toBeNull();
@@ -538,4 +568,221 @@ it('stops a waiting activation when it is disposed', async () => {
   await settle();
   // Nothing more is asked.
   expect(h.steps).toHaveLength(1);
+});
+
+/** `bound` as the authority reports it once it is attached, in `mode`. */
+const attachedPage = (mode: 'inference' | 'local_tools'): SessionPage => ({
+  ...loaded,
+  head: '12',
+  runtime:
+    mode === 'local_tools'
+      ? { mode, workspace: bound.workspace }
+      : { mode, workspace: null },
+  sessions: [fresh, { ...bound, binding: 'bound_attached', mode }, closed],
+});
+
+it('creates a session in Inference unless Local Tools is chosen, every time', async () => {
+  const h = await showing(empty, null);
+  await composed(h, FOLDER);
+  // The composer opens in Inference: tools are never what a session gets by default.
+  expect(h.state().mode).toBe('inference');
+  h.controller.setMode('local_tools');
+  expect(h.state().mode).toBe('local_tools');
+  h.controller.activate();
+  h.intents[0].resolve({ id: fresh.id });
+  await settle();
+  // The mode travels as a name with the folder the user selected. Nothing else does.
+  expect(steps(h)).toEqual([['intent-1', fresh.id, 1, FOLDER, 'local_tools']]);
+  expect(h.state().operation).toMatchObject({
+    kind: 'activate',
+    mode: 'local_tools',
+  });
+  h.steps[0].resolve({ stage: 'ready' });
+  await settle();
+  // Opened again, it is Inference again: the choice is made each time, not remembered.
+  h.controller.compose(true);
+  expect(h.state()).toMatchObject({ composing: true, mode: 'inference' });
+  // It can be opened asking for Local Tools by name, and only then starts there.
+  h.controller.compose(false);
+  h.controller.compose(true, null, 'local_tools');
+  expect(h.state().mode).toBe('local_tools');
+  // The mode cannot be changed with nothing being composed.
+  h.controller.compose(false);
+  h.controller.setMode('inference');
+  expect(h.state().mode).toBe('local_tools');
+});
+
+it('says the runtime is being stopped when another mode has to give way', async () => {
+  const h = await showing(loaded);
+  await composed(h, FOLDER, fresh.id);
+  h.controller.setMode('local_tools');
+  h.controller.activate();
+  // The runtime runs in another mode: the authority was asked to stop it.
+  h.steps[0].resolve({ stage: 'runtime_stopping' });
+  await settle();
+  expect(h.state().operation).toMatchObject({
+    kind: 'activate',
+    status: 'pending',
+    step: 'stopping',
+    mode: 'local_tools',
+  });
+  // Nothing is asked again until the authority reports a change.
+  expect(h.steps).toHaveLength(1);
+  h.controller.observe(connected('9', { actual: 'stopped' }));
+  await settle();
+  expect(h.steps).toHaveLength(2);
+  expect(h.steps[1].args).toEqual(h.steps[0].args);
+  h.steps[1].resolve({ stage: 'runtime_starting' });
+  await settle();
+  expect(h.state().operation).toMatchObject({ step: 'starting' });
+  h.controller.observe(connected('10'));
+  await settle();
+  h.steps[2].resolve({ stage: 'ready' });
+  await settle();
+  expect(h.state().operation).toBeNull();
+});
+
+it('enters a mode with a bound session only after it was confirmed, naming no folder', async () => {
+  const h = await showing(loaded);
+  h.controller.select(bound.id);
+  // Asked for: nothing is sent until the user confirms what it does.
+  h.controller.confirmMode(bound.id, 'local_tools');
+  expect(h.state().confirmingMode).toEqual({
+    session: bound.id,
+    mode: 'local_tools',
+  });
+  expect(h.steps).toHaveLength(0);
+  // Backed out of: nothing was asked.
+  h.controller.confirmMode(null);
+  h.controller.enterMode();
+  expect(h.steps).toHaveLength(0);
+
+  h.controller.confirmMode(bound.id, 'local_tools');
+  h.controller.enterMode();
+  // The session, the revision that was shown and the mode. No workspace, no profile:
+  // the folder is the one the authority holds for the session.
+  expect(steps(h)).toEqual([['intent-1', bound.id, 1, 'local_tools']]);
+  expect(h.state()).toMatchObject({
+    confirmingMode: null,
+    operation: { kind: 'mode', session: bound.id, mode: 'local_tools' },
+  });
+  // One action at a time: a second confirmation or click sends nothing.
+  h.controller.confirmMode(bound.id, 'inference');
+  h.controller.enterMode();
+  expect(h.steps).toHaveLength(1);
+  h.steps[0].resolve({ stage: 'runtime_stopping' });
+  await settle();
+  expect(h.state().operation).toMatchObject({ step: 'stopping' });
+  h.controller.observe(connected('10', { actual: 'stopped' }));
+  await settle();
+  h.steps[1].resolve({ stage: 'runtime_starting' });
+  await settle();
+  h.controller.observe(connected('11'));
+  await settle();
+  // Every step is the same request: the same action for the authority.
+  expect(new Set(steps(h).map((s) => JSON.stringify(s))).size).toBe(1);
+  h.steps[2].resolve({ stage: 'ready' });
+  await settle();
+  expect(h.state().operation).toBeNull();
+  // What the session is now is read, not assumed.
+  h.reads.at(-1)!.resolve(attachedPage('local_tools'));
+  await settle();
+  expect(h.state().page?.sessions[1]).toMatchObject({
+    id: bound.id,
+    mode: 'local_tools',
+  });
+  expect(h.state().page?.runtime).toEqual({
+    mode: 'local_tools',
+    workspace: bound.workspace,
+  });
+});
+
+it('shows a refused change of mode as the authority answered it and retries as the same action', async () => {
+  const h = await showing(loaded);
+  h.controller.confirmMode(bound.id, 'local_tools');
+  h.controller.enterMode();
+  // A turn is running: the runtime is not restarted under it.
+  h.steps[0].reject({ code: 'turn_active', retry: false });
+  await settle();
+  expect(h.state().operation).toEqual({
+    kind: 'mode',
+    session: bound.id,
+    status: 'failed',
+    failure: { code: 'turn_active', retry: false },
+    mode: 'local_tools',
+  });
+  // A refusal is not sent again by a retry.
+  h.controller.retry();
+  expect(h.steps).toHaveLength(1);
+  h.controller.dismiss();
+
+  // The provider refused the session in that mode: said as that.
+  h.reads.at(-1)?.resolve(loaded);
+  await settle();
+  h.controller.confirmMode(bound.id, 'local_tools');
+  h.controller.enterMode();
+  h.steps[1].reject({ code: 'rejected', retry: false });
+  await settle();
+  expect(h.state().operation).toMatchObject({
+    kind: 'mode',
+    failure: { code: 'rejected' },
+  });
+  h.controller.dismiss();
+  h.reads.at(-1)?.resolve(loaded);
+  await settle();
+
+  // An unknown outcome is retried with the identity the action had.
+  h.controller.confirmMode(bound.id, 'inference');
+  h.controller.enterMode();
+  h.steps[2].reject({ code: 'unavailable', retry: true });
+  await settle();
+  h.controller.retry();
+  expect(h.steps[3].args).toEqual(h.steps[2].args);
+  expect(h.steps[3].args).toEqual(['intent-3', bound.id, 1, 'inference']);
+});
+
+it('offers a change of mode only for a session that has a workspace', async () => {
+  const h = await showing(loaded);
+  // No workspace, or closed: there is none to run a mode for.
+  for (const session of [fresh, closed]) {
+    h.controller.confirmMode(session.id, 'local_tools');
+    expect(h.state().confirmingMode).toBeNull();
+    h.controller.enterMode();
+  }
+  expect(h.steps).toHaveLength(0);
+  // A confirmation is dropped when what it was for is no longer shown as eligible.
+  h.controller.confirmMode(bound.id, 'local_tools');
+  expect(h.state().confirmingMode).not.toBeNull();
+  h.controller.observe(connected('13'));
+  h.reads.at(-1)!.resolve(
+    at(
+      {
+        ...loaded,
+        sessions: [
+          fresh,
+          {
+            ...bound,
+            state: 'closed',
+            revision: 2,
+            binding: 'bound_detached',
+            resumable: false,
+            closable: false,
+          },
+          closed,
+        ],
+      },
+      '13',
+    ),
+  );
+  await settle();
+  expect(h.state().confirmingMode).toBeNull();
+  h.controller.enterMode();
+  expect(h.steps).toHaveLength(0);
+  // Losing the authority drops it too: nothing is entered on a stale confirmation.
+  const again = await showing(loaded);
+  again.controller.confirmMode(bound.id, 'local_tools');
+  again.controller.observe(offline);
+  expect(again.state().confirmingMode).toBeNull();
+  again.controller.enterMode();
+  expect(again.steps).toHaveLength(0);
 });

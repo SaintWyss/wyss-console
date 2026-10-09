@@ -737,7 +737,7 @@ fn local_layout(env: &Sandbox) -> String {
 }
 
 #[test]
-fn a_turn_waiting_on_an_approval_is_shown_waiting_and_nothing_here_answers_it() {
+fn a_turn_waiting_on_an_approval_is_shown_waiting_and_reading_it_answers_nothing() {
     let _serial = serial();
     // This provider proposes a command and asks before running it.
     let env = Sandbox::new("approval_command");
@@ -806,21 +806,25 @@ fn a_turn_waiting_on_an_approval_is_shown_waiting_and_nothing_here_answers_it() 
     assert_eq!(notice.kind, ApprovalKind::CommandExecution);
     assert!(waiting.kinds.contains(&TurnEventKind::CommandProposed));
     assert!(waiting.kinds.contains(&TurnEventKind::ApprovalRequired));
-    // What kind of action and until when. Not the command, its directory or its identity.
+    // Which approval, what kind of action and until when. The reading of a turn carries
+    // a handle to its approval, never the command, its directory or its fingerprint:
+    // the action is read with the approval, by whoever decides it.
     let wire = serde_json::to_string(&waiting.views).unwrap();
-    assert_eq!(
-        serde_json::to_value(&notice).unwrap(),
-        serde_json::json!({"kind": "command_execution", "expires_at": notice.expires_at})
-    );
     let pending = other
         .approval_pending(started.id.clone())
         .unwrap()
         .expect("pending approval");
+    assert_eq!(
+        serde_json::to_value(&notice).unwrap(),
+        serde_json::json!({
+            "id": pending.approval.managed_approval_id,
+            "kind": "command_execution", "expires_at": notice.expires_at,
+        })
+    );
     for private in [
         "WYSS_FIXTURE_COMMAND",
         "printf",
         workspace.as_str(),
-        pending.approval.managed_approval_id.as_str(),
         pending.approval.action_fingerprint.as_str(),
         "call-1",
     ] {

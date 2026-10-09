@@ -1,0 +1,157 @@
+<script lang="ts">
+  import { outcomeUnknown, localClock } from '../agent/present';
+  import type { ApprovalCard, ApprovalsController } from './controller';
+  import {
+    approvalTitle,
+    approvalWhere,
+    decidingMessage,
+    decisionFailureMessage,
+    FILE_KIND,
+    shownOf,
+    wholeShown,
+  } from './present';
+
+  let {
+    card,
+    controller,
+    connected,
+    context = false,
+  }: {
+    card: ApprovalCard;
+    controller: ApprovalsController;
+    connected: boolean;
+    /** Name the session the approval belongs to: where it is not shown under its turn. */
+    context?: boolean;
+  } = $props();
+
+  const id = $derived(card.approval.id);
+  const whole = $derived(wholeShown(card));
+  // A decision is offered for a pending approval nobody is deciding. Approve also needs
+  // everything it is about to have been read. The authority decides either way.
+  const open = $derived(
+    connected && card.approval.decidable && card.decision === null,
+  );
+</script>
+
+<div class="approval-card" role="group" aria-label="Approval">
+  <p class="approval-title">{approvalTitle(card)}</p>
+  {#if context}
+    <p class="approval-context">
+      {approvalWhere(card.workspace, card.approval.session)} · turn
+      <span class="mono">{card.approval.turn.slice(0, 8)}</span>
+    </p>
+  {/if}
+
+  {#if card.command}
+    <dl class="approval-fields">
+      <dt>Command</dt>
+      <!-- Plain text, as the authority presents it. It is never run or interpreted here. -->
+      <dd><pre class="approval-code">{card.command.command}</pre></dd>
+      <dt>Directory</dt>
+      <dd class="mono">{card.command.cwd}</dd>
+    </dl>
+  {:else if card.files !== null}
+    {#each card.shown as file (file.index)}
+      <div class="approval-file">
+        <p class="file-head">
+          <span class="file-kind">{FILE_KIND[file.kind]}</span>
+          <span class="mono">{file.path}</span>
+          {#if file.move_path}
+            <span aria-hidden="true">→</span>
+            <span class="mono">{file.move_path}</span>
+          {/if}
+        </p>
+        <pre class="approval-code">{file.text}</pre>
+        {#if file.next !== null}
+          <p class="approval-note">
+            Preview truncated: {shownOf(file.text, file.bytes)}.
+            <button
+              type="button"
+              class="action"
+              disabled={!connected || file.reading}
+              onclick={() => controller.more(id, file.index)}
+              >{file.reading ? 'Reading…' : 'Show the rest'}</button
+            >
+          </p>
+        {/if}
+        {#if file.failure}
+          <p class="approval-note failed" role="alert">
+            The rest of this change could not be read.
+          </p>
+        {/if}
+      </div>
+    {/each}
+    {#if card.shown.length < card.files}
+      <p class="approval-note">
+        {card.shown.length} of {card.files} files shown.
+        <button
+          type="button"
+          class="action"
+          disabled={!connected || card.listing}
+          onclick={() => controller.moreFiles(id)}
+          >{card.listing ? 'Reading…' : 'Show more files'}</button
+        >
+      </p>
+    {/if}
+  {:else}
+    <p class="approval-note">
+      wyss-control no longer holds what this approval was about.
+    </p>
+  {/if}
+
+  <p class="approval-deadline">
+    Waits until
+    <time datetime={card.approval.expires_at}
+      >{localClock(card.approval.expires_at)}</time
+    >. wyss-control checks the action again before anything runs.
+  </p>
+
+  {#if card.decision?.status === 'pending'}
+    <p class="turn-activity live" role="status">
+      <span class="dot" aria-hidden="true"></span>
+      {decidingMessage(card.decision.kind)}
+    </p>
+  {:else if card.decision?.failure}
+    <div
+      class="turn-alert"
+      class:unknown={outcomeUnknown(card.decision.failure.code)}
+      role="alert"
+    >
+      <p>
+        {decisionFailureMessage(card.decision.kind, card.decision.failure.code)}
+      </p>
+      {#if card.decision.failure.retry}
+        <button
+          type="button"
+          class="action"
+          disabled={!connected}
+          onclick={() => controller.retry(id)}>Retry</button
+        >
+      {/if}
+      <button
+        type="button"
+        class="action"
+        disabled={!card.decision.reread}
+        onclick={() => controller.dismiss(id)}>Dismiss</button
+      >
+    </div>
+  {/if}
+
+  <div class="approval-actions">
+    <button
+      type="button"
+      class="action primary"
+      disabled={!open || !whole}
+      onclick={() => controller.decide(id, 'approve')}>Approve</button
+    >
+    <button
+      type="button"
+      class="action danger"
+      disabled={!open}
+      onclick={() => controller.decide(id, 'deny')}>Deny</button
+    >
+    {#if open && !whole}
+      <p class="approval-note">Read the whole change to approve it.</p>
+    {/if}
+  </div>
+</div>

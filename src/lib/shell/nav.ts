@@ -37,9 +37,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   {
     id: 'approvals',
     label: 'Approvals',
-    subtitle: 'Coming soon',
+    subtitle: 'Actions waiting for a decision',
     icon: 'M12 3l7.5 3v5.5c0 4.5-3.2 8.2-7.5 9.5-4.3-1.3-7.5-5-7.5-9.5V6L12 3zM8.8 12.2l2.2 2.2 4.2-4.4',
-    available: false,
+    available: true,
   },
   {
     id: 'events',

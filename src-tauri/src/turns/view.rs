@@ -7,11 +7,12 @@ use crate::contracts::{
         ApprovalKind, ApprovalState, ApprovalStatus, BindingState, ControlState, ManagedTurnStatus,
         ManagedTurnStreamEventV1, StreamKind, TurnReason, TurnState,
     },
-    identities::{ManagedSessionId, ManagedTurnId},
+    identities::{ManagedApprovalId, ManagedSessionId, ManagedTurnId},
 };
+use crate::sessions::SessionMode;
 use serde::Serialize;
 
-pub(super) const VIEW_SCHEMA_VERSION: u8 = 1;
+pub(super) const VIEW_SCHEMA_VERSION: u8 = 2;
 /// Turns of one session the window is given at once, newest first.
 pub const TURN_PAGE: usize = 20;
 
@@ -132,16 +133,18 @@ impl TurnEvent {
     }
 }
 
-/// The approval a turn is waiting on: what kind of action, and until when. The action
-/// itself is for whoever answers it, and nothing here can answer.
+/// The approval a turn is waiting on: which one, what kind of action, and until when.
+/// The identity is a handle: what the approval is and what it is about is read with it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ApprovalNotice {
+    pub id: ManagedApprovalId,
     pub kind: ApprovalKind,
     pub expires_at: UtcTimestamp,
 }
 impl ApprovalNotice {
     pub(super) fn of(status: ApprovalStatus) -> Self {
         Self {
+            id: status.approval.managed_approval_id,
             kind: status.approval.kind,
             expires_at: status.approval.expires_at,
         }
@@ -179,6 +182,8 @@ pub struct SessionFacts {
     pub revision: u64,
     pub binding: BindingState,
     pub workspace: Option<String>,
+    /// The mode it is attached in. `unknown` while it is not attached.
+    pub mode: SessionMode,
 }
 
 /// The recent turns of one session, newest first.

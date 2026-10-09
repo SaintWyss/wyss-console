@@ -1,0 +1,91 @@
+{
+  "empty": {
+    "schema_version": 1,
+    "head": "9",
+    "pending": [],
+    "recent": [],
+    "partial": false
+  },
+  "command": {
+    "approval": {
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "session": "22222222-2222-4222-8222-222222222222",
+      "turn": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "kind": "command_execution",
+      "state": "pending",
+      "revision": 1,
+      "requested_at": "2026-10-09T10:10:00Z",
+      "expires_at": "2026-10-09T10:15:00Z",
+      "ended_at": null,
+      "reason": null,
+      "decision": null,
+      "decidable": true
+    },
+    "workspace": "/home/dev/rag-corp",
+    "command": {
+      "command": "/usr/bin/bash -lc 'git status'",
+      "cwd": "/home/dev/rag-corp"
+    },
+    "files": null,
+    "file": null
+  },
+  "file": {
+    "approval": {
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "session": "22222222-2222-4222-8222-222222222222",
+      "turn": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "kind": "file_change",
+      "state": "pending",
+      "revision": 1,
+      "requested_at": "2026-10-09T10:10:00Z",
+      "expires_at": "2026-10-09T10:15:00Z",
+      "ended_at": null,
+      "reason": null,
+      "decision": null,
+      "decidable": true
+    },
+    "workspace": "/home/dev/rag-corp",
+    "command": null,
+    "files": 2,
+    "file": {
+      "index": 0,
+      "path": "/home/dev/rag-corp/src/parser.rs",
+      "kind": "update",
+      "move_path": null,
+      "bytes": 22,
+      "offset": 0,
+      "chunk": "-old line\n+new line\n\n\n",
+      "next": null
+    }
+  },
+  "recent": [
+    {
+      "id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      "session": "22222222-2222-4222-8222-222222222222",
+      "turn": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "kind": "command_execution",
+      "state": "accepted",
+      "revision": 2,
+      "requested_at": "2026-10-09T10:00:00Z",
+      "expires_at": "2026-10-09T10:05:00Z",
+      "ended_at": "2026-10-09T10:00:20Z",
+      "reason": "client_decision",
+      "decision": "accept",
+      "decidable": false
+    },
+    {
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "session": "22222222-2222-4222-8222-222222222222",
+      "turn": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "kind": "file_change",
+      "state": "expired",
+      "revision": 2,
+      "requested_at": "2026-10-09T09:50:00Z",
+      "expires_at": "2026-10-09T09:55:00Z",
+      "ended_at": "2026-10-09T09:55:00Z",
+      "reason": "approval_timeout",
+      "decision": null,
+      "decidable": false
+    }
+  ]
+}

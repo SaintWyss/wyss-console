@@ -1,16 +1,23 @@
 /**
- * TurnView v1 and TurnList v1: the desktop's projection of managed turns, and what its
+ * TurnView v2 and TurnList v2: the desktop's projection of managed turns, and what its
  * turn intents answer. It is not the control contract. It names no control method and
  * carries no provider identity, no lease, no runtime instance, no reasoning text and no
  * detail of a mediated action: the only provider text in it is the assistant's answer.
  */
 import {
+  parseManagedApprovalId,
   parseManagedSessionId,
   parseManagedTurnId,
+  type ManagedApprovalId,
   type ManagedSessionId,
   type ManagedTurnId,
 } from './identities';
-import type { SessionBinding, SessionState } from './sessions';
+import {
+  AGENT_MODES,
+  type SessionBinding,
+  type SessionMode,
+  type SessionState,
+} from './sessions';
 
 /** The authority's own lifecycle names. The last four are final. */
 export const TURN_STATES = [
@@ -112,13 +119,17 @@ export interface TurnEvent {
   kind: TurnEventKind;
   text: string | null;
 }
-/** The approval a turn waits on: what kind of action and until when. Nothing answers it here. */
+/**
+ * The approval a turn waits on: which one, what kind of action and until when. The
+ * identity is a handle: what the approval is about is read with it.
+ */
 export interface ApprovalNotice {
+  id: ManagedApprovalId;
   kind: ApprovalKind;
   expires_at: string;
 }
 export interface TurnView {
-  schema_version: 1;
+  schema_version: 2;
   turn: TurnSummary;
   events: TurnEvent[];
   /** The cursor to read from next. Unchanged when nothing new was read. */
@@ -137,9 +148,11 @@ export interface SessionFacts {
   revision: number;
   binding: SessionBinding;
   workspace: string | null;
+  /** The mode the session is attached in. `unknown` while it is not attached. */
+  mode: SessionMode;
 }
 export interface TurnList {
-  schema_version: 1;
+  schema_version: 2;
   head: string | null;
   session: SessionFacts;
   /** Newest first. */
@@ -292,8 +305,15 @@ function parseEvent(value: unknown): TurnEvent {
 }
 
 function parseApproval(value: unknown): ApprovalNotice {
-  const v = record(value, ['kind', 'expires_at'], 'approval');
+  const v = record(value, ['id', 'kind', 'expires_at'], 'approval');
+  let id: ManagedApprovalId;
+  try {
+    id = parseManagedApprovalId(v.id);
+  } catch {
+    throw invalid('approval');
+  }
   return {
+    id,
     kind: member(v.kind, APPROVAL_KINDS, 'approval'),
     expires_at: timestamp(v.expires_at, 'expires_at'),
   };
@@ -306,7 +326,7 @@ export function parseTurnView(value: unknown): TurnView {
     ['schema_version', 'turn', 'events', 'next', 'more', 'gap', 'approval'],
     'view',
   );
-  if (v.schema_version !== 1) throw invalid('schema_version');
+  if (v.schema_version !== 2) throw invalid('schema_version');
   const turn = parseSummary(v.turn);
   if (!Array.isArray(v.events) || v.events.length > TURN_EVENTS_LIMIT)
     throw invalid('events');
@@ -323,7 +343,7 @@ export function parseTurnView(value: unknown): TurnView {
   // A turn that ended waits on nothing.
   if (approval && turnEnded(turn.state)) throw invalid('approval');
   return {
-    schema_version: 1,
+    schema_version: 2,
     turn,
     events,
     next,
@@ -336,7 +356,7 @@ export function parseTurnView(value: unknown): TurnView {
 function parseFacts(value: unknown): SessionFacts {
   const v = record(
     value,
-    ['id', 'state', 'revision', 'binding', 'workspace'],
+    ['id', 'state', 'revision', 'binding', 'workspace', 'mode'],
     'session',
   );
   const state = member(v.state, STATES, 'session_state');
@@ -353,12 +373,16 @@ function parseFacts(value: unknown): SessionFacts {
   )
     throw invalid('workspace');
   if ((v.workspace !== null) !== bound) throw invalid('workspace');
+  const mode = member(v.mode, [...AGENT_MODES, 'unknown'] as const, 'mode');
+  // A mode is what an attachment reports: a session that is not attached has none.
+  if (mode !== 'unknown' && binding !== 'bound_attached') throw invalid('mode');
   return {
     id: session(v.id),
     state,
     revision: v.revision as number,
     binding,
     workspace: v.workspace as string | null,
+    mode,
   };
 }
 
@@ -368,7 +392,7 @@ export function parseTurnList(value: unknown): TurnList {
     ['schema_version', 'head', 'session', 'turns', 'runnable', 'partial'],
     'list',
   );
-  if (v.schema_version !== 1) throw invalid('schema_version');
+  if (v.schema_version !== 2) throw invalid('schema_version');
   const facts = parseFacts(v.session);
   if (!Array.isArray(v.turns) || v.turns.length > TURN_LIST_LIMIT)
     throw invalid('turns');
@@ -387,7 +411,7 @@ export function parseTurnList(value: unknown): TurnList {
   )
     throw invalid('hints');
   return {
-    schema_version: 1,
+    schema_version: 2,
     head: v.head === null ? null : sequence(v.head, 'head'),
     session: facts,
     turns,

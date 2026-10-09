@@ -20,7 +20,7 @@ import {
   readTurns,
   startTurn,
 } from '../src/lib/desktop/turns-client';
-import fixture from './fixtures/turn-view-v1.json';
+import fixture from './fixtures/turn-view-v2.json';
 
 const SESSION = parseManagedSessionId(fixture.list.session.id);
 const TURN = parseManagedTurnId(fixture.view.turn.id);
@@ -141,7 +141,8 @@ it('refuses a reading that carries anything the window is not to be given', () =
 it('refuses a reading whose parts contradict each other', () => {
   const view = (path: (string | number)[], value: unknown) => () =>
     parseTurnView(tampered(fixture.view, path, value));
-  expect(view(['schema_version'], 2)).toThrow(/schema_version/);
+  expect(view(['schema_version'], 1)).toThrow(/schema_version/);
+  expect(view(['schema_version'], 3)).toThrow(/schema_version/);
   // Cursors are canonical decimal text, never numbers.
   expect(view(['next'], 5)).toThrow(/invalid_next/);
   expect(view(['next'], '05')).toThrow(/invalid_next/);
@@ -204,7 +205,23 @@ it('refuses a reading whose parts contradict each other', () => {
   expect(list(['head'], 14)).toThrow(/invalid_head/);
   expect(list(['partial'], null)).toThrow(/invalid_partial/);
   // No hint offers a turn that what is shown already rules out.
-  expect(list(['session', 'binding'], 'bound_detached')).toThrow(/hints/);
+  expect(list(['session', 'binding'], 'bound_detached')).toThrow(/mode/);
+  expect(() =>
+    parseTurnList({
+      ...fixture.list,
+      session: {
+        ...fixture.list.session,
+        binding: 'bound_detached',
+        mode: 'unknown',
+      },
+    }),
+  ).toThrow(/hints/);
+  // A mode is one of the product's two, or none while the session is not attached.
+  expect(list(['session', 'mode'], 'codex_local_tools_v1')).toThrow(/mode/);
+  expect(list(['session', 'mode'], undefined)).toThrow(/session/);
+  expect(() =>
+    parseTurnList(tampered(fixture.list, ['session', 'mode'], 'local_tools')),
+  ).not.toThrow();
   expect(
     list(['turns', 0], { ...fixture.view.turn, session: SESSION }),
   ).toThrow(/hints/);

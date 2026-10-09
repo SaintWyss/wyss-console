@@ -6,6 +6,11 @@
     type AuthorityObservation,
   } from '../../shell/authority';
   import { BINDING, localTime } from '../sessions/present';
+  import ApprovalCard from '../approvals/ApprovalCard.svelte';
+  import type {
+    ApprovalsController,
+    ApprovalsState,
+  } from '../approvals/controller';
   import {
     promptFits,
     type AgentController,
@@ -13,6 +18,7 @@
   } from './controller';
   import {
     activityLabel,
+    agentLabel,
     approvalMessage,
     cancelFailureMessage,
     localClock,
@@ -32,6 +38,8 @@
     authority,
     visible,
     onsessions,
+    approvals,
+    approvalsController,
   }: {
     agent: AgentState;
     controller: AgentController;
@@ -40,6 +48,9 @@
     visible: boolean;
     /** Shows the Sessions view, where a session is created, activated and resumed. */
     onsessions: () => void;
+    /** Approvals as the shell's one approvals controller holds them. */
+    approvals: ApprovalsState;
+    approvalsController: ApprovalsController;
   } = $props();
 
   const view = $derived(agent.current);
@@ -49,6 +60,17 @@
     view !== null && hint === null && promptFits(view.draft),
   );
   const active = $derived(view?.turns.find((t) => t.id === view.active));
+  /** The approval a turn waits on, once what it is about was read. Never another turn's. */
+  const cardOf = (turn: string, approval: string) =>
+    approvals.pending?.find(
+      (c) => c.approval.id === approval && c.approval.turn === turn,
+    );
+  // A turn names an approval that is not shown yet: it is read, by the one reader.
+  $effect(() => {
+    for (const entry of view?.turns ?? [])
+      if (entry.approval && !cardOf(entry.id, entry.approval.id))
+        approvalsController.want(entry.approval.id);
+  });
 
   let transcript = $state<HTMLElement>();
   /** Whether the reader is at the end of the transcript, and so follows it. */
@@ -151,7 +173,7 @@
           <span class="agent-path">{view.facts.workspace}</span>
         {/if}
       {/if}
-      <span class="agent-who">Codex</span>
+      <span class="agent-who">{agentLabel(view.facts?.mode)}</span>
     </header>
 
     {#if !connected}
@@ -273,15 +295,24 @@
               </p>
             {/if}
             {#if !ended && entry.approval}
-              <div class="turn-approval" role="status">
-                <p class="approval-title">Waiting for approval</p>
-                <p>
-                  {approvalMessage(
-                    entry.approval.kind,
-                    localClock(entry.approval.expires_at),
-                  )}
-                </p>
-              </div>
+              {@const card = cardOf(entry.id, entry.approval.id)}
+              {#if card}
+                <ApprovalCard
+                  {card}
+                  controller={approvalsController}
+                  {connected}
+                />
+              {:else}
+                <div class="turn-approval" role="status">
+                  <p class="approval-title">Waiting for approval</p>
+                  <p>
+                    {approvalMessage(
+                      entry.approval.kind,
+                      localClock(entry.approval.expires_at),
+                    )}
+                  </p>
+                </div>
+              {/if}
             {/if}
             {#if !ended && entry.cancel !== 'idle'}
               <p class="turn-activity live" role="status">

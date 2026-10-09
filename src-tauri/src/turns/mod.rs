@@ -7,11 +7,17 @@
 //! provider did. What the window is told is what the authority answered, reduced to a
 //! narrow projection. No dependency on Tauri or human terminals.
 //!
-//! There is nothing here that answers an approval. A turn that waits on one is shown as
-//! waiting, and stays waiting.
+//! An approval a turn waits on is read here and answered as an intent (`approvals`); a
+//! session enters a mode here, because that may stop the runtime a turn runs on (`modes`).
+mod approvals;
+mod modes;
 mod service;
 mod view;
 
+pub use approvals::{
+    APPROVAL_PAGE, ApprovalDetail, ApprovalList, ApprovalSummary, CommandView, Decision,
+    DecisionReceipt, FileView,
+};
 pub use service::TurnService;
 pub use view::{
     ApprovalNotice, SessionFacts, TURN_PAGE, TurnEvent, TurnEventKind, TurnList, TurnReceipt,

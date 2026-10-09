@@ -7,6 +7,7 @@ import {
   parseSessionReceipt,
   parseWorkspaceChoice,
   type ActivationProgress,
+  type AgentMode,
   type SessionFailure,
   type SessionPage,
   type SessionReceipt,
@@ -87,14 +88,15 @@ export function closeSession(
 }
 
 /**
- * One step of activating a session in `workspace`. `operationId` names the whole user
- * action: the same request is sent again until the stage is `ready`.
+ * One step of activating a session in `workspace` and `mode`. `operationId` names the
+ * whole user action: the same request is sent again until the stage is `ready`.
  */
 export function activateSession(
   operationId: string,
   sessionId: ManagedSessionId,
   expectedRevision: number,
   workspace: string,
+  mode: AgentMode,
 ): Promise<ActivationProgress> {
   return call(
     'managed_session_activate',
@@ -103,6 +105,29 @@ export function activateSession(
       session_id: sessionId,
       expected_revision: expectedRevision,
       workspace,
+      mode,
+    },
+    parseActivationProgress,
+  );
+}
+/**
+ * One step of entering `mode` with a session that has a workspace. The request names
+ * the mode and nothing else: the workspace is the one the authority holds for the
+ * session, and which runtime profile the mode means is the desktop's to say.
+ */
+export function enterSessionMode(
+  operationId: string,
+  sessionId: ManagedSessionId,
+  expectedRevision: number,
+  mode: AgentMode,
+): Promise<ActivationProgress> {
+  return call(
+    'managed_session_mode',
+    {
+      operation_id: operationId,
+      session_id: sessionId,
+      expected_revision: expectedRevision,
+      mode,
     },
     parseActivationProgress,
   );

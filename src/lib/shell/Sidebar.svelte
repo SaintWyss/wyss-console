@@ -1,8 +1,16 @@
 <script lang="ts">
   import { NAV_ITEMS, type ViewId } from './nav';
 
-  let { active, onselect }: { active: ViewId; onselect: (id: ViewId) => void } =
-    $props();
+  let {
+    active,
+    onselect,
+    waiting = 0,
+  }: {
+    active: ViewId;
+    onselect: (id: ViewId) => void;
+    /** Approvals waiting for a decision. Shown on their own item. */
+    waiting?: number;
+  } = $props();
 </script>
 
 <nav class="sidebar" aria-label="Primary">
@@ -23,6 +31,11 @@
           >
           <span class="nav-label">{item.label}</span>
           {#if !item.available}<span class="nav-tag">Soon</span>{/if}
+          {#if item.id === 'approvals' && waiting > 0}
+            <span class="nav-tag waiting" aria-label={`${waiting} waiting`}
+              >{waiting}</span
+            >
+          {/if}
         </button>
       </li>
     {/each}

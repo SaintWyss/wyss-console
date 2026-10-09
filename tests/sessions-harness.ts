@@ -14,7 +14,7 @@ import {
 } from '../src/lib/features/sessions/controller';
 import type { AuthorityObservation } from '../src/lib/shell/authority';
 import views from './fixtures/authority-view-v1.json';
-import pages from './fixtures/session-page-v2.json';
+import pages from './fixtures/session-page-v3.json';
 
 export const loaded = parseSessionPage(pages.loaded);
 export const empty = parseSessionPage(pages.empty);
@@ -94,6 +94,12 @@ export function harness() {
     close: intent('close'),
     abandon: intent('abandon'),
     activate(...args) {
+      const d = deferred<ActivationProgress>();
+      steps.push({ ...d, args });
+      return d.promise;
+    },
+    // A change of mode is the same kind of step, asked without a folder.
+    enter(...args) {
       const d = deferred<ActivationProgress>();
       steps.push({ ...d, args });
       return d.promise;

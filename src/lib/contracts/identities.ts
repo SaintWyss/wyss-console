@@ -7,6 +7,7 @@ export type TerminalId = Identity<'TerminalId'>;
 export type AgentRuntimeInstanceId = Identity<'AgentRuntimeInstanceId'>;
 export type ManagedSessionId = Identity<'ManagedSessionId'>;
 export type ManagedTurnId = Identity<'ManagedTurnId'>;
+export type ManagedApprovalId = Identity<'ManagedApprovalId'>;
 
 export function parseConsoleSessionId(value: unknown): ConsoleSessionId {
   return parseUuid(value) as ConsoleSessionId;
@@ -19,6 +20,9 @@ export function parseManagedSessionId(value: unknown): ManagedSessionId {
 }
 export function parseManagedTurnId(value: unknown): ManagedTurnId {
   return parseUuid(value) as ManagedTurnId;
+}
+export function parseManagedApprovalId(value: unknown): ManagedApprovalId {
+  return parseUuid(value) as ManagedApprovalId;
 }
 
 export function parseAgentRuntimeInstanceId(

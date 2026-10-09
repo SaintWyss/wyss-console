@@ -88,6 +88,8 @@ export interface AgentState {
   link: AgentLink;
   tabs: { session: ManagedSessionId; label: string }[];
   current: AgentSessionView | null;
+  /** A turn of some open session has not ended, as far as it was read. */
+  following: boolean;
 }
 
 export interface TurnsClient {
@@ -226,6 +228,7 @@ export class AgentController {
     const model = this.model();
     return {
       link: this.link,
+      following: this.models.some((m) => m.entries.some((e) => !over(e))),
       tabs: this.models.map(({ session, label }) => ({ session, label })),
       current: model && {
         session: model.session,

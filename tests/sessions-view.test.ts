@@ -5,7 +5,7 @@ import App from '../src/App.svelte';
 import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import { parseTerminalId } from '../src/lib/contracts/identities';
 import views from './fixtures/authority-view-v1.json';
-import pages from './fixtures/session-page-v2.json';
+import pages from './fixtures/session-page-v3.json';
 
 const fakes = vi.hoisted(() => ({ factory: vi.fn() }));
 vi.mock('../src/lib/features/terminal/renderer', () => ({
@@ -51,6 +51,8 @@ function desktop(script: {
   intent?: (call: Call) => unknown;
   /** One step of an activation; `step` counts them from one. */
   activate?: (call: Call, step: number) => unknown;
+  /** One step of a change of mode; `step` counts them from one. */
+  mode?: (call: Call, step: number) => unknown;
   choose?: () => unknown;
 }) {
   const calls: Call[] = [];
@@ -72,6 +74,11 @@ function desktop(script: {
       return (script.choose ?? (() => ({ path: FOLDER })))();
     if (command === 'managed_session_activate')
       return (script.activate ?? (() => ({ stage: 'ready' })))(
+        calls.at(-1)!,
+        calls.filter((c) => c.command === command).length,
+      );
+    if (command === 'managed_session_mode')
+      return (script.mode ?? (() => ({ stage: 'ready' })))(
         calls.at(-1)!,
         calls.filter((c) => c.command === command).length,
       );
@@ -347,9 +354,18 @@ it('creates and activates a session from one composer, step by step', async () =
   // A project and an agent, and nothing to type: the folder comes from the dialog.
   expect(text(composer())).toContain('Project No folder selected');
   expect(text(composer())).toContain('Agent Codex');
-  expect(composer().querySelectorAll('input, select, textarea')).toHaveLength(
-    0,
+  expect(
+    composer().querySelectorAll('select, textarea, input:not([type="radio"])'),
+  ).toHaveLength(0);
+  // The one choice it offers is the mode, and it starts at Inference.
+  const modes = Array.from(
+    composer().querySelectorAll<HTMLInputElement>('input[type="radio"]'),
   );
+  expect(modes.map((m) => [m.value, m.checked])).toEqual([
+    ['inference', true],
+    ['local_tools', false],
+  ]);
+  expect(composer().querySelector('.composer-note.caution')).toBeNull();
   expect(button('New session').disabled).toBe(true);
   expect(button('Create & activate', composer()).disabled).toBe(true);
   button('Create & activate', composer()).click();
@@ -391,12 +407,14 @@ it('creates and activates a session from one composer, step by step', async () =
   expect(sent).toHaveLength(2);
   expect(sent[1]).toEqual({
     command: 'managed_session_activate',
-    // One action: the identity the session was prepared under, and the folder as chosen.
+    // One action: the identity the session was prepared under, the folder as chosen,
+    // and the mode: Inference, because nothing else was asked for.
     request: {
       operation_id: action,
       session_id: session,
       expected_revision: 1,
       workspace: FOLDER,
+      mode: 'inference',
     },
   });
   answers.shift()!({ stage: 'runtime_starting' });
@@ -472,6 +490,7 @@ it('activates an existing session that has no workspace', async () => {
     session_id: fresh.id,
     expected_revision: 1,
     workspace: FOLDER,
+    mode: 'inference',
   });
   expect(sent[1].request).toEqual(sent[0].request);
   expect(view().querySelector('.sessions-status')).toBeNull();
@@ -873,4 +892,210 @@ it('keeps the terminal workspace alive across every visit to Sessions', async ()
   // The same DOM node all along: the workspace was hidden, never rebuilt.
   expect(document.querySelectorAll('.terminal-feature')).toHaveLength(1);
   expect(document.querySelectorAll('.sessions-feature')).toHaveLength(1);
+});
+
+/** The fixture page with `bound` attached in `mode` and the runtime serving it. */
+const attachedIn = (mode: 'inference' | 'local_tools') => ({
+  ...pages.loaded,
+  runtime:
+    mode === 'local_tools'
+      ? { mode, workspace: bound.workspace }
+      : { mode, workspace: null },
+  sessions: [fresh, { ...bound, binding: 'bound_attached', mode }, closed],
+});
+
+it('creates a session in Local Tools only when that mode is chosen, and says what it means', async () => {
+  const stopped = {
+    ...ready,
+    agent: { ...ready.agent, actual: 'stopped', model_count: 0 },
+  };
+  const ipc = await start({
+    authority: (after) => (after === null ? stopped : never()),
+    activate: () => ({ stage: 'runtime_starting' }),
+  });
+  button('New session').click();
+  await flush();
+  const composer = () =>
+    view().querySelector<HTMLElement>('.session-composer')!;
+  const modes = () =>
+    Array.from(
+      composer().querySelectorAll<HTMLInputElement>('input[type="radio"]'),
+    );
+  // Both modes are named with what they are, and Inference is the one selected.
+  expect(text(composer().querySelector('.mode-choice'))).toBe(
+    'Mode Inference Text only. Codex is offered no tool. Local Tools Codex may propose commands and file changes in this folder. Each one waits for your approval.',
+  );
+  expect(modes().map((m) => m.checked)).toEqual([true, false]);
+  modes()[1].click();
+  await flush();
+  expect(modes().map((m) => m.checked)).toEqual([false, true]);
+  // More capability is not more authority, and the runtime is shared: both are said
+  // before anything is asked.
+  const caution = text(composer().querySelector('.composer-note.caution'));
+  expect(caution).toMatch(
+    /every command and file change waits for your approval/,
+  );
+  expect(caution).toMatch(
+    /it is restarted and the sessions attached to it are detached/,
+  );
+
+  button('Choose folder', composer()).click();
+  await flush();
+  button('Create & activate', composer()).click();
+  await flush();
+  const sent = ipc.sent('managed_session_activate');
+  // The mode is a name next to the folder: no profile, no path of its own.
+  expect(sent[0].request).toEqual({
+    operation_id: expect.stringMatching(UUID),
+    session_id: fresh.id,
+    expected_revision: 1,
+    workspace: FOLDER,
+    mode: 'local_tools',
+  });
+  expect(text(view().querySelector('.sessions-status'))).toBe(
+    'Starting Codex in Local Tools…',
+  );
+});
+
+it('shows the mode a session is attached in and the runtime every session shares', async () => {
+  await start({ page: () => attachedIn('local_tools') });
+  expect(text(view().querySelector('.sessions-count'))).toBe(
+    '1 prepared · 0 closed · Codex runs in Local Tools for rag-corp',
+  );
+  expect(text(rows()[1])).toContain('Codex · Ready · Local Tools');
+  // Not attached: no mode is claimed for it.
+  expect(text(rows()[0])).not.toMatch(/Local Tools|Inference/);
+  rows()[1].click();
+  await flush();
+  const facts = () => text(details()!.querySelector('.session-facts'));
+  expect(facts()).toContain('Mode Local Tools');
+  expect(text(details())).toContain(
+    'This session runs in Local Tools. Every command and file change Codex proposes waits for your approval.',
+  );
+  // Attached: there is no mode to change to, and nothing offers one.
+  expect(button('Enable Local Tools', details()!)).toBeUndefined();
+  expect(button('Use Inference', details()!)).toBeUndefined();
+  rows()[0].click();
+  await flush();
+  expect(facts()).toContain('Mode Not attached');
+});
+
+it('explains that an Inference session stays one, and opens a Local Tools composer by name', async () => {
+  await start({ page: () => attachedIn('inference') });
+  expect(text(view().querySelector('.sessions-count'))).toContain(
+    'Codex runs in Inference',
+  );
+  rows()[1].click();
+  await flush();
+  expect(text(details()!.querySelector('.session-facts'))).toContain(
+    'Mode Inference',
+  );
+  // Its conversation cannot move: nothing offers to move it.
+  expect(button('Enable Local Tools', details()!)).toBeUndefined();
+  expect(text(details())).toContain(
+    'Local Tools needs a session of its own, because a conversation stays in the mode it was created in.',
+  );
+  button('New Local Tools session', details()!)!.click();
+  await flush();
+  const composer = view().querySelector<HTMLElement>('.session-composer')!;
+  expect(text(composer.querySelector('.composer-title'))).toBe(
+    'New managed session',
+  );
+  expect(
+    Array.from(
+      composer.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
+    ).map((m) => m.checked),
+  ).toEqual([false, true]);
+  // No folder was carried over: one is chosen in the dialog, as always.
+  expect(text(composer)).toContain('Project No folder selected');
+});
+
+it('changes the mode of a bound session only after saying what it does', async () => {
+  const answers: ((value: unknown) => void)[] = [];
+  const ipc = await start({
+    page: () => ({
+      ...pages.loaded,
+      runtime: { mode: 'inference', workspace: null },
+    }),
+    mode: () => new Promise((resolve) => answers.push(resolve)),
+  });
+  rows()[1].click();
+  await flush();
+  // Bound and detached, with Inference running: Local Tools can be asked for.
+  expect(button('Use Inference', details()!)).toBeUndefined();
+  button('Enable Local Tools', details()!)!.click();
+  await flush();
+  const confirm = () =>
+    details()!.querySelector<HTMLElement>('[aria-label="Confirm mode"]')!;
+  expect(text(confirm())).toBe(
+    'Enable Local Tools for rag-corp? This restarts the managed Codex runtime in Local Tools for this workspace. Sessions attached now are detached. A session created in Inference cannot be resumed in Local Tools. Every command and file change still waits for your approval. Enable Local Tools Cancel',
+  );
+  // Nothing was asked yet, and Cancel asks nothing.
+  expect(ipc.count('managed_session_mode')).toBe(0);
+  button('Cancel', confirm())!.click();
+  await flush();
+  expect(details()!.querySelector('[aria-label="Confirm mode"]')).toBeNull();
+  expect(ipc.count('managed_session_mode')).toBe(0);
+
+  button('Enable Local Tools', details()!)!.click();
+  await flush();
+  button('Enable Local Tools', confirm())!.click();
+  await flush();
+  const sent = ipc.sent('managed_session_mode');
+  // The session, the revision that was shown and the mode. No folder: the workspace
+  // is the one wyss-control holds for the session.
+  expect(sent).toHaveLength(1);
+  expect(sent[0].request).toEqual({
+    operation_id: expect.stringMatching(UUID),
+    session_id: bound.id,
+    expected_revision: 1,
+    mode: 'local_tools',
+  });
+  // The runtime really is being stopped, and that is what is shown.
+  answers.shift()!({ stage: 'runtime_stopping' });
+  await flush();
+  expect(text(view().querySelector('.sessions-status'))).toBe(
+    'Stopping the managed runtime…',
+  );
+  // While it is pending no other session action is offered.
+  expect(button('Resume', details()!)!.disabled).toBe(true);
+  expect(button('Enable Local Tools', details()!)!.disabled).toBe(true);
+});
+
+it('says why a mode could not be entered, in the words of what happened', async () => {
+  const failures: Record<string, RegExp> = {
+    turn_active:
+      /A turn is running, and the runtime it runs on is not restarted under it/,
+    rejected:
+      /Codex refused to resume this session in that mode\. A session resumes only in the mode it was created in/,
+    start_refused:
+      /refused to start Codex in Local Tools: it could not set up or prove the isolation that mode requires\. Nothing runs without it/,
+    mode_fixed: /attached in the other mode/,
+  };
+  for (const [code, message] of Object.entries(failures)) {
+    await start({
+      page: () => ({
+        ...pages.loaded,
+        runtime: { mode: 'inference', workspace: null },
+      }),
+      mode: () => Promise.reject({ code, retry: false }),
+    });
+    rows()[1].click();
+    await flush();
+    button('Enable Local Tools', details()!)!.click();
+    await flush();
+    button(
+      'Enable Local Tools',
+      details()!.querySelector<HTMLElement>('[aria-label="Confirm mode"]')!,
+    )!.click();
+    await flush();
+    const alert = view().querySelector('.sessions-status.failed')!;
+    expect(text(alert)).toMatch(/^The session is not ready in that mode\./);
+    expect(text(alert)).toMatch(message);
+    // A refusal offers no Retry: sending it again would change nothing.
+    expect(button('Retry', alert)).toBeUndefined();
+    await unmount(component!);
+    component = undefined;
+    await flush();
+  }
 });

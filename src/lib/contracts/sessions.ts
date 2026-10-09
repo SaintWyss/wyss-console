@@ -1,5 +1,5 @@
 /**
- * SessionPage v2: the desktop's projection of managed sessions, and what its session
+ * SessionPage v3: the desktop's projection of managed sessions, and what its session
  * intents answer. It is not the control contract: it names no control method, and the
  * only identity it carries is the session's own.
  */
@@ -13,6 +13,22 @@ export type SessionBinding =
   | 'bound_detached'
   | 'bound_attached';
 
+/**
+ * What a session can do, as a product choice: text only, or text with commands and file
+ * changes that each wait for an approval. One of exactly these two.
+ */
+export const AGENT_MODES = ['inference', 'local_tools'] as const;
+export type AgentMode = (typeof AGENT_MODES)[number];
+/** The mode a session is attached in. `unknown` while it is not attached. */
+export type SessionMode = AgentMode | 'unknown';
+/** The one managed runtime every session shares. */
+export interface RuntimeFacts {
+  /** The mode of the generation that is ready now. Null when none is. */
+  mode: AgentMode | null;
+  /** The one workspace a local-tools generation serves. */
+  workspace: string | null;
+}
+
 export interface SessionSummary {
   id: ManagedSessionId;
   adapter: string;
@@ -24,6 +40,7 @@ export interface SessionSummary {
   position: string;
   binding: SessionBinding;
   workspace: string | null;
+  mode: SessionMode;
   /** Presentation hints from the desktop. The authority decides. */
   resumable: boolean;
   closable: boolean;
@@ -33,9 +50,10 @@ export interface SessionSummary {
   recoverable: boolean;
 }
 export interface SessionPage {
-  schema_version: 2;
+  schema_version: 3;
   /** The durable head the page was read at; null before the first committed event. */
   head: string | null;
+  runtime: RuntimeFacts;
   /** Newest first. */
   sessions: SessionSummary[];
   /** Cursor of the next older page, when older sessions exist. */
@@ -51,6 +69,7 @@ export interface SessionReceipt {
  * request is sent again until the stage is `ready`.
  */
 export const ACTIVATION_STAGES = [
+  'runtime_stopping',
   'runtime_starting',
   'creating',
   'bound',
@@ -75,6 +94,8 @@ export const SESSION_FAILURES = [
   'not_bound',
   'runtime_unavailable',
   'start_refused',
+  'turn_active',
+  'mode_fixed',
   'workspace_invalid',
   'already_bound',
   'permission_denied',
@@ -164,6 +185,16 @@ function path(value: unknown): string {
   return value;
 }
 
+const MODES: readonly SessionMode[] = [...AGENT_MODES, 'unknown'];
+function parseRuntime(value: unknown): RuntimeFacts {
+  const v = record(value, ['mode', 'workspace'], 'runtime');
+  const mode = v.mode === null ? null : member(v.mode, AGENT_MODES, 'mode');
+  const folder = workspace(v.workspace);
+  // Only a local-tools generation is isolated for a workspace, and it always is.
+  if ((folder !== null) !== (mode === 'local_tools')) throw invalid('runtime');
+  return { mode, workspace: folder };
+}
+
 function parseSummary(value: unknown): SessionSummary {
   const v = record(
     value,
@@ -177,6 +208,7 @@ function parseSummary(value: unknown): SessionSummary {
       'position',
       'binding',
       'workspace',
+      'mode',
       'resumable',
       'closable',
       'activatable',
@@ -202,6 +234,9 @@ function parseSummary(value: unknown): SessionSummary {
   const folder = workspace(v.workspace);
   const bound = binding === 'bound_detached' || binding === 'bound_attached';
   if ((folder !== null) !== bound) throw invalid('workspace');
+  const mode = member(v.mode, MODES, 'mode');
+  // A mode is what an attachment reports: a session that is not attached has none.
+  if (mode !== 'unknown' && binding !== 'bound_attached') throw invalid('mode');
   const resumable = flag(v.resumable, 'resumable');
   const closable = flag(v.closable, 'closable');
   const activatable = flag(v.activatable, 'activatable');
@@ -226,6 +261,7 @@ function parseSummary(value: unknown): SessionSummary {
     position: sequence(v.position, 'position'),
     binding,
     workspace: folder,
+    mode,
     resumable,
     closable,
     activatable,
@@ -237,10 +273,10 @@ function parseSummary(value: unknown): SessionSummary {
 export function parseSessionPage(value: unknown): SessionPage {
   const v = record(
     value,
-    ['schema_version', 'head', 'sessions', 'older', 'truncated'],
+    ['schema_version', 'head', 'runtime', 'sessions', 'older', 'truncated'],
     'page',
   );
-  if (v.schema_version !== 2) throw invalid('schema_version');
+  if (v.schema_version !== 3) throw invalid('schema_version');
   if (!Array.isArray(v.sessions) || v.sessions.length > SESSION_PAGE_LIMIT)
     throw invalid('sessions');
   const sessions = v.sessions.map(parseSummary);
@@ -257,8 +293,9 @@ export function parseSessionPage(value: unknown): SessionPage {
   if (older !== null && older !== sessions.at(-1)?.position)
     throw invalid('older');
   return {
-    schema_version: 2,
+    schema_version: 3,
     head,
+    runtime: parseRuntime(v.runtime),
     sessions,
     older,
     truncated: flag(v.truncated, 'truncated'),

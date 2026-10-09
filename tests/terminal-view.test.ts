@@ -167,8 +167,9 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   const { default: capability } =
     await import('../src-tauri/capabilities/main.json');
   // The authority is reached through one read of the desktop's own projection, and
-  // managed sessions through one read and five intents, and managed turns through two
-  // reads and two intents. Nothing takes a method name.
+  // managed sessions through one read and six intents, managed turns through two reads
+  // and two intents, and their approvals through two reads and two decisions. Nothing
+  // takes a method name.
   // A workspace is chosen through one native dialog: the window is granted no
   // filesystem, shell, process, socket, dialog or event permission of the framework.
   expect(capability.permissions).toEqual([
@@ -180,11 +181,16 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-managed-session-close',
     'allow-managed-session-activate',
     'allow-managed-session-abandon',
+    'allow-managed-session-mode',
     'allow-choose-workspace',
     'allow-managed-turns',
     'allow-managed-turn-read',
     'allow-managed-turn-start',
     'allow-managed-turn-cancel',
+    'allow-managed-approvals',
+    'allow-managed-approval-read',
+    'allow-managed-approval-approve',
+    'allow-managed-approval-deny',
     'allow-create-terminal',
     'allow-terminal-write',
     'allow-terminal-read-output',
@@ -196,11 +202,20 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   // plugin (`fs:`, `shell:`, `dialog:`) or to the framework's core (`core:`).
   for (const permission of capability.permissions)
     expect(permission).toMatch(/^allow-[a-z-]+$/);
-  // Nothing the window is granted answers an approval, changes a lease or passes a
-  // control request through.
+  // An approval is answered by exactly two commands, one decision each. Nothing the
+  // window is granted makes a rule, remembers a choice, edits a policy, changes a
+  // lease, names a runtime profile or passes a control request through.
+  expect(
+    capability.permissions.filter((p: string) => /approv/.test(p)),
+  ).toEqual([
+    'allow-managed-approvals',
+    'allow-managed-approval-read',
+    'allow-managed-approval-approve',
+    'allow-managed-approval-deny',
+  ]);
   for (const permission of capability.permissions)
     expect(permission).not.toMatch(
-      /approv|accept|decline|allow-.*(lease|control|request|invoke|exec|shell|fs)/,
+      /always|remember|trust|rule|policy|allowlist|respond|decision|lease|scope|profile|runtime|control|request|invoke|exec|shell|spawn|process|socket|fs/,
     );
   const directives = Object.fromEntries(
     config.app.security.csp
