@@ -401,3 +401,14 @@ real pointer and keyboard input and nothing sent to the user's session:
 Two visual defects were found in that run before the accepted build and fixed in it:
 a workspace path lost its leading slash, and the focus ring was drawn on the field
 instead of the composer.
+
+## Later implementation status
+
+Since ADR 0023 the window starts a local-tools runtime when the user chooses Local
+Tools for a session, and approvals are read and answered in it. "Approvals are not
+answered here", "a local-tools runtime, which the window cannot start", "The desktop's
+lease is `turn_start` only" and the notice that "this view cannot answer it" describe
+this ADR's phase. A turn of a session attached in Local Tools is now admitted under a
+lease that also carries `command_execute` and `file_change`; a turn of an inference
+session is admitted as described here. A turn ended `user_cancel` is worded "Stopped at
+your request", because the authority records a denied command that way too.

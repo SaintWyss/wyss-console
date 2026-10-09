@@ -362,3 +362,10 @@ the experimental API disabled; the model's command arrives wrapped as
 its output with the finished item; the diff of an added file is its raw content; after
 `cancel` the provider reports the request resolved, the item declined and the turn
 interrupted, in that order; `decline` on a file change keeps the turn running.
+
+## Later implementation status
+
+Since ADR 0023 the desktop is a client of this contract: it starts turns of Local Tools
+sessions under a lease with `command_execute` and `file_change`, reads an approval with
+`approval/status` and answers it with `accept` or `decline`. The contract itself is
+unchanged. The desktop does not offer `cancel` as an approval decision.

@@ -163,3 +163,6 @@ Since ADRs 0020 and 0021 the desktop asks for leases too: exactly `session_resum
 `session_create`, for seconds, around one operation of its own, and revokes them.
 Since ADR 0022 it also asks for exactly `turn_start`, for thirty minutes, keeps that
 lease while the turn it admitted runs and revokes it once the turn has ended.
+Since ADR 0023 the lease it asks for a turn of a session attached in the local-tools
+profile carries `turn_start`, `command_execute` and `file_change`, because an approval
+is accepted only under the lease its turn was admitted under.

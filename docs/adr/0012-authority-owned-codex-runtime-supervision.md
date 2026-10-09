@@ -204,3 +204,7 @@ moved away from its build tree cannot start a runtime; it fails closed. Packagin
 to replace that before distribution (ADR 0018, residual risks).
 Since ADR 0021 the desktop can ask for `runtime/start`, with the default profile, as
 part of activating a session; it still launches and supervises nothing.
+Since ADR 0023 it can also ask for the local-tools profile for the workspace of a
+session, and for `runtime/stop` when the runtime serves another profile or workspace
+and it read that no managed turn is running. One runtime, in one profile, is still all
+there is.

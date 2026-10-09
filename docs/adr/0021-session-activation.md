@@ -578,3 +578,11 @@ turns and chat are not part of this" describe this ADR's phase, no longer the de
 The lease sequence shared with binding is now also used for a turn, with one
 difference: a turn's lease is kept while the turn runs instead of being given back when
 the operation is answered. Approvals and the local-tools profile are still deferred.
+
+Since ADR 0023 an activation names one of two modes, Inference or Local Tools, and
+Inference stays the default. "With the default profile" and "the window cannot start a
+local-tools runtime" describe this ADR's phase. An activation may now ask the authority
+to stop a runtime that serves another mode or folder, after reading that no managed
+turn is running; the sequence gained `runtime/stop` and the stage "Stopping the managed
+runtime…". The folder still comes only from the native dialog, and for a session that
+is already bound, from the authority's own binding.

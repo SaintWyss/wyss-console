@@ -473,3 +473,7 @@ no longer the desktop.
 
 Since ADR 0022 a session with a workspace can be opened in the `Agents` view from its
 details. The Sessions view itself sends nothing new, and its five intents are unchanged.
+
+Since ADR 0023 a session shows the mode it is attached in, an activation names a mode,
+and a bound session can be entered in the other mode: a sixth intent,
+`managed_session_mode`.

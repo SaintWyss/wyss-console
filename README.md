@@ -14,9 +14,12 @@ attached to the managed Codex runtime, which the authority starts when asked
 ([ADR 0021](docs/adr/0021-session-activation.md)). A ready session can be given an
 objective in the Agents view: the authority starts a managed turn for it, the answer is
 shown as it arrives and the turn can be cancelled
-([ADR 0022](docs/adr/0022-managed-turns-ui.md)). The product is not complete: an
-approval cannot be answered from the window yet, and the sessions the window activates
-run Codex without tools. Built with Tauri 2,
+([ADR 0022](docs/adr/0022-managed-turns-ui.md)). A session can be created in Local
+Tools, where Codex may propose commands and file changes in its project folder, and
+each proposal waits for an approval that is read and answered in the window
+([ADR 0023](docs/adr/0023-local-tools-and-approvals-ui.md)). The product is not
+complete: there is no event or history view yet, nothing an approval decided is
+remembered, and the authority runs one Codex runtime in one mode at a time. Built with Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -129,7 +132,7 @@ external authority.
 `wyss-control` independently owns prepared/closed managed-session identities,
 canonical control state, durable intent receipts and a minimal EventEnvelope audit.
 **Prepared is not execution permission.** Explicit, leased managed turns are
-available through the authority developer client, with no product chat UI:
+available from the window and through the authority developer client:
 inference-only by default, and with authority-mediated commands and file changes
 in the isolated local-tools profile.
 Human terminal tabs remain Console-local; the read-only Codex probe above remains
@@ -251,21 +254,22 @@ killed, incompatible or malformed. See
 ## Managed sessions
 
 The `Sessions` view shows the managed sessions the authority holds, newest first, and
-sends five product intents. The desktop requests; `wyss-control` decides.
+sends six product intents. The desktop requests; `wyss-control` decides.
 
 ```text
 Svelte  ->  narrow Tauri commands  ->  SessionService  ->  shared ControlClient  ->  wyss-control
 ```
 
-| In the window                 | What the desktop asks the authority                                                                                                                                                                   |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The list                      | `managedSession/list`, then `managedSession/runtime/status` for each session shown. Twenty-five to a page.                                                                                            |
-| **New session**, **Activate** | One step at a time until the session is ready: `managedSession/prepare` for a new one, `runtime/start` if no runtime is on its way, `managedSession/runtime/create`, `managedSession/runtime/resume`. |
-| **Resume**                    | `managedSession/runtime/resume`: attaches a session that is already bound to a workspace to the running runtime.                                                                                      |
-| **Discard attempt**           | `managedSession/runtime/abandon`, after one confirmation, for a binding attempt the authority could not confirm.                                                                                      |
-| **Close**                     | `managedSession/close`, after one confirmation. Closing is final and revokes the session's lease.                                                                                                     |
+| In the window                             | What the desktop asks the authority                                                                                                                                                                                                                                                                          |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The list                                  | `managedSession/list`, then `managedSession/runtime/status` for each session shown. Twenty-five to a page.                                                                                                                                                                                                   |
+| **New session**, **Activate**             | One step at a time until the session is ready in the mode chosen: `managedSession/prepare` for a new one, `runtime/stop` if the runtime serves another mode or folder and no turn is running, `runtime/start` if no runtime is on its way, `managedSession/runtime/create`, `managedSession/runtime/resume`. |
+| **Enable Local Tools**, **Use Inference** | The same steps for a session that is already bound, after one confirmation, for the workspace the authority holds for it.                                                                                                                                                                                    |
+| **Resume**                                | `managedSession/runtime/resume`: attaches a session that is already bound to a workspace to the running runtime.                                                                                                                                                                                             |
+| **Discard attempt**                       | `managedSession/runtime/abandon`, after one confirmation, for a binding attempt the authority could not confirm.                                                                                                                                                                                             |
+| **Close**                                 | `managedSession/close`, after one confirmation. Closing is final and revokes the session's lease.                                                                                                                                                                                                            |
 
-Each session shows its control state, agent, binding state and workspace, revision,
+Each session shows its control state, agent, binding state, mode and workspace, revision,
 times and identity. The Codex thread, runtime instance, lease and operation identities
 never reach the window, and the window cannot name a control method, an adapter, a
 scope, a lease, a lifetime or a safety profile: it sends a session it was shown, the
@@ -275,7 +279,7 @@ folder the user selected in the native dialog.
 ### Creating and activating a session
 
 ```text
-New session  ->  Choose folder (native dialog)  ->  Create & activate
+New session  ->  Mode (Inference unless chosen otherwise)  ->  Choose folder (native dialog)  ->  Create & activate
 Preparing session…  ->  Starting Codex…  ->  Creating workspace binding…  ->  Attaching…  ->  Ready
 ```
 
@@ -284,8 +288,8 @@ Preparing session…  ->  Starting Codex…  ->  Creating workspace binding…  
   activation is accepted only for a folder that dialog returned in this run. Selecting
   a folder is a request; whether it may be a workspace is the authority's to say.
 - **The authority starts Codex.** If no runtime is running or starting, the desktop
-  asks `wyss-control` to start it with the default profile and waits for the authority
-  to report it ready. The desktop never launches Codex and never asks while a runtime
+  asks `wyss-control` to start it in the mode that was chosen (the default profile for
+  Inference) and waits for the authority to report it ready. The desktop never launches Codex and never asks while a runtime
   is already starting. A runtime the authority contained for safety is not restarted
   from the window.
 - **The binding takes a lease for that alone.** The authority admits a binding under a
@@ -362,18 +366,21 @@ Svelte  ->  four narrow Tauri commands  ->  TurnService  ->  ControlClient  ->  
   A start whose answer was lost is retried with that same identity, never replaced.
 - **The lease of a turn is kept while it runs** and given back by the reading that finds
   it ended. It is `turn_start` for thirty minutes, which is the turn's time budget if
-  the desktop is not there to give it back. A lease somebody else holds is used as it is.
+  the desktop is not there to give it back; for a session attached in Local Tools it
+  also carries `command_execute` and `file_change`, without which the authority accepts
+  no approval. A lease somebody else holds is used as it is.
 - **What is shown is what the authority has.** The state is one of its own: Starting,
   Running, Completed, Interrupted, Failed, Indeterminate, with the reason it recorded.
   A cancel shows "Cancelling…" until a reading says what became of the turn.
 - **Only the answer crosses as text.** Reasoning is shown as "Thinking…" and nothing
-  more; a command or a file change is shown as one line saying that it happened. The
-  provider's thread and turn, the lease, the runtime instance and the approval's
-  content never reach the window.
+  more; a command or a file change is shown as one line saying that it happened, and
+  the output of a command does not cross. The provider's thread and turn, the lease and
+  the runtime instance never reach the window.
 - **Text is shown as text.** Nothing Codex or the user wrote is interpreted as HTML or
   Markdown.
-- **A turn waiting on an approval is shown waiting.** The window cannot answer it: no
-  command for it exists. That is the next phase.
+- **A turn waiting on an approval shows it under that turn**, with **Approve** and
+  **Deny** (see [below](#local-tools-and-approvals-in-the-window)). The turn stays
+  `Running`, because that is what it is.
 - **Wyss keeps no conversation text**, so the input of a turn is shown only by the
   window that sent it, while it is open, and output is shown while the authority still
   holds it (the last eight turns, in memory).
@@ -383,9 +390,8 @@ Svelte  ->  four narrow Tauri commands  ->  TurnService  ->  ControlClient  ->  
   nothing is sent to start it. After a restart of the authority the turn is
   `indeterminate` and the session has to be resumed.
 
-Sessions activated from the window run in the inference profile, where Codex is given
-no tools. Tool activity and approvals only occur in a local-tools runtime started with
-the developer client, under a lease that allows them.
+The header of the view names the mode the session is attached in: `Codex · Inference`,
+where Codex is given no tools, or `Codex · Local Tools`.
 
 ```sh
 ./src-tauri/target/debug/wyss-control      # one terminal
@@ -394,6 +400,73 @@ npm run desktop:run                        # Sessions -> a Ready session -> Open
 ```
 
 See [ADR 0022](docs/adr/0022-managed-turns-ui.md).
+
+## Local Tools and approvals in the window
+
+A session is created in one of two modes. **Inference** is preselected: text only.
+**Local Tools** lets Codex propose commands and file changes in the session's folder;
+nothing it proposes runs until it was approved.
+
+```text
+New session  ->  Local Tools  ->  Choose folder  ->  Create & activate
+a turn  ->  Codex proposes a command or a file change  ->  wyss-control holds it as a pending approval
+the window shows it, under the turn and in Approvals  ->  Approve or Deny  ->  the same turn goes on, or ends
+```
+
+| In the window                           | What the desktop asks the authority                                                                                                                          |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Mode **Local Tools**                    | `runtime/start` with the local-tools profile for that folder, after `runtime/stop` when the runtime serves another mode or folder. The window names neither. |
+| The approvals                           | `audit/read` for the approvals the durable stream names, then `managedSession/turn/approval/status` for each of the last eight.                              |
+| A change longer than a page, more files | `managedSession/turn/approval/status` for one file and one page of its diff.                                                                                 |
+| **Approve**, **Deny**                   | `managedSession/turn/approval/respond` with `accept` or `decline`, at the revision that was shown.                                                           |
+
+**One runtime, one mode.** `wyss-control` supervises a single Codex runtime, and a
+generation of it runs in one mode: Inference, or Local Tools for exactly one folder.
+So:
+
+- **Entering a mode the runtime is not in restarts the runtime**, and every session
+  attached to it is detached, whichever session asked. The window says so before it is
+  asked for, names its action for it (**Restart Codex & activate**) and, for an existing
+  session, asks for one confirmation.
+- **It is never asked while a managed turn is running**: the action is refused as "A turn
+  is running". This is a check and then a request; the core itself does not refuse a
+  stop under a turn.
+- **A session keeps the mode it was created in.** Codex keeps a conversation in the
+  home of the profile that created it and refuses to resume it under the other one. An
+  Inference session cannot be given tools: Local Tools needs a session of its own.
+- **A detached session shows no mode**, because the authority reports one only while a
+  session is attached. After `wyss-control` restarts the runtime is back in Inference
+  and a Local Tools session is entered again with **Enable Local Tools**.
+
+**Approvals.**
+
+- **What is shown is what the authority holds**: the whole command and its directory, or
+  the files of a change set with their diffs, as plain text. Nothing in the desktop runs,
+  parses or completes a command. A diff longer than a page says how much of it is on
+  screen, and **Approve is offered once every file was read to its end**.
+- **Approve and Deny are two commands**, each for one approval at the revision that was
+  shown. There is no "always allow", no trusted folder, no rule and no policy editing.
+- **Approve is a request.** `wyss-control` checks the approval, the lease of its turn,
+  the action and its confinement again before Codex is answered. The same turn goes on;
+  no turn is started again.
+- **Deny refuses that one action.** What becomes of the turn is read from the authority:
+  a denied command ends it `Interrupted`, a denied file change lets it go on.
+- **One decision, one identity.** A second click sends nothing, a lost answer is retried
+  with the same decision, and Approve never becomes Deny by itself.
+- **An approval waits five minutes at most.** When its deadline passes the window reads
+  what became of it; an approval that ended has no buttons.
+- **Nothing is read on a connection that is gone.** Offline, no approval is shown as
+  pending, and nothing is decided on reconnection. After a restart of `wyss-control` a
+  pending approval comes back as `No longer applies`.
+
+```sh
+./src-tauri/target/debug/wyss-control      # one terminal
+npm run desktop:run                        # Sessions -> New session -> Local Tools -> Choose folder -> Create & activate
+                                           # Open agent -> write -> Enter -> Approve or Deny
+./src-tauri/target/debug/examples/control_client audit        # the lease, the turn and the approval, as recorded
+```
+
+See [ADR 0023](docs/adr/0023-local-tools-and-approvals-ui.md).
 
 ## Authority-owned Codex runtime
 
