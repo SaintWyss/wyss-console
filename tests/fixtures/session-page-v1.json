@@ -1,0 +1,56 @@
+{
+  "empty": {
+    "schema_version": 1,
+    "head": null,
+    "sessions": [],
+    "older": null,
+    "truncated": false
+  },
+  "loaded": {
+    "schema_version": 1,
+    "head": "9",
+    "sessions": [
+      {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "adapter": "codex",
+        "state": "prepared",
+        "revision": 1,
+        "created_at": "2026-10-08T12:30:00Z",
+        "updated_at": "2026-10-08T12:30:00Z",
+        "position": "7",
+        "binding": "unbound",
+        "workspace": null,
+        "resumable": false,
+        "closable": true
+      },
+      {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "adapter": "codex",
+        "state": "prepared",
+        "revision": 1,
+        "created_at": "2026-10-08T11:00:00Z",
+        "updated_at": "2026-10-08T11:00:00Z",
+        "position": "4",
+        "binding": "bound_detached",
+        "workspace": "/home/dev/rag-corp",
+        "resumable": true,
+        "closable": true
+      },
+      {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "adapter": "codex",
+        "state": "closed",
+        "revision": 2,
+        "created_at": "2026-10-07T09:15:00Z",
+        "updated_at": "2026-10-08T08:00:00Z",
+        "position": "1",
+        "binding": "bound_detached",
+        "workspace": "/home/dev/wyss",
+        "resumable": false,
+        "closable": false
+      }
+    ],
+    "older": null,
+    "truncated": false
+  }
+}

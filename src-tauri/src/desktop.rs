@@ -6,6 +6,7 @@ use std::sync::{
 use tauri::Manager;
 mod authority;
 mod glass;
+mod sessions;
 mod terminal;
 
 #[tauri::command]
@@ -55,9 +56,15 @@ pub fn run() {
         .manage(TerminalService::default())
         // Read-only and independent: no terminal operation waits on, or learns of, it.
         .manage(authority::AuthorityService::from_environment())
+        // Its own short-lived connections: the observer above is never borrowed.
+        .manage(sessions::SessionService::from_environment())
         .invoke_handler(tauri::generate_handler![
             get_app_info,
             authority::authority_state,
+            sessions::managed_sessions_page,
+            sessions::managed_session_prepare,
+            sessions::managed_session_resume,
+            sessions::managed_session_close,
             terminal::create_terminal,
             terminal::terminal_write,
             terminal::terminal_read_output,
@@ -77,9 +84,12 @@ pub fn run() {
                     .state::<authority::AuthorityService>()
                     .inner()
                     .clone();
+                let sessions = handle.state::<sessions::SessionService>().inner().clone();
                 let app = handle.clone();
                 tauri::async_runtime::spawn(async move {
                     let result = tauri::async_runtime::spawn_blocking(move || {
+                        // A session call in flight is cancelled; none is admitted after.
+                        sessions.shutdown();
                         // Terminals first: the link's bounded stop never delays them.
                         let result = service.shutdown();
                         authority.shutdown();

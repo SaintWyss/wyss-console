@@ -1,0 +1,359 @@
+//! The window's door to managed sessions: one read and three product intents.
+//!
+//! Each command takes one narrow request and names no control method. The window cannot
+//! choose an adapter, a workspace, a scope, a lease or a lifetime: it names a session it
+//! was shown, the revision it saw and the identity of its own action. What it gets back is
+//! the desktop's projection or a product failure code.
+use serde::Deserialize;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tauri::State;
+
+use crate::contracts::{Sequence, WireUuid, identities::ManagedSessionId};
+#[cfg(target_os = "linux")]
+pub use crate::sessions::{
+    SessionError, SessionFailure, SessionPage, SessionReceipt, SessionService,
+};
+
+/// Calls that may be admitted at once. They run one at a time; the rest wait their turn.
+const MAX_CALLS: usize = 4;
+static CALLS: AtomicUsize = AtomicUsize::new(0);
+struct Permit;
+impl Drop for Permit {
+    fn drop(&mut self) {
+        CALLS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionsPageRequest {
+    /// Sessions created before this position. Null is the newest page.
+    before: Option<Sequence>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrepareSessionRequest {
+    /// Names this user action. The same value sent again is the same action.
+    intent_id: WireUuid,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionIntentRequest {
+    intent_id: WireUuid,
+    session_id: ManagedSessionId,
+    /// The session revision the window was shown.
+    expected_revision: u64,
+}
+
+/// Admission occurs before `spawn_blocking`, with its own counter: session calls never
+/// take a terminal permit or one of the authority view's waiting slots.
+async fn blocking<T: Send + 'static>(
+    service: SessionService,
+    operation: impl FnOnce(SessionService) -> Result<T, SessionError> + Send + 'static,
+) -> Result<T, SessionError> {
+    CALLS
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            (count < MAX_CALLS).then_some(count + 1)
+        })
+        .map_err(|_| SessionError::new(SessionFailure::Busy))?;
+    let permit = Permit;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
+        operation(service)
+    })
+    .await
+    .map_err(|_| SessionError::new(SessionFailure::Internal))?
+}
+
+#[tauri::command]
+pub async fn managed_sessions_page(
+    service: State<'_, SessionService>,
+    request: SessionsPageRequest,
+) -> Result<SessionPage, SessionError> {
+    blocking(service.inner().clone(), move |service| {
+        service.page(request.before)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn managed_session_prepare(
+    service: State<'_, SessionService>,
+    request: PrepareSessionRequest,
+) -> Result<SessionReceipt, SessionError> {
+    blocking(service.inner().clone(), move |service| {
+        service.prepare(request.intent_id)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn managed_session_resume(
+    service: State<'_, SessionService>,
+    request: SessionIntentRequest,
+) -> Result<SessionReceipt, SessionError> {
+    blocking(service.inner().clone(), move |service| {
+        service.resume(
+            request.intent_id,
+            request.session_id,
+            request.expected_revision,
+        )
+    })
+    .await
+}
+#[tauri::command]
+pub async fn managed_session_close(
+    service: State<'_, SessionService>,
+    request: SessionIntentRequest,
+) -> Result<SessionReceipt, SessionError> {
+    blocking(service.inner().clone(), move |service| {
+        service.close(
+            request.intent_id,
+            request.session_id,
+            request.expected_revision,
+        )
+    })
+    .await
+}
+
+/// Where there is no authority to ask, every call says so.
+#[cfg(not(target_os = "linux"))]
+mod unsupported {
+    use crate::contracts::{Sequence, WireUuid, identities::ManagedSessionId};
+    use serde::Serialize;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum SessionFailure {
+        Unavailable,
+        Busy,
+        Internal,
+    }
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+    pub struct SessionError {
+        pub code: SessionFailure,
+        pub retry: bool,
+    }
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    pub struct SessionPage {}
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    pub struct SessionReceipt {}
+    #[derive(Clone, Default)]
+    pub struct SessionService;
+    impl SessionError {
+        pub const fn new(code: SessionFailure) -> Self {
+            Self { code, retry: false }
+        }
+    }
+    type Refused<T> = Result<T, SessionError>;
+    impl SessionService {
+        pub fn from_environment() -> Self {
+            Self
+        }
+        fn absent<T>() -> Refused<T> {
+            Err(SessionError::new(SessionFailure::Unavailable))
+        }
+        pub fn page(&self, _: Option<Sequence>) -> Refused<SessionPage> {
+            Self::absent()
+        }
+        pub fn prepare(&self, _: WireUuid) -> Refused<SessionReceipt> {
+            Self::absent()
+        }
+        pub fn resume(&self, _: WireUuid, _: ManagedSessionId, _: u64) -> Refused<SessionReceipt> {
+            Self::absent()
+        }
+        pub fn close(&self, _: WireUuid, _: ManagedSessionId, _: u64) -> Refused<SessionReceipt> {
+            Self::absent()
+        }
+        pub fn shutdown(&self) {}
+    }
+}
+#[cfg(not(target_os = "linux"))]
+pub use unsupported::{SessionError, SessionFailure, SessionPage, SessionReceipt, SessionService};
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    const INTENT: &str = "11111111-1111-4111-8111-111111111111";
+    const SESSION: &str = "22222222-2222-4222-8222-222222222222";
+
+    fn block<T>(future: impl std::future::Future<Output = T>) -> T {
+        tauri::async_runtime::block_on(future)
+    }
+    fn code(error: SessionError) -> Value {
+        serde_json::to_value(error).unwrap()
+    }
+
+    #[test]
+    fn requests_accept_exactly_their_narrow_fields() {
+        let page = serde_json::from_value::<SessionsPageRequest>;
+        assert!(page(json!({})).unwrap().before.is_none());
+        assert!(page(json!({"before": null})).unwrap().before.is_none());
+        assert_eq!(
+            page(json!({"before": "7"})).unwrap().before.unwrap().get(),
+            7
+        );
+        for rejected in [
+            json!({"before": 7}),
+            json!({"before": "0"}),
+            json!({"before": "07"}),
+            json!({"before": "-1"}),
+            json!({"before": "1", "limit": 5000}),
+            json!({"after": "1"}),
+            json!({"method": "managedSession/list", "params": {"limit": 50}}),
+        ] {
+            assert!(page(rejected.clone()).is_err(), "{rejected}");
+        }
+
+        let prepare = serde_json::from_value::<PrepareSessionRequest>;
+        assert_eq!(
+            prepare(json!({"intent_id": INTENT}))
+                .unwrap()
+                .intent_id
+                .as_str(),
+            INTENT
+        );
+        for rejected in [
+            json!({}),
+            json!({"intent_id": null}),
+            json!({"intent_id": "not-a-uuid"}),
+            json!({"intent_id": INTENT.replace('-', "")}),
+            // The window cannot choose what is prepared, or for whom.
+            json!({"intent_id": INTENT, "adapter_id": "claude"}),
+            json!({"intent_id": INTENT, "runtime_kind": "codex"}),
+            json!({"intent_id": INTENT, "workspace_root": "/"}),
+            json!({"method": "managedSession/prepare", "params": {"intent_id": INTENT}}),
+        ] {
+            assert!(prepare(rejected.clone()).is_err(), "{rejected}");
+        }
+
+        let intent = serde_json::from_value::<SessionIntentRequest>;
+        let accepted = intent(json!({
+            "intent_id": INTENT, "session_id": SESSION, "expected_revision": 1
+        }))
+        .unwrap();
+        assert_eq!(accepted.session_id.as_str(), SESSION);
+        assert_eq!(accepted.expected_revision, 1);
+        let full = json!({"intent_id": INTENT, "session_id": SESSION, "expected_revision": 1});
+        for (field, value) in [
+            ("intent_id", json!("x")),
+            ("session_id", json!("x")),
+            ("session_id", json!(7)),
+            ("expected_revision", json!(-1)),
+            ("expected_revision", json!("1")),
+            ("expected_revision", json!(1.5)),
+        ] {
+            let mut tampered = full.clone();
+            tampered[field] = value;
+            assert!(intent(tampered.clone()).is_err(), "{tampered}");
+        }
+        for extra in [
+            // Nothing that belongs to the authority can ride along.
+            "scopes",
+            "ttl_seconds",
+            "lease_id",
+            "workspace_root",
+            "expected_session_revision",
+            "managed_session_id",
+            "method",
+        ] {
+            let mut tampered = full.clone();
+            tampered[extra] = json!("x");
+            assert!(intent(tampered.clone()).is_err(), "{tampered}");
+        }
+        for missing in ["intent_id", "session_id", "expected_revision"] {
+            let mut tampered = full.clone();
+            tampered.as_object_mut().unwrap().remove(missing);
+            assert!(intent(tampered.clone()).is_err(), "{tampered}");
+        }
+    }
+
+    #[test]
+    fn the_window_is_granted_exactly_the_known_commands() {
+        // The capability and the build manifest are the whole surface. Neither has a
+        // command that takes a method name.
+        let capability: Value =
+            serde_json::from_str(include_str!("../../capabilities/main.json")).unwrap();
+        let granted: Vec<&str> = capability["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p.as_str().unwrap())
+            .collect();
+        let expected = [
+            "allow-get-app-info",
+            "allow-authority-state",
+            "allow-managed-sessions-page",
+            "allow-managed-session-prepare",
+            "allow-managed-session-resume",
+            "allow-managed-session-close",
+            "allow-create-terminal",
+            "allow-terminal-write",
+            "allow-terminal-read-output",
+            "allow-terminal-resize",
+            "allow-close-terminal",
+            "allow-terminal-status",
+        ];
+        assert_eq!(granted, expected);
+        let manifest = include_str!("../../build.rs");
+        let (_, list) = manifest.split_once("commands(&[").unwrap();
+        let (list, _) = list.split_once(']').unwrap();
+        let commands: Vec<String> = list
+            .split(',')
+            .map(|c| c.trim().trim_matches('"').to_owned())
+            .filter(|c| !c.is_empty())
+            .collect();
+        let permitted: Vec<String> = expected
+            .iter()
+            .map(|p| p.trim_start_matches("allow-").replace('-', "_"))
+            .collect();
+        assert_eq!(commands, permitted);
+    }
+
+    #[test]
+    fn a_call_without_an_authority_fails_safely_and_admission_recovers() {
+        // No runtime directory: nothing can be reached and nothing is sent.
+        let service = SessionService::new(None);
+        let intent = || WireUuid::try_from(INTENT.to_owned()).unwrap();
+        let session = || ManagedSessionId::parse(SESSION).unwrap();
+        let unavailable = json!({"code": "unavailable", "retry": true});
+        assert_eq!(
+            code(block(blocking(service.clone(), |s| s.page(None))).unwrap_err()),
+            unavailable
+        );
+        assert_eq!(
+            code(block(blocking(service.clone(), move |s| s.prepare(intent()))).unwrap_err()),
+            unavailable
+        );
+        // A revision no session can have is refused here, before anything is asked.
+        for revision in [0, 3, u64::MAX] {
+            for call in [SessionService::close, SessionService::resume] {
+                let (intent, session) = (intent(), session());
+                let refused = block(blocking(service.clone(), move |s| {
+                    call(&s, intent, session, revision)
+                }));
+                assert_eq!(
+                    code(refused.unwrap_err()),
+                    json!({"code": "invalid", "retry": false})
+                );
+            }
+        }
+        assert_eq!(service.stats().connections, 0);
+
+        let held: Vec<_> = (0..MAX_CALLS).map(|_| Permit).collect();
+        CALLS.fetch_add(MAX_CALLS, Ordering::AcqRel);
+        let refused = block(blocking(service.clone(), |s| s.page(None)));
+        assert_eq!(
+            code(refused.unwrap_err()),
+            json!({"code": "busy", "retry": true})
+        );
+        drop(held);
+        assert_eq!(CALLS.load(Ordering::Acquire), 0);
+        // A stopped service refuses at once.
+        service.shutdown();
+        assert_eq!(
+            code(block(blocking(service, |s| s.page(None))).unwrap_err()),
+            unavailable
+        );
+    }
+}

@@ -6,6 +6,8 @@ pub mod contracts;
 #[cfg(target_os = "linux")]
 pub mod control;
 mod desktop;
+#[cfg(target_os = "linux")]
+pub mod sessions;
 pub mod terminal;
 
 pub fn run() {

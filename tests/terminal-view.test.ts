@@ -166,10 +166,15 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   const { default: config } = await import('../src-tauri/tauri.conf.json');
   const { default: capability } =
     await import('../src-tauri/capabilities/main.json');
-  // One authority permission, and it is a read of the desktop's own projection.
+  // The authority is reached through one read of the desktop's own projection, and
+  // managed sessions through one read and three intents. Nothing takes a method name.
   expect(capability.permissions).toEqual([
     'allow-get-app-info',
     'allow-authority-state',
+    'allow-managed-sessions-page',
+    'allow-managed-session-prepare',
+    'allow-managed-session-resume',
+    'allow-managed-session-close',
     'allow-create-terminal',
     'allow-terminal-write',
     'allow-terminal-read-output',
