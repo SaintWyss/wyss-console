@@ -22,6 +22,8 @@
     "allow-managed-approval-read",
     "allow-managed-approval-approve",
     "allow-managed-approval-deny",
+    "allow-managed-events",
+    "allow-managed-events-older",
     "allow-create-terminal",
     "allow-terminal-write",
     "allow-terminal-read-output",

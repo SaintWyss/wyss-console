@@ -19,6 +19,8 @@ fn main() {
             "managed_approval_read",
             "managed_approval_approve",
             "managed_approval_deny",
+            "managed_events",
+            "managed_events_older",
             "create_terminal",
             "terminal_write",
             "terminal_read_output",

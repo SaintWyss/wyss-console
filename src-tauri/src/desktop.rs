@@ -5,6 +5,7 @@ use std::sync::{
 };
 use tauri::Manager;
 mod authority;
+mod events;
 mod glass;
 mod sessions;
 mod terminal;
@@ -62,6 +63,8 @@ pub fn run() {
         // Its own short-lived connections: the observer above is never borrowed.
         // Turns send their intents through the session service and stop with it.
         .manage(turns::TurnService::new(managed_sessions.clone()))
+        // History: reads only, on connections of its own. It holds nothing between two.
+        .manage(events::EventService::new(managed_sessions.clone()))
         .manage(managed_sessions)
         // What the native folder dialog returned: the only paths an activation may name.
         .manage(workspace::WorkspaceSelections::default())
@@ -84,6 +87,8 @@ pub fn run() {
             turns::managed_approval_read,
             turns::managed_approval_approve,
             turns::managed_approval_deny,
+            events::managed_events,
+            events::managed_events_older,
             terminal::create_terminal,
             terminal::terminal_write,
             terminal::terminal_read_output,
