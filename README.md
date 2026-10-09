@@ -11,9 +11,12 @@ managed sessions the authority holds and can resume and close them
 ([ADR 0020](docs/adr/0020-managed-sessions-ui.md)), and a session can be created and
 activated from the window: bound to a project folder chosen in a native dialog and
 attached to the managed Codex runtime, which the authority starts when asked
-([ADR 0021](docs/adr/0021-session-activation.md)). The product is not complete: there
-is no agent chat, turn or approval UI yet, so a ready session cannot be talked to from
-the window. Built with Tauri 2,
+([ADR 0021](docs/adr/0021-session-activation.md)). A ready session can be given an
+objective in the Agents view: the authority starts a managed turn for it, the answer is
+shown as it arrives and the turn can be cancelled
+([ADR 0022](docs/adr/0022-managed-turns-ui.md)). The product is not complete: an
+approval cannot be answered from the window yet, and the sessions the window activates
+run Codex without tools. Built with Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -337,6 +340,60 @@ npm run desktop:run                        # Sessions -> New session -> Choose f
 
 See [ADR 0020](docs/adr/0020-managed-sessions-ui.md) and
 [ADR 0021](docs/adr/0021-session-activation.md).
+
+## Managed turns in the window
+
+The `Agents` view is where a ready session is given something to do. A session is
+opened in it from its details in `Sessions` (**Open agent**); up to eight stay open as
+tabs, and the session every turn on screen belongs to is always named above them.
+
+```text
+Svelte  ->  four narrow Tauri commands  ->  TurnService  ->  ControlClient  ->  wyss-control  ->  managed Codex
+```
+
+| In the window          | What the desktop asks the authority                                                                                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The turns of a session | `audit/read` for the turns the durable stream names, then `managedSession/turn/status` for each of the last twenty.                                                                              |
+| **Run** (Enter)        | `managedSession/turn/start` with the session, the revision that was shown and the text. If the gate names a lease as what is missing: `executionLease/grant` for `turn_start` alone, then again. |
+| The answer             | `managedSession/turn/events` from the cursor the last reading returned, `managedSession/turn/status`, `managedSession/turn/approval/pending`.                                                    |
+| **Cancel turn**        | `managedSession/turn/cancel` at the revision that was shown.                                                                                                                                     |
+
+- **Each submission is one managed turn**, with one identity made when it is submitted.
+  A start whose answer was lost is retried with that same identity, never replaced.
+- **The lease of a turn is kept while it runs** and given back by the reading that finds
+  it ended. It is `turn_start` for thirty minutes, which is the turn's time budget if
+  the desktop is not there to give it back. A lease somebody else holds is used as it is.
+- **What is shown is what the authority has.** The state is one of its own: Starting,
+  Running, Completed, Interrupted, Failed, Indeterminate, with the reason it recorded.
+  A cancel shows "Cancelling…" until a reading says what became of the turn.
+- **Only the answer crosses as text.** Reasoning is shown as "Thinking…" and nothing
+  more; a command or a file change is shown as one line saying that it happened. The
+  provider's thread and turn, the lease, the runtime instance and the approval's
+  content never reach the window.
+- **Text is shown as text.** Nothing Codex or the user wrote is interpreted as HTML or
+  Markdown.
+- **A turn waiting on an approval is shown waiting.** The window cannot answer it: no
+  command for it exists. That is the next phase.
+- **Wyss keeps no conversation text**, so the input of a turn is shown only by the
+  window that sent it, while it is open, and output is shown while the authority still
+  holds it (the last eight turns, in memory).
+- **One reading at a time.** The turn that runs goes on being read whichever view is
+  shown; nothing is read while no turn runs and nothing changed at the authority.
+- **After a restart** of the desktop the running turn is found and followed again, and
+  nothing is sent to start it. After a restart of the authority the turn is
+  `indeterminate` and the session has to be resumed.
+
+Sessions activated from the window run in the inference profile, where Codex is given
+no tools. Tool activity and approvals only occur in a local-tools runtime started with
+the developer client, under a lease that allows them.
+
+```sh
+./src-tauri/target/debug/wyss-control      # one terminal
+npm run desktop:run                        # Sessions -> a Ready session -> Open agent -> write -> Enter
+./src-tauri/target/debug/examples/control_client audit        # the lease and the turn's lifecycle, as recorded
+```
+
+See [ADR 0022](docs/adr/0022-managed-turns-ui.md).
 
 ## Authority-owned Codex runtime
 

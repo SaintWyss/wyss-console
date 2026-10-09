@@ -569,3 +569,12 @@ was made, from a stopped runtime to `Ready`, and the window closed.
 - **Window material.** `_KDE_NET_WM_BLUR_BEHIND_REGION` was set on the composited
   window. As before, the blur itself was not looked at on a GPU session, and nothing in
   `desktop/glass.rs` or window creation changed.
+
+## Later implementation status
+
+Since ADR 0022 a ready session can be given an objective from the window: the desktop
+starts, follows and cancels managed turns. "Nothing here sends a prompt" and "Managed
+turns and chat are not part of this" describe this ADR's phase, no longer the desktop.
+The lease sequence shared with binding is now also used for a turn, with one
+difference: a turn's lease is kept while the turn runs instead of being given back when
+the operation is answered. Approvals and the local-tools profile are still deferred.

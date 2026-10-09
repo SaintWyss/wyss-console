@@ -161,3 +161,5 @@ that was not yet dispatched is withdrawn before a revocation of its lease or a c
 of its session commits. The schema is at version 7.
 Since ADRs 0020 and 0021 the desktop asks for leases too: exactly `session_resume` or
 `session_create`, for seconds, around one operation of its own, and revokes them.
+Since ADR 0022 it also asks for exactly `turn_start`, for thirty minutes, keeps that
+lease while the turn it admitted runs and revokes it once the turn has ended.

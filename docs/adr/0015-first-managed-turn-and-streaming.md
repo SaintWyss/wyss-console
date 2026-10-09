@@ -296,3 +296,9 @@ Everything above still describes the inference profile exactly: it is the defaul
 it offers the model no tool and it answers no server request. The supervisor's command
 channel now holds a few queued commands instead of one; commands still run strictly one
 at a time.
+
+[ADR 0022](0022-managed-turns-ui.md) is the first product surface over these
+operations: the desktop starts a turn, reads its stream by cursor and cancels it. The
+operations, their bounds and the stream are unchanged. Two facts of this ADR shape
+that surface: the stream has no blocking read, so the desktop paces its own; and a
+turn that has put nothing out yet has no stream, which the authority answers as a gap.

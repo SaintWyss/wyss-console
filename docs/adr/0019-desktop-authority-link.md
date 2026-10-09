@@ -337,3 +337,6 @@ separate short-lived connections owned by another service; the link described he
 unchanged, still sends only the five reads above, and is what wakes the Sessions view
 and ends the wait of an activation.
 "The desktop only reads" above describes this link, no longer the whole desktop.
+Since ADR 0022 it also starts, follows and cancels managed turns, again over
+connections of another service. The link is still unchanged, and its durable head is
+also what tells the Agent view that a session's turns have to be read again.

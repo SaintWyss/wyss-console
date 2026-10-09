@@ -470,3 +470,6 @@ sequence described above for Resume is unchanged and is now shared with binding,
 the next call for that session instead of only being left to expire. "Binding is not in
 this phase" and the reach described under Security boundary describe this ADR's phase,
 no longer the desktop.
+
+Since ADR 0022 a session with a workspace can be opened in the `Agents` view from its
+details. The Sessions view itself sends nothing new, and its five intents are unchanged.
