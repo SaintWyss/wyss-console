@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getAppInfo } from './lib/desktop/client';
+  import { SessionsController } from './lib/features/sessions/controller';
+  import SessionsView from './lib/features/sessions/SessionsView.svelte';
   import TerminalView from './lib/features/terminal/TerminalView.svelte';
   import type { WorkspaceState } from './lib/features/terminal/session-manager';
   import Sidebar from './lib/shell/Sidebar.svelte';
@@ -21,7 +23,17 @@
   let activeView = $state<ViewId>('console');
   let runtime = $state<RuntimeSummary>(idleRuntime);
   let authority = $state<AuthorityObservation>(pendingAuthority);
+  // One controller for the application's lifetime, whichever view is shown.
+  const sessionsController = new SessionsController((next) => {
+    sessions = next;
+  });
+  let sessions = $state(sessionsController.state());
   const current = $derived(NAV_ITEMS.find((item) => item.id === activeView));
+
+  // Sessions are read only while their view is shown.
+  $effect(() => {
+    sessionsController.setVisible(activeView === 'sessions');
+  });
 
   onMount(() => {
     let active = true;
@@ -31,13 +43,16 @@
       },
       () => undefined,
     );
-    // Read-only and separate from the terminal workspace: neither waits on the other.
+    // Separate from the terminal workspace: neither waits on the other. The one
+    // follower also wakes the Sessions view; no second one is started for it.
     const unfollow = followAuthority((observation) => {
       authority = observation;
+      sessionsController.observe(observation);
     });
     return () => {
       active = false;
       unfollow();
+      sessionsController.dispose();
     };
   });
 
@@ -61,6 +76,16 @@
   />
   <Sidebar active={activeView} onselect={(id) => (activeView = id)} />
   <main class="content">
-    <TerminalView onworkspace={observeWorkspace} />
+    <!-- Both views stay mounted: leaving the Console never ends a terminal. -->
+    <TerminalView
+      visible={activeView === 'console'}
+      onworkspace={observeWorkspace}
+    />
+    <SessionsView
+      visible={activeView === 'sessions'}
+      {sessions}
+      controller={sessionsController}
+      {authority}
+    />
   </main>
 </div>

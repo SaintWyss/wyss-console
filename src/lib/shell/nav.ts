@@ -23,9 +23,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   {
     id: 'sessions',
     label: 'Sessions',
-    subtitle: 'Coming soon',
+    subtitle: 'Managed agent sessions',
     icon: 'M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5',
-    available: false,
+    available: true,
   },
   {
     id: 'agents',

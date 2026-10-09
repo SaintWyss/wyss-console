@@ -131,7 +131,7 @@ it('maps the terminal workspace to one honest runtime status', () => {
   });
 });
 
-it('lists every planned view but enables only Console', () => {
+it('lists every planned view and enables the ones that exist', () => {
   expect(NAV_ITEMS.map((item) => item.label)).toEqual([
     'Console',
     'Sessions',
@@ -142,6 +142,7 @@ it('lists every planned view but enables only Console', () => {
   ]);
   expect(NAV_ITEMS.filter((item) => item.available).map((i) => i.id)).toEqual([
     'console',
+    'sessions',
   ]);
 });
 
@@ -154,7 +155,8 @@ it('renders the shell with brand, navigation placeholders and Console selected',
   );
   expect(nav).toHaveLength(6);
   expect(nav[0].getAttribute('aria-current')).toBe('page');
-  expect(nav.slice(1).every((b) => b.disabled)).toBe(true);
+  expect(nav[1].disabled).toBe(false);
+  expect(nav.slice(2).every((b) => b.disabled)).toBe(true);
   expect(document.querySelector('.context-title')?.textContent).toBe('Console');
   // The workspace opens one terminal on mount, so the pill reports it running.
   expect(pill('terminal')?.textContent).toContain('Terminal');

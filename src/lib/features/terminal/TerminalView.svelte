@@ -7,8 +7,14 @@
   } from './session-manager';
   import type { ConsoleSessionId } from '../../contracts/identities';
   import TerminalPanel from './TerminalPanel.svelte';
-  let { onworkspace }: { onworkspace?: (state: WorkspaceState) => void } =
-    $props();
+  let {
+    onworkspace,
+    visible = true,
+  }: {
+    onworkspace?: (state: WorkspaceState) => void;
+    /** False while another view is shown. The terminals keep running. */
+    visible?: boolean;
+  } = $props();
   let workspace = $state<WorkspaceState>({ sessions: [], creating: false });
   let manager = $state<TerminalSessionManager>();
   let strip: HTMLDivElement;
@@ -27,6 +33,12 @@
   }
   $effect(() => {
     if (activeId && count) revealActiveTab();
+  });
+  let shown = true;
+  $effect(() => {
+    // Back in view: the active terminal fits its host again and takes focus.
+    if (visible && !shown && manager && activeId) manager.activate(activeId);
+    shown = visible;
   });
   onMount(() => {
     const observer = new ResizeObserver(revealActiveTab);
@@ -62,7 +74,12 @@
   }
 </script>
 
-<section class="terminal-feature" aria-label="Local terminal workspace">
+<section
+  class="terminal-feature"
+  aria-label="Local terminal workspace"
+  hidden={!visible}
+  inert={!visible}
+>
   <div class="workspace-toolbar">
     <div
       bind:this={strip}
