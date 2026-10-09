@@ -939,8 +939,6 @@ button:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
-  text-align: left;
 }
 .agent-who {
   flex-shrink: 0;
@@ -1106,8 +1104,10 @@ button:focus-visible {
   border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.03);
 }
+/* The field has no edge of its own: the composer is what shows the focus. */
 .agent-composer:focus-within {
-  border-color: var(--glass-line-strong);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 .agent-composer textarea {
   width: 100%;
@@ -1128,8 +1128,7 @@ button:focus-visible {
   color: var(--faint);
 }
 .agent-composer textarea:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
+  outline: none;
 }
 .composer-row {
   display: flex;
