@@ -3,132 +3,54 @@ import { mockIPC } from '@tauri-apps/api/mocks';
 import { parseAuthorityView } from '../src/lib/contracts/authority';
 import { parseManagedSessionId } from '../src/lib/contracts/identities';
 import {
+  ACTIVATION_STAGES,
+  parseActivationProgress,
   parseSessionFailure,
   parseSessionPage,
   parseSessionReceipt,
+  parseWorkspaceChoice,
   SESSION_FAILURES,
-  type SessionFailure,
   type SessionPage,
-  type SessionReceipt,
 } from '../src/lib/contracts/sessions';
 import {
+  abandonSession,
+  activateSession,
+  chooseWorkspace,
   closeSession,
   prepareSession,
   readSessionsPage,
   resumeSession,
   SessionCallError,
 } from '../src/lib/desktop/sessions-client';
+import { SessionsController } from '../src/lib/features/sessions/controller';
 import {
-  SessionsController,
-  type SessionsClient,
-  type SessionsState,
-} from '../src/lib/features/sessions/controller';
-import {
+  chooseFailureMessage,
   failureMessage,
+  pendingMessage,
   readFailureMessage,
   resumeHint,
   sessionLabel,
 } from '../src/lib/features/sessions/present';
 import type { AuthorityObservation } from '../src/lib/shell/authority';
 import views from './fixtures/authority-view-v1.json';
-import pages from './fixtures/session-page-v1.json';
+import pages from './fixtures/session-page-v2.json';
+import {
+  at,
+  bound,
+  closed,
+  composed,
+  connected,
+  empty,
+  fresh,
+  harness,
+  loaded,
+  offline,
+  settle,
+  showing,
+} from './sessions-harness';
 
-const loaded = parseSessionPage(pages.loaded);
-const empty = parseSessionPage(pages.empty);
-const [fresh, bound, closed] = loaded.sessions;
 const INTENT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const settle = async () => {
-  for (let i = 0; i < 25; i++) await Promise.resolve();
-};
-
-function connected(
-  head: string | null,
-  over: { restarts?: number; actual?: string } = {},
-): AuthorityObservation {
-  return {
-    state: 'observed',
-    view: parseAuthorityView({
-      ...views.connected,
-      authority: {
-        ...views.connected.authority,
-        last_sequence: head,
-        restarts: over.restarts ?? 0,
-      },
-      agent: { ...views.connected.agent, actual: over.actual ?? 'ready' },
-    }),
-  };
-}
-const offline: AuthorityObservation = {
-  state: 'observed',
-  view: parseAuthorityView(views.waiting_absent),
-};
-const at = (page: SessionPage, head: string | null): SessionPage => ({
-  ...page,
-  head,
-});
-
-interface Deferred<T> {
-  resolve: (value: T) => void;
-  reject: (failure: SessionFailure) => void;
-}
-/** A client whose every call waits to be answered by the test. */
-function harness() {
-  const reads: (Deferred<SessionPage> & { before: string | null })[] = [];
-  const intents: (Deferred<SessionReceipt> & {
-    kind: string;
-    args: unknown[];
-  })[] = [];
-  const deferred = <T>(): Deferred<T> & { promise: Promise<T> } => {
-    let resolve!: (value: T) => void;
-    let fail!: (error: unknown) => void;
-    const promise = new Promise<T>((res, rej) => {
-      resolve = res;
-      fail = rej;
-    });
-    return {
-      promise,
-      resolve,
-      reject: (failure) => fail(new SessionCallError(failure)),
-    };
-  };
-  const intent =
-    (kind: string) =>
-    (...args: unknown[]) => {
-      const d = deferred<SessionReceipt>();
-      intents.push({ ...d, kind, args });
-      return d.promise;
-    };
-  const client: SessionsClient = {
-    page(before) {
-      const d = deferred<SessionPage>();
-      reads.push({ ...d, before });
-      return d.promise;
-    },
-    prepare: intent('prepare'),
-    resume: intent('resume'),
-    close: intent('close'),
-  };
-  let state!: SessionsState;
-  let minted = 0;
-  const controller = new SessionsController(
-    (next) => {
-      state = next;
-    },
-    client,
-    () => `intent-${++minted}`,
-  );
-  state = controller.state();
-  return { controller, reads, intents, state: () => state };
-}
-/** Shown and connected at `head`, with its first read answered by `page`. */
-async function showing(page: SessionPage, head: string | null = page.head) {
-  const h = harness();
-  h.controller.setVisible(true);
-  h.controller.observe(connected(head));
-  h.reads[0].resolve(page);
-  await settle();
-  return h;
-}
+const FOLDER = '/home/dev/project';
 
 it('accepts exactly the pages the desktop serializes', () => {
   expect(loaded).toEqual(pages.loaded);
@@ -139,7 +61,7 @@ it('accepts exactly the pages the desktop serializes', () => {
   expect(parseSessionPage(older).older).toBe('1');
 });
 
-it('rejects anything that is not a v1 page', () => {
+it('rejects anything that is not a v2 page', () => {
   const page = pages.loaded;
   const [first, second, third] = page.sessions;
   const session = (over: Record<string, unknown>) => ({
@@ -150,7 +72,8 @@ it('rejects anything that is not a v1 page', () => {
     null,
     [],
     'page',
-    { ...page, schema_version: 2 },
+    { ...page, schema_version: 1 },
+    { ...page, schema_version: 3 },
     { ...page, stream_id: 'x' },
     { ...page, head: 9 },
     { ...page, head: '09' },
@@ -185,6 +108,13 @@ it('rejects anything that is not a v1 page', () => {
     session({ workspace: `/${'x'.repeat(256)}` }),
     session({ resumable: 'yes' }),
     session({ closable: 1 }),
+    session({ activatable: 'yes' }),
+    session({ recoverable: null }),
+    // The hints of the first page are not optional.
+    {
+      ...page,
+      sessions: [Object.fromEntries(Object.entries(second).slice(0, -2))],
+    },
     // No hint offers what the shown state rules out.
     session({ binding: 'unbound', workspace: null }),
     session({ runtime_session_id: '0199a213-81c0-7800-8aa1-bbab2a035a53' }),
@@ -192,6 +122,18 @@ it('rejects anything that is not a v1 page', () => {
     { ...page, sessions: [{ ...third, closable: true }] },
     { ...page, sessions: [{ ...third, resumable: true }] },
     { ...page, sessions: [{ ...third, binding: 'bound_attached' }] },
+    // Activation is offered only for a prepared session with nothing bound or tried,
+    // and recovery only for one whose attempt is uncertain.
+    session({ activatable: true }),
+    session({ recoverable: true }),
+    { ...page, sessions: [{ ...first, recoverable: true }] },
+    { ...page, sessions: [{ ...first, binding: 'creating' }] },
+    {
+      ...page,
+      sessions: [{ ...first, binding: 'indeterminate', activatable: true }],
+    },
+    { ...page, sessions: [{ ...third, activatable: true }] },
+    { ...page, sessions: [{ ...third, recoverable: true }] },
   ];
   for (const value of rejected)
     expect(() => parseSessionPage(value), JSON.stringify(value)).toThrow(
@@ -229,19 +171,29 @@ it('reads receipts and failures strictly', () => {
     });
 });
 
-it('sends four narrow requests and nothing that names a control method', async () => {
+it('sends narrow requests and nothing that names a control method', async () => {
   const calls: [string, unknown][] = [];
   mockIPC((command, payload) => {
     calls.push([command, payload]);
     return command === 'managed_sessions_page'
       ? pages.loaded
-      : { id: bound.id };
+      : command === 'managed_session_activate'
+        ? { stage: 'bound' }
+        : command === 'choose_workspace'
+          ? { path: FOLDER }
+          : { id: bound.id };
   });
   expect(await readSessionsPage(null)).toEqual(loaded);
   await readSessionsPage('4');
   expect(await prepareSession(INTENT)).toEqual({ id: bound.id });
   await resumeSession(INTENT, bound.id, 1);
   await closeSession(INTENT, bound.id, 1);
+  expect(await activateSession(INTENT, bound.id, 1, FOLDER)).toEqual({
+    stage: 'bound',
+  });
+  expect(await abandonSession(INTENT, bound.id)).toEqual({ id: bound.id });
+  // The dialog is asked for with nothing: the window cannot suggest a folder.
+  expect(await chooseWorkspace()).toBe(FOLDER);
   const intent = {
     intent_id: INTENT,
     session_id: bound.id,
@@ -253,7 +205,72 @@ it('sends four narrow requests and nothing that names a control method', async (
     ['managed_session_prepare', { request: { intent_id: INTENT } }],
     ['managed_session_resume', { request: intent }],
     ['managed_session_close', { request: intent }],
+    [
+      'managed_session_activate',
+      {
+        request: {
+          operation_id: INTENT,
+          session_id: bound.id,
+          expected_revision: 1,
+          workspace: FOLDER,
+        },
+      },
+    ],
+    [
+      'managed_session_abandon',
+      { request: { intent_id: INTENT, session_id: bound.id } },
+    ],
+    ['choose_workspace', {}],
   ]);
+});
+
+it('reads activation progress and the chosen folder strictly', async () => {
+  for (const stage of ACTIVATION_STAGES)
+    expect(parseActivationProgress({ stage })).toEqual({ stage });
+  for (const value of [
+    null,
+    {},
+    { stage: 'active' },
+    { stage: 'ready', settled: true },
+    // Nothing that belongs to the authority rides along.
+    { stage: 'bound', thread_id: 'x' },
+    { stage: 'bound', lease_id: fresh.id },
+    'ready',
+  ])
+    expect(() => parseActivationProgress(value)).toThrow();
+  expect(parseWorkspaceChoice(null)).toBeNull();
+  expect(parseWorkspaceChoice({ path: FOLDER })).toEqual({ path: FOLDER });
+  for (const value of [
+    {},
+    FOLDER,
+    { path: 'relative' },
+    { path: `/${'x'.repeat(256)}` },
+    { path: '/a\u001b[31m' },
+    { path: FOLDER, entries: [] },
+    { path: null },
+  ])
+    expect(() => parseWorkspaceChoice(value)).toThrow();
+  // A dismissed dialog is nothing chosen; an answer out of contract is a failed bridge.
+  mockIPC(() => null);
+  expect(await chooseWorkspace()).toBeNull();
+  for (const answer of [
+    () => ({ path: 'relative' }),
+    () => ({ path: FOLDER, files: ['a'] }),
+    () => Promise.reject('private'),
+  ]) {
+    mockIPC(answer);
+    await expect(chooseWorkspace()).rejects.toMatchObject({
+      failure: { code: 'internal', retry: false },
+    });
+  }
+  mockIPC(() => Promise.reject({ code: 'busy', retry: true }));
+  await expect(chooseWorkspace()).rejects.toMatchObject({
+    failure: { code: 'busy', retry: true },
+  });
+  mockIPC(() => ({ stage: 'attached' }));
+  await expect(
+    activateSession(INTENT, bound.id, 1, FOLDER),
+  ).rejects.toMatchObject({ failure: { code: 'internal', retry: false } });
 });
 
 it('turns every bridge failure into a product failure', async () => {
@@ -315,13 +332,20 @@ it('reads nothing while hidden or offline and shows nothing it did not read', as
   });
   // Offline, nothing can be started and nothing is read.
   h.controller.compose(true);
-  h.controller.prepare();
+  h.controller.chooseWorkspace();
+  h.controller.activate();
   h.controller.resume(bound.id);
   h.controller.close(bound.id);
+  h.controller.discard(bound.id);
   h.controller.refresh();
   h.controller.older();
   expect(h.state().composing).toBe(false);
-  expect([h.reads.length, h.intents.length]).toEqual([1, 0]);
+  expect([
+    h.reads.length,
+    h.intents.length,
+    h.steps.length,
+    h.dialogs.length,
+  ]).toEqual([1, 0, 0, 0]);
   for (const observation of [
     { state: 'unavailable' },
     { state: 'observed', view: parseAuthorityView(views.stopped) },
@@ -423,59 +447,53 @@ it('shows a failed read as a failure and reads again only when asked or woken', 
 });
 
 it('names one action with one intent however many times it is asked', async () => {
-  const h = await showing(empty, null);
-  h.controller.compose(true);
-  expect(h.state().composing).toBe(true);
-  h.controller.prepare();
-  expect(h.state()).toMatchObject({
-    composing: false,
-    operation: { kind: 'prepare', session: null, status: 'pending' },
+  const h = await showing(loaded);
+  h.controller.resume(bound.id);
+  expect(h.state().operation).toEqual({
+    kind: 'resume',
+    session: bound.id,
+    status: 'pending',
   });
   // Clicking again while it is pending sends nothing, of any kind.
-  h.controller.prepare();
-  h.controller.prepare();
+  h.controller.resume(bound.id);
+  h.controller.close(bound.id);
   h.controller.compose(true);
   h.controller.retry();
   h.controller.dismiss();
   expect(h.state().composing).toBe(false);
   expect(h.intents.map((i) => [i.kind, i.args])).toEqual([
-    ['prepare', ['intent-1']],
+    ['resume', ['intent-1', bound.id, 1]],
   ]);
 
   // The answer was lost: the outcome is unknown and the same intent settles it.
   h.intents[0].reject({ code: 'unavailable', retry: true });
   await settle();
   expect(h.state().operation).toEqual({
-    kind: 'prepare',
-    session: null,
+    kind: 'resume',
+    session: bound.id,
     status: 'failed',
     failure: { code: 'unavailable', retry: true },
   });
-  // The failure made it read again: whether the session exists is the authority's to say.
+  // The failure made it read again: what the session is now is the authority's to say.
   expect(h.reads).toHaveLength(2);
-  h.reads[1].resolve(empty);
+  h.reads[1].resolve(loaded);
   await settle();
   h.controller.retry();
   h.controller.retry();
-  expect(h.intents.map((i) => i.args)).toEqual([['intent-1'], ['intent-1']]);
+  expect(h.intents.map((i) => i.args[0])).toEqual(['intent-1', 'intent-1']);
   expect(h.state().operation?.status).toBe('pending');
   const before = h.reads.length;
-  h.intents[1].resolve({ id: fresh.id });
+  h.intents[1].resolve({ id: bound.id });
   await settle();
-  // Accepted: nothing is assumed about the session. It is selected and read.
-  expect(h.state()).toMatchObject({
-    operation: null,
-    selected: fresh.id,
-    page: empty,
-  });
+  // Accepted: nothing is assumed about the session. It is read.
+  expect(h.state()).toMatchObject({ operation: null, page: loaded });
   expect(h.reads).toHaveLength(before + 1);
   h.reads.at(-1)!.resolve(loaded);
   await settle();
-  expect(h.state().page).toEqual(loaded);
 
   // A refusal is not retried under the same identity; the next action is a new one.
-  h.controller.prepare();
-  expect(h.intents.at(-1)!.args).toEqual(['intent-2']);
+  h.controller.resume(bound.id);
+  expect(h.intents.at(-1)!.args[0]).toBe('intent-2');
   h.intents.at(-1)!.reject({ code: 'conflict', retry: false });
   await settle();
   expect(h.state().operation?.failure).toEqual({
@@ -488,8 +506,8 @@ it('names one action with one intent however many times it is asked', async () =
   expect(h.state().operation).toBeNull();
   h.controller.retry();
   expect(h.intents).toHaveLength(3);
-  h.controller.prepare();
-  expect(h.intents.at(-1)!.args).toEqual(['intent-3']);
+  h.controller.resume(bound.id);
+  expect(h.intents.at(-1)!.args[0]).toBe('intent-3');
 });
 
 it('sends resume and close for the session and revision that were shown', async () => {
@@ -499,6 +517,9 @@ it('sends resume and close for the session and revision that were shown', async 
   h.controller.resume(unknown);
   h.controller.close(unknown);
   h.controller.confirmClose(unknown);
+  h.controller.discard(unknown);
+  h.controller.compose(true, unknown);
+  expect(h.state().composing).toBe(false);
   // Closing is asked about first, and only for a session that can be closed.
   h.controller.confirmClose(closed.id);
   expect(h.state().confirmingClose).toBeNull();
@@ -612,7 +633,8 @@ it('walks older pages one read at a time and returns to the newest', async () =>
   h.controller.older();
   h.reads[4].resolve(at(empty, '10'));
   await settle();
-  h.controller.prepare();
+  await composed(h, FOLDER);
+  h.controller.activate();
   h.intents[0].resolve({ id: fresh.id });
   await settle();
   expect(h.state()).toMatchObject({ depth: 0, selected: fresh.id });
@@ -627,6 +649,9 @@ it('stops answering once disposed', async () => {
     prepare: () => Promise.resolve({ id: fresh.id }),
     resume: () => Promise.resolve({ id: fresh.id }),
     close: () => Promise.resolve({ id: fresh.id }),
+    abandon: () => Promise.resolve({ id: fresh.id }),
+    activate: () => Promise.resolve({ stage: 'ready' }),
+    chooseWorkspace: () => Promise.resolve(FOLDER),
   });
   controller.setVisible(true);
   controller.observe(connected('9'));
@@ -635,7 +660,10 @@ it('stops answering once disposed', async () => {
   const calls = update.mock.calls.length;
   controller.observe(connected('10'));
   controller.setVisible(false);
-  controller.prepare();
+  controller.compose(true);
+  controller.chooseWorkspace();
+  controller.activate();
+  controller.resume(bound.id);
   await settle();
   expect(update.mock.calls).toHaveLength(calls);
   h.controller.dispose();
@@ -656,16 +684,40 @@ it('words sessions, hints and failures without protocol text', () => {
   expect(resumeHint(closed, true)).toContain('closed');
   expect(
     resumeHint({ ...bound, binding: 'bound_attached', resumable: false }, true),
-  ).toContain('Already attached');
+  ).toContain('Ready');
   for (const code of SESSION_FAILURES) {
-    for (const kind of ['prepare', 'resume', 'close'] as const) {
+    for (const kind of ['activate', 'resume', 'close', 'abandon'] as const) {
       const message = failureMessage(kind, code);
       expect(message.length).toBeGreaterThan(20);
       // Product wording: no error code, method or field name of the control protocol.
       expect(message).not.toMatch(/_|managedSession|executionLease|\{|\}/);
     }
     expect(readFailureMessage(code)).not.toMatch(/_|\{|\}/);
+    expect(chooseFailureMessage(code)).not.toMatch(/_|\{|\}/);
   }
+  // Every step of an activation says what is being done, in the product's words.
+  expect(
+    (['preparing', 'starting', 'binding', 'attaching'] as const).map((step) =>
+      pendingMessage('activate', step),
+    ),
+  ).toEqual([
+    'Preparing session…',
+    'Starting Codex…',
+    'Creating workspace binding…',
+    'Attaching…',
+  ]);
+  expect(pendingMessage('resume', undefined)).toBe('Resuming session…');
+  // Neither is an activation the authority could not confirm, nor one it could not answer.
+  for (const code of ['uncertain', 'unavailable'] as const) {
+    const message = failureMessage('activate', code);
+    expect(message).not.toMatch(/not ready|refused|failed/i);
+  }
+  expect(failureMessage('activate', 'uncertain')).toContain(
+    'Activation outcome uncertain',
+  );
+  expect(failureMessage('activate', 'workspace_invalid')).toContain(
+    'did not accept that folder',
+  );
   // An unknown outcome is never worded as a refusal.
   expect(failureMessage('close', 'unavailable')).not.toContain(
     'was not closed',

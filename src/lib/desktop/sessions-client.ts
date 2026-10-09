@@ -1,9 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { ManagedSessionId } from '../contracts/identities';
 import {
+  parseActivationProgress,
   parseSessionFailure,
   parseSessionPage,
   parseSessionReceipt,
+  parseWorkspaceChoice,
+  type ActivationProgress,
   type SessionFailure,
   type SessionPage,
   type SessionReceipt,
@@ -17,8 +20,9 @@ export class SessionCallError extends Error {
 }
 
 /**
- * The four session calls the window can make. None names a control method: the window
- * sends a session it was shown, the revision it saw and the identity of its own action.
+ * The session calls the window can make. None names a control method: the window sends
+ * a session it was shown, the revision it saw and the identity of its own action. The
+ * only path it sends is a folder the native dialog returned.
  */
 async function call<T>(
   command: string,
@@ -80,4 +84,54 @@ export function closeSession(
     },
     parseSessionReceipt,
   );
+}
+
+/**
+ * One step of activating a session in `workspace`. `operationId` names the whole user
+ * action: the same request is sent again until the stage is `ready`.
+ */
+export function activateSession(
+  operationId: string,
+  sessionId: ManagedSessionId,
+  expectedRevision: number,
+  workspace: string,
+): Promise<ActivationProgress> {
+  return call(
+    'managed_session_activate',
+    {
+      operation_id: operationId,
+      session_id: sessionId,
+      expected_revision: expectedRevision,
+      workspace,
+    },
+    parseActivationProgress,
+  );
+}
+/** Gives up on the binding attempt the authority holds as uncertain for the session. */
+export function abandonSession(
+  intentId: string,
+  sessionId: ManagedSessionId,
+): Promise<SessionReceipt> {
+  return call(
+    'managed_session_abandon',
+    { intent_id: intentId, session_id: sessionId },
+    parseSessionReceipt,
+  );
+}
+/**
+ * Shows the native folder dialog. Answers the folder the user selected, or null when
+ * the dialog was dismissed. The window suggests nothing and reads nothing.
+ */
+export async function chooseWorkspace(): Promise<string | null> {
+  let answer: unknown;
+  try {
+    answer = await invoke<unknown>('choose_workspace');
+  } catch (error) {
+    throw new SessionCallError(parseSessionFailure(error));
+  }
+  try {
+    return parseWorkspaceChoice(answer)?.path ?? null;
+  } catch {
+    throw new SessionCallError({ code: 'internal', retry: false });
+  }
 }

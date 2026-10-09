@@ -1,7 +1,7 @@
 /**
- * SessionPage v1: the desktop's projection of managed sessions, and what its three
- * session intents answer. It is not the control contract: it names no control method,
- * and the only identity it carries is the session's own.
+ * SessionPage v2: the desktop's projection of managed sessions, and what its session
+ * intents answer. It is not the control contract: it names no control method, and the
+ * only identity it carries is the session's own.
  */
 import { parseManagedSessionId, type ManagedSessionId } from './identities';
 
@@ -27,9 +27,13 @@ export interface SessionSummary {
   /** Presentation hints from the desktop. The authority decides. */
   resumable: boolean;
   closable: boolean;
+  /** Prepared, with no binding and no attempt at one: a workspace can be bound. */
+  activatable: boolean;
+  /** Prepared, with an attempt whose outcome the authority could not confirm. */
+  recoverable: boolean;
 }
 export interface SessionPage {
-  schema_version: 1;
+  schema_version: 2;
   /** The durable head the page was read at; null before the first committed event. */
   head: string | null;
   /** Newest first. */
@@ -42,6 +46,25 @@ export interface SessionReceipt {
   id: ManagedSessionId;
 }
 
+/**
+ * How far one step of an activation got, as the authority answered it. The same
+ * request is sent again until the stage is `ready`.
+ */
+export const ACTIVATION_STAGES = [
+  'runtime_starting',
+  'creating',
+  'bound',
+  'ready',
+] as const;
+export type ActivationStage = (typeof ACTIVATION_STAGES)[number];
+export interface ActivationProgress {
+  stage: ActivationStage;
+}
+/** The one folder the user selected in the native dialog. */
+export interface WorkspaceChoice {
+  path: string;
+}
+
 export const SESSION_FAILURES = [
   'unavailable',
   'incompatible',
@@ -51,6 +74,9 @@ export const SESSION_FAILURES = [
   'not_allowed',
   'not_bound',
   'runtime_unavailable',
+  'start_refused',
+  'workspace_invalid',
+  'already_bound',
   'permission_denied',
   'busy',
   'rejected',
@@ -124,6 +150,9 @@ function timestamp(value: unknown, field: string): string {
 /** An absolute path of bounded length with no control character, as the authority keeps it. */
 function workspace(value: unknown): string | null {
   if (value === null) return null;
+  return path(value);
+}
+function path(value: unknown): string {
   if (
     typeof value !== 'string' ||
     !value.startsWith('/') ||
@@ -150,6 +179,8 @@ function parseSummary(value: unknown): SessionSummary {
       'workspace',
       'resumable',
       'closable',
+      'activatable',
+      'recoverable',
     ],
     'session',
   );
@@ -168,15 +199,20 @@ function parseSummary(value: unknown): SessionSummary {
   // A managed session is at revision one while prepared and two once closed.
   if (v.revision !== (state === 'prepared' ? 1 : 2)) throw invalid('revision');
   const binding = member(v.binding, BINDINGS, 'binding');
-  const path = workspace(v.workspace);
+  const folder = workspace(v.workspace);
   const bound = binding === 'bound_detached' || binding === 'bound_attached';
-  if ((path !== null) !== bound) throw invalid('workspace');
+  if ((folder !== null) !== bound) throw invalid('workspace');
   const resumable = flag(v.resumable, 'resumable');
   const closable = flag(v.closable, 'closable');
+  const activatable = flag(v.activatable, 'activatable');
+  const recoverable = flag(v.recoverable, 'recoverable');
   // No hint may offer what the shown state already rules out.
   if (
-    (state === 'closed' && (resumable || closable)) ||
+    (state === 'closed' &&
+      (resumable || closable || activatable || recoverable)) ||
     (resumable && !bound) ||
+    (activatable && binding !== 'unbound') ||
+    (recoverable && binding !== 'indeterminate') ||
     (state === 'closed' && binding === 'bound_attached')
   )
     throw invalid('hints');
@@ -189,9 +225,11 @@ function parseSummary(value: unknown): SessionSummary {
     updated_at: timestamp(v.updated_at, 'updated_at'),
     position: sequence(v.position, 'position'),
     binding,
-    workspace: path,
+    workspace: folder,
     resumable,
     closable,
+    activatable,
+    recoverable,
   };
 }
 
@@ -202,7 +240,7 @@ export function parseSessionPage(value: unknown): SessionPage {
     ['schema_version', 'head', 'sessions', 'older', 'truncated'],
     'page',
   );
-  if (v.schema_version !== 1) throw invalid('schema_version');
+  if (v.schema_version !== 2) throw invalid('schema_version');
   if (!Array.isArray(v.sessions) || v.sessions.length > SESSION_PAGE_LIMIT)
     throw invalid('sessions');
   const sessions = v.sessions.map(parseSummary);
@@ -219,7 +257,7 @@ export function parseSessionPage(value: unknown): SessionPage {
   if (older !== null && older !== sessions.at(-1)?.position)
     throw invalid('older');
   return {
-    schema_version: 1,
+    schema_version: 2,
     head,
     sessions,
     older,
@@ -233,6 +271,22 @@ export function parseSessionReceipt(value: unknown): SessionReceipt {
     return { id: parseManagedSessionId(v.id) };
   } catch {
     throw invalid('receipt');
+  }
+}
+
+export function parseActivationProgress(value: unknown): ActivationProgress {
+  const v = record(value, ['stage'], 'progress');
+  return { stage: member(v.stage, ACTIVATION_STAGES, 'stage') };
+}
+
+/** The folder the dialog returned, or null when it was dismissed. */
+export function parseWorkspaceChoice(value: unknown): WorkspaceChoice | null {
+  if (value === null) return null;
+  const v = record(value, ['path'], 'choice');
+  try {
+    return { path: path(v.path) };
+  } catch {
+    throw invalid('choice');
   }
 }
 

@@ -77,6 +77,10 @@ impl Sandbox {
         self.root.join("workspace").to_str().unwrap().to_owned()
     }
     fn start(&self) -> Authority {
+        self.start_as("happy")
+    }
+    /// The same authority with the Codex fixture playing another scenario.
+    fn start_as(&self, scenario: &str) -> Authority {
         Authority(
             Command::new(env!("CARGO_BIN_EXE_wyss-control"))
                 .env("XDG_RUNTIME_DIR", self.run())
@@ -84,7 +88,7 @@ impl Sandbox {
                 .env("PATH", self.root.join("bin"))
                 .env("CODEX_HOME", self.root.join("codex-home"))
                 .env("WYSS_RUNTIME_FIXTURE", &self.root)
-                .env("WYSS_RUNTIME_SCENARIO", "happy")
+                .env("WYSS_RUNTIME_SCENARIO", scenario)
                 .env("WYSS_FIXTURE_USER_HOME", self.root.join("codex-home"))
                 .env("WYSS_FIXTURE_LAYERS", "[]")
                 .stdin(Stdio::null())
@@ -838,4 +842,658 @@ fn resume_attaches_under_a_lease_the_authority_grants_for_that_one_action() {
     env.ready(&mut other, ActualState::Stopped);
     drop(other);
     authority.stop(false);
+}
+
+/// Every durable event the authority holds, whole, in order.
+fn trail(c: &mut ControlClient) -> Vec<serde_json::Value> {
+    let stream = c.hello_status().stream_id.clone();
+    let mut after = None;
+    let mut all = Vec::new();
+    loop {
+        let ResultValue::Audit { events, next } = c
+            .audit(AuditRead {
+                stream_id: stream.clone(),
+                after_sequence: after,
+                limit: MAX_PAGE,
+            })
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        all.extend(events.iter().map(|e| serde_json::to_value(e).unwrap()));
+        if next.is_none() {
+            return all;
+        }
+        after = next;
+    }
+}
+fn kinds(trail: &[serde_json::Value]) -> Vec<&str> {
+    trail
+        .iter()
+        .map(|e| e["event_type"].as_str().unwrap())
+        .collect()
+}
+fn count(trail: &[serde_json::Value], kind: &str) -> usize {
+    kinds(trail).iter().filter(|k| **k == kind).count()
+}
+/// Seconds between the commit of a lease event and the expiry it records.
+fn lifetime(event: &serde_json::Value) -> i64 {
+    let parse = |v: &serde_json::Value| {
+        time::OffsetDateTime::parse(
+            v.as_str().unwrap(),
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap()
+    };
+    (parse(&event["payload"]["expires_at"]) - parse(&event["timestamp"])).whole_seconds()
+}
+fn progress(
+    result: Result<wyss_console::sessions::ActivationProgress, SessionError>,
+) -> wyss_console::sessions::ActivationStage {
+    result.unwrap().stage
+}
+
+#[test]
+fn a_session_is_activated_through_the_real_authority_from_a_stopped_runtime() {
+    use wyss_console::sessions::ActivationStage as Stage;
+    let _serial = serial();
+    let env = Sandbox::new();
+    let mut authority = env.start();
+    let mut other = env.client();
+    let sessions = env.sessions();
+    // Nothing is running: the authority was never asked to start a runtime.
+    assert_eq!(
+        other.runtime_status().unwrap().actual_state,
+        ActualState::Stopped
+    );
+    let session = sessions.prepare(id()).unwrap().id;
+    let shown = sessions.page(None).unwrap().sessions.remove(0);
+    assert_eq!(
+        (
+            shown.binding,
+            shown.activatable,
+            shown.resumable,
+            shown.recoverable
+        ),
+        (BindingState::Unbound, true, false, false)
+    );
+
+    let operation = id();
+    let step = |sessions: &SessionService| {
+        sessions.activate(operation.clone(), session.clone(), 1, env.workspace())
+    };
+
+    // The first step asks the authority to start the runtime, and nothing else.
+    assert_eq!(progress(step(&sessions)), Stage::RuntimeStarting);
+    let after_start = trail(&mut other);
+    assert_eq!(
+        kinds(&after_start),
+        [
+            "authority.managed_session.prepared",
+            "authority.runtime.desired_state_changed",
+        ]
+    );
+    assert_eq!(env.methods("thread/start"), 0);
+    // Asked again while the authority brings it up: it waits, or goes on once ready.
+    // Either way no second start is asked for.
+    env.ready(&mut other, ActualState::Ready);
+    assert_eq!(progress(step(&sessions)), Stage::Bound);
+    let bound = trail(&mut other);
+    assert_eq!(count(&bound, "authority.runtime.desired_state_changed"), 1);
+    assert_eq!(
+        kinds(&bound)[kinds(&bound).len() - 3..],
+        [
+            "authority.execution_lease.granted",
+            "authority.managed_session.runtime_bound",
+            "authority.execution_lease.revoked",
+        ]
+    );
+    // The lease the authority granted for it: that scope alone, for fifteen seconds.
+    let granted = &bound[bound.len() - 3];
+    assert_eq!(
+        granted["payload"]["scopes"],
+        serde_json::json!(["session_create"])
+    );
+    assert_eq!(lifetime(granted), 15);
+    assert_eq!(other.lease_active(session.clone()).unwrap(), None);
+    // One provider thread, made durable the way the authority does it, and no attachment.
+    assert_eq!(
+        (
+            env.methods("thread/start"),
+            env.methods("thread/archive"),
+            env.methods("thread/unarchive"),
+            env.methods("thread/resume")
+        ),
+        (1, 1, 1, 0)
+    );
+    let status = other.binding_status(session.clone()).unwrap();
+    assert_eq!(status.state, BindingState::BoundDetached);
+    let binding = status.binding.unwrap();
+    assert_eq!(binding.workspace_root, env.workspace());
+    let shown = sessions.page(None).unwrap().sessions.remove(0);
+    assert_eq!(
+        (shown.binding, shown.activatable, shown.resumable),
+        (BindingState::BoundDetached, false, true)
+    );
+    assert_eq!(shown.workspace.as_deref(), Some(env.workspace().as_str()));
+
+    // The next step attaches it, under a lease for resuming alone.
+    assert_eq!(progress(step(&sessions)), Stage::Ready);
+    let attached = trail(&mut other);
+    assert_eq!(
+        kinds(&attached)[kinds(&attached).len() - 3..],
+        [
+            "authority.execution_lease.granted",
+            "authority.managed_session.runtime_attached",
+            "authority.execution_lease.revoked",
+        ]
+    );
+    let granted = &attached[attached.len() - 3];
+    assert_eq!(
+        granted["payload"]["scopes"],
+        serde_json::json!(["session_resume"])
+    );
+    assert_eq!(lifetime(granted), 30);
+    assert_eq!(other.lease_active(session.clone()).unwrap(), None);
+    assert_eq!(
+        other.binding_status(session.clone()).unwrap().state,
+        BindingState::BoundAttached
+    );
+    assert_eq!(env.methods("thread/resume"), 1);
+    assert_eq!(sessions.stats().leases, 2);
+    let shown = sessions.page(None).unwrap().sessions.remove(0);
+    assert_eq!(
+        (
+            shown.state,
+            shown.binding,
+            shown.activatable,
+            shown.resumable
+        ),
+        (
+            ControlState::Prepared,
+            BindingState::BoundAttached,
+            false,
+            false
+        )
+    );
+    // No identity but the session's own crosses to the window.
+    let wire = serde_json::to_string(&shown).unwrap();
+    assert!(!wire.contains(&serde_json::to_string(&binding.runtime_session_id).unwrap()));
+    assert!(!wire.contains(operation.as_str()));
+
+    // The same action again: nothing is written and nothing reaches Codex.
+    let settled = head(&mut other);
+    let sent = fs::read_to_string(env.root.join("methods")).unwrap();
+    for _ in 0..3 {
+        assert_eq!(progress(step(&sessions)), Stage::Ready);
+    }
+    assert_eq!(head(&mut other), settled);
+    assert_eq!(fs::read_to_string(env.root.join("methods")).unwrap(), sent);
+    assert_eq!(sessions.stats().leases, 2);
+
+    // A second session, with the runtime already up: bound, and never a start.
+    let second = sessions.prepare(id()).unwrap().id;
+    let again = id();
+    let next = |sessions: &SessionService| {
+        sessions.activate(again.clone(), second.clone(), 1, env.workspace())
+    };
+    assert_eq!(progress(next(&sessions)), Stage::Bound);
+    assert_eq!(
+        count(
+            &trail(&mut other),
+            "authority.runtime.desired_state_changed"
+        ),
+        1
+    );
+    assert_eq!(env.methods("thread/start"), 2);
+
+    // The authority stops in the middle of that activation and returns. Nothing is
+    // compensated: what it kept is what there is. Both bindings are there, detached.
+    drop(other);
+    authority.stop(true);
+    assert_eq!(failed(next(&sessions)), (SessionFailure::Unavailable, true));
+    let mut authority = env.start();
+    let mut other = env.client();
+    env.ready(&mut other, ActualState::Ready);
+    for kept in [&session, &second] {
+        assert_eq!(
+            other.binding_status(kept.clone()).unwrap().state,
+            BindingState::BoundDetached
+        );
+    }
+    // The interrupted action goes on where it was: the authority answers its binding
+    // request with the receipt it kept, and the session is attached. No second thread.
+    assert_eq!(progress(next(&sessions)), Stage::Ready);
+    assert_eq!(
+        (env.methods("thread/start"), env.methods("thread/resume")),
+        (2, 2)
+    );
+    assert_eq!(
+        other.binding_status(second.clone()).unwrap().state,
+        BindingState::BoundAttached
+    );
+    // The action that had finished is not replayed into a new attachment: its attach
+    // intent is one the authority already answered. The receipt comes back, the session
+    // is read as still detached, and that is what is reported.
+    assert_eq!(
+        failed(step(&sessions)),
+        (SessionFailure::RuntimeUnavailable, false)
+    );
+    assert_eq!(env.methods("thread/resume"), 2);
+    // Resume, a new action, attaches it to the new runtime.
+    sessions.resume(id(), session.clone(), 1).unwrap();
+    assert_eq!(
+        other.binding_status(session.clone()).unwrap().state,
+        BindingState::BoundAttached
+    );
+    assert_eq!(other.lease_active(session.clone()).unwrap(), None);
+
+    other.runtime_stop(mutation()).unwrap();
+    env.ready(&mut other, ActualState::Stopped);
+    drop(other);
+    authority.stop(false);
+}
+
+#[test]
+fn the_real_authority_decides_the_workspace_the_lease_and_whose_binding_it_is() {
+    use wyss_console::sessions::ActivationStage as Stage;
+    let _serial = serial();
+    let env = Sandbox::new();
+    let mut authority = env.start();
+    let mut other = env.client();
+    let sessions = env.sessions();
+    other.runtime_start(mutation()).unwrap();
+    env.ready(&mut other, ActualState::Ready);
+    let prepared = |sessions: &SessionService| sessions.prepare(id()).unwrap().id;
+
+    // A folder the authority refuses: no lease, no thread, nothing bound.
+    let session = prepared(&sessions);
+    let file = env.root.join("workspace/a-file");
+    fs::write(&file, b"").unwrap();
+    let before = head(&mut other);
+    for refused in [
+        env.root.join("missing").to_str().unwrap().to_owned(),
+        file.to_str().unwrap().to_owned(),
+        "relative/path".to_owned(),
+        format!("/{}", "x".repeat(300)),
+    ] {
+        assert_eq!(
+            failed(sessions.activate(id(), session.clone(), 1, refused.clone())),
+            (SessionFailure::WorkspaceInvalid, false),
+            "{refused}"
+        );
+    }
+    assert_eq!(head(&mut other), before);
+    assert_eq!(
+        (env.methods("thread/start"), sessions.stats().leases),
+        (0, 0)
+    );
+    assert_eq!(
+        other.binding_status(session.clone()).unwrap().state,
+        BindingState::Unbound
+    );
+    // A link to a workspace: what is bound is where the authority resolved it to.
+    let link = env.root.join("link");
+    std::os::unix::fs::symlink(env.root.join("workspace"), &link).unwrap();
+    let through = id();
+    let chosen = link.to_str().unwrap().to_owned();
+    assert_eq!(
+        progress(sessions.activate(through.clone(), session.clone(), 1, chosen.clone())),
+        Stage::Bound
+    );
+    assert_eq!(
+        other
+            .binding_status(session.clone())
+            .unwrap()
+            .binding
+            .unwrap()
+            .workspace_root,
+        env.workspace()
+    );
+    // The same action, the same folder as it was chosen: its own binding, then attached.
+    assert_eq!(
+        progress(sessions.activate(through, session.clone(), 1, chosen)),
+        Stage::Ready
+    );
+    assert_eq!(env.methods("thread/start"), 1);
+
+    // A lease somebody else holds that does not grant a binding: denied, and left as it is.
+    let session = prepared(&sessions);
+    let grant = |other: &mut ControlClient, session: &ManagedSessionId, scopes| {
+        other
+            .lease_grant(LeaseGrant {
+                intent_id: id(),
+                session_id: session.clone(),
+                expected_session_revision: 1,
+                scopes,
+                ttl_seconds: 300,
+            })
+            .unwrap()
+    };
+    let narrow = grant(&mut other, &session, vec![ExecutionScope::TurnStart]);
+    let leases = sessions.stats().leases;
+    assert_eq!(
+        failed(sessions.activate(id(), session.clone(), 1, env.workspace())),
+        (SessionFailure::PermissionDenied, false)
+    );
+    assert_eq!(
+        other.lease_active(session.clone()).unwrap(),
+        Some(narrow.clone())
+    );
+    assert_eq!(
+        (env.methods("thread/start"), sessions.stats().leases),
+        (1, leases)
+    );
+    other
+        .lease_revoke(LeaseRevoke {
+            intent_id: id(),
+            lease_id: narrow.lease_id,
+            expected_revision: 1,
+        })
+        .unwrap();
+    // One that grants both: used for both steps, and still theirs afterwards.
+    let wide = grant(
+        &mut other,
+        &session,
+        vec![ExecutionScope::SessionCreate, ExecutionScope::SessionResume],
+    );
+    let whole = id();
+    assert_eq!(
+        progress(sessions.activate(whole.clone(), session.clone(), 1, env.workspace())),
+        Stage::Bound
+    );
+    assert_eq!(
+        progress(sessions.activate(whole, session.clone(), 1, env.workspace())),
+        Stage::Ready
+    );
+    assert_eq!(other.lease_active(session.clone()).unwrap(), Some(wide));
+    assert_eq!(sessions.stats().leases, leases);
+
+    // A session somebody else bound: this action did not make that binding, so it is
+    // neither attached in its name nor bound again.
+    let session = prepared(&sessions);
+    let lease = grant(&mut other, &session, vec![ExecutionScope::SessionCreate]);
+    other
+        .binding_create(BindingCreate {
+            intent_id: id(),
+            managed_session_id: session.clone(),
+            expected_session_revision: 1,
+            workspace_root: env.workspace(),
+        })
+        .unwrap();
+    let threads = env.methods("thread/start");
+    // While their lease stands it even grants a binding: the authority still refuses.
+    assert_eq!(
+        failed(sessions.activate(id(), session.clone(), 1, env.workspace())),
+        (SessionFailure::AlreadyBound, false)
+    );
+    other
+        .lease_revoke(LeaseRevoke {
+            intent_id: id(),
+            lease_id: lease.lease_id,
+            expected_revision: 1,
+        })
+        .unwrap();
+    assert_eq!(
+        failed(sessions.activate(id(), session.clone(), 1, env.workspace())),
+        (SessionFailure::AlreadyBound, false)
+    );
+    assert_eq!(
+        (
+            env.methods("thread/start"),
+            env.methods("thread/resume"),
+            sessions.stats().leases
+        ),
+        (threads, 2, leases)
+    );
+    assert_eq!(
+        other.binding_status(session.clone()).unwrap().state,
+        BindingState::BoundDetached
+    );
+    assert_eq!(other.lease_active(session.clone()).unwrap(), None);
+    // Resume is the action for it.
+    sessions.resume(id(), session.clone(), 1).unwrap();
+
+    // Closed, unknown, and a revision the session is not at.
+    let session = prepared(&sessions);
+    sessions.close(id(), session.clone(), 1).unwrap();
+    for revision in [1, 2] {
+        assert_eq!(
+            failed(sessions.activate(id(), session.clone(), revision, env.workspace())),
+            (SessionFailure::NotAllowed, false)
+        );
+    }
+    let unknown = ManagedSessionId::parse(id().as_str()).unwrap();
+    assert_eq!(
+        failed(sessions.activate(id(), unknown, 1, env.workspace())),
+        (SessionFailure::NotFound, false)
+    );
+    let session = prepared(&sessions);
+    assert_eq!(
+        failed(sessions.activate(id(), session.clone(), 2, env.workspace())),
+        (SessionFailure::Changed, false)
+    );
+    assert_eq!(other.lease_active(session.clone()).unwrap(), None);
+    assert_eq!(env.methods("thread/start"), threads);
+    // Nothing uncertain to abandon on any of them.
+    assert_eq!(
+        failed(sessions.abandon(id(), session)),
+        (SessionFailure::NotAllowed, false)
+    );
+
+    other.runtime_stop(mutation()).unwrap();
+    env.ready(&mut other, ActualState::Stopped);
+    drop(other);
+    authority.stop(false);
+}
+
+#[test]
+fn a_binding_the_provider_never_answered_is_uncertain_until_it_is_abandoned() {
+    use wyss_console::sessions::ActivationStage as Stage;
+    let _serial = serial();
+    let env = Sandbox::new();
+    // This Codex takes a thread request and never answers it.
+    let mut authority = env.start_as("thread_timeout");
+    let mut other = env.client();
+    let sessions = env.sessions();
+    other.runtime_start(mutation()).unwrap();
+    env.ready(&mut other, ActualState::Ready);
+    let session = sessions.prepare(id()).unwrap().id;
+
+    let operation = id();
+    let error = sessions
+        .activate(operation.clone(), session.clone(), 1, env.workspace())
+        .unwrap_err();
+    // Not a refusal, and not something to send again.
+    assert_eq!(
+        (error.code, error.retry, error.cause),
+        (
+            SessionFailure::Uncertain,
+            false,
+            Some(ControlError::ExternalEffectUnknown)
+        )
+    );
+    assert_eq!(env.methods("thread/start"), 1);
+    // (The authority waited ten seconds for Codex: the other client reconnects.)
+    let mut other = env.client();
+    let status = other.binding_status(session.clone()).unwrap();
+    assert_eq!(status.state, BindingState::Indeterminate);
+    let attempt = status.operation_id.unwrap();
+    // The lease asked for it did not outlive it.
+    assert_eq!(other.lease_active(session.clone()).unwrap(), None);
+    let shown = sessions.page(None).unwrap().sessions.remove(0);
+    assert_eq!(
+        (
+            shown.binding,
+            shown.recoverable,
+            shown.activatable,
+            shown.resumable
+        ),
+        (BindingState::Indeterminate, true, false, false)
+    );
+    assert!(
+        !serde_json::to_string(&shown)
+            .unwrap()
+            .contains(attempt.as_str())
+    );
+
+    // The same action, a new action, and across an authority restart: no second thread
+    // is ever asked for, and the answer stays "uncertain".
+    let settled = head(&mut other);
+    for action in [operation.clone(), id()] {
+        assert_eq!(
+            failed(sessions.activate(action, session.clone(), 1, env.workspace())),
+            (SessionFailure::Uncertain, false)
+        );
+    }
+    assert_eq!(
+        (head(&mut other), env.methods("thread/start")),
+        (settled, 1)
+    );
+    drop(other);
+    authority.stop(false);
+    // The authority returns with a Codex that answers.
+    let mut authority = env.start();
+    let mut other = env.client();
+    env.ready(&mut other, ActualState::Ready);
+    assert_eq!(
+        other.binding_status(session.clone()).unwrap().state,
+        BindingState::Indeterminate
+    );
+    assert_eq!(
+        failed(sessions.activate(operation.clone(), session.clone(), 1, env.workspace())),
+        (SessionFailure::Uncertain, false)
+    );
+    assert_eq!(env.methods("thread/start"), 1);
+
+    // The user gives up on that attempt: the authority records it, and names the attempt.
+    let intent = id();
+    assert_eq!(
+        sessions
+            .abandon(intent.clone(), session.clone())
+            .unwrap()
+            .id,
+        session
+    );
+    let events = trail(&mut other);
+    let last = events.last().unwrap();
+    assert_eq!(
+        last["event_type"],
+        "authority.managed_session.runtime_operation_abandoned"
+    );
+    assert_eq!(last["payload"]["operation_id"], attempt.as_str());
+    assert_eq!(last["correlation_id"], intent.as_str());
+    assert_eq!(
+        other.binding_status(session.clone()).unwrap().state,
+        BindingState::Unbound
+    );
+    // Asked again once it is settled: there is nothing to give up on, and nothing changes.
+    let settled = head(&mut other);
+    assert_eq!(
+        failed(sessions.abandon(intent, session.clone())),
+        (SessionFailure::NotAllowed, false)
+    );
+    assert_eq!(head(&mut other), settled);
+
+    // The action that ended in uncertainty stays ended: its binding intent is one the
+    // authority holds as failed. A new action binds the session.
+    assert_eq!(
+        failed(sessions.activate(operation, session.clone(), 1, env.workspace())),
+        (SessionFailure::NotAllowed, false)
+    );
+    let fresh = id();
+    assert_eq!(
+        progress(sessions.activate(fresh.clone(), session.clone(), 1, env.workspace())),
+        Stage::Bound
+    );
+    assert_eq!(
+        progress(sessions.activate(fresh, session.clone(), 1, env.workspace())),
+        Stage::Ready
+    );
+    assert_eq!(env.methods("thread/start"), 2);
+
+    other.runtime_stop(mutation()).unwrap();
+    env.ready(&mut other, ActualState::Stopped);
+    drop(other);
+    authority.stop(false);
+}
+
+#[test]
+fn repeated_activations_next_to_the_observer_leak_nothing_and_add_no_watcher() {
+    use wyss_console::sessions::ActivationStage as Stage;
+    let _serial = serial();
+    let env = Sandbox::new();
+    let _authority = env.start();
+    // The authority is listening before the observer makes its one connection.
+    drop(env.client());
+    let observer = AuthorityService::start(Some(env.run()));
+    until(&observer, "connected", |v| {
+        v.connection == Connection::Connected
+    });
+    let sessions = env.sessions();
+    // The first activation starts the runtime; the observer's one watch announces it.
+    let first = sessions.prepare(id()).unwrap().id;
+    let operation = id();
+    assert_eq!(
+        progress(sessions.activate(operation.clone(), first.clone(), 1, env.workspace())),
+        Stage::RuntimeStarting
+    );
+    until(&observer, "ready", |v| {
+        v.agent
+            .as_ref()
+            .is_some_and(|a| a.actual == ActualState::Ready)
+    });
+    assert_eq!(
+        progress(sessions.activate(operation.clone(), first.clone(), 1, env.workspace())),
+        Stage::Bound
+    );
+    assert_eq!(
+        progress(sessions.activate(operation, first, 1, env.workspace())),
+        Stage::Ready
+    );
+    thread::sleep(Duration::from_millis(200));
+    let (idle_descriptors, idle_threads) = (descriptors(), threads());
+    let connections = sessions.stats().connections;
+
+    let cycles = 12u64;
+    for _ in 0..cycles {
+        let session = sessions.prepare(id()).unwrap().id;
+        let operation = id();
+        let step = || sessions.activate(operation.clone(), session.clone(), 1, env.workspace());
+        assert_eq!(progress(step()), Stage::Bound);
+        assert_eq!(progress(step()), Stage::Ready);
+        assert_eq!(progress(step()), Stage::Ready);
+        assert_eq!(
+            sessions.page(None).unwrap().sessions[0].binding,
+            BindingState::BoundAttached
+        );
+        sessions.close(id(), session, 1).unwrap();
+    }
+    // Six connections a cycle, each closed with its call; the observer kept its one.
+    assert_eq!(sessions.stats().connections, connections + 6 * cycles);
+    let link = observer.stats();
+    assert_eq!((link.connections, link.failures, link.resyncs), (1, 0, 0));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while (descriptors(), threads()) != (idle_descriptors, idle_threads) {
+        assert!(
+            Instant::now() < deadline,
+            "holds {:?}, expected {:?}",
+            (descriptors(), threads()),
+            (idle_descriptors, idle_threads)
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    // One runtime start for all of it, and no lease left standing anywhere.
+    let mut other = env.client();
+    let events = trail(&mut other);
+    assert_eq!(count(&events, "authority.runtime.desired_state_changed"), 1);
+    assert_eq!(
+        count(&events, "authority.execution_lease.granted"),
+        count(&events, "authority.execution_lease.revoked")
+    );
+    assert_eq!(count(&events, "authority.execution_lease.expired"), 0);
+    observer.shutdown();
+    sessions.shutdown();
+    other.runtime_stop(mutation()).unwrap();
+    env.ready(&mut other, ActualState::Stopped);
 }

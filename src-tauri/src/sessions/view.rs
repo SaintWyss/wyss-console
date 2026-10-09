@@ -8,7 +8,7 @@ use crate::contracts::{
 };
 use serde::Serialize;
 
-pub(super) const PAGE_SCHEMA_VERSION: u8 = 1;
+pub(super) const PAGE_SCHEMA_VERSION: u8 = 2;
 /// Sessions in one page of the window. Below the protocol's own page bound.
 pub const PAGE_SIZE: usize = 25;
 
@@ -30,6 +30,10 @@ pub struct SessionSummary {
     /// Presentation hints: whether offering the action makes sense. The authority decides.
     pub resumable: bool,
     pub closable: bool,
+    /// Prepared and without a binding or an attempt at one: a workspace can be bound.
+    pub activatable: bool,
+    /// Prepared, with an attempt whose outcome the authority could not confirm.
+    pub recoverable: bool,
 }
 impl SessionSummary {
     pub(super) fn of(session: ManagedSessionRecord, binding: BindingStatus) -> Self {
@@ -46,6 +50,8 @@ impl SessionSummary {
             workspace: binding.binding.map(|b| b.workspace_root),
             resumable: prepared && binding.state == BindingState::BoundDetached,
             closable: prepared,
+            activatable: prepared && binding.state == BindingState::Unbound,
+            recoverable: prepared && binding.state == BindingState::Indeterminate,
         }
     }
 }
@@ -70,6 +76,25 @@ pub struct SessionReceipt {
     pub id: ManagedSessionId,
 }
 
+/// How far an activation got, as the authority answered it. One call takes one step:
+/// the caller asks again, with the same request, until the session is `Ready`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivationStage {
+    /// The managed runtime was asked to start, or is starting. Ask again once it settles.
+    RuntimeStarting,
+    /// The authority is still waiting for the runtime to answer a binding request.
+    Creating,
+    /// The workspace is bound. The session is not attached yet.
+    Bound,
+    /// Bound and attached to the running runtime, as the authority reads it now.
+    Ready,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ActivationProgress {
+    pub stage: ActivationStage,
+}
+
 /// Why a call did not succeed, in product terms. No protocol text crosses to the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -89,6 +114,12 @@ pub enum SessionFailure {
     NotBound,
     /// The managed runtime is not running, not ready or not the session's.
     RuntimeUnavailable,
+    /// The authority refused to start the managed runtime.
+    StartRefused,
+    /// The authority did not accept the folder as a workspace.
+    WorkspaceInvalid,
+    /// The session already has a workspace binding that this action did not create.
+    AlreadyBound,
     /// The execution gate denied it: no usable lease for this action.
     PermissionDenied,
     /// The authority is doing something that excludes this, or is at capacity.
@@ -136,6 +167,7 @@ impl SessionError {
             E::StaleRevision => F::Changed,
             E::InvalidTransition => F::NotAllowed,
             E::BindingNotFound => F::NotBound,
+            E::BindingAlreadyExists => F::AlreadyBound,
             E::WorkspaceInvalid => F::RuntimeUnavailable,
             E::GateDenied | E::LeaseAlreadyActive | E::LeaseNotFound => F::PermissionDenied,
             E::RuntimeOperationInProgress | E::CapacityExceeded | E::ActiveTurnExists => F::Busy,
@@ -148,6 +180,21 @@ impl SessionError {
             cause: Some(error),
             ..Self::new(code)
         }
+    }
+    /// The same failure, where a workspace was being bound: there, a workspace the
+    /// authority refused is the folder itself. Every other failure is what it was.
+    pub(super) fn binding(self) -> Self {
+        match self.cause {
+            Some(ControlError::WorkspaceInvalid) => Self {
+                code: SessionFailure::WorkspaceInvalid,
+                ..self
+            },
+            _ => self,
+        }
+    }
+    /// Whether nothing was answered: the request may or may not have been taken.
+    pub(super) fn unknown(error: ControlError) -> bool {
+        Self::of(error).code == SessionFailure::Unavailable
     }
     /// A denial by the execution gate, named by the authority's own diagnostic.
     pub(super) fn denied(reason: GateReason) -> Self {

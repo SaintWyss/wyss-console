@@ -167,7 +167,9 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   const { default: capability } =
     await import('../src-tauri/capabilities/main.json');
   // The authority is reached through one read of the desktop's own projection, and
-  // managed sessions through one read and three intents. Nothing takes a method name.
+  // managed sessions through one read and five intents. Nothing takes a method name.
+  // A workspace is chosen through one native dialog: the window is granted no
+  // filesystem, shell, process, socket, dialog or event permission of the framework.
   expect(capability.permissions).toEqual([
     'allow-get-app-info',
     'allow-authority-state',
@@ -175,6 +177,9 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-managed-session-prepare',
     'allow-managed-session-resume',
     'allow-managed-session-close',
+    'allow-managed-session-activate',
+    'allow-managed-session-abandon',
+    'allow-choose-workspace',
     'allow-create-terminal',
     'allow-terminal-write',
     'allow-terminal-read-output',
@@ -182,6 +187,10 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-close-terminal',
     'allow-terminal-status',
   ]);
+  // Every permission is one of this application's own commands: none belongs to a
+  // plugin (`fs:`, `shell:`, `dialog:`) or to the framework's core (`core:`).
+  for (const permission of capability.permissions)
+    expect(permission).toMatch(/^allow-[a-z-]+$/);
   const directives = Object.fromEntries(
     config.app.security.csp
       .split(';')

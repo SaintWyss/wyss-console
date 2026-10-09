@@ -1,13 +1,13 @@
 {
   "empty": {
-    "schema_version": 1,
+    "schema_version": 2,
     "head": null,
     "sessions": [],
     "older": null,
     "truncated": false
   },
   "loaded": {
-    "schema_version": 1,
+    "schema_version": 2,
     "head": "9",
     "sessions": [
       {
@@ -21,7 +21,9 @@
         "binding": "unbound",
         "workspace": null,
         "resumable": false,
-        "closable": true
+        "closable": true,
+        "activatable": true,
+        "recoverable": false
       },
       {
         "id": "22222222-2222-4222-8222-222222222222",
@@ -34,7 +36,9 @@
         "binding": "bound_detached",
         "workspace": "/home/dev/rag-corp",
         "resumable": true,
-        "closable": true
+        "closable": true,
+        "activatable": false,
+        "recoverable": false
       },
       {
         "id": "11111111-1111-4111-8111-111111111111",
@@ -47,7 +51,9 @@
         "binding": "bound_detached",
         "workspace": "/home/dev/wyss",
         "resumable": false,
-        "closable": false
+        "closable": false,
+        "activatable": false,
+        "recoverable": false
       }
     ],
     "older": null,

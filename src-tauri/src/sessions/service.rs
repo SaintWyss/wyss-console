@@ -11,43 +11,63 @@
 //! first session. This service never retries on its own and never invents an identity for
 //! the action itself.
 //!
-//! **Resume.** `managedSession/runtime/resume` is admitted by the authority's execution
-//! gate under an active lease that grants `session_resume`. The desktop asks first. Only
-//! when the authority says a lease is what is missing does it ask the authority to grant
-//! one, for that single scope and `RESUME_LEASE_SECONDS`, ask again, and ask the authority
-//! to revoke what it was granted. A lease somebody else holds is used as it is and never
-//! touched. Every one of those steps is a request the authority may refuse.
+//! **Gated operations.** Resuming and binding are admitted by the authority's execution
+//! gate under an active lease that grants their scope. The desktop asks first. Only when
+//! the authority says a lease is what is missing does it ask the authority to grant one,
+//! for that single scope and a few seconds, ask again, and ask the authority to revoke
+//! what it was granted. A lease somebody else holds is used as it is and never touched.
+//! Every one of those steps is a request the authority may refuse.
+//!
+//! **A lease that could not be given back.** When the answer to a grant or a revoke is
+//! lost, the lease is remembered until the moment it would have expired by itself. The
+//! next call for that session settles it first, with the identities it already used.
 use super::view::{
     PAGE_SCHEMA_VERSION, PAGE_SIZE, SessionError, SessionFailure, SessionPage, SessionReceipt,
     SessionSummary,
 };
+use crate::contracts::identities::ExecutionLeaseId;
 use crate::{
     contracts::{
         Sequence, WireUuid,
         control::{
-            BindingResume, Close, ControlError, ControlResult, ExecutionScope, GateQuery,
-            GateReason, LeaseGrant, LeaseRevoke, List, MAX_PAGE, ManagedSessionRecord, Prepare,
-            ResultValue, RuntimeTarget,
+            BindingResume, Close, ControlError, ControlResult, ExecutionLease, ExecutionScope,
+            GateQuery, GateReason, LeaseGrant, LeaseRevoke, List, MAX_PAGE, ManagedSessionRecord,
+            Prepare, ResultValue, RuntimeTarget,
         },
         identities::ManagedSessionId,
     },
     control::client::ControlClient,
 };
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     env,
     path::PathBuf,
     sync::{
         Arc, Mutex, PoisonError,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
+    time::{Duration, Instant},
 };
 
 /// Protocol pages one read walks at most: two thousand sessions.
 const WALK_PAGES: usize = 40;
 /// How long a lease the desktop asked for may live if it cannot be revoked afterwards.
 /// The authority's own deadline for a resume is ten seconds.
-const RESUME_LEASE_SECONDS: u32 = 30;
+pub(super) const RESUME_LEASE_SECONDS: u32 = 30;
+/// Past a lease's own lifetime, how long its record is kept before it is dropped unasked.
+const LEASE_MARGIN: Duration = Duration::from_secs(5);
+
+/// A lease this desktop asked for and has not seen given back. It is kept only while
+/// that is so, and never past the moment the lease has expired by itself.
+struct LeaseSlot {
+    /// The grant exactly as it was sent: sent again, it is the same intent and payload.
+    grant: LeaseGrant,
+    /// What the authority granted, once it answered.
+    lease: Option<(ExecutionLeaseId, u64)>,
+    /// Names the revoke, however many times it has to be asked.
+    revoke: WireUuid,
+    until: Instant,
+}
 
 /// Counters of what the service did. For tests and diagnostics: none of it is shown.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -66,6 +86,8 @@ struct Inner {
     turn: Mutex<()>,
     connections: AtomicU64,
     leases: AtomicU64,
+    /// By session, the lease of this desktop whose return is not yet known.
+    slots: Mutex<HashMap<String, LeaseSlot>>,
 }
 
 /// Application-lifetime door to managed sessions. Cloning shares it.
@@ -87,6 +109,7 @@ impl SessionService {
                 turn: Mutex::new(()),
                 connections: AtomicU64::new(0),
                 leases: AtomicU64::new(0),
+                slots: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -103,7 +126,7 @@ impl SessionService {
     }
 
     /// One connection, from its handshake to the end of `work`.
-    fn call<T>(
+    pub(super) fn call<T>(
         &self,
         work: impl FnOnce(&mut ControlClient) -> Result<T, SessionError>,
     ) -> Result<T, SessionError> {
@@ -203,59 +226,162 @@ impl SessionService {
         expected_revision: u64,
     ) -> Result<SessionReceipt, SessionError> {
         session_revision(expected_revision)?;
-        let leases = &self.inner.leases;
         self.call(|client| {
+            self.settle(client, &id);
             let request = BindingResume {
                 intent_id: intent,
                 managed_session_id: id.clone(),
                 expected_session_revision: expected_revision,
             };
-            let attached = |_| SessionReceipt { id: id.clone() };
-            // An intent the authority already holds, or a lease already in place, needs
-            // nothing more from the desktop.
-            match client.binding_resume(request.clone()) {
-                Ok(binding) => return Ok(attached(binding)),
-                Err(ControlError::GateDenied) => (),
-                Err(error) => return Err(SessionError::of(error)),
-            }
-            let reason = gate(client, &id);
-            if !matches!(
-                reason,
-                Some(
-                    GateReason::LeaseMissing
-                        | GateReason::LeaseNotActive
-                        | GateReason::LeaseExpired
-                )
-            ) {
-                return Err(denied(reason));
-            }
-            let lease = client
-                .lease_grant(LeaseGrant {
-                    intent_id: fresh(),
-                    session_id: id.clone(),
-                    expected_session_revision: expected_revision,
-                    scopes: vec![ExecutionScope::SessionResume],
-                    ttl_seconds: RESUME_LEASE_SECONDS,
-                })
-                .map_err(SessionError::of)?;
-            leases.fetch_add(1, Ordering::AcqRel);
-            let result = client.binding_resume(request);
-            // Read while the lease still stands, so the reason is the one that denied.
-            let reason = matches!(result, Err(ControlError::GateDenied))
-                .then(|| gate(client, &id))
-                .flatten();
-            // The lease was asked for this one action. If this fails it ages out.
-            let _ = client.lease_revoke(LeaseRevoke {
-                intent_id: fresh(),
-                lease_id: lease.lease_id,
-                expected_revision: lease.revision,
-            });
-            match result {
-                Ok(binding) => Ok(attached(binding)),
-                Err(ControlError::GateDenied) => Err(denied(reason)),
-                Err(error) => Err(SessionError::of(error)),
-            }
+            self.gated(
+                client,
+                &id,
+                expected_revision,
+                ExecutionScope::SessionResume,
+                RESUME_LEASE_SECONDS,
+                |client| client.binding_resume(request.clone()),
+            )
+            .map(|_| SessionReceipt { id: id.clone() })
         })
+    }
+
+    /// Asks the authority for `ask`, which its execution gate admits under `scope`.
+    ///
+    /// An intent the authority already holds, or a lease already in place, needs nothing
+    /// more. Only when the gate names a lease as what is missing is one asked for: that
+    /// scope alone, for `ttl_seconds`, and given back as soon as `ask` was answered.
+    pub(super) fn gated<T>(
+        &self,
+        client: &mut ControlClient,
+        id: &ManagedSessionId,
+        expected_revision: u64,
+        scope: ExecutionScope,
+        ttl_seconds: u32,
+        mut ask: impl FnMut(&mut ControlClient) -> ControlResult<T>,
+    ) -> Result<T, SessionError> {
+        match ask(client) {
+            Ok(value) => return Ok(value),
+            Err(ControlError::GateDenied) => (),
+            Err(error) => return Err(SessionError::of(error)),
+        }
+        let reason = gate(client, id, scope);
+        if !matches!(
+            reason,
+            Some(GateReason::LeaseMissing | GateReason::LeaseNotActive | GateReason::LeaseExpired)
+        ) {
+            return Err(denied(reason));
+        }
+        let grant = LeaseGrant {
+            intent_id: fresh(),
+            session_id: id.clone(),
+            expected_session_revision: expected_revision,
+            scopes: vec![scope],
+            ttl_seconds,
+        };
+        // Recorded before it is sent: if no answer comes back, the next call for this
+        // session finds out whether it was taken.
+        self.slots().insert(
+            key(id),
+            LeaseSlot {
+                grant: grant.clone(),
+                lease: None,
+                revoke: fresh(),
+                until: Instant::now() + Duration::from_secs(ttl_seconds.into()) + LEASE_MARGIN,
+            },
+        );
+        let lease = match client.lease_grant(grant) {
+            Ok(lease) => lease,
+            Err(error) => {
+                if !SessionError::unknown(error) {
+                    self.slots().remove(&key(id));
+                }
+                return Err(SessionError::of(error));
+            }
+        };
+        self.inner.leases.fetch_add(1, Ordering::AcqRel);
+        self.granted(id, &lease);
+        let result = ask(client);
+        // Read while the lease still stands, so the reason is the one that denied.
+        let reason = matches!(result, Err(ControlError::GateDenied))
+            .then(|| gate(client, id, scope))
+            .flatten();
+        // The lease was asked for this one action.
+        self.release(client, id);
+        match result {
+            Ok(value) => Ok(value),
+            Err(ControlError::GateDenied) => Err(denied(reason)),
+            Err(error) => Err(SessionError::of(error)),
+        }
+    }
+
+    fn slots(&self) -> std::sync::MutexGuard<'_, HashMap<String, LeaseSlot>> {
+        self.inner
+            .slots
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+    fn granted(&self, id: &ManagedSessionId, lease: &ExecutionLease) {
+        if let Some(slot) = self.slots().get_mut(&key(id)) {
+            slot.lease = Some((lease.lease_id.clone(), lease.revision));
+        }
+    }
+    /// Asks the authority to revoke the lease it granted this desktop for the session.
+    /// Only a lease whose identity came back from this desktop's own grant is ever named.
+    /// An answer, whatever it says, ends it; without one the lease stays on record.
+    fn release(&self, client: &mut ControlClient, id: &ManagedSessionId) {
+        let Some((lease_id, expected_revision, intent_id)) =
+            self.slots().get(&key(id)).and_then(|slot| {
+                let (lease, revision) = slot.lease.clone()?;
+                Some((lease, revision, slot.revoke.clone()))
+            })
+        else {
+            return;
+        };
+        match client.lease_revoke(LeaseRevoke {
+            intent_id,
+            lease_id,
+            expected_revision,
+        }) {
+            Err(error) if SessionError::unknown(error) => (),
+            _ => {
+                self.slots().remove(&key(id));
+            }
+        }
+    }
+    /// Settles what an earlier call for this session could not: a grant or a revoke
+    /// whose answer never came. Nothing here is reported: it ends when the authority
+    /// answers or when the lease has expired by itself.
+    pub(super) fn settle(&self, client: &mut ControlClient, id: &ManagedSessionId) {
+        let Some((grant, known, until)) = self
+            .slots()
+            .get(&key(id))
+            .map(|slot| (slot.grant.clone(), slot.lease.is_some(), slot.until))
+        else {
+            return;
+        };
+        if Instant::now() >= until {
+            self.slots().remove(&key(id));
+            return;
+        }
+        if !known {
+            // A grant that was never taken would be granted by sending it again. Only
+            // while a lease stands can it be this one, and then the same intent names it.
+            let standing = client.lease_active(id.clone());
+            let answer = match standing {
+                Ok(Some(_)) => client.lease_grant(grant),
+                Ok(None) => Err(ControlError::LeaseNotFound),
+                Err(error) => Err(error),
+            };
+            match answer {
+                Ok(lease) => self.granted(id, &lease),
+                Err(error) if SessionError::unknown(error) => return,
+                Err(_) => {
+                    self.slots().remove(&key(id));
+                    return;
+                }
+            }
+        }
+        self.release(client, id);
     }
 }
 
@@ -265,13 +391,18 @@ fn receipt(session: ManagedSessionRecord) -> SessionReceipt {
     }
 }
 
-/// An identity for a request that is not the user's action: asked once, never resent.
+/// Sessions are told apart whatever the case of their identity.
+fn key(id: &ManagedSessionId) -> String {
+    id.as_str().to_ascii_lowercase()
+}
+
+/// An identity for a request that is not the user's action.
 fn fresh() -> WireUuid {
     WireUuid::try_from(uuid::Uuid::new_v4().to_string()).expect("generated UUID")
 }
 
 /// A managed session is at revision one (prepared) or two (closed).
-fn session_revision(revision: u64) -> Result<(), SessionError> {
+pub(super) fn session_revision(revision: u64) -> Result<(), SessionError> {
     if (1..=2).contains(&revision) {
         Ok(())
     } else {
@@ -279,13 +410,17 @@ fn session_revision(revision: u64) -> Result<(), SessionError> {
     }
 }
 
-/// Why the gate denies a resume right now. Informational: it explains a refusal the
+/// Why the gate denies the action right now. Informational: it explains a refusal the
 /// authority already made and authorizes nothing.
-fn gate(client: &mut ControlClient, id: &ManagedSessionId) -> Option<GateReason> {
+fn gate(
+    client: &mut ControlClient,
+    id: &ManagedSessionId,
+    action: ExecutionScope,
+) -> Option<GateReason> {
     client
         .gate_status(GateQuery {
             session_id: id.clone(),
-            action: ExecutionScope::SessionResume,
+            action,
         })
         .ok()
         .map(|status| status.reason)

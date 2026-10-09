@@ -723,7 +723,7 @@ fn every_authority_error_has_one_product_meaning() {
         (E::Unsupported, F::Internal, false),
         (E::HandshakeRequired, F::Internal, false),
         (E::FrameTooLarge, F::Internal, false),
-        (E::BindingAlreadyExists, F::Internal, false),
+        (E::BindingAlreadyExists, F::AlreadyBound, false),
         (E::TurnNotFound, F::Internal, false),
         (E::ApprovalNotFound, F::Internal, false),
     ];
@@ -740,6 +740,19 @@ fn every_authority_error_has_one_product_meaning() {
         );
     }
     assert_eq!(table.len(), 35, "every ControlError is in the table");
+    // Where a workspace is being bound, a refused workspace is the folder itself.
+    let folder = SessionError::of(E::WorkspaceInvalid).binding();
+    assert_eq!(
+        (folder.code, folder.retry, folder.cause),
+        (F::WorkspaceInvalid, false, Some(E::WorkspaceInvalid))
+    );
+    for (error, code, _) in table {
+        if error != E::WorkspaceInvalid {
+            assert_eq!(SessionError::of(error).binding().code, code);
+        }
+        // Only an answer that never came leaves the outcome unknown.
+        assert_eq!(SessionError::unknown(error), code == F::Unavailable);
+    }
     let codes: Vec<String> = [
         F::Unavailable,
         F::Incompatible,
@@ -749,6 +762,9 @@ fn every_authority_error_has_one_product_meaning() {
         F::NotAllowed,
         F::NotBound,
         F::RuntimeUnavailable,
+        F::StartRefused,
+        F::WorkspaceInvalid,
+        F::AlreadyBound,
         F::PermissionDenied,
         F::Busy,
         F::Rejected,
@@ -776,6 +792,9 @@ fn every_authority_error_has_one_product_meaning() {
             "not_allowed",
             "not_bound",
             "runtime_unavailable",
+            "start_refused",
+            "workspace_invalid",
+            "already_bound",
             "permission_denied",
             "busy",
             "rejected",
@@ -787,7 +806,7 @@ fn every_authority_error_has_one_product_meaning() {
 }
 
 #[test]
-fn the_page_projection_serializes_exactly_the_v1_fields() {
+fn the_page_projection_serializes_exactly_the_v2_fields() {
     let session = session_id();
     let (kept, target) = (record(&session, 9), session.clone());
     let peer = Peer::canonical(move |op| {
@@ -811,18 +830,19 @@ fn the_page_projection_serializes_exactly_the_v1_fields() {
     assert_eq!(
         page,
         json!({
-            "schema_version": 1, "head": "41", "older": null, "truncated": false,
+            "schema_version": 2, "head": "41", "older": null, "truncated": false,
             "sessions": [{
                 "id": session, "adapter": "codex", "state": "prepared", "revision": 1,
                 "created_at": "2026-10-08T00:00:00Z", "updated_at": "2026-10-08T00:00:00Z",
                 "position": "9", "binding": "bound_detached", "workspace": "/work/space",
                 "resumable": true, "closable": true,
+                "activatable": false, "recoverable": false,
             }],
         })
     );
     // The window's own fixture is this shape.
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../../../tests/fixtures/session-page-v1.json")).unwrap();
+        serde_json::from_str(include_str!("../../../tests/fixtures/session-page-v2.json")).unwrap();
     let keys = |v: &serde_json::Value| -> Vec<String> {
         let mut keys: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
         keys.sort();
@@ -833,3 +853,6 @@ fn the_page_projection_serializes_exactly_the_v1_fields() {
         assert_eq!(keys(shown), keys(&page["sessions"][0]));
     }
 }
+
+#[path = "activation_tests.rs"]
+mod activation;

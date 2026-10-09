@@ -1,17 +1,19 @@
-//! The window's door to managed sessions: one read and three product intents.
+//! The window's door to managed sessions: one read and five product intents.
 //!
 //! Each command takes one narrow request and names no control method. The window cannot
-//! choose an adapter, a workspace, a scope, a lease or a lifetime: it names a session it
-//! was shown, the revision it saw and the identity of its own action. What it gets back is
-//! the desktop's projection or a product failure code.
+//! choose an adapter, a scope, a lease, a lifetime or a runtime: it names a session it was
+//! shown, the revision it saw and the identity of its own action. The one path it can name
+//! is a folder the user selected in the native dialog. What it gets back is the desktop's
+//! projection or a product failure code.
 use serde::Deserialize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::State;
 
+use super::workspace::WorkspaceSelections;
 use crate::contracts::{Sequence, WireUuid, identities::ManagedSessionId};
 #[cfg(target_os = "linux")]
 pub use crate::sessions::{
-    SessionError, SessionFailure, SessionPage, SessionReceipt, SessionService,
+    ActivationProgress, SessionError, SessionFailure, SessionPage, SessionReceipt, SessionService,
 };
 
 /// Calls that may be admitted at once. They run one at a time; the rest wait their turn.
@@ -43,6 +45,23 @@ pub struct SessionIntentRequest {
     session_id: ManagedSessionId,
     /// The session revision the window was shown.
     expected_revision: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActivateSessionRequest {
+    /// Names the whole user action. The same value sent again continues the same action.
+    operation_id: WireUuid,
+    session_id: ManagedSessionId,
+    expected_revision: u64,
+    /// The folder the user selected in the native dialog, exactly as it was returned.
+    workspace: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AbandonSessionRequest {
+    intent_id: WireUuid,
+    session_id: ManagedSessionId,
 }
 
 /// Admission occurs before `spawn_blocking`, with its own counter: session calls never
@@ -114,6 +133,50 @@ pub async fn managed_session_close(
     .await
 }
 
+/// The window names no path of its own: an activation is admitted only for a folder the
+/// native dialog returned. Anything else is refused here, before anything is asked.
+fn selected(
+    selections: &WorkspaceSelections,
+    request: &ActivateSessionRequest,
+) -> Result<(), SessionError> {
+    if selections.chose(&request.workspace) {
+        Ok(())
+    } else {
+        Err(SessionError::new(SessionFailure::Invalid))
+    }
+}
+
+/// One step of an activation. The window sends the same request until the answer is
+/// `ready`; which authority operation a step takes is decided here, from what the
+/// authority reports, never by the window.
+#[tauri::command]
+pub async fn managed_session_activate(
+    service: State<'_, SessionService>,
+    selections: State<'_, WorkspaceSelections>,
+    request: ActivateSessionRequest,
+) -> Result<ActivationProgress, SessionError> {
+    selected(&selections, &request)?;
+    blocking(service.inner().clone(), move |service| {
+        service.activate(
+            request.operation_id,
+            request.session_id,
+            request.expected_revision,
+            request.workspace,
+        )
+    })
+    .await
+}
+#[tauri::command]
+pub async fn managed_session_abandon(
+    service: State<'_, SessionService>,
+    request: AbandonSessionRequest,
+) -> Result<SessionReceipt, SessionError> {
+    blocking(service.inner().clone(), move |service| {
+        service.abandon(request.intent_id, request.session_id)
+    })
+    .await
+}
+
 /// Where there is no authority to ask, every call says so.
 #[cfg(not(target_os = "linux"))]
 mod unsupported {
@@ -124,6 +187,8 @@ mod unsupported {
     #[serde(rename_all = "snake_case")]
     pub enum SessionFailure {
         Unavailable,
+        Invalid,
+        WorkspaceInvalid,
         Busy,
         Internal,
     }
@@ -136,6 +201,8 @@ mod unsupported {
     pub struct SessionPage {}
     #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
     pub struct SessionReceipt {}
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    pub struct ActivationProgress {}
     #[derive(Clone, Default)]
     pub struct SessionService;
     impl SessionError {
@@ -163,11 +230,25 @@ mod unsupported {
         pub fn close(&self, _: WireUuid, _: ManagedSessionId, _: u64) -> Refused<SessionReceipt> {
             Self::absent()
         }
+        pub fn activate(
+            &self,
+            _: WireUuid,
+            _: ManagedSessionId,
+            _: u64,
+            _: String,
+        ) -> Refused<ActivationProgress> {
+            Self::absent()
+        }
+        pub fn abandon(&self, _: WireUuid, _: ManagedSessionId) -> Refused<SessionReceipt> {
+            Self::absent()
+        }
         pub fn shutdown(&self) {}
     }
 }
 #[cfg(not(target_os = "linux"))]
-pub use unsupported::{SessionError, SessionFailure, SessionPage, SessionReceipt, SessionService};
+pub use unsupported::{
+    ActivationProgress, SessionError, SessionFailure, SessionPage, SessionReceipt, SessionService,
+};
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
@@ -269,6 +350,106 @@ mod tests {
     }
 
     #[test]
+    fn an_activation_names_one_action_one_session_and_a_folder_the_user_selected() {
+        let activate = serde_json::from_value::<ActivateSessionRequest>;
+        let full = json!({
+            "operation_id": INTENT, "session_id": SESSION, "expected_revision": 1,
+            "workspace": "/home/user/project",
+        });
+        let accepted = activate(full.clone()).unwrap();
+        assert_eq!(accepted.operation_id.as_str(), INTENT);
+        assert_eq!(accepted.session_id.as_str(), SESSION);
+        assert_eq!(
+            (accepted.expected_revision, accepted.workspace.as_str()),
+            (1, "/home/user/project")
+        );
+        for (field, value) in [
+            ("operation_id", json!("x")),
+            ("session_id", json!(7)),
+            ("expected_revision", json!("1")),
+            ("workspace", json!(null)),
+            ("workspace", json!(["/home/user/project"])),
+            ("workspace", json!({"path": "/home/user/project"})),
+        ] {
+            let mut tampered = full.clone();
+            tampered[field] = value;
+            assert!(activate(tampered.clone()).is_err(), "{tampered}");
+        }
+        for extra in [
+            // Nothing the authority or the bridge decides can ride along.
+            "intent_id",
+            "scopes",
+            "ttl_seconds",
+            "lease_id",
+            "adapter_id",
+            "runtime_kind",
+            "safety_profile",
+            "workspace_root",
+            "runtime_instance_id",
+            "thread_id",
+            "start_runtime",
+            "method",
+        ] {
+            let mut tampered = full.clone();
+            tampered[extra] = json!("x");
+            assert!(activate(tampered.clone()).is_err(), "{tampered}");
+        }
+        for missing in [
+            "operation_id",
+            "session_id",
+            "expected_revision",
+            "workspace",
+        ] {
+            let mut tampered = full.clone();
+            tampered.as_object_mut().unwrap().remove(missing);
+            assert!(activate(tampered.clone()).is_err(), "{tampered}");
+        }
+
+        // The path is admitted only if the native dialog returned exactly that text.
+        let selections = WorkspaceSelections::default();
+        let refused = Err(SessionError::new(SessionFailure::Invalid));
+        assert_eq!(selected(&selections, &accepted), refused);
+        selections.remember_for_test("/home/user/project");
+        assert_eq!(selected(&selections, &accepted), Ok(()));
+        for other in [
+            "/home/user",
+            "/home/user/project/",
+            "/home/user/project/sub",
+            "/home/user/project/../project",
+            "/",
+            "/etc",
+            "",
+        ] {
+            let mut tampered = full.clone();
+            tampered["workspace"] = json!(other);
+            assert_eq!(
+                selected(&selections, &activate(tampered).unwrap()),
+                refused,
+                "{other}"
+            );
+        }
+
+        let abandon = serde_json::from_value::<AbandonSessionRequest>;
+        let full = json!({"intent_id": INTENT, "session_id": SESSION});
+        let accepted = abandon(full.clone()).unwrap();
+        assert_eq!(
+            (accepted.intent_id.as_str(), accepted.session_id.as_str()),
+            (INTENT, SESSION)
+        );
+        // The attempt given up on is the one the authority names, never the window's.
+        for extra in ["operation_id", "expected_revision", "workspace", "method"] {
+            let mut tampered = full.clone();
+            tampered[extra] = json!("x");
+            assert!(abandon(tampered.clone()).is_err(), "{tampered}");
+        }
+        for missing in ["intent_id", "session_id"] {
+            let mut tampered = full.clone();
+            tampered.as_object_mut().unwrap().remove(missing);
+            assert!(abandon(tampered.clone()).is_err(), "{tampered}");
+        }
+    }
+
+    #[test]
     fn the_window_is_granted_exactly_the_known_commands() {
         // The capability and the build manifest are the whole surface. Neither has a
         // command that takes a method name.
@@ -287,6 +468,9 @@ mod tests {
             "allow-managed-session-prepare",
             "allow-managed-session-resume",
             "allow-managed-session-close",
+            "allow-managed-session-activate",
+            "allow-managed-session-abandon",
+            "allow-choose-workspace",
             "allow-create-terminal",
             "allow-terminal-write",
             "allow-terminal-read-output",

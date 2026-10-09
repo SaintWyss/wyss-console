@@ -5,7 +5,7 @@ import App from '../src/App.svelte';
 import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import { parseTerminalId } from '../src/lib/contracts/identities';
 import views from './fixtures/authority-view-v1.json';
-import pages from './fixtures/session-page-v1.json';
+import pages from './fixtures/session-page-v2.json';
 
 const fakes = vi.hoisted(() => ({ factory: vi.fn() }));
 vi.mock('../src/lib/features/terminal/renderer', () => ({
@@ -31,6 +31,9 @@ const flush = async () => {
   flushSync();
 };
 const never = () => new Promise(() => undefined);
+const FOLDER = '/home/dev/project';
+const text = (node: Element | null | undefined) =>
+  node?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 const ready = {
   ...views.connected,
   authority: { ...views.connected.authority, last_sequence: '9' },
@@ -46,6 +49,9 @@ function desktop(script: {
   authority?: (after: number | null) => unknown;
   page?: (before: string | null, read: number) => unknown;
   intent?: (call: Call) => unknown;
+  /** One step of an activation; `step` counts them from one. */
+  activate?: (call: Call, step: number) => unknown;
+  choose?: () => unknown;
 }) {
   const calls: Call[] = [];
   mockIPC((command, payload) => {
@@ -60,6 +66,13 @@ function desktop(script: {
     if (command === 'managed_sessions_page')
       return (script.page ?? (() => pages.loaded))(
         request!.before as string | null,
+        calls.filter((c) => c.command === command).length,
+      );
+    if (command === 'choose_workspace')
+      return (script.choose ?? (() => ({ path: FOLDER })))();
+    if (command === 'managed_session_activate')
+      return (script.activate ?? (() => ({ stage: 'ready' })))(
+        calls.at(-1)!,
         calls.filter((c) => c.command === command).length,
       );
     if (command.startsWith('managed_session_'))
@@ -186,8 +199,8 @@ it('shows a useful empty state for an authority with no sessions', async () => {
   expect(rows()).toHaveLength(0);
   const empty = view().querySelector('.sessions-empty')!;
   expect(empty.textContent).toContain('No managed sessions yet.');
-  expect(empty.textContent).toContain(
-    'Create a session to let Wyss supervise an agent workspace.',
+  expect(text(empty)).toContain(
+    'Create a session to let Wyss supervise Codex in one of your projects.',
   );
   expect(button('New session', empty).disabled).toBe(false);
 });
@@ -245,17 +258,19 @@ it('shows the details of the selected session with the actions its state allows'
   expect(button('Close', panel).disabled).toBe(false);
   expect(panel.querySelector('.session-hint')).toBeNull();
 
-  // No binding: resume is not offered, and the panel says why.
+  // No workspace yet: there is nothing to resume, and activating is what is offered.
   rows()[0].click();
   await flush();
-  expect(button('Resume', details()!).disabled).toBe(true);
-  expect(details()!.querySelector('.session-hint')?.textContent).toContain(
-    'Resume needs a workspace bound to the session.',
+  expect(button('Resume', details()!)).toBeUndefined();
+  expect(button('Activate', details()!).disabled).toBe(false);
+  expect(text(details()!.querySelector('.session-hint'))).toContain(
+    'Activate binds a project folder and attaches the session to Codex.',
   );
   expect(button('Close', details()!).disabled).toBe(false);
   // Closed: nothing to do with it.
   rows()[2].click();
   await flush();
+  expect(button('Activate', details()!)).toBeUndefined();
   expect(button('Resume', details()!).disabled).toBe(true);
   expect(button('Close', details()!).disabled).toBe(true);
   expect(details()!.querySelector('.session-hint')?.textContent).toContain(
@@ -292,74 +307,232 @@ it('does not offer resume while the agent runtime is not ready', async () => {
   expect(ipc.sent()).toHaveLength(0);
 });
 
-it('creates a session through one intent and shows what the authority then says', async () => {
-  const answers: ((value: unknown) => void)[] = [];
-  const created = {
+it('creates and activates a session from one composer, step by step', async () => {
+  const session = '44444444-4444-4444-8444-444444444444';
+  const row = (binding: string) => ({
+    ...fresh,
+    id: session,
+    position: '10',
+    binding,
+    workspace: binding === 'unbound' ? null : FOLDER,
+    resumable: binding === 'bound_detached',
+    activatable: binding === 'unbound',
+  });
+  const page = (binding: string, head: string) => ({
     ...pages.loaded,
-    head: '10',
-    sessions: [
-      {
-        ...fresh,
-        id: '44444444-4444-4444-8444-444444444444',
-        position: '10',
-      },
-      ...pages.loaded.sessions,
-    ],
+    head,
+    sessions: [row(binding), ...pages.loaded.sessions],
+  });
+  let shown: unknown = pages.loaded;
+  const views_: ((view: unknown) => void)[] = [];
+  const answers: ((value: unknown) => void)[] = [];
+  const pending = () => new Promise((resolve) => answers.push(resolve));
+  const stopped = {
+    ...ready,
+    agent: { ...ready.agent, actual: 'stopped', model_count: 0 },
   };
   const ipc = await start({
-    page: (_, read) => (read === 1 ? pages.loaded : created),
-    intent: () => new Promise((resolve) => answers.push(resolve)),
+    authority: () => new Promise((resolve) => views_.push(resolve)),
+    page: () => shown,
+    intent: pending,
+    activate: pending,
   });
+  views_.shift()!(stopped);
+  await flush();
+  const status = () => text(view().querySelector('.sessions-status'));
+
   button('New session').click();
   await flush();
-  const composer = view().querySelector('.session-composer')!;
-  // Only what the authority needs: a Codex session, and nothing to fill in.
-  expect(composer.textContent).toContain('Agent: Codex');
-  expect(composer.querySelectorAll('input, select, textarea')).toHaveLength(0);
+  const composer = () => view().querySelector('.session-composer')!;
+  // A project and an agent, and nothing to type: the folder comes from the dialog.
+  expect(text(composer())).toContain('Project No folder selected');
+  expect(text(composer())).toContain('Agent Codex');
+  expect(composer().querySelectorAll('input, select, textarea')).toHaveLength(
+    0,
+  );
   expect(button('New session').disabled).toBe(true);
-  button('Create session', composer).click();
+  expect(button('Create & activate', composer()).disabled).toBe(true);
+  button('Create & activate', composer()).click();
+  await flush();
+  expect(ipc.sent()).toHaveLength(0);
+
+  button('Choose folder', composer()).click();
+  await flush();
+  // The dialog was asked for with nothing, and what it returned is what is shown.
+  expect(ipc.calls.filter((c) => c.command === 'choose_workspace')).toEqual([
+    { command: 'choose_workspace', request: {} },
+  ]);
+  expect(text(composer())).toContain(`Project ${FOLDER}`);
+  expect(button('Change folder', composer())).toBeDefined();
+  button('Create & activate', composer()).click();
   await flush();
 
   // Pending: said so, and nothing can be started twice.
-  expect(view().querySelector('[role="status"]')?.textContent).toContain(
-    'Creating session…',
-  );
+  expect(status()).toBe('Preparing session…');
   expect(view().querySelector('.session-composer')).toBeNull();
   expect(button('New session').disabled).toBe(true);
   button('New session').click();
   await flush();
-  expect(rows()).toHaveLength(3);
-  const sent = ipc.sent();
+  let sent = ipc.sent();
   expect(sent).toHaveLength(1);
   expect(sent[0].command).toBe('managed_session_prepare');
   expect(Object.keys(sent[0].request)).toEqual(['intent_id']);
-  expect(sent[0].request.intent_id).toMatch(UUID);
+  const action = sent[0].request.intent_id;
+  expect(action).toMatch(UUID);
 
-  answers[0]({ id: created.sessions[0].id });
+  // The session exists: it is read and selected, and Codex is not running yet.
+  shown = page('unbound', '10');
+  answers.shift()!({ id: session });
   await flush();
-  // Accepted: read again, and the new session is the one selected.
-  expect(view().querySelector('.sessions-status')).toBeNull();
   expect(rows()).toHaveLength(4);
   expect(rows()[0].getAttribute('aria-pressed')).toBe('true');
-  expect(details()!.textContent).toContain(created.sessions[0].id);
-  expect(ipc.count('managed_sessions_page')).toBe(2);
+  expect(status()).toBe('Starting Codex…');
+  sent = ipc.sent();
+  expect(sent).toHaveLength(2);
+  expect(sent[1]).toEqual({
+    command: 'managed_session_activate',
+    // One action: the identity the session was prepared under, and the folder as chosen.
+    request: {
+      operation_id: action,
+      session_id: session,
+      expected_revision: 1,
+      workspace: FOLDER,
+    },
+  });
+  answers.shift()!({ stage: 'runtime_starting' });
+  await flush();
+  // Waiting on the authority: nothing is sent, and nothing is shown as further along.
+  expect(status()).toBe('Starting Codex…');
+  expect(ipc.sent()).toHaveLength(2);
+  expect(rows()[0].textContent).toContain('No workspace');
+
+  // The authority reports Codex ready: the same request goes again, for the binding.
+  views_.shift()!({ ...ready, revision: 5 });
+  await flush();
+  expect(status()).toBe('Creating workspace binding…');
+  expect(ipc.sent()).toHaveLength(3);
+  expect(ipc.sent()[2]).toEqual(sent[1]);
+  shown = page('bound_detached', '12');
+  answers.shift()!({ stage: 'bound' });
+  await flush();
+  expect(status()).toBe('Attaching…');
+  expect(rows()[0].textContent).toContain('Detached');
+  expect(ipc.sent()).toHaveLength(4);
+  expect(ipc.sent()[3]).toEqual(sent[1]);
+
+  shown = page('bound_attached', '14');
+  answers.shift()!({ stage: 'ready' });
+  await flush();
+  // Ready, because the page that was read says so.
+  expect(view().querySelector('.sessions-status')).toBeNull();
+  expect(rows()[0].textContent).toContain('Ready');
+  expect(rows()[0].textContent).toContain(FOLDER);
+  const facts = text(details()!.querySelector('.session-facts'));
+  expect(facts).toContain('Runtime Ready');
+  expect(text(details()!.querySelector('.session-hint'))).toContain(
+    'Ready: attached to the running agent.',
+  );
   expect(button('New session').disabled).toBe(false);
+  // One session, one folder dialog, four steps of one action.
+  expect(ipc.sent().map((c) => c.command)).toEqual([
+    'managed_session_prepare',
+    'managed_session_activate',
+    'managed_session_activate',
+    'managed_session_activate',
+  ]);
+});
+
+it('activates an existing session that has no workspace', async () => {
+  const ipc = await start({
+    activate: (_, step) => ({ stage: step === 1 ? 'bound' : 'ready' }),
+  });
+  rows()[0].click();
+  await flush();
+  button('Activate', details()!).click();
+  await flush();
+  const composer = view().querySelector('.session-composer')!;
+  expect(composer.getAttribute('aria-label')).toBe('Activate session');
+  expect(text(composer)).toContain('Activate Session 33333333');
+  expect(button('Create & activate', composer)).toBeUndefined();
+  expect(button('Activate', composer).disabled).toBe(true);
+  // While it is open, the same composer is not opened twice.
+  expect(button('Activate', details()!).disabled).toBe(true);
+  button('Choose folder', composer).click();
+  await flush();
+  button('Activate', composer).click();
+  await flush();
+  const sent = ipc.sent();
+  // No session was created: the one that was shown, at the revision it was shown at.
+  expect(sent.map((c) => c.command)).toEqual([
+    'managed_session_activate',
+    'managed_session_activate',
+  ]);
+  expect(sent[0].request).toEqual({
+    operation_id: expect.stringMatching(UUID),
+    session_id: fresh.id,
+    expected_revision: 1,
+    workspace: FOLDER,
+  });
+  expect(sent[1].request).toEqual(sent[0].request);
+  expect(view().querySelector('.sessions-status')).toBeNull();
+});
+
+it('keeps a dismissed dialog and a folder that cannot be used out of the request', async () => {
+  const outcomes: (() => unknown)[] = [
+    () => null,
+    () => Promise.reject({ code: 'workspace_invalid', retry: false }),
+    () => Promise.reject({ code: 'internal', retry: false }),
+  ];
+  const ipc = await start({ choose: () => outcomes.shift()!() });
+  button('New session').click();
+  await flush();
+  const composer = () => view().querySelector('.session-composer')!;
+  button('Choose folder', composer()).click();
+  await flush();
+  // Dismissed: nothing chosen, nothing said, nothing to send.
+  expect(text(composer())).toContain('No folder selected');
+  expect(composer().querySelector('[role="alert"]')).toBeNull();
+  for (const sentence of [
+    'That folder cannot be used',
+    'The folder dialog could not be opened.',
+  ]) {
+    button('Choose folder', composer()).click();
+    await flush();
+    expect(text(composer().querySelector('[role="alert"]'))).toContain(
+      sentence,
+    );
+    expect(text(composer())).toContain('No folder selected');
+    expect(button('Create & activate', composer()).disabled).toBe(true);
+  }
+  button('Cancel', composer()).click();
+  await flush();
+  expect(view().querySelector('.session-composer')).toBeNull();
+  expect(ipc.sent()).toHaveLength(0);
 });
 
 it('explains a failed action and retries it as the same action', async () => {
   const outcomes = [
     () => Promise.reject({ code: 'unavailable', retry: true }),
     () => ({ id: fresh.id }),
-    () => Promise.reject({ code: 'permission_denied', retry: false }),
+  ];
+  const steps = [
+    () => Promise.reject({ code: 'workspace_invalid', retry: false }),
+    () => Promise.reject({ code: 'uncertain', retry: false }),
   ];
   const ipc = await start({
     page: () => pages.empty,
     intent: () => outcomes.shift()!(),
+    activate: () => steps.shift()!(),
   });
-  button('New session').click();
-  await flush();
-  button('Create session').click();
-  await flush();
+  const activate = async () => {
+    button('New session').click();
+    await flush();
+    button('Choose folder').click();
+    await flush();
+    button('Create & activate').click();
+    await flush();
+  };
+  await activate();
   let alert = view().querySelector('.sessions-status.failed')!;
   expect(alert.getAttribute('role')).toBe('alert');
   expect(alert.textContent).toContain('wyss-control did not answer');
@@ -367,25 +540,130 @@ it('explains a failed action and retries it as the same action', async () => {
   expect(alert.textContent).not.toMatch(/unavailable|_|\{/);
   button('Retry', alert).click();
   await flush();
-  const sent = ipc.sent();
-  expect(sent).toHaveLength(2);
+  let sent = ipc.sent();
   // The same action: the same intent, so the authority can never do it twice.
   expect(sent[1].request).toEqual(sent[0].request);
-  expect(view().querySelector('.sessions-status.failed')).toBeNull();
+  expect(sent[2].command).toBe('managed_session_activate');
+  expect(sent[2].request.operation_id).toBe(sent[0].request.intent_id);
 
   // A refusal has no retry: it is read, dismissed, and a new click is a new action.
-  button('New session').click();
-  await flush();
-  button('Create session').click();
-  await flush();
   alert = view().querySelector('.sessions-status.failed')!;
-  expect(alert.textContent).toContain('The session was not created.');
-  expect(alert.textContent).toContain('no execution lease allows this');
+  expect(alert.textContent).toContain('The session is not ready.');
+  expect(alert.textContent).toContain('did not accept that folder');
   expect(button('Retry', alert)).toBeUndefined();
   button('Dismiss', alert).click();
   await flush();
   expect(view().querySelector('.sessions-status')).toBeNull();
-  expect(ipc.sent()[2].request.intent_id).not.toBe(sent[0].request.intent_id);
+
+  // An outcome the authority could not confirm is said as that, and is not retried.
+  outcomes.push(() => ({ id: fresh.id }));
+  await activate();
+  sent = ipc.sent();
+  expect(sent.at(-2)!.request.intent_id).not.toBe(sent[0].request.intent_id);
+  alert = view().querySelector('.sessions-status.failed')!;
+  expect(alert.textContent).toContain('Activation outcome uncertain');
+  expect(alert.textContent).not.toMatch(/not ready|refused|failed|_/);
+  expect(button('Retry', alert)).toBeUndefined();
+  expect(ipc.sent()).toHaveLength(sent.length);
+});
+
+it('shows an uncertain activation as uncertain and discards it only when asked', async () => {
+  const uncertain = {
+    ...pages.loaded,
+    sessions: [
+      {
+        ...fresh,
+        binding: 'indeterminate',
+        activatable: false,
+        recoverable: true,
+      },
+      bound,
+      closed,
+    ],
+  };
+  const ipc = await start({
+    page: (_, read) => (read === 1 ? uncertain : pages.loaded),
+  });
+  expect(rows()[0].textContent).toContain('Uncertain');
+  rows()[0].click();
+  await flush();
+  const panel = () => details()!;
+  expect(text(panel().querySelector('.session-uncertain'))).toContain(
+    'Activation outcome uncertain',
+  );
+  // Neither activating nor resuming is offered: nothing asks Codex again.
+  expect(button('Activate', panel())).toBeUndefined();
+  expect(button('Resume', panel())).toBeUndefined();
+  button('Discard attempt', panel()).click();
+  await flush();
+  // Asked about first, and said plainly: what Codex did stays unknown.
+  expect(ipc.sent()).toHaveLength(0);
+  const confirm = panel().querySelector('.close-confirm')!;
+  expect(confirm.getAttribute('aria-label')).toBe('Confirm discard');
+  expect(text(confirm)).toContain('the empty thread is left behind');
+  button('Keep it', confirm).click();
+  await flush();
+  expect(panel().querySelector('.close-confirm')).toBeNull();
+  expect(ipc.sent()).toHaveLength(0);
+
+  button('Discard attempt', panel()).click();
+  await flush();
+  button('Discard attempt', panel().querySelector('.close-confirm')!).click();
+  await flush();
+  expect(ipc.sent()).toEqual([
+    {
+      command: 'managed_session_abandon',
+      // The session and the action. The attempt is the authority's to name.
+      request: {
+        intent_id: expect.stringMatching(UUID),
+        session_id: fresh.id,
+      },
+    },
+  ]);
+  // Read again: the session has no workspace and can be activated.
+  expect(rows()[0].textContent).toContain('No workspace');
+  expect(button('Activate', panel()).disabled).toBe(false);
+});
+
+it('goes on activating while the Console is shown, without a second request', async () => {
+  const answers: ((value: unknown) => void)[] = [];
+  const ipc = await start({
+    activate: () => new Promise((resolve) => answers.push(resolve)),
+  });
+  rows()[0].click();
+  await flush();
+  button('Activate', details()!).click();
+  await flush();
+  button('Choose folder').click();
+  await flush();
+  const composer = view().querySelector('.session-composer')!;
+  const go = button('Activate', composer);
+  // A double click is one action.
+  go.click();
+  go.click();
+  await flush();
+  expect(ipc.sent()).toHaveLength(1);
+  for (let visit = 0; visit < 4; visit++) {
+    await open('Console');
+    await open('Sessions');
+  }
+  expect(ipc.sent()).toHaveLength(1);
+  expect(text(view().querySelector('.sessions-status'))).toBe(
+    'Creating workspace binding…',
+  );
+  await open('Console');
+  answers.shift()!({ stage: 'bound' });
+  await flush();
+  // Still the same action, one step further, with the terminal untouched.
+  expect(ipc.sent()).toHaveLength(2);
+  expect(ipc.sent()[1].request).toEqual(ipc.sent()[0].request);
+  answers.shift()!({ stage: 'ready' });
+  await flush();
+  await open('Sessions');
+  expect(view().querySelector('.sessions-status')).toBeNull();
+  expect(ipc.count('create_terminal')).toBe(1);
+  expect(ipc.count('close_terminal')).toBe(0);
+  expect(ipc.count('authority_state')).toBe(2);
 });
 
 it('asks before closing and sends the session and revision that were shown', async () => {
@@ -451,10 +729,10 @@ it('resumes a bound session with one narrow request', async () => {
     session_id: bound.id,
     expected_revision: 1,
   });
-  expect(rows()[1].textContent).toContain('Attached');
+  expect(rows()[1].textContent).toContain('Ready');
   expect(button('Resume', details()!).disabled).toBe(true);
   expect(details()!.querySelector('.session-hint')?.textContent).toContain(
-    'Already attached',
+    'Ready: attached to the running agent.',
   );
 });
 

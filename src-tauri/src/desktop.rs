@@ -8,6 +8,7 @@ mod authority;
 mod glass;
 mod sessions;
 mod terminal;
+mod workspace;
 
 #[tauri::command]
 fn get_app_info() -> AppInfo {
@@ -58,6 +59,8 @@ pub fn run() {
         .manage(authority::AuthorityService::from_environment())
         // Its own short-lived connections: the observer above is never borrowed.
         .manage(sessions::SessionService::from_environment())
+        // What the native folder dialog returned: the only paths an activation may name.
+        .manage(workspace::WorkspaceSelections::default())
         .invoke_handler(tauri::generate_handler![
             get_app_info,
             authority::authority_state,
@@ -65,6 +68,9 @@ pub fn run() {
             sessions::managed_session_prepare,
             sessions::managed_session_resume,
             sessions::managed_session_close,
+            sessions::managed_session_activate,
+            sessions::managed_session_abandon,
+            workspace::choose_workspace,
             terminal::create_terminal,
             terminal::terminal_write,
             terminal::terminal_read_output,

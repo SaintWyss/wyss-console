@@ -7,9 +7,10 @@
   import {
     agentName,
     BINDING,
+    chooseFailureMessage,
     failureMessage,
     localTime,
-    PENDING,
+    pendingMessage,
     readFailureMessage,
     resumeHint,
     sessionLabel,
@@ -40,6 +41,10 @@
   );
   const hint = $derived(
     selected ? resumeHint(selected, sessions.agentReady) : null,
+  );
+  /** The existing session the composer activates, when it is not creating one. */
+  const target = $derived(
+    page?.sessions.find((s) => s.id === sessions.composeFor),
   );
   const acting = (id: string) => pending && sessions.operation?.session === id;
 </script>
@@ -80,7 +85,7 @@
   {#if sessions.operation?.status === 'pending'}
     <p class="sessions-status" role="status">
       <span class="dot" aria-hidden="true"></span>
-      {PENDING[sessions.operation.kind]}
+      {pendingMessage(sessions.operation.kind, sessions.operation.step)}
     </p>
   {:else if sessions.operation?.failure}
     <div class="sessions-status failed" role="alert">
@@ -105,22 +110,55 @@
   {/if}
 
   {#if sessions.composing}
-    <div class="session-composer" role="group" aria-label="New managed session">
+    <div
+      class="session-composer"
+      role="group"
+      aria-label={target ? 'Activate session' : 'New managed session'}
+    >
       <div class="composer-text">
-        <p class="composer-title">New managed session</p>
-        <p class="composer-note">
-          Agent: Codex. wyss-control prepares the session and keeps its record.
+        <p class="composer-title">
+          {target ? `Activate ${sessionLabel(target)}` : 'New managed session'}
         </p>
+        <dl class="composer-fields">
+          <dt>Project</dt>
+          <dd class:mono={!!sessions.workspace}>
+            {sessions.workspace ?? 'No folder selected'}
+          </dd>
+          <dt>Agent</dt>
+          <dd>Codex</dd>
+        </dl>
+        <p class="composer-note">
+          wyss-control decides whether the folder can be a workspace, starts
+          Codex if it is not running, and binds the session to it.
+        </p>
+        {#if sessions.chooseFailure}
+          <p class="composer-note failed" role="alert">
+            {chooseFailureMessage(sessions.chooseFailure.code)}
+          </p>
+        {/if}
       </div>
       <button
         type="button"
+        class="action"
+        disabled={!connected || pending || sessions.choosing}
+        aria-busy={sessions.choosing}
+        onclick={() => controller.chooseWorkspace()}
+        >{sessions.workspace ? 'Change folder' : 'Choose folder'}</button
+      >
+      <button
+        type="button"
         class="action primary"
-        disabled={!connected || pending}
-        onclick={() => controller.prepare()}>Create session</button
+        disabled={!connected ||
+          pending ||
+          sessions.choosing ||
+          !sessions.workspace}
+        onclick={() => controller.activate()}
+        >{target ? 'Activate' : 'Create & activate'}</button
       >
       <button
         type="button"
         class="action"
+        disabled={sessions.choosing}
         onclick={() => controller.compose(false)}>Cancel</button
       >
     </div>
@@ -135,8 +173,8 @@
       <p class="empty-title">wyss-control is unavailable</p>
       <p>{summarizeAuthority(authority).detail}</p>
       <p>
-        Sessions are read from the authority and cannot be created, resumed or
-        closed until it is connected. The Console keeps working.
+        Sessions are read from the authority and cannot be created, activated,
+        resumed or closed until it is connected. The Console keeps working.
       </p>
     </div>
   {:else if !page && sessions.readFailure}
@@ -153,7 +191,9 @@
   {:else if page.sessions.length === 0 && sessions.depth === 0}
     <div class="sessions-empty">
       <p class="empty-title">No managed sessions yet.</p>
-      <p>Create a session to let Wyss supervise an agent workspace.</p>
+      <p>
+        Create a session to let Wyss supervise Codex in one of your projects.
+      </p>
       <button
         type="button"
         class="action primary"
@@ -265,14 +305,70 @@
                 >
               </div>
             </div>
+          {:else if sessions.confirmingDiscard === selected.id}
+            <div
+              class="close-confirm"
+              role="group"
+              aria-label="Confirm discard"
+            >
+              <p>
+                Discard the uncertain attempt? wyss-control records that it was
+                abandoned and stops holding the session for it. If Codex did
+                create a thread for that attempt, the empty thread is left
+                behind. The session can then be activated again.
+              </p>
+              <div class="session-actions">
+                <button
+                  type="button"
+                  class="action danger"
+                  disabled={!connected || pending}
+                  onclick={() => controller.discard(selected.id)}
+                  >Discard attempt</button
+                >
+                <button
+                  type="button"
+                  class="action"
+                  onclick={() => controller.confirmDiscard(null)}
+                  >Keep it</button
+                >
+              </div>
+            </div>
           {:else}
+            {#if selected.recoverable}
+              <div class="session-uncertain" role="status">
+                <p class="uncertain-title">Activation outcome uncertain</p>
+                <p>
+                  wyss-control asked Codex to bind a workspace and could not
+                  confirm what Codex did. Nothing asks again by itself: a second
+                  request could create a second thread.
+                </p>
+              </div>
+            {/if}
             <div class="session-actions">
-              <button
-                type="button"
-                class="action primary"
-                disabled={!connected || pending || hint !== null}
-                onclick={() => controller.resume(selected.id)}>Resume</button
-              >
+              {#if selected.activatable}
+                <button
+                  type="button"
+                  class="action primary"
+                  disabled={!connected || pending || sessions.composing}
+                  onclick={() => controller.compose(true, selected.id)}
+                  >Activate</button
+                >
+              {:else if selected.recoverable}
+                <button
+                  type="button"
+                  class="action"
+                  disabled={!connected || pending}
+                  onclick={() => controller.confirmDiscard(selected.id)}
+                  >Discard attempt</button
+                >
+              {:else}
+                <button
+                  type="button"
+                  class="action primary"
+                  disabled={!connected || pending || hint !== null}
+                  onclick={() => controller.resume(selected.id)}>Resume</button
+                >
+              {/if}
               <button
                 type="button"
                 class="action"
@@ -281,7 +377,14 @@
                 >Close</button
               >
             </div>
-            {#if hint}<p class="session-hint">{hint}</p>{/if}
+            {#if selected.activatable}
+              <p class="session-hint">
+                Activate binds a project folder and attaches the session to
+                Codex.
+              </p>
+            {:else if hint && !selected.recoverable}
+              <p class="session-hint">{hint}</p>
+            {/if}
           {/if}
 
           <dl class="session-facts">
