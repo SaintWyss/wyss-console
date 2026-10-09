@@ -38,6 +38,7 @@ const THREAD: &str = "0199a213-81c0-7800-8aa1-bbab2a035a53";
 const PROVIDER_TURN: &str = "provider-turn-PRIVATE";
 const REASONING: &str = "REASONING_SUMMARY_PRIVATE";
 const COMMAND_OUTPUT: &str = "COMMAND_OUTPUT_PRIVATE";
+const ACTION_DETAIL: &str = "ACTION_DETAIL_PRIVATE";
 
 #[derive(Clone, Copy)]
 enum Fault {
@@ -443,6 +444,12 @@ fn a_turn_is_admitted_under_a_lease_that_is_kept_until_the_turn_has_ended() {
         .start(uuid(), session.clone(), 1, PROMPT.into())
         .unwrap();
     assert_eq!(sessions.stats().leases, 2);
+    // Reading the first turn again, ended as it is, gives nothing back: the lease that
+    // is kept now is the one the second turn runs under.
+    let sent = peer.requests().len();
+    turns.read(started.id.clone(), None, true).unwrap();
+    assert_eq!(since(&peer, sent), [EVENTS, STATUS]);
+    assert!(world.lock().unwrap().lease.is_some());
     // The same action sent again is the same turn: no lease, no new turn. (The first
     // request asks whether the turn the kept lease is for has ended.)
     let sent = peer.requests().len();
@@ -454,6 +461,45 @@ fn a_turn_is_admitted_under_a_lease_that_is_kept_until_the_turn_has_ended() {
     );
     assert_eq!(since(&peer, sent), [STATUS, START]);
     assert_eq!(world.lock().unwrap().turns.len(), 2);
+}
+
+#[test]
+fn a_turn_whose_end_nobody_read_does_not_lend_its_lease_to_the_next_one() {
+    let session = session_id();
+    let (peer, sessions, turns, world) = authority(World::new(&session));
+    let first = turns
+        .start(uuid(), session.clone(), 1, PROMPT.into())
+        .unwrap();
+    // While it runs, another start is the authority's to refuse, and the lease the
+    // running turn was admitted under stays where it is.
+    let sent = peer.requests().len();
+    assert_eq!(
+        failed(turns.start(uuid(), session.clone(), 1, PROMPT.into())),
+        (SessionFailure::Busy, true)
+    );
+    assert!(!since(&peer, sent).contains(&REVOKE.to_owned()));
+    assert!(world.lock().unwrap().lease.is_some());
+    // It ends, and the desktop never reads that it did.
+    world
+        .lock()
+        .unwrap()
+        .advance(&first.id, TurnState::Completed, Some(TurnReason::Completed));
+    let before = world.lock().unwrap().lease.clone().unwrap().lease_id;
+    let sent = peer.requests().len();
+    turns
+        .start(uuid(), session.clone(), 1, PROMPT.into())
+        .unwrap();
+    // The lease kept for the ended turn is given back first, and this turn is admitted
+    // under one of its own: its time budget is its own, not what was left of another's.
+    assert_eq!(
+        since(&peer, sent),
+        [STATUS, REVOKE, START, GATE, GRANT, START]
+    );
+    assert_eq!(sessions.stats().leases, 2);
+    assert_ne!(
+        world.lock().unwrap().lease.clone().unwrap().lease_id,
+        before
+    );
 }
 
 #[test]
@@ -611,13 +657,15 @@ fn a_reading_carries_the_answer_and_the_lifecycle_and_nothing_private() {
             (StreamKind::AssistantMessageDelta, Some("Hello, ")),
             (StreamKind::AssistantMessageDelta, Some("<b>world</b>")),
             (StreamKind::AssistantMessageCompleted, None),
-            (StreamKind::CommandProposed, None),
-            (StreamKind::ApprovalRequired, None),
+            // The authority puts no text on these today. If it ever does, it is the
+            // detail of a mediated action, and it does not cross either.
+            (StreamKind::CommandProposed, Some(ACTION_DETAIL)),
+            (StreamKind::ApprovalRequired, Some(ACTION_DETAIL)),
             (StreamKind::ApprovalResolved, Some("accepted")),
-            (StreamKind::CommandStarted, None),
+            (StreamKind::CommandStarted, Some(ACTION_DETAIL)),
             (StreamKind::CommandOutputDelta, Some(COMMAND_OUTPUT)),
-            (StreamKind::CommandCompleted, None),
-            (StreamKind::FileChangeProposed, None),
+            (StreamKind::CommandCompleted, Some(ACTION_DETAIL)),
+            (StreamKind::FileChangeProposed, Some(ACTION_DETAIL)),
             (StreamKind::ApprovalResolved, Some("not a state")),
             (StreamKind::TurnCompleted, None),
         ];
@@ -683,6 +731,7 @@ fn a_reading_carries_the_answer_and_the_lifecycle_and_nothing_private() {
     for private in [
         REASONING,
         COMMAND_OUTPUT,
+        ACTION_DETAIL,
         THREAD,
         PROVIDER_TURN,
         "PROMPT_PRIVATE",

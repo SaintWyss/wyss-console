@@ -307,8 +307,10 @@ it('sends four narrow requests and no other, each as one typed request', async (
 
 it('takes an answer about another turn, session or position for a failed bridge', async () => {
   const internal = { code: 'internal', retry: false };
-  // Another session's list.
-  bridge(() => tampered(fixture.list, ['session', 'id'], OTHER));
+  // Another session's list: well formed, and not an answer to what was asked.
+  const theirs = tampered(fixture.empty, ['session', 'id'], OTHER);
+  expect(() => parseTurnList(theirs)).not.toThrow();
+  bridge(() => theirs);
   expect(await failure(readTurns(SESSION))).toEqual(internal);
   // Another turn's reading, and another turn's receipt for a cancel.
   bridge(({ command }) =>

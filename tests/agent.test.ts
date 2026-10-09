@@ -1036,7 +1036,11 @@ it('asks nothing and shows nothing after it is disposed', async () => {
   await settle();
   const calls = h.calls();
   const published = h.published();
+  // The reading brought nothing, so the next one is waiting on a timer.
+  expect(vi.getTimerCount()).toBe(1);
   h.controller.dispose();
+  // Nothing is left to fire.
+  expect(vi.getTimerCount()).toBe(0);
   await vi.advanceTimersByTimeAsync(60_000);
   h.controller.observe(connected('20'));
   h.controller.setVisible(false);

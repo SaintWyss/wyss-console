@@ -235,13 +235,22 @@ struct Followed {
 }
 /// Reads a turn the way the window follows it, until `done` says to stop.
 fn follow(turns: &TurnService, turn: &ManagedTurnId, done: impl Fn(&TurnView) -> bool) -> Followed {
+    follow_from(turns, turn, None, done)
+}
+/// The same, from a cursor an earlier reading returned.
+fn follow_from(
+    turns: &TurnService,
+    turn: &ManagedTurnId,
+    from: Option<wyss_console::contracts::Sequence>,
+    done: impl Fn(&TurnView) -> bool,
+) -> Followed {
     let mut followed = Followed {
         views: Vec::new(),
         text: String::new(),
         kinds: Vec::new(),
         sequences: Vec::new(),
     };
-    let (mut cursor, deadline) = (None, Instant::now() + Duration::from_secs(12));
+    let (mut cursor, deadline) = (from, Instant::now() + Duration::from_secs(12));
     loop {
         let view = turns.read(turn.clone(), cursor, true).unwrap();
         cursor = view.next;
@@ -634,6 +643,78 @@ fn a_turn_the_authority_fails_is_shown_as_failed_with_its_reason() {
     assert_eq!(other.lease_active(session.clone()).unwrap(), None);
     let listed = turns.list(session).unwrap();
     assert_eq!(listed.turns[0].state, TurnState::Failed);
+    drop(other);
+    authority.stop(false);
+}
+
+#[test]
+fn a_runtime_stopped_under_a_turn_ends_it_and_the_session_runs_again_once_resumed() {
+    let _serial = serial();
+    let env = Sandbox::new("turn_long");
+    let mut authority = env.start();
+    let (sessions, turns) = env.services();
+    let session = env.activated(&sessions);
+    let started = turns
+        .start(id(), session.clone(), 1, PROMPT.into())
+        .unwrap();
+    let cursor = follow(&turns, &started.id, |v| v.turn.state == TurnState::Running)
+        .views
+        .last()
+        .unwrap()
+        .next;
+
+    // Somebody stops the runtime while the turn runs. The desktop asked for nothing.
+    let mut other = env.client();
+    other.runtime_stop(mutation()).unwrap();
+    env.ready(ActualState::Stopped);
+    let stopped = follow_from(&turns, &started.id, cursor, ended);
+    let last = stopped.views.last().unwrap();
+    assert_eq!(
+        (last.turn.state, last.turn.reason),
+        (TurnState::Indeterminate, Some(TurnReason::RuntimeStopped))
+    );
+    // That is the authority's word for it: the runtime went away before the provider
+    // confirmed anything, and the desktop shows it as that rather than as interrupted.
+    // What it had said is still held, and the lease kept for it is given back.
+    assert!(last.turn.output);
+    assert_eq!(other.lease_active(session.clone()).unwrap(), None);
+    // The session is what the authority says: bound, and attached to nothing.
+    let listed = turns.list(session.clone()).unwrap();
+    assert_eq!(listed.session.binding, BindingState::BoundDetached);
+    assert!(!listed.runnable);
+    assert_eq!(
+        failed(turns.start(id(), session.clone(), 1, PROMPT.into())),
+        (SessionFailure::RuntimeUnavailable, false)
+    );
+    assert_eq!(other.lease_active(session.clone()).unwrap(), None);
+    assert_eq!(env.sent("turn/start"), 1);
+
+    // Started again and resumed, the same session runs another turn.
+    other.runtime_start(mutation()).unwrap();
+    env.ready(ActualState::Ready);
+    sessions.resume(id(), session.clone(), 1).unwrap();
+    assert!(turns.list(session.clone()).unwrap().runnable);
+    let again = turns
+        .start(id(), session.clone(), 1, PROMPT.into())
+        .unwrap();
+    let running = follow(&turns, &again.id, |v| v.turn.state == TurnState::Running);
+    assert_eq!(running.text, "ASSISTANT_SENTINEL");
+    assert_eq!(env.sent("turn/start"), 2);
+    let listed = turns.list(session.clone()).unwrap();
+    assert_eq!(
+        listed
+            .turns
+            .iter()
+            .map(|t| (t.id.clone(), t.state))
+            .collect::<Vec<_>>(),
+        [
+            (again.id.clone(), TurnState::Running),
+            (started.id.clone(), TurnState::Indeterminate),
+        ]
+    );
+
+    other.runtime_stop(mutation()).unwrap();
+    env.ready(ActualState::Stopped);
     drop(other);
     authority.stop(false);
 }
