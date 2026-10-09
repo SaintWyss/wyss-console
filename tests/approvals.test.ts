@@ -260,6 +260,18 @@ it('refuses an approval whose parts contradict each other', () => {
       recent: Array.from({ length: 8 }, () => fixture.recent[0]),
     }),
   ).toThrow(/invalid_list/);
+  // Eight different approvals are a page; a ninth is more than the desktop reads.
+  const ended = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({
+      ...fixture.recent[0],
+      id: `0000000${i}-0000-4000-8000-000000000000`,
+    }));
+  expect(
+    parseApprovalList({ ...fixture.empty, recent: ended(8) }).recent,
+  ).toHaveLength(8);
+  expect(() =>
+    parseApprovalList({ ...fixture.empty, recent: ended(9) }),
+  ).toThrow(/invalid_list/);
   expect(() => parseApprovalList({ ...list, head: 14 })).toThrow(
     /invalid_head/,
   );

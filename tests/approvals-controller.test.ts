@@ -242,6 +242,11 @@ it('shows what the authority holds and nothing read on a connection that is gone
   const before = h.lists.length;
   h.controller.observe(connected('3', { restarts: 1 }));
   expect(h.lists).toHaveLength(before + 1);
+  // Connected again, and not read yet: what was shown before is not there to decide.
+  h.controller.decide(C, 'approve');
+  h.controller.decide(C, 'deny');
+  h.controller.retry(C);
+  expect(h.decisions).toHaveLength(0);
   // It restarted: the approval it held was invalidated, and that is what it says.
   h.lists.at(-1)!.resolve(
     listOf(
@@ -470,6 +475,9 @@ it('reads a change set file by file and a diff to its end, one request at a time
       file: index,
       offset: 0,
     });
+    // Asked for more while a file is being read: no second read beside it.
+    h.controller.moreFiles(F);
+    expect(h.reads).toHaveLength(index);
     h.reads.at(-1)!.resolve(change(11, index));
     await settle();
   }
