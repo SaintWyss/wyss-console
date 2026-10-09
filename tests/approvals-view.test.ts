@@ -167,6 +167,8 @@ async function running() {
   ipc.world.turns = [turn(T1, 'running', 2)];
   ipc.last('managed_turn_start').resolve({ id: T1 });
   await flush();
+  // A turn is being followed: approvals are read from now on, and were not before.
+  expect(ipc.count('managed_approvals')).toBe(1);
   return ipc;
 }
 /** The running turn reports that it waits on `approval`, which the authority now lists. */
@@ -549,4 +551,48 @@ it('offers nothing beyond one decision for one approval', async () => {
   await ipc.advance('13', 5);
   expect(ipc.count('managed_approval_approve')).toBe(0);
   expect(ipc.count('managed_approval_deny')).toBe(0);
+});
+
+it('never shows the approval of another turn under a turn, nor a command as markup', async () => {
+  const ipc = await running();
+  const hostile =
+    '/usr/bin/bash -lc \'echo <img src=x onerror="window.pwned=1"><b>x</b>\'';
+  // The turn says it waits on one approval. What the authority lists as pending is
+  // another one, of another turn.
+  const theirs = {
+    ...approvals.command,
+    approval: {
+      ...approvals.command.approval,
+      id: F,
+      turn: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    },
+    command: { ...approvals.command.command, command: hostile },
+  };
+  ipc.world.approvals = pendingList(theirs);
+  ipc.last('managed_turn_read').resolve(
+    reading(turn(T1, 'running', 2), [[1, 'approval_required']], {
+      approval: {
+        id: C as never,
+        kind: 'command_execution',
+        expires_at: approvals.command.approval.expires_at,
+      },
+    }),
+  );
+  await flush();
+  // Under this turn: that it waits, and nothing of the other turn's action.
+  expect(cards(agent())).toHaveLength(0);
+  expect(text(agent().querySelector('.turn-approval'))).toMatch(
+    /^Waiting for approval Codex asked to run a command\./,
+  );
+  expect(text(agent())).not.toContain('echo');
+  expect(button('Approve', agent())).toBeUndefined();
+  // In Approvals it is shown as what it is: another turn's, as text.
+  await click(nav('Approvals'));
+  const [card] = cards(approvalsView());
+  expect(text(card.querySelector('.approval-context'))).toBe(
+    'rag-corp · turn bbbbbbbb',
+  );
+  expect(card.querySelector('.approval-code')!.textContent).toBe(hostile);
+  expect(card.querySelectorAll('img, b, script')).toHaveLength(0);
+  expect((window as unknown as { pwned?: number }).pwned).toBeUndefined();
 });
