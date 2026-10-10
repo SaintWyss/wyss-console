@@ -78,7 +78,14 @@ const fake = {
   key: [
     '-----BEGIN ',
     'RSA PRIVATE ',
-    'KEY-----\nMIIB\n-----END RSA PRIVATE KEY-----',
+    'KEY-----\n',
+    'MIIEogIBAAKCAQEA6yCv+BLrRP/dMPBXJWK21c0aqxIX6JkODL4K+zlyEURt8/Wp\n',
+    '-----END RSA PRIVATE KEY-----',
+  ].join(''),
+  npm: [
+    '//registry.npmjs.org/:_auth',
+    'Token=',
+    'npm_0123456789abcdefghijklmnop',
   ].join(''),
 };
 
@@ -165,6 +172,11 @@ it('does not mistake ordinary text for a credential', () => {
       '"access_token": ""',
       'AKIA is a prefix',
       '-----BEGIN CERTIFICATE-----',
+      // The words a TLS library looks for, and the strings it prints to explain itself.
+      '-----BEGIN PRIVATE KEY-----',
+      '-----BEGIN RSA PRIVATE KEY-----\n-----END RSA PRIVATE KEY-----',
+      's://%s:%d HOME %s%s.netrc ftp@example.com',
+      'ftp://user:pass@host',
       'eyJ not a token',
       'ghp_ short',
     ].join('\n'),

@@ -1,62 +1,49 @@
 # Wyss Console
 
-Desktop client for local terminals and, progressively, managed-agent control.
-Linux-first, local-first. Current validated status: **Core complete**: the managed-agent
-core (external authority, leases, managed turns, approval mediation, durable event
-replay) is implemented, hardened and accepted through
-[ADR 0018](docs/adr/0018-core-hardening-and-completion.md). The desktop follows that
-authority: its top bar shows the real authority and managed-agent status
-([ADR 0019](docs/adr/0019-desktop-authority-link.md)), its Sessions view lists the
-managed sessions the authority holds and can resume and close them
-([ADR 0020](docs/adr/0020-managed-sessions-ui.md)), and a session can be created and
-activated from the window: bound to a project folder chosen in a native dialog and
-attached to the managed Codex runtime, which the authority starts when asked
-([ADR 0021](docs/adr/0021-session-activation.md)). A ready session can be given an
-objective in the Agents view: the authority starts a managed turn for it, the answer is
-shown as it arrives and the turn can be cancelled
-([ADR 0022](docs/adr/0022-managed-turns-ui.md)). A session can be created in Local
-Tools, where Codex may propose commands and file changes in its project folder, and
-each proposal waits for an approval that is read and answered in the window
-([ADR 0023](docs/adr/0023-local-tools-and-approvals-ui.md)). What the authority
-recorded can be read in the Events view, newest first and back to the first event
-([ADR 0024](docs/adr/0024-events-history-ui.md)). A packaged desktop installs and starts
-its own authority: launching Wyss Console is enough
-([ADR 0025](docs/adr/0025-authority-lifecycle-bootstrap.md)). The product is not
-complete: nothing an approval decided is remembered, history cannot be searched or
-exported, there is no Settings view, and the authority runs one Codex runtime in one
-mode at a time. Built with Tauri 2,
-Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
-and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
-of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
+A Linux desktop for local terminals and for working with Codex in managed, approved
+sessions. Your terminals work on their own; managed sessions, approvals and history are
+kept by a separate authority that Wyss Console installs and starts for you.
 
-## Development
+**Release candidate 0.2.0.** It is code complete and checked in the cloud; it has not
+yet been accepted on a real desktop ([`docs/release/LOCAL_ACCEPTANCE.md`](docs/release/LOCAL_ACCEPTANCE.md)).
+Release notes: [CHANGELOG](CHANGELOG.md) and [`docs/release/RELEASE.md`](docs/release/RELEASE.md).
 
-Requires stable Rust, Node 26+, npm 12+ and the
-[Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
+## Install and use
 
-```sh
-npm ci
-npm run desktop:dev
-```
+You need Linux with a `systemd --user` session (any desktop session has one) and
+[Codex](https://developers.openai.com/codex) on the `PATH` your session gives its
+services, which is where a desktop session puts `~/.local/bin`. Nothing else: no
+repository, no Cargo, no npm, no terminal after installing.
 
-`npm run dev` runs the frontend alone; application IPC requires the desktop host.
-Development and native-run commands keep Cargo/XDG caches inside ignored `.cache/`.
+1. Download `wyss-console_0.2.0_amd64.deb` (or the `.AppImage`) and `SHA256SUMS`, and
+   check it: `sha256sum -c SHA256SUMS --ignore-missing`. The files are checksummed and
+   **not signed**.
+2. Install it: `sudo apt install ./wyss-console_0.2.0_amd64.deb`, or make the AppImage
+   executable and run it. The `.deb` recommends `bubblewrap`, which Local Tools needs.
+3. Open **Wyss Console** from your application menu. The authority is installed and started
+   by itself; the top bar goes from Starting to Connected.
 
-## Validation
+What you can do:
 
-```sh
-npm run check
-npm run check:rust
-npm run test:pty
-```
+- **Console**: local terminals, in tabs.
+- **Sessions**: create a managed session for a project folder and activate it. It starts in
+  **Inference** (Codex answers, nothing runs). **Local Tools** is chosen for a session on
+  purpose.
+- **Agents**: give a session an objective and follow the turn.
+- **Approvals**: in Local Tools every command and file change Codex proposes waits here
+  until you approve or deny it, one at a time.
+- **Events**: what the authority recorded, newest first.
+- **Settings**: how Wyss Console looks and where it opens (font size, scrollback and cursor of
+  the terminals, how event times are written, the view it opens on), the authority's state,
+  the version, and a reset. Settings change convenience only: they cannot turn on Local
+  Tools, skip an approval, or change what Codex may do.
 
-Frontend commands: `format:check`, `lint`, `typecheck`, `test`, `build`.
-Rust commands: `rust:fmt`, `rust:check`, `rust:test`, `rust:clippy`.
-`npm run format` applies frontend/config/document formatting.
+Closing the window does not stop the authority: the next time you open it, the same
+sessions and history are there.
 
-## Using Wyss Console
+### The authority
 
-Launch Wyss Console. The application ensures its authority is available automatically:
+Wyss Console ensures its authority is available automatically:
 there is nothing to start by hand, no terminal to keep open and no `sudo`.
 
 ```text
@@ -90,14 +77,61 @@ it. Codex has to be in the `PATH` your session gives its services, which is wher
 desktop session puts `~/.local/bin`. Linux with a `systemd --user` session is the
 supported platform. See [ADR 0025](docs/adr/0025-authority-lifecycle-bootstrap.md).
 
+### Your data, upgrades and removal
+
+| What                 | Where                                                      |
+| -------------------- | ---------------------------------------------------------- |
+| Preferences          | `~/.config/wyss-console/preferences.json` (private, small) |
+| Sessions and history | `~/.local/state/wyss-console/` (the authority's, yours)    |
+| The authority        | `~/.local/share/wyss-console/authority/wyss-control`       |
+| Its service          | `~/.config/systemd/user/wyss-control.service`              |
+
+- **Upgrading** installs the new package over the old. A running authority is never
+  replaced: the window says `update pending`, and the new authority is installed the next
+  time none runs (after you log out, or stop it). Your sessions and history carry over.
+- **Removing the application** (`sudo apt remove wyss-console`, or deleting the AppImage)
+  removes the desktop only. The authority, its unit and your data stay. To remove them too:
+  `systemctl --user stop wyss-control`, delete the two files above, and, only if you want
+  to lose your history, delete `~/.local/state/wyss-console/`.
+- **Settings → Reset preferences** restores the defaults and nothing else.
+
+## Development
+
+Everything below is for working on Wyss Console itself.
+
+Requires stable Rust, Node 26+, npm 12+ and the
+[Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
+
+```sh
+npm ci
+npm run desktop:dev
+```
+
+`npm run dev` runs the frontend alone; application IPC requires the desktop host.
+Development and native-run commands keep Cargo/XDG caches inside ignored `.cache/`.
+
+## Validation
+
+```sh
+npm run check
+npm run check:rust
+npm run test:pty
+```
+
+Frontend commands: `format:check`, `lint`, `typecheck`, `test`, `build`.
+Rust commands: `rust:fmt`, `rust:check`, `rust:test`, `rust:clippy`.
+`npm run format` applies frontend/config/document formatting.
+
 ## Production build
 
 ```sh
-npm run desktop:package
+npm run desktop:package    # the directory package: bin/, libexec/, share/
+npm run release:package    # the .deb and the AppImage, checksums, manifest, verification
+npm run release:verify     # open what was built and check it again
 ```
 
-Builds the authority, pins the desktop to its SHA-256, and writes the package to
-`.artifacts/package/wyss-console-<version>-linux-<arch>/`:
+Both build the authority, pin the desktop to its SHA-256 (`WYSS_AUTHORITY_SHA256`) and
+write the package to `.artifacts/package/wyss-console-<version>-linux-<arch>/`:
 
 ```text
 bin/wyss-console
@@ -105,10 +139,13 @@ libexec/wyss-console/wyss-control
 share/wyss-console/package.json
 ```
 
-Copy that directory to a place only you (or root) can write, and run `bin/wyss-console`
-from it. The desktop finds the authority beside itself and installs it; it refuses one
-whose digest is not the one it was built with, and one in a folder others can write to.
-No package format (`.deb`, AppImage, Flatpak) is produced.
+`release:package` also writes `.artifacts/release/` with the `.deb`, the AppImage,
+`SHA256SUMS` and `release-manifest.json`. Both formats put the two programs below their
+prefix exactly as above (`usr/bin`, `usr/libexec/wyss-console`), so the desktop finds its
+authority by the same rule everywhere: from its own real executable, never from `PATH`,
+and only if its SHA-256 is the pinned one. It needs a clean committed tree, `dpkg-deb`,
+`mksquashfs` and network access to GitHub for the AppImage tooling. See
+[ADR 0026](docs/adr/0026-settings-and-release-closure.md).
 
 ```sh
 npm run desktop:build    # the two binaries only, in src-tauri/target/release
@@ -134,7 +171,7 @@ managed-agent sessions. Tabs, identities and scrollback are not persisted; resta
 creates fresh shells. Tab arrows/Home/End move tab focus; Enter/Space activate.
 No global terminal shortcuts are intercepted.
 
-TERM is scoped to each child as `xterm-256color`. Scrollback is 5,000 volatile lines.
+TERM is scoped to each child as `xterm-256color`. Scrollback is volatile (5,000 lines unless changed in Settings).
 Output uses bounded byte batches acknowledged after xterm processing. Input is capped
 at 64 KiB queued and 4 KiB per IPC write; an excessive paste fails visibly instead of
 buffering indefinitely. Selection/paste use default WebView behavior, without added

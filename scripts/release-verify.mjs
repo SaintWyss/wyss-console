@@ -205,7 +205,17 @@ function checkTree(tree, label) {
     `${label}: no credential, fixture, source or local state by name`,
     forbidden.map((f) => `${f.path} (${f.kind})`).join(', '),
   );
-  const secrets = secretsIn(entries);
+  // The AppImage carries the build host's shared libraries. GnuTLS compiles its own
+  // published self-test keys into libgnutls, so that library, and only that one, holds
+  // private-key blocks. Reviewed, and allowed by path and kind: a key in any other file
+  // stops the release.
+  const secrets = secretsIn(entries).filter(
+    (s) =>
+      !(
+        /^usr\/lib\/libgnutls\.so(\.[0-9.]+)?$/.test(s.path) &&
+        s.kind === 'private key block'
+      ),
+  );
   check(
     secrets.length === 0,
     `${label}: no credential in any file`,
@@ -397,17 +407,35 @@ if (flag('--repo')) {
     .filter((e) => e !== null);
   // Names that only a credential has. A fixture directory or a source file is a normal
   // thing to track; these are not.
-  const tracked = forbiddenPaths(entries).filter((f) =>
-    /environment|provider credentials|private key|package manager|database|credentials file/.test(
-      f.kind,
-    ),
+  // `.npmrc` is a normal tracked file (this project's holds two settings); what could
+  // make it a credential is a token in it, which the content scan below looks for.
+  const tracked = forbiddenPaths(entries).filter(
+    (f) =>
+      !/(^|\/)\.npmrc$/.test(f.path) &&
+      /environment|provider credentials|private key|package manager|database|credentials file/.test(
+        f.kind,
+      ),
   );
   check(
     tracked.length === 0,
     'no credential file is tracked',
     tracked.map((f) => `${f.path} (${f.kind})`).join(', '),
   );
-  const secrets = secretsIn(entries);
+  // One finding is known and reviewed: a historical planning document of an earlier
+  // system plants a made-up `sk-ant-` string in a test that checks a secret is not
+  // indexed (a canary, 43 characters where a real key has about a hundred). It is
+  // allowed by path and kind, so that a second one anywhere stops the release.
+  const ALLOWED = new Set([
+    'docs origins/.planning/phases/03-pipeline-de-ingesta/03-PATTERNS.md|OpenAI-style API key',
+    'docs origins/.planning/phases/03-pipeline-de-ingesta/03-PATTERNS.md|Anthropic-style API key',
+  ]);
+  const found = secretsIn(entries);
+  const secrets = found.filter((s) => !ALLOWED.has(`${s.path}|${s.kind}`));
+  for (const s of found)
+    if (ALLOWED.has(`${s.path}|${s.kind}`))
+      console.log(
+        `note  reviewed canary, not a credential: ${s.path} (${s.kind})`,
+      );
   check(
     secrets.length === 0,
     `no credential in any of the ${entries.length} tracked files`,

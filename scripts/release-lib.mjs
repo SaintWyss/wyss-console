@@ -138,8 +138,10 @@ export function forbiddenPaths(entries) {
 export const SECRET_PATTERNS = [
   {
     kind: 'private key block',
+    // The marker alone is in every TLS library, as a string to look for. A key has a
+    // body of base64 after it, with optional headers in between.
     pattern:
-      /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----/,
+      /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----\r?\n(?:[A-Za-z-]+: [^\n]*\n)*\s*[A-Za-z0-9+/=]{40,}/,
     anchors: ['-----BEGIN '],
   },
   {
@@ -192,9 +194,17 @@ export const SECRET_PATTERNS = [
   },
   {
     kind: 'credentials in a URL',
+    // A user and a password in a real address. The format strings (`%s:%d`) and the
+    // examples that libraries print are not one.
     pattern:
-      /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]{1,64}:[^\s/@]{3,64}@[a-z0-9.-]+/i,
+      /\b[a-z][a-z0-9+.-]*:\/\/[A-Za-z0-9._~-]{1,64}:[A-Za-z0-9._~!$&'()*+,;=-]{3,64}@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/i,
     anchors: ['://'],
+  },
+  {
+    kind: 'package registry token',
+    pattern:
+      /_authToken\s*=\s*[A-Za-z0-9._~+/=-]{8,}|:_auth\s*=\s*[A-Za-z0-9+/=]{8,}/,
+    anchors: ['_auth'],
   },
 ];
 

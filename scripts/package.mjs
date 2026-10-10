@@ -43,6 +43,18 @@ const sha256 = (path) =>
 
 const releasing = process.argv.includes('--release');
 
+// What the binaries say about where they were built is the same wherever that was: the
+// checkout and Cargo's sources are named by fixed, made-up paths. A package that names
+// the machine that built it is a package that records it. The more specific prefix is
+// given last, which is the one rustc prefers.
+const remap = [
+  `--remap-path-prefix=${root}=/build/wyss-console`,
+  `--remap-path-prefix=${join(root, '.cache', 'cargo')}=/build/cargo`,
+].join(' ');
+process.env.RUSTFLAGS = [process.env.RUSTFLAGS, remap]
+  .filter(Boolean)
+  .join(' ');
+
 /**
  * @param {string} command
  * @param {string[]} args
@@ -355,7 +367,7 @@ if (releasing) {
         name: 'wyss-console',
         version,
         revision: revision ?? null,
-        platform: `linux-${arch()}`,
+        platform: `linux-${arch() === 'x64' ? 'x86_64' : arch() === 'arm64' ? 'aarch64' : arch()}`,
         authority_sha256: digest,
         artifacts,
         // Checksummed, not signed: there is no release signing key or process.
