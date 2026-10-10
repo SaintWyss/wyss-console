@@ -106,8 +106,6 @@ struct Inner {
     changed: Condvar,
     /// One attempt at a time, whoever asks.
     attempting: AtomicBool,
-    /// The one automatic start of this process was used.
-    started_once: AtomicBool,
     stop: AtomicBool,
     link: Arc<dyn AuthorityLink>,
     provision: Provision,
@@ -392,8 +390,10 @@ impl Inner {
                 LinkState::Absent if armed && self.begin() => {
                     armed = false;
                     // By itself it starts an authority once, and only one it never saw:
-                    // when it came up and nothing answered.
-                    let kind = if connected_once || self.started_once.swap(true, Ordering::AcqRel) {
+                    // when it came up and nothing answered. `armed` is cleared here and
+                    // set again only by a connection, after which every absence is one
+                    // to watch.
+                    let kind = if connected_once {
                         Kind::Recovery
                     } else {
                         Kind::Automatic
@@ -454,7 +454,6 @@ impl AuthorityBootstrap {
             view: Mutex::new(LifecycleView::initial(build)),
             changed: Condvar::new(),
             attempting: AtomicBool::new(false),
-            started_once: AtomicBool::new(false),
             stop: AtomicBool::new(false),
             link,
             provision,
