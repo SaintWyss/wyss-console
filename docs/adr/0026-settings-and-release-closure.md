@@ -280,6 +280,14 @@ has not happened. No tag was created and history was not touched.
 | That the window is granted no framework permission                            | KDE/KWin native blur; 960×640 and narrow layouts by eye      |
 |                                                                               | Upgrading from a running previous authority; uninstalling    |
 
+Two limits of the build host are recorded rather than hidden. Its `bubblewrap` is 0.9.0
+and the Local Tools sandbox needs 0.11 or newer (it is looked for at `/usr/bin/bwrap`, which
+was not replaced), and it has no user service manager. Forty tests of the Rust suite
+fail for that reason; the same forty fail on a clean `origin/main`, and the 569 that pass
+include every test this phase added. The packaged desktop was started under Xvfb from
+the extracted `.deb` and AppImage with an isolated home, and stayed up; no authority could
+be started without a service manager. None of this stands in for the local acceptance.
+
 The cloud did not run Codex: nothing in this phase touches runtime launching or the
 provider protocol, so a paid provider run would have repeated 3G's evidence and shown
 nothing new.

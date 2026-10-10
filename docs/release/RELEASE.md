@@ -18,7 +18,8 @@ product. Nothing here has been tagged or published; both are for the owner to do
 
 - Linux with a login session that has a user service manager (`systemd --user`).
 - The `.deb`: Debian 12 / Ubuntu 22.04 or newer (needs `libwebkit2gtk-4.1`, `libgtk-3`,
-  `systemd`). It recommends `bubblewrap`, which Local Tools needs.
+  `systemd`). It recommends `bubblewrap`, which Local Tools needs, **0.11 or newer**: it uses
+  `--overlay-src`; without it Local Tools cannot become Ready.
 - The AppImage: built on Ubuntu 24.04 with that system's libraries inside it; use a system
   at least that recent. It needs FUSE 2 to be double-clicked, or `--appimage-extract-and-run`.
 - Codex, installed separately, on the `PATH` the service manager gives its units (a desktop
@@ -113,4 +114,60 @@ wyss-control`, or after Retry following a crash loop), the authority carried by 
 
 ## This candidate's build record
 
-See the section below, written from the files that were produced.
+Built in the cloud (Ubuntu 24.04, x86_64) from source revision **`818657b38fce`**, the commit
+that held all of the code of this release. Commits after it change documentation only; the
+artifacts were not rebuilt for them, so the build revision they report in About is the one
+above. `npm run release:package` made them and `npm run release:verify` opened them again:
+**60 checks passed, 0 failed**.
+
+| Artifact                            | Size       | SHA-256                                                            |
+| ----------------------------------- | ---------- | ------------------------------------------------------------------ |
+| `wyss-console_0.2.0_amd64.deb`      | 5,682,292  | `2004bbe63c7a9314e938514a00bd19aa668da18b32c2d8a13684a15b9dedaba2` |
+| `wyss-console_0.2.0_amd64.AppImage` | 86,063,608 | `3888e7533f201ded5fff87f71501cbd49f210bbfcd36a293e83a1c4a7484fbb3` |
+
+The authority both carry (and the desktop is pinned to):
+`7decca439c325aa652479159d52f1aabf9a7efe1be78794bdde9130b08a75537`.
+
+**Checksummed, not signed.** `SHA256SUMS` and `release-manifest.json` are produced by the
+build and are not committed: the artifacts are rebuilt from a commit, not stored in it.
+They are in `.artifacts/release/` of the machine that built them.
+
+Toolchain: rustc 1.97.0, cargo 1.97.0 (`--locked`, `Cargo.lock` as committed), Node
+v22.22.0, npm 10.9.4 (`npm ci`, `package-lock.json` as committed), `@tauri-apps/cli` 2.12.1,
+target `x86_64-unknown-linux-gnu`. (`package.json` asks for Node 26 and npm 12; this
+environment had 22 and 10, and every command ran on them. The engines are advisory.)
+
+What was checked in the artifacts themselves (see ADR 0026): the manifest, `SHA256SUMS` and
+both files agree; the desktop and the authority are where the desktop looks, executable, one
+of each; the authority is the pinned one and the desktop carries its digest; no credential,
+fixture, source, database or local state by name or content (the checkout's 581 tracked
+files included); neither program names the build machine; nothing writable by group or
+others; the `.deb` has no maintainer script, is owned by root, and its menu entry
+validates.
+
+What was observed running: the packaged desktop (the `.deb`'s `usr/bin/wyss-console`, and the
+AppImage's entry point after extraction) was started under Xvfb with an empty home and stayed
+up. With no user service manager in the build container its bootstrap could not start an
+authority, which is the case the product says it handles; nothing was installed. That is not
+an observation of a real desktop session, `systemd --user` or Codex: those are in
+[`LOCAL_ACCEPTANCE.md`](LOCAL_ACCEPTANCE.md).
+
+### Reviewed findings of the content scan
+
+- An archived planning document of an earlier system (`docs origins/.planning/phases/03-pipeline-de-ingesta/03-PATTERNS.md`,
+  line 573) contains a test that plants a made-up `sk-ant-` string in a file to check it is
+  not indexed. It is 43 characters where a real key has about a hundred, and it sits in a
+  test named for planting a secret. It was judged a canary and not a credential, and is
+  allowed by path and kind so that any second finding stops the release. **Whoever owns that
+  document may want to confirm it and redact it.**
+- The AppImage carries the build host's `libgnutls`, which compiles GnuTLS's own published
+  self-test keys into the library. Allowed by library and kind.
+
+### What the cloud could not run
+
+The Rust suite on this build host has **40 failing tests, the same 40 that fail on a clean
+`origin/main`** (checked by running both): 5 isolation tests and 28 process tests (told apart by their errors: an unknown `bwrap` option, or a Local Tools runtime that failed to start) need
+`bubblewrap` 0.11 or newer (the Local Tools sandbox uses `--overlay-src`; this host has
+0.9.0 and the code requires `/usr/bin/bwrap`), and 7 lifecycle tests need a real
+`systemd --user` manager. They have to be run on a machine that has both. 569 tests pass
+(42 more than on `origin/main`: the new ones).

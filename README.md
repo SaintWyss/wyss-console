@@ -19,7 +19,8 @@ repository, no Cargo, no npm, no terminal after installing.
    check it: `sha256sum -c SHA256SUMS --ignore-missing`. The files are checksummed and
    **not signed**.
 2. Install it: `sudo apt install ./wyss-console_0.2.0_amd64.deb`, or make the AppImage
-   executable and run it. The `.deb` recommends `bubblewrap`, which Local Tools needs.
+   executable and run it. The `.deb` recommends `bubblewrap` (0.11 or newer), which Local
+   Tools needs; Inference does not.
 3. Open **Wyss Console** from your application menu. The authority is installed and started
    by itself; the top bar goes from Starting to Connected.
 
