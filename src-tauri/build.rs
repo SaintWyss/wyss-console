@@ -3,6 +3,8 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "get_app_info",
             "authority_state",
+            "authority_lifecycle",
+            "authority_retry",
             "managed_sessions_page",
             "managed_session_prepare",
             "managed_session_resume",

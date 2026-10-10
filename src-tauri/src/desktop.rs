@@ -7,6 +7,7 @@ use tauri::Manager;
 mod authority;
 mod events;
 mod glass;
+mod lifecycle;
 mod sessions;
 mod terminal;
 mod turns;
@@ -52,14 +53,19 @@ fn build_main_window(
         .build()
 }
 
-pub fn run() {
+pub fn run(authority_digest: Option<&'static str>) {
     let stopping = Arc::new(AtomicBool::new(false));
     let managed_sessions = sessions::SessionService::from_environment();
+    let authority = authority::AuthorityService::from_environment();
+    // Makes an authority available where none answers. It follows the observer above
+    // and never stands in for it: connected is what the observer says.
+    let bootstrap = lifecycle::start(&authority, authority_digest);
     tauri::Builder::default()
         .setup(|app| open_main_window(app))
         .manage(TerminalService::default())
         // Read-only and independent: no terminal operation waits on, or learns of, it.
-        .manage(authority::AuthorityService::from_environment())
+        .manage(authority)
+        .manage(bootstrap)
         // Its own short-lived connections: the observer above is never borrowed.
         // Turns send their intents through the session service and stop with it.
         .manage(turns::TurnService::new(managed_sessions.clone()))
@@ -71,6 +77,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_app_info,
             authority::authority_state,
+            lifecycle::authority_lifecycle,
+            lifecycle::authority_retry,
             sessions::managed_sessions_page,
             sessions::managed_session_prepare,
             sessions::managed_session_resume,
@@ -108,6 +116,10 @@ pub fn run() {
                     .state::<authority::AuthorityService>()
                     .inner()
                     .clone();
+                let bootstrap = handle
+                    .state::<lifecycle::AuthorityBootstrap>()
+                    .inner()
+                    .clone();
                 let sessions = handle.state::<sessions::SessionService>().inner().clone();
                 let app = handle.clone();
                 tauri::async_runtime::spawn(async move {
@@ -117,6 +129,9 @@ pub fn run() {
                         // Terminals first: the link's bounded stop never delays them.
                         let result = service.shutdown();
                         authority.shutdown();
+                        // Only the following ends. The authority is not stopped: its
+                        // lifetime is the service manager's, not this window's.
+                        bootstrap.shutdown();
                         result
                     })
                     .await;

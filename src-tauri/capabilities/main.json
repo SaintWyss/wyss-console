@@ -6,6 +6,8 @@
   "permissions": [
     "allow-get-app-info",
     "allow-authority-state",
+    "allow-authority-lifecycle",
+    "allow-authority-retry",
     "allow-managed-sessions-page",
     "allow-managed-session-prepare",
     "allow-managed-session-resume",

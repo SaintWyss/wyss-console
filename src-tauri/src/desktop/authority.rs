@@ -37,6 +37,11 @@ pub enum BridgeErrorCode {
 pub struct BridgeError {
     code: BridgeErrorCode,
 }
+impl BridgeError {
+    pub(super) fn new(code: BridgeErrorCode) -> Self {
+        Self { code }
+    }
+}
 
 /// The current view, or the next one once it differs from revision `after`. Waiting has
 /// its own admission and never touches the terminal service or its blocking permits.

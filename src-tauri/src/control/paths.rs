@@ -19,7 +19,7 @@ fn err(_: impl std::fmt::Debug) -> E {
 }
 /// No symlink component and no ancestor writable by another UID, except root-owned
 /// sticky temporary parents used by isolated tests. Final XDG root remains owned/private.
-fn ancestors(path: &Path) -> ControlResult<()> {
+pub(crate) fn ancestors(path: &Path) -> ControlResult<()> {
     if !path.is_absolute()
         || path
             .components()
@@ -41,7 +41,7 @@ fn ancestors(path: &Path) -> ControlResult<()> {
     }
     Ok(())
 }
-fn owned_dir(path: &Path, private: bool) -> ControlResult<()> {
+pub(crate) fn owned_dir(path: &Path, private: bool) -> ControlResult<()> {
     ancestors(path)?;
     let m = fs::symlink_metadata(path).map_err(err)?;
     if m.uid() != geteuid().as_raw() || (private && m.mode() & 0o777 != 0o700) {
@@ -49,7 +49,7 @@ fn owned_dir(path: &Path, private: bool) -> ControlResult<()> {
     }
     Ok(())
 }
-fn create_private(path: &Path) -> ControlResult<()> {
+pub(crate) fn create_private(path: &Path) -> ControlResult<()> {
     match DirBuilder::new().mode(0o700).create(path) {
         Ok(()) => (),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),

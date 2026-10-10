@@ -6,7 +6,8 @@ mod conversations;
 mod framing;
 mod gate;
 mod mediation;
-mod paths;
+// The safe-path rules are the authority's; the desktop's installer follows the same ones.
+pub(crate) mod paths;
 mod runtime;
 mod schema;
 mod server;

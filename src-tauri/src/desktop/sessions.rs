@@ -501,6 +501,9 @@ mod tests {
         let expected = [
             "allow-get-app-info",
             "allow-authority-state",
+            // The lifecycle: one read and Retry. Nothing that names a service or a file.
+            "allow-authority-lifecycle",
+            "allow-authority-retry",
             "allow-managed-sessions-page",
             "allow-managed-session-prepare",
             "allow-managed-session-resume",
