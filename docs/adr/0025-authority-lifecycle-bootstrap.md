@@ -343,7 +343,27 @@ or socket is shown, and the terminal works throughout.
   created 0700, and the runtime does not start unless it is the authority's, private and
   empty. It is in no project of the user's, next to no file of the authority's, and under
   no directory that carries project configuration. Which workspace a thread works in was
-  never taken from it. The read-only developer probe keeps its own.
+  never taken from it. The read-only developer probe keeps its own. How a process gets
+  there depends on how it is started, and every runtime process is covered: the version
+  check, discovery and the thread-capable process.
+  - **Inference, and the version check of both profiles.** The process is started
+    directly by the authority, in that host directory (`Command::current_dir`), and is
+    told the same place in `PWD`, so the directory the authority itself was started from
+    does not travel with it.
+  - **Local Tools.** The process is started by the sandbox launcher, and the namespace
+    hides the authority's runtime directory whole, `runtime-cwd` with it. Where the
+    launcher is started therefore decides nothing: a `bwrap` whose own directory is gone
+    goes to the user's home. The launcher is told where to go instead. The last mounts
+    of the namespace are `--perms 0700 --tmpfs <runtime-cwd> --remount-ro <runtime-cwd>`,
+    followed by `--chdir <runtime-cwd>`: an empty private directory that exists only in
+    that namespace, at the authority's path, sealed so it stays empty, and the place
+    the launcher changes to before it becomes the runtime. It is a new mount: the host
+    directory is never the one the process is in, and neither it nor any parent of it
+    is bound back, so the control plane stays as hidden as it was. Being last, nothing
+    mounted before it can cover it. The launch is refused when the directory is not a
+    private directory of this user, is reached through a link, lies in the workspace's
+    project or in the user's Codex state, or would cover something the generation is
+    given (its workspace, private state, executable or catalog).
 - **Exit status 2** for `already_running` and `unsafe_path`.
 - The path rules of `control/paths.rs` are visible to the crate. Nothing in them changed.
 
@@ -375,9 +395,12 @@ or socket is shown, and the terminal works throughout.
   offers Retry, which waits again. It does not kill what it cannot prove idle.
 - **No package format.** `desktop:package` produces a directory, not a `.deb`, an RPM,
   an AppImage or a Flatpak, and nothing signs it.
-- **The new working directory was not exercised with a real Codex.** The fixture runs in
-  it in both profiles. Codex 0.159.0's own preflight is what checks the configuration it
-  ends up with, and fails closed.
+- **A local-tools runtime cannot write where it stands.** Its working directory is
+  sealed. Codex 0.159.0 started, served a thread and ran an approved command from it;
+  a later runtime that expects a writable process directory would not.
+- **The directory of a local-tools runtime is named in its namespace.** `runtime-cwd`
+  is visible there as an empty directory name next to the generation's catalog. Nothing
+  else of the runtime directory is.
 - **Stopping the authority through a session's end interrupts running work**, as any
   authority shutdown does.
 - As with ADRs 0019 to 0024, no party other than the session that built this reviewed
@@ -398,8 +421,9 @@ Nothing of the user's own session was used. Every service manager was a private
 `systemd --user`, started for the test on a temporary runtime directory and an empty
 temporary home, so the unit under test was the one the product writes, unchanged. The
 user's own manager was never asked anything and has no `wyss-control.service`; nothing
-was installed in the real account, no real Codex was launched and nothing was sent to
-the user's display.
+was installed in the real account and nothing was sent to the user's display. No real
+Codex was launched for any of it except the two turns recorded under "The working
+directory inside the sandbox" below.
 
 **Phase 3F** was fast-forwarded into `main` first (`c9b71a0` to `f91c549`, eight commits
 ahead and none behind, pushed, verified equal to `origin/main`). It was not reviewed or
@@ -415,8 +439,11 @@ fixture:
   that binary (`/proc/<pid>/exe`); its environment has no `LD_PRELOAD` although the
   manager's has one; the unit is `static`; the store and the socket are where the
   authority has always put them. A session is activated in Local Tools, so the runtime
-  starts under the unit's hardening inside `bwrap`, and every child of the authority
-  started in `runtime-cwd`. The desktop closes: the same process goes on answering, with
+  starts under the unit's hardening inside `bwrap`; a command it proposes waits for a
+  decision, runs once approved, and the turn completes; and every runtime process
+  reported, from inside whatever it was started in, that it stands in `runtime-cwd`: the
+  version check in the host directory, discovery and the thread-capable process in an
+  empty sealed directory of their own namespace. The desktop closes: the same process goes on answering, with
   its runtime ready. It opens again: the same instance, nothing installed, reloaded or
   started, no restart counted. The authority is killed: the manager restarts it once, the
   desktop starts nothing, the stream is the same and continues, and the session is
@@ -494,7 +521,7 @@ empty home with a private service manager:
 | 6   | Connected                  | Top bar: Authority Connected                                                              |
 | 7   | Sessions                   | Lists, creates, resumes                                                                   |
 | 8   | Inference session          | Created through the native folder dialog; runtime ready in the inference profile          |
-| 9   | Local Tools session        | Runtime ready in the local-tools profile; its process started in `runtime-cwd`            |
+| 9   | Local Tools session        | Runtime ready in the local-tools profile (where its process stood: see the closure below) |
 | 10  | Agent turn                 | Completed                                                                                 |
 | 11  | Approval                   | A command proposed, approved, run; the turn completed                                     |
 | 12  | Events                     | 45 recorded events shown                                                                  |
@@ -536,3 +563,85 @@ manifest, with nothing writable by anyone but the owner.
 
 The interface followed the visual contract the shell already has: its tokens, its status
 line and its buttons. No new direction was decided, so no design layer was run for it.
+
+### The working directory inside the sandbox
+
+An independent review of this phase, reported to the session that built it, found one
+defect of medium severity: for a local-tools generation the working directory described
+above was that of the sandbox launcher only. It was reproduced before anything was
+changed. The Codex fixture was made to report the directory it is really started in, and
+for a local-tools generation it reported the user's home. The evidence this record gave
+for row 9, and for "every child of the authority", had read the launcher's directory
+from `/proc`.
+
+The correction is the Local Tools paragraph under "Changes in the authority". Nothing of
+the lifecycle, the protocol, the store or the approval model changed.
+
+**Tests.** Three unit tests of the isolation and one process test were added, and two
+process tests changed what they look at.
+
+- The whole launch is asserted as one exact argv in two layouts, with and without a
+  control plane: the directory's mount is the last of the namespace, `--chdir` follows it
+  and precedes `--`, and nothing of the control plane is bound back for it.
+- In a real namespace, with the launcher started in the directory itself, in the
+  workspace, in what it is told is home and in another directory, the process is in the
+  one place it was sent to: empty, 0700, this user's, not the host directory of that
+  name, not writable, and next to nothing else of the control plane.
+- Twenty launches from a directory that is not a private place apart are refused: missing,
+  a file, a link, reached through a link, open to group or others, the workspace, inside
+  it, above it, elsewhere in its repository, in the user's Codex state, or holding the
+  executable, the private state, a control directory or the catalog.
+- With the real `wyss-control` and the fixture, in both profiles, the version check,
+  discovery and the thread-capable process each report where they stand: `runtime-cwd`,
+  the same in `PWD`, empty and 0700. In inference it is the host directory. In Local
+  Tools it is a directory of the namespace's own, sealed, while the host one stays
+  empty; of the authority's runtime directory the process sees its catalog and that one
+  name, and of its state directory what it saw before. A thread is told its workspace
+  and the process stays where it started.
+- The clean-account test asserts the same from a unit started by a private
+  `systemd --user`, under the unit's hardening, and approves a command there.
+
+**Mutation controls.** 25 single-change mutants, each run against the unit tests and the
+process tests together, after an unchanged run that passes: 25 killed by a test, none by
+the compiler. They are: `--chdir` removed, to the home, to the workspace, to `/`; the
+namespace directory not made; the control plane bound back; the directory made before
+the mask that covers it; only discovery placed; only the thread-capable process placed;
+the host directory bound instead of a new one; its parent bound back; not sealed; not
+private; the supervisor sending the workspace; a direct process not told its place, or
+told and not moved; the version check, the final process or discovery not placed; and
+each of the six refusals removed. `--chdir` removed is killed by the unit tests, which
+start the launcher elsewhere, and not by the process tests: the authority also starts
+the launcher in that path, so a launcher told nothing still ends up there. As a control
+of the evidence itself, the original defect was put back and both kinds of evidence were
+run against it: the unit and process tests above fail, and the former check, which read
+the launcher's directory, passes.
+
+**Real Codex 0.159.0**, on 2026-10-10, through the debug build of this commit's
+authority and the control protocol, in an isolated authority state and a disposable
+workspace, with the user's existing login used as it is. Two turns.
+
+| Profile     | Measured                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Inference   | Runtime ready, `codex_inference_v1`, seven models. The app-server process is in `runtime-cwd`, the host directory itself, and `PWD` says so. One turn, completed. The directory was empty afterwards.                                                                                                                                                                                                          |
+| Local Tools | Runtime ready, `codex_local_tools_v1`. The launcher is in the host directory. The app-server inside it is at the same path in a different directory: a read-only `tmpfs` mounted there, 0700, empty. One turn: `/usr/bin/bash -c pwd` proposed in the workspace, pending, approved, run, confirmed; the turn completed and the reply named the workspace. The workspace and the host directory were unchanged. |
+
+A command a tool runs is told the workspace; the process that serves it is not there.
+The credential file was the same inode, with the same mode and one name, before and
+after; nothing of it was read. The reply of the inference turn was not captured: the
+driver asked for more events than one read allows, after the turn had ended, and what
+is recorded of it is the durable turn record, read by a restarted authority on the same
+store.
+
+**The packaged desktop**, built from this commit and installed to a private prefix, in a
+nested display on an empty home with a private service manager: the authority was
+installed and started by the first launch; an Inference session was created and its
+runtime ready; a Local Tools session restarted Codex in that profile and was ready; a
+command was proposed, approved, run once, and the turn completed; Events listed 28
+recorded events; the terminal was the same session before and after; the window was
+closed and the same authority process went on, not restarted, its runtime ready. The six
+runtime processes of that run reported the directory as above, and the installed
+authority had the pinned digest.
+
+**Official validation and packaging** were repeated on the commit that carries this
+section: the thirteen commands above each exit 0, and `npm run desktop:package` exits 0
+with the same authority digest as the package the smoke used.

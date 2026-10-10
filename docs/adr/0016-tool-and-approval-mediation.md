@@ -74,6 +74,8 @@ neither.
 > such ancestor is forced `untrusted` together with the workspace, so a marker that
 > appears in the workspace can never shorten what is masked. The proof before each
 > conversation, turn and Accept also covers the identity of the bound credential.
+> Since ADR 0025 the launcher is also told where the process starts: an empty sealed
+> directory of the namespace's own at the authority's `runtime-cwd` path.
 
 ### Credential capability
 

@@ -202,6 +202,8 @@ and bound by descriptor. The schema is at version 7. Since ADR 0025 the working
 directory of the runtime process is `runtime-cwd`, a private empty directory of the
 authority's own inside its runtime directory, and no longer the repository root
 compiled into the binary: an installed authority starts a runtime with no build tree.
+A local-tools generation, whose namespace hides that directory, starts in an empty
+sealed directory of the namespace's own at the same path.
 Since ADR 0021 the desktop can ask for `runtime/start`, with the default profile, as
 part of activating a session; it still launches and supervises nothing.
 Since ADR 0023 it can also ask for the local-tools profile for the workspace of a

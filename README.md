@@ -667,6 +667,10 @@ is fixed by the authority and built without a shell or any client text:
 - The authority's own control plane does not exist inside the namespace: its runtime
   and state directories (control socket, locks, canonical database) are hidden. The
   generation gets back its private home and, read-only, its one model catalog file.
+- The process starts in an empty directory that exists only in the namespace: a sealed
+  private mount at the authority's `runtime-cwd` path, which the launcher is told to
+  change to. It is not the host directory, the workspace or the user's home. A thread
+  is told its workspace explicitly.
 - One credential capability crosses: the user's `auth.json`, bound read-write
   because Codex 0.159.0 refreshes its token in place and has no other
   non-interactive way to share one login. The authority opens it without following a
