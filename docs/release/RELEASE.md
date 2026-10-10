@@ -6,12 +6,12 @@ product. Nothing here has been tagged or published; both are for the owner to do
 
 ## What this is
 
-|                 |                                                                                                     |
-| --------------- | --------------------------------------------------------------------------------------------------- |
-| Version         | 0.2.0 (the first installable build; the repository had no tag and `0.1.0` was the scaffold)         |
-| Platform        | Linux x86_64 with a `systemd --user` session. No other platform is packaged or supported            |
-| Artifacts       | `wyss-console_0.2.0_amd64.deb`, `wyss-console_0.2.0_amd64.AppImage`, `SHA256SUMS`, `release-manifest.json` |
-| Integrity       | **Checksummed, not signed.** There is no release signing key or process                             |
+|                 |                                                                                                                   |
+| --------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Version         | 0.2.0 (the first installable build; the repository had no tag and `0.1.0` was the scaffold)                       |
+| Platform        | Linux x86_64 with a `systemd --user` session. No other platform is packaged or supported                          |
+| Artifacts       | `wyss-console_0.2.0_amd64.deb`, `wyss-console_0.2.0_amd64.AppImage`, `SHA256SUMS`, `release-manifest.json`        |
+| Integrity       | **Checksummed, not signed.** There is no release signing key or process                                           |
 | Decision record | [ADR 0026](../adr/0026-settings-and-release-closure.md), [ADR 0025](../adr/0025-authority-lifecycle-bootstrap.md) |
 
 ## Environment it needs
@@ -46,7 +46,7 @@ launch  ->  an authority answers?  yes -> connected (whoever started it)
 ```
 
 1. The desktop finds the authority it carries, from its own executable: `usr/libexec/wyss-console/
-   wyss-control` below its prefix, and nowhere else. It checks that file's SHA-256 against
+wyss-control` below its prefix, and nowhere else. It checks that file's SHA-256 against
    the one it was built with and refuses it if it differs or if anyone else could have
    written it.
 2. It installs that file once under `~/.local/share/wyss-console/authority/`, writes one
@@ -63,9 +63,9 @@ every command and file change waits for your approval.
 Install the new package over the old one.
 
 - If the previous authority is **running**, the window connects to it, says `update
-  pending`, and replaces nothing. A turn that is running is never interrupted.
+pending`, and replaces nothing. A turn that is running is never interrupted.
 - The next time no authority runs (after you log out and in, after `systemctl --user stop
-  wyss-control`, or after Retry following a crash loop), the authority carried by the new
+wyss-control`, or after Retry following a crash loop), the authority carried by the new
   package is installed and started. Sessions, history and approvals' records are in the
   state directory and carry over.
 - There is no hot update.
@@ -90,13 +90,13 @@ Install the new package over the old one.
 
 ## Data preservation
 
-| Action                                  | Sessions, history | Authority, unit | Preferences |
-| --------------------------------------- | ----------------- | --------------- | ----------- |
-| Close the window, reopen                | kept              | kept, running   | kept        |
-| Upgrade the package                     | kept              | kept; new one on cold start | kept |
-| Remove the package                      | kept              | kept            | kept        |
-| Settings → Reset preferences            | kept              | kept            | defaults    |
-| Delete `~/.local/state/wyss-console/`   | **lost**          | kept            | kept        |
+| Action                                | Sessions, history | Authority, unit             | Preferences |
+| ------------------------------------- | ----------------- | --------------------------- | ----------- |
+| Close the window, reopen              | kept              | kept, running               | kept        |
+| Upgrade the package                   | kept              | kept; new one on cold start | kept        |
+| Remove the package                    | kept              | kept                        | kept        |
+| Settings → Reset preferences          | kept              | kept                        | defaults    |
+| Delete `~/.local/state/wyss-console/` | **lost**          | kept                        | kept        |
 
 ## Known limitations
 
