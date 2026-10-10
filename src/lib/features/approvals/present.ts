@@ -38,10 +38,10 @@ export const APPROVAL_REASON: Record<ApprovalReason, string> = {
   turn_ended: 'Its turn ended.',
   session_closed: 'Its session was closed.',
   runtime_lost: 'Codex stopped while it waited.',
-  authority_shutdown: 'wyss-control shut down while it waited.',
-  authority_restarted: 'wyss-control restarted while it waited.',
+  authority_shutdown: 'The authority shut down while it waited.',
+  authority_restarted: 'The authority restarted while it waited.',
   effect_unknown:
-    'It was approved, and wyss-control could not confirm what Codex did with that.',
+    'It was approved, and the authority could not confirm what Codex did with that.',
   unsupported: 'Codex asked for something that cannot be approved.',
   isolation_violation: 'Codex acted outside what the session allows.',
 };
@@ -86,8 +86,8 @@ export function wholeShown(card: ApprovalCard): boolean {
 }
 
 const DOING: Record<DecisionKind, string> = {
-  approve: 'Asking wyss-control to approve it…',
-  deny: 'Asking wyss-control to deny it…',
+  approve: 'Asking the authority to approve it…',
+  deny: 'Asking the authority to deny it…',
 };
 export function decidingMessage(kind: DecisionKind): string {
   return DOING[kind];
@@ -99,17 +99,17 @@ const NOT: Record<DecisionKind, string> = {
 };
 const DECISION: Partial<Record<SessionFailureCode, string>> = {
   invalid: 'The console sent a request it should not have. Nothing changed.',
-  not_found: 'wyss-control no longer has this approval.',
+  not_found: 'The authority no longer has this approval.',
   changed: 'The approval changed after it was shown. It has been read again.',
   not_allowed: 'The approval had already ended.',
   permission_denied:
-    'wyss-control denied it: the lease its turn was admitted under does not allow this action.',
+    'The authority denied it: the lease its turn was admitted under does not allow this action.',
   runtime_unavailable: 'Codex is no longer there to answer.',
-  busy: 'wyss-control is busy with another operation. Try again in a moment.',
+  busy: 'The authority is busy with another operation. Try again in a moment.',
   uncertain:
-    'wyss-control could not confirm what Codex did with the answer. Nothing is sent again by itself.',
+    'The authority could not confirm what Codex did with the answer. Nothing is sent again by itself.',
   conflict: 'That request was already used for another decision.',
-  incompatible: 'This console and wyss-control speak different versions.',
+  incompatible: 'This console and the authority speak different versions.',
 };
 /** One sentence for a decision that failed. An unknown outcome is never a refusal. */
 export function decisionFailureMessage(
@@ -117,15 +117,15 @@ export function decisionFailureMessage(
   code: SessionFailureCode,
 ): string {
   if (code === 'unavailable')
-    return 'wyss-control did not answer, so it is not known whether the decision was taken. Retrying repeats the same decision: it cannot decide twice.';
+    return 'The authority did not answer, so it is not known whether the decision was taken. Retrying repeats the same decision: it cannot decide twice.';
   return `${NOT[kind]}. ${DECISION[code] ?? 'Something unexpected happened. Nothing is assumed to have changed.'}`;
 }
 
 export function approvalsReadFailure(code: SessionFailureCode): string {
   return code === 'unavailable'
-    ? 'Approvals could not be read: wyss-control did not answer.'
+    ? 'Approvals could not be read: the authority did not answer.'
     : code === 'busy'
-      ? 'Approvals could not be read. wyss-control is busy; try again in a moment.'
+      ? 'Approvals could not be read. The authority is busy; try again in a moment.'
       : 'Approvals could not be read. Nothing is shown rather than something unverified.';
 }
 

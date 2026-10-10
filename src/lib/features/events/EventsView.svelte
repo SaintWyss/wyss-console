@@ -219,8 +219,8 @@
   {#if events.restarted}
     <div class="sessions-status" role="status">
       <p>
-        wyss-control restarted. It kept the same event stream: the history below
-        continues, and what it ended on the way is recorded in it.
+        The authority restarted. It kept the same event stream: the history
+        below continues, and what it ended on the way is recorded in it.
       </p>
       <button
         type="button"
@@ -238,15 +238,15 @@
 
   {#if events.link === 'connecting' && !events.loaded}
     <div class="sessions-empty" role="status">
-      <p class="empty-title">Connecting to wyss-control…</p>
+      <p class="empty-title">Connecting to the authority…</p>
     </div>
   {:else if !events.loaded && !connected}
     <div class="sessions-empty" role="status">
-      <p class="empty-title">wyss-control is unavailable</p>
+      <p class="empty-title">The authority is unavailable</p>
       <p>{summarizeAuthority(authority).detail}</p>
       <p>
         Events are the authority's own record and are read from it. Nothing is
-        shown until it is connected.
+        shown until it is connected. Your local terminals keep working.
       </p>
     </div>
   {:else if !events.loaded && events.readFailure}
@@ -262,7 +262,7 @@
     <div class="sessions-empty">
       <p class="empty-title">No events yet.</p>
       <p>
-        wyss-control records every session, runtime, turn, approval and lease
+        The authority records every session, runtime, turn, approval and lease
         change it commits. Nothing has been recorded in this stream.
       </p>
     </div>
@@ -347,7 +347,7 @@
           <div class="events-boundary" role="separator">
             <p class="empty-title">New authority event stream</p>
             <p>
-              The events above belong to the stream wyss-control holds now. The
+              The events above belong to the stream the authority holds now. The
               ones below were read from another stream (<span class="mono"
                 >{short(events.previous.stream)}</span
               >) and are not continued by them: positions of the two are
@@ -425,14 +425,14 @@
             <!-- What this record is about belongs to another stream's authority
                  state. Nothing here may be read against the one that answers now. -->
             <p class="session-hint" role="note">
-              This record was read from a stream wyss-control no longer holds
+              This record was read from a stream the authority no longer holds
               here. What it is about cannot be opened or read from this
               authority.
             </p>
           {:else}
             <p class="session-hint">
               This is a record of what happened then. What it is about may have
-              changed since: that is read from wyss-control where it lives.
+              changed since: that is read from the authority where it lives.
             </p>
           {/if}
           {#if !earlierStream}
@@ -486,7 +486,7 @@
               Now: {APPROVAL_STATE[now.state].label}.
               {now.reason ? APPROVAL_REASON[now.reason] : ''}
               {answer.detail.command === null && answer.detail.files === null
-                ? 'wyss-control no longer holds what it was about.'
+                ? 'The authority no longer holds what it was about.'
                 : 'What it is about is shown in Approvals.'}
             </p>
           {:else if answer?.status === 'gone'}
@@ -496,7 +496,7 @@
             </p>
           {:else if answer?.status === 'failed'}
             <p class="session-hint failed" role="alert">
-              The approval could not be read from wyss-control.
+              The approval could not be read from the authority.
             </p>
           {/if}
         </aside>

@@ -97,7 +97,7 @@ export function modeImpact(mode: AgentMode): string {
  * What activating a session in `mode` does to the runtime that is running now, when it
  * is known to serve something else. Null when nothing is restarted, or when that cannot
  * be told yet. Folders are compared as text, so the same folder spelled another way is
- * announced as a restart that wyss-control then has no need for.
+ * announced as a restart that the authority then has no need for.
  */
 export function composeImpact(
   mode: AgentMode,
@@ -115,7 +115,7 @@ export function composeImpact(
     runtime.mode === mode
       ? ''
       : ` A session created in ${AGENT_MODE[runtime.mode].label} cannot be resumed in ${AGENT_MODE[mode].label}.`;
-  return `${runtimeLine(runtime)} now, and wyss-control runs one Codex runtime. Activating this session restarts it in ${to}, and the sessions attached to it are detached.${kept}`;
+  return `${runtimeLine(runtime)} now, and the authority runs one Codex runtime. Activating this session restarts it in ${to}, and the sessions attached to it are detached.${kept}`;
 }
 /** Which change of mode to offer for a session that is bound and not attached. */
 export function modeOffers(
@@ -169,8 +169,8 @@ const ACTION: Record<OperationKind, string> = {
 
 const FAILURE: Record<SessionFailureCode, string> = {
   unavailable:
-    'wyss-control did not answer, so the result is unknown. Retrying repeats the same request safely.',
-  incompatible: 'This console and wyss-control speak different versions.',
+    'The authority did not answer, so the result is unknown. Retrying repeats the same request safely.',
+  incompatible: 'This console and the authority speak different versions.',
   invalid: 'The console sent a request it should not have. Nothing changed.',
   not_found: 'The authority no longer has this session.',
   changed: 'The session changed after it was shown. It has been read again.',
@@ -178,13 +178,13 @@ const FAILURE: Record<SessionFailureCode, string> = {
   not_bound: 'This session has no workspace binding to resume.',
   runtime_unavailable:
     'The authority denied it because the agent runtime is not ready.',
-  start_refused: 'wyss-control refused to start Codex.',
+  start_refused: 'The authority refused to start Codex.',
   turn_active:
     'A turn is running, and the runtime it runs on is not restarted under it. Wait for it or cancel it.',
   mode_fixed:
     'This session is attached in the other mode: its conversation exists only there.',
   workspace_invalid:
-    'wyss-control did not accept that folder as a workspace. Nothing was bound.',
+    'The authority did not accept that folder as a workspace. Nothing was bound.',
   already_bound:
     'The session already has a workspace binding. It has been read again.',
   permission_denied:
@@ -210,7 +210,7 @@ const SPECIFIC: Partial<
   mode: {
     not_allowed: 'The authority refused: the session no longer allows it.',
     runtime_unavailable:
-      'Codex did not come up in that mode. The runtime is as wyss-control reports it.',
+      'Codex did not come up in that mode. The runtime is as the authority reports it.',
     rejected:
       'Codex refused to resume this session in that mode. A session resumes only in the mode it was created in. The runtime now runs in the mode that was asked for.',
     not_bound: 'This session has no workspace to run a mode for.',
@@ -238,9 +238,9 @@ export function failureMessage(
   if (code === 'unavailable') return FAILURE[code];
   // Local Tools runs only inside the isolation the authority can set up and prove.
   if (code === 'start_refused' && mode === 'local_tools')
-    return `${ACTION[kind]}. wyss-control refused to start Codex in Local Tools: it could not set up or prove the isolation that mode requires. Nothing runs without it.`;
+    return `${ACTION[kind]}. The authority refused to start Codex in Local Tools: it could not set up or prove the isolation that mode requires. Nothing runs without it.`;
   if (kind === 'activate' && code === 'uncertain')
-    return 'Activation outcome uncertain: wyss-control could not confirm whether Codex created the workspace binding. Nothing is sent again by itself.';
+    return 'Activation outcome uncertain: the authority could not confirm whether Codex created the workspace binding. Nothing is sent again by itself.';
   return `${ACTION[kind]}. ${SPECIFIC[kind]?.[code] ?? FAILURE[code]}`;
 }
 
@@ -254,7 +254,7 @@ export function outcomeUnknown(code: SessionFailureCode): boolean {
 
 export function readFailureMessage(code: SessionFailureCode): string {
   return code === 'unavailable'
-    ? 'Sessions could not be read: wyss-control did not answer.'
+    ? 'Sessions could not be read: the authority did not answer.'
     : code === 'incompatible'
       ? `Sessions could not be read. ${FAILURE.incompatible}`
       : code === 'busy'

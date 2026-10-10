@@ -178,7 +178,7 @@ it('summarizes sessions and the event head only from a connected view', () => {
   const summary = summarizeAuthority(observed(connected));
   expect(summary.note).toBe('1 session');
   expect(summary.detail).toBe(
-    'wyss-control 9.9.9-test · protocol 1 · sessions: 1 prepared, 0 closed · event head 1',
+    'Wyss authority 9.9.9-test · protocol 1 · sessions: 1 prepared, 0 closed · event head 1',
   );
   const busy = summarizeAuthority(
     observed({
@@ -194,7 +194,7 @@ it('summarizes sessions and the event head only from a connected view', () => {
   );
   expect(busy.note).toBe('3 sessions');
   expect(busy.detail).toBe(
-    'wyss-control · protocol 1 · sessions: 3 prepared, 2 closed · event head 0',
+    'Wyss authority · protocol 1 · sessions: 3 prepared, 2 closed · event head 0',
   );
   expect(summarizeAuthority(observed(absent)).note).toBeUndefined();
 });

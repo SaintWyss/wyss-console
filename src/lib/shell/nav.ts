@@ -26,7 +26,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   {
     id: 'agents',
     label: 'Agents',
-    subtitle: 'Managed turns',
+    subtitle: 'Work with Codex in a session',
     icon: 'M5 8h14v11H5zM12 4v4M9.5 13h.01M14.5 13h.01',
   },
   {

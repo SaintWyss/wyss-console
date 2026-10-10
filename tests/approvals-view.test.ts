@@ -273,7 +273,7 @@ it('opens Approvals from the sidebar and reads nothing for it before that', asyn
   // The authority goes away: nothing is shown as pending, and nothing can be decided.
   ipc.world.authority!({ ...views.waiting_absent, revision: 5 });
   await flush();
-  expect(text(approvalsView())).toContain('wyss-control is unavailable');
+  expect(text(approvalsView())).toContain('The authority is unavailable');
   expect(text(approvalsView())).toContain(
     'Nothing is approved or denied in the meantime.',
   );
@@ -334,7 +334,7 @@ it('shows an approval under the turn that waits on it and in Approvals, and appr
   for (const card of cards()) {
     expect(button('Approve', card)!.disabled).toBe(true);
     expect(button('Deny', card)!.disabled).toBe(true);
-    expect(text(card)).toContain('Asking wyss-control to approve it…');
+    expect(text(card)).toContain('Asking the authority to approve it…');
   }
   button('Approve', listed[0])!.click();
   button('Deny', listed[0])!.click();
@@ -403,7 +403,7 @@ it('denies one approval, and settles a decision whose answer was lost with the s
     },
   ]);
   expect(ipc.count('managed_approval_approve')).toBe(0);
-  expect(text(card())).toContain('Asking wyss-control to deny it…');
+  expect(text(card())).toContain('Asking the authority to deny it…');
 
   // No answer came. Not known to be taken: a caution, never a refusal.
   ipc

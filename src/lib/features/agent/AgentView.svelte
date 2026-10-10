@@ -179,7 +179,7 @@
     {#if !connected}
       <p class="sessions-status failed unknown" role="status">
         {agent.link === 'connecting'
-          ? 'Connecting to wyss-control…'
+          ? 'Connecting to the authority…'
           : `${summarizeAuthority(authority).detail} What is shown was read before the connection was lost.`}
       </p>
     {:else if view.readFailure}
@@ -210,7 +210,7 @@
           {:else}
             <p class="empty-title">No turns yet.</p>
             <p>
-              Write an objective below. wyss-control decides whether the turn
+              Write an objective below. The authority decides whether the turn
               may start and what Codex is allowed to do in it.
             </p>
           {/if}
@@ -277,7 +277,7 @@
                 <p class="turn-activity">{outcomeLabel(item.outcome)}</p>
               {:else}
                 <p class="turn-gap">
-                  Output here was not kept by wyss-control.
+                  Output here was not kept by the authority.
                 </p>
               {/if}
             {/each}
@@ -285,7 +285,7 @@
               <p class="turn-note">
                 {turn?.output
                   ? 'This turn produced no answer.'
-                  : 'wyss-control no longer holds the output of this turn.'}
+                  : 'The authority no longer holds the output of this turn.'}
               </p>
             {/if}
             {#if !ended && entry.thinking && !entry.approval}
@@ -357,7 +357,7 @@
           {#if view.start.status === 'pending'}
             <p class="turn-activity live" role="status">
               <span class="dot" aria-hidden="true"></span>
-              Asking wyss-control to start the turn…
+              Asking the authority to start the turn…
             </p>
           {:else if view.start.failure}
             <div

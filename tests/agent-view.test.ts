@@ -275,7 +275,7 @@ it('runs what the composer holds with Enter, once, and keeps Shift+Enter for a n
   expect(box().value).toBe('');
   expect(text(turns().at(-1))).toContain('First line Second line');
   expect(text(turns().at(-1))).toContain(
-    'Asking wyss-control to start the turn…',
+    'Asking the authority to start the turn…',
   );
   expect(button('Run')!.disabled).toBe(true);
   expect(text(agent().querySelector('.composer-hint'))).toBe(
@@ -419,7 +419,7 @@ it('says why a start failed, and offers the same request again only when it may 
   ipc.last('managed_turn_start').reject({ code: 'busy', retry: true });
   await flush();
   expect(text(alert())).toBe(
-    'The turn was not started. Another turn is running. wyss-control runs one turn at a time. Retry Dismiss',
+    'The turn was not started. Another turn is running. The authority runs one turn at a time. Retry Dismiss',
   );
   expect(alert().classList.contains('unknown')).toBe(false);
   // Dismissed, the input is the composer's again.
@@ -453,15 +453,15 @@ it('shows a failed and an indeterminate turn with the reason the authority recor
     ['Failed', 'Indeterminate'],
   );
   expect(text(turns()[0])).toContain(
-    'Codex tried to act outside what this session allows, and wyss-control stopped it.',
+    'Codex tried to act outside what this session allows, and the authority stopped it.',
   );
   expect(text(turns()[1])).toContain(
-    'wyss-control could not confirm whether Codex received the turn.',
+    'The authority could not confirm whether Codex received the turn.',
   );
   // Turns this window did not start have no input to show, and say so.
   expect(text(turns()[0])).toContain('Wyss keeps no conversation text');
   expect(text(turns()[0])).toContain(
-    'wyss-control no longer holds the output of this turn.',
+    'The authority no longer holds the output of this turn.',
   );
   expect(ipc.count('managed_turn_read')).toBe(0);
 });
@@ -614,7 +614,7 @@ it('stops offering a turn when the authority goes away, and keeps what was read'
   expect(button('Run')!.disabled).toBe(true);
   expect(button('Cancel turn')!.disabled).toBe(true);
   expect(text(agent().querySelector('.composer-hint'))).toMatch(
-    /wyss-control is unavailable/,
+    /The authority is unavailable/,
   );
   await type('typed while offline');
   await press({ key: 'Enter' });

@@ -554,7 +554,7 @@ it('explains a failed action and retries it as the same action', async () => {
   await activate();
   let alert = view().querySelector('.sessions-status.failed')!;
   expect(alert.getAttribute('role')).toBe('alert');
-  expect(alert.textContent).toContain('wyss-control did not answer');
+  expect(alert.textContent).toContain('The authority did not answer');
   // An answer that never came is a caution, not an error.
   expect(alert.classList.contains('unknown')).toBe(true);
   // Product wording only.
@@ -765,12 +765,12 @@ it('keeps the page reachable and every mutation disabled while the authority is 
     authority: () => new Promise((resolve) => answers.push(resolve)),
   });
   // Not answered yet: connecting, not an endless spinner over stale data.
-  expect(view().textContent).toContain('Connecting to wyss-control…');
+  expect(view().textContent).toContain('Connecting to the authority…');
   answers.shift()!(views.waiting_absent);
   await flush();
   const offline = view().querySelector('.sessions-empty')!;
-  expect(offline.textContent).toContain('wyss-control is unavailable');
-  expect(offline.textContent).toContain('wyss-control is not running.');
+  expect(offline.textContent).toContain('The authority is unavailable');
+  expect(offline.textContent).toContain('The authority is not running.');
   expect(offline.textContent).toContain('The Console keeps working.');
   expect(button('New session').disabled).toBe(true);
   expect(button('Refresh').disabled).toBe(true);
@@ -932,7 +932,7 @@ it('creates a session in Local Tools only when that mode is chosen, and says wha
   // More capability is not more authority, and the runtime is one: both are said
   // before anything is asked.
   expect(text(composer())).toMatch(
-    /not more authority: every command and file change waits for your approval\. wyss-control runs one Codex runtime, in one mode and for one folder at a time\./,
+    /not more authority: every command and file change waits for your approval\. The authority runs one Codex runtime, in one mode and for one folder at a time\./,
   );
   // No runtime is running: nothing is restarted, and nothing says it would be.
   expect(composer().querySelector('.composer-note.caution')).toBeNull();
@@ -974,7 +974,7 @@ it('says what activating does to the runtime that is running, before it is asked
   // Inference is what is selected, and here it is the mode that costs a restart.
   expect(modes().map((m) => m.checked)).toEqual([true, false]);
   expect(caution()).toBe(
-    'Codex runs in Local Tools for rag-corp now, and wyss-control runs one Codex runtime. Activating this session restarts it in Inference, and the sessions attached to it are detached. A session created in Local Tools cannot be resumed in Inference.',
+    'Codex runs in Local Tools for rag-corp now, and the authority runs one Codex runtime. Activating this session restarts it in Inference, and the sessions attached to it are detached. A session created in Local Tools cannot be resumed in Inference.',
   );
   // The action is named for what it does. Nothing is asked until it is pressed.
   expect(button('Create & activate', composer())).toBeUndefined();
@@ -986,7 +986,7 @@ it('says what activating does to the runtime that is running, before it is asked
   button('Choose folder', composer()).click();
   await flush();
   expect(caution()).toBe(
-    'Codex runs in Local Tools for rag-corp now, and wyss-control runs one Codex runtime. Activating this session restarts it in Local Tools for this folder, and the sessions attached to it are detached.',
+    'Codex runs in Local Tools for rag-corp now, and the authority runs one Codex runtime. Activating this session restarts it in Local Tools for this folder, and the sessions attached to it are detached.',
   );
   button('Restart Codex & activate', composer())!.click();
   await flush();
@@ -1013,7 +1013,7 @@ it('announces no restart when the runtime already runs what is asked', async () 
     .click();
   await flush();
   expect(text(composer().querySelector('.composer-note.caution'))).toBe(
-    'Codex runs in Inference now, and wyss-control runs one Codex runtime. Activating this session restarts it in Local Tools for this folder, and the sessions attached to it are detached. A session created in Inference cannot be resumed in Local Tools.',
+    'Codex runs in Inference now, and the authority runs one Codex runtime. Activating this session restarts it in Local Tools for this folder, and the sessions attached to it are detached. A session created in Inference cannot be resumed in Local Tools.',
   );
 });
 
@@ -1103,7 +1103,7 @@ it('changes the mode of a bound session only after saying what it does', async (
   await flush();
   const sent = ipc.sent('managed_session_mode');
   // The session, the revision that was shown and the mode. No folder: the workspace
-  // is the one wyss-control holds for the session.
+  // is the one the authority holds for the session.
   expect(sent).toHaveLength(1);
   expect(sent[0].request).toEqual({
     operation_id: expect.stringMatching(UUID),

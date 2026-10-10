@@ -30,19 +30,20 @@ export const TURN_REASON: Record<TurnReason, string> = {
   completed: '',
   // Both a cancelled turn and a denied command end this way at the authority.
   user_cancel: 'Stopped at your request.',
-  lease_expired: 'Its execution lease expired, so wyss-control stopped it.',
-  lease_revoked: 'Its execution lease was revoked, so wyss-control stopped it.',
+  lease_expired: 'Its execution lease expired, so the authority stopped it.',
+  lease_revoked:
+    'Its execution lease was revoked, so the authority stopped it.',
   session_closed: 'The session was closed while it ran.',
   runtime_stopped: 'Codex was stopped while it ran.',
-  authority_shutdown: 'wyss-control shut down while it ran.',
+  authority_shutdown: 'The authority shut down while it ran.',
   authority_restarted:
-    'wyss-control restarted while it ran. What Codex did after that is not known.',
+    'The authority restarted while it ran. What Codex did after that is not known.',
   runtime_failed: 'Codex stopped unexpectedly.',
   provider_failed: 'Codex reported that the turn failed.',
   dispatch_unknown:
-    'wyss-control could not confirm whether Codex received the turn.',
+    'The authority could not confirm whether Codex received the turn.',
   inference_isolation_violation:
-    'Codex tried to act outside what this session allows, and wyss-control stopped it.',
+    'Codex tried to act outside what this session allows, and the authority stopped it.',
   interrupt_timeout:
     'Codex did not confirm the cancel in time. What it did is not known.',
   approval_expired: 'The approval it waited on expired undecided.',
@@ -88,7 +89,7 @@ const ASKED: Record<ApprovalKind, string> = {
  * names the kind of action, never the action.
  */
 export function approvalMessage(kind: ApprovalKind, until: string): string {
-  return `Codex asked to ${ASKED[kind]}. wyss-control holds the turn until that is decided, or until ${until}.`;
+  return `Codex asked to ${ASKED[kind]}. The authority holds the turn until that is decided, or until ${until}.`;
 }
 
 const MODE: Record<SessionMode, string> = {
@@ -102,27 +103,27 @@ export function agentLabel(mode: SessionMode | undefined): string {
 }
 
 const COMMON: Record<SessionFailureCode, string> = {
-  unavailable: 'wyss-control did not answer.',
-  incompatible: 'This console and wyss-control speak different versions.',
+  unavailable: 'The authority did not answer.',
+  incompatible: 'This console and the authority speak different versions.',
   invalid: 'The console sent a request it should not have. Nothing changed.',
-  not_found: 'wyss-control no longer has it.',
+  not_found: 'The authority no longer has it.',
   changed: 'It changed after it was shown. It has been read again.',
-  not_allowed: 'wyss-control refused: it is no longer allowed.',
+  not_allowed: 'The authority refused: it is no longer allowed.',
   not_bound: 'The session has no workspace. Activate it in Sessions.',
   runtime_unavailable:
     'The session is not attached to a running Codex. Resume it in Sessions.',
-  start_refused: 'wyss-control refused to start Codex.',
+  start_refused: 'The authority refused to start Codex.',
   turn_active: 'A turn is running. The runtime is not restarted under it.',
   mode_fixed:
     'The session is attached in the other mode: its conversation exists only there.',
-  workspace_invalid: 'wyss-control did not accept the workspace.',
+  workspace_invalid: 'The authority did not accept the workspace.',
   already_bound: 'The session already has a workspace binding.',
   permission_denied:
-    'wyss-control denied it: no execution lease allows a turn for this session.',
-  busy: 'wyss-control is busy with another operation. Try again in a moment.',
+    'The authority denied it: no execution lease allows a turn for this session.',
+  busy: 'The authority is busy with another operation. Try again in a moment.',
   rejected: 'Codex refused it.',
   uncertain:
-    'wyss-control could not confirm what Codex did. Nothing is sent again by itself.',
+    'The authority could not confirm what Codex did. Nothing is sent again by itself.',
   conflict: 'That request was already used for something else.',
   internal:
     'Something unexpected happened. Nothing is assumed to have changed.',
@@ -130,15 +131,15 @@ const COMMON: Record<SessionFailureCode, string> = {
 
 const START: Partial<Record<SessionFailureCode, string>> = {
   unavailable:
-    'wyss-control did not answer, so it is not known whether the turn started. Retrying repeats the same request: it cannot start a second turn.',
+    'The authority did not answer, so it is not known whether the turn started. Retrying repeats the same request: it cannot start a second turn.',
   invalid: 'The input is empty or longer than a turn can carry.',
-  not_found: 'wyss-control no longer has this session.',
+  not_found: 'The authority no longer has this session.',
   changed: 'The session changed after it was shown. It has been read again.',
-  not_allowed: 'The session is closed, so wyss-control refused.',
-  busy: 'Another turn is running. wyss-control runs one turn at a time.',
+  not_allowed: 'The session is closed, so the authority refused.',
+  busy: 'Another turn is running. The authority runs one turn at a time.',
   rejected: 'Codex refused the turn.',
   uncertain:
-    'wyss-control could not confirm whether Codex received the turn. Nothing is sent again by itself.',
+    'The authority could not confirm whether Codex received the turn. Nothing is sent again by itself.',
   conflict: 'That request was already used for another input.',
 };
 /** One sentence for a start that failed. An unknown outcome is never worded as a refusal. */
@@ -149,8 +150,8 @@ export function startFailureMessage(code: SessionFailureCode): string {
 
 const CANCEL: Partial<Record<SessionFailureCode, string>> = {
   unavailable:
-    'wyss-control did not answer, so it is not known whether the cancel was taken. The turn is shown as wyss-control reports it.',
-  not_found: 'wyss-control no longer has this turn.',
+    'The authority did not answer, so it is not known whether the cancel was taken. The turn is shown as the authority reports it.',
+  not_found: 'The authority no longer has this turn.',
   changed: 'The turn changed after it was shown. Try again.',
   not_allowed: 'The turn had already ended.',
 };
@@ -161,9 +162,9 @@ export function cancelFailureMessage(code: SessionFailureCode): string {
 
 export function readFailureMessage(code: SessionFailureCode): string {
   return code === 'unavailable'
-    ? 'This could not be read: wyss-control did not answer.'
+    ? 'This could not be read: the authority did not answer.'
     : code === 'not_found'
-      ? 'This could not be read: wyss-control no longer has it.'
+      ? 'This could not be read: the authority no longer has it.'
       : code === 'busy'
         ? `This could not be read. ${COMMON.busy}`
         : 'This could not be read. Nothing is shown rather than something unverified.';
@@ -188,8 +189,8 @@ export function runHint(
 ): string | null {
   if (link !== 'connected')
     return link === 'connecting'
-      ? 'Connecting to wyss-control…'
-      : 'wyss-control is unavailable: a turn cannot be started.';
+      ? 'Connecting to the authority…'
+      : 'The authority is unavailable: a turn cannot be started.';
   if (view.start?.status === 'pending') return 'Starting the turn…';
   if (view.start) return 'Retry or dismiss the turn that was not started.';
   const facts = view.facts;
@@ -199,7 +200,7 @@ export function runHint(
       : 'Reading the session…';
   if (facts.state === 'closed') return 'This session is closed.';
   if (view.active !== null)
-    return 'A turn is running. wyss-control runs one at a time.';
+    return 'A turn is running. The authority runs one at a time.';
   if (facts.binding === 'unbound')
     return 'This session has no workspace. Activate it in Sessions.';
   if (facts.binding === 'bound_detached')
@@ -207,7 +208,7 @@ export function runHint(
   if (facts.binding !== 'bound_attached')
     return 'The workspace binding of this session is not settled.';
   if (!view.runnable)
-    return 'wyss-control reports that a turn cannot start now.';
+    return 'The authority reports that a turn cannot start now.';
   if (overLimit(view.draft))
     return 'The input is longer than one turn can carry.';
   return null;

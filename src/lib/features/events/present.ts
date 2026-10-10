@@ -80,20 +80,20 @@ const SCOPE: Record<(typeof LEASE_SCOPES)[number], string> = {
 };
 const EXIT: Record<(typeof RUNTIME_EXITS)[number], string> = {
   unavailable: 'Codex was not available to start.',
-  spawn_failed: 'wyss-control could not launch Codex.',
+  spawn_failed: 'The authority could not launch Codex.',
   transport_failed: 'The connection to Codex failed.',
   handshake_timeout: 'Codex did not answer in time when it started.',
-  protocol_failed: 'Codex did not speak the protocol wyss-control expects.',
+  protocol_failed: 'Codex did not speak the protocol the authority expects.',
   server_request:
     'Codex asked for something this runtime is not allowed to answer.',
   runtime_rejected: 'Codex refused the configuration it was started with.',
   catalog_rejected: 'Codex refused the model catalog it was started with.',
   child_exited: 'The Codex process ended.',
-  audit_unavailable: 'wyss-control could not record what Codex was doing.',
+  audit_unavailable: 'The authority could not record what Codex was doing.',
   inference_isolation_violation:
-    'Codex acted outside what its isolation allows, and wyss-control stopped it.',
+    'Codex acted outside what its isolation allows, and the authority stopped it.',
   safety_unproven:
-    'wyss-control could not prove the isolation of the runtime, and did not let it run.',
+    'The authority could not prove the isolation of the runtime, and did not let it run.',
 };
 
 /** What was recorded, in one line. Only what the record itself says. */
@@ -181,13 +181,13 @@ export function eventDetail(event: EventRow): string {
   switch (event.category) {
     case 'turn': {
       if (event.kind === 'turn_admitted')
-        return 'wyss-control admitted the turn under an execution lease. What was asked of Codex is not part of the record.';
+        return 'The authority admitted the turn under an execution lease. What was asked of Codex is not part of the record.';
       if (event.kind === 'turn_running')
         return 'Codex took the turn and started working on it.';
       const reason = facts.turn_reason ? TURN_REASON[facts.turn_reason] : '';
       if (event.kind === 'turn_cancel_requested')
         return reason || 'A cancel of the turn was recorded.';
-      return reason || 'wyss-control recorded how the turn ended.';
+      return reason || 'The authority recorded how the turn ended.';
     }
     case 'approval': {
       const about =
@@ -197,7 +197,7 @@ export function eventDetail(event: EventRow): string {
             ? 'a file change'
             : 'an action';
       if (event.kind === 'approval_requested')
-        return `Codex proposed ${about} and wyss-control held it for a decision. The proposal itself is not part of the record.`;
+        return `Codex proposed ${about} and the authority held it for a decision. The proposal itself is not part of the record.`;
       if (event.kind === 'approval_accepted')
         return `The approval of ${about} was accepted and the answer was sent to Codex.`;
       if (event.kind === 'approval_confirmed')
@@ -207,7 +207,7 @@ export function eventDetail(event: EventRow): string {
       const reason = facts.approval_reason
         ? APPROVAL_REASON[facts.approval_reason]
         : '';
-      return reason || 'wyss-control recorded how the approval ended.';
+      return reason || 'The authority recorded how the approval ended.';
     }
     case 'lease': {
       const scopes =
@@ -219,18 +219,18 @@ export function eventDetail(event: EventRow): string {
         return `${facts.revocation === 'session_closed' ? 'The lease ended because its session was closed.' : 'The lease was given back.'}${allowed}`;
       if (event.kind === 'lease_expired')
         return `The lease reached its time limit.${allowed}`;
-      return `wyss-control ${event.kind === 'lease_renewed' ? 'extended' : 'granted'} a lease for this session.${allowed}`;
+      return `The authority ${event.kind === 'lease_renewed' ? 'extended' : 'granted'} a lease for this session.${allowed}`;
     }
     case 'runtime':
       if (event.kind === 'runtime_desired')
-        return 'wyss-control accepted a request for the managed Codex runtime and recorded what it should be.';
+        return 'The authority accepted a request for the managed Codex runtime and recorded what it should be.';
       if (event.kind === 'runtime_ready')
         return facts.runtime_version
           ? `Codex ${facts.runtime_version} started, was checked and is ready.`
           : 'Codex started, was checked and is ready.';
       return (
         (facts.exit ? EXIT[facts.exit] : 'The Codex process ended.') +
-        (facts.expected === true ? ' wyss-control meant it to.' : '')
+        (facts.expected === true ? ' The authority meant it to.' : '')
       );
     case 'session':
       switch (event.kind) {
@@ -239,16 +239,16 @@ export function eventDetail(event: EventRow): string {
         case 'session_closed':
           return 'The session was closed. Closing is final.';
         case 'session_bound':
-          return 'wyss-control bound the session to a project folder. Which folder is not part of the record.';
+          return 'The authority bound the session to a project folder. Which folder is not part of the record.';
         case 'session_attached':
           return 'The session was attached to the Codex runtime that was running.';
         case 'binding_indeterminate':
-          return 'wyss-control could not confirm whether Codex created the workspace binding.';
+          return 'The authority could not confirm whether Codex created the workspace binding.';
         default:
           return 'An uncertain binding attempt was given up on explicitly.';
       }
     case 'authority':
-      return 'wyss-control recorded an event of a kind this version of the console does not know. Nothing else of it is shown.';
+      return 'The authority recorded an event of a kind this version of the console does not know. Nothing else of it is shown.';
   }
 }
 
@@ -263,18 +263,18 @@ export function startMessage(start: EventsStart): string {
 
 export function eventsReadFailure(code: SessionFailureCode): string {
   return code === 'unavailable'
-    ? 'Events could not be read: wyss-control did not answer.'
+    ? 'Events could not be read: the authority did not answer.'
     : code === 'busy'
-      ? 'Events could not be read. wyss-control is busy; try again in a moment.'
+      ? 'Events could not be read. The authority is busy; try again in a moment.'
       : code === 'changed'
         ? 'The event history changed while it was being read.'
         : 'Events could not be read. Nothing is shown rather than something unverified.';
 }
 export function olderFailure(code: SessionFailureCode): string {
   return code === 'changed'
-    ? 'Older events could not be read: wyss-control holds another history than the one shown. The newest events were read again.'
+    ? 'Older events could not be read: the authority holds another history than the one shown. The newest events were read again.'
     : code === 'unavailable'
-      ? 'Older events could not be read: wyss-control did not answer.'
+      ? 'Older events could not be read: the authority did not answer.'
       : 'Older events could not be read.';
 }
 const CLOCK_OPTIONS: Intl.DateTimeFormatOptions = {

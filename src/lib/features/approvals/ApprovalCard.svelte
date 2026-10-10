@@ -95,7 +95,7 @@
     {/if}
   {:else}
     <p class="approval-note">
-      wyss-control no longer holds what this approval was about.
+      The authority no longer holds what this approval was about.
     </p>
   {/if}
 
@@ -103,7 +103,7 @@
     Waits until
     <time datetime={card.approval.expires_at}
       >{localClock(card.approval.expires_at)}</time
-    >. wyss-control checks the action again before anything runs.
+    >. The authority checks the action again before anything runs.
   </p>
 
   {#if card.decision?.status === 'pending'}

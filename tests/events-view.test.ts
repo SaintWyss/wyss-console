@@ -208,7 +208,7 @@ it('says what it is doing before there is history to show', async () => {
   await ipc.tell(views.waiting_absent);
   await click(nav('Events'));
   expect(text(view().querySelector('.empty-title'))).toBe(
-    'wyss-control is unavailable',
+    'The authority is unavailable',
   );
   expect(text(view())).toContain('Nothing is shown until it is connected.');
   expect(ipc.count('managed_events')).toBe(0);
@@ -221,7 +221,7 @@ it('says what it is doing before there is history to show', async () => {
     fail ? Promise.reject({ code: 'unavailable', retry: true }) : rawPage(0, 0),
   );
   expect(text(view().querySelector('.empty-title'))).toBe(
-    'Events could not be read: wyss-control did not answer.',
+    'Events could not be read: the authority did not answer.',
   );
   fail = false;
   await click(button('Try again'));
@@ -288,7 +288,7 @@ it('reads each record as one plain line, newest first, and never as data', async
   // An event of a kind this build does not know shows where it is, and nothing else.
   await click(rows()[0]);
   expect(text(details())).toContain(
-    'wyss-control recorded an event of a kind this version of the console does not know. Nothing else of it is shown.',
+    'The authority recorded an event of a kind this version of the console does not know. Nothing else of it is shown.',
   );
   expect(button('Open session', details()!)).toBeUndefined();
   // What a record says beyond its title is the authority's own reason, in a sentence.
@@ -298,15 +298,15 @@ it('reads each record as one plain line, newest first, and never as data', async
   );
   await click(rows()[1]);
   expect(text(details()!.querySelector('.session-hint'))).toBe(
-    'wyss-control could not prove the isolation of the runtime, and did not let it run.',
+    'The authority could not prove the isolation of the runtime, and did not let it run.',
   );
   await click(rows()[7]);
   expect(text(details()!.querySelector('.session-hint'))).toBe(
-    'wyss-control granted a lease for this session. It allowed the session to start a turn.',
+    'The authority granted a lease for this session. It allowed the session to start a turn.',
   );
   await click(rows()[5]);
   expect(text(details()!.querySelector('.session-hint'))).toBe(
-    'Codex proposed a command and wyss-control held it for a decision. The proposal itself is not part of the record.',
+    'Codex proposed a command and the authority held it for a decision. The proposal itself is not part of the record.',
   );
 });
 
@@ -478,7 +478,7 @@ it('asks the authority what an approval is now, and says when it no longer knows
     },
   ]);
   expect(text(details())).toContain(
-    'Now: Approved. wyss-control no longer holds what it was about.',
+    'Now: Approved. The authority no longer holds what it was about.',
   );
   // The authority has nothing of it any more: history is still history.
   ipc.world.approval = () =>
@@ -491,7 +491,7 @@ it('asks the authority what an approval is now, and says when it no longer knows
     Promise.reject({ code: 'unavailable', retry: true });
   await click(button('Check what it is now', details()!));
   expect(text(details())).toContain(
-    'The approval could not be read from wyss-control.',
+    'The approval could not be read from the authority.',
   );
   await click(button('Open Approvals', details()!));
   expect(document.querySelector('.context-title')?.textContent).toBe(
@@ -574,12 +574,12 @@ it('draws a boundary where the authority holds another stream', async () => {
   ipc.world.events = () => rawPage(122, 50);
   await ipc.tell(ready('122', 4, 1));
   expect(text(view())).toContain(
-    'wyss-control restarted. It kept the same event stream',
+    'The authority restarted. It kept the same event stream',
   );
   expect(view().querySelector('.events-boundary')).toBeNull();
   expect(rows()).toHaveLength(52);
   await click(button('Dismiss'));
-  expect(text(view())).not.toContain('wyss-control restarted');
+  expect(text(view())).not.toContain('The authority restarted');
 
   // Another stream on the same socket: its positions start over.
   ipc.world.events = () => rawPage(2, 2, { stream: OTHER_STREAM });
@@ -623,7 +623,7 @@ it('shows a record of a replaced stream as itself, whatever now has its position
   // What it is about lived in that stream's authority: nothing of it is offered to be
   // opened or read from the one that answers now.
   expect(text(details())).toContain(
-    'This record was read from a stream wyss-control no longer holds here.',
+    'This record was read from a stream the authority no longer holds here.',
   );
   expect(details()!.querySelectorAll('button.action')).toHaveLength(0);
   expect(button('Open session', details()!)).toBeUndefined();
@@ -636,7 +636,7 @@ it('shows a record of a replaced stream as itself, whatever now has its position
   // A record of the stream the authority holds links to where its subject lives.
   expect(button('Open session', details()!)).toBeDefined();
   expect(text(details())).toContain(
-    'that is read from wyss-control where it lives',
+    'that is read from the authority where it lives',
   );
   expect(ipc.count('managed_approval_read')).toBe(reads);
   // A filter is applied to each stream by itself: neither list takes a row of the other.

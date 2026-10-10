@@ -181,14 +181,14 @@
           {/each}
         </fieldset>
         <p class="composer-note">
-          wyss-control decides whether the folder can be a workspace, starts
+          The authority decides whether the folder can be a workspace, starts
           Codex if it is not running, and binds the session to it. A session
           keeps the mode it is created in.
         </p>
         {#if sessions.mode === 'local_tools'}
           <p class="composer-note">
             Local Tools gives Codex more to work with, not more authority: every
-            command and file change waits for your approval. wyss-control runs
+            command and file change waits for your approval. The authority runs
             one Codex runtime, in one mode and for one folder at a time.
           </p>
         {/if}
@@ -234,11 +234,11 @@
 
   {#if sessions.link === 'connecting'}
     <div class="sessions-empty" role="status">
-      <p class="empty-title">Connecting to wyss-control…</p>
+      <p class="empty-title">Connecting to the authority…</p>
     </div>
   {:else if !connected}
     <div class="sessions-empty" role="status">
-      <p class="empty-title">wyss-control is unavailable</p>
+      <p class="empty-title">The authority is unavailable</p>
       <p>{summarizeAuthority(authority).detail}</p>
       <p>
         Sessions are read from the authority and cannot be created, activated,
@@ -383,7 +383,7 @@
               aria-label="Confirm discard"
             >
               <p>
-                Discard the uncertain attempt? wyss-control records that it was
+                Discard the uncertain attempt? The authority records that it was
                 abandoned and stops holding the session for it. If Codex did
                 create a thread for that attempt, the empty thread is left
                 behind. The session can then be activated again.
@@ -439,7 +439,7 @@
               <div class="session-uncertain" role="status">
                 <p class="uncertain-title">Activation outcome uncertain</p>
                 <p>
-                  wyss-control asked Codex to bind a workspace and could not
+                  The authority asked Codex to bind a workspace and could not
                   confirm what Codex did. Nothing asks again by itself: a second
                   request could create a second thread.
                 </p>
@@ -546,7 +546,7 @@
               {modeLabel(selected.mode)}
               {#if selected.mode === 'unknown' && selected.workspace}
                 <span class="fact-note"
-                  >wyss-control reports a session's mode while it is attached.</span
+                  >The authority reports a session's mode while it is attached.</span
                 >
               {/if}
             </dd>

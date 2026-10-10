@@ -61,15 +61,16 @@
 
   {#if approvals.link === 'connecting'}
     <div class="sessions-empty" role="status">
-      <p class="empty-title">Connecting to wyss-control…</p>
+      <p class="empty-title">Connecting to the authority…</p>
     </div>
   {:else if !connected}
     <div class="sessions-empty" role="status">
-      <p class="empty-title">wyss-control is unavailable</p>
+      <p class="empty-title">The authority is unavailable</p>
       <p>{summarizeAuthority(authority).detail}</p>
       <p>
         Approvals are read from the authority and cannot be decided until it is
-        connected. Nothing is approved or denied in the meantime.
+        connected. Nothing is approved or denied in the meantime. Your local
+        terminals keep working.
       </p>
     </div>
   {:else if pending === null && approvals.readFailure}

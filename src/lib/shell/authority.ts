@@ -83,7 +83,8 @@ const FAULTS: Record<
   absent: {
     label: 'Offline',
     tone: 'idle',
-    detail: 'wyss-control is not running. Local terminals do not depend on it.',
+    detail:
+      'The authority is not running. Local terminals do not depend on it.',
   },
   lost: {
     label: 'Reconnecting',
@@ -121,7 +122,7 @@ export function summarizeAuthority(
       key,
       label: 'Connecting',
       tone: 'pending',
-      detail: 'Looking for wyss-control.',
+      detail: 'Looking for the Wyss authority.',
     };
   if (observation.state === 'unavailable')
     return {
@@ -140,7 +141,7 @@ export function summarizeAuthority(
       tone: 'ok',
       note: plural(a.prepared_sessions, 'session'),
       detail: [
-        `wyss-control${a.service_version ? ` ${a.service_version}` : ''}`,
+        `Wyss authority${a.service_version ? ` ${a.service_version}` : ''}`,
         `protocol ${a.protocol_version}`,
         `sessions: ${sessions}`,
         `event head ${a.last_sequence ?? '0'}`,
@@ -166,7 +167,7 @@ export function summarizeAuthority(
     key,
     label: 'Connecting',
     tone: 'pending',
-    detail: 'Looking for wyss-control.',
+    detail: 'Looking for the Wyss authority.',
   };
 }
 
