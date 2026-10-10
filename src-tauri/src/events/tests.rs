@@ -52,6 +52,10 @@ struct Log {
     foreign: bool,
     /// Answers nothing although there is history.
     empty: bool,
+    /// Answers the next read from this many positions before the one asked for.
+    rewind: u64,
+    /// Answers this many events more than the limit asked for.
+    extra: usize,
 }
 fn envelope(
     stream: &WireUuid,
@@ -81,14 +85,18 @@ fn authority(log: Log) -> (Peer, EventService, Arc<Mutex<Log>>, ManagedSessionId
         let Operation::AuditRead(p) = op else {
             return answer(Err(ControlError::InvalidRequest));
         };
-        let log = shared.lock().unwrap();
+        let mut log = shared.lock().unwrap();
         let after = p.after_sequence.map_or(0, Sequence::get);
         let stream = if log.foreign {
             uuid()
         } else {
             p.stream_id.clone()
         };
-        let limit = log.chunk.unwrap_or(usize::MAX).min(usize::from(p.limit));
+        let limit = log
+            .chunk
+            .unwrap_or(usize::MAX)
+            .min(usize::from(p.limit) + log.extra);
+        let after = after.saturating_sub(std::mem::take(&mut log.rewind));
         let events: Vec<EventEnvelopeV1> = (after + 1..=log.entries.len() as u64)
             .filter(|at| *at > log.lost && Some(*at) != log.hole && !log.empty)
             .take(limit)
@@ -650,9 +658,10 @@ fn an_event_this_build_does_not_know_crosses_as_its_position_and_time_alone() {
                        "scopes": ["turn_start"], "runtime_version": "9.9.9"}),
                 true,
             ),
+            // A new kind of a family this build knows is still a kind it does not know.
             (
-                "vendor.something.else",
-                json!({"anything": {"nested": ["SECRET_FUTURE"]}}),
+                "authority.managed_turn.paused",
+                json!({"managed_turn_id": TURN, "reason": "user_cancel", "note": "SECRET_FUTURE"}),
                 false,
             ),
             // A known kind whose words are newer than this build: the kind stays, the
@@ -747,6 +756,25 @@ fn a_stream_that_is_not_one_is_refused_and_a_missing_beginning_is_said() {
     let older = service.older(page.stream.clone(), at(71)).unwrap();
     assert_eq!(positions(&older), (26..=70).rev().collect::<Vec<_>>());
     assert_eq!((older.gap, older.older), (true, None));
+    // And when none of the window is there: it is answered empty, as a gap, after one
+    // question. It is not an error, and it is not asked again and again.
+    log.lock().unwrap().lost = 80;
+    let asked = reads(&peer).len();
+    let gone = service.older(page.stream.clone(), at(71)).unwrap();
+    assert_eq!(
+        (positions(&gone), gone.gap, gone.older),
+        (vec![], true, None)
+    );
+    assert_eq!(reads(&peer).len(), asked + 1);
+    // The newest window is never that: its head is an event. Here everything up to the
+    // head the authority greeted with is gone, and it answers with what came after.
+    {
+        let mut log = log.lock().unwrap();
+        log.lost = 120;
+        log.entries.extend(turns(5));
+    }
+    stream_error(failed(service.latest()));
+    log.lock().unwrap().entries.truncate(120);
     // A hole inside what was read is not a beginning: nothing is shown around it.
     {
         let mut log = log.lock().unwrap();
@@ -759,12 +787,35 @@ fn a_stream_that_is_not_one_is_refused_and_a_missing_beginning_is_said() {
         (log.hole, log.foreign) = (None, true);
     }
     stream_error(failed(service.latest()));
-    // An answer with nothing in it, where the greeting said there is history.
+    // An answer with nothing in it, where the greeting said there is history. It is
+    // refused at once.
     {
         let mut log = log.lock().unwrap();
         (log.foreign, log.empty) = (false, true);
     }
+    let asked = reads(&peer).len();
     stream_error(failed(service.latest()));
+    assert_eq!(reads(&peer).len(), asked + 1);
+    // An event at the position asked from, once, and then the rest as it should be:
+    // history does not go backwards, and that event is not taken into the window.
+    {
+        let mut log = log.lock().unwrap();
+        (log.empty, log.rewind) = (false, 1);
+    }
+    stream_error(failed(service.latest()));
+    log.lock().unwrap().rewind = 3;
+    stream_error(failed(service.older(page.stream.clone(), at(71))));
+    // More events than were asked for.
+    {
+        let mut log = log.lock().unwrap();
+        (log.rewind, log.extra) = (0, 10);
+    }
+    stream_error(failed(service.older(page.stream.clone(), at(11))));
+    log.lock().unwrap().extra = 0;
+    assert_eq!(
+        positions(&service.older(page.stream.clone(), at(11)).unwrap()),
+        (1..=10).rev().collect::<Vec<_>>()
+    );
     drop(peer);
 
     // Whatever else the authority answers to a history read is not history.

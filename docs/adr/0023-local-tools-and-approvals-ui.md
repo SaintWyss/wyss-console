@@ -451,8 +451,10 @@ shows the approval's record without it.
 
 Remembering a decision in any form (always allow, trusted folders, rules, policy);
 editing a proposed action; more than one runtime, or one per session; a durable record
-of a session's mode; an event and history
-view (Phase 3F); rendering Markdown; other adapters.
+of a session's mode; rendering Markdown; other adapters.
+
+Status note (2026-10-09): the event and history view that was deferred here exists. See
+[ADR 0024](0024-events-history-ui.md).
 
 ## Acceptance evidence
 

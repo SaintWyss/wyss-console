@@ -157,6 +157,18 @@ it('adds new events once, in order, and never an event it already shows', async 
   expect(h.state()).toMatchObject({ start: 'more', detached: false });
 });
 
+it('tells positions apart exactly, past what a number holds', async () => {
+  // 2^53 and the position after it are the same number, and not the same position.
+  const h = await showing(9007199254740992, 3);
+  expect(positions(h.state().events)[0]).toBe('9007199254740992');
+  h.controller.observe(connected('9007199254740993'));
+  expect(h.latest).toHaveLength(2);
+  // And a head that did not move is not read again.
+  const still = await showing(9007199254740992, 3);
+  still.controller.observe(connected('9007199254740992'));
+  expect(still.latest).toHaveLength(1);
+});
+
 it('does not move history under a reader who is somewhere older', async () => {
   const h = await showing(120, 50);
   h.controller.setAtTop(false);
@@ -203,9 +215,17 @@ it('reads older history a window at a time, from the position it was handed', as
   await settle();
   // The beginning of the stream: said, and nothing more is asked for.
   expect(positions(h.state().events)).toEqual(run(120, 1));
+  expect(new Set(positions(h.state().events)).size).toBe(120);
   expect(h.state().start).toBe('beginning');
   h.controller.loadOlder();
   expect(h.older).toHaveLength(2);
+
+  // An answer that overlaps what is shown adds each event once.
+  const overlap = await showing(120, 50);
+  overlap.controller.loadOlder();
+  overlap.older[0].resolve(page(75, 50, { head: '120' }));
+  await settle();
+  expect(positions(overlap.state().events)).toEqual(run(120, 26));
 
   // A window that begins at a hole: history before it is unavailable, and that is all.
   const gap = await showing(120, 50);
@@ -216,6 +236,19 @@ it('reads older history a window at a time, from the position it was handed', as
   expect(gap.state().start).toBe('unavailable');
   gap.controller.loadOlder();
   expect(gap.older).toHaveLength(1);
+  // None of the window before is there: the same is said, and what is shown stays.
+  const gone = await showing(120, 50);
+  gone.controller.loadOlder();
+  gone.older[0].resolve(page(0, 0, { head: '120', gap: true }));
+  await settle();
+  expect(positions(gone.state().events)).toEqual(run(120, 71));
+  expect(gone.state()).toMatchObject({
+    start: 'unavailable',
+    loadingOlder: false,
+    olderFailure: null,
+  });
+  gone.controller.loadOlder();
+  expect(gone.older).toHaveLength(1);
   // The newest window itself may begin at one.
   const short = harness();
   short.controller.setVisible(true);

@@ -17,9 +17,11 @@ shown as it arrives and the turn can be cancelled
 ([ADR 0022](docs/adr/0022-managed-turns-ui.md)). A session can be created in Local
 Tools, where Codex may propose commands and file changes in its project folder, and
 each proposal waits for an approval that is read and answered in the window
-([ADR 0023](docs/adr/0023-local-tools-and-approvals-ui.md)). The product is not
-complete: there is no event or history view yet, nothing an approval decided is
-remembered, and the authority runs one Codex runtime in one mode at a time. Built with Tauri 2,
+([ADR 0023](docs/adr/0023-local-tools-and-approvals-ui.md)). What the authority
+recorded can be read in the Events view, newest first and back to the first event
+([ADR 0024](docs/adr/0024-events-history-ui.md)). The product is not
+complete: nothing an approval decided is remembered, history cannot be searched or
+exported, and the authority runs one Codex runtime in one mode at a time. Built with Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -468,6 +470,56 @@ npm run desktop:run                        # Sessions -> New session -> Local To
 ```
 
 See [ADR 0023](docs/adr/0023-local-tools-and-approvals-ui.md).
+
+## Events and history in the window
+
+**Events** shows what `wyss-control` recorded: every session, runtime, turn, approval
+and lease change it committed, newest first.
+
+```text
+Events  ->  the newest fifty events  ->  Load older, fifty at a time, down to the first event
+a row   ->  what the record says  ->  Open session · Open in Agents · Check what an approval is now
+```
+
+| In the window        | What the desktop asks the authority                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------------- |
+| Opening Events       | The stream and its head from the greeting, then `audit/read` for the fifty events below the head. |
+| **Load older**       | `audit/read` for the fifty events before the oldest one shown, in the stream it was read from.    |
+| A new event arriving | Nothing by itself: the head the top bar already follows moved, and the view reads again.          |
+| Filters              | Nothing. They are applied to the events that are loaded.                                          |
+
+- **A record is evidence, not state.** A row saying an approval was requested does not
+  say it is pending. What a session, a turn or an approval is now is read where it lives:
+  a row's details link there, and for an approval ask the authority what it is now.
+- **A row is a closed projection.** Its position, time, kind, the Wyss identities of
+  its session, turn and approval, and a few recorded facts (why a turn ended, how the
+  runtime exited, what a lease allowed). The event as the authority stores it never
+  reaches the window: no payload, no provider thread or turn, no lease identity, no
+  action fingerprint, no runtime instance. Events hold no prompt, command, diff or
+  output, and none is shown.
+- **Nothing here changes anything.** Events has no Approve, Deny, Retry, Cancel, Start,
+  Stop or Replay, and no export.
+- **It reads only while it is shown**, once for each change of the durable head. At the
+  newest end new events are added; anywhere else the view says **New events available**
+  and leaves the reader where they are.
+- **Bounded.** Fifty events a read, 400 kept; further back, the newest are let go.
+- **What is not there is said.** _Older events exist and are not loaded_, _This is the
+  beginning of the event stream_, or _History before this point is unavailable_.
+- **A restart of `wyss-control` keeps its stream**: history continues and the view says
+  the authority restarted. Another state store on the same socket is another stream, and
+  is shown below an explicit boundary, never as a continuation.
+- **Offline, loaded rows stay** and are said to be from before; nothing is read.
+- **Refusals are not events.** `wyss-control` records what it committed. A refused
+  request (a stop under a running turn, a stale revision) is answered and not recorded,
+  so it does not appear here.
+
+```sh
+./src-tauri/target/debug/wyss-control      # one terminal
+npm run desktop:run                        # Events
+./src-tauri/target/debug/examples/control_client audit        # the same stream, as the authority stores it
+```
+
+See [ADR 0024](docs/adr/0024-events-history-ui.md).
 
 ## Authority-owned Codex runtime
 

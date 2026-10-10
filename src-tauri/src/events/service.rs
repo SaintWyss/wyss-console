@@ -41,13 +41,18 @@ impl EventService {
     pub fn latest(&self) -> Result<EventsPage, SessionError> {
         let mut client = self.sessions.connect()?;
         let (stream, head) = greeting(&client);
-        window(
+        let page = window(
             &mut client,
             stream,
             head,
             head.saturating_sub(EVENTS_PAGE),
             head,
-        )
+        )?;
+        // The head is an event: a stream that has one and shows none is not a stream.
+        if head > 0 && page.events.is_empty() {
+            return Err(SessionError::of(ControlError::CorrelationError));
+        }
+        Ok(page)
     }
 
     /// The window before `before`, in the stream the caller read it from. A position of
@@ -86,7 +91,8 @@ fn greeting(client: &ControlClient) -> (WireUuid, u64) {
 /// may hold. What comes back has to be the stream: every event of `stream`, each one
 /// position after the one before. A hole inside what was read is not a stream and is a
 /// failed read. The one hole that is said rather than refused is at the beginning: if the
-/// first event is not the one asked for, history before it is unavailable.
+/// first event is not the one asked for, history before it is unavailable. That includes
+/// a window none of which is there: it is answered empty, as a gap.
 fn window(
     client: &mut ControlClient,
     stream: WireUuid,
@@ -96,7 +102,7 @@ fn window(
 ) -> Result<EventsPage, SessionError> {
     let mut rows: Vec<EventRow> = Vec::new();
     let (mut cursor, mut gap) = (after, false);
-    for _ in 0..EVENTS_PAGE {
+    'read: for _ in 0..EVENTS_PAGE {
         if cursor >= upper {
             break;
         }
@@ -124,22 +130,24 @@ fn window(
             if at <= cursor {
                 return Err(SessionError::of(ControlError::CorrelationError));
             }
-            // Past the window: where its beginning is missing, the authority counts the
-            // events it answers from further on. What lies beyond is not this window.
-            if at > upper {
-                break;
-            }
             if at != cursor + 1 {
                 if !rows.is_empty() {
                     return Err(SessionError::of(ControlError::CorrelationError));
                 }
                 gap = true;
             }
+            // Past the window: where its beginning is missing, the authority counts the
+            // events it answers from further on. What lies beyond is not this window,
+            // and nothing more of it is there to ask for.
+            if at > upper {
+                break 'read;
+            }
             cursor = at;
             rows.push(row);
         }
     }
-    if cursor != upper {
+    // The window was read to its end, or none of it is there.
+    if cursor != upper && !(gap && rows.is_empty()) {
         return Err(SessionError::of(ControlError::CorrelationError));
     }
     rows.reverse();

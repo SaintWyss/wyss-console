@@ -79,6 +79,10 @@ it('accepts the projection the desktop sends, positions as the text they are', (
       older: '18446744073709551613',
     }),
   ).toThrow(/invalid_order/);
+  // Nor is an event one past the head taken for the head itself.
+  expect(() =>
+    parseEventsPage({ ...far, head: '18446744073709551614' }),
+  ).toThrow(/invalid_head/);
 });
 
 it('refuses anything a row of history has no use for', () => {
@@ -134,6 +138,17 @@ it('refuses a page that is not an unbroken run of one stream, newest first', () 
     bad(['events', 0, 'sequence'], position, /invalid_(sequence|order|head)/);
   bad(['head'], 12, /invalid_head/);
   bad(['older'], 9, /invalid_older/);
+  // A time is the authority's UTC timestamp, not anything a date can be read from.
+  for (const at of [
+    '2026-10-09 10:00:00Z',
+    'October 9, 2026 10:00 UTC',
+    '2026-10-09',
+    '2026-10-09T10:00:00+02:00',
+    '2026-13-40T10:00:00Z',
+    1791590922,
+    null,
+  ])
+    bad(['events', 0, 'at'], at, /invalid_at/);
   // A hole, a repeat, an ascending pair.
   bad(['events', 2, 'sequence'], '9', /invalid_order/);
   bad(['events', 1, 'sequence'], '12', /invalid_order/);
@@ -152,9 +167,13 @@ it('refuses a page that is not an unbroken run of one stream, newest first', () 
   expect(() =>
     parseEventsPage({ ...rawPage(12, 4, { gap: true }), older: '9' }),
   ).toThrow(/invalid_older/);
-  expect(() => parseEventsPage({ ...rawPage(0, 0), gap: true })).toThrow(
-    /invalid_gap/,
-  );
+  // A window none of which is there is a gap with nothing in it, and hands nothing back.
+  expect(
+    parseEventsPage({ ...rawPage(0, 0), head: '120', gap: true }),
+  ).toMatchObject({ events: [], gap: true, older: null });
+  expect(() =>
+    parseEventsPage({ ...rawPage(0, 0), head: '120', gap: true, older: '70' }),
+  ).toThrow(/invalid_older/);
   // Never more than a page.
   expect(parseEventsPage(rawPage(200, EVENTS_PAGE_LIMIT)).events).toHaveLength(
     EVENTS_PAGE_LIMIT,
@@ -270,6 +289,26 @@ it('takes an answer about another stream or another window for a failed bridge',
   expect(await failure(readOlderEvents(STREAM, '71'))).toEqual(internal);
   bridge(() => rawPage(71, 50));
   expect(await failure(readOlderEvents(STREAM, '71'))).toEqual(internal);
+  // Far positions are compared as what they are: this is the window right before.
+  bridge(() => ({
+    ...rawPage(2, 2),
+    head: '18446744073709551615',
+    events: [row('18446744073709551614'), row('18446744073709551613')],
+    older: '18446744073709551613',
+  }));
+  expect(
+    (await readOlderEvents(STREAM, '18446744073709551615')).events[0].sequence,
+  ).toBe('18446744073709551614');
+  // A window none of which is there to read is a fair answer about older history.
+  bridge(() => ({ ...rawPage(0, 0), head: '120', gap: true }));
+  expect(await readOlderEvents(STREAM, '71')).toMatchObject({
+    events: [],
+    gap: true,
+  });
+  // It is not one about the newest: a stream that has a head shows its head.
+  expect(await failure(readEvents())).toEqual(internal);
+  bridge(() => ({ ...rawPage(0, 0), head: '120' }));
+  expect(await failure(readEvents())).toEqual(internal);
   // Nothing before the first event is a fair answer.
   bridge(() => rawPage(0, 0, { head: '9' }));
   expect((await readOlderEvents(STREAM, '1')).events).toEqual([]);

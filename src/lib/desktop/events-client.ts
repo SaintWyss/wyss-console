@@ -30,9 +30,13 @@ async function call(
   return page;
 }
 
-/** The newest window of durable events. */
+/** The newest window of durable events. A stream that has a head shows its head. */
 export function readEvents(): Promise<EventsPage> {
-  return call('managed_events', {}, () => true);
+  return call(
+    'managed_events',
+    {},
+    (page) => page.events.length > 0 || page.head === null,
+  );
 }
 
 /**

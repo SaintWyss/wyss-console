@@ -318,11 +318,18 @@ it('filters the loaded events and says that is all it filters', async () => {
     'approval_requested',
     'lease_granted',
     'other',
+    'runtime_exited',
   ] as const;
-  const ipc = await opened(
-    () => rawPage(6, 6, { kind: (at) => kinds[at - 1] }),
-    '6',
-  );
+  const ipc = await opened(() => {
+    const raw = rawPage(7, 7, { kind: (at) => kinds[at - 1] });
+    // What the record says is isolation is security, whatever its category.
+    raw.events[0] = row(7, 'runtime_exited', {
+      disposition: 'security',
+      security: true,
+      facts: { exit: 'inference_isolation_violation', expected: false },
+    });
+    return raw;
+  }, '7');
   const filters = () =>
     Array.from(
       view().querySelectorAll<HTMLButtonElement>('.events-filters .chip'),
@@ -346,17 +353,20 @@ it('filters the loaded events and says that is all it filters', async () => {
   await click(button('Turns'));
   expect(titles()).toEqual(['Managed turn running']);
   expect(text(view().querySelector('.sessions-count'))).toBe(
-    '6 loaded · newest first · 1 shown',
+    '7 loaded · newest first · 1 shown',
   );
   expect(text(view())).toContain(
     'Filters apply to the events loaded here, not to all of history.',
   );
   await click(button('Security'));
-  expect(titles()).toEqual(['Execution lease granted']);
+  expect(titles()).toEqual([
+    'Codex runtime contained',
+    'Execution lease granted',
+  ]);
   await click(button('Runtime'));
-  expect(titles()).toEqual(['Codex runtime ready']);
+  expect(titles()).toEqual(['Codex runtime contained', 'Codex runtime ready']);
   await click(button('All'));
-  expect(titles()).toHaveLength(6);
+  expect(titles()).toHaveLength(7);
   // Choosing a filter reads nothing.
   expect(ipc.count('managed_events')).toBe(1);
   expect(ipc.count('managed_events_older')).toBe(0);
@@ -591,6 +601,35 @@ it('draws a boundary where the authority holds another stream', async () => {
   );
   // Nothing is asked of the old stream again.
   expect(ipc.count('managed_events_older')).toBe(0);
+});
+
+it('shows a record of a replaced stream as itself, whatever now has its position', async () => {
+  const ipc = await opened(() => rawPage(5, 5), '5');
+  // Another stream, as long as the one before: every position exists in both.
+  ipc.world.events = () =>
+    rawPage(5, 5, { stream: OTHER_STREAM, kind: () => 'session_prepared' });
+  await ipc.tell(ready('5', 4, 1));
+  const lists = () => view().querySelectorAll('.events-list');
+  expect(titles(lists()[0])[0]).toBe('Managed session prepared');
+  expect(titles(lists()[1])[0]).toBe('Managed turn running');
+  await click(rows(lists()[1])[0]);
+  expect(text(details()!.querySelector('h3'))).toBe('Managed turn running');
+  expect(text(details()!.querySelector('.session-facts'))).toContain(
+    `Position 5 in stream ${STREAM.slice(0, 8)}`,
+  );
+  expect(
+    rows().filter((r) => r.getAttribute('aria-pressed') === 'true'),
+  ).toHaveLength(1);
+  await click(rows(lists()[0])[0]);
+  expect(text(details()!.querySelector('h3'))).toBe('Managed session prepared');
+  expect(text(details()!.querySelector('.session-facts'))).toContain(
+    `Position 5 in stream ${OTHER_STREAM.slice(0, 8)}`,
+  );
+  // A filter is applied to each stream by itself: neither list takes a row of the other.
+  await click(button('Sessions'));
+  expect(rows(lists()[0])).toHaveLength(5);
+  expect(view().querySelector('.events-boundary')).not.toBeNull();
+  expect(rows(lists()[1])).toHaveLength(0);
 });
 
 it('keeps loaded history when the authority goes away, and says it is from before', async () => {

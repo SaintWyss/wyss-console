@@ -172,7 +172,8 @@ export interface EventsPage {
   events: EventRow[];
   /** Hand this back to read the window before this one. */
   older: string | null;
-  /** History before the oldest event here is unavailable. */
+  /** History before the oldest event here is unavailable. With no events, none of
+   * the window that was asked for is there. */
   gap: boolean;
 }
 
@@ -374,7 +375,6 @@ export function parseEventsPage(value: unknown): EventsPage {
     throw invalid('older');
   if (older === null && oldest !== undefined && oldest !== '1' && !v.gap)
     throw invalid('older');
-  if (v.gap && events.length === 0) throw invalid('gap');
   return {
     schema_version: 1,
     stream: v.stream.toLowerCase(),
