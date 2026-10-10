@@ -307,9 +307,9 @@ impl Inner {
                 return Err(Failure::ExitedRepeatedly);
             }
             self.phase(Phase::Installing);
-            let bytes = package.verified().map_err(failure_of)?;
-            install::ensure(layout, &bytes, package.digest()).map_err(failure_of)?;
-            drop(bytes);
+            let payload = package.verified().map_err(failure_of)?;
+            install::ensure(layout, &payload).map_err(failure_of)?;
+            drop(payload);
             let refused = |error| match error {
                 ManagerError::Unavailable => Failure::ManagerUnavailable,
                 ManagerError::Refused => Failure::StartRefused,
@@ -323,11 +323,13 @@ impl Inner {
             self.manager.start().map_err(refused)?;
         }
         self.phase(Phase::Connecting);
-        self.await_connection(revision)
+        self.await_connection(revision, !in_hand)
     }
     /// Waits for the link, looking at the unit a bounded number of times so that a start
-    /// that failed is said when it is known and not when the limit passes.
-    fn await_connection(&self, mut revision: u64) -> Result<LinkState, Failure> {
+    /// that failed is said when it is known and not when the limit passes. `started` is
+    /// whether this attempt asked for the start: a unit that was only watched and is no
+    /// longer running was stopped, it did not fail to start.
+    fn await_connection(&self, mut revision: u64, started: bool) -> Result<LinkState, Failure> {
         let deadline = Instant::now() + self.limits.startup;
         let mut pause = self.limits.first_check;
         loop {
@@ -352,7 +354,8 @@ impl Inner {
                 Ok(status) if status.result == UnitResult::StartLimitHit => {
                     return Err(Failure::ExitedRepeatedly);
                 }
-                Ok(_) => return Err(Failure::StartupFailed),
+                Ok(_) if started => return Err(Failure::StartupFailed),
+                Ok(_) => return Err(Failure::Stopped),
                 Err(_) => return Err(Failure::ManagerUnavailable),
             }
             pause = (pause * 2).min(CHECK_LIMIT);

@@ -279,6 +279,32 @@ fn diagnostic(error: ProbeError) -> RuntimeDiagnostic {
         _ => RuntimeDiagnostic::ProtocolFailed,
     }
 }
+/// The working directory of every runtime process: `runtime-cwd` inside the authority's
+/// private runtime directory, created 0700 where it is missing.
+///
+/// It is the authority's alone and it is empty, so the runtime starts in no project of
+/// the user's, next to no file of the authority's, and under no directory that carries
+/// project configuration. Which workspace a thread works in is said to the runtime
+/// explicitly and checked; it is never where the process happens to be.
+pub(super) fn runtime_cwd(authority_runtime: &Path) -> std::io::Result<std::path::PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    let unsafe_place = || std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+    let path = authority_runtime.join("runtime-cwd");
+    match std::fs::DirBuilder::new().mode(0o700).create(&path) {
+        Ok(()) => (),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
+        Err(e) => return Err(e),
+    }
+    let meta = std::fs::symlink_metadata(&path)?;
+    if !meta.is_dir()
+        || meta.uid() != nix::unistd::geteuid().as_raw()
+        || meta.mode() & 0o777 != 0o700
+        || std::fs::read_dir(&path)?.next().is_some()
+    {
+        return Err(unsafe_place());
+    }
+    Ok(path)
+}
 /// Counts the actual successful sends at the IO boundary. Rejects responses and all
 /// other methods before writing any byte; independent fake-child tests inspect stdin.
 struct RuntimeIo<'a> {
@@ -701,10 +727,11 @@ fn run(
     observe: &mut impl FnMut(&AgentRuntimeInstanceId, Observation, &AtomicBool),
     methods: &mut RuntimeMethods,
 ) -> std::result::Result<(), RuntimeDiagnostic> {
-    let cwd = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .to_path_buf();
+    // Where the runtime process starts. Nothing of the build tree: an installed authority
+    // has none. A directory that is not provably the authority's own and empty keeps the
+    // runtime from starting.
+    let cwd =
+        runtime_cwd(&generation.catalog_dir).map_err(|_| RuntimeDiagnostic::SafetyUnproven)?;
     let executable =
         discover(env::var_os("PATH").as_deref()).ok_or(RuntimeDiagnostic::Unavailable)?;
     let mut version_command = Command::new(&executable);
@@ -1422,6 +1449,51 @@ fn start_turn(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_runtime_starts_in_a_private_empty_directory_of_the_authority_or_not_at_all() {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt, symlink};
+        let root = std::env::temp_dir().join(format!("wyss-cwd-{}", uuid::Uuid::new_v4()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&root)
+            .unwrap();
+        // Created where it is missing, private, and the same place every time.
+        let cwd = super::runtime_cwd(&root).unwrap();
+        assert_eq!(cwd, root.join("runtime-cwd"));
+        assert_eq!(
+            std::fs::symlink_metadata(&cwd).unwrap().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(super::runtime_cwd(&root).unwrap(), cwd);
+        // It names nothing of the tree this binary was built in.
+        assert!(!cwd.starts_with(env!("CARGO_MANIFEST_DIR")));
+        // Something in it: a project file, a policy layer, anything. Not started there.
+        std::fs::write(cwd.join("AGENTS.md"), "x").unwrap();
+        assert!(super::runtime_cwd(&root).is_err());
+        std::fs::remove_file(cwd.join("AGENTS.md")).unwrap();
+        std::fs::create_dir(cwd.join(".codex")).unwrap();
+        assert!(super::runtime_cwd(&root).is_err());
+        std::fs::remove_dir(cwd.join(".codex")).unwrap();
+        assert!(super::runtime_cwd(&root).is_ok());
+        // Open to others, or not a directory of its own: not started there either.
+        std::fs::set_permissions(&cwd, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(super::runtime_cwd(&root).is_err());
+        std::fs::remove_dir(&cwd).unwrap();
+        let elsewhere = root.join("elsewhere");
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&elsewhere)
+            .unwrap();
+        symlink(&elsewhere, &cwd).unwrap();
+        assert!(super::runtime_cwd(&root).is_err());
+        std::fs::remove_file(&cwd).unwrap();
+        std::fs::write(&cwd, "a file").unwrap();
+        assert!(super::runtime_cwd(&root).is_err());
+        // An authority runtime directory that is not there has nothing to start in.
+        assert!(super::runtime_cwd(&root.join("missing")).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     use super::*;
     use serde_json::json;
 

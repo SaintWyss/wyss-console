@@ -108,7 +108,8 @@ impl Systemd {
     fn call(&self, arguments: &[&str], limit: Duration) -> Result<String, ManagerError> {
         let systemctl = self.systemctl.as_ref().ok_or(ManagerError::Unavailable)?;
         let mut child = Command::new(systemctl)
-            .arg("--user")
+            // Never a prompt: there is nobody to answer one, and nothing to ask.
+            .args(["--user", "--no-ask-password"])
             .args(arguments)
             // Nothing of the desktop's environment: where the manager is, and plain output.
             .env_clear()
@@ -132,9 +133,17 @@ impl Systemd {
                 }
             }
         };
+        // What it printed is in the pipe already. It is read without waiting, so a
+        // process that outlived it with the pipe open cannot hold this call.
         let mut output = String::new();
         if let Some(stdout) = child.stdout.take() {
-            let _ = stdout.take(MAX_OUTPUT).read_to_string(&mut output);
+            use nix::fcntl::{FcntlArg, OFlag, fcntl};
+            use std::os::fd::AsRawFd;
+            if fcntl(stdout.as_raw_fd(), FcntlArg::F_SETFL(OFlag::O_NONBLOCK)).is_ok() {
+                let mut bytes = Vec::new();
+                let _ = stdout.take(MAX_OUTPUT).read_to_end(&mut bytes);
+                output = String::from_utf8_lossy(&bytes).into_owned();
+            }
         }
         match status.code() {
             Some(0) => Ok(output),

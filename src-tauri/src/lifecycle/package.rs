@@ -42,8 +42,28 @@ impl std::fmt::Debug for Digest {
     }
 }
 
-/// An authority binary is a few megabytes. Nothing larger is read as one.
-pub(super) const MAX_BINARY: u64 = 256 * 1024 * 1024;
+/// An authority binary is a few megabytes, and a few hundred with debugging symbols.
+/// Nothing larger is read as one.
+pub(super) const MAX_BINARY: u64 = 512 * 1024 * 1024;
+
+/// An authority binary held in memory together with its digest, computed once. What is
+/// compared with a pin and what is written to disk are these same bytes.
+pub struct Payload {
+    bytes: Vec<u8>,
+    digest: Digest,
+}
+impl Payload {
+    pub fn of(bytes: Vec<u8>) -> Self {
+        let digest = Digest::of(&bytes);
+        Self { bytes, digest }
+    }
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+    pub fn digest(&self) -> Digest {
+        self.digest
+    }
+}
 
 /// Reads a file that has to be an executable nobody else could have written: a regular
 /// file, no link, owned by this user (or by root where `system` allows a packaged file),
@@ -88,16 +108,17 @@ impl Package {
     pub fn digest(&self) -> Digest {
         self.digest
     }
-    /// The payload's bytes, once it is proved to be the pinned authority. It is read one
-    /// time: what was verified is what is installed.
-    pub fn verified(&self) -> LifecycleResult<Vec<u8>> {
+    /// The payload, once it is proved to be the pinned authority. It is read one time:
+    /// what was verified is what is installed.
+    pub fn verified(&self) -> LifecycleResult<Payload> {
         let parent = self.payload.parent().ok_or(E::PackageInvalid)?;
         ancestors(parent).map_err(|_| E::PackageInvalid)?;
-        let bytes = read_executable(&self.payload, true).map_err(|_| E::PackageInvalid)?;
-        if Digest::of(&bytes) != self.digest {
+        let payload =
+            Payload::of(read_executable(&self.payload, true).map_err(|_| E::PackageInvalid)?);
+        if payload.digest != self.digest {
             return Err(E::PackageInvalid);
         }
-        Ok(bytes)
+        Ok(payload)
     }
 }
 

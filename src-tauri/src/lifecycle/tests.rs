@@ -139,11 +139,17 @@ fn a_build_installs_only_the_authority_it_was_packaged_with() {
         )
     );
     // Nothing is packaged beside this test binary: the payload is not there to verify.
-    assert_eq!(package.verified(), Err(LifecycleError::PackageInvalid));
+    assert_eq!(
+        package.verified().err(),
+        Some(LifecycleError::PackageInvalid)
+    );
 
     let account = Account::new();
     let package = account.package(NEW);
-    assert_eq!(package.verified().as_deref(), Ok(NEW));
+    assert_eq!(
+        package.verified().map(|p| p.bytes().to_vec()).as_deref(),
+        Ok(NEW)
+    );
     let payload = account.root.join("package/libexec/wyss-control-real");
     // Another file under the payload's name is not the authority this build pinned.
     assert_eq!(
@@ -153,8 +159,9 @@ fn a_build_installs_only_the_authority_it_was_packaged_with() {
                 .join("package/libexec/wyss-console/wyss-control"),
             Digest::of(OLD)
         )
-        .verified(),
-        Err(LifecycleError::PackageInvalid)
+        .verified()
+        .err(),
+        Some(LifecycleError::PackageInvalid)
     );
     // A link in the payload's place is not followed, wherever it points.
     fs::rename(
@@ -171,19 +178,31 @@ fn a_build_installs_only_the_authority_it_was_packaged_with() {
             .join("package/libexec/wyss-console/wyss-control"),
     )
     .unwrap();
-    assert_eq!(package.verified(), Err(LifecycleError::PackageInvalid));
+    assert_eq!(
+        package.verified().err(),
+        Some(LifecycleError::PackageInvalid)
+    );
     // A payload others can write, or in a directory others can write, proves nothing.
     let package = account.package(NEW);
     let file = account
         .root
         .join("package/libexec/wyss-console/wyss-control");
     fs::set_permissions(&file, fs::Permissions::from_mode(0o757)).unwrap();
-    assert_eq!(package.verified(), Err(LifecycleError::PackageInvalid));
+    assert_eq!(
+        package.verified().err(),
+        Some(LifecycleError::PackageInvalid)
+    );
     fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
-    assert_eq!(package.verified().as_deref(), Ok(NEW));
+    assert_eq!(
+        package.verified().map(|p| p.bytes().to_vec()).as_deref(),
+        Ok(NEW)
+    );
     let dir = account.root.join("package/libexec/wyss-console");
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o777)).unwrap();
-    assert_eq!(package.verified(), Err(LifecycleError::PackageInvalid));
+    assert_eq!(
+        package.verified().err(),
+        Some(LifecycleError::PackageInvalid)
+    );
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
 }
 
@@ -313,7 +332,7 @@ fn a_clean_account_gets_exactly_two_files_and_a_second_install_writes_nothing() 
             unit: FileState::Absent
         }
     );
-    let change = install::ensure(&layout, NEW, Digest::of(NEW)).unwrap();
+    let change = install::ensure(&layout, &Payload::of(NEW.to_vec())).unwrap();
     assert_eq!(
         change,
         Change {
@@ -357,26 +376,20 @@ fn a_clean_account_gets_exactly_two_files_and_a_second_install_writes_nothing() 
     // Current: nothing is written again, not even the same bytes.
     let (binary, unit) = (inode(&layout.binary()), inode(&layout.unit()));
     assert_eq!(
-        install::ensure(&layout, NEW, Digest::of(NEW)),
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
         Ok(Change::default())
     );
     assert_eq!(
         (inode(&layout.binary()), inode(&layout.unit())),
         (binary, unit)
     );
-    // What is installed is what was verified: bytes that are not the pinned ones are not.
-    assert_eq!(
-        install::ensure(&layout, OLD, Digest::of(NEW)),
-        Err(LifecycleError::PackageInvalid)
-    );
-    assert_eq!(fs::read(layout.binary()).unwrap(), NEW);
 }
 
 #[test]
 fn an_update_replaces_the_file_whole_and_never_the_one_that_is_running() {
     let account = Account::new();
     let layout = account.layout();
-    install::ensure(&layout, OLD, Digest::of(OLD)).unwrap();
+    install::ensure(&layout, &Payload::of(OLD.to_vec())).unwrap();
     // A process that runs the old authority holds its file.
     let running = fs::File::open(layout.binary()).unwrap();
     let old = inode(&layout.binary());
@@ -387,7 +400,7 @@ fn an_update_replaces_the_file_whole_and_never_the_one_that_is_running() {
     // A build that carries no authority cannot call one current.
     assert_eq!(install::inspect(&layout, None).binary, FileState::Outdated);
     assert_eq!(
-        install::ensure(&layout, NEW, Digest::of(NEW)),
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
         Ok(Change {
             binary: true,
             unit: false
@@ -415,7 +428,7 @@ fn an_update_replaces_the_file_whole_and_never_the_one_that_is_running() {
     .unwrap();
     assert_eq!(install::inspect(&layout, None).unit, FileState::Outdated);
     assert_eq!(
-        install::ensure(&layout, NEW, Digest::of(NEW)),
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
         Ok(Change {
             binary: false,
             unit: true
@@ -432,7 +445,7 @@ fn what_an_interrupted_install_left_is_cleared_and_the_install_completes() {
     let account = Account::new();
     let layout = account.layout();
     // Interrupted after the temporary binary was written: nothing has the real name.
-    install::ensure(&layout, OLD, Digest::of(OLD)).unwrap();
+    install::ensure(&layout, &Payload::of(OLD.to_vec())).unwrap();
     fs::remove_file(layout.binary()).unwrap();
     fs::remove_file(layout.unit()).unwrap();
     let stray_binary = layout.binary_dir().join(".wyss-control.0123abcd.tmp");
@@ -452,7 +465,7 @@ fn what_an_interrupted_install_left_is_cleared_and_the_install_completes() {
         }
     );
     assert_eq!(
-        install::ensure(&layout, NEW, Digest::of(NEW)),
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
         Ok(Change {
             binary: true,
             unit: true
@@ -465,7 +478,7 @@ fn what_an_interrupted_install_left_is_cleared_and_the_install_completes() {
     // Interrupted after the binary was renamed and before the unit was written.
     fs::remove_file(layout.unit()).unwrap();
     assert_eq!(
-        install::ensure(&layout, NEW, Digest::of(NEW)),
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
         Ok(Change {
             binary: false,
             unit: true
@@ -474,7 +487,7 @@ fn what_an_interrupted_install_left_is_cleared_and_the_install_completes() {
     // Interrupted after the unit was written, with the binary of another build.
     install::binary(&layout, OLD).unwrap();
     assert_eq!(
-        install::ensure(&layout, NEW, Digest::of(NEW)),
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
         Ok(Change {
             binary: true,
             unit: false
@@ -488,7 +501,7 @@ fn a_place_that_is_not_safely_the_users_is_refused_and_left_as_it_is() {
     let fresh = || {
         let account = Account::new();
         let layout = account.layout();
-        install::ensure(&layout, OLD, Digest::of(OLD)).unwrap();
+        install::ensure(&layout, &Payload::of(OLD.to_vec())).unwrap();
         (account, layout)
     };
     // A link where the managed binary goes: not followed, not replaced, target untouched.
@@ -501,7 +514,10 @@ fn a_place_that_is_not_safely_the_users_is_refused_and_left_as_it_is() {
         install::inspect(&layout, Some(Digest::of(NEW))).binary,
         FileState::Unsafe
     );
-    assert_eq!(install::ensure(&layout, NEW, Digest::of(NEW)), unsafe_path);
+    assert_eq!(
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
+        unsafe_path
+    );
     assert_eq!(fs::read(&elsewhere).unwrap(), b"not ours");
     assert!(
         fs::symlink_metadata(layout.binary())
@@ -517,7 +533,10 @@ fn a_place_that_is_not_safely_the_users_is_refused_and_left_as_it_is() {
         install::inspect(&layout, Some(Digest::of(OLD))).binary,
         FileState::Unsafe
     );
-    assert_eq!(install::ensure(&layout, NEW, Digest::of(NEW)), unsafe_path);
+    assert_eq!(
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
+        unsafe_path
+    );
     assert_eq!(fs::read(layout.binary()).unwrap(), OLD);
 
     // A managed binary others can write.
@@ -527,7 +546,10 @@ fn a_place_that_is_not_safely_the_users_is_refused_and_left_as_it_is() {
         install::inspect(&layout, Some(Digest::of(OLD))).binary,
         FileState::Unsafe
     );
-    assert_eq!(install::ensure(&layout, NEW, Digest::of(NEW)), unsafe_path);
+    assert_eq!(
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
+        unsafe_path
+    );
 
     // A directory on the way that others can write: whoever can write it can swap the
     // binary, whatever the file itself says. Nothing is written below it.
@@ -544,7 +566,7 @@ fn a_place_that_is_not_safely_the_users_is_refused_and_left_as_it_is() {
             "{dir}"
         );
         assert_eq!(
-            install::ensure(&layout, NEW, Digest::of(NEW)),
+            install::ensure(&layout, &Payload::of(NEW.to_vec())),
             unsafe_path,
             "{dir}"
         );
@@ -560,7 +582,10 @@ fn a_place_that_is_not_safely_the_users_is_refused_and_left_as_it_is() {
         install::inspect(&layout, Some(Digest::of(OLD))).binary,
         FileState::Unsafe
     );
-    assert_eq!(install::ensure(&layout, NEW, Digest::of(NEW)), unsafe_path);
+    assert_eq!(
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
+        unsafe_path
+    );
     assert_eq!(fs::read(real.join("wyss-control")).unwrap(), OLD);
 
     // The unit: a link, a file others can write, a unit directory that is a link.
@@ -570,19 +595,28 @@ fn a_place_that_is_not_safely_the_users_is_refused_and_left_as_it_is() {
     fs::remove_file(layout.unit()).unwrap();
     symlink(&target, layout.unit()).unwrap();
     assert_eq!(install::inspect(&layout, None).unit, FileState::Unsafe);
-    assert_eq!(install::ensure(&layout, NEW, Digest::of(NEW)), unsafe_path);
+    assert_eq!(
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
+        unsafe_path
+    );
     // Refused before anything was written: the binary is still the old one.
     assert_eq!(fs::read(layout.binary()).unwrap(), OLD);
     let (_account, layout) = fresh();
     fs::set_permissions(layout.unit(), fs::Permissions::from_mode(0o666)).unwrap();
     assert_eq!(install::inspect(&layout, None).unit, FileState::Unsafe);
-    assert_eq!(install::ensure(&layout, NEW, Digest::of(NEW)), unsafe_path);
+    assert_eq!(
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
+        unsafe_path
+    );
     let (account, layout) = fresh();
     let real = account.root.join("config/systemd/real-user");
     fs::rename(layout.unit_dir(), &real).unwrap();
     symlink(&real, layout.unit_dir()).unwrap();
     assert_eq!(install::inspect(&layout, None).unit, FileState::Unsafe);
-    assert_eq!(install::ensure(&layout, NEW, Digest::of(NEW)), unsafe_path);
+    assert_eq!(
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
+        unsafe_path
+    );
 
     // A unit of that name this product did not write is not this product's to replace.
     let (_account, layout) = fresh();
@@ -590,7 +624,7 @@ fn a_place_that_is_not_safely_the_users_is_refused_and_left_as_it_is() {
     fs::write(layout.unit(), theirs).unwrap();
     assert_eq!(install::inspect(&layout, None).unit, FileState::Foreign);
     assert_eq!(
-        install::ensure(&layout, NEW, Digest::of(NEW)),
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
         Err(LifecycleError::Foreign)
     );
     assert_eq!(fs::read_to_string(layout.unit()).unwrap(), theirs);
@@ -607,7 +641,7 @@ fn installers_that_run_at_once_leave_one_whole_installation() {
                 let layout = layout.clone();
                 scope.spawn(move || {
                     let bytes = if i % 2 == 0 { NEW } else { OLD };
-                    install::ensure(&layout, bytes, Digest::of(bytes)).unwrap()
+                    install::ensure(&layout, &Payload::of(bytes.to_vec())).unwrap()
                 })
             })
             .collect();
@@ -1142,6 +1176,22 @@ fn it_starts_the_authority_by_itself_once_and_after_that_only_retry_does() {
     world.link.set(LinkState::Absent);
     let view = world.failed();
     assert_eq!((view.failure, view.retry), (Some(Failure::Stopped), true));
+    // The same when the desktop looked while it was still being stopped: it was
+    // watched, not started, so it did not fail to start.
+    world
+        .manager
+        .set(Ok(unit(ActiveState::Active, UnitResult::Success)));
+    world.link.set(LinkState::Connected);
+    world.ready();
+    world
+        .manager
+        .set(Ok(unit(ActiveState::Deactivating, UnitResult::Success)));
+    world.link.set(LinkState::Absent);
+    world.until(|v| v.phase == Phase::Connecting);
+    world
+        .manager
+        .set(Ok(unit(ActiveState::Inactive, UnitResult::Success)));
+    assert_eq!(world.failed().failure, Some(Failure::Stopped));
     world.quiet();
     assert_eq!(world.manager.count("start"), 2);
     assert_eq!(world.manager.count("reset-failed"), 1);
@@ -1186,7 +1236,7 @@ fn an_installation_that_is_not_safe_or_not_this_products_fails_closed() {
         LinkState::Connecting,
         |account| {
             let layout = account.layout();
-            install::ensure(&layout, OLD, Digest::of(OLD)).unwrap();
+            install::ensure(&layout, &Payload::of(OLD.to_vec())).unwrap();
             fs::write(layout.unit(), "[Service]\nExecStart=/usr/bin/other\n").unwrap();
             Provision::Packaged(account.package(NEW))
         },
@@ -1204,7 +1254,7 @@ fn an_installation_that_is_not_safe_or_not_this_products_fails_closed() {
         LinkState::Connecting,
         |account| {
             let layout = account.layout();
-            install::ensure(&layout, OLD, Digest::of(OLD)).unwrap();
+            install::ensure(&layout, &Payload::of(OLD.to_vec())).unwrap();
             fs::remove_file(layout.binary()).unwrap();
             symlink("/usr/bin/true", layout.binary()).unwrap();
             Provision::Packaged(account.package(NEW))
@@ -1278,7 +1328,7 @@ fn a_running_authority_is_never_replaced_and_a_newer_one_waits_for_a_cold_start(
         .create(account.root.join("run/wyss-console"))
         .unwrap();
     let _listener = UnixListener::bind(layout.socket()).unwrap();
-    install::ensure(&layout, OLD, Digest::of(OLD)).unwrap();
+    install::ensure(&layout, &Payload::of(OLD.to_vec())).unwrap();
     let before = (inode(&layout.binary()), inode(&layout.unit()));
     let managed = UnitStatus {
         main_pid: Some(std::process::id()),

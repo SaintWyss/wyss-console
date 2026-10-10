@@ -35,7 +35,7 @@ pub use layout::{Layout, UNIT_NAME};
 pub use manager::{
     ActiveState, LoadState, ManagerError, ServiceManager, Systemd, UnitResult, UnitStatus,
 };
-pub use package::{Digest, Package, Provision};
+pub use package::{Digest, Package, Payload, Provision};
 pub use view::{
     BuildKind, Diagnostics, Failure, InstallationState, LifecycleView, Origin, Phase, ServiceState,
 };

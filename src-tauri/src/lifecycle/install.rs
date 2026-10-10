@@ -2,7 +2,7 @@
 //! leaves either the old file or the new one, and never part of one.
 use super::{
     Layout, LifecycleError as E, LifecycleResult,
-    package::{Digest, read_executable},
+    package::{Digest, Payload, read_executable},
 };
 use nix::{
     fcntl::{Flock, FlockArg},
@@ -290,10 +290,8 @@ pub fn unit(layout: &Layout) -> LifecycleResult<()> {
 /// It never removes anything but its own unfinished temporary files, and it touches no
 /// directory but the two it owns files in: canonical state is somewhere else and is not
 /// read, moved or deleted by installing, repairing or updating.
-pub fn ensure(layout: &Layout, bytes: &[u8], digest: Digest) -> LifecycleResult<Change> {
-    if Digest::of(bytes) != digest {
-        return Err(E::PackageInvalid);
-    }
+pub fn ensure(layout: &Layout, payload: &Payload) -> LifecycleResult<Change> {
+    let (bytes, digest) = (payload.bytes(), payload.digest());
     let binary_dir = layout.prepare_binary_dir()?;
     let unit_dir = layout.prepare_unit_dir()?;
     let _held = lock(&binary_dir)?;
