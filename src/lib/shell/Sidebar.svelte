@@ -22,15 +22,13 @@
           type="button"
           class="nav-item"
           aria-current={active === item.id ? 'page' : undefined}
-          disabled={!item.available}
-          title={item.available ? item.label : `${item.label} · coming soon`}
+          title={item.label}
           onclick={() => onselect(item.id)}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"
             ><path d={item.icon} /></svg
           >
           <span class="nav-label">{item.label}</span>
-          {#if !item.available}<span class="nav-tag">Soon</span>{/if}
           {#if item.id === 'approvals' && waiting > 0}
             <span class="nav-tag waiting" aria-label={`${waiting} waiting`}
               >{waiting}</span

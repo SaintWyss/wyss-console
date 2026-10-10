@@ -6,6 +6,7 @@ import type {
   RUNTIME_EXITS,
 } from '../../contracts/events';
 import type { SessionFailureCode } from '../../contracts/sessions';
+import type { TimeFormat } from '../../contracts/settings';
 import type { RuntimeTone } from '../../shell/runtime';
 import { TURN_REASON } from '../agent/present';
 import { APPROVAL_REASON } from '../approvals/present';
@@ -276,19 +277,32 @@ export function olderFailure(code: SessionFailureCode): string {
       ? 'Older events could not be read: wyss-control did not answer.'
       : 'Older events could not be read.';
 }
-const CLOCK = new Intl.DateTimeFormat(undefined, {
+const CLOCK_OPTIONS: Intl.DateTimeFormatOptions = {
   hour: '2-digit',
   minute: '2-digit',
   second: '2-digit',
-});
+};
+/** One formatter per preference; the system's own is the default. */
+const CLOCKS: Record<TimeFormat, Intl.DateTimeFormat> = {
+  system: new Intl.DateTimeFormat(undefined, CLOCK_OPTIONS),
+  h12: new Intl.DateTimeFormat(undefined, { ...CLOCK_OPTIONS, hour12: true }),
+  h24: new Intl.DateTimeFormat(undefined, {
+    ...CLOCK_OPTIONS,
+    hour12: false,
+    hourCycle: 'h23',
+  }),
+};
 const DAY = new Intl.DateTimeFormat(undefined, {
   month: 'short',
   day: 'numeric',
 });
 /** Local time of day of an event, to the second: several are recorded in one minute. */
-export function eventClock(timestamp: string): string {
+export function eventClock(
+  timestamp: string,
+  format: TimeFormat = 'system',
+): string {
   const time = Date.parse(timestamp);
-  return Number.isNaN(time) ? timestamp : CLOCK.format(time);
+  return Number.isNaN(time) ? timestamp : CLOCKS[format].format(time);
 }
 /** The local day of an event, when it is not the day it is read on. */
 export function eventDay(timestamp: string, now: number = Date.now()): string {

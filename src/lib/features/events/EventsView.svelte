@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ApprovalDetail } from '../../contracts/approvals';
   import type { EventRow } from '../../contracts/events';
+  import type { TimeFormat } from '../../contracts/settings';
   import type {
     ManagedApprovalId,
     ManagedSessionId,
@@ -39,6 +40,7 @@
     controller,
     authority,
     visible,
+    timeFormat = 'system',
     onsession,
     onagent,
     onapprovals,
@@ -49,6 +51,8 @@
     /** The shell's one authority observation. Read here for wording only. */
     authority: AuthorityObservation;
     visible: boolean;
+    /** How the time of day of an event is written. Only how: never which events. */
+    timeFormat?: TimeFormat;
     /** Shows a session in Sessions, where what it is now is read. */
     onsession: (session: ManagedSessionId) => void;
     /** Opens a session in Agents, where its turns are read. */
@@ -146,7 +150,9 @@
       onclick={() =>
         controller.select(chosen(stream, event) ? null : keyOf(stream, event))}
     >
-      <time class="event-time" datetime={event.at}>{eventClock(event.at)}</time>
+      <time class="event-time" datetime={event.at}
+        >{eventClock(event.at, timeFormat)}</time
+      >
       <span class="event-title">{eventTitle(event)}</span>
       {#if event.disposition !== 'normal'}
         <span

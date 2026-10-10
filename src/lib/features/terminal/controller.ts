@@ -28,6 +28,7 @@ export class TerminalController {
   private disposeTask?: Promise<void>;
   private finishTask?: Promise<void>;
   private inputCleanup?: () => void;
+  private metricsCleanup?: () => void;
   private observer?: ResizeObserver;
   private resizeTimer?: ReturnType<typeof setTimeout>;
   private sleepTimer?: ReturnType<typeof setTimeout>;
@@ -76,6 +77,10 @@ export class TerminalController {
       );
       this.observer = new ResizeObserver(() => this.requestFit());
       this.observer.observe(this.host);
+      // A preference that changes the size of a character changes how many fit.
+      this.metricsCleanup = this.renderer.onMetricsChange?.(() =>
+        this.requestFit(),
+      );
       const size = (this.active ? this.renderer.fit() : undefined) ?? {
         rows: 24,
         cols: 80,
@@ -264,6 +269,8 @@ export class TerminalController {
     this.renderer.setInput(false);
     this.inputCleanup?.();
     this.inputCleanup = undefined;
+    this.metricsCleanup?.();
+    this.metricsCleanup = undefined;
     this.observer?.disconnect();
     this.observer = undefined;
     clearTimeout(this.resizeTimer);

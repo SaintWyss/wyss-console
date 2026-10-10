@@ -2,6 +2,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import type { TerminalSize } from '../../contracts/terminal';
+import { currentAppearance, followAppearance } from './appearance';
 
 export interface TerminalRenderer {
   fit(): TerminalSize | undefined;
@@ -12,6 +13,11 @@ export interface TerminalRenderer {
   ): () => void;
   setInput(enabled: boolean): void;
   setActive(active: boolean): void;
+  /**
+   * Tells when a preference changed what fits in the host (a font size), so the
+   * terminal can be fitted again. Optional: a renderer without preferences has none.
+   */
+  onMetricsChange?(listener: () => void): () => void;
   focus(): void;
   dispose(): void;
 }
@@ -25,14 +31,16 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
       cursor: css.getPropertyValue('--terminal-fg').trim(),
     };
   };
+  const look = currentAppearance();
   const term = new Terminal({
     cols: 80,
     rows: 24,
-    scrollback: 5000,
+    scrollback: look.scrollback,
     fontFamily:
       'ui-monospace, "DejaVu Sans Mono", "Liberation Mono", monospace',
-    fontSize: 16,
-    cursorBlink: false,
+    fontSize: look.fontSize,
+    cursorStyle: look.cursorStyle,
+    cursorBlink: look.cursorBlink,
     disableStdin: true,
     minimumContrastRatio: 4.5,
     linkHandler: { activate: () => undefined },
@@ -66,11 +74,23 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
     term.options.theme = palette();
   };
   colors.addEventListener('change', updateTheme);
+  const metrics = new Set<() => void>();
+  // Presentation preferences, applied to this terminal whenever they change.
+  const unfollow = followAppearance((next) => {
+    if (disposed) return;
+    const resized = term.options.fontSize !== next.fontSize;
+    term.options.fontSize = next.fontSize;
+    term.options.scrollback = next.scrollback;
+    term.options.cursorStyle = next.cursorStyle;
+    term.options.cursorBlink = next.cursorBlink;
+    if (resized) for (const listener of [...metrics]) listener();
+  });
   try {
     term.loadAddon(fit);
     term.open(host);
   } catch (error) {
     colors.removeEventListener('change', updateTheme);
+    unfollow();
     for (const event of guardedEvents)
       host.removeEventListener(event, guardInput, true);
     term.dispose();
@@ -114,12 +134,18 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
       host.inert = !value;
       if (!value && !disposed) term.blur();
     },
+    onMetricsChange(listener) {
+      metrics.add(listener);
+      return () => metrics.delete(listener);
+    },
     focus() {
       if (!disposed) term.focus();
     },
     dispose() {
       if (disposed) return;
       disposed = true;
+      unfollow();
+      metrics.clear();
       pending?.(false);
       pending = undefined;
       colors.removeEventListener('change', updateTheme);

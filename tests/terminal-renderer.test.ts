@@ -106,3 +106,83 @@ it('keeps hidden byte parsing and protocol responses alive while gating user key
   );
   expect(data).toHaveBeenCalledWith('a');
 });
+
+it('follows the appearance preferences, and says when a character changed size', async () => {
+  const { resetAppearance, setAppearance } =
+    await import('../src/lib/features/terminal/appearance');
+  const refit = vi.fn();
+  const stop = renderer.onMetricsChange!(refit);
+  const size = () =>
+    host.querySelector<HTMLElement>('.xterm-char-measure-element')!.style
+      .fontSize;
+  expect(size()).toBe('16px');
+
+  setAppearance({
+    fontSize: 20,
+    scrollback: 9000,
+    cursorStyle: 'bar',
+    cursorBlink: true,
+  });
+  expect(size()).toBe('20px');
+  expect(refit).toHaveBeenCalledTimes(1);
+  // A change that leaves the size of a character alone needs no new fit.
+  setAppearance({
+    fontSize: 20,
+    scrollback: 3000,
+    cursorStyle: 'underline',
+    cursorBlink: false,
+  });
+  expect(refit).toHaveBeenCalledTimes(1);
+  // The same appearance again wakes nobody.
+  setAppearance({
+    fontSize: 20,
+    scrollback: 3000,
+    cursorStyle: 'underline',
+    cursorBlink: false,
+  });
+  expect(refit).toHaveBeenCalledTimes(1);
+
+  stop();
+  setAppearance({
+    fontSize: 12,
+    scrollback: 3000,
+    cursorStyle: 'underline',
+    cursorBlink: false,
+  });
+  expect(size()).toBe('12px');
+  expect(refit).toHaveBeenCalledTimes(1);
+
+  // A renderer that is gone no longer follows: nothing is kept alive for it.
+  renderer.dispose();
+  expect(() =>
+    setAppearance({
+      fontSize: 14,
+      scrollback: 3000,
+      cursorStyle: 'underline',
+      cursorBlink: false,
+    }),
+  ).not.toThrow();
+  resetAppearance();
+});
+
+it('starts a terminal with the appearance in force', async () => {
+  renderer.dispose();
+  const { resetAppearance, setAppearance } =
+    await import('../src/lib/features/terminal/appearance');
+  setAppearance({
+    fontSize: 18,
+    scrollback: 7000,
+    cursorStyle: 'block',
+    cursorBlink: false,
+  });
+  const { createRenderer } =
+    await import('../src/lib/features/terminal/renderer');
+  const second = document.createElement('div');
+  document.body.append(second);
+  renderer = createRenderer(second);
+  expect(
+    second.querySelector<HTMLElement>('.xterm-char-measure-element')!.style
+      .fontSize,
+  ).toBe('18px');
+  resetAppearance();
+});

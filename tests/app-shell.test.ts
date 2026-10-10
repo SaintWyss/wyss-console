@@ -131,7 +131,7 @@ it('maps the terminal workspace to one honest runtime status', () => {
   });
 });
 
-it('lists every planned view and enables the ones that exist', () => {
+it('lists every view, and every one of them exists', () => {
   expect(NAV_ITEMS.map((item) => item.label)).toEqual([
     'Console',
     'Sessions',
@@ -140,16 +140,20 @@ it('lists every planned view and enables the ones that exist', () => {
     'Events',
     'Settings',
   ]);
-  expect(NAV_ITEMS.filter((item) => item.available).map((i) => i.id)).toEqual([
+  expect(NAV_ITEMS.map((item) => item.id)).toEqual([
     'console',
     'sessions',
     'agents',
     'approvals',
     'events',
+    'settings',
   ]);
+  // Nothing is a placeholder any more: no item is disabled or marked as coming.
+  expect('available' in NAV_ITEMS[0]!).toBe(false);
+  expect(NAV_ITEMS.some((item) => /soon/i.test(item.subtitle))).toBe(false);
 });
 
-it('renders the shell with brand, navigation placeholders and Console selected', async () => {
+it('renders the shell with brand, every view enabled and Console selected', async () => {
   component = mount(App, { target: document.body });
   await flush();
   expect(document.querySelector('h1')?.textContent).toBe('Wyss AI');
@@ -158,9 +162,17 @@ it('renders the shell with brand, navigation placeholders and Console selected',
   );
   expect(nav).toHaveLength(6);
   expect(nav[0].getAttribute('aria-current')).toBe('page');
-  expect(nav.slice(0, 5).every((b) => !b.disabled)).toBe(true);
-  // Settings does not exist yet.
-  expect(nav.slice(5).every((b) => b.disabled)).toBe(true);
+  expect(nav.every((b) => !b.disabled)).toBe(true);
+  expect(nav.map((b) => b.textContent?.trim())).toEqual([
+    'Console',
+    'Sessions',
+    'Agents',
+    'Approvals',
+    'Events',
+    'Settings',
+  ]);
+  // No item is a placeholder.
+  expect(document.querySelector('.nav-tag:not(.waiting)')).toBeNull();
   // Nothing waits for a decision: the Approvals item carries no count.
   expect(document.querySelector('.nav-tag.waiting')).toBeNull();
   expect(document.querySelector('.context-title')?.textContent).toBe('Console');

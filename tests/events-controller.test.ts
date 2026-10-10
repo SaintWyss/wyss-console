@@ -576,3 +576,26 @@ it('says when an event was recorded to the second, and on which day when not tod
   expect(eventClock('nonsense')).toBe('nonsense');
   expect(eventDay('nonsense')).toBe('');
 });
+
+it('writes the time of an event as the preference says, in local time', () => {
+  const at = '2026-10-09T13:05:07Z';
+  const local = new Date(at);
+  const hour24 = String(local.getHours()).padStart(2, '0');
+  const twelve = String(local.getHours() % 12 || 12);
+  const h24 = eventClock(at, 'h24');
+  const h12 = eventClock(at, 'h12');
+  // 24-hour has no day period and a two-digit hour; 12-hour has one.
+  expect(h24).toMatch(new RegExp(`^${hour24}\\D`));
+  expect(h24).not.toMatch(/[AP]\.?M/i);
+  expect(h12).toMatch(/[AP]\.?M/i);
+  expect(h12).toMatch(new RegExp(`^0?${twelve}\\D`));
+  // The system's own writing is what it was before the preference existed.
+  expect(eventClock(at)).toBe(eventClock(at, 'system'));
+  // The preference changes how the time reads, never which time it is.
+  for (const format of ['system', 'h12', 'h24'] as const) {
+    expect(eventClock(at, format)).toContain(
+      String(local.getSeconds()).padStart(2, '0'),
+    );
+    expect(eventClock('nonsense', format)).toBe('nonsense');
+  }
+});

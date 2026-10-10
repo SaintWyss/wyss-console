@@ -195,6 +195,9 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-managed-approval-deny',
     'allow-managed-events',
     'allow-managed-events-older',
+    'allow-settings-read',
+    'allow-settings-update',
+    'allow-settings-reset',
     'allow-create-terminal',
     'allow-terminal-write',
     'allow-terminal-read-output',
@@ -222,6 +225,24 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   expect(
     capability.permissions.filter((p: string) => /event|audit|histor/.test(p)),
   ).toEqual(['allow-managed-events', 'allow-managed-events-older']);
+  // The desktop's own preferences are one read, one replacement of the whole typed set
+  // and one reset. There is no key to write, no file to name and nothing to run.
+  expect(
+    capability.permissions.filter((p: string) => /setting/.test(p)),
+  ).toEqual([
+    'allow-settings-read',
+    'allow-settings-update',
+    'allow-settings-reset',
+  ]);
+  // The window is granted none of the framework's own plugins or core commands: every
+  // permission is an application command, so no generic file, shell or process access
+  // came with the settings.
+  expect(
+    capability.permissions.filter(
+      (p: string) =>
+        p.includes(':') || /^allow-(fs|shell|process|opener|os|http)/.test(p),
+    ),
+  ).toEqual([]);
   // The authority's lifecycle is one read and Retry. Nothing the window is granted
   // starts, stops or restarts a service by name, runs a command, installs a file at a
   // path, or talks to the service manager.

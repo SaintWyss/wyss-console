@@ -8,6 +8,9 @@
   import ApprovalsView from './lib/features/approvals/ApprovalsView.svelte';
   import { ApprovalsController } from './lib/features/approvals/controller';
   import { EventsController } from './lib/features/events/controller';
+  import { SettingsController } from './lib/features/settings/controller';
+  import SettingsView from './lib/features/settings/SettingsView.svelte';
+  import { setAppearance } from './lib/features/terminal/appearance';
   import EventsView from './lib/features/events/EventsView.svelte';
   import { SessionsController } from './lib/features/sessions/controller';
   import { sessionLabel } from './lib/features/sessions/present';
@@ -65,6 +68,14 @@
     events = next;
   });
   let events = $state(eventsController.state());
+  // The desktop's own preferences: read once, written only when the user changes one.
+  const settingsController = new SettingsController((next) => {
+    settings = next;
+  });
+  let settings = $state(settingsController.state());
+  const defaultFilter = $derived(settings.preferences.events.default_filter);
+  let opened = false;
+  let navigated = false;
   const current = $derived(NAV_ITEMS.find((item) => item.id === activeView));
 
   // Sessions are read only while their view is shown.
@@ -86,8 +97,31 @@
     eventsController.setVisible(activeView === 'events');
   });
 
+  // The window opens on the view the preferences name, unless the user has already
+  // moved: a late answer never takes them somewhere they did not go.
+  $effect(() => {
+    if (settings.phase !== 'ready' || opened) return;
+    opened = true;
+    if (!navigated) activeView = settings.preferences.interface.landing_page;
+  });
+  // Presentation preferences, applied to every terminal, open or new.
+  $effect(() => {
+    const t = settings.preferences.terminal;
+    setAppearance({
+      fontSize: t.font_size,
+      scrollback: t.scrollback,
+      cursorStyle: t.cursor_style,
+      cursorBlink: t.cursor_blink,
+    });
+  });
+  // Where the history starts. It narrows what is shown and nothing the authority keeps.
+  $effect(() => {
+    eventsController.setFilter(defaultFilter);
+  });
+
   onMount(() => {
     let active = true;
+    settingsController.start();
     void getAppInfo().then(
       (info) => {
         if (active) version = info.version;
@@ -114,32 +148,37 @@
       agentController.dispose();
       approvalsController.dispose();
       eventsController.dispose();
+      settingsController.dispose();
     };
   });
 
+  function go(view: ViewId) {
+    navigated = true;
+    activeView = view;
+  }
+
   /** Opens a session the user picked in Sessions in the Agent view, and shows it. */
   function openAgent(session: SessionSummary) {
-    if (agentController.open(session.id, sessionLabel(session)))
-      activeView = 'agents';
+    if (agentController.open(session.id, sessionLabel(session))) go('agents');
   }
 
   // From a record to where the thing it names lives. Nothing is taken from the record:
   // each view reads what the session is now from the authority.
   function showSession(session: ManagedSessionId) {
     sessionsController.select(session);
-    activeView = 'sessions';
+    go('sessions');
   }
   function showAgent(session: ManagedSessionId) {
     const known = sessions.page?.sessions.find((s) => s.id === session);
     const label = known
       ? sessionLabel(known)
       : `Session ${session.slice(0, 8)}`;
-    if (agentController.open(session, label)) activeView = 'agents';
+    if (agentController.open(session, label)) go('agents');
   }
   /** The loaded history of one session, from its details in Sessions. */
   function showEvents(session: SessionSummary) {
     eventsController.setScope({ session: session.id, turn: null });
-    activeView = 'events';
+    go('events');
   }
 
   /** The user's Retry: one request at a time. What comes of it arrives as a view. */
@@ -173,7 +212,7 @@
   />
   <Sidebar
     active={activeView}
-    onselect={(id) => (activeView = id)}
+    onselect={go}
     waiting={approvals.pending?.length ?? 0}
   />
   <main class="content">
@@ -200,7 +239,7 @@
       {authority}
       {approvals}
       {approvalsController}
-      onsessions={() => (activeView = 'sessions')}
+      onsessions={() => go('sessions')}
     />
     <ApprovalsView
       visible={activeView === 'approvals'}
@@ -213,9 +252,19 @@
       {events}
       controller={eventsController}
       {authority}
+      timeFormat={settings.preferences.events.time_format}
       onsession={showSession}
       onagent={showAgent}
-      onapprovals={() => (activeView = 'approvals')}
+      onapprovals={() => go('approvals')}
+    />
+    <SettingsView
+      visible={activeView === 'settings'}
+      {settings}
+      controller={settingsController}
+      {authority}
+      {lifecycle}
+      {retrying}
+      onretry={retry}
     />
   </main>
 </div>
