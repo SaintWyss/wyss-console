@@ -349,3 +349,91 @@ export function parseSums(text) {
 export function formatSums(sums) {
   return [...sums].map(([name, hex]) => `${hex}  ${name}\n`).join('');
 }
+
+/**
+ * A release is built from a commit, and from nothing that is not in it.
+ * @param {string | null} porcelain `git status --porcelain`, or null if git failed
+ * @param {string | null} head `git rev-parse HEAD`, or null if git failed
+ * @returns {string[]} what is wrong; empty means the tree is the commit
+ */
+export function sourceProblems(porcelain, head) {
+  /** @type {string[]} */
+  const problems = [];
+  if (head === null || !/^[0-9a-f]{40}$/.test(head))
+    problems.push('the commit being built cannot be named');
+  if (porcelain === null)
+    problems.push('the state of the working tree cannot be read');
+  else if (porcelain.trim() !== '')
+    problems.push(
+      'the working tree has uncommitted changes; a release is built from a commit',
+    );
+  return problems;
+}
+
+/**
+ * @param {{ revision?: unknown, revision_short?: unknown }} manifest
+ * @param {string} head the full commit of the source it is compared with
+ * @returns {string[]}
+ */
+export function revisionProblems(manifest, head) {
+  /** @type {string[]} */
+  const problems = [];
+  if (manifest.revision !== head)
+    problems.push('the manifest names another revision than the source commit');
+  if (
+    typeof manifest.revision_short !== 'string' ||
+    !head.startsWith(manifest.revision_short) ||
+    manifest.revision_short.length < 7
+  )
+    problems.push('the short revision is not the start of the commit');
+  return problems;
+}
+
+/**
+ * The private-key blocks in `bytes`, each from its BEGIN line to its END line, and how
+ * many begin without ending within a few kilobytes. A block that does not end is not
+ * one that can be recognised, so it counts against the file.
+ * @param {Buffer} bytes
+ * @returns {{ digests: string[], unterminated: number }}
+ */
+export function privateKeyBlocks(bytes) {
+  const begin = Buffer.from('-----BEGIN ');
+  /** @type {string[]} */
+  const digests = [];
+  let unterminated = 0;
+  let at = bytes.indexOf(begin);
+  while (at !== -1) {
+    const head = bytes.toString('latin1', at, at + 60);
+    const kind = /^-----BEGIN ((?:[A-Z]+ )*PRIVATE KEY)-----/.exec(head)?.[1];
+    if (kind) {
+      const end = Buffer.from(`-----END ${kind}-----`);
+      const stop = bytes.indexOf(end, at);
+      if (stop === -1 || stop - at > 8192) unterminated += 1;
+      else digests.push(sha256Of(bytes.subarray(at, stop + end.length)));
+    }
+    at = bytes.indexOf(begin, at + begin.length);
+  }
+  return { digests, unterminated };
+}
+
+/**
+ * Whether every private-key block of a file is one that was reviewed for that file. The
+ * exception is bound to the content of each block, never to a path and a kind: a block
+ * that is not listed, or one that never ends, is refused.
+ * @param {string} path path of the file in the package
+ * @param {Buffer} bytes
+ * @param {{ libraries: { file_pattern: string, blocks: string[] }[] }} reviewed
+ */
+export function onlyReviewedKeyBlocks(path, bytes, reviewed) {
+  const library = reviewed.libraries.find((l) =>
+    new RegExp(l.file_pattern).test(path),
+  );
+  if (!library) return false;
+  const { digests, unterminated } = privateKeyBlocks(bytes);
+  const known = new Set(library.blocks);
+  return (
+    unterminated === 0 &&
+    digests.length > 0 &&
+    digests.every((d) => known.has(d))
+  );
+}

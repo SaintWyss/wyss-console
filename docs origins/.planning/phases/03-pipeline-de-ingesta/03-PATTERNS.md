@@ -570,7 +570,7 @@ def test_planted_secret_not_indexed(tmp_path: Path) -> None:
     """Prueba dirigida obligatoria (criterio 4): secreto plantado no aparece en índice."""
     # 1. Crear BC trampa con archivo que contiene un secreto conocido
     secret_file = tmp_path / "credentials.txt"
-    secret_file.write_text("token=sk-ant-api03-FAKE_KEY_FOR_TEST_abc123def456")
+    secret_file.write_text("token=sk-ant-<FAKE_TEST_SECRET>")
 
     # 2. Correr pipeline completo sobre tmp_path
     # ...

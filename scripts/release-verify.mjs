@@ -4,9 +4,12 @@
 // looks for it, no credential, no development file, nothing tied to the machine that
 // built them.
 //
-//   node scripts/release-verify.mjs [--artifacts <dir>] [--repo]
+//   node scripts/release-verify.mjs [--artifacts <dir>] [--repo] [--source-root <dir>]
+//   node scripts/release-verify.mjs --repo-only [--repo-root <dir>]
 //
-// `--repo` also scans the tracked files of the checkout for credentials. Exit status 0
+// `--repo` also scans the tracked files of the checkout for credentials, `--repo-only`
+// does only that, and the manifest has to name the commit `--source-root` (the checkout by
+// default) is at. Exit status 0
 // only when every check passed. Nothing a check finds is printed as a value: a finding
 // names a file and a kind.
 import { spawnSync } from 'node:child_process';
@@ -22,13 +25,16 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { configProblems } from './appimage-tools.mjs';
 import {
   buildHostReferences,
   escapingLinks,
   forbiddenPaths,
+  onlyReviewedKeyBlocks,
   parseSums,
   payloadFor,
   permissionProblems,
+  revisionProblems,
   secretsIn,
   sha256File,
   walk,
@@ -83,6 +89,16 @@ const artifacts = resolve(
 
 /** @param {string} path */
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'));
+/** The checkout whose files are scanned, and the one whose commit the manifest must name. */
+const repoRoot = resolve(option('--repo-root', root));
+const sourceRoot = resolve(option('--source-root', root));
+const reviewedKeys = json(join(root, 'scripts', 'reviewed-library-keys.json'));
+const toolsConfig = json(join(root, 'scripts', 'appimage-tools.json'));
+// Only the checkout: nothing about artifacts.
+if (flag('--repo-only')) {
+  scanRepo(repoRoot);
+  finish();
+}
 
 // ---------------------------------------------------------------------------- versions
 const versions = {
@@ -115,6 +131,54 @@ check(
   manifest.signing === 'unsigned',
   'the manifest does not claim a signature',
 );
+// The artifacts are of the commit that is being reviewed, and of nothing else.
+const head = run('git', ['rev-parse', 'HEAD'], {
+  cwd: sourceRoot,
+  encoding: 'utf8',
+});
+const headSha = head.status === 0 ? head.stdout.trim() : '';
+check(/^[0-9a-f]{40}$/.test(headSha), 'the source commit can be named');
+const wrongRevision = revisionProblems(manifest, headSha);
+check(
+  wrongRevision.length === 0,
+  'the manifest revision is the commit the source is at',
+  wrongRevision.join('; '),
+);
+check(manifest.source_tree === 'clean', 'the manifest says the tree was clean');
+check(
+  manifest.network_during_bundling === 'none',
+  'the manifest says the bundler ran with no network',
+);
+// The build tools: pinned in the repository, and the manifest says each was exactly that.
+const unpinned = configProblems(toolsConfig);
+check(
+  unpinned.length === 0,
+  'every AppImage build tool is pinned by version and digest',
+  unpinned.join('; '),
+);
+for (const tool of toolsConfig.tools ?? []) {
+  const said = (manifest.appimage_tooling?.downloaded ?? []).find(
+    (/** @type {{ name: string }} */ t) => t.name === tool.name,
+  );
+  check(
+    said?.version === tool.version &&
+      said?.source === tool.source &&
+      said?.download_sha256 === tool.download_sha256 &&
+      said?.expected_sha256 === tool.sha256 &&
+      said?.actual_sha256 === tool.sha256,
+    `build tool ${tool.name} ${tool.version} was the pinned one when it ran`,
+  );
+}
+for (const tool of toolsConfig.embedded ?? []) {
+  const said = (manifest.appimage_tooling?.embedded ?? []).find(
+    (/** @type {{ name: string }} */ t) => t.name === tool.name,
+  );
+  check(
+    said?.expected_sha256 === tool.sha256 &&
+      said?.actual_sha256 === tool.sha256,
+    `build script ${tool.name} was the expected one when it ran`,
+  );
+}
 
 // ---------------------------------------------------------------------------- checksums
 const sums = parseSums(readFileSync(join(artifacts, 'SHA256SUMS'), 'utf8'));
@@ -180,9 +244,16 @@ function checkTree(tree, label) {
       sha256File(authority.absolute) === manifest.authority_sha256,
       `${label}: the authority is the one the manifest pinned`,
     );
+    const desktopBytes = readFileSync(desktop.absolute);
     check(
-      readFileSync(desktop.absolute).includes(pin),
+      desktopBytes.includes(pin),
       `${label}: the desktop carries the digest of that authority`,
+    );
+    check(
+      typeof manifest.revision_short === 'string' &&
+        manifest.revision_short.length >= 7 &&
+        desktopBytes.includes(Buffer.from(manifest.revision_short, 'ascii')),
+      `${label}: the desktop was compiled with the revision the manifest names`,
     );
   }
   // One authority, one place: a second copy would be one nobody pinned.
@@ -205,15 +276,20 @@ function checkTree(tree, label) {
     `${label}: no credential, fixture, source or local state by name`,
     forbidden.map((f) => `${f.path} (${f.kind})`).join(', '),
   );
-  // The AppImage carries the build host's shared libraries. GnuTLS compiles its own
-  // published self-test keys into libgnutls, so that library, and only that one, holds
-  // private-key blocks. Reviewed, and allowed by path and kind: a key in any other file
-  // stops the release.
+  // The AppImage carries the build host's shared libraries, and GnuTLS compiles its own
+  // published self-test keys into libgnutls. A private-key finding in that library is
+  // dropped only when every block in it is one listed, by digest, in
+  // `reviewed-library-keys.json`: the exception is bound to the content, and a block
+  // that is not listed (or never ends) in that file or any other stops the release.
   const secrets = secretsIn(entries).filter(
     (s) =>
       !(
-        /^usr\/lib\/libgnutls\.so(\.[0-9.]+)?$/.test(s.path) &&
-        s.kind === 'private key block'
+        s.kind === 'private key block' &&
+        onlyReviewedKeyBlocks(
+          s.path,
+          readFileSync(join(tree, s.path)),
+          reviewedKeys,
+        )
       ),
   );
   check(
@@ -384,15 +460,35 @@ for (const artifact of listed) {
 }
 
 // ---------------------------------------------------------------------------- the checkout
-if (flag('--repo')) {
+if (flag('--repo')) scanRepo(repoRoot);
+
+finish();
+
+/** Says what was checked and ends with the verdict. */
+function finish() {
+  for (const line of passed) console.log(`ok    ${line}`);
+  for (const line of problems) console.log(`FAIL  ${line}`);
+  console.log(
+    `\nrelease-verify: ${passed.length} passed, ${problems.length} failed`,
+  );
+  process.exit(problems.length === 0 ? 0 : 1);
+}
+
+/**
+ * The tracked files of a checkout: no credential file by name and no credential-shaped
+ * content in any of them, historical documents included. There is no exception: a file
+ * that holds something that looks like a credential is changed, not excused.
+ * @param {string} where
+ */
+function scanRepo(where) {
   const listing = run('git', ['ls-files', '-z'], {
-    cwd: root,
+    cwd: where,
     encoding: 'utf8',
   });
   const names = listing.stdout.split('\0').filter(Boolean);
   const entries = names
     .map((path) => {
-      const absolute = join(root, path);
+      const absolute = join(where, path);
       const stat = existsSync(absolute) ? statSync(absolute) : null;
       return stat?.isFile()
         ? /** @type {import('./release-lib.mjs').Entry} */ ({
@@ -405,10 +501,11 @@ if (flag('--repo')) {
         : null;
     })
     .filter((e) => e !== null);
+  check(entries.length > 0, 'the checkout has tracked files to scan');
   // Names that only a credential has. A fixture directory or a source file is a normal
-  // thing to track; these are not.
-  // `.npmrc` is a normal tracked file (this project's holds two settings); what could
-  // make it a credential is a token in it, which the content scan below looks for.
+  // thing to track; these are not. `.npmrc` is a normal tracked file (this project's
+  // holds two settings); what could make it a credential is a token in it, which the
+  // content scan below looks for.
   const tracked = forbiddenPaths(entries).filter(
     (f) =>
       !/(^|\/)\.npmrc$/.test(f.path) &&
@@ -421,31 +518,10 @@ if (flag('--repo')) {
     'no credential file is tracked',
     tracked.map((f) => `${f.path} (${f.kind})`).join(', '),
   );
-  // One finding is known and reviewed: a historical planning document of an earlier
-  // system plants a made-up `sk-ant-` string in a test that checks a secret is not
-  // indexed (a canary, 43 characters where a real key has about a hundred). It is
-  // allowed by path and kind, so that a second one anywhere stops the release.
-  const ALLOWED = new Set([
-    'docs origins/.planning/phases/03-pipeline-de-ingesta/03-PATTERNS.md|OpenAI-style API key',
-    'docs origins/.planning/phases/03-pipeline-de-ingesta/03-PATTERNS.md|Anthropic-style API key',
-  ]);
-  const found = secretsIn(entries);
-  const secrets = found.filter((s) => !ALLOWED.has(`${s.path}|${s.kind}`));
-  for (const s of found)
-    if (ALLOWED.has(`${s.path}|${s.kind}`))
-      console.log(
-        `note  reviewed canary, not a credential: ${s.path} (${s.kind})`,
-      );
+  const secrets = secretsIn(entries);
   check(
     secrets.length === 0,
     `no credential in any of the ${entries.length} tracked files`,
     secrets.map((s) => `${s.path} (${s.kind})`).join(', '),
   );
 }
-
-for (const line of passed) console.log(`ok    ${line}`);
-for (const line of problems) console.log(`FAIL  ${line}`);
-console.log(
-  `\nrelease-verify: ${passed.length} passed, ${problems.length} failed`,
-);
-process.exit(problems.length === 0 ? 0 : 1);

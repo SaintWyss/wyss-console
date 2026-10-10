@@ -354,14 +354,37 @@ function makeRelease(
     | 'script'
     | 'wrong-checksum'
     | 'signed-claim'
-    | 'authority-by-path',
+    | 'authority-by-path'
+    | 'wrong-revision'
+    | 'no-revision-in-desktop'
+    | 'tooling-mismatch'
+    | 'unpinned-tooling-claim'
+    | 'duplicate-authority',
 ) {
+  // The source this release claims to be built from: a repository with one commit.
+  const source = join(scratch, 'source');
+  mkdirSync(source, { recursive: true });
+  const git = (...args: string[]) =>
+    spawnSync(
+      'git',
+      ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args],
+      { cwd: source, encoding: 'utf8' },
+    );
+  git('init', '-q');
+  git('commit', '-q', '--allow-empty', '-m', 'the source');
+  const head = git('rev-parse', 'HEAD').stdout.trim();
+  const short = head.slice(0, 12);
+  const toolsConfig = JSON.parse(
+    readFileSync(join(root, 'scripts/appimage-tools.json'), 'utf8'),
+  );
   const authority = Buffer.from('the authority this release was pinned to');
   const pin = sha256Of(authority);
   const pkgRoot = join(scratch, 'pkg');
   const files: Record<string, string | Buffer> = {
     'usr/bin/wyss-console': Buffer.from(
-      wrong === 'desktop-without-pin' ? 'desktop' : `desktop pinned to ${pin}`,
+      wrong === 'desktop-without-pin'
+        ? 'desktop'
+        : `desktop pinned to ${pin}${wrong === 'no-revision-in-desktop' ? '' : ` built at ${short}`}`,
     ),
     'usr/libexec/wyss-console/wyss-control':
       wrong === 'other-authority'
@@ -379,6 +402,8 @@ function makeRelease(
     files['usr/share/wyss-console/notes.txt'] = `x ${fake.github} y`;
   if (wrong === 'fixture')
     files['usr/share/wyss-console/fixtures/a.json'] = '{}';
+  if (wrong === 'duplicate-authority')
+    files['usr/bin/wyss-control'] = authority;
   if (wrong === 'authority-by-path')
     files['usr/share/wyss-console/path'] = '/usr/local/bin/wyss-control';
   for (const [path, content] of Object.entries(files)) {
@@ -431,9 +456,34 @@ function makeRelease(
       schema_version: 1,
       name: 'wyss-console',
       version,
-      revision: null,
+      revision: wrong === 'wrong-revision' ? 'f'.repeat(40) : head,
+      revision_short: short,
+      source_tree: 'clean',
       platform: 'linux-x86_64',
       authority_sha256: pin,
+      network_during_bundling: 'none',
+      appimage_tooling: {
+        downloaded: toolsConfig.tools.map(
+          (t: Record<string, string>, i: number) => ({
+            name:
+              wrong === 'unpinned-tooling-claim' && i === 0 ? 'other' : t.name,
+            version: t.version,
+            source: t.source,
+            download_sha256: t.download_sha256,
+            expected_sha256: t.sha256,
+            actual_sha256:
+              wrong === 'tooling-mismatch' && i === 1
+                ? '0'.repeat(64)
+                : t.sha256,
+          }),
+        ),
+        embedded: toolsConfig.embedded.map((e: Record<string, string>) => ({
+          name: e.name,
+          provider: e.provider,
+          expected_sha256: e.sha256,
+          actual_sha256: e.sha256,
+        })),
+      },
       artifacts: [
         { name, kind: 'deb', size: deb.length, sha256: sha256Of(deb) },
       ],
@@ -446,7 +496,13 @@ function makeRelease(
 function verify(dir: string) {
   const result = spawnSync(
     process.execPath,
-    [join(root, 'scripts/release-verify.mjs'), '--artifacts', dir],
+    [
+      join(root, 'scripts/release-verify.mjs'),
+      '--artifacts',
+      dir,
+      '--source-root',
+      join(dir, '..', 'source'),
+    ],
     { encoding: 'utf8', env: { PATH: process.env.PATH } },
   );
   return {
@@ -465,28 +521,40 @@ it.skipIf(!dpkg)('accepts a package that is what its manifest says', () => {
   );
 });
 
-it.skipIf(!dpkg)('refuses each way a package can be wrong', () => {
-  const cases: [Parameters<typeof makeRelease>[0], RegExp][] = [
-    ['missing-authority', /the authority is at usr\/libexec/],
-    ['other-authority', /the authority is the one the manifest pinned/],
-    ['desktop-without-pin', /the desktop carries the digest/],
-    [
-      'credential-file',
-      /no credential, fixture, source or local state by name/,
-    ],
-    ['secret-inside', /no credential in any file/],
-    ['fixture', /no credential, fixture, source or local state by name/],
-    ['script', /it has no maintainer script/],
-    ['wrong-checksum', /matches SHA256SUMS/],
-    ['signed-claim', /does not claim a signature/],
-  ];
-  for (const [wrong, expected] of cases) {
-    rmSync(scratch, { recursive: true, force: true });
-    mkdirSync(scratch);
-    const result = verify(makeRelease(wrong));
-    expect(result.status, wrong).toBe(1);
-    expect(result.failures.join('\n'), wrong).toMatch(expected);
-    // Whatever it finds, it does not print the credential.
-    expect(result.out, wrong).not.toContain(fake.github);
-  }
-});
+it.skipIf(!dpkg)(
+  'refuses each way a package can be wrong',
+  () => {
+    const cases: [Parameters<typeof makeRelease>[0], RegExp][] = [
+      ['missing-authority', /the authority is at usr\/libexec/],
+      ['other-authority', /the authority is the one the manifest pinned/],
+      ['desktop-without-pin', /the desktop carries the digest/],
+      [
+        'credential-file',
+        /no credential, fixture, source or local state by name/,
+      ],
+      ['secret-inside', /no credential in any file/],
+      ['fixture', /no credential, fixture, source or local state by name/],
+      ['script', /it has no maintainer script/],
+      ['wrong-checksum', /matches SHA256SUMS/],
+      ['signed-claim', /does not claim a signature/],
+      ['wrong-revision', /manifest revision is the commit the source is at/],
+      [
+        'no-revision-in-desktop',
+        /compiled with the revision the manifest names/,
+      ],
+      ['tooling-mismatch', /was the pinned one when it ran/],
+      ['unpinned-tooling-claim', /was the pinned one when it ran/],
+      ['duplicate-authority', /exactly one authority in the package/],
+    ];
+    for (const [wrong, expected] of cases) {
+      rmSync(scratch, { recursive: true, force: true });
+      mkdirSync(scratch);
+      const result = verify(makeRelease(wrong));
+      expect(result.status, wrong).toBe(1);
+      expect(result.failures.join('\n'), wrong).toMatch(expected);
+      // Whatever it finds, it does not print the credential.
+      expect(result.out, wrong).not.toContain(fake.github);
+    }
+  },
+  120_000,
+);
