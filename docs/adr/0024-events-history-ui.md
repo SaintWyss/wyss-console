@@ -1,6 +1,6 @@
 # ADR 0024: Events and history in the window
 
-Status: Proposed
+Status: Accepted
 Date: 2026-10-09
 
 ## Decision
@@ -225,10 +225,18 @@ deduplicated against each other.
 ## Gaps, retention and duplicates
 
 No retention exists, so no history is missing today. The handling is in place and was
-proved against a scripted authority: a window that begins at a hole is marked, the view
-says _"History before this point is unavailable."_ and offers nothing older; a hole
-inside a window is a failed read. A gap is never skipped in silence and never presented
-as continuous.
+proved against a scripted authority:
+
+- a window that begins at a hole is marked, the view says _"History before this point is
+  unavailable."_ and offers nothing older;
+- a window none of which is there is the same thing with no rows: it is answered empty
+  and marked, after one question to the authority, and the view says the same;
+- the newest window is never that: a stream that greets with a head shows its head, or
+  the read failed;
+- a hole inside a window, an answer that goes backwards and an answer longer than was
+  asked for are each a failed read.
+
+A gap is never skipped in silence and never presented as continuous.
 
 An event is identified by its stream and its position. A page that overlaps what is
 shown adds each event once; rows are keyed by position within their stream's list.
@@ -247,10 +255,11 @@ rows and can be cleared. Each stream's list is filtered by itself.
 
 ## Details and correlation
 
-A row opens a details surface: its title, a sentence from the record, the time, the
-kind, the session, turn and approval identities, a lease's deadline, its position and
-stream, and the note that it is a record. It shows no JSON and offers no action on the
-event.
+A row shows its local time to the second, because several events are recorded in one
+minute, and its day when that is not today. A row opens a details surface: its title, a
+sentence from the record, the time (local, and as the authority wrote it), the kind, the
+session, turn and approval identities, a lease's deadline, its position and stream, and
+the note that it is a record. It shows no JSON and offers no action on the event.
 
 Its links navigate and let the destination read:
 
@@ -263,6 +272,11 @@ Its links navigate and let the destination read:
   _"Approval detail is no longer available. The record above is still what happened."_
   Nothing about the approval is filled in from the event. **Open Approvals** goes to the
   view that decides.
+
+A record of a stream the authority no longer holds offers none of this. What it is about
+lived in that stream's authority, so its details say _"This record was read from a stream
+wyss-control no longer holds here. What it is about cannot be opened or read from this
+authority."_ and nothing is asked of the authority that answers now.
 
 ## Offline
 
@@ -303,6 +317,8 @@ does not break the view and does not leak through it.
   loading history until it is reached.
 - **The start of history is the store's.** A new state store is a new stream; the rows
   of a replaced one stay only while the window is open, 100 at most.
+- **A stop under a running turn** is the refusal the acceptance exercised: it is answered
+  `active_turn_exists`, the durable head does not move, and no row appears.
 - **Gap handling is proved with a scripted authority**, because the real one keeps
   everything.
 - **A window costs a connection.** Each read greets the authority again, so that the
@@ -321,3 +337,120 @@ does not break the view and does not leak through it.
 Searching or filtering history at the authority; exporting it; a durable record of
 refusals or of the authority's own lifecycle (both would be core changes); retention;
 Settings.
+
+## Acceptance evidence
+
+Accepted on Linux (CachyOS, KWin 6.7.5). Every authority ran in an isolated temporary
+XDG directory with the repository's Codex fixture as its runtime. No production state of
+the authority was read or written, no real Codex was launched and nothing was sent to
+the user's display.
+
+**Phase 3E** was fast-forwarded into `main` first (`1a6d55c` to `c9b71a0`, ten commits
+ahead and none behind, pushed, verified equal to `origin/main`). It was not reviewed or
+changed again.
+
+**Service, against the real `wyss-control` process** (`src-tauri/tests/events_process.rs`,
+the fixture started in the authority's real namespace), two tests:
+
+- A session is prepared, the runtime started in Local Tools, the session bound, a turn
+  admitted, a command approval requested and denied (the turn ends interrupted), a second
+  turn's approval approved (the command runs and the turn completes), the runtime
+  stopped, the session closed, and 105 more sessions prepared. A `runtime/stop` sent
+  under the first turn is answered `active_turn_exists` and the stream is exactly as
+  long as before it. What the desktop reads is every durable event once, in order, in
+  windows of at most fifty that begin where the one after ends, down to position 1: each
+  row has its event's position (as text), timestamp, kind, category and session, and the
+  turn and approval identities its payload names. The story is in its order. Every value
+  of `runtime_session_id`, `codex_turn_id`, `lease_id`, `action_fingerprint` and
+  `runtime_instance_id` in the stream, every event, correlation and causation identity,
+  the prompt, the command, the credential and the workspace path are absent from what
+  crossed, and so are their field names. A position past the head and a position of
+  another stream answer `changed`.
+- The authority is killed with a turn waiting on an approval and started again on the
+  same store: the stream identity is the same, positions continue without a hole, the
+  window before one read before the restart is still read, and the turn
+  (`indeterminate`, `authority_restarted`) and the approval (`invalidated`,
+  `authority_restarted`) are rows. Started on another store behind the same socket it
+  greets with another stream whose head is 1, and a position of the first stream answers
+  `changed`.
+
+**Service and bridge, against a scripted authority** (`src-tauri/src/events/tests.rs`,
+`src-tauri/src/desktop/events.rs`), eight tests: windows read in bounded requests when
+answers are short; every one of the twenty-eight kinds projected to exactly the ten row
+fields and eleven facts, with planted provider, lease, fingerprint, instance, operation,
+command and reasoning strings never crossing; isolation and failure marked from the
+recorded reason only; unknown kinds, including a new kind of a known family, crossing as
+position and time alone; a missing beginning and a wholly missing window said as gaps;
+holes, backward answers, oversized answers, empty answers and other streams refused; the
+two requests rejecting every field but their own; the read pool refusing beyond two.
+
+**Window** (`tests/events.test.ts`, `tests/events-controller.test.ts`,
+`tests/events-view.test.ts`), 31 tests: the parser refuses any field a row has no use
+for; positions past 2^53 are compared exactly; the view reads only while shown and only
+when the head moved; a reader of older history is not moved; bounds hold in both
+directions; another stream is a boundary and never a continuation or a duplicate; a
+selection is a stream and a position; offline keeps rows and says they are from before;
+no control changes anything; an approval's present state comes from the authority or is
+said to be unavailable.
+
+**Mutation controls.** 87 single-change mutants over the adversarial list of this phase,
+45 in the window and 42 in Rust, run on the final code: 87 killed by a test, none by the
+compiler. They include a position turned into a `Number` (five places), a stream change
+ignored, a page appended whole, an older page not deduplicated, a hole accepted, a gap
+not said, unknown fields accepted, the payload crossing whole, the provider thread and
+turn, the lease identity, the fingerprint, the runtime instance, reasoning and command
+output each crossing as a new field, an unbounded window, unbounded retention in each
+direction, a hidden view that reads, a timer in the controller, a second permission, and
+a filter or a selection that ignores the stream. One more mutant is equivalent and was
+not run: the final length check of a window cannot fire for the two callers that exist.
+Thirteen mutants survived the first pass. Eleven were closed with tests, one had been
+written so that it changed nothing and was rewritten, and one is the equivalent above.
+One of the eleven showed that a wholly missing window was read fifty times and then
+failed, which is now a gap said after one question.
+
+**Desktop**, the release build in a nested KWin X11 display with real pointer and
+keyboard input, against an isolated `wyss-control` holding 93 real events:
+
+| #   | Check                                             | Result                                                                                                                               |
+| --- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | 3E fast-forwarded                                 | `main` = `origin/main` = `c9b71a0`                                                                                                   |
+| 2   | Events opens                                      | Enabled in the sidebar; an empty store says _No events yet._                                                                         |
+| 3   | Real durable events display                       | A prepare and a runtime start committed by a second client appear as three rows                                                      |
+| 4   | Newest first                                      | Positions descend; the story of a turn reads bottom to top                                                                           |
+| 5   | Load older                                        | 50 loaded, then the seven before them, then _This is the beginning of the event stream._                                             |
+| 6   | No duplicate at a page boundary                   | 57 rows for positions 1 to 57                                                                                                        |
+| 7   | Filters                                           | Approvals: 5 of 74 loaded; Security: the ten lease events of 50 loaded; the note about loaded events is shown                        |
+| 8   | Details                                           | Title, sentence, local and recorded time, kind, identities, position and stream; no JSON                                             |
+| 9   | Session correlation                               | **Open session** selects `ws` in Sessions with its present state                                                                     |
+| 10  | Turn correlation                                  | **Open in Agents** shows that session's turns; **Show events of this turn** leaves six rows                                          |
+| 11  | Approval correlation degrades                     | _Now: Approved. wyss-control no longer holds what it was about._ under a record that says _requested_                                |
+| 12  | Live refresh at the newest end                    | 54 further events committed by a second client arrive without a click                                                                |
+| 13  | No jump while reading older history               | A commit while at the bottom shows **New events available** and moves nothing                                                        |
+| 14  | Stream boundary                                   | Another store behind the socket: its two events, then **New authority event stream**, then the rows of `242e77fb`                    |
+| 15  | Offline                                           | Authority killed: 78 rows stay under _Authority offline. Showing previously loaded history_; Refresh and the approval check disabled |
+| 16  | Reconnect                                         | Same store: same stream, four more events, _wyss-control restarted. It kept the same event stream_; no boundary                      |
+| 17  | No raw envelope                                   | Nothing on any screen is a stored event                                                                                              |
+| 18  | No provider identity, secret, reasoning or output | Only Wyss session, turn and approval identities are shown; the fixture's command appears in Approvals and Agents, never in Events    |
+| 19  | Terminal PTY survives                             | The same shell answers before and after every view change                                                                            |
+| 20  | Sessions                                          | Lists, creates and activates a Local Tools session through the native folder dialog                                                  |
+| 21  | Agents and turns                                  | Three turns started; one denied, one approved, one left waiting                                                                      |
+| 22  | Approvals                                         | The pending approval is shown and approved there                                                                                     |
+| 23  | 960×640                                           | The default size of every capture                                                                                                    |
+| 24  | Narrow                                            | 700×560: list and details side by side under the collapsed sidebar                                                                   |
+| 25  | Native glass                                      | `_KDE_NET_WM_BLUR_BEHIND_REGION` is set on the window, as before                                                                     |
+
+The refused stop was sent from a second client while the first turn waited: it was
+answered `active_turn_exists` and the head stayed at 71. The process held 9 sockets
+throughout and its descriptors did not grow with reads: 51 before and after the reads of
+the first run, 44 to 46 on the rebuilt release after every view had been used.
+
+The acceptance found four defects, fixed before this record: a row's time had no
+seconds and no day; **New events available** could not be read over the rows; a title
+was cut short beside the details by its own mark; a record of a replaced stream offered
+to open a session the present authority does not have. The checks that depend on them
+were repeated on the rebuilt release.
+
+**Official validation** on the final commit, each exit 0: `format:check`, `lint`,
+`typecheck`, `npm test`, `npm run build`, `rust:fmt`, `rust:check`, `rust:test`,
+`rust:clippy`, `test:pty`, `desktop:build`, `git diff --check`,
+`git diff --cached --check`.

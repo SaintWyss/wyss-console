@@ -507,7 +507,8 @@ a row   ->  what the record says  ->  Open session · Open in Agents · Check wh
   beginning of the event stream_, or _History before this point is unavailable_.
 - **A restart of `wyss-control` keeps its stream**: history continues and the view says
   the authority restarted. Another state store on the same socket is another stream, and
-  is shown below an explicit boundary, never as a continuation.
+  is shown below an explicit boundary, never as a continuation; a record of the replaced
+  one offers nothing to open, because what it is about lived in that stream's authority.
 - **Offline, loaded rows stay** and are said to be from before; nothing is read.
 - **Refusals are not events.** `wyss-control` records what it committed. A refused
   request (a stop under a running turn, a stale revision) is answered and not recorded,
