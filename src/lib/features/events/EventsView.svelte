@@ -11,7 +11,6 @@
     summarizeAuthority,
     type AuthorityObservation,
   } from '../../shell/authority';
-  import { localClock } from '../agent/present';
   import { APPROVAL_REASON, APPROVAL_STATE } from '../approvals/present';
   import { localTime } from '../sessions/present';
   import {
@@ -29,6 +28,8 @@
     FILTER_LABEL,
     olderFailure,
     short,
+    eventClock,
+    eventDay,
     shownEvents,
     startMessage,
   } from './present';
@@ -76,6 +77,11 @@
         : (events.previous?.events ?? []);
     return from.find((event) => event.sequence === key.sequence) ?? null;
   });
+
+  /** The selected record is of a stream the authority that answers now does not hold. */
+  const earlierStream = $derived(
+    events.selected !== null && events.selected.stream !== events.stream,
+  );
 
   let list = $state<HTMLElement | null>(null);
   function scrolled() {
@@ -140,7 +146,7 @@
       onclick={() =>
         controller.select(chosen(stream, event) ? null : keyOf(stream, event))}
     >
-      <time class="event-time" datetime={event.at}>{localClock(event.at)}</time>
+      <time class="event-time" datetime={event.at}>{eventClock(event.at)}</time>
       <span class="event-title">{eventTitle(event)}</span>
       {#if event.disposition !== 'normal'}
         <span
@@ -155,6 +161,9 @@
         {CATEGORY_LABEL[event.category]}
         {#if event.session}
           · session <span class="mono">{short(event.session)}</span>
+        {/if}
+        {#if eventDay(event.at)}
+          · {eventDay(event.at)}
         {/if}
       </span>
     </button>
@@ -406,52 +415,66 @@
             </dd>
           </dl>
 
-          <p class="session-hint">
-            This is a record of what happened then. What it is about may have
-            changed since: that is read from wyss-control where it lives.
-          </p>
-          <div class="session-actions">
-            {#if selected.session}
-              {@const session = selected.session}
-              <button
-                type="button"
-                class="action"
-                onclick={() => onsession(session)}>Open session</button
-              >
-              {#if selected.turn || selected.category === 'turn'}
+          {#if earlierStream}
+            <!-- What this record is about belongs to another stream's authority
+                 state. Nothing here may be read against the one that answers now. -->
+            <p class="session-hint" role="note">
+              This record was read from a stream wyss-control no longer holds
+              here. What it is about cannot be opened or read from this
+              authority.
+            </p>
+          {:else}
+            <p class="session-hint">
+              This is a record of what happened then. What it is about may have
+              changed since: that is read from wyss-control where it lives.
+            </p>
+          {/if}
+          {#if !earlierStream}
+            <div class="session-actions">
+              {#if selected.session}
+                {@const session = selected.session}
                 <button
                   type="button"
                   class="action"
-                  onclick={() => onagent(session)}>Open in Agents</button
+                  onclick={() => onsession(session)}>Open session</button
+                >
+                {#if selected.turn || selected.category === 'turn'}
+                  <button
+                    type="button"
+                    class="action"
+                    onclick={() => onagent(session)}>Open in Agents</button
+                  >
+                {/if}
+                <button
+                  type="button"
+                  class="action"
+                  onclick={() =>
+                    controller.setScope({ session, turn: selected.turn })}
+                  >{selected.turn
+                    ? 'Show events of this turn'
+                    : 'Show events of this session'}</button
                 >
               {/if}
-              <button
-                type="button"
-                class="action"
-                onclick={() =>
-                  controller.setScope({ session, turn: selected.turn })}
-                >{selected.turn
-                  ? 'Show events of this turn'
-                  : 'Show events of this session'}</button
-              >
-            {/if}
-            {#if selected.approval}
-              {@const approval = selected.approval}
-              <button
-                type="button"
-                class="action"
-                disabled={!connected || answer?.status === 'reading'}
-                onclick={() => check(approval)}
-                >{answer?.status === 'reading'
-                  ? 'Reading…'
-                  : 'Check what it is now'}</button
-              >
-              <button type="button" class="action" onclick={onapprovals}
-                >Open Approvals</button
-              >
-            {/if}
-          </div>
-          {#if answer?.status === 'read'}
+              {#if selected.approval}
+                {@const approval = selected.approval}
+                <button
+                  type="button"
+                  class="action"
+                  disabled={!connected || answer?.status === 'reading'}
+                  onclick={() => check(approval)}
+                  >{answer?.status === 'reading'
+                    ? 'Reading…'
+                    : 'Check what it is now'}</button
+                >
+                <button type="button" class="action" onclick={onapprovals}
+                  >Open Approvals</button
+                >
+              {/if}
+            </div>
+          {/if}
+          {#if earlierStream}
+            <!-- no canonical answer belongs under a record of another stream -->
+          {:else if answer?.status === 'read'}
             {@const now = answer.detail.approval}
             <p class="session-hint" role="status">
               Now: {APPROVAL_STATE[now.state].label}.

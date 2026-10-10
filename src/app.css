@@ -1609,19 +1609,28 @@ html[data-glass='transparent'] .shell {
   background: linear-gradient(90deg, var(--accent-soft), transparent);
 }
 .event-time {
+  grid-area: 1 / 1;
+  /* Every row is a grid of its own: one width keeps the titles in a column. */
+  min-width: 11ch;
   font-family: var(--font-mono);
   font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
   color: var(--faint);
 }
 .event-title {
+  /* The whole width: how it ended is marked on the line below, not beside it. */
+  grid-area: 1 / 2 / auto / -1;
   font-size: 13px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.event-row .pill {
+  grid-area: 2 / 3;
+}
 .event-meta {
-  grid-column: 2 / -1;
+  grid-area: 2 / 2;
   font-size: 12px;
   color: var(--muted);
   overflow: hidden;
@@ -1633,11 +1642,20 @@ html[data-glass='transparent'] .shell {
   font-family: var(--font-mono);
   font-size: 11.5px;
 }
-.events-newer {
+/* It stays over the rows it is scrolled across: opaque, or it cannot be read. */
+.events-feature .action.events-newer {
   align-self: center;
   position: sticky;
   top: 0;
   z-index: 1;
+  color: var(--accent-strong);
+  border-color: var(--glass-line-strong);
+  background:
+    linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.events-feature .action.events-newer:hover {
+  background: linear-gradient(var(--glow-cyan), var(--glow-cyan)), var(--bg);
 }
 .events-end {
   display: flex;
@@ -1667,9 +1685,15 @@ html[data-glass='transparent'] .shell {
     grid-template-columns: minmax(0, 1fr) auto;
   }
   .event-time {
-    grid-column: 1 / -1;
+    grid-area: 1 / 1 / auto / -1;
+  }
+  .event-title {
+    grid-area: 2 / 1 / auto / -1;
   }
   .event-meta {
-    grid-column: 1 / -1;
+    grid-area: 3 / 1;
+  }
+  .event-row .pill {
+    grid-area: 3 / 2;
   }
 }

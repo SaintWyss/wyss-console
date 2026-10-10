@@ -276,6 +276,34 @@ export function olderFailure(code: SessionFailureCode): string {
       ? 'Older events could not be read: wyss-control did not answer.'
       : 'Older events could not be read.';
 }
+const CLOCK = new Intl.DateTimeFormat(undefined, {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+});
+const DAY = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+});
+/** Local time of day of an event, to the second: several are recorded in one minute. */
+export function eventClock(timestamp: string): string {
+  const time = Date.parse(timestamp);
+  return Number.isNaN(time) ? timestamp : CLOCK.format(time);
+}
+/** The local day of an event, when it is not the day it is read on. */
+export function eventDay(timestamp: string, now: number = Date.now()): string {
+  const time = Date.parse(timestamp);
+  if (Number.isNaN(time)) return '';
+  const [then, today] = [new Date(time), new Date(now)];
+  const same =
+    then.getFullYear() === today.getFullYear() &&
+    then.getMonth() === today.getMonth() &&
+    then.getDate() === today.getDate();
+  if (same) return '';
+  return then.getFullYear() === today.getFullYear()
+    ? DAY.format(time)
+    : `${DAY.format(time)}, ${then.getFullYear()}`;
+}
 /** A short form of an identity, for a line of text. The whole one is in the details. */
 export function short(id: string): string {
   return id.slice(0, 8);

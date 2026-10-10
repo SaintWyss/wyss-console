@@ -620,11 +620,25 @@ it('shows a record of a replaced stream as itself, whatever now has its position
   expect(
     rows().filter((r) => r.getAttribute('aria-pressed') === 'true'),
   ).toHaveLength(1);
+  // What it is about lived in that stream's authority: nothing of it is offered to be
+  // opened or read from the one that answers now.
+  expect(text(details())).toContain(
+    'This record was read from a stream wyss-control no longer holds here.',
+  );
+  expect(details()!.querySelectorAll('button.action')).toHaveLength(0);
+  expect(button('Open session', details()!)).toBeUndefined();
+  const reads = ipc.count('managed_approval_read');
   await click(rows(lists()[0])[0]);
   expect(text(details()!.querySelector('h3'))).toBe('Managed session prepared');
   expect(text(details()!.querySelector('.session-facts'))).toContain(
     `Position 5 in stream ${OTHER_STREAM.slice(0, 8)}`,
   );
+  // A record of the stream the authority holds links to where its subject lives.
+  expect(button('Open session', details()!)).toBeDefined();
+  expect(text(details())).toContain(
+    'that is read from wyss-control where it lives',
+  );
+  expect(ipc.count('managed_approval_read')).toBe(reads);
   // A filter is applied to each stream by itself: neither list takes a row of the other.
   await click(button('Sessions'));
   expect(rows(lists()[0])).toHaveLength(5);

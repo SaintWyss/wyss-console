@@ -9,7 +9,11 @@ import {
   type EventsClient,
   type EventsState,
 } from '../src/lib/features/events/controller';
-import { shownEvents } from '../src/lib/features/events/present';
+import {
+  eventClock,
+  eventDay,
+  shownEvents,
+} from '../src/lib/features/events/present';
 import {
   OTHER_STREAM,
   page,
@@ -552,4 +556,23 @@ it('has nothing that changes anything, and asks nothing once disposed', async ()
   expect(h.calls()).toBe(calls);
   expect(h.published()).toBe(published);
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it('says when an event was recorded to the second, and on which day when not today', () => {
+  const at = '2026-10-09T10:02:07Z';
+  const local = new Date(at);
+  // Several events share a minute: the second is part of the time shown.
+  expect(eventClock(at)).toContain(String(local.getSeconds()).padStart(2, '0'));
+  expect(eventClock(at)).not.toBe(eventClock('2026-10-09T10:02:08Z'));
+  // The day is said only when it is another one, and the year only when it is another.
+  expect(eventDay(at, local.getTime() + 60_000)).toBe('');
+  const nextDay = eventDay(at, local.getTime() + 36 * 3_600_000);
+  expect(nextDay).toContain(String(local.getDate()));
+  expect(nextDay).not.toContain(String(local.getFullYear()));
+  expect(eventDay(at, local.getTime() + 400 * 86_400_000)).toContain(
+    String(local.getFullYear()),
+  );
+  // What is not a time is shown as it came, and has no day.
+  expect(eventClock('nonsense')).toBe('nonsense');
+  expect(eventDay('nonsense')).toBe('');
 });
