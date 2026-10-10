@@ -237,6 +237,15 @@ impl Account {
 }
 impl Drop for Account {
     fn drop(&mut self) {
+        // The manager leaves a read-only directory of entries nobody may enter in its
+        // runtime directory. They are opened up first, or the account could not be removed.
+        let sealed = self.root.join("run/systemd/inaccessible");
+        let _ = fs::set_permissions(&sealed, fs::Permissions::from_mode(0o700));
+        if let Ok(entries) = fs::read_dir(&sealed) {
+            for entry in entries.flatten() {
+                let _ = fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o700));
+            }
+        }
         let _ = fs::remove_dir_all(&self.root);
     }
 }
