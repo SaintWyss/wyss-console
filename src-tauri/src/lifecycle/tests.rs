@@ -110,6 +110,158 @@ fn a_digest_is_sixty_four_lower_case_hex_digits_or_nothing() {
     }
 }
 
+/// Lays out `executable` and `payload` below `at` the way a package format would.
+fn lay_out(at: &Path, executable: &str, payload: &str, bytes: &[u8]) -> PathBuf {
+    for (path, content) in [(executable, &b"desktop"[..]), (payload, bytes)] {
+        let path = at.join(path);
+        fs::DirBuilder::new()
+            .mode(0o755)
+            .recursive(true)
+            .create(path.parent().unwrap())
+            .unwrap();
+        fs::write(&path, content).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    at.join(executable)
+}
+
+#[test]
+fn every_package_format_has_the_same_layout_below_its_prefix() {
+    let account = Account::new();
+    let pin = format!("{:?}", Digest::of(NEW));
+    // The directory package, the `.deb` (prefix `/usr`) and an AppImage (the `usr` of its
+    // mounted image): one rule finds the payload in all of them, from the executable.
+    for (name, executable, payload) in [
+        (
+            "directory",
+            "bin/wyss-console",
+            "libexec/wyss-console/wyss-control",
+        ),
+        (
+            "deb",
+            "usr/bin/wyss-console",
+            "usr/libexec/wyss-console/wyss-control",
+        ),
+        (
+            "appimage",
+            ".mount_Wyss1a2b3c/usr/bin/wyss-console",
+            ".mount_Wyss1a2b3c/usr/libexec/wyss-console/wyss-control",
+        ),
+    ] {
+        let at = account.root.join("formats").join(name);
+        let executable = lay_out(&at, executable, payload, NEW);
+        let Provision::Packaged(package) = Provision::beside(Some(&pin), Some(&executable)) else {
+            panic!("{name}: a pinned build is a packaged one");
+        };
+        assert_eq!(
+            package,
+            Package::at(fs::canonicalize(at.join(payload)).unwrap(), Digest::of(NEW)),
+            "{name}"
+        );
+        assert_eq!(
+            package.verified().map(|p| p.bytes().to_vec()).as_deref(),
+            Ok(NEW),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_payload_that_is_missing_or_not_the_pinned_one_is_not_installed() {
+    let account = Account::new();
+    let at = account.root.join("formats/broken");
+    let pin = format!("{:?}", Digest::of(NEW));
+    // Missing: the desktop is there and its authority is not.
+    let executable = lay_out(&at, "usr/bin/wyss-console", "usr/libexec/other", NEW);
+    let Provision::Packaged(package) = Provision::beside(Some(&pin), Some(&executable)) else {
+        panic!("pinned");
+    };
+    assert_eq!(
+        package.verified().err(),
+        Some(LifecycleError::PackageInvalid)
+    );
+    // Present and not the one this build was made with.
+    lay_out(
+        &at,
+        "usr/bin/wyss-console",
+        "usr/libexec/wyss-console/wyss-control",
+        OLD,
+    );
+    let Provision::Packaged(package) = Provision::beside(Some(&pin), Some(&executable)) else {
+        panic!("pinned");
+    };
+    assert_eq!(
+        package.verified().err(),
+        Some(LifecycleError::PackageInvalid)
+    );
+    // An authority found by name somewhere else is never looked for: with nothing at all
+    // beside the desktop, there is no payload, and nothing else is tried.
+    let lonely = account.root.join("formats/lonely");
+    let executable = lay_out(&lonely, "bin/wyss-console", "elsewhere/wyss-control", NEW);
+    let Provision::Packaged(package) = Provision::beside(Some(&pin), Some(&executable)) else {
+        panic!("pinned");
+    };
+    assert_eq!(
+        package.verified().err(),
+        Some(LifecycleError::PackageInvalid)
+    );
+}
+
+#[test]
+fn the_payload_is_found_from_the_real_executable_and_not_from_a_link_to_it() {
+    let account = Account::new();
+    let pin = format!("{:?}", Digest::of(NEW));
+    let real = lay_out(
+        &account.root.join("formats/real"),
+        "usr/bin/wyss-console",
+        "usr/libexec/wyss-console/wyss-control",
+        NEW,
+    );
+    // A launcher somewhere else, with an authority of its own beside it that is not the
+    // pinned one. Following the link must not make that one the payload.
+    let decoy = account.root.join("formats/decoy");
+    lay_out(
+        &decoy,
+        "bin/launcher",
+        "libexec/wyss-console/wyss-control",
+        OLD,
+    );
+    symlink(&real, decoy.join("bin/wyss-console")).unwrap();
+    let Provision::Packaged(package) =
+        Provision::beside(Some(&pin), Some(&decoy.join("bin/wyss-console")))
+    else {
+        panic!("pinned");
+    };
+    assert_eq!(
+        package,
+        Package::at(
+            fs::canonicalize(
+                account
+                    .root
+                    .join("formats/real/usr/libexec/wyss-console/wyss-control")
+            )
+            .unwrap(),
+            Digest::of(NEW)
+        )
+    );
+    assert!(package.verified().is_ok());
+}
+
+#[test]
+fn a_build_that_cannot_say_where_it_runs_is_invalid_not_development() {
+    let pin = format!("{:?}", Digest::of(NEW));
+    assert_eq!(Provision::beside(Some(&pin), None), Provision::Invalid);
+    assert_eq!(
+        Provision::beside(Some(&pin), Some(Path::new("/nonexistent/bin/wyss-console"))),
+        Provision::Invalid
+    );
+    // Without a pin nothing is looked for, wherever it runs.
+    assert_eq!(
+        Provision::beside(None, Some(Path::new("/usr/bin/wyss-console"))),
+        Provision::Development
+    );
+}
+
 #[test]
 fn a_build_installs_only_the_authority_it_was_packaged_with() {
     // Not packaged: it has no authority to install, whatever lies around it.

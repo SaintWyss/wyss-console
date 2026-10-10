@@ -137,17 +137,25 @@ impl Provision {
     /// The authority packaged beside this executable, if the build was pinned to one.
     ///
     /// The payload is found from the running executable and from nowhere else: not from
-    /// `PATH`, not from the working directory, not from a name the window sends. A
-    /// package lays the two out as `bin/wyss-console` and
-    /// `libexec/wyss-console/wyss-control`.
+    /// `PATH`, not from the working directory, not from a name the window sends. Every
+    /// package format lays the two out the same way, below one prefix:
+    /// `<prefix>/bin/wyss-console` and `<prefix>/libexec/wyss-console/wyss-control`. The
+    /// directory package has its own folder as the prefix, the `.deb` has `/usr`, and an
+    /// AppImage has the `usr` of its mounted image.
     pub fn of_build(pin: Option<&str>) -> Self {
+        Self::beside(pin, std::env::current_exe().ok().as_deref())
+    }
+
+    /// [`Self::of_build`] for an executable that is named: what a test, and nothing else,
+    /// can vary.
+    pub(super) fn beside(pin: Option<&str>, executable: Option<&Path>) -> Self {
         let Some(pin) = pin else {
             return Self::Development;
         };
         let located = (|| {
             let digest = Digest::parse(pin)?;
             // The real file behind `/proc/self/exe`, links already resolved.
-            let executable = fs::canonicalize(std::env::current_exe().ok()?).ok()?;
+            let executable = fs::canonicalize(executable?).ok()?;
             let prefix = executable.parent()?.parent()?;
             Some(Package::at(
                 prefix
