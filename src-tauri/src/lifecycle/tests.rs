@@ -720,18 +720,105 @@ fn what_the_service_manager_says_is_read_word_by_word_and_nothing_is_assumed() {
     assert_eq!(nowhere.reset_failed(), Err(ManagerError::Unavailable));
 }
 
+#[test]
+fn the_service_manager_is_asked_fixed_things_by_a_fixed_program_with_no_shell() {
+    // The program is the system's own, by its whole path: never a name looked up in PATH.
+    let real = Systemd::new(Path::new("/nonexistent/wyss-no-manager"));
+    let executable = real.executable().expect("this system has systemctl");
+    assert!(executable.is_absolute());
+    assert!(
+        ["/usr/bin/systemctl", "/bin/systemctl"]
+            .iter()
+            .any(|c| fs::canonicalize(c).is_ok_and(|p| p == executable))
+    );
+    let meta = fs::metadata(executable).unwrap();
+    assert_eq!((meta.uid(), meta.mode() & 0o022), (0, 0));
+
+    // A stand-in that writes down how it was run, and answers like a manager would.
+    let account = Account::new();
+    let record = account.root.join("calls");
+    let stand_in = account.root.join("stand-in");
+    fs::write(
+        &stand_in,
+        format!(
+            "#!/bin/sh\n{{ printf 'ARGS'; for a in \"$@\"; do printf ' [%s]' \"$a\"; done; echo; env | sed 's/=.*//' | sort | tr '\\n' ' '; echo; }} >> {}\nprintf 'LoadState=loaded\\nActiveState=inactive\\nResult=success\\nMainPID=0\\nFragmentPath=\\nVersion=1\\n'\n",
+            record.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&stand_in, fs::Permissions::from_mode(0o700)).unwrap();
+    let manager = Systemd::with_executable(&stand_in, &account.root.join("run"));
+    assert!(manager.status().is_ok());
+    manager.reload().unwrap();
+    manager.start().unwrap();
+    manager.reset_failed().unwrap();
+    let recorded = fs::read_to_string(&record).unwrap();
+    let lines: Vec<&str> = recorded.lines().collect();
+    // Four things, each a fixed argument list about the one unit. Nothing is quoted into
+    // a shell, and nothing of it can be chosen by a caller.
+    assert_eq!(
+        lines.iter().step_by(2).copied().collect::<Vec<_>>(),
+        [
+            "ARGS [--user] [--no-ask-password] [show] [wyss-control.service] [--property=LoadState,ActiveState,Result,MainPID,FragmentPath]",
+            "ARGS [--user] [--no-ask-password] [daemon-reload]",
+            "ARGS [--user] [--no-ask-password] [start] [wyss-control.service]",
+            "ARGS [--user] [--no-ask-password] [reset-failed] [wyss-control.service]",
+        ]
+    );
+    // It is given where the manager is and plain output, and nothing of the desktop's
+    // environment: not HOME, not PATH, not what a session may carry for the loader.
+    assert!(std::env::var_os("PATH").is_some() && std::env::var_os("HOME").is_some());
+    for environment in lines.iter().skip(1).step_by(2) {
+        let given: Vec<&str> = environment
+            .split(' ')
+            .filter(|name| !name.is_empty() && !["PWD", "SHLVL", "_", "OLDPWD"].contains(name))
+            .collect();
+        assert_eq!(given, ["LC_ALL", "XDG_RUNTIME_DIR"]);
+    }
+    // There is no way to ask for anything else. The manager is never told to stop,
+    // restart, kill, enable or disable anything, by this or any other code here.
+    let source = include_str!("manager.rs");
+    for verb in [
+        "\"stop\"",
+        "\"restart\"",
+        "\"kill\"",
+        "\"enable\"",
+        "\"disable\"",
+        "\"mask\"",
+        "\"edit\"",
+        "\"set-environment\"",
+        "\"import-environment\"",
+        "\"-c\"",
+        "/bin/sh",
+        "bash",
+    ] {
+        assert!(!source.contains(verb), "{verb}");
+    }
+    for source in [
+        include_str!("bootstrap.rs"),
+        include_str!("install.rs"),
+        include_str!("package.rs"),
+        include_str!("layout.rs"),
+    ] {
+        assert!(!source.contains("Command::new") && !source.contains("std::process"));
+    }
+}
+
 // --- the state machine -----------------------------------------------------------
 
 /// A link the test moves by hand.
 struct Link {
     state: Mutex<(u64, LinkState)>,
     changed: Condvar,
+    /// Becomes this the next time it is asked how it is now (and not what changed).
+    turns: Mutex<Option<LinkState>>,
 }
 impl Link {
     fn new(state: LinkState) -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new((0, state)),
             changed: Condvar::new(),
+            turns: Mutex::new(None),
         })
     }
     fn set(&self, state: LinkState) {
@@ -743,6 +830,13 @@ impl Link {
 impl AuthorityLink for Link {
     fn observe(&self, after: Option<u64>, timeout: Duration) -> (u64, LinkState) {
         let deadline = Instant::now() + timeout;
+        // An attempt asks how the link is now, once, before it does anything.
+        if after.is_none()
+            && timeout.is_zero()
+            && let Some(next) = self.turns.lock().unwrap().take()
+        {
+            self.set(next);
+        }
         let mut held = self.state.lock().unwrap();
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
@@ -945,6 +1039,20 @@ fn an_authority_that_already_answers_is_used_and_nothing_is_installed_or_started
     assert_eq!(view.diagnostics.service, ServiceState::NotInstalled);
     world.quiet();
     // It was asked how the unit is, for the diagnostics, and nothing else.
+    assert_eq!(world.manager.asked(), Vec::<&str>::new());
+    assert!(!world.installed());
+    // Once ready nothing is looked at again: no timer reads the unit or the files.
+    let looks = world.manager.count("status");
+    thread::sleep(Duration::from_millis(400));
+    assert_eq!(world.manager.count("status"), looks);
+
+    // The same for an authority that starts answering just as an attempt begins:
+    // somebody else brought it up, and it is theirs.
+    let world = World::packaged(LinkState::Connecting, Ok(not_installed()));
+    *world.link.turns.lock().unwrap() = Some(LinkState::Connected);
+    world.link.set(LinkState::Absent);
+    world.ready();
+    world.quiet();
     assert_eq!(world.manager.asked(), Vec::<&str>::new());
     assert!(!world.installed());
     // Retry has nothing to retry.

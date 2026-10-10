@@ -104,6 +104,20 @@ impl Systemd {
             runtime: runtime.to_owned(),
         }
     }
+    /// The same against another executable than the system's. For tests, which look at
+    /// exactly what is run: no product path constructs this.
+    #[cfg(test)]
+    pub(super) fn with_executable(executable: &Path, runtime: &Path) -> Self {
+        Self {
+            systemctl: Some(executable.to_owned()),
+            runtime: runtime.to_owned(),
+        }
+    }
+    /// The executable every call runs, if the system has one.
+    #[cfg(test)]
+    pub(super) fn executable(&self) -> Option<&Path> {
+        self.systemctl.as_deref()
+    }
     /// Runs `systemctl --user` with these arguments and answers what it printed.
     fn call(&self, arguments: &[&str], limit: Duration) -> Result<String, ManagerError> {
         let systemctl = self.systemctl.as_ref().ok_or(ManagerError::Unavailable)?;
