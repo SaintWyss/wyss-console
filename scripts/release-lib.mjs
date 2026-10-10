@@ -437,3 +437,22 @@ export function onlyReviewedKeyBlocks(path, bytes, reviewed) {
     digests.every((d) => known.has(d))
   );
 }
+
+/**
+ * Whether `made` is `pinned` with only the 16 bytes appimagetool writes into the
+ * `.digest_md5` section of an AppImage runtime (the MD5 of the image it was building)
+ * changed. Anything else that differs means the runtime is not the pinned one.
+ * @param {Buffer} made
+ * @param {Buffer} pinned
+ */
+export function runtimeIsPinned(made, pinned) {
+  if (made.length !== pinned.length) return false;
+  let first = -1;
+  let last = -1;
+  for (let i = 0; i < made.length; i += 1) {
+    if (made[i] === pinned[i]) continue;
+    if (first === -1) first = i;
+    last = i;
+  }
+  return first === -1 || last - first < 16;
+}

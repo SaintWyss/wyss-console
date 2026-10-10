@@ -41,7 +41,7 @@ import {
   offlineEnvironment,
   provisionAll,
 } from './appimage-tools.mjs';
-import { sourceProblems } from './release-lib.mjs';
+import { runtimeIsPinned, sourceProblems } from './release-lib.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const release = join(root, 'src-tauri', 'target', 'release');
@@ -152,8 +152,12 @@ function repackAppImage(original, appDir, destination, epoch) {
     process.exit(1);
   }
   const runtime = readFileSync(original).subarray(0, offset);
-  // The image begins with the pinned runtime and with nothing that was fetched.
-  if (!runtimeFile || !runtime.equals(readFileSync(runtimeFile))) {
+  // appimagetool was given the pinned runtime and fills in one 16-byte field of it, the
+  // MD5 of the image it built. This image is written again below, so that field would be
+  // stale: the pinned runtime is used as it is, byte for byte, and the one that came out
+  // of the bundler has to be that file and nothing else.
+  const pinnedRuntime = runtimeFile ? readFileSync(runtimeFile) : null;
+  if (!pinnedRuntime || !runtimeIsPinned(runtime, pinnedRuntime)) {
     console.error(
       'package: the AppImage does not begin with the pinned runtime',
     );
@@ -178,7 +182,7 @@ function repackAppImage(original, appDir, destination, epoch) {
   ]);
   writeFileSync(
     destination,
-    Buffer.concat([runtime, readFileSync(filesystem)]),
+    Buffer.concat([pinnedRuntime, readFileSync(filesystem)]),
   );
   chmodSync(destination, 0o755);
   rmSync(filesystem, { force: true });

@@ -31,6 +31,7 @@ import {
   onlyReviewedKeyBlocks,
   privateKeyBlocks,
   revisionProblems,
+  runtimeIsPinned,
   sourceProblems,
 } from '../scripts/release-lib.mjs';
 
@@ -442,7 +443,7 @@ it('provisions the whole table from a fetcher that serves the pinned files, and 
     provisionAll(config, dir, () => {
       throw new Error('no fetch');
     }).map((d) => d.how),
-  ).toEqual(['cached', 'cached', 'cached']);
+  ).toEqual(committed.tools.map(() => 'cached'));
   // An unpinned table is refused before anything is fetched.
   const floating = {
     ...config,
@@ -739,4 +740,26 @@ it('excuses a private key in a library only by the content of that exact key', (
   for (const l of file.libraries)
     for (const d of l.blocks) expect(d).toMatch(/^[0-9a-f]{64}$/);
   chmodSync(scratch, 0o700);
+});
+
+it('takes a runtime for the pinned one only if it differs in nothing but its digest field', () => {
+  const pinned = Buffer.alloc(4096, 7);
+  const made = Buffer.from(pinned);
+  expect(runtimeIsPinned(made, pinned)).toBe(true);
+  // appimagetool writes the 16 bytes of the MD5 of the image into one field.
+  for (let i = 1000; i < 1016; i += 1) made[i] = i & 0xff;
+  expect(runtimeIsPinned(made, pinned)).toBe(true);
+  // Anything else: a byte elsewhere, a second field, a longer or shorter file.
+  const other = Buffer.from(made);
+  other[3000] = 9;
+  expect(runtimeIsPinned(other, pinned)).toBe(false);
+  const spread = Buffer.from(pinned);
+  spread[1000] = 1;
+  spread[1016] = 1;
+  expect(runtimeIsPinned(spread, pinned)).toBe(false);
+  expect(runtimeIsPinned(pinned.subarray(1), pinned)).toBe(false);
+  expect(
+    runtimeIsPinned(Buffer.concat([pinned, Buffer.from([0])]), pinned),
+  ).toBe(false);
+  expect(runtimeIsPinned(Buffer.alloc(4096, 8), pinned)).toBe(false);
 });
