@@ -52,7 +52,16 @@ it('pins every build tool the committed configuration names', () => {
     'AppRun',
     'linuxdeploy',
     'linuxdeploy-plugin-appimage',
+    'type2-runtime',
   ]);
+  // The plugin would fetch its runtime from a floating address; it is handed the pinned one,
+  // and the finished image has to begin with it.
+  const packager = readFileSync(join(root, 'scripts/package.mjs'), 'utf8');
+  expect(packager).toContain('LDAI_RUNTIME_FILE');
+  expect(packager).toContain('does not begin with the pinned runtime');
+  expect(
+    readFileSync(join(root, 'scripts/release-verify.mjs'), 'utf8'),
+  ).toContain('it begins with the pinned runtime');
   for (const tool of committed.tools) {
     // One fixed https release asset of github.com, an immutable tag, a digest for what is
     // downloaded and one for what runs, and a size bound.
@@ -423,7 +432,7 @@ it('provisions the whole table from a fetcher that serves the pinned files, and 
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'left-over'), 'x');
   const done = provisionAll(config, dir, fetch);
-  expect(done.map((d) => d.how)).toEqual(['fetched', 'fetched', 'fetched']);
+  expect(done.map((d) => d.how)).toEqual(committed.tools.map(() => 'fetched'));
   expect(names(dir)).toEqual(
     config.tools.map((t: { file: string }) => t.file).sort(),
   );

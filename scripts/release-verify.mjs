@@ -37,6 +37,7 @@ import {
   revisionProblems,
   secretsIn,
   sha256File,
+  sha256Of,
   walk,
 } from './release-lib.mjs';
 
@@ -436,6 +437,18 @@ for (const artifact of listed) {
     const copy = join(scratch, 'image.AppImage');
     run('cp', [path, copy]);
     run('chmod', ['+x', copy]);
+    // The image begins with the pinned runtime, whatever the bundler would have fetched.
+    const offset = Number(run(copy, ['--appimage-offset']).stdout.trim());
+    const runtime = toolsConfig.tools.find(
+      (/** @type {{ name: string }} */ t) => t.name === 'type2-runtime',
+    );
+    check(
+      Number.isSafeInteger(offset) &&
+        offset > 0 &&
+        runtime !== undefined &&
+        sha256Of(readFileSync(path).subarray(0, offset)) === runtime.sha256,
+      'appimage: it begins with the pinned runtime',
+    );
     const extracted = run(copy, ['--appimage-extract'], {
       cwd: tree,
       encoding: 'utf8',

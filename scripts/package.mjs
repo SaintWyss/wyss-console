@@ -152,6 +152,13 @@ function repackAppImage(original, appDir, destination, epoch) {
     process.exit(1);
   }
   const runtime = readFileSync(original).subarray(0, offset);
+  // The image begins with the pinned runtime and with nothing that was fetched.
+  if (!runtimeFile || !runtime.equals(readFileSync(runtimeFile))) {
+    console.error(
+      'package: the AppImage does not begin with the pinned runtime',
+    );
+    process.exit(1);
+  }
   const filesystem = join(parent, `.appimage-${process.pid}.squashfs`);
   rmSync(filesystem, { force: true });
   must('mksquashfs', [
@@ -328,8 +335,20 @@ if (releasing) {
     process.exit(1);
   }
 }
+// appimagetool, inside the plugin, takes the AppImage runtime from the file it is told
+// of; without one it fetches a floating address. It is told of the pinned one.
+const runtimeTool = toolsConfig.tools.find((t) => t.name === 'type2-runtime');
+const runtimeFile = runtimeTool ? join(toolsDirectory, runtimeTool.file) : null;
+if (releasing && !runtimeFile) {
+  console.error('package: no pinned AppImage runtime is configured');
+  process.exit(1);
+}
 const bundlerOutput = await build(
-  { ...named, WYSS_AUTHORITY_SHA256: digest },
+  {
+    ...named,
+    WYSS_AUTHORITY_SHA256: digest,
+    ...(releasing && runtimeFile ? { LDAI_RUNTIME_FILE: runtimeFile } : {}),
+  },
   releasing ? ['deb', 'appimage'] : [],
 );
 if (releasing) {

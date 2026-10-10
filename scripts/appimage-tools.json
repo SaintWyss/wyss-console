@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "comment": "Every executable the AppImage build runs that is not built here. Each is fetched from one fixed HTTPS address of an immutable release, checked against the SHA-256 below before anything runs it, and checked again after the bundler has used it. No floating reference (continuous, latest, a branch) may appear. The two scripts under `embedded` are written by the pinned @tauri-apps/cli itself; their digests are checked after the bundler ran.",
+  "comment": "Every executable the AppImage build runs that is not built here. Each is fetched from one fixed HTTPS address of an immutable release, checked against the SHA-256 below before anything runs it, and checked again after the bundler has used it. No floating reference (continuous, latest, a branch) may appear. The two scripts under `embedded` are written by the pinned @tauri-apps/cli itself; their digests are checked after the bundler ran. The runtime is the part of every AppImage that runs first. appimagetool, inside the pinned plugin, would fetch it from a floating 'continuous' address when it runs; it is given this pinned file instead (LDAI_RUNTIME_FILE), and the finished image has to begin with exactly these bytes.",
   "tools": [
     {
       "name": "AppRun",
@@ -30,6 +30,16 @@
       "download_sha256": "992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3",
       "sha256": "992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3",
       "max_bytes": 67108864,
+      "transform": null
+    },
+    {
+      "name": "type2-runtime",
+      "file": "type2-runtime-20251108-x86_64",
+      "version": "20251108",
+      "source": "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64",
+      "download_sha256": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
+      "sha256": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
+      "max_bytes": 4194304,
       "transform": null
     }
   ],
