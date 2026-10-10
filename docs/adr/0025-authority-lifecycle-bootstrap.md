@@ -1,6 +1,6 @@
 # ADR 0025: Authority lifecycle and desktop bootstrap
 
-Status: Proposed
+Status: Accepted
 Date: 2026-10-10
 
 ## Decision
@@ -389,3 +389,150 @@ or socket is shown, and the terminal works throughout.
 A package format and its signature; updating under idle work, which needs a drain
 operation in the core; an uninstall flow; a log viewer; Settings; platforms other than
 Linux.
+
+## Acceptance evidence
+
+Accepted on Linux (CachyOS, systemd 262, KWin 6.7.5).
+
+Nothing of the user's own session was used. Every service manager was a private
+`systemd --user`, started for the test on a temporary runtime directory and an empty
+temporary home, so the unit under test was the one the product writes, unchanged. The
+user's own manager was never asked anything and has no `wyss-control.service`; nothing
+was installed in the real account, no real Codex was launched and nothing was sent to
+the user's display.
+
+**Phase 3F** was fast-forwarded into `main` first (`c9b71a0` to `f91c549`, eight commits
+ahead and none behind, pushed, verified equal to `origin/main`). It was not reviewed or
+changed again.
+
+**The real authority under a real service manager** (`src-tauri/tests/lifecycle_process.rs`),
+eight tests with the real `wyss-control`, the real `AuthorityService` and the Codex
+fixture:
+
+- **A clean account.** An empty home; the desktop is launched and nothing else is done.
+  Exactly four entries appear under the data directory and three under the configuration
+  directory, all private; the manager runs the unit from that file and the process is
+  that binary (`/proc/<pid>/exe`); its environment has no `LD_PRELOAD` although the
+  manager's has one; the unit is `static`; the store and the socket are where the
+  authority has always put them. A session is activated in Local Tools, so the runtime
+  starts under the unit's hardening inside `bwrap`, and every child of the authority
+  started in `runtime-cwd`. The desktop closes: the same process goes on answering, with
+  its runtime ready. It opens again: the same instance, nothing installed, reloaded or
+  started, no restart counted. The authority is killed: the manager restarts it once, the
+  desktop starts nothing, the stream is the same and continues, and the session is
+  there. The authority ends cleanly on `SIGTERM`: nobody restarts it, the desktop says it
+  is not running, and Retry starts it on the same store.
+- **Four desktops at once** get one authority: one process runs the managed binary, every
+  greeting names the same instance, and the installation is whole.
+- **A crash loop ends.** An authority that exits at once runs five times and no more;
+  the desktop asked for one start; a second desktop starts nothing; Retry gives one more
+  round of the same limit. An authority that exits with status 2 runs once.
+- **No service manager**: the failure is said within the bound, twice, and the home is
+  still empty.
+- **An authority started by hand** is used: nothing is installed beside it and nothing is
+  asked of the manager. A second one started by hand under a managed one is refused by
+  the authority's own locks with status 2.
+- **An incompatible authority** (the real framing, another protocol version) is said, it
+  is external, nothing is installed or started, and its socket is the one it made.
+- **A newer build** while a turn runs under the old authority: `update pending`, the same
+  process, the same file, the turn still running, and still so after the turn is over.
+  Once the authority is stopped, the next desktop installs the newer one and starts it;
+  the store is the same file, the same stream, with the session and its turn.
+- **A dead socket and interrupted installs** (a temporary file left, the binary without
+  the unit, a unit the manager had not read, a start already asked for) are each recovered
+  on the next launch. The authority replaced the dead socket itself.
+
+**The lifecycle against a scripted link and a scripted manager**
+(`src-tauri/src/lifecycle/tests.rs`, 25 tests, with the bridge's and the runtime
+directory's own): the digest and the provenance of the payload; the layout; the unit's
+exact text; a clean install, an update that never writes the running file, an
+interrupted install, eight installers at once; every unsafe place refused and left as it
+was; what the manager is asked, word for word, by which program and with which
+environment; the state machine with its bounds; an authority that answers at launch,
+one that appears as an attempt begins, one that went away; an incompatible one; managed
+and foreign told apart; no polling once ready; a view that never contradicts itself.
+
+**Window** (`tests/lifecycle.test.ts`, `tests/lifecycle-view.test.ts`), 11 tests: the
+parser refuses any other field and any self-contradiction; Retry carries nothing; one
+follower with one read in flight and no loop; connected only when the link is; every
+failure said in words with no command, unit, path or process; the terminal working while
+the authority starts; one Retry however often it is pressed; no view starting anything.
+
+**Mutation controls.** 89 single-change mutants over the adversarial list of this phase
+(19 in the window, 62 in Rust, 8 against the real service manager), run on the final
+code: 89 killed by a test, none by the compiler. They include the payload found in the
+working directory, an unpinned build that installs, a digest not checked, links
+followed, a payload or a directory others can write, `systemctl` looked up in `PATH`,
+run through a shell or inheriting the desktop's environment, a start that is a restart,
+a foreign unit overwritten, a binary written in place, installers not serialized, a unit
+that restarts always, has no start limit, keeps the loader's variables or can be
+enabled, ready without a connection, an answering authority installed over, a unit in
+hand started again, a recovery that starts the service, files written without a manager,
+any listener taken for managed, a retry that names a service, a wider permission, the
+runtime starting in the build tree. One more is equivalent and was not run (a guard
+behind a button that is already disabled).
+
+The first pass left nine survivors: five were closed with tests, one by sending the
+authority its own `SIGTERM` where the test had asked the manager to stop it, two were
+process-level copies of unit mutants that the real manager's timing does not reach, and
+one is the equivalent above. Reading one of them showed a real case: a desktop that was
+connected when it came up could start again an authority somebody had just stopped. The
+desktop now never starts by itself an authority that had answered. A later survivor was
+a flag that no longer decided anything, and was removed.
+
+**Desktop**, the packaged release (`npm run desktop:package`, copied to a prefix of the
+account's own) in a nested KWin X11 display with real pointer and keyboard input, on an
+empty home with a private service manager:
+
+| #   | Check                      | Result                                                                                    |
+| --- | -------------------------- | ----------------------------------------------------------------------------------------- |
+| 1   | 3F merged cleanly          | `main` = `origin/main` = `f91c549`                                                        |
+| 2   | No authority at launch     | No process, unit not found, home empty                                                    |
+| 3   | The desktop opens          | The window and its terminal, at once                                                      |
+| 4   | Bootstrap starts by itself | The binary and the unit appear; the manager runs the unit                                 |
+| 5   | No terminal or command     | Nothing but launching the application was done                                            |
+| 6   | Connected                  | Top bar: Authority Connected                                                              |
+| 7   | Sessions                   | Lists, creates, resumes                                                                   |
+| 8   | Inference session          | Created through the native folder dialog; runtime ready in the inference profile          |
+| 9   | Local Tools session        | Runtime ready in the local-tools profile; its process started in `runtime-cwd`            |
+| 10  | Agent turn                 | Completed                                                                                 |
+| 11  | Approval                   | A command proposed, approved, run; the turn completed                                     |
+| 12  | Events                     | 45 recorded events shown                                                                  |
+| 13  | Close the desktop          | The desktop process is gone                                                               |
+| 14  | The authority remains      | The same process and instance, runtime still ready                                        |
+| 15  | Reopen                     | Connected to the same instance; nothing started                                           |
+| 16  | Kill the authority         | `SIGKILL` to the unit's process                                                           |
+| 17  | The service recovers       | One restart counted, another process                                                      |
+| 18  | The desktop reconnects     | "Starting", then Connected, with nobody touching it                                       |
+| 19  | State survived             | The same stream continued; the session and its failed turn are there; the session resumes |
+| 20  | A second desktop           | Two windows, one managed authority, no restart                                            |
+| 21  | No service manager         | "could not start", Retry, details: packaged, installed, no service manager answered       |
+| 22  | An incompatible authority  | "An incompatible Wyss authority is running", left as it is, nothing to press              |
+| 23  | Terminal independent       | It answered in every one of these states                                                  |
+| 24  | 960×640                    | The default size of every capture                                                         |
+| 25  | Narrow                     | 700×560: the notice above the terminal, under the collapsed sidebar                       |
+| 26  | Native glass               | `_KDE_NET_WM_BLUR_BEHIND_REGION` is set on the window, as before                          |
+
+Also there: an inference turn under a provider that proposes a command was stopped by the
+authority as an isolation violation, as it should be; a clean stop showed "not running"
+and Retry brought the authority back on the same store.
+
+The acceptance found two defects, fixed before this record. The package built into the
+repository's own tree was refused, correctly, because that tree is group-writable, and
+the message did not say that a folder others can write to is one of the reasons; it does
+now, and the package was installed to a private prefix as a user would. The other is the
+restart of a stopped authority described above; the checks that depend on it (first run,
+crash, clean exit, Retry) were repeated on the rebuilt package.
+
+**Packaging.** `npm run desktop:package` exited 0 three times. Each time the authority's
+digest was the same before and after the second build, the desktop binary contained it,
+and the package was `bin/wyss-console`, `libexec/wyss-console/wyss-control` and a
+manifest, with nothing writable by anyone but the owner.
+
+**Official validation** on the final commit, each exit 0: `format:check`, `lint`,
+`typecheck`, `npm test`, `npm run build`, `rust:fmt`, `rust:check`, `rust:test`,
+`rust:clippy`, `test:pty`, `desktop:build`, `git diff --check`,
+`git diff --cached --check`.
+
+The interface followed the visual contract the shell already has: its tokens, its status
+line and its buttons. No new direction was decided, so no design layer was run for it.
