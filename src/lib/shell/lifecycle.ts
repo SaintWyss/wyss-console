@@ -147,7 +147,7 @@ const FAILURE: Record<LifecycleFailure, string> = {
   not_packaged:
     'No Wyss authority is running. This is a development build: it does not install or start one. Start wyss-control and it is used as soon as it answers.',
   package_invalid:
-    'The authority packaged with this application is missing or is not the one it was built with. Nothing was installed. Reinstall Wyss Console.',
+    'The authority packaged with this application could not be trusted: it is missing, it is not the one this application was built with, or it is in a folder others can write to. Nothing was installed.',
   installation_unsafe:
     'The authority was not installed: the place it is installed in is not safely yours (a link, another owner, or a folder others can write to). Nothing was changed.',
   installation_mismatch:
