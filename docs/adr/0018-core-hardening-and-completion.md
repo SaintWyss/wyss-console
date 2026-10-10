@@ -494,9 +494,9 @@ binary showing the sequence above before `bind` and before every receipt.
 - The local-tools profile is not durable across an authority restart, by design.
 - Compatibility is pinned to Codex 0.159.0; the profile needs bubblewrap with overlay
   support.
-- The runtime's working directory is the repository root compiled into the binary
-  (ADRs 0010 and 0012). A binary moved from its build tree starts no runtime. Packaging
-  has to replace it.
+- The runtime's working directory was the repository root compiled into the binary
+  (ADRs 0010 and 0012). Packaging replaced it: since ADR 0025 it is a private empty
+  directory of the authority's own.
 - `sha2`, `serde` and `serde_json` are caret requirements; the lockfile and `--locked`
   pin them. No dependency was added, removed or upgraded by this sprint.
 - This review was one independent pass. An external review afterwards reported one

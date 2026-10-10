@@ -107,8 +107,8 @@ Reuse Sprint 2C discovery, OwnedProcess, JSONL reader, codec, correlation and th
 same handshake function. Production does not invoke the example probe. Discover
 only `codex` from absolute PATH entries, verify a regular executable and canonicalize
 symlinks. Run `codex --version` as a bounded separate owned observation, then directly
-`codex app-server`, without a shell. Cwd is the repository root compiled from the
-crate manifest. Inherit local environment/configuration normally; no client can
+`codex app-server`, without a shell. Cwd was the repository root compiled from the
+crate manifest; since ADR 0025 it is a private empty directory of the authority's own. Inherit local environment/configuration normally; no client can
 supply environment or choose a workspace. Wyss never reads token files, logs in,
 modifies Codex config or attempts authentication remediation.
 
@@ -198,10 +198,10 @@ does not inherit the local Codex environment and configuration described above: 
 runs in an authority-built namespace with a private Codex home and policy, and one
 validated credential capability (ADR 0016, hardened in ADR 0018). The authority still
 reads no token file in either profile: the credential is opened without read access
-and bound by descriptor. The schema is at version 7. The working directory of the
-runtime process is still the repository root compiled into the binary, so a binary
-moved away from its build tree cannot start a runtime; it fails closed. Packaging has
-to replace that before distribution (ADR 0018, residual risks).
+and bound by descriptor. The schema is at version 7. Since ADR 0025 the working
+directory of the runtime process is `runtime-cwd`, a private empty directory of the
+authority's own inside its runtime directory, and no longer the repository root
+compiled into the binary: an installed authority starts a runtime with no build tree.
 Since ADR 0021 the desktop can ask for `runtime/start`, with the default profile, as
 part of activating a session; it still launches and supervises nothing.
 Since ADR 0023 it can also ask for the local-tools profile for the workspace of a

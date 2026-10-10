@@ -391,9 +391,8 @@ Creating a prepared session with no workspace is no longer offered by itself.
   left to the turn phase, which is the one that needs it.
 - **128 attachments per runtime generation** is the core's bound. Closed sessions keep
   theirs until the runtime restarts; past it a binding or a resume answers `busy`.
-- **A runtime starts only from the build tree.** The runtime's working directory is
-  still compiled into the binary (ADR 0018, residual risks), so an authority moved away
-  from its build tree refuses to start one, and activation reports that.
+- **A runtime no longer needs the build tree.** Its working directory was compiled into
+  the binary; since ADR 0025 it is a private empty directory of the authority's own.
 - **The dialog's memory is this run's.** After a restart a folder has to be selected
   again. There is no list of recent projects.
 - GTK decides between its own chooser and a portal one. The acceptance used GTK's own.

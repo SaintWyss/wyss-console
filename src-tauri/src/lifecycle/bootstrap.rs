@@ -1,6 +1,6 @@
 //! The one bootstrap of a desktop process.
 //!
-//! It follows the authority link and acts in exactly two cases: the first time no
+//! It follows the authority link and acts in exactly two cases: when it comes up and no
 //! authority answers, and when the user asks for a retry. Acting means checking what is
 //! installed, writing what is missing, asking the service manager to start the unit, and
 //! then waiting, for a bounded time, for the link to connect. It never decides that the
@@ -92,7 +92,7 @@ impl AuthorityLink for AuthorityService {
 /// Why an attempt is made, which is what it may do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
-    /// The first time nothing answered. May install and start.
+    /// Nothing answered when the desktop came up. May install and start.
     Automatic,
     /// The user asked. May install and start, and may clear a recorded failure first.
     Retry,
@@ -371,6 +371,9 @@ impl Inner {
         let mut revision = None;
         // Whether the next absence is one to act on: the first, or one after a connection.
         let mut armed = true;
+        // An authority that answered and went away was stopped, or crashed and is the
+        // manager's to restart. Either way it is not this desktop's to start again.
+        let mut connected_once = false;
         loop {
             let (next, state) = self.link.observe(revision, WATCH);
             revision = Some(next);
@@ -381,13 +384,16 @@ impl Inner {
             match state {
                 LinkState::Connected => {
                     armed = true;
+                    connected_once = true;
                     if !attempting {
                         self.settle(state);
                     }
                 }
                 LinkState::Absent if armed && self.begin() => {
                     armed = false;
-                    let kind = if self.started_once.swap(true, Ordering::AcqRel) {
+                    // By itself it starts an authority once, and only one it never saw:
+                    // when it came up and nothing answered.
+                    let kind = if connected_once || self.started_once.swap(true, Ordering::AcqRel) {
                         Kind::Recovery
                     } else {
                         Kind::Automatic
@@ -495,11 +501,16 @@ impl AuthorityBootstrap {
     /// made; otherwise it changes nothing. It answers at once: the attempt is followed
     /// through the view.
     pub fn retry(&self) -> LifecycleView {
-        let failed = self.inner.lock().phase == Phase::Failed;
-        if failed && !self.inner.stopping() && self.inner.begin() {
-            // Shown at once, so that a second press finds nothing to retry.
-            self.inner.phase(Phase::Checking);
-            self.inner.spawn(Kind::Retry);
+        // The attempt is taken first: whether there is something to retry is then read
+        // by one caller at a time.
+        if !self.inner.stopping() && self.inner.begin() {
+            if self.inner.lock().phase == Phase::Failed {
+                // Shown at once, so that a second press finds nothing to retry.
+                self.inner.phase(Phase::Checking);
+                self.inner.spawn(Kind::Retry);
+            } else {
+                self.inner.attempting.store(false, Ordering::Release);
+            }
         }
         self.view()
     }

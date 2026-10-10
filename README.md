@@ -19,9 +19,12 @@ Tools, where Codex may propose commands and file changes in its project folder, 
 each proposal waits for an approval that is read and answered in the window
 ([ADR 0023](docs/adr/0023-local-tools-and-approvals-ui.md)). What the authority
 recorded can be read in the Events view, newest first and back to the first event
-([ADR 0024](docs/adr/0024-events-history-ui.md)). The product is not
+([ADR 0024](docs/adr/0024-events-history-ui.md)). A packaged desktop installs and starts
+its own authority: launching Wyss Console is enough
+([ADR 0025](docs/adr/0025-authority-lifecycle-bootstrap.md)). The product is not
 complete: nothing an approval decided is remembered, history cannot be searched or
-exported, and the authority runs one Codex runtime in one mode at a time. Built with Tauri 2,
+exported, there is no Settings view, and the authority runs one Codex runtime in one
+mode at a time. Built with Tauri 2,
 Rust, Svelte, TypeScript and Vite. Real local human shells run in bounded PTYs
 and render through xterm.js, with native shell input, ANSI colors and resizing. EventEnvelope contracts remain independent
 of transient terminal bytes. Architecture decisions are in [docs/adr](docs/adr).
@@ -51,14 +54,69 @@ Frontend commands: `format:check`, `lint`, `typecheck`, `test`, `build`.
 Rust commands: `rust:fmt`, `rust:check`, `rust:test`, `rust:clippy`.
 `npm run format` applies frontend/config/document formatting.
 
+## Using Wyss Console
+
+Launch Wyss Console. The application ensures its authority is available automatically:
+there is nothing to start by hand, no terminal to keep open and no `sudo`.
+
+```text
+launch  ->  an authority answers?  yes -> connected
+                                   no  -> installed where missing, started, connected
+```
+
+- **The authority is a separate process**, `wyss-control`, run by your login session's
+  service manager (`systemd --user`) and not by the window. Closing the window does not
+  stop it; opening it again finds the same one, with the same sessions and history.
+- **If it crashes it is restarted**, a bounded number of times. If it keeps ending, the
+  window says so and offers **Retry**.
+- **Stopping it is respected.** An authority that was stopped is not started again
+  behind your back: the window says it is not running, and Retry starts it.
+- **An authority that is already running is used as it is**, whoever started it, and is
+  never replaced, restarted or stopped by the window. A newer authority that came with
+  an update is installed the next time none is running; the top bar says
+  `update pending` until then.
+- **Local terminals never depend on it.** They work while it starts, and when it cannot.
+
+What is installed, once, for your account:
+
+| File                | Where                                                |
+| ------------------- | ---------------------------------------------------- |
+| The authority       | `~/.local/share/wyss-console/authority/wyss-control` |
+| Its service         | `~/.config/systemd/user/wyss-control.service`        |
+| Its state (not new) | `~/.local/state/wyss-console/`                       |
+
+Removing the first two uninstalls the authority; the state is yours and nothing removes
+it. Codex has to be in the `PATH` your session gives its services, which is where a
+desktop session puts `~/.local/bin`. Linux with a `systemd --user` session is the
+supported platform. See [ADR 0025](docs/adr/0025-authority-lifecycle-bootstrap.md).
+
 ## Production build
 
 ```sh
-npm run desktop:build
+npm run desktop:package
+```
+
+Builds the authority, pins the desktop to its SHA-256, and writes the package to
+`.artifacts/package/wyss-console-<version>-linux-<arch>/`:
+
+```text
+bin/wyss-console
+libexec/wyss-console/wyss-control
+share/wyss-console/package.json
+```
+
+Copy that directory to a place only you (or root) can write, and run `bin/wyss-console`
+from it. The desktop finds the authority beside itself and installs it; it refuses one
+whose digest is not the one it was built with, and one in a folder others can write to.
+No package format (`.deb`, AppImage, Flatpak) is produced.
+
+```sh
+npm run desktop:build    # the two binaries only, in src-tauri/target/release
 npm run desktop:run
 ```
 
-Produces `src-tauri/target/release/wyss-console`. Distribution packaging is deferred.
+A build that was not packaged manages no authority: it uses one that is already
+running, and installs and starts nothing. That is the development workflow below.
 
 ## Interactive terminal
 
@@ -138,17 +196,21 @@ available from the window and through the authority developer client:
 inference-only by default, and with authority-mediated commands and file changes
 in the isolated local-tools profile.
 Human terminal tabs remain Console-local; the read-only Codex probe above remains
-a separate developer tool. The desktop never starts the authority; when one is running
-it connects to it, follows it ([Desktop authority link](#desktop-authority-link)) and
-sends it three session intents ([Managed sessions](#managed-sessions)).
+a separate developer tool. A packaged desktop installs the authority and asks the
+user's service manager to start it ([Using Wyss Console](#using-wyss-console)); it never
+runs it as its own child. When one is running the desktop connects to it, follows it
+([Desktop authority link](#desktop-authority-link)) and sends it its intents
+([Managed sessions](#managed-sessions)).
 
-Build the independent binary and developer client:
+For development, the authority is started by hand. A development build of the desktop
+uses it and installs nothing. Build the independent binary and developer client:
 
 ```sh
 node scripts/tool.mjs cargo build --locked --manifest-path src-tauri/Cargo.toml --bin wyss-control --example control_client
 ```
 
-Start independently, with a valid private XDG runtime directory:
+Start independently, with a valid private XDG runtime directory (it exits with status 2
+when one already runs: `already_running`):
 
 ```sh
 ./src-tauri/target/debug/wyss-control

@@ -648,9 +648,9 @@ fn a_clean_account_gets_an_authority_that_outlives_the_desktop_and_survives_a_cr
     assert!(page.sessions.iter().any(|s| s.id == tools));
     assert_eq!((inode(&layout.binary()), inode(&layout.unit())), installed);
 
-    // Stopped cleanly, by whoever may: that is a decision and it is respected. It is not
-    // restarted by the manager, and not by the desktop.
-    assert!(manager.systemctl(&["stop", UNIT_NAME]).0);
+    // Ended cleanly, by whoever may ask it to: that is a decision and it is respected.
+    // It is not restarted by the manager, and not by the desktop.
+    kill(Pid::from_raw(restarted as i32), Signal::SIGTERM).unwrap();
     let view = desktop.failed();
     assert_eq!((view.failure, view.retry), (Some(Failure::Stopped), true));
     thread::sleep(Duration::from_millis(1500));

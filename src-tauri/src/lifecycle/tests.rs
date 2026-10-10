@@ -618,6 +618,25 @@ fn a_place_that_is_not_safely_the_users_is_refused_and_left_as_it_is() {
         unsafe_path
     );
 
+    // A home whose parent others can write: nothing is created below it, not even the
+    // directory that would have been refused next.
+    let account = Account::new();
+    let open = account.root.join("open");
+    fs::create_dir(&open).unwrap();
+    fs::set_permissions(&open, fs::Permissions::from_mode(0o777)).unwrap();
+    let layout = Layout::new(
+        open.join("share"),
+        open.join("config"),
+        account.root.join("run"),
+    )
+    .unwrap();
+    assert_eq!(
+        install::ensure(&layout, &Payload::of(NEW.to_vec())),
+        unsafe_path
+    );
+    assert_eq!(fs::read_dir(&open).unwrap().count(), 0);
+    fs::set_permissions(&open, fs::Permissions::from_mode(0o700)).unwrap();
+
     // A unit of that name this product did not write is not this product's to replace.
     let (_account, layout) = fresh();
     let theirs = "[Service]\nExecStart=/usr/bin/something-else\n";
@@ -992,6 +1011,22 @@ impl World {
             let view = self
                 .bootstrap
                 .wait_changed(after, Duration::from_millis(200));
+            // Whatever is going on, a view never contradicts itself.
+            assert_eq!(
+                view.failure.is_some(),
+                view.phase == Phase::Failed,
+                "{view:?}"
+            );
+            assert_eq!(view.retry, view.phase == Phase::Failed, "{view:?}");
+            assert!(
+                view.origin.is_none() || matches!(view.phase, Phase::Ready | Phase::Incompatible),
+                "{view:?}"
+            );
+            assert!(
+                !view.update_pending
+                    || (view.phase == Phase::Ready && view.origin == Some(Origin::Managed)),
+                "{view:?}"
+            );
             if phases.last() != Some(&view.phase) {
                 phases.push(view.phase);
             }
@@ -1214,6 +1249,14 @@ fn a_start_that_does_not_end_in_a_connection_ends_within_its_bound() {
     );
     world.quiet();
     assert_eq!(world.manager.count("start"), 1);
+    // Retry is the user asking, and still nothing is done to an authority that runs:
+    // its files are not written again and it is not started over.
+    let installed = inode(&world.account.layout().binary());
+    world.bootstrap.retry();
+    world.until(|v| v.phase == Phase::Connecting);
+    assert_eq!(world.failed().failure, Some(Failure::SocketUnavailable));
+    assert_eq!(world.manager.asked(), ["reload", "start"]);
+    assert_eq!(inode(&world.account.layout().binary()), installed);
     // The place of the socket is not safely the user's.
     let world = World::packaged(LinkState::Unsafe, Ok(not_installed()));
     assert_eq!(world.failed().failure, Some(Failure::SocketUnsafe));
@@ -1228,13 +1271,17 @@ fn it_starts_the_authority_by_itself_once_and_after_that_only_retry_does() {
         .on_start(|status| *status = Ok(unit(ActiveState::Failed, UnitResult::Other)));
     assert_eq!(world.failed().failure, Some(Failure::StartupFailed));
     assert_eq!(world.manager.count("start"), 1);
-    // The link keeps saying nothing answers. That is not a reason to start it again.
+    // The link keeps saying nothing answers. That is not a reason to start it again, to
+    // look at it again, or to say anything else about it.
+    let (looks, said) = (world.manager.count("status"), world.bootstrap.view());
     for _ in 0..5 {
         world.link.set(LinkState::Absent);
     }
     world.quiet();
     assert_eq!(world.manager.count("start"), 1);
-    assert_eq!(world.bootstrap.view().phase, Phase::Failed);
+    assert_eq!(world.manager.count("status"), looks);
+    assert_eq!(world.bootstrap.view(), said);
+    assert_eq!(said.failure, Some(Failure::StartupFailed));
 
     // Retry: one attempt, however often it is pressed. A recorded failure is cleared
     // first, because the user asked.
@@ -1244,7 +1291,9 @@ fn it_starts_the_authority_by_itself_once_and_after_that_only_retry_does() {
     for _ in 0..4 {
         world.bootstrap.retry();
     }
-    world.until(|v| v.phase == Phase::Connecting);
+    let (view, _) = world.until(|v| v.phase == Phase::Connecting);
+    // What failed before is not said of an attempt that is being made.
+    assert_eq!((view.failure, view.retry), (None, false));
     assert_eq!(
         world.manager.asked(),
         ["reload", "start", "reload", "reset-failed", "start"]
@@ -1303,6 +1352,59 @@ fn it_starts_the_authority_by_itself_once_and_after_that_only_retry_does() {
     world.quiet();
     assert_eq!(world.manager.count("start"), 2);
     assert_eq!(world.manager.count("reset-failed"), 1);
+}
+
+#[test]
+fn an_authority_that_answered_and_went_away_is_never_started_by_the_desktop_itself() {
+    // It was running when the desktop came up. Somebody stops it: the manager says it
+    // is not running, and that is respected. The desktop has not used a start of its own
+    // and still does not start it.
+    let world = World::packaged(
+        LinkState::Connected,
+        Ok(unit(ActiveState::Active, UnitResult::Success)),
+    );
+    world.ready();
+    world
+        .manager
+        .set(Ok(unit(ActiveState::Inactive, UnitResult::Success)));
+    world.link.set(LinkState::Absent);
+    let view = world.failed();
+    assert_eq!((view.failure, view.retry), (Some(Failure::Stopped), true));
+    world.quiet();
+    assert_eq!(world.manager.asked(), Vec::<&str>::new());
+    assert!(!world.installed());
+    // The user asks: now it is installed and started.
+    world
+        .manager
+        .on_start(|status| *status = Ok(unit(ActiveState::Active, UnitResult::Success)));
+    world.bootstrap.retry();
+    world.until(|v| v.phase == Phase::Connecting);
+    assert_eq!(world.manager.asked(), ["reload", "start"]);
+
+    // One attempt at a time, whatever the link does meanwhile. A start that has not
+    // returned yet is the attempt; the link flapping under it starts no second one.
+    let world = World::packaged(LinkState::Connecting, Ok(not_installed()));
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let held = Mutex::new(held);
+    world.manager.on_start(move |status| {
+        let _ = held.lock().unwrap().recv_timeout(Duration::from_secs(5));
+        *status = Ok(unit(ActiveState::Active, UnitResult::Success));
+    });
+    world.link.set(LinkState::Absent);
+    world.until(|v| v.phase == Phase::Starting);
+    let looks = world.manager.count("status");
+    // The follower sees each of these: it is not the link skipping one that saves it.
+    world.link.set(LinkState::Connected);
+    thread::sleep(Duration::from_millis(60));
+    world.link.set(LinkState::Absent);
+    world.quiet();
+    assert_eq!(world.bootstrap.view().phase, Phase::Starting);
+    assert_eq!(world.manager.count("status"), looks);
+    assert_eq!(world.manager.asked(), ["reload", "start"]);
+    release.send(()).unwrap();
+    world.link.set(LinkState::Connected);
+    world.ready();
+    assert_eq!(world.manager.asked(), ["reload", "start"]);
 }
 
 #[test]

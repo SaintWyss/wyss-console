@@ -16,8 +16,8 @@
 //! - **`AuthorityService`** (ADR 0019) is still the one observer of the connection. Ready
 //!   means it is connected, never that a process or a unit exists;
 //! - **this module** owns two files, the managed binary and the unit, and one request:
-//!   start. It asks for that by itself at most once in a desktop's lifetime; after that
-//!   only the user's Retry asks again.
+//!   start. It asks for that by itself at most once, when the desktop comes up and no
+//!   authority answers; after that only the user's Retry asks.
 //!
 //! An authority that already answers is used as it is, whoever started it. One that runs
 //! is never replaced: a newer packaged authority is installed the next time none runs.
