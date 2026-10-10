@@ -763,3 +763,47 @@ it('takes a runtime for the pinned one only if it differs in nothing but its dig
   ).toBe(false);
   expect(runtimeIsPinned(Buffer.alloc(4096, 8), pinned)).toBe(false);
 });
+
+it('refuses to package with a tool table that names a floating tool, before it fetches anything', () => {
+  const repo = join(scratch, 'repo-floating');
+  mkdirSync(join(repo, 'scripts'), { recursive: true });
+  for (const file of readdirSync(join(root, 'scripts')))
+    cpSync(join(root, 'scripts', file), join(repo, 'scripts', file));
+  // The table as it was before it was pinned: the plugin from the floating release.
+  const table = JSON.parse(
+    readFileSync(join(repo, 'scripts/appimage-tools.json'), 'utf8'),
+  );
+  table.tools[2].version = 'continuous';
+  table.tools[2].source =
+    'https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage';
+  writeFileSync(
+    join(repo, 'scripts/appimage-tools.json'),
+    JSON.stringify(table),
+  );
+  const git = (...args: string[]) =>
+    spawnSync(
+      'git',
+      ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args],
+      {
+        cwd: repo,
+        encoding: 'utf8',
+      },
+    );
+  git('init', '-q');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'scripts');
+  const result = spawnSync(
+    process.execPath,
+    [join(repo, 'scripts/package.mjs'), '--release'],
+    {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: scratch, ...offlineEnvironment({}) },
+    },
+  );
+  expect(result.status).toBe(1);
+  expect(result.stderr).toMatch(/names whatever is newest|floating release/);
+  expect(existsSync(join(repo, '.cache'))).toBe(false);
+  expect(existsSync(join(repo, 'src-tauri'))).toBe(false);
+  expect(existsSync(join(repo, '.artifacts'))).toBe(false);
+});

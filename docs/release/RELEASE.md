@@ -109,65 +109,65 @@ wyss-control`, or after Retry following a crash loop), the authority carried by 
   installation is replaced only on its next start.
 - No `systemd --user`, no managed authority: the window says so and starts nothing.
 - AppImage terminals inherit the library path its launcher sets. The AppImage depends on the
-  GitHub-hosted tooling Tauri fetches when it is built (see ADR 0026).
+  host's libraries and on the pinned, GitHub-hosted build tools (see ADR 0026).
 - Unsigned. Verify the checksum against the place you trust to have published it.
 
-## This candidate's build record
+## Where the exact artifacts are described
 
-Built in the cloud (Ubuntu 24.04, x86_64) from source revision **`818657b38fce`**, the commit
-that held all of the code of this release. Commits after it change documentation only; the
-artifacts were not rebuilt for them, so the build revision they report in About is the one
-above. `npm run release:package` made them and `npm run release:verify` opened them again:
-**60 checks passed, 0 failed**.
+The artifacts are **not** described in this repository by hash or by revision, because a
+commit that said so would move the revision it describes. Git holds the process; each build
+holds its own record, untracked, in `.artifacts/release/`:
 
-| Artifact                            | Size       | SHA-256                                                            |
-| ----------------------------------- | ---------- | ------------------------------------------------------------------ |
-| `wyss-console_0.2.0_amd64.deb`      | 5,682,292  | `2004bbe63c7a9314e938514a00bd19aa668da18b32c2d8a13684a15b9dedaba2` |
-| `wyss-console_0.2.0_amd64.AppImage` | 86,063,608 | `3888e7533f201ded5fff87f71501cbd49f210bbfcd36a293e83a1c4a7484fbb3` |
+| File                                | What it says                                                                                                                                                                                             |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wyss-console_0.2.0_amd64.deb`      | the package                                                                                                                                                                                              |
+| `wyss-console_0.2.0_amd64.AppImage` | the AppImage                                                                                                                                                                                             |
+| `SHA256SUMS`                        | `sha256sum` format; `sha256sum -c SHA256SUMS`                                                                                                                                                            |
+| `release-manifest.json`             | version, the full source commit and its short form, authority digest, each artifact's size and digest, `signing: "unsigned"`, the toolchain, the pinned AppImage build tools as they ran, the host tools |
 
-The authority both carry (and the desktop is pinned to):
-`7decca439c325aa652479159d52f1aabf9a7efe1be78794bdde9130b08a75537`.
+The rule that makes them the artifacts of this branch: they are built from a clean tree at
+the commit that was pushed, nothing tracked changes afterwards, and `npm run release:verify`
+refuses them if the manifest's commit is not the commit of the checkout it runs in. About
+(Settings) shows the short revision they were compiled with; it is the start of the
+manifest's commit. If they are rebuilt, they are a new candidate with new digests.
 
-**Checksummed, not signed.** `SHA256SUMS` and `release-manifest.json` are produced by the
-build and are not committed: the artifacts are rebuilt from a commit, not stored in it.
-They are in `.artifacts/release/` of the machine that built them.
+**Checksummed, not signed.** There is no release signing key or process.
 
-Toolchain: rustc 1.97.0, cargo 1.97.0 (`--locked`, `Cargo.lock` as committed), Node
-v22.22.0, npm 10.9.4 (`npm ci`, `package-lock.json` as committed), `@tauri-apps/cli` 2.12.1,
-target `x86_64-unknown-linux-gnu`. (`package.json` asks for Node 26 and npm 12; this
-environment had 22 and 10, and every command ran on them. The engines are advisory.)
+## How they are built
 
-What was checked in the artifacts themselves (see ADR 0026): the manifest, `SHA256SUMS` and
-both files agree; the desktop and the authority are where the desktop looks, executable, one
-of each; the authority is the pinned one and the desktop carries its digest; no credential,
-fixture, source, database or local state by name or content (the checkout's 581 tracked
-files included); neither program names the build machine; nothing writable by group or
-others; the `.deb` has no maintainer script, is owned by root, and its menu entry
-validates.
+`npm run release:package`, on Linux with `dpkg-deb`, `mksquashfs` and network access to
+GitHub's release downloads for the first fetch of the pinned tools:
 
-What was observed running: the packaged desktop (the `.deb`'s `usr/bin/wyss-console`, and the
-AppImage's entry point after extraction) was started under Xvfb with an empty home and stayed
-up. With no user service manager in the build container its bootstrap could not start an
-authority, which is the case the product says it handles; nothing was installed. That is not
-an observation of a real desktop session, `systemd --user` or Codex: those are in
-[`LOCAL_ACCEPTANCE.md`](LOCAL_ACCEPTANCE.md).
+1. refuses a working tree that is not exactly the commit;
+2. builds the authority, takes its SHA-256, builds the desktop pinned to it;
+3. makes every AppImage build tool exactly the one pinned in `scripts/appimage-tools.json`
+   (`AppRun`, `linuxdeploy`, `linuxdeploy-plugin-appimage` `1-alpha-20250213-1`, the AppImage
+   runtime `20251108`), each from an immutable release address and against a committed
+   SHA-256, hashed again on every use, then bundles with no network;
+4. removes the bundler's second copy of the authority, writes both packages again, writes
+   `SHA256SUMS` and `release-manifest.json`;
+5. opens what it made (`npm run release:verify`).
 
-### Reviewed findings of the content scan
+Toolchain of the cloud build: Rust 1.97.0, Node v22.22.0, npm 10.9.4 (`package.json` asks for
+Node 26 and npm 12; the engines are advisory and everything ran on the older ones),
+`@tauri-apps/cli` 2.12.1, target `x86_64-unknown-linux-gnu`. The manifest records the exact
+versions of the build that made it.
 
-- An archived planning document of an earlier system (`docs origins/.planning/phases/03-pipeline-de-ingesta/03-PATTERNS.md`,
-  line 573) contains a test that plants a made-up `sk-ant-` string in a file to check it is
-  not indexed. It is 43 characters where a real key has about a hundred, and it sits in a
-  test named for planting a secret. It was judged a canary and not a credential, and is
-  allowed by path and kind so that any second finding stops the release. **Whoever owns that
-  document may want to confirm it and redact it.**
-- The AppImage carries the build host's `libgnutls`, which compiles GnuTLS's own published
-  self-test keys into the library. Allowed by library and kind.
+### What the content scan allows
+
+Nothing by name or path. The archived planning document that planted a made-up key in a
+test was redacted (`sk-ant-<FAKE_TEST_SECRET>`); a credential in that file now fails
+`npm run release:verify`. The only exception is content-bound: the private-key blocks that
+GnuTLS compiles into the `libgnutls` the AppImage carries, each listed by digest in
+`scripts/reviewed-library-keys.json`.
 
 ### What the cloud could not run
 
-The Rust suite on this build host has **40 failing tests, the same 40 that fail on a clean
-`origin/main`** (checked by running both): 5 isolation tests and 28 process tests (told apart by their errors: an unknown `bwrap` option, or a Local Tools runtime that failed to start) need
-`bubblewrap` 0.11 or newer (the Local Tools sandbox uses `--overlay-src`; this host has
-0.9.0 and the code requires `/usr/bin/bwrap`), and 7 lifecycle tests need a real
-`systemd --user` manager. They have to be run on a machine that has both. 569 tests pass
-(42 more than on `origin/main`: the new ones).
+The Rust suite on the cloud build host has the same failing tests as a clean `origin/main`:
+tests that need `bubblewrap` 0.11 or newer (the Local Tools sandbox uses `--overlay-src`; the
+host has 0.9.0 and the code requires `/usr/bin/bwrap`) and tests that need a real
+`systemd --user` manager. They have to be run on a machine that has both. The packaged
+desktop was started under Xvfb from the extracted `.deb` and AppImage with an isolated home
+and stayed up; that is not an observation of a real desktop session, `systemd --user` or
+Codex: those are in [`LOCAL_ACCEPTANCE.md`](LOCAL_ACCEPTANCE.md), all still
+`PENDING_LOCAL_ACCEPTANCE`.

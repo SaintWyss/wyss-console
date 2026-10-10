@@ -190,7 +190,7 @@ bundler as a `.deb` and an AppImage. Three things are done to what the bundler m
 1. **The bundler's second copy of the authority is removed.** Tauri puts every binary of the
    crate in `usr/bin`, which would leave an authority on `PATH` that no build pinned and
    nothing installs. The packages are written again (`dpkg-deb --root-owner-group -Zxz`;
-   `mksquashfs -root-owned`, zstd, with the bundler's own runtime), with the commit time
+   `mksquashfs -root-owned`, zstd, with the pinned runtime below), with the commit time
    as the time of every file.
 2. **The menu entry** is named `wyss-console.desktop` in the `.deb`.
 3. The desktop's `bundle.linux.deb.files` / `appimage.files` place the authority.
@@ -202,6 +202,65 @@ Layout, the same below every prefix:
 <prefix>/libexec/wyss-console/wyss-control       .deb:              prefix = /usr
                                                  AppImage:          prefix = the mounted image's usr
 ```
+
+### The AppImage build toolchain is pinned
+
+Tauri's AppImage bundler runs executables it did not build, and out of the box it fetches
+them when it runs. Found when this was closed: `AppRun` and `linuxdeploy` from release assets
+of `tauri-apps/binary-releases`, the AppImage plugin from the **floating `continuous`**
+release of `linuxdeploy-plugin-appimage`, and, one level down, `appimagetool` inside that
+plugin fetching the AppImage **runtime** from the floating `continuous` release of
+`AppImage/type2-runtime`. The runtime is the first thing an AppImage executes, and the
+`continuous` one changed between two builds made a day apart. A verifier of the output
+cannot make up for running an unpinned build tool, so the tools themselves are pinned.
+
+`scripts/appimage-tools.json` (committed) lists every such executable:
+
+| Tool                          | Release (immutable tag) | Notes                                                                           |
+| ----------------------------- | ----------------------- | ------------------------------------------------------------------------------- |
+| `AppRun`                      | `apprun-old`            | Tauri's `tauri-apps/binary-releases`                                            |
+| `linuxdeploy`                 | `linuxdeploy-07333c6`   | The release Tauri 2.12 expects; run unchanged but for the one byte change below |
+| `linuxdeploy-plugin-appimage` | `1-alpha-20250213-1`    | A tagged release; it contains `appimagetool`                                    |
+| `type2-runtime`               | `20251108`              | Handed to `appimagetool` as `LDAI_RUNTIME_FILE`; the image has to begin with it |
+
+and, for each: one fixed `https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>`
+address, the SHA-256 of what is downloaded, the SHA-256 of what runs, and a size bound. The
+two shell plugins Tauri writes itself (`gtk`, `gstreamer`) are pinned by digest too, as
+what `@tauri-apps/cli` 2.12.1 produces. The expected digests are in the repository, not
+fetched; a table that names `continuous`, `latest`, a branch, plain http, another host, a
+query, a missing or malformed digest or an unbounded size is refused before anything runs,
+and a test holds the committed table to that.
+
+What `release:package` does with them:
+
+```text
+tool directory of the bundler (private, 0700)
+  every entry that is not a pinned download is removed (the scripts Tauri writes, strangers)
+  each pinned tool: lstat (a link or directory is removed, never followed) -> hash what is there
+      exact pinned digest? use it   else remove it and fetch
+  fetch: /usr/bin/curl, https only, redirects only to GitHub's release hosts, bounded size and
+      time, to a name nothing else uses; no second address
+  verify the SHA-256 of what arrived -> apply the one change Tauri would make to linuxdeploy
+      (zero the AppImage magic bytes, so it runs without FUSE) -> verify the SHA-256 of what
+      will run -> written executable to its own name, flushed, renamed into place -> verified again
+the bundler runs with every proxy variable unreachable and Cargo offline
+  it prints a download? the release stops.   a tool differs afterwards? the release stops
+  every pinned tool, and the two scripts it wrote, are hashed again against the table
+the image is checked to begin with the pinned runtime
+```
+
+A cache is therefore only a way to avoid downloading: it is hashed on every use, and what
+fails the hash is replaced or the build stops. Applying the byte change to linuxdeploy
+ourselves, on a file whose digest is pinned, means the bundler's own in-place change leaves
+the file as it is, so the file that is hashed before is the file that is run. The runtime:
+`appimagetool` writes the MD5 of the image it built into one 16-byte field of it. The image
+is written again here, so the pinned runtime is used byte for byte, and the bundler's copy
+must differ from it in that one field and nowhere else.
+
+Not pinned, and recorded in the manifest instead: the build host's own `dpkg-deb`,
+`mksquashfs`, `patchelf` and `strip` (path, version line, SHA-256), which come from the
+distribution's packages, and the shared libraries the AppImage carries from the build host.
+They are not downloaded; a build on another host will say so in its manifest.
 
 ### Provenance is unchanged
 
@@ -236,10 +295,27 @@ that rule looks (`tests/release.test.ts` reads both).
   sources, lock files, acceptance state), no credential-shaped content in any file,
   binaries included, neither program names the checkout or the build machine, nothing
   writable by group or others or set-id, no link leaving the package;
-- with `--repo`: no credential file is tracked and no tracked file holds a credential-shaped
-  string, historical documents included.
+- the manifest names the commit the source is at (`git rev-parse HEAD`), the short revision
+  is its start, the desktop was compiled with that revision, and the tree was clean;
+- every build tool in the manifest is the pinned one, by version, source and digest, as it
+  ran; the table itself is pinned; the bundler ran with no network; the AppImage begins with
+  the pinned runtime;
+- with `--repo` (or `--repo-only`): no credential file is tracked and no tracked file holds a
+  credential-shaped string, historical documents included.
 
 Findings name a file and a kind, never the bytes. A probable live credential stops the
+release.
+
+**No exception stands on a path and a kind.** An earlier version excused one archived
+planning document because it plants a made-up `sk-ant-` string in a test that checks a
+secret is not indexed. That would also have excused a real key added to the same file. The
+string was instead redacted (`sk-ant-<FAKE_TEST_SECRET>`, nothing else in that document
+touched) and the exception removed; a test puts a credential of each of five providers in
+that file and requires the scan to fail. The one remaining exception is bound to content:
+GnuTLS compiles its own published self-test keys into the `libgnutls` the AppImage
+carries, and a private-key finding in that library is dropped only if every block in it,
+from its BEGIN line to its END line, has a SHA-256 listed in
+`scripts/reviewed-library-keys.json`. An unlisted block, or one that does not end, stops the
 release.
 
 ### Checksums and signing
@@ -249,6 +325,25 @@ release.
 generated, and the configuration carries no signing or updater setting (a test fails if it
 does). A checksum next to the file proves a download is the one that was published only as
 far as the place it was published is trusted.
+
+### The artifacts are of the final commit
+
+Git describes the process; the artifact manifest describes the binary. The order is fixed:
+
+```text
+all source and documentation committed -> tree clean -> pushed
+  -> release:package from that exact HEAD -> release:verify -> nothing tracked changes afterwards
+```
+
+`release:package` refuses a tree with any uncommitted or untracked change before it fetches
+or builds anything, compiles `WYSS_BUILD_REVISION` (shown in About) from `HEAD`, and fails if
+`HEAD` or the tree moved while it ran. It writes, untracked, `SHA256SUMS` and
+`release-manifest.json`: the version, the full commit and its short form, the authority
+digest, each artifact's name, size and digest, `signing: unsigned`, the toolchain, the pinned
+build tools as they ran, and the host tools. `release:verify` requires the manifest's
+commit to be the commit of the checkout it runs in, so an artifact from an earlier commit
+is refused, including after a documentation-only commit. For that reason no tracked
+document records an artifact's hash or revision: a commit that did would move `HEAD`.
 
 ### Upgrade, uninstall, data
 
@@ -300,9 +395,13 @@ nothing new.
   Ubuntu 24.04 and needs a system at least that recent. The `.deb` needs the web view
   (`libwebkit2gtk-4.1`) and `systemd`; `bubblewrap` is recommended because Local Tools
   needs it. Codex is not packaged.
-- **Build-time downloads**: the AppImage bundler fetches `AppRun`, `linuxdeploy` and a
-  `continuous` (unpinned) appimage plugin from GitHub when it runs. Reproducing it
-  exactly depends on those; the verifier checks what came out, not where it came from.
+- **The pinned tools are GitHub release assets** and are trusted as far as the digest that
+  was committed for them: it was computed from the file at the time of pinning, and says
+  nothing about how that file was made. A tool that disappears from GitHub stops the
+  build until it is provided another way.
+- **Host tools and libraries are the distribution's**: recorded in the manifest, not
+  pinned. A `.deb` is built by the host's `dpkg-deb`, an AppImage carries the host's
+  libraries.
 - **The desktop differs per format**: Tauri patches the executable with the bundle type,
   so the two desktops have different digests. The authority is the same file in both.
 - **An AppImage's terminals** inherit the environment its launcher sets (library paths).

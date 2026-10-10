@@ -145,7 +145,10 @@ share/wyss-console/package.json
 prefix exactly as above (`usr/bin`, `usr/libexec/wyss-console`), so the desktop finds its
 authority by the same rule everywhere: from its own real executable, never from `PATH`,
 and only if its SHA-256 is the pinned one. It needs a clean committed tree, `dpkg-deb`,
-`mksquashfs` and network access to GitHub for the AppImage tooling. See
+`mksquashfs`, and network access to GitHub's release downloads the first time, to fetch
+the AppImage build tools pinned in `scripts/appimage-tools.json` (each checked against a
+committed SHA-256 before it runs; the bundler then runs with no network). The artifacts are
+of the commit they were built from, and say so in their untracked manifest. See
 [ADR 0026](docs/adr/0026-settings-and-release-closure.md).
 
 ```sh
