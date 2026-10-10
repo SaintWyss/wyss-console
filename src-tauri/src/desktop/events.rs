@@ -158,4 +158,26 @@ mod tests {
                 .is_err()
         );
     }
+
+    #[test]
+    fn history_reads_are_admitted_up_to_a_bound_and_refused_beyond_it() {
+        // No runtime directory: nothing can be reached, so a read that is admitted
+        // answers that at once.
+        let service = EventService::new(crate::sessions::SessionService::new(None));
+        let read = || {
+            tauri::async_runtime::block_on(blocking(service.clone(), |s| s.latest()))
+                .map(|_| ())
+                .map_err(|error| (error.code, error.retry))
+        };
+        assert_eq!(read(), Err((SessionFailure::Unavailable, true)));
+        // Every place taken: the next read is refused before anything is asked.
+        let held: Vec<_> = (0..MAX_READS).map(|_| Permit(&READS)).collect();
+        READS.fetch_add(MAX_READS, Ordering::AcqRel);
+        assert_eq!(read(), Err((SessionFailure::Busy, true)));
+        assert_eq!(READS.load(Ordering::Acquire), MAX_READS);
+        drop(held);
+        assert_eq!(READS.load(Ordering::Acquire), 0);
+        assert_eq!(read(), Err((SessionFailure::Unavailable, true)));
+        assert_eq!(READS.load(Ordering::Acquire), 0);
+    }
 }
