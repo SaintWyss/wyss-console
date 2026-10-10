@@ -168,8 +168,8 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     await import('../src-tauri/capabilities/main.json');
   // The authority is reached through one read of the desktop's own projection, and
   // managed sessions through one read and six intents, managed turns through two reads
-  // and two intents, and their approvals through two reads and two decisions. Nothing
-  // takes a method name.
+  // and two intents, their approvals through two reads and two decisions, and the
+  // authority's durable history through two reads. Nothing takes a method name.
   // A workspace is chosen through one native dialog: the window is granted no
   // filesystem, shell, process, socket, dialog or event permission of the framework.
   expect(capability.permissions).toEqual([
@@ -191,6 +191,8 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-managed-approval-read',
     'allow-managed-approval-approve',
     'allow-managed-approval-deny',
+    'allow-managed-events',
+    'allow-managed-events-older',
     'allow-create-terminal',
     'allow-terminal-write',
     'allow-terminal-read-output',
@@ -213,9 +215,14 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-managed-approval-approve',
     'allow-managed-approval-deny',
   ]);
+  // History is read by exactly two commands. Nothing reads the audit as the authority
+  // stores it, watches it, exports it, or performs again what an event describes.
+  expect(
+    capability.permissions.filter((p: string) => /event|audit|histor/.test(p)),
+  ).toEqual(['allow-managed-events', 'allow-managed-events-older']);
   for (const permission of capability.permissions)
     expect(permission).not.toMatch(
-      /always|remember|trust|rule|policy|allowlist|respond|decision|lease|scope|profile|runtime|control|request|invoke|exec|shell|spawn|process|socket|fs/,
+      /always|remember|trust|rule|policy|allowlist|respond|decision|lease|scope|profile|runtime|control|request|invoke|exec|shell|spawn|process|socket|fs|audit|watch|replay|export|save|payload|envelope/,
     );
   const directives = Object.fromEntries(
     config.app.security.csp

@@ -44,9 +44,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   {
     id: 'events',
     label: 'Events',
-    subtitle: 'Coming soon',
+    subtitle: 'What the authority recorded',
     icon: 'M3 12h4l2.5-6 4 12 2.5-6H21',
-    available: false,
+    available: true,
   },
   {
     id: 'settings',

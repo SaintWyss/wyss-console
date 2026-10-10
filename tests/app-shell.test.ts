@@ -145,6 +145,7 @@ it('lists every planned view and enables the ones that exist', () => {
     'sessions',
     'agents',
     'approvals',
+    'events',
   ]);
 });
 
@@ -157,9 +158,9 @@ it('renders the shell with brand, navigation placeholders and Console selected',
   );
   expect(nav).toHaveLength(6);
   expect(nav[0].getAttribute('aria-current')).toBe('page');
-  expect(nav.slice(0, 4).every((b) => !b.disabled)).toBe(true);
-  // Events and Settings do not exist yet.
-  expect(nav.slice(4).every((b) => b.disabled)).toBe(true);
+  expect(nav.slice(0, 5).every((b) => !b.disabled)).toBe(true);
+  // Settings does not exist yet.
+  expect(nav.slice(5).every((b) => b.disabled)).toBe(true);
   // Nothing waits for a decision: the Approvals item carries no count.
   expect(document.querySelector('.nav-tag.waiting')).toBeNull();
   expect(document.querySelector('.context-title')?.textContent).toBe('Console');

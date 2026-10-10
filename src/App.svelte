@@ -1,11 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { ManagedSessionId } from './lib/contracts/identities';
   import type { SessionSummary } from './lib/contracts/sessions';
   import { getAppInfo } from './lib/desktop/client';
   import AgentView from './lib/features/agent/AgentView.svelte';
   import { AgentController } from './lib/features/agent/controller';
   import ApprovalsView from './lib/features/approvals/ApprovalsView.svelte';
   import { ApprovalsController } from './lib/features/approvals/controller';
+  import { EventsController } from './lib/features/events/controller';
+  import EventsView from './lib/features/events/EventsView.svelte';
   import { SessionsController } from './lib/features/sessions/controller';
   import { sessionLabel } from './lib/features/sessions/present';
   import SessionsView from './lib/features/sessions/SessionsView.svelte';
@@ -44,6 +47,11 @@
     approvals = next;
   });
   let approvals = $state(approvalsController.state());
+  // History is read only while its view is shown, and has no watcher of its own.
+  const eventsController = new EventsController((next) => {
+    events = next;
+  });
+  let events = $state(eventsController.state());
   const current = $derived(NAV_ITEMS.find((item) => item.id === activeView));
 
   // Sessions are read only while their view is shown.
@@ -61,6 +69,9 @@
   $effect(() => {
     approvalsController.setWatching(agent.following);
   });
+  $effect(() => {
+    eventsController.setVisible(activeView === 'events');
+  });
 
   onMount(() => {
     let active = true;
@@ -77,6 +88,7 @@
       sessionsController.observe(observation);
       agentController.observe(observation);
       approvalsController.observe(observation);
+      eventsController.observe(observation);
     });
     return () => {
       active = false;
@@ -84,6 +96,7 @@
       sessionsController.dispose();
       agentController.dispose();
       approvalsController.dispose();
+      eventsController.dispose();
     };
   });
 
@@ -91,6 +104,25 @@
   function openAgent(session: SessionSummary) {
     if (agentController.open(session.id, sessionLabel(session)))
       activeView = 'agents';
+  }
+
+  // From a record to where the thing it names lives. Nothing is taken from the record:
+  // each view reads what the session is now from the authority.
+  function showSession(session: ManagedSessionId) {
+    sessionsController.select(session);
+    activeView = 'sessions';
+  }
+  function showAgent(session: ManagedSessionId) {
+    const known = sessions.page?.sessions.find((s) => s.id === session);
+    const label = known
+      ? sessionLabel(known)
+      : `Session ${session.slice(0, 8)}`;
+    if (agentController.open(session, label)) activeView = 'agents';
+  }
+  /** The loaded history of one session, from its details in Sessions. */
+  function showEvents(session: SessionSummary) {
+    eventsController.setScope({ session: session.id, turn: null });
+    activeView = 'events';
   }
 
   function observeWorkspace(state: WorkspaceState) {
@@ -128,6 +160,7 @@
       controller={sessionsController}
       {authority}
       onagent={openAgent}
+      onevents={showEvents}
     />
     <AgentView
       visible={activeView === 'agents'}
@@ -143,6 +176,15 @@
       {approvals}
       controller={approvalsController}
       {authority}
+    />
+    <EventsView
+      visible={activeView === 'events'}
+      {events}
+      controller={eventsController}
+      {authority}
+      onsession={showSession}
+      onagent={showAgent}
+      onapprovals={() => (activeView = 'approvals')}
     />
   </main>
 </div>

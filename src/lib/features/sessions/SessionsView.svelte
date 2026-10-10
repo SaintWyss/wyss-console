@@ -32,6 +32,7 @@
     authority,
     visible,
     onagent,
+    onevents,
   }: {
     sessions: SessionsState;
     controller: SessionsController;
@@ -40,6 +41,8 @@
     visible: boolean;
     /** Opens a session in the Agent view. Offered for a session with a workspace. */
     onagent?: (session: SessionSummary) => void;
+    /** Shows the loaded history of a session in Events. */
+    onevents?: (session: SessionSummary) => void;
   } = $props();
 
   const connected = $derived(sessions.link === 'connected');
@@ -449,6 +452,13 @@
                   class="action"
                   class:primary={selected.binding === 'bound_attached'}
                   onclick={() => onagent(selected)}>Open agent</button
+                >
+              {/if}
+              {#if onevents}
+                <button
+                  type="button"
+                  class="action"
+                  onclick={() => onevents(selected)}>Events</button
                 >
               {/if}
               {#if selected.activatable}
