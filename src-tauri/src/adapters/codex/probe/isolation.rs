@@ -1,8 +1,9 @@
 //! Unprivileged namespace of the local-tools generation. The argv is authority-fixed and
 //! built without a shell: private managed requirements, a private Codex home, the user's
 //! Codex state hidden except for one credential file, the authority's own control plane
-//! hidden, and every project policy layer of the workspace masked. Nothing here reads,
-//! copies or logs credential content.
+//! hidden, every project policy layer of the workspace masked, and the process started in
+//! an empty directory that exists only in the namespace. Nothing here reads, copies or
+//! logs credential content.
 use super::{ProbeError, ProbeResult};
 use crate::adapters::codex::safety;
 use std::{
@@ -318,10 +319,16 @@ impl Isolation {
     }
     /// The complete launch of one local-tools process. The supervisor refuses to work once
     /// the live set of policy layers differs from the masked one.
+    ///
+    /// `cwd` is where the process inside the namespace starts: the authority's own
+    /// directory for that. The launcher is told to go there after it has built the
+    /// namespace; where the launcher itself is started decides nothing, because it would
+    /// otherwise fall back to the user's home once its own directory is hidden.
     pub(super) fn command(
         &self,
         executable: &Path,
         args: Vec<String>,
+        cwd: &Path,
         grants: &Grants<'_>,
     ) -> ProbeResult<Command> {
         let home_dir = env::var_os("HOME").map(|h| PathBuf::from(h).join(".codex"));
@@ -329,6 +336,7 @@ impl Isolation {
         self.launch(
             executable,
             args,
+            cwd,
             grants,
             &user_home()?,
             home_dir,
@@ -336,10 +344,12 @@ impl Isolation {
         )
     }
     /// `command` with the process environment made explicit.
+    #[allow(clippy::too_many_arguments)]
     fn launch(
         &self,
         executable: &Path,
         args: Vec<String>,
+        cwd: &Path,
         grants: &Grants<'_>,
         user: &Path,
         home_dir: Option<PathBuf>,
@@ -379,6 +389,27 @@ impl Isolation {
         }
         let executable =
             fs::canonicalize(executable).map_err(|_| ProbeError::RuntimeUnavailable)?;
+        // The working directory is a private directory of this user reached through no
+        // link. It is in no project and under nothing of the user's Codex state, and it
+        // holds nothing the generation is given: what is mounted there covers only itself.
+        owned_dir(cwd)?;
+        let given = [
+            Some(self.workspace.as_path()),
+            Some(self.state.as_path()),
+            Some(executable.as_path()),
+            grants.catalog,
+        ];
+        if fs::symlink_metadata(cwd).map_err(unsafe_path)?.mode() & 0o077 != 0
+            || fs::canonicalize(cwd).map_err(unsafe_path)? != cwd
+            || self
+                .project_dirs()?
+                .first()
+                .is_some_and(|root| cwd.starts_with(root))
+            || hidden.iter().any(|h| cwd.starts_with(h))
+            || given.into_iter().flatten().any(|g| g.starts_with(cwd))
+        {
+            return Err(ProbeError::Protocol);
+        }
         let mut command = Command::new(BWRAP);
         command
             .args(["--die-with-parent", "--dev-bind", "/", "/"])
@@ -450,6 +481,17 @@ impl Isolation {
                 });
             }
         }
+        // Last of the namespace, so nothing mounted before can cover it: an empty private
+        // directory that exists only here, sealed so it stays empty, and the place the
+        // launcher goes to before it becomes the runtime. The host directory of the same
+        // name is never the one the process is in.
+        command
+            .args(["--perms", "0700", "--tmpfs"])
+            .arg(cwd)
+            .arg("--remount-ro")
+            .arg(cwd)
+            .arg("--chdir")
+            .arg(cwd);
         command.arg("--").arg(&executable).args(args);
         // The generation resolves everything from its private home; no inherited override.
         for key in inherited {

@@ -2011,11 +2011,12 @@ fn local_tools_generation_is_isolated_attested_and_serves_only_its_workspace() {
         serde_json::json!(["managed_config.toml", "requirements.toml"])
     );
     assert_eq!(seen["user_home_entries"], serde_json::json!([]));
-    // Of the authority's control plane only the generation's own catalog and home exist:
-    // no control socket, no lock and no canonical database.
+    // Of the authority's control plane only the generation's own catalog and home exist,
+    // and the name of the empty directory the process stands in: no control socket, no
+    // lock and no canonical database.
     assert_eq!(
         seen["authority_runtime"],
-        serde_json::json!(["codex-local-tools-catalog.json"])
+        serde_json::json!(["codex-local-tools-catalog.json", "runtime-cwd"])
     );
     assert_eq!(
         seen["authority_state"],
@@ -4683,5 +4684,156 @@ fn a_binding_request_in_flight_is_not_written_once_its_lease_was_revoked() {
     assert_eq!(c.runtime_status().unwrap().actual_state, ActualState::Ready);
     c.runtime_stop(mutation()).unwrap();
     env.wait(&mut c, ActualState::Stopped);
+    a.stop(false);
+}
+/// What each runtime process the fixture stood in for saw of its own working directory,
+/// in launch order: asked of the kernel by that very process, inside whatever namespace
+/// it was started in.
+fn started_in(env: &Sandbox) -> Vec<serde_json::Value> {
+    fs::read_to_string(env.root.join("cwds"))
+        .unwrap_or_default()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+/// Which workspace each thread was told, next to where the process serving it runs.
+fn thread_places(env: &Sandbox) -> Vec<serde_json::Value> {
+    fs::read_to_string(env.root.join("thread-cwds"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+fn stages(seen: &[serde_json::Value]) -> Vec<&str> {
+    seen.iter().map(|s| s["stage"].as_str().unwrap()).collect()
+}
+#[test]
+fn every_runtime_process_starts_in_the_authority_directory_selected_for_it_in_both_profiles() {
+    use std::os::unix::fs::MetadataExt;
+    let identity = |path: &PathBuf| {
+        let m = fs::symlink_metadata(path).unwrap();
+        serde_json::json!([m.dev(), m.ino()])
+    };
+    // Where a process that was given no directory of its own would end up.
+    let elsewhere = [
+        std::env::var("HOME").unwrap(),
+        env!("CARGO_MANIFEST_DIR").to_owned(),
+        "/".to_owned(),
+    ];
+    let nowhere_else = |seen: &serde_json::Value, workspace: &str| {
+        let cwd = seen["cwd"].as_str().unwrap();
+        for other in elsewhere.iter().map(String::as_str).chain([workspace]) {
+            assert_ne!(cwd, other, "{seen}");
+            assert!(
+                !std::path::Path::new(workspace).starts_with(cwd),
+                "the workspace is not below it: {seen}"
+            );
+        }
+        assert!(
+            !std::path::Path::new(cwd).starts_with(workspace),
+            "it is not inside the workspace: {seen}"
+        );
+    };
+
+    // Inference: the runtime is started directly, in the authority's own directory.
+    let env = Sandbox::new("happy");
+    let place = env.root.join("run/wyss-console/runtime-cwd");
+    fs::create_dir(env.root.join("ws")).unwrap();
+    let workspace = env.root.join("ws").to_str().unwrap().to_owned();
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(mutation()).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    let (s, _lease) = prepare_bound_session(
+        &mut c,
+        vec![ExecutionScope::SessionCreate, ExecutionScope::SessionResume],
+    );
+    c.binding_create(BindingCreate {
+        workspace_root: workspace.clone(),
+        ..create_params(&env, &s)
+    })
+    .unwrap();
+    c.binding_resume(resume_params(&s)).unwrap();
+    let seen = started_in(&env);
+    assert_eq!(
+        stages(&seen),
+        ["version", "inference-discovery", "inference-final"]
+    );
+    for process in &seen {
+        assert_eq!(process["cwd"], place.to_str().unwrap(), "{process}");
+        // Nor is it told another place than the one it is in.
+        assert_eq!(process["pwd"], place.to_str().unwrap(), "{process}");
+        assert_eq!(process["identity"], identity(&place), "{process}");
+        assert_eq!(process["entries"], 0, "{process}");
+        assert_eq!(process["mode"], 0o700, "{process}");
+        assert_eq!(process["owner"], nix::unistd::geteuid().as_raw());
+        nowhere_else(process, &workspace);
+    }
+    // A thread is told its workspace; the process serving it stays where it started.
+    let threads = thread_places(&env);
+    assert_eq!(threads.len(), 2, "one thread started, then resumed");
+    for thread in &threads {
+        assert_eq!(thread["thread"], workspace.as_str());
+        assert_eq!(thread["process"], place.to_str().unwrap());
+    }
+    drop(c);
+    a.stop(false);
+    drop(env);
+
+    // Local tools: the runtime is started by the sandbox launcher. What counts is where
+    // the process inside the namespace is, not where the launcher was.
+    let env = Sandbox::new("happy");
+    let place = env.root.join("run/wyss-console/runtime-cwd");
+    let workspace = local_layout(&env);
+    let mut a = env.start();
+    let mut c = env.client();
+    c.runtime_start(local_mutation(&workspace)).unwrap();
+    env.wait(&mut c, ActualState::Ready);
+    local_session(&env, &mut c, &workspace, local_scopes());
+    let seen = started_in(&env);
+    assert_eq!(stages(&seen), ["version", "local-discovery", "local-final"]);
+    // The version check never enters a namespace: it is the authority's host directory.
+    assert_eq!(seen[0]["cwd"], place.to_str().unwrap());
+    assert_eq!(seen[0]["pwd"], place.to_str().unwrap());
+    assert_eq!(seen[0]["identity"], identity(&place));
+    for process in &seen[1..] {
+        // The same authority-selected path, said to the process by the launcher...
+        assert_eq!(process["cwd"], place.to_str().unwrap(), "{process}");
+        assert_eq!(process["pwd"], place.to_str().unwrap(), "{process}");
+        // ...and a directory that exists only in this namespace: not the host one, which
+        // the namespace hides with the rest of the control plane.
+        assert_ne!(process["identity"], identity(&place), "{process}");
+        assert_eq!(process["entries"], 0, "{process}");
+        assert_eq!(process["mode"], 0o700, "{process}");
+        assert_eq!(process["owner"], nix::unistd::geteuid().as_raw());
+        assert_eq!(process["writable"], false, "it stays empty: {process}");
+        nowhere_else(process, &workspace);
+    }
+    // Giving the process a place to stand brought nothing of the control plane back.
+    let inside = observed(&env);
+    assert_eq!(
+        inside["authority_runtime"],
+        serde_json::json!(["codex-local-tools-catalog.json", "runtime-cwd"])
+    );
+    assert_eq!(
+        inside["authority_state"],
+        serde_json::json!(["codex-local-tools"])
+    );
+    assert_eq!(inside["generation_state"], serde_json::json!(["home"]));
+    for hidden in ["control.sock", "control.lock", "runtime-cwd"] {
+        assert!(
+            env.root.join("run/wyss-console").join(hidden).exists(),
+            "{hidden} exists on the host"
+        );
+    }
+    // Nothing was left in the host directory either.
+    assert_eq!(fs::read_dir(&place).unwrap().count(), 0);
+    let threads = thread_places(&env);
+    assert_eq!(threads.len(), 2, "one thread started, then resumed");
+    for thread in &threads {
+        assert_eq!(thread["thread"], workspace.as_str());
+        assert_eq!(thread["process"], place.to_str().unwrap());
+    }
+    drop(c);
     a.stop(false);
 }

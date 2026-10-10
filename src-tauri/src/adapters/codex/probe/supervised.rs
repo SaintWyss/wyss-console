@@ -147,6 +147,8 @@ struct Local<'a> {
     workspace: String,
     /// The one credential capability bound into the namespace, if the user has one.
     credential: Option<isolation::Credential>,
+    /// Where every process of the generation starts, inside the namespace.
+    cwd: std::path::PathBuf,
 }
 impl Local<'_> {
     fn spawn(
@@ -158,6 +160,7 @@ impl Local<'_> {
         self.isolation.command(
             executable,
             args,
+            &self.cwd,
             &isolation::Grants {
                 masked: &self.masked,
                 catalog,
@@ -286,6 +289,11 @@ fn diagnostic(error: ProbeError) -> RuntimeDiagnostic {
 /// the user's, next to no file of the authority's, and under no directory that carries
 /// project configuration. Which workspace a thread works in is said to the runtime
 /// explicitly and checked; it is never where the process happens to be.
+///
+/// An inference runtime is started directly in it. A local-tools runtime is started by
+/// the sandbox launcher, whose namespace hides this directory with the rest of the
+/// control plane: there the launcher makes an empty directory of the namespace's own at
+/// this same path and goes to it (`Isolation::command`).
 pub(super) fn runtime_cwd(authority_runtime: &Path) -> std::io::Result<std::path::PathBuf> {
     use std::os::unix::fs::{DirBuilderExt, MetadataExt};
     let unsafe_place = || std::io::Error::from(std::io::ErrorKind::PermissionDenied);
@@ -304,6 +312,11 @@ pub(super) fn runtime_cwd(authority_runtime: &Path) -> std::io::Result<std::path
         return Err(unsafe_place());
     }
     Ok(path)
+}
+/// Starts `command` in the runtime's working directory, and says so: the directory the
+/// authority itself was started from does not travel with it in `PWD` either.
+fn start_in(command: &mut Command, cwd: &Path) {
+    command.current_dir(cwd).env("PWD", cwd);
 }
 /// Counts the actual successful sends at the IO boundary. Rejects responses and all
 /// other methods before writing any byte; independent fake-child tests inspect stdin.
@@ -727,15 +740,16 @@ fn run(
     observe: &mut impl FnMut(&AgentRuntimeInstanceId, Observation, &AtomicBool),
     methods: &mut RuntimeMethods,
 ) -> std::result::Result<(), RuntimeDiagnostic> {
-    // Where the runtime process starts. Nothing of the build tree: an installed authority
-    // has none. A directory that is not provably the authority's own and empty keeps the
-    // runtime from starting.
+    // Where every runtime process starts, the version check and discovery included.
+    // Nothing of the build tree: an installed authority has none. A directory that is not
+    // provably the authority's own and empty keeps the runtime from starting.
     let cwd =
         runtime_cwd(&generation.catalog_dir).map_err(|_| RuntimeDiagnostic::SafetyUnproven)?;
     let executable =
         discover(env::var_os("PATH").as_deref()).ok_or(RuntimeDiagnostic::Unavailable)?;
     let mut version_command = Command::new(&executable);
-    version_command.arg("--version").current_dir(&cwd);
+    version_command.arg("--version");
+    start_in(&mut version_command, &cwd);
     let mut version_process = OwnedProcess::spawn(&mut version_command).map_err(diagnostic)?;
     version_process.cancel_with(
         cancel.clone(),
@@ -768,6 +782,7 @@ fn run(
                     home: text(isolation.home())?,
                     workspace: text(isolation.workspace.clone())?,
                     credential: isolation.credential()?,
+                    cwd: cwd.clone(),
                 })
             })()
             .map_err(|_| RuntimeDiagnostic::SafetyUnproven)?,
@@ -810,7 +825,7 @@ fn run(
             .and_then(|args| local.spawn(&executable, args, Some(&catalog)))
             .map_err(|_| RuntimeDiagnostic::SafetyUnproven)?,
     };
-    command.current_dir(&cwd);
+    start_in(&mut command, &cwd);
     let mut owner = OwnedProcess::spawn(&mut command).map_err(diagnostic)?;
     owner.cancel_with(cancel.clone(), wake);
     observe(instance, Observation::Spawned, cancel);
@@ -1306,7 +1321,7 @@ fn discover_mcp(
             None,
         )?,
     };
-    command.current_dir(cwd);
+    start_in(&mut command, cwd);
     let mut owner = OwnedProcess::spawn(&mut command)?;
     owner.cancel_with(cancel.clone(), wake);
     let result = (|| {
@@ -1528,6 +1543,7 @@ mod tests {
             home: "/h".into(),
             workspace: "/w".into(),
             credential: None,
+            cwd: dir.clone(),
         };
         let mut methods = RuntimeMethods::default();
         let mut notices = 0;

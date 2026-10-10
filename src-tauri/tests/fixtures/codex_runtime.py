@@ -8,7 +8,20 @@ from pathlib import Path
 
 root = Path(os.environ['WYSS_RUNTIME_FIXTURE'])
 scenario = os.environ.get('WYSS_RUNTIME_SCENARIO', 'happy')
+
+
+def started_in(stage):
+    """Where this very process was started, as it sees it: asked of the kernel, not inferred."""
+    place = os.stat('.')
+    with (root / 'cwds').open('a') as record:
+        record.write(json.dumps({
+            'stage': stage, 'cwd': os.getcwd(), 'pwd': os.environ.get('PWD'), 'entries': len(os.listdir('.')),
+            'mode': place.st_mode & 0o7777, 'owner': place.st_uid, 'identity': [place.st_dev, place.st_ino],
+            'writable': os.access('.', os.W_OK)}) + '\n')
+
+
 if sys.argv[1:] == ['--version']:
+    started_in('version')
     print('codex-cli 0.159.0')
     sys.exit(0)
 assert sys.argv[-1] == 'app-server'
@@ -41,6 +54,7 @@ if catalog:
 
 with (root / 'pids').open('a') as record:
     record.write(str(os.getpid()) + '\n')
+started_in(('local-' if local else 'inference-') + ('final' if catalog else 'discovery'))
 if local:
     # What this process can actually see from inside its namespace. Never credential bytes
     # beyond the fixture marker the test wrote itself.
@@ -281,6 +295,9 @@ for line in sys.stdin:
         if method == 'thread/resume':
             assert threads[thread_id]['durable'] and not threads[thread_id]['archived']
         assert Path(params['cwd']).is_absolute()
+        # The workspace a thread is told, next to where the process serving it runs.
+        with (root / 'thread-cwds').open('a') as record:
+            record.write(json.dumps({'thread': params['cwd'], 'process': os.getcwd()}) + '\n')
         (root / 'dispatched').touch()
         if scenario == 'thread_timeout':
             continue

@@ -33,7 +33,7 @@ use wyss_console::{
         ServiceState, Systemd, UNIT_NAME, UnitResult, UnitStatus,
     },
     sessions::{ActivationStage, AgentMode, SessionService},
-    turns::TurnService,
+    turns::{Decision, TurnService},
 };
 
 /// One private service manager and one provider at a time.
@@ -570,6 +570,33 @@ fn a_clean_account_gets_an_authority_that_outlives_the_desktop_and_survives_a_cr
         &account.workspace(),
         AgentMode::LocalTools,
     );
+    // And it works: a command the runtime proposes waits for a decision, runs once it is
+    // approved, and the turn completes.
+    let turn = turns
+        .start(id(), tools.clone(), 1, "run it".into())
+        .unwrap()
+        .id;
+    let deadline = Instant::now() + Duration::from_secs(12);
+    let pending = loop {
+        if let Some(pending) = turns.approvals().unwrap().pending.into_iter().next() {
+            break pending.approval;
+        }
+        assert!(Instant::now() < deadline, "the approval");
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert!(pending.decidable && pending.turn == turn);
+    assert!(!account.root.join("executions").exists(), "nothing ran yet");
+    turns
+        .decide(id(), pending.id, pending.revision, Decision::Approve)
+        .unwrap();
+    while turns.read(turn.clone(), None, false).unwrap().turn.state != TurnState::Completed {
+        assert!(Instant::now() < deadline, "the approved turn");
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        fs::read_to_string(account.root.join("executions")).unwrap(),
+        "1\n"
+    );
     let mut client = account.client();
     assert_eq!(
         client.runtime_status().unwrap().runtime_safety_profile,
@@ -578,29 +605,44 @@ fn a_clean_account_gets_an_authority_that_outlives_the_desktop_and_survives_a_cr
     let first = client.hello_status().clone();
     let events = first.last_sequence.map(|s| s.get()).unwrap();
     drop(client);
-    // Every process the authority runs for it started in the authority's own empty
-    // directory: not in the tree the binary was built in, and not in the user's home.
-    let children: Vec<PathBuf> = fs::read_dir("/proc")
+    // Every runtime process started where the authority sent it. Each one said so itself,
+    // from inside whatever it was started in: the direct child of the authority is the
+    // sandbox launcher, and where the launcher stands says nothing about the runtime.
+    let place = account.run().join("wyss-console/runtime-cwd");
+    let host = fs::symlink_metadata(&place).unwrap();
+    let started: Vec<serde_json::Value> = fs::read_to_string(account.root.join("cwds"))
         .unwrap()
-        .flatten()
-        .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
-        .filter(|p| {
-            fs::read_to_string(format!("/proc/{p}/stat")).is_ok_and(|stat| {
-                // The parent is the second field after the parenthesised name.
-                stat.rsplit_once(") ")
-                    .and_then(|(_, rest)| rest.split(' ').nth(1)?.parse::<u32>().ok())
-                    == Some(pid)
-            })
-        })
-        .filter_map(|p| fs::read_link(format!("/proc/{p}/cwd")).ok())
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert!(
-        !children.is_empty(),
-        "the runtime runs as a child of the authority"
-    );
-    for cwd in &children {
-        assert_eq!(cwd, &account.run().join("wyss-console/runtime-cwd"));
+    let stages: Vec<&str> = started
+        .iter()
+        .map(|s| s["stage"].as_str().unwrap())
+        .collect();
+    assert_eq!(stages, ["version", "local-discovery", "local-final"]);
+    for process in &started {
+        assert_eq!(process["cwd"], place.to_str().unwrap(), "{process}");
+        assert_eq!(process["pwd"], place.to_str().unwrap(), "{process}");
+        assert_eq!(process["entries"], 0, "{process}");
+        assert_eq!(process["mode"], 0o700, "{process}");
+        // Inside the sandbox it is a directory of the sandbox, not the host's.
+        let sandboxed = process["stage"] != "version";
+        assert_eq!(
+            process["identity"] != serde_json::json!([host.dev(), host.ino()]),
+            sandboxed,
+            "{process}"
+        );
+        assert_eq!(process["writable"], !sandboxed, "{process}");
     }
+    // Not the user's home, not the workspace, not the tree the binary was built in.
+    for elsewhere in [
+        account.home(),
+        PathBuf::from(account.workspace()),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+    ] {
+        assert!(!place.starts_with(&elsewhere) && !elsewhere.starts_with(&place));
+    }
+    assert_eq!(fs::read_dir(&place).unwrap().count(), 0);
 
     // The window is closed. The authority is not the desktop's child and is not stopped.
     desktop.close();

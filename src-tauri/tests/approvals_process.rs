@@ -386,11 +386,12 @@ fn local_tools_is_an_explicit_mode_and_a_command_runs_only_after_it_is_approved(
             .unwrap()
             .contains("unified_exec = false")
     );
-    // Of the authority's own runtime directory only its read-only model catalog is there:
-    // no control socket, no lock.
+    // Of the authority's own runtime directory only its read-only model catalog is there,
+    // and the name of the empty directory the process stands in: no control socket, no
+    // lock.
     assert_eq!(
         inside["authority_runtime"],
-        serde_json::json!(["codex-local-tools-catalog.json"])
+        serde_json::json!(["codex-local-tools-catalog.json", "runtime-cwd"])
     );
     assert_eq!(inside["credential"], "FIXTURE-CREDENTIAL");
     // What the window is told: the session's mode, and the runtime every session shares.

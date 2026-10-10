@@ -22,6 +22,13 @@ impl Temp {
         fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
         path
     }
+    /// A private empty directory, as the authority keeps for the runtime to start in.
+    fn place(&self, relative: &str) -> PathBuf {
+        let path = self.0.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
+        path
+    }
     /// A repository with a nested workspace, a user Codex home with a credential, and
     /// the isolation that serves that workspace.
     fn layout(&self) -> (Isolation, PathBuf, PathBuf) {
@@ -52,12 +59,28 @@ fn argv(command: &Command) -> Vec<String> {
 fn text(path: &Path) -> String {
     path.to_str().unwrap().to_owned()
 }
+/// The working directory the helpers launch with: a private empty directory at the root
+/// of the test's own tree, next to its repository, user home and private state.
+fn place_of(i: &Isolation) -> PathBuf {
+    let root = i
+        .state
+        .ancestors()
+        .find(|a| {
+            a.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("wyss-isolation-"))
+        })
+        .unwrap();
+    let path = root.join("runtime-cwd");
+    let _ = fs::DirBuilder::new().mode(0o700).create(&path);
+    path
+}
 fn launch(i: &Isolation, executable: &Path, user: &Path) -> ProbeResult<Command> {
     let masked = i.layers()?;
     let credential = credential(user)?;
     i.launch(
         executable,
         vec!["-c".into(), "a=b".into(), "app-server".into()],
+        &place_of(i),
         &Grants {
             masked: &masked,
             catalog: None,
@@ -81,6 +104,7 @@ fn stable(mut args: Vec<String>) -> Vec<String> {
 fn inside(
     i: &Isolation,
     user: &Path,
+    cwd: &Path,
     grants: &Grants<'_>,
     script: &str,
     environment: &[(&str, &Path)],
@@ -89,6 +113,7 @@ fn inside(
         .launch(
             Path::new("/bin/sh"),
             vec!["-c".into(), script.into()],
+            cwd,
             grants,
             user,
             None,
@@ -139,10 +164,12 @@ fn launch_is_one_exact_shell_free_argv_with_private_policy_masks_and_one_credent
     .map(OsString::from)
     .collect();
     let held = credential(&user).unwrap();
+    let cwd = place_of(&i);
     let command = i
         .launch(
             &executable,
             vec!["-c".into(), "a=b".into(), "app-server".into()],
+            &cwd,
             &Grants {
                 masked: &i.layers().unwrap(),
                 catalog: None,
@@ -180,6 +207,14 @@ fn launch_is_one_exact_shell_free_argv_with_private_policy_masks_and_one_credent
             "--bind-fd".into(),
             "<credential>".into(),
             text(&state.join("home/auth.json")),
+            "--perms".into(),
+            "0700".into(),
+            "--tmpfs".into(),
+            text(&cwd),
+            "--remount-ro".into(),
+            text(&cwd),
+            "--chdir".into(),
+            text(&cwd),
             "--".into(),
             text(&executable),
             "-c".into(),
@@ -489,6 +524,7 @@ printf REFRESHED > "$CODEX_HOME/auth.json" && printf written"#;
     let seen = inside(
         &i,
         &user,
+        &place_of(&i),
         &Grants {
             masked: &i.layers().unwrap(),
             catalog: None,
@@ -535,6 +571,7 @@ fn the_bound_credential_is_the_validated_inode_and_its_identity_is_watched() {
     let seen = inside(
         &i,
         &user,
+        &place_of(&i),
         &Grants {
             masked: &[],
             catalog: None,
@@ -584,6 +621,8 @@ fn the_control_plane_and_the_host_policy_directory_never_exist_inside_the_namesp
     let catalog = t.file("control/run/catalog.json", "CATALOG", 0o600);
     t.file("control/state/control.sqlite3", "CANONICAL", 0o600);
     t.file("control/state/control.lock", "", 0o600);
+    // Where the runtime starts is one more directory of the control plane.
+    let cwd = t.place("control/run/runtime-cwd");
     // No such directory exists on this host: the policy is mounted on a private view.
     let absent = PathBuf::from(format!("/etc/wyss-isolation-{}", uuid::Uuid::new_v4()));
     let probe = PathBuf::from(format!("/etc/wyss-isolation-{}", uuid::Uuid::new_v4()));
@@ -606,10 +645,12 @@ test -r /etc/passwd && printf host-etc"#;
         ("MANAGED", &absent),
         ("PROBE", &probe),
     ];
-    // The thread-capable process: its catalog comes back read-only, and nothing else.
+    // The thread-capable process: its catalog comes back read-only, and nothing else but
+    // the name of the empty place the process stands in.
     let seen = inside(
         &i,
         &user,
+        &cwd,
         &Grants {
             masked: &[],
             catalog: Some(&catalog),
@@ -620,12 +661,14 @@ test -r /etc/passwd && printf host-etc"#;
     );
     assert_eq!(
         seen,
-        "catalog.json |codex-local-tools |home |CATALOG|readonly|managed_config.toml requirements.toml |readonly|home|private-etc|host-etc"
+        "catalog.json runtime-cwd |codex-local-tools |home |CATALOG|readonly|managed_config.toml requirements.toml |readonly|home|private-etc|host-etc"
     );
-    // Discovery has no catalog: nothing of the authority's runtime directory exists.
+    // Discovery has no catalog: of the authority's runtime directory there is only the
+    // name of the empty place the process stands in.
     let seen = inside(
         &i,
         &user,
+        &cwd,
         &Grants {
             masked: &[],
             catalog: None,
@@ -636,7 +679,7 @@ test -r /etc/passwd && printf host-etc"#;
     );
     assert_eq!(
         seen,
-        "|codex-local-tools |home ||absent|managed_config.toml requirements.toml |readonly|home|private-etc|host-etc"
+        "runtime-cwd |codex-local-tools |home ||absent|managed_config.toml requirements.toml |readonly|home|private-etc|host-etc"
     );
     MANAGED_AT.with(|at| *at.borrow_mut() = PathBuf::from(MANAGED));
     // On the host nothing moved: the control plane is intact, the home received the write
@@ -786,4 +829,239 @@ fn a_home_that_is_itself_a_repository_keeps_its_hidden_codex_home_and_pinned_rel
         String::from_utf8(output.stdout).unwrap(),
         "RELEASE|packages "
     );
+}
+/// The layout the authority really has: the working directory is inside the runtime
+/// directory, which the namespace hides whole.
+fn governed(t: &Temp) -> (Isolation, PathBuf, PathBuf, PathBuf, PathBuf) {
+    let (layout, user, executable) = t.layout();
+    let run = t.dir("control/run");
+    let state = t.dir("control/state");
+    let i = Isolation {
+        workspace: layout.workspace,
+        state: state.join("codex-local-tools"),
+        control: vec![run.clone(), state],
+    };
+    let cwd = t.place("control/run/runtime-cwd");
+    (i, user, executable, run, cwd)
+}
+#[test]
+fn the_working_directory_is_the_last_thing_of_the_namespace_and_the_one_place_it_goes_to() {
+    let t = Temp::new();
+    let (i, user, executable, run, cwd) = governed(&t);
+    let catalog = t.file("control/run/catalog.json", "CATALOG", 0o600);
+    let held = credential(&user).unwrap();
+    let command = i
+        .launch(
+            &executable,
+            vec!["app-server".into()],
+            &cwd,
+            &Grants {
+                masked: &[],
+                catalog: Some(&catalog),
+                credential: held.as_ref(),
+            },
+            &user,
+            None,
+            &[],
+        )
+        .unwrap();
+    let state = &i.control[1];
+    // The whole launch. The control plane is hidden first; of it only the generation's
+    // home and catalog are brought back, each by itself; then the working directory is
+    // made: a new mount of its own, never the host directory and never a parent of it.
+    // Nothing is mounted after it, so nothing can cover the place the process goes to.
+    assert_eq!(
+        stable(argv(&command)),
+        [
+            "--die-with-parent".to_owned(),
+            "--dev-bind".into(),
+            "/".into(),
+            "/".into(),
+            "--overlay-src".into(),
+            "/etc".into(),
+            "--tmp-overlay".into(),
+            "/etc".into(),
+            "--ro-bind".into(),
+            text(&i.state.join("etc")),
+            "/etc/codex".into(),
+            "--tmpfs".into(),
+            text(&user),
+            "--tmpfs".into(),
+            text(&run),
+            "--tmpfs".into(),
+            text(state),
+            "--bind".into(),
+            text(&i.home()),
+            text(&i.home()),
+            "--ro-bind".into(),
+            text(&catalog),
+            text(&catalog),
+            "--bind-fd".into(),
+            "<credential>".into(),
+            text(&i.home().join("auth.json")),
+            "--perms".into(),
+            "0700".into(),
+            "--tmpfs".into(),
+            text(&cwd),
+            "--remount-ro".into(),
+            text(&cwd),
+            "--chdir".into(),
+            text(&cwd),
+            "--".into(),
+            text(&executable),
+            "app-server".into(),
+        ]
+    );
+    // The launcher is told the place; where it is started itself is not part of the launch.
+    assert_eq!(command.get_current_dir(), None);
+}
+#[test]
+fn the_process_stands_in_an_empty_sealed_directory_of_the_namespace_wherever_the_launcher_was() {
+    use std::os::unix::fs::MetadataExt;
+    let t = Temp::new();
+    let (i, user, _, run, cwd) = governed(&t);
+    let _socket = std::os::unix::net::UnixListener::bind(run.join("control.sock")).unwrap();
+    t.file("control/state/control.sqlite3", "CANONICAL", 0o600);
+    let home = t.dir("home");
+    let held = credential(&user).unwrap();
+    let script = r#"pwd -P | tr -d '\n'; printf '|%s|' "$PWD"; ls -A . | wc -l | tr -d ' \n'; printf '|'
+stat -c '%a %u %d:%i' . | tr -d '\n'; printf '|'
+(echo x > ./new) 2>/dev/null && printf writable || printf sealed; printf '|'
+ls -A "$RUN" | tr '\n' ' '; printf '|'; ls -A "$STATE" | tr '\n' ' '"#;
+    let host = fs::metadata(&cwd).unwrap();
+    // Whatever directory the launcher is started in, and whatever it is told is home, the
+    // process ends up in the one place it was sent to.
+    for launcher in [&cwd, &i.workspace, &home, &t.0] {
+        let mut command = i
+            .launch(
+                Path::new("/bin/sh"),
+                vec!["-c".into(), script.into()],
+                &cwd,
+                &Grants {
+                    masked: &[],
+                    catalog: None,
+                    credential: held.as_ref(),
+                },
+                &user,
+                None,
+                &[],
+            )
+            .unwrap();
+        let output = command
+            .current_dir(launcher)
+            .env("HOME", &home)
+            .env("RUN", &run)
+            .env("STATE", &i.control[1])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let seen = String::from_utf8(output.stdout).unwrap();
+        let fields: Vec<&str> = seen.split('|').collect();
+        assert_eq!(fields[0], text(&cwd), "{launcher:?}");
+        assert_eq!(fields[1], text(&cwd), "{launcher:?}");
+        assert_eq!(fields[2], "0", "it is empty");
+        // Private, this user's, and a directory of the namespace: not the host one.
+        let (own, identity) = fields[3].rsplit_once(' ').unwrap();
+        assert_eq!(own, format!("700 {}", own_uid()));
+        assert_ne!(identity, format!("{}:{}", host.dev(), host.ino()));
+        assert_eq!(fields[4], "sealed");
+        // The directory it stands in is all there is of the control plane.
+        assert_eq!(fields[5], "runtime-cwd ");
+        assert_eq!(fields[6], "codex-local-tools ");
+    }
+    // On the host the directory is the one it was, still empty, and nothing was hidden.
+    let after = fs::metadata(&cwd).unwrap();
+    assert_eq!((after.dev(), after.ino()), (host.dev(), host.ino()));
+    assert_eq!(fs::read_dir(&cwd).unwrap().count(), 0);
+    assert!(run.join("control.sock").exists());
+}
+#[test]
+fn a_working_directory_that_is_not_a_private_place_apart_keeps_the_profile_off() {
+    let grants = |catalog| Grants {
+        masked: &[],
+        catalog,
+        credential: None,
+    };
+    let try_in = |i: &Isolation, executable: &Path, user: &Path, cwd: &Path| {
+        i.launch(
+            executable,
+            vec!["app-server".into()],
+            cwd,
+            &grants(None),
+            user,
+            None,
+            &[],
+        )
+    };
+    let t = Temp::new();
+    let (i, user, executable, _, cwd) = governed(&t);
+    assert!(try_in(&i, &executable, &user, &cwd).is_ok());
+    // It has to be there, a real directory, reached through no link.
+    assert!(try_in(&i, &executable, &user, &t.0.join("missing")).is_err());
+    let file = t.file("control/run/file", "", 0o600);
+    assert!(try_in(&i, &executable, &user, &file).is_err());
+    let alias = t.0.join("control/run/alias");
+    std::os::unix::fs::symlink(&cwd, &alias).unwrap();
+    assert!(try_in(&i, &executable, &user, &alias).is_err());
+    let through = t.0.join("control-alias");
+    std::os::unix::fs::symlink(t.0.join("control"), &through).unwrap();
+    assert!(try_in(&i, &executable, &user, &through.join("run/runtime-cwd")).is_err());
+    // Nobody else may enter it.
+    for open in [0o750, 0o705, 0o770, 0o707] {
+        fs::set_permissions(&cwd, fs::Permissions::from_mode(open)).unwrap();
+        assert!(try_in(&i, &executable, &user, &cwd).is_err(), "{open:o}");
+    }
+    fs::set_permissions(&cwd, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(try_in(&i, &executable, &user, &cwd).is_ok());
+    // It is no part of a project: not the workspace, not inside it, not above it, and
+    // nowhere in the repository the workspace belongs to.
+    let private = |path: PathBuf| {
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    };
+    for project in [
+        private(i.workspace.clone()),
+        t.place("repo/sub/ws/inner"),
+        private(t.0.join("repo/sub")),
+        private(t.0.join("repo")),
+        t.place("repo/elsewhere"),
+    ] {
+        assert!(
+            try_in(&i, &executable, &user, &project).is_err(),
+            "{project:?}"
+        );
+    }
+    // A workspace in no repository is still a project of its own.
+    let t = Temp::new();
+    let (i, user, executable, _, cwd) = governed(&t);
+    fs::remove_dir(t.0.join("repo/.git")).unwrap();
+    assert!(try_in(&i, &executable, &user, &cwd).is_ok());
+    assert!(try_in(&i, &executable, &user, &t.place("repo/sub/ws/inner")).is_err());
+    assert!(try_in(&i, &executable, &user, &private(t.0.join("repo/sub"))).is_err());
+    // It is nowhere in the user's Codex state.
+    assert!(try_in(&i, &executable, &user, &t.place("user/place")).is_err());
+    // What is mounted there covers only itself: nothing the generation is given is below.
+    assert!(try_in(&i, &executable, &user, &private(t.0.join("bin"))).is_err());
+    assert!(try_in(&i, &executable, &user, &private(i.state.clone())).is_err());
+    assert!(try_in(&i, &executable, &user, &private(t.0.join("control/state"))).is_err());
+    let holder = t.place("control/run/holder");
+    let catalog = t.file("control/run/holder/catalog.json", "CATALOG", 0o600);
+    let with_catalog = |catalog| {
+        i.launch(
+            &executable,
+            vec!["app-server".into()],
+            &holder,
+            &grants(catalog),
+            &user,
+            None,
+            &[],
+        )
+    };
+    assert!(with_catalog(Some(&catalog)).is_err());
+    assert!(with_catalog(None).is_ok());
 }
