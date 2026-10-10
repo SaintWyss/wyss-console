@@ -97,7 +97,7 @@ impl Layout {
 }
 
 /// `root` and then each of `below`, created 0700 where missing and checked either way.
-fn descend(root: &Path, below: &[&str], private: bool) -> LifecycleResult<PathBuf> {
+pub(crate) fn descend(root: &Path, below: &[&str], private: bool) -> LifecycleResult<PathBuf> {
     // The XDG root itself may be missing on a clean account, and so may `~/.local`.
     let mut missing = Vec::new();
     let mut existing = root;

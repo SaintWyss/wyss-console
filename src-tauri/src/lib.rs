@@ -12,6 +12,8 @@ pub mod events;
 pub mod lifecycle;
 #[cfg(target_os = "linux")]
 pub mod sessions;
+#[cfg(target_os = "linux")]
+pub mod settings;
 pub mod terminal;
 #[cfg(target_os = "linux")]
 pub mod turns;

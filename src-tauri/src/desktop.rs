@@ -9,6 +9,7 @@ mod events;
 mod glass;
 mod lifecycle;
 mod sessions;
+mod settings;
 mod terminal;
 mod turns;
 mod workspace;
@@ -57,6 +58,8 @@ pub fn run(authority_digest: Option<&'static str>) {
     let stopping = Arc::new(AtomicBool::new(false));
     let managed_sessions = sessions::SessionService::from_environment();
     let authority = authority::AuthorityService::from_environment();
+    // The desktop's own preferences: read once here, kept in memory, written on change.
+    let preferences = settings::SettingsService::from_environment();
     // Makes an authority available where none answers. It follows the observer above
     // and never stands in for it: connected is what the observer says.
     let bootstrap = lifecycle::start(&authority, authority_digest);
@@ -66,6 +69,7 @@ pub fn run(authority_digest: Option<&'static str>) {
         // Read-only and independent: no terminal operation waits on, or learns of, it.
         .manage(authority)
         .manage(bootstrap)
+        .manage(preferences)
         // Its own short-lived connections: the observer above is never borrowed.
         // Turns send their intents through the session service and stop with it.
         .manage(turns::TurnService::new(managed_sessions.clone()))
@@ -97,6 +101,9 @@ pub fn run(authority_digest: Option<&'static str>) {
             turns::managed_approval_deny,
             events::managed_events,
             events::managed_events_older,
+            settings::settings_read,
+            settings::settings_update,
+            settings::settings_reset,
             terminal::create_terminal,
             terminal::terminal_write,
             terminal::terminal_read_output,

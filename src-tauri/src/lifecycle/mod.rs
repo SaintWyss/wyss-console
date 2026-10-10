@@ -31,6 +31,7 @@ mod tests;
 mod view;
 
 pub use bootstrap::{AuthorityBootstrap, AuthorityLink, Limits, LinkState};
+pub(crate) use layout::descend;
 pub use layout::{Layout, UNIT_NAME};
 pub use manager::{
     ActiveState, LoadState, ManagerError, ServiceManager, Systemd, UnitResult, UnitStatus,
