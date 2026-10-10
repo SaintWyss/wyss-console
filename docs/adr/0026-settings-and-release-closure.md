@@ -111,6 +111,10 @@ directory of this user's, 0700. Nothing else is stored there and no secret ever 
   exact name pattern, but only the regular files of this user that are over a minute old:
   another desktop of the same user may be writing one right now. A first version of this
   code removed them at once, and a test with a concurrent writer found it.
+- **A read that loses a race with a write** opened the old file just before it was renamed
+  over, and saw a file with no name left. That is a replaced file, not an unsafe one: the
+  read starts over (five times at most) and also checks that the path still names the file
+  it read. This too was found by the concurrent-reader test, one run in six.
 - **One lock** serializes every read, update and reset in the process, so an update
   racing a reset leaves one of the two outcomes and never a mixture; what is in memory
   is what is on disk. Two desktops of the same user are last-writer-wins, and a change

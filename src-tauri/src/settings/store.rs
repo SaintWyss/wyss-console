@@ -6,7 +6,7 @@
 //! of its own, is flushed, renamed over the old file, and its directory is flushed: a
 //! reader, a crash and a second desktop see the old file or the new one.
 use super::model::{Preferences, SCHEMA_VERSION};
-use crate::control::paths::{ancestors, owned_dir, validate_file};
+use crate::control::paths::{ancestors, owned_dir};
 use crate::lifecycle::descend;
 use nix::unistd::geteuid;
 use std::{
@@ -111,6 +111,19 @@ impl Store {
             return Loaded::Unavailable;
         }
         remove_leftovers(&dir);
+        // A write renames a new file over the old one. A read that opened the old file just
+        // before sees a file with no name left, which is a file that was replaced and not
+        // a file that is unsafe: it reads again, a few times at most.
+        for _ in 0..READ_ATTEMPTS {
+            match self.read_once() {
+                Attempt::Done(loaded) => return loaded,
+                Attempt::Replaced => {}
+            }
+        }
+        Loaded::Unsafe
+    }
+
+    fn read_once(&self) -> Attempt {
         let path = self.file();
         let file = match OpenOptions::new()
             .read(true)
@@ -118,40 +131,50 @@ impl Store {
             .open(&path)
         {
             Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Loaded::Absent,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Attempt::Done(Loaded::Absent);
+            }
             // A link (ELOOP), a directory, a device: not a preference file.
-            Err(_) => return Loaded::Unsafe,
+            Err(_) => return Attempt::Done(Loaded::Unsafe),
         };
         let Ok(meta) = file.metadata() else {
-            return Loaded::Unsafe;
+            return Attempt::Done(Loaded::Unsafe);
         };
-        // Judged by the descriptor that is read, then by the path for its name count.
+        // Replaced while it was being opened: nothing of it is believed.
+        if meta.nlink() == 0 {
+            return Attempt::Replaced;
+        }
+        // Judged by the descriptor that is read.
         if !meta.is_file()
             || meta.uid() != geteuid().as_raw()
             || meta.mode() & 0o777 != 0o600
             || meta.nlink() != 1
-            || validate_file(&path).is_err()
         {
-            return Loaded::Unsafe;
+            return Attempt::Done(Loaded::Unsafe);
+        }
+        // And the name still names that file, not another one put there since.
+        match fs::symlink_metadata(&path) {
+            Ok(named) if named.dev() == meta.dev() && named.ino() == meta.ino() => {}
+            _ => return Attempt::Replaced,
         }
         if meta.len() > MAX_FILE {
-            return self.set_aside();
+            return Attempt::Done(self.set_aside());
         }
         let mut bytes = Vec::with_capacity(meta.len() as usize);
         if File::take(file, MAX_FILE + 1)
             .read_to_end(&mut bytes)
             .is_err()
         {
-            return Loaded::Unavailable;
+            return Attempt::Done(Loaded::Unavailable);
         }
         if bytes.len() as u64 > MAX_FILE {
-            return self.set_aside();
+            return Attempt::Done(self.set_aside());
         }
-        match parse(&bytes) {
+        Attempt::Done(match parse(&bytes) {
             Parsed::Stored(preferences) => Loaded::Stored(preferences),
             Parsed::Newer => Loaded::Newer,
             Parsed::Rejected => self.set_aside(),
-        }
+        })
     }
 
     /// Moves the saved file out of the way without reading or deleting it.
@@ -204,6 +227,14 @@ impl Store {
         }
         sync_dir(&dir).map_err(|_| StoreError::Io)
     }
+}
+
+/// How many times a read that lost a race with a write starts over.
+const READ_ATTEMPTS: usize = 5;
+enum Attempt {
+    Done(Loaded),
+    /// The file was replaced while it was being read.
+    Replaced,
 }
 
 enum Parsed {

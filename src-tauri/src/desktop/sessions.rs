@@ -523,6 +523,11 @@ mod tests {
             // History: two reads, and nothing that passes a method or a payload on.
             "allow-managed-events",
             "allow-managed-events-older",
+            // The desktop's own preferences: one read, one replacement of the whole typed
+            // set, one reset. No key, no path and nothing that is run.
+            "allow-settings-read",
+            "allow-settings-update",
+            "allow-settings-reset",
             "allow-create-terminal",
             "allow-terminal-write",
             "allow-terminal-read-output",
