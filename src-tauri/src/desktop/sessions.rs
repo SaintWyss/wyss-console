@@ -517,6 +517,9 @@ mod tests {
             "allow-managed-approval-read",
             "allow-managed-approval-approve",
             "allow-managed-approval-deny",
+            // History: two reads, and nothing that passes a method or a payload on.
+            "allow-managed-events",
+            "allow-managed-events-older",
             "allow-create-terminal",
             "allow-terminal-write",
             "allow-terminal-read-output",
