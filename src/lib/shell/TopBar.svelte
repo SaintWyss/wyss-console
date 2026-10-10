@@ -1,9 +1,6 @@
 <script lang="ts">
-  import {
-    summarizeAgent,
-    summarizeAuthority,
-    type AuthorityObservation,
-  } from './authority';
+  import { summarizeAgent, type AuthorityObservation } from './authority';
+  import { summarizeLink, type LifecycleObservation } from './lifecycle';
   import type { RuntimeSummary } from './runtime';
 
   let {
@@ -11,6 +8,7 @@
     subtitle,
     runtime,
     authority,
+    lifecycle,
     version,
   }: {
     title: string;
@@ -18,10 +16,12 @@
     /** The local human terminal. It never depends on the authority. */
     runtime: RuntimeSummary;
     authority: AuthorityObservation;
+    /** What is being done to make the authority available, while it is not. */
+    lifecycle: LifecycleObservation;
     version: string;
   } = $props();
   const agent = $derived(summarizeAgent(authority));
-  const link = $derived(summarizeAuthority(authority));
+  const link = $derived(summarizeLink(authority, lifecycle));
 </script>
 
 <header class="top-bar">

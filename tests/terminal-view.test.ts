@@ -175,6 +175,8 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   expect(capability.permissions).toEqual([
     'allow-get-app-info',
     'allow-authority-state',
+    'allow-authority-lifecycle',
+    'allow-authority-retry',
     'allow-managed-sessions-page',
     'allow-managed-session-prepare',
     'allow-managed-session-resume',
@@ -220,9 +222,21 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   expect(
     capability.permissions.filter((p: string) => /event|audit|histor/.test(p)),
   ).toEqual(['allow-managed-events', 'allow-managed-events-older']);
+  // The authority's lifecycle is one read and Retry. Nothing the window is granted
+  // starts, stops or restarts a service by name, runs a command, installs a file at a
+  // path, or talks to the service manager.
+  expect(
+    capability.permissions.filter((p: string) =>
+      /authority|lifecycle|retry/.test(p),
+    ),
+  ).toEqual([
+    'allow-authority-state',
+    'allow-authority-lifecycle',
+    'allow-authority-retry',
+  ]);
   for (const permission of capability.permissions)
     expect(permission).not.toMatch(
-      /always|remember|trust|rule|policy|allowlist|respond|decision|lease|scope|profile|runtime|control|request|invoke|exec|shell|spawn|process|socket|fs|audit|watch|replay|export|save|payload|envelope/,
+      /always|remember|trust|rule|policy|allowlist|respond|decision|lease|scope|profile|runtime|control|request|invoke|exec|shell|spawn|process|socket|fs|audit|watch|replay|export|save|payload|envelope|service|unit|systemd|systemctl|dbus|install|binary|path|restart|stop|kill|command/,
     );
   const directives = Object.fromEntries(
     config.app.security.csp

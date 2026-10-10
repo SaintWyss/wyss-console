@@ -14,6 +14,14 @@
   import SessionsView from './lib/features/sessions/SessionsView.svelte';
   import TerminalView from './lib/features/terminal/TerminalView.svelte';
   import type { WorkspaceState } from './lib/features/terminal/session-manager';
+  import { retryAuthority } from './lib/desktop/lifecycle-client';
+  import AuthorityNotice from './lib/shell/AuthorityNotice.svelte';
+  import {
+    followLifecycle,
+    lifecycleNotice,
+    pendingLifecycle,
+    type LifecycleObservation,
+  } from './lib/shell/lifecycle';
   import Sidebar from './lib/shell/Sidebar.svelte';
   import TopBar from './lib/shell/TopBar.svelte';
   import {
@@ -32,6 +40,11 @@
   let activeView = $state<ViewId>('console');
   let runtime = $state<RuntimeSummary>(idleRuntime);
   let authority = $state<AuthorityObservation>(pendingAuthority);
+  // Whether the authority is being made available, and why not when it is not. The
+  // shell follows it once; no view asks for it or starts anything for it.
+  let lifecycle = $state<LifecycleObservation>(pendingLifecycle);
+  let retrying = $state(false);
+  const notice = $derived(lifecycleNotice(lifecycle, authority));
   // One controller for the application's lifetime, whichever view is shown.
   const sessionsController = new SessionsController((next) => {
     sessions = next;
@@ -90,9 +103,13 @@
       approvalsController.observe(observation);
       eventsController.observe(observation);
     });
+    const unfollowLifecycle = followLifecycle((observation) => {
+      lifecycle = observation;
+    });
     return () => {
       active = false;
       unfollow();
+      unfollowLifecycle();
       sessionsController.dispose();
       agentController.dispose();
       approvalsController.dispose();
@@ -125,6 +142,16 @@
     activeView = 'events';
   }
 
+  /** The user's Retry: one request at a time. What comes of it arrives as a view. */
+  function retry() {
+    if (retrying) return;
+    retrying = true;
+    void retryAuthority().then(
+      () => (retrying = false),
+      () => (retrying = false),
+    );
+  }
+
   function observeWorkspace(state: WorkspaceState) {
     runtime = summarizeRuntime(state);
   }
@@ -141,6 +168,7 @@
     subtitle={current?.subtitle ?? ''}
     {runtime}
     {authority}
+    {lifecycle}
     {version}
   />
   <Sidebar
@@ -149,6 +177,9 @@
     waiting={approvals.pending?.length ?? 0}
   />
   <main class="content">
+    {#if notice}
+      <AuthorityNotice {notice} {retrying} onretry={retry} />
+    {/if}
     <!-- Every view stays mounted: leaving the Console never ends a terminal. -->
     <TerminalView
       visible={activeView === 'console'}
