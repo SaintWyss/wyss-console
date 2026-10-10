@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "comment": "Every executable the AppImage build runs that is not built here. Each is fetched from one fixed HTTPS address of an immutable release, checked against the SHA-256 below before anything runs it, and checked again after the bundler has used it. No floating reference (continuous, latest, a branch) may appear. The two scripts under `embedded` are written by the pinned @tauri-apps/cli itself; their digests are checked after the bundler ran.",
+  "tools": [
+    {
+      "name": "AppRun",
+      "file": "AppRun-x86_64",
+      "version": "apprun-old",
+      "source": "https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64",
+      "download_sha256": "f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f",
+      "sha256": "f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f",
+      "max_bytes": 1048576,
+      "transform": null
+    },
+    {
+      "name": "linuxdeploy",
+      "file": "linuxdeploy-07333c6-x86_64.AppImage",
+      "version": "07333c6",
+      "source": "https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy-07333c6/linuxdeploy-x86_64.AppImage",
+      "download_sha256": "36a2d7e274d12e1050d0e9ecfe11d339ed54720b2bec464c286d53f8b07f5c62",
+      "sha256": "bd9521cd5ff3ca351fecb78cd9b236a4e37b3621014ac05cac0c2d767ffa0474",
+      "max_bytes": 67108864,
+      "transform": "clear-appimage-magic"
+    },
+    {
+      "name": "linuxdeploy-plugin-appimage",
+      "file": "linuxdeploy-plugin-appimage.AppImage",
+      "version": "1-alpha-20250213-1",
+      "source": "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage",
+      "download_sha256": "992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3",
+      "sha256": "992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3",
+      "max_bytes": 67108864,
+      "transform": null
+    }
+  ],
+  "embedded": [
+    {
+      "name": "linuxdeploy-plugin-gtk",
+      "file": "linuxdeploy-plugin-gtk.sh",
+      "provider": "@tauri-apps/cli 2.12.1",
+      "sha256": "ef6b9a980417243bc62e0241b51dc49876032afd1bab9b4762389f961b406d9b"
+    },
+    {
+      "name": "linuxdeploy-plugin-gstreamer",
+      "file": "linuxdeploy-plugin-gstreamer.sh",
+      "provider": "@tauri-apps/cli 2.12.1",
+      "sha256": "2a15ce9da8de6e20159e1ab27861a7a5ef8758c81a6278ba4ab30cefa1d74c9f"
+    }
+  ]
+}
