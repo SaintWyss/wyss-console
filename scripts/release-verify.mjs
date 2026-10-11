@@ -343,8 +343,14 @@ for (const artifact of listed) {
       continue;
     checkTree(tree, 'deb');
 
-    // The package's own records.
+    // The package's own records. Each read of the package has to succeed: what a failed
+    // read leaves (no fields, no scripts, no listing) is not evidence of anything.
     const control = run('dpkg-deb', ['-f', path]);
+    check(
+      control.status === 0,
+      'deb: its control fields can be read',
+      control.stderr,
+    );
     const field = (/** @type {string} */ name) =>
       new RegExp(`^${name}: (.*)$`, 'm').exec(control.stdout)?.[1] ?? '';
     check(
@@ -370,24 +376,34 @@ for (const artifact of listed) {
     // Installing runs nothing: no script of the package's own, as root, at install time.
     const controlDir = join(scratch, 'deb-control');
     mkdirSync(controlDir, { recursive: true });
-    run('dpkg-deb', ['-e', path, controlDir]);
-    const scripts = walk(controlDir)
-      .map((e) => e.path)
-      .filter((name) => /^(pre|post)(inst|rm)$|^config$|^triggers$/.test(name));
+    const controlArchive = run('dpkg-deb', ['-e', path, controlDir]);
+    const controlFiles =
+      controlArchive.status === 0 ? walk(controlDir).map((e) => e.path) : null;
+    const scripts = (controlFiles ?? []).filter((name) =>
+      /^(pre|post)(inst|rm)$|^config$|^triggers$/.test(name),
+    );
     check(
-      scripts.length === 0,
+      controlFiles !== null && controlFiles.includes('control'),
+      'deb: its control archive unpacks',
+      controlArchive.stderr,
+    );
+    check(
+      controlFiles !== null && scripts.length === 0,
       'deb: it has no maintainer script',
-      scripts.join(', '),
+      controlFiles === null
+        ? 'the control archive was not read'
+        : scripts.join(', '),
     );
     // Everything it installs is root's.
-    const listing = run('dpkg-deb', ['-c', path])
-      .stdout.split('\n')
-      .filter(Boolean);
+    const contents = run('dpkg-deb', ['-c', path]);
+    const listing = contents.stdout.split('\n').filter(Boolean);
     const foreign = listing.filter((line) => !/^\S+\s+root\/root\s/.test(line));
     check(
-      foreign.length === 0,
+      contents.status === 0 && listing.length > 0 && foreign.length === 0,
       'deb: every installed file belongs to root',
-      `${foreign.length} entries`,
+      contents.status === 0
+        ? `${foreign.length} entries`
+        : 'the listing was not read',
     );
     // The root of the package is a system directory: 0755, not a private temporary one.
     check(

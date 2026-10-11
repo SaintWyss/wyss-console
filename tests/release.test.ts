@@ -496,7 +496,7 @@ function makeRelease(
   );
   return out;
 }
-function verify(dir: string) {
+function verify(dir: string, path = process.env.PATH) {
   const result = spawnSync(
     process.execPath,
     [
@@ -506,7 +506,7 @@ function verify(dir: string) {
       '--source-root',
       join(dir, '..', 'source'),
     ],
-    { encoding: 'utf8', env: { PATH: process.env.PATH } },
+    { encoding: 'utf8', env: { PATH: path } },
   );
   return {
     status: result.status,
@@ -559,6 +559,52 @@ it.skipIf(!dpkg)(
       // Whatever it finds, it does not print the credential.
       expect(result.out, wrong).not.toContain(fake.github);
     }
+  },
+  120_000,
+);
+
+it.skipIf(!dpkg)(
+  'does not take a .deb it could not read for one that is clean',
+  () => {
+    // A dpkg-deb in front of the real one that fails one kind of read of the package.
+    const real = spawnSync('sh', ['-c', 'command -v dpkg-deb'], {
+      encoding: 'utf8',
+    }).stdout.trim();
+    const failing = (option: string) => {
+      const bin = join(scratch, `bin${option}`);
+      mkdirSync(bin);
+      writeFileSync(
+        join(bin, 'dpkg-deb'),
+        `#!/bin/sh\nif [ "$1" = "${option}" ]; then echo simulated >&2; exit 2; fi\nexec ${real} "$@"\n`,
+        { mode: 0o755 },
+      );
+      return `${bin}:${process.env.PATH}`;
+    };
+    // The package has a maintainer script; its control archive cannot be unpacked. No
+    // script was seen, and none is vouched for.
+    const script = makeRelease('script');
+    const control = verify(script, failing('-e'));
+    expect(control.status).toBe(1);
+    expect(control.out).not.toMatch(/^ok\s+deb: it has no maintainer script/m);
+    expect(control.failures.join('\n')).toMatch(
+      /deb: its control archive unpacks[^\n]*\nFAIL\s+deb: it has no maintainer script: the control archive was not read/,
+    );
+    // A clean package whose listing or fields cannot be read is not passed either.
+    rmSync(scratch, { recursive: true, force: true });
+    mkdirSync(scratch);
+    const clean = makeRelease('none');
+    const listing = verify(clean, failing('-c'));
+    expect(listing.status).toBe(1);
+    expect(listing.failures.join('\n')).toMatch(
+      /deb: every installed file belongs to root: the listing was not read/,
+    );
+    const fields = verify(clean, failing('-f'));
+    expect(fields.status).toBe(1);
+    expect(fields.failures.join('\n')).toMatch(
+      /deb: its control fields can be read/,
+    );
+    // With the real dpkg-deb, the same clean package passes.
+    expect(verify(clean).failures).toEqual([]);
   },
   120_000,
 );
