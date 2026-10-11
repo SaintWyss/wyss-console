@@ -35,6 +35,7 @@ import {
   payloadFor,
   permissionProblems,
   revisionProblems,
+  scanCheckout,
   secretsIn,
   sha256File,
   sha256Of,
@@ -496,35 +497,26 @@ function finish() {
  * The tracked files of a checkout: no credential file by name and no credential-shaped
  * content in any of them, historical documents included. There is no exception: a file
  * that holds something that looks like a credential is changed, not excused.
+ *
+ * What is scanned is what Git records (the committed tree and the index, read from Git's
+ * objects) and what is on disk for each tracked path. A tracked file that is missing from
+ * the working tree, is not the kind of entry Git records, or cannot be read is a failure,
+ * never a file that was skipped: it is still scanned as it was committed.
  * @param {string} where
  */
 function scanRepo(where) {
-  const listing = run('git', ['ls-files', '-z'], {
-    cwd: where,
-    encoding: 'utf8',
-  });
-  const names = listing.stdout.split('\0').filter(Boolean);
-  const entries = names
-    .map((path) => {
-      const absolute = join(where, path);
-      const stat = existsSync(absolute) ? statSync(absolute) : null;
-      return stat?.isFile()
-        ? /** @type {import('./release-lib.mjs').Entry} */ ({
-            path,
-            absolute,
-            type: 'file',
-            mode: stat.mode & 0o7777,
-            size: stat.size,
-          })
-        : null;
-    })
-    .filter((e) => e !== null);
-  check(entries.length > 0, 'the checkout has tracked files to scan');
+  const scan = scanCheckout(where);
+  check(scan.paths.length > 0, 'the checkout has tracked files to scan');
+  check(
+    scan.problems.length === 0,
+    'every tracked file was read, from Git and from the working tree',
+    scan.problems.map((p) => `${p.path} (${p.problem})`).join(', '),
+  );
   // Names that only a credential has. A fixture directory or a source file is a normal
   // thing to track; these are not. `.npmrc` is a normal tracked file (this project's
   // holds two settings); what could make it a credential is a token in it, which the
   // content scan below looks for.
-  const tracked = forbiddenPaths(entries).filter(
+  const tracked = forbiddenPaths(scan.paths.map((path) => ({ path }))).filter(
     (f) =>
       !/(^|\/)\.npmrc$/.test(f.path) &&
       /environment|provider credentials|private key|package manager|database|credentials file/.test(
@@ -536,10 +528,9 @@ function scanRepo(where) {
     'no credential file is tracked',
     tracked.map((f) => `${f.path} (${f.kind})`).join(', '),
   );
-  const secrets = secretsIn(entries);
   check(
-    secrets.length === 0,
-    `no credential in any of the ${entries.length} tracked files`,
-    secrets.map((s) => `${s.path} (${s.kind})`).join(', '),
+    scan.secrets.length === 0,
+    `no credential in any of the ${scan.paths.length} tracked files`,
+    scan.secrets.map((s) => `${s.path} (${s.kind})`).join(', '),
   );
 }

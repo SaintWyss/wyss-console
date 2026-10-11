@@ -34,6 +34,7 @@ import {
   revisionProblems,
   runtimeDigestField,
   runtimeIsPinned,
+  scanCheckout,
   secretsIn,
   sourceProblems,
 } from '../scripts/release-lib.mjs';
@@ -582,25 +583,35 @@ it('refuses to package a dirty tree, before it fetches or builds anything', () =
 
 // ---------------------------------------------------------------- the secret scan
 
-/** A repository holding `files`, scanned the way `npm run release:verify` scans the checkout. */
-function scanOf(files: Record<string, string>) {
+/** Runs git in `repo` with an identity of its own. */
+function gitIn(repo: string, ...args: string[]) {
+  return spawnSync(
+    'git',
+    ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args],
+    { cwd: repo, encoding: 'utf8' },
+  );
+}
+
+/** A repository holding `files` (committed), scanned the way `release:verify` scans the checkout. */
+function scanOf(
+  files: Record<string, string | Buffer>,
+  after: (repo: string) => void = () => {},
+  args: string[] = ['--repo-only'],
+) {
   const repo = join(scratch, `repo-${Math.random().toString(16).slice(2)}`);
   mkdirSync(repo, { recursive: true });
   for (const [path, content] of Object.entries(files)) {
     mkdirSync(dirname(join(repo, path)), { recursive: true });
     writeFileSync(join(repo, path), content);
   }
-  spawnSync('git', ['init', '-q'], { cwd: repo });
-  spawnSync('git', ['add', '-A'], { cwd: repo });
+  gitIn(repo, 'init', '-q');
+  gitIn(repo, 'add', '-A');
+  gitIn(repo, 'commit', '-q', '-m', 'files');
+  after(repo);
   const result = spawnSync(
     process.execPath,
-    [
-      join(root, 'scripts/release-verify.mjs'),
-      '--repo-only',
-      '--repo-root',
-      repo,
-    ],
-    { encoding: 'utf8', env: { PATH: process.env.PATH } },
+    [join(root, 'scripts/release-verify.mjs'), ...args, '--repo-root', repo],
+    { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 60_000 },
   );
   return { status: result.status, out: result.stdout };
 }
@@ -687,6 +698,176 @@ it('accepts the redaction that replaced the canary, and ordinary prose about key
   });
   expect(result.out).not.toMatch(/^FAIL/m);
   expect(result.status).toBe(0);
+});
+
+// A committed credential has to be found whatever the working tree of the checkout says:
+// the scan reads what Git records, and a tracked path that is not on disk as Git records
+// it is a failure of its own, never a file that is skipped.
+it('finds a committed credential whose file is gone from the working tree', () => {
+  const secret = real.github;
+  const result = scanOf(
+    { 'README.md': 'hello\n', 'docs/leak.txt': `token=${secret}\n` },
+    (repo) => rmSync(join(repo, 'docs/leak.txt')),
+  );
+  expect(result.status).toBe(1);
+  expect(result.out).toMatch(
+    /FAIL\s+every tracked file was read.*docs\/leak\.txt \(tracked but missing from the working tree\)/,
+  );
+  expect(result.out).toMatch(
+    /FAIL\s+no credential in any of the 2 tracked files: docs\/leak\.txt \(GitHub token\)/,
+  );
+  expect(result.out).not.toContain(secret);
+});
+
+it('finds a committed credential that the working tree replaced, hid or emptied', () => {
+  const files = { 'README.md': 'hello\n', 'leak.txt': `token=${real.aws}\n` };
+  const replacements: Record<string, (repo: string) => void> = {
+    'clean content': (repo) => writeFileSync(join(repo, 'leak.txt'), 'clean\n'),
+    'a directory': (repo) => {
+      rmSync(join(repo, 'leak.txt'));
+      mkdirSync(join(repo, 'leak.txt'));
+    },
+    'a link': (repo) => {
+      rmSync(join(repo, 'leak.txt'));
+      symlinkSync('README.md', join(repo, 'leak.txt'));
+    },
+    // Opening a FIFO would wait for a writer forever: it is judged, never read.
+    'a fifo': (repo) => {
+      rmSync(join(repo, 'leak.txt'));
+      expect(spawnSync('mkfifo', [join(repo, 'leak.txt')]).status).toBe(0);
+    },
+    'a staged deletion': (repo) => gitIn(repo, 'rm', '-q', 'leak.txt'),
+    'an untracked copy': (repo) =>
+      gitIn(repo, 'rm', '-q', '--cached', 'leak.txt'),
+  };
+  for (const [what, replace] of Object.entries(replacements)) {
+    const result = scanOf(files, replace);
+    expect(result.status, what).toBe(1);
+    expect(result.out, what).toMatch(
+      /FAIL\s+no credential in any of the \d+ tracked files: leak\.txt \(AWS access key id\)/,
+    );
+  }
+});
+
+it('finds a credential that is only staged, and one that is only on disk', () => {
+  // Staged, never committed, and then deleted from the disk: the index's blob is read.
+  const staged = scanOf({ 'README.md': 'hello\n' }, (repo) => {
+    writeFileSync(join(repo, 'new.txt'), `x ${real.openai}\n`);
+    gitIn(repo, 'add', 'new.txt');
+    rmSync(join(repo, 'new.txt'));
+  });
+  expect(staged.status).toBe(1);
+  expect(staged.out).toMatch(/new\.txt \(OpenAI-style API key\)/);
+  // Committed clean, changed on disk: the working tree is scanned too.
+  const onDisk = scanOf({ 'README.md': 'hello\n' }, (repo) =>
+    writeFileSync(join(repo, 'README.md'), `x ${real.openai}\n`),
+  );
+  expect(onDisk.status).toBe(1);
+  expect(onDisk.out).toMatch(/README\.md \(OpenAI-style API key\)/);
+});
+
+it('finds a credential inside committed binary content that is gone from the disk', () => {
+  const binary = Buffer.concat([
+    Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0, 0, 0, 0xff, 0xfe]),
+    Buffer.from(real.anthropic, 'latin1'),
+    Buffer.from([0, 0, 0x90, 0x90, 0]),
+  ]);
+  const result = scanOf({ 'README.md': 'hi\n', 'bin/tool': binary }, (repo) =>
+    rmSync(join(repo, 'bin/tool')),
+  );
+  expect(result.status).toBe(1);
+  expect(result.out).toMatch(/bin\/tool \(Anthropic-style API key\)/);
+});
+
+it('fails closed when there is nothing it can vouch for', () => {
+  // No commit to scan.
+  const repo = join(scratch, 'uncommitted');
+  mkdirSync(repo);
+  writeFileSync(join(repo, 'a.txt'), 'a\n');
+  gitIn(repo, 'init', '-q');
+  gitIn(repo, 'add', '-A');
+  const verify = (where: string) =>
+    spawnSync(
+      process.execPath,
+      [
+        join(root, 'scripts/release-verify.mjs'),
+        '--repo-only',
+        '--repo-root',
+        where,
+      ],
+      { encoding: 'utf8', env: { PATH: process.env.PATH } },
+    );
+  let result = verify(repo);
+  expect(result.status).toBe(1);
+  expect(result.stdout).toMatch(/HEAD \(there is no commit to scan\)/);
+  // Not a repository at all.
+  const plain = join(scratch, 'plain');
+  mkdirSync(plain);
+  writeFileSync(join(plain, 'a.txt'), `x ${real.github}\n`);
+  result = verify(plain);
+  expect(result.status).toBe(1);
+  // A submodule's content is not in this repository's objects: it is not scanned, so it
+  // cannot pass.
+  const sub = scanOf({ 'README.md': 'hi\n' }, (where) => {
+    const head = gitIn(where, 'rev-parse', 'HEAD').stdout.trim();
+    gitIn(
+      where,
+      'update-index',
+      '--add',
+      '--cacheinfo',
+      `160000,${head},vendor/sub`,
+    );
+    mkdirSync(join(where, 'vendor/sub'), { recursive: true });
+  });
+  expect(sub.status).toBe(1);
+  expect(sub.out).toMatch(
+    /vendor\/sub \(a submodule, whose content is not scanned\)/,
+  );
+});
+
+it('reports a committed file too large to scan, rather than passing it', () => {
+  const repo = join(scratch, 'large');
+  mkdirSync(repo);
+  writeFileSync(join(repo, 'big.bin'), Buffer.alloc(4096, 0x61));
+  writeFileSync(join(repo, 'small.txt'), 'small\n');
+  gitIn(repo, 'init', '-q');
+  gitIn(repo, 'add', '-A');
+  gitIn(repo, 'commit', '-q', '-m', 'x');
+  rmSync(join(repo, 'big.bin'));
+  const scan = scanCheckout(repo, { maxBytes: 1024 });
+  expect(scan.paths).toEqual(['big.bin', 'small.txt']);
+  expect(scan.secrets).toEqual([
+    { path: 'big.bin', kind: 'file too large to scan' },
+  ]);
+  expect(scan.problems).toEqual([
+    { path: 'big.bin', problem: 'tracked but missing from the working tree' },
+  ]);
+  // The same checkout, complete and within the limit, is clean.
+  writeFileSync(join(repo, 'big.bin'), Buffer.alloc(4096, 0x61));
+  expect(scanCheckout(repo)).toEqual({
+    paths: ['big.bin', 'small.txt'],
+    secrets: [],
+    problems: [],
+  });
+});
+
+it('applies the same checkout scan in a full verification with --repo', () => {
+  // An artifacts directory with nothing in it: the artifact checks fail on their own, and
+  // the scan of the checkout still has to run and say what it found.
+  const artifacts = join(scratch, 'artifacts');
+  mkdirSync(artifacts);
+  writeFileSync(join(artifacts, 'release-manifest.json'), '{}');
+  writeFileSync(join(artifacts, 'SHA256SUMS'), '');
+  const result = scanOf(
+    { 'README.md': 'hello\n', 'leak.txt': `token=${real.github}\n` },
+    (repo) => rmSync(join(repo, 'leak.txt')),
+    ['--repo', '--artifacts', artifacts],
+  );
+  expect(result.status).toBe(1);
+  expect(result.out).toMatch(/FAIL\s+every tracked file was read.*leak\.txt/);
+  expect(result.out).toMatch(
+    /FAIL\s+no credential in any of the 2 tracked files: leak\.txt \(GitHub token\)/,
+  );
 });
 
 // ---------------------------------------------------------------- reviewed library keys

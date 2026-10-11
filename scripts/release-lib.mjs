@@ -4,6 +4,7 @@
 //
 // Nothing here prints a secret: a finding names a file and a kind, never the bytes that
 // matched.
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, readlinkSync } from 'node:fs';
 import { join, posix, sep } from 'node:path';
@@ -115,7 +116,7 @@ export const FORBIDDEN_PATHS = [
 ];
 
 /**
- * @param {readonly Entry[]} entries
+ * @param {readonly { path: string }[]} entries
  * @returns {{ path: string, kind: string }[]}
  */
 export function forbiddenPaths(entries) {
@@ -240,6 +241,30 @@ function anchored(bytes, anchor, pattern, maxHits) {
 }
 
 /**
+ * The kinds of credential-shaped content in `bytes`, and the kinds whose scan reached its
+ * limit (reported as findings too: what lies after the last place looked at was not read).
+ * Binary or text, the same: a credential embedded in an executable is as bad. The bytes
+ * are searched for the fixed words each shape starts with and only the bytes around them
+ * are matched, so a package of hundreds of megabytes takes seconds.
+ * @param {Buffer} bytes
+ * @param {number} [maxHits]
+ * @returns {string[]}
+ */
+export function secretKindsIn(bytes, maxHits = MAX_HITS) {
+  /** @type {string[]} */
+  const kinds = [];
+  for (const { kind, pattern, anchors } of SECRET_PATTERNS) {
+    const results = anchors.map((anchor) =>
+      anchored(bytes, anchor, pattern, maxHits),
+    );
+    if (results.includes('found')) kinds.push(kind);
+    else if (results.includes('exhausted'))
+      kinds.push(`${kind} (scan limit reached)`);
+  }
+  return kinds;
+}
+
+/**
  * Credential-shaped content in the files of a package or a checkout. A file that cannot be
  * scanned (too large, or too many places to look at) is reported as such: it fails the
  * release like a credential does.
@@ -258,20 +283,241 @@ export function secretsIn(entries, limits = {}) {
       found.push({ path: entry.path, kind: 'file too large to scan' });
       continue;
     }
-    // Binary or text, the same: a credential embedded in an executable is as bad. The
-    // file is searched for the fixed words each shape starts with and only the bytes
-    // around them are matched, so a package of hundreds of megabytes takes seconds.
-    const bytes = readFileSync(entry.absolute);
-    for (const { kind, pattern, anchors } of SECRET_PATTERNS) {
-      const results = anchors.map((anchor) =>
-        anchored(bytes, anchor, pattern, maxHits),
-      );
-      if (results.includes('found')) found.push({ path: entry.path, kind });
-      else if (results.includes('exhausted'))
-        found.push({ path: entry.path, kind: `${kind} (scan limit reached)` });
-    }
+    for (const kind of secretKindsIn(readFileSync(entry.absolute), maxHits))
+      found.push({ path: entry.path, kind });
   }
   return found;
+}
+
+/**
+ * @param {string} where
+ * @param {string[]} args
+ * @param {Buffer} [input]
+ */
+function git(where, args, input) {
+  return spawnSync('git', ['-C', where, ...args], {
+    input,
+    maxBuffer: 2 * MAX_SCAN,
+  });
+}
+
+/** @param {Buffer} out NUL-separated records, as `-z` writes them */
+const records = (out) =>
+  out
+    .toString('utf8')
+    .split('\0')
+    .filter((r) => r !== '');
+
+/**
+ * Git's own record of what a checkout tracks, read from its objects: every entry of the
+ * committed tree (`HEAD`) and of the index. Whatever cannot be listed is a problem.
+ * @param {string} where
+ */
+function trackedRecords(where) {
+  /** @type {{ path: string, mode: string, type: string, oid: string }[]} */
+  const found = [];
+  /** @type {{ path: string, problem: string }[]} */
+  const problems = [];
+  const head = git(where, ['rev-parse', '--verify', '-q', 'HEAD^{commit}']);
+  if (head.status !== 0)
+    problems.push({ path: 'HEAD', problem: 'there is no commit to scan' });
+  else {
+    const tree = git(where, ['ls-tree', '-r', '-z', '--full-tree', 'HEAD']);
+    if (tree.status !== 0)
+      problems.push({
+        path: 'HEAD',
+        problem: 'the committed tree cannot be listed',
+      });
+    else
+      for (const record of records(tree.stdout)) {
+        const m = /^(\d{6}) (\w+) ([0-9a-f]{40,64})\t(.+)$/s.exec(record);
+        if (m)
+          found.push({
+            mode: /** @type {string} */ (m[1]),
+            type: /** @type {string} */ (m[2]),
+            oid: /** @type {string} */ (m[3]),
+            path: /** @type {string} */ (m[4]),
+          });
+        else
+          problems.push({ path: 'HEAD', problem: 'an entry cannot be read' });
+      }
+  }
+  const index = git(where, ['ls-files', '-s', '-z']);
+  if (index.status !== 0)
+    problems.push({ path: 'index', problem: 'the index cannot be listed' });
+  else
+    for (const record of records(index.stdout)) {
+      const m = /^(\d{6}) ([0-9a-f]{40,64}) ([0-3])\t(.+)$/s.exec(record);
+      if (!m) {
+        problems.push({ path: 'index', problem: 'an entry cannot be read' });
+        continue;
+      }
+      const [, mode, oid, stage, path] = /** @type {string[]} */ (m);
+      if (stage !== '0')
+        problems.push({ path, problem: 'unmerged in the index' });
+      found.push({
+        mode,
+        oid,
+        path,
+        type: mode === '160000' ? 'commit' : 'blob',
+      });
+    }
+  return { found, problems };
+}
+
+/**
+ * The content of each object, read from Git's store (`git cat-file --batch`), never from
+ * the working tree. An object larger than `maxBytes` is sized and not read.
+ * @param {string} where
+ * @param {readonly string[]} oids
+ * @param {number} maxBytes
+ * @returns {Map<string, { size: number, bytes?: Buffer }>} only the objects that could be read
+ */
+function blobContents(where, oids, maxBytes) {
+  /** @type {Map<string, { size: number, bytes?: Buffer }>} */
+  const out = new Map();
+  if (oids.length === 0) return out;
+  /** @param {string[]} args @param {readonly string[]} ask */
+  const batch = (args, ask) => {
+    const result = git(where, args, Buffer.from(`${ask.join('\n')}\n`));
+    return result.status === 0 ? /** @type {Buffer} */ (result.stdout) : null;
+  };
+  /** @type {string[]} */
+  const small = [];
+  const sizes = batch(['cat-file', '--batch-check'], oids);
+  if (sizes === null) return out;
+  for (const line of sizes.toString('utf8').split('\n')) {
+    const m = /^([0-9a-f]{40,64}) blob (\d+)$/.exec(line);
+    if (!m) continue;
+    const [oid, size] = [/** @type {string} */ (m[1]), Number(m[2])];
+    if (size > maxBytes) out.set(oid, { size });
+    else small.push(oid);
+  }
+  const content = small.length ? batch(['cat-file', '--batch'], small) : null;
+  if (content === null) return out;
+  // `<oid> blob <size>\n<content>\n`, once per object asked for, in order.
+  let at = 0;
+  for (const oid of small) {
+    /** @type {number} */
+    const eol = content.indexOf(0x0a, at);
+    if (eol === -1) break;
+    const m = /^([0-9a-f]{40,64}) blob (\d+)$/.exec(
+      content.toString('utf8', at, eol),
+    );
+    const size = Number(m?.[2]);
+    const end = eol + 1 + size;
+    if (!m || m[1] !== oid || end >= content.length || content[end] !== 0x0a)
+      break;
+    out.set(oid, { size, bytes: content.subarray(eol + 1, end) });
+    at = end + 1;
+  }
+  return out;
+}
+
+/**
+ * The credential scan of a checkout. Two things, kept apart:
+ *
+ * - **What Git records**: every file of the committed tree and of the index is read from
+ *   Git's objects and scanned. A file that was deleted, replaced or hidden in the working
+ *   tree is still scanned as it was committed.
+ * - **What is on disk**: every tracked path has to be in the working tree as the kind of
+ *   entry Git records (a regular file, or a link, never followed), and a regular file is
+ *   scanned as it is there too.
+ *
+ * Whatever cannot be listed, read or scanned is a problem: the scan fails closed. There is
+ * no exception by path or by kind.
+ * @param {string} where
+ * @param {{ maxBytes?: number, maxHits?: number }} [limits]
+ * @returns {{ paths: string[], secrets: { path: string, kind: string }[], problems: { path: string, problem: string }[] }}
+ */
+export function scanCheckout(where, limits = {}) {
+  const maxBytes = limits.maxBytes ?? MAX_SCAN;
+  const maxHits = limits.maxHits ?? MAX_HITS;
+  const { found, problems } = trackedRecords(where);
+  /** @type {Map<string, { path: string, kind: string }>} */
+  const secrets = new Map();
+  /** @param {string} path @param {string} kind */
+  const secret = (path, kind) =>
+    secrets.set(`${path}\0${kind}`, { path, kind });
+
+  const blobs = found.filter((r) => r.type === 'blob');
+  const contents = blobContents(
+    where,
+    [...new Set(blobs.map((r) => r.oid))],
+    maxBytes,
+  );
+  for (const record of found) {
+    if (record.type !== 'blob') {
+      problems.push({
+        path: record.path,
+        problem: `a ${record.type === 'commit' ? 'submodule' : record.type}, whose content is not scanned`,
+      });
+      continue;
+    }
+    const blob = contents.get(record.oid);
+    if (blob === undefined)
+      problems.push({
+        path: record.path,
+        problem: 'its committed content cannot be read',
+      });
+    else if (blob.bytes === undefined)
+      secret(record.path, 'file too large to scan');
+    else
+      for (const kind of secretKindsIn(blob.bytes, maxHits))
+        secret(record.path, kind);
+  }
+
+  // The index's mode wins over the commit's: it is what the working tree is meant to hold.
+  /** @type {Map<string, string>} */
+  const modes = new Map();
+  for (const r of found) if (r.type === 'blob') modes.set(r.path, r.mode);
+  for (const [path, mode] of modes) {
+    const absolute = join(where, ...path.split('/'));
+    /** @type {import('node:fs').Stats} */
+    let stat;
+    try {
+      stat = lstatSync(absolute);
+    } catch {
+      problems.push({
+        path,
+        problem: 'tracked but missing from the working tree',
+      });
+      continue;
+    }
+    if (mode === '120000') {
+      if (!stat.isSymbolicLink())
+        problems.push({
+          path,
+          problem: 'tracked as a link and not one on disk',
+        });
+      continue;
+    }
+    if (!stat.isFile()) {
+      problems.push({
+        path,
+        problem: 'tracked as a file and not a regular file on disk',
+      });
+      continue;
+    }
+    if (stat.size > maxBytes) {
+      secret(path, 'file too large to scan');
+      continue;
+    }
+    /** @type {Buffer} */
+    let bytes;
+    try {
+      bytes = readFileSync(absolute);
+    } catch {
+      problems.push({ path, problem: 'unreadable in the working tree' });
+      continue;
+    }
+    for (const kind of secretKindsIn(bytes, maxHits)) secret(path, kind);
+  }
+  return {
+    paths: [...new Set(found.map((r) => r.path))].sort(),
+    secrets: [...secrets.values()],
+    problems,
+  };
 }
 
 /**
