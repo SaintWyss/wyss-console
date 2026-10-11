@@ -28,10 +28,13 @@ import {
   transformed,
 } from '../scripts/appimage-tools.mjs';
 import {
+  buildHostReferences,
   onlyReviewedKeyBlocks,
   privateKeyBlocks,
   revisionProblems,
+  runtimeDigestField,
   runtimeIsPinned,
+  secretsIn,
   sourceProblems,
 } from '../scripts/release-lib.mjs';
 
@@ -742,26 +745,190 @@ it('excuses a private key in a library only by the content of that exact key', (
   chmodSync(scratch, 0o700);
 });
 
-it('takes a runtime for the pinned one only if it differs in nothing but its digest field', () => {
-  const pinned = Buffer.alloc(4096, 7);
+/**
+ * A small ELF64 little-endian file shaped like an AppImage runtime: code, then the
+ * `.digest_md5` section (16 bytes) with `.upd_info` right behind it, then the section names
+ * and the section header table.
+ */
+function elfRuntime(
+  options: { sections?: string[]; digestSize?: number } = {},
+) {
+  const names = options.sections ?? ['.text', '.digest_md5', '.upd_info'];
+  const sizes: Record<string, number> = {
+    '.text': 2048,
+    '.digest_md5': options.digestSize ?? 16,
+    '.upd_info': 64,
+  };
+  const body: Record<string, number> = {};
+  let at = 64;
+  for (const name of names) {
+    body[name] = at;
+    at += sizes[name] ?? 32;
+  }
+  const strings = Buffer.from(`\0${['.shstrtab', ...names].join('\0')}\0`);
+  const stringsAt = at;
+  const tableAt = Math.ceil((stringsAt + strings.length) / 8) * 8;
+  const count = names.length + 2;
+  const file = Buffer.alloc(tableAt + count * 64, 0xaa);
+  file.fill(0, 0, 64);
+  file.writeUInt32BE(0x7f454c46, 0);
+  file[4] = 2;
+  file[5] = 1;
+  file.writeBigUInt64LE(BigInt(tableAt), 0x28);
+  file.writeUInt16LE(64, 0x3a);
+  file.writeUInt16LE(count, 0x3c);
+  file.writeUInt16LE(count - 1, 0x3e);
+  strings.copy(file, stringsAt);
+  file.fill(0, tableAt);
+  const header = (
+    index: number,
+    nameAt: number,
+    offset: number,
+    size: number,
+  ) => {
+    const entry = tableAt + index * 64;
+    file.writeUInt32LE(nameAt, entry);
+    file.writeBigUInt64LE(BigInt(offset), entry + 0x18);
+    file.writeBigUInt64LE(BigInt(size), entry + 0x20);
+  };
+  let nameAt = 1 + '.shstrtab'.length + 1;
+  names.forEach((name, i) => {
+    header(i + 1, nameAt, body[name], sizes[name] ?? 32);
+    nameAt += name.length + 1;
+  });
+  header(count - 1, 1, stringsAt, strings.length);
+  return { file, field: body['.digest_md5'], after: body['.upd_info'] };
+}
+
+it('takes a runtime for the pinned one only if it differs in nothing but its .digest_md5 section', () => {
+  const { file: pinned, field, after } = elfRuntime();
+  expect(runtimeIsPinned(Buffer.from(pinned), pinned)).toBe(true);
+  // appimagetool writes the 16 bytes of the MD5 of the image into that one section.
   const made = Buffer.from(pinned);
+  for (let i = 0; i < 16; i += 1) made[field + i] ^= 0xff;
   expect(runtimeIsPinned(made, pinned)).toBe(true);
-  // appimagetool writes the 16 bytes of the MD5 of the image into one field.
-  for (let i = 1000; i < 1016; i += 1) made[i] = i & 0xff;
-  expect(runtimeIsPinned(made, pinned)).toBe(true);
-  // Anything else: a byte elsewhere, a second field, a longer or shorter file.
-  const other = Buffer.from(made);
-  other[3000] = 9;
-  expect(runtimeIsPinned(other, pinned)).toBe(false);
-  const spread = Buffer.from(pinned);
-  spread[1000] = 1;
-  spread[1016] = 1;
-  expect(runtimeIsPinned(spread, pinned)).toBe(false);
+  const one = Buffer.from(pinned);
+  one[field + 7] ^= 1;
+  expect(runtimeIsPinned(one, pinned)).toBe(true);
+  // Nothing else, wherever it is: sixteen bytes of code are not the digest field.
+  const code = Buffer.from(pinned);
+  for (let i = 0; i < 16; i += 1) code[100 + i] ^= 0xff;
+  expect(runtimeIsPinned(code, pinned)).toBe(false);
+  // The byte on either side of the field, and a window that straddles its edge.
+  const next = Buffer.from(pinned);
+  next[after] ^= 1;
+  expect(runtimeIsPinned(next, pinned)).toBe(false);
+  const before = Buffer.from(pinned);
+  before[field - 1] ^= 1;
+  expect(runtimeIsPinned(before, pinned)).toBe(false);
+  const straddle = Buffer.from(pinned);
+  for (let i = 8; i < 24; i += 1) straddle[field + i] ^= 1;
+  expect(runtimeIsPinned(straddle, pinned)).toBe(false);
+  // The field changed and one more byte anywhere else.
+  const both = Buffer.from(made);
+  both[pinned.length - 1] ^= 1;
+  expect(runtimeIsPinned(both, pinned)).toBe(false);
+  // A different length is a different file.
   expect(runtimeIsPinned(pinned.subarray(1), pinned)).toBe(false);
   expect(
     runtimeIsPinned(Buffer.concat([pinned, Buffer.from([0])]), pinned),
   ).toBe(false);
-  expect(runtimeIsPinned(Buffer.alloc(4096, 8), pinned)).toBe(false);
+});
+
+it('pins nothing when the pinned runtime does not say where its digest field is', () => {
+  expect(runtimeDigestField(elfRuntime().file)).toEqual({
+    offset: elfRuntime().field,
+    size: 16,
+  });
+  const refused = (pinned: Buffer) =>
+    runtimeIsPinned(Buffer.from(pinned), pinned);
+  // Not an ELF, or not an ELF64 little-endian one.
+  expect(refused(Buffer.alloc(4096, 7))).toBe(false);
+  const big = Buffer.from(elfRuntime().file);
+  big[5] = 2;
+  expect(refused(big)).toBe(false);
+  const narrow = Buffer.from(elfRuntime().file);
+  narrow[4] = 1;
+  expect(refused(narrow)).toBe(false);
+  // No such section, one of the wrong size, or the same name twice.
+  expect(refused(elfRuntime({ sections: ['.text', '.upd_info'] }).file)).toBe(
+    false,
+  );
+  expect(refused(elfRuntime({ digestSize: 15 }).file)).toBe(false);
+  expect(
+    refused(
+      elfRuntime({ sections: ['.text', '.digest_md5', '.digest_md5'] }).file,
+    ),
+  ).toBe(false);
+  // A header table that does not fit in the file, or a section that points outside it.
+  const cut = elfRuntime().file;
+  expect(refused(cut.subarray(0, cut.length - 1))).toBe(false);
+  expect(refused(cut.subarray(0, 40))).toBe(false);
+  const outside = Buffer.from(elfRuntime().file);
+  const entry = outside.readUInt32LE(0x28) + 2 * 64;
+  outside.writeBigUInt64LE(BigInt(outside.length - 8), entry + 0x18);
+  expect(refused(outside)).toBe(false);
+});
+
+it('fails closed when it cannot read all of a file, instead of calling it clean', () => {
+  // Assembled here so that this file is not itself a credential-shaped string.
+  const credential = [
+    'registry http://deploy',
+    ':hunter22secret',
+    '@registry.example.com/\n',
+  ].join('');
+  const entry = (name: string, text: string) => {
+    const absolute = join(scratch, name);
+    writeFileSync(absolute, text);
+    return {
+      type: 'file' as const,
+      path: name,
+      absolute,
+      size: text.length,
+      mode: 0o644,
+    };
+  };
+  // Found when it is the first thing in the file...
+  expect(secretsIn([entry('first.bin', credential)])).toEqual([
+    { path: 'first.bin', kind: 'credentials in a URL' },
+  ]);
+  // ...and found behind any number of earlier places that look like the start of one.
+  const filler = 'see https://example.com/x\n'.repeat(60_000);
+  const buried = entry('buried.bin', filler + credential);
+  expect(secretsIn([buried])).toEqual([
+    { path: 'buried.bin', kind: 'credentials in a URL' },
+  ]);
+  // Past the most places it will look at, the file is reported, never passed.
+  expect(secretsIn([buried], { maxHits: 100 })).toEqual([
+    { path: 'buried.bin', kind: 'credentials in a URL (scan limit reached)' },
+  ]);
+  // A file too large to read is reported by both scans.
+  expect(secretsIn([entry('huge.bin', 'x')], { maxBytes: 0 })).toEqual([
+    { path: 'huge.bin', kind: 'file too large to scan' },
+  ]);
+  expect(
+    buildHostReferences([entry('huge.bin', 'x')], ['/home/builder'], 0),
+  ).toEqual([{ path: 'huge.bin', needle: '(file too large to scan)' }]);
+  expect(secretsIn([entry('clean.bin', 'nothing here')])).toEqual([]);
+});
+
+it('does not say the bundler had no network, or that the product has no authority or agent UI', () => {
+  const read = (file: string) => readFileSync(join(root, file), 'utf8');
+  const documents = [
+    'README.md',
+    'docs/release/RELEASE.md',
+    'docs/adr/0026-settings-and-release-closure.md',
+    'scripts/package.mjs',
+    'scripts/appimage-tools.mjs',
+  ].map(read);
+  for (const text of documents) {
+    expect(text).not.toMatch(/bundler (then )?(runs|ran) with no network/i);
+    expect(text).not.toMatch(/then bundles with no network/i);
+    expect(text).not.toMatch(/no way out/i);
+  }
+  const readme = read('README.md');
+  expect(readme).not.toContain('No agent SDK, authority or agent UI');
+  expect(readme).not.toContain('Codex is not usable through the Console UI');
 });
 
 it('refuses to package with a tool table that names a floating tool, before it fetches anything', () => {

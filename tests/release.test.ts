@@ -461,7 +461,7 @@ function makeRelease(
       source_tree: 'clean',
       platform: 'linux-x86_64',
       authority_sha256: pin,
-      network_during_bundling: 'none',
+      network_during_bundling: 'proxies-unreachable',
       appimage_tooling: {
         downloaded: toolsConfig.tools.map(
           (t: Record<string, string>, i: number) => ({

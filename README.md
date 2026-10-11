@@ -147,7 +147,8 @@ authority by the same rule everywhere: from its own real executable, never from 
 and only if its SHA-256 is the pinned one. It needs a clean committed tree, `dpkg-deb`,
 `mksquashfs`, and network access to GitHub's release downloads the first time, to fetch
 the AppImage build tools pinned in `scripts/appimage-tools.json` (each checked against a
-committed SHA-256 before it runs; the bundler then runs with no network). The artifacts are
+committed SHA-256 before it runs; the bundler then runs with every proxy unreachable and
+Cargo offline, and the tools are hashed again afterwards). The artifacts are
 of the commit they were built from, and say so in their untracked manifest. See
 [ADR 0026](docs/adr/0026-settings-and-release-closure.md).
 
@@ -193,15 +194,19 @@ version/compatibility evidence, observed managed-session state, models and safe
 errors. Shared synthetic JSON fixtures prove classification and semantic round-trip
 parity. They do not claim installed-runtime compatibility. See ADR 0008 and
 [official runtime-surface research](docs/research/agent-runtime-surfaces-2026-10-06.md).
-No agent SDK, authority or agent UI is connected. Existing local
-terminal behavior is unchanged; managed-agent execution requires external authority.
+These contracts are the vocabulary the later layers share (the authority, ADR 0011, and the
+window's managed views, ADRs 0019–0024); the adapter layer itself embeds no agent SDK.
+Existing local terminal behavior is unchanged; managed-agent execution requires the
+external authority.
 
 ## Codex protocol boundary
 
 An offline Rust codec validates and normalizes a bounded subset of Codex App Server
 messages using schema-derived synthetic fixtures. It includes initialization ordering,
 thread/turn/item lifecycle, approvals and model catalogs. Shared common projections
-are checked in Rust and TypeScript. Codex is not usable through the Console UI. See ADR 0009 for codec limits.
+are checked in Rust and TypeScript. The codec itself starts nothing; the window reaches
+Codex only through the authority's managed sessions ([Managed sessions](#managed-sessions)).
+See ADR 0009 for codec limits.
 
 ## Read-only Codex compatibility probe
 
@@ -306,8 +311,10 @@ Svelte  ->  Tauri desktop  ->  shared ControlClient  ->  Unix socket  ->  wyss-c
 ```
 
 `wyss-control` stays the only authority. The desktop makes no authorization or security
-decision, never opens the authority's database and never starts, stops or configures
-the authority or its runtime. The requests this link sends are `authority/hello`,
+decision, never opens the authority's database and, through this link, never starts,
+stops or configures the authority or its runtime. (Two separate, narrower doors exist: a
+packaged desktop installs the authority and asks the user's service manager to start it,
+ADR 0025; and activating a session asks the authority to start a runtime, ADR 0021.) The requests this link sends are `authority/hello`,
 `authority/status`, `runtime/status`, `audit/read` and `audit/watch`. Session requests
 go over separate short-lived connections ([Managed sessions](#managed-sessions)).
 

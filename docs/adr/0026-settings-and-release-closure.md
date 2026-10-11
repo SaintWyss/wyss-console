@@ -244,6 +244,7 @@ tool directory of the bundler (private, 0700)
       (zero the AppImage magic bytes, so it runs without FUSE) -> verify the SHA-256 of what
       will run -> written executable to its own name, flushed, renamed into place -> verified again
 the bundler runs with every proxy variable unreachable and Cargo offline
+  (not a network namespace: a direct connection is not blocked, the re-hashing below is)
   it prints a download? the release stops.   a tool differs afterwards? the release stops
   every pinned tool, and the two scripts it wrote, are hashed again against the table
 the image is checked to begin with the pinned runtime
@@ -255,7 +256,12 @@ ourselves, on a file whose digest is pinned, means the bundler's own in-place ch
 the file as it is, so the file that is hashed before is the file that is run. The runtime:
 `appimagetool` writes the MD5 of the image it built into one 16-byte field of it. The image
 is written again here, so the pinned runtime is used byte for byte, and the bundler's copy
-must differ from it in that one field and nowhere else.
+must differ from it in that one field and nowhere else. The field is the runtime's
+`.digest_md5` ELF section, located from the section headers of the pinned runtime itself
+(exactly one, of 16 bytes, inside the file); every byte outside it, including the bytes
+next to it, has to be the pinned byte, and a pinned runtime whose field cannot be located
+pins nothing. A first version accepted any difference that fitted in a window of 16 bytes
+anywhere in the file, which would have let a patch of the runtime's code through.
 
 Not pinned, and recorded in the manifest instead: the build host's own `dpkg-deb`,
 `mksquashfs`, `patchelf` and `strip` (path, version line, SHA-256), which come from the
@@ -298,7 +304,7 @@ that rule looks (`tests/release.test.ts` reads both).
 - the manifest names the commit the source is at (`git rev-parse HEAD`), the short revision
   is its start, the desktop was compiled with that revision, and the tree was clean;
 - every build tool in the manifest is the pinned one, by version, source and digest, as it
-  ran; the table itself is pinned; the bundler ran with no network; the AppImage begins with
+  ran; the table itself is pinned; the bundler ran with every proxy unreachable and Cargo offline; the AppImage begins with
   the pinned runtime;
 - with `--repo` (or `--repo-only`): no credential file is tracked and no tracked file holds a
   credential-shaped string, historical documents included.

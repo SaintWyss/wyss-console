@@ -147,8 +147,8 @@ check(
 );
 check(manifest.source_tree === 'clean', 'the manifest says the tree was clean');
 check(
-  manifest.network_during_bundling === 'none',
-  'the manifest says the bundler ran with no network',
+  manifest.network_during_bundling === 'proxies-unreachable',
+  'the manifest says the bundler ran with every proxy unreachable and Cargo offline',
 );
 // The build tools: pinned in the repository, and the manifest says each was exactly that.
 const unpinned = configProblems(toolsConfig);

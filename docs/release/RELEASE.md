@@ -143,7 +143,9 @@ GitHub's release downloads for the first fetch of the pinned tools:
 3. makes every AppImage build tool exactly the one pinned in `scripts/appimage-tools.json`
    (`AppRun`, `linuxdeploy`, `linuxdeploy-plugin-appimage` `1-alpha-20250213-1`, the AppImage
    runtime `20251108`), each from an immutable release address and against a committed
-   SHA-256, hashed again on every use, then bundles with no network;
+   SHA-256, hashed again on every use, then bundles with every proxy variable unreachable and
+   Cargo offline (a proxy-aware download fails; a direct connection is not blocked, which is
+   why the tools are hashed again afterwards and a printed download stops the release);
 4. removes the bundler's second copy of the authority, writes both packages again, writes
    `SHA256SUMS` and `release-manifest.json`;
 5. opens what it made (`npm run release:verify`).

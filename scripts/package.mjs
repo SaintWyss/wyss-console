@@ -195,8 +195,10 @@ const sha256Md5 = (path) =>
 /**
  * The same build `desktop:build` runs, with or without the authority's digest. With
  * `bundles` it also makes those installable formats from the build it just made, and
- * then it runs with no way out: the tools it needs are already in place and verified, so
- * a download it attempts has to fail, and one that is printed stops the release.
+ * then it runs with every proxy unreachable and Cargo offline: the tools it needs are
+ * already in place and verified, so a download through a proxy fails, a download that is
+ * printed stops the release, and a tool that changed is found by hashing them afterwards.
+ * A direct connection is not blocked; that is what the hashes are for.
  * @param {Record<string, string>} extra
  * @param {string[]} [bundles]
  * @returns {Promise<string>} what the build printed
@@ -511,8 +513,11 @@ if (releasing) {
         // Every executable the AppImage build ran that is not built here: where it came
         // from, the digest it had to have, and the digest it was found to have.
         appimage_tooling: describeTools(toolsConfig, toolsDirectory),
-        // Run during bundling with no network (proxies unreachable, Cargo offline).
-        network_during_bundling: 'none',
+        // The bundler ran with every proxy variable pointing at an address nothing listens
+        // on and Cargo offline. That keeps out every client that honours them; it is not a
+        // network namespace, and a direct connection was not prevented. What is relied on is
+        // the pinned, re-hashed tool set and that nothing was printed as downloaded.
+        network_during_bundling: 'proxies-unreachable',
         // From the distribution's own packages, recorded and not pinned.
         system_tools: ['dpkg-deb', 'mksquashfs', 'patchelf', 'strip'].map(
           systemTool,

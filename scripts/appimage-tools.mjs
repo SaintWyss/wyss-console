@@ -317,9 +317,11 @@ export function downloadsIn(text) {
 }
 
 /**
- * The environment the bundler runs in: no way out. Every proxy variable names an address
- * nothing listens on and Cargo is told not to fetch, so a download that was not
- * prevented fails instead of running.
+ * The environment the bundler runs in: no proxy route. Every proxy variable names an
+ * address nothing listens on and Cargo is told not to fetch, so a download by a client that
+ * honours them fails instead of running. This does not stop a client that connects
+ * directly; the pinned tool set, hashed before and after, and the scan of the bundler's
+ * output for a download are what catch that.
  * @param {NodeJS.ProcessEnv} env
  * @returns {NodeJS.ProcessEnv}
  */

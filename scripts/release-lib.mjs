@@ -209,45 +209,67 @@ export const SECRET_PATTERNS = [
 ];
 
 /**
- * Files larger than this are not read as text. The authority and the desktop are a few
- * tens of megabytes; nothing in a package is larger than this.
+ * Files larger than this are not read as text, and are therefore reported rather than
+ * passed: a scanner that skips what it cannot read has certified nothing about it. The
+ * authority and the desktop are a few tens of megabytes; nothing in a package is larger.
  */
 const MAX_SCAN = 600 * 1024 * 1024;
 
-/** Most places one anchor is looked at in one file. */
-const MAX_HITS = 50_000;
+/**
+ * Most places one anchor is looked at in one file. It bounds the work, and reaching it is
+ * a finding, not a clean result: what lies after the last place looked at was not read.
+ */
+const MAX_HITS = 5_000_000;
 /**
  * @param {Buffer} bytes
  * @param {string} anchor
  * @param {RegExp} pattern
+ * @param {number} maxHits
+ * @returns {'found' | 'clear' | 'exhausted'}
  */
-function anchored(bytes, anchor, pattern) {
+function anchored(bytes, anchor, pattern, maxHits) {
   const needle = Buffer.from(anchor, 'latin1');
   let at = bytes.indexOf(needle);
-  for (let hits = 0; at !== -1 && hits < MAX_HITS; hits++) {
+  for (let hits = 0; at !== -1; hits++) {
+    if (hits >= maxHits) return 'exhausted';
     const window = bytes.toString('latin1', Math.max(0, at - 12), at + 400);
-    if (pattern.test(window)) return true;
+    if (pattern.test(window)) return 'found';
     at = bytes.indexOf(needle, at + needle.length);
   }
-  return false;
+  return 'clear';
 }
 
 /**
+ * Credential-shaped content in the files of a package or a checkout. A file that cannot be
+ * scanned (too large, or too many places to look at) is reported as such: it fails the
+ * release like a credential does.
  * @param {readonly Entry[]} entries
+ * @param {{ maxBytes?: number, maxHits?: number }} [limits]
  * @returns {{ path: string, kind: string }[]}
  */
-export function secretsIn(entries) {
+export function secretsIn(entries, limits = {}) {
+  const maxBytes = limits.maxBytes ?? MAX_SCAN;
+  const maxHits = limits.maxHits ?? MAX_HITS;
   /** @type {{ path: string, kind: string }[]} */
   const found = [];
   for (const entry of entries) {
-    if (entry.type !== 'file' || entry.size > MAX_SCAN) continue;
+    if (entry.type !== 'file') continue;
+    if (entry.size > maxBytes) {
+      found.push({ path: entry.path, kind: 'file too large to scan' });
+      continue;
+    }
     // Binary or text, the same: a credential embedded in an executable is as bad. The
     // file is searched for the fixed words each shape starts with and only the bytes
     // around them are matched, so a package of hundreds of megabytes takes seconds.
     const bytes = readFileSync(entry.absolute);
-    for (const { kind, pattern, anchors } of SECRET_PATTERNS)
-      if (anchors.some((anchor) => anchored(bytes, anchor, pattern)))
-        found.push({ path: entry.path, kind });
+    for (const { kind, pattern, anchors } of SECRET_PATTERNS) {
+      const results = anchors.map((anchor) =>
+        anchored(bytes, anchor, pattern, maxHits),
+      );
+      if (results.includes('found')) found.push({ path: entry.path, kind });
+      else if (results.includes('exhausted'))
+        found.push({ path: entry.path, kind: `${kind} (scan limit reached)` });
+    }
   }
   return found;
 }
@@ -257,13 +279,18 @@ export function secretsIn(entries) {
  * works only where it was built is not a package.
  * @param {readonly Entry[]} entries
  * @param {readonly string[]} needles absolute paths of the build host, longest first
+ * @param {number} [maxBytes]
  * @returns {{ path: string, needle: string }[]}
  */
-export function buildHostReferences(entries, needles) {
+export function buildHostReferences(entries, needles, maxBytes = MAX_SCAN) {
   /** @type {{ path: string, needle: string }[]} */
   const found = [];
   for (const entry of entries) {
-    if (entry.type !== 'file' || entry.size > MAX_SCAN) continue;
+    if (entry.type !== 'file') continue;
+    if (entry.size > maxBytes) {
+      found.push({ path: entry.path, needle: '(file too large to scan)' });
+      continue;
+    }
     const bytes = readFileSync(entry.absolute);
     for (const needle of needles)
       if (bytes.includes(Buffer.from(needle)))
@@ -439,20 +466,87 @@ export function onlyReviewedKeyBlocks(path, bytes, reviewed) {
 }
 
 /**
- * Whether `made` is `pinned` with only the 16 bytes appimagetool writes into the
- * `.digest_md5` section of an AppImage runtime (the MD5 of the image it was building)
- * changed. Anything else that differs means the runtime is not the pinned one.
+ * Where the `.digest_md5` section of an AppImage runtime is: the 16 bytes appimagetool
+ * fills with the MD5 of the image it built. Read from the ELF section headers of the
+ * runtime itself, and refused (null) unless the runtime is a little-endian ELF64 that has
+ * exactly one such section, of 16 bytes, inside the file.
+ * @param {Buffer} runtime
+ * @returns {{ offset: number, size: number } | null}
+ */
+export function runtimeDigestField(runtime) {
+  const u16 = (/** @type {number} */ at) => runtime.readUInt16LE(at);
+  const u32 = (/** @type {number} */ at) => runtime.readUInt32LE(at);
+  const u64 = (/** @type {number} */ at) => {
+    const value = runtime.readBigUInt64LE(at);
+    return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : -1;
+  };
+  // ELF64 (class 2), little endian (data 1), and a header that holds its own fields.
+  if (
+    runtime.length < 64 ||
+    runtime.readUInt32BE(0) !== 0x7f454c46 ||
+    runtime[4] !== 2 ||
+    runtime[5] !== 1
+  )
+    return null;
+  const tableAt = u64(0x28);
+  const entrySize = u16(0x3a);
+  const count = u16(0x3c);
+  const namesIndex = u16(0x3e);
+  if (tableAt < 0 || entrySize < 64 || count === 0 || namesIndex >= count)
+    return null;
+  if (tableAt + count * entrySize > runtime.length) return null;
+  /** @param {number} index */
+  const section = (index) => {
+    const at = tableAt + index * entrySize;
+    return { name: u32(at), offset: u64(at + 0x18), size: u64(at + 0x20) };
+  };
+  const names = section(namesIndex);
+  if (
+    names.offset < 0 ||
+    names.size < 0 ||
+    names.offset + names.size > runtime.length
+  )
+    return null;
+  const nameOf = (/** @type {number} */ at) => {
+    if (at >= names.size) return null;
+    const from = names.offset + at;
+    const end = runtime.indexOf(0, from);
+    return end === -1 || end > names.offset + names.size
+      ? null
+      : runtime.toString('latin1', from, end);
+  };
+  /** @type {{ offset: number, size: number }[]} */
+  const found = [];
+  for (let i = 0; i < count; i += 1) {
+    const candidate = section(i);
+    if (nameOf(candidate.name) !== '.digest_md5') continue;
+    if (
+      candidate.offset < 0 ||
+      candidate.size !== 16 ||
+      candidate.offset + candidate.size > runtime.length
+    )
+      return null;
+    found.push({ offset: candidate.offset, size: candidate.size });
+  }
+  return found.length === 1 ? found[0] : null;
+}
+
+/**
+ * Whether `made` is `pinned` with, at most, its `.digest_md5` section changed: the 16
+ * bytes appimagetool writes there (the MD5 of the image it was building). Where that
+ * section is comes from the pinned runtime's own section headers; every byte outside it,
+ * including those that touch it, has to be the pinned byte. A pinned runtime whose field
+ * cannot be located pins nothing.
  * @param {Buffer} made
  * @param {Buffer} pinned
  */
 export function runtimeIsPinned(made, pinned) {
   if (made.length !== pinned.length) return false;
-  let first = -1;
-  let last = -1;
-  for (let i = 0; i < made.length; i += 1) {
-    if (made[i] === pinned[i]) continue;
-    if (first === -1) first = i;
-    last = i;
-  }
-  return first === -1 || last - first < 16;
+  const field = runtimeDigestField(pinned);
+  if (field === null) return false;
+  const end = field.offset + field.size;
+  return (
+    made.subarray(0, field.offset).equals(pinned.subarray(0, field.offset)) &&
+    made.subarray(end).equals(pinned.subarray(end))
+  );
 }
