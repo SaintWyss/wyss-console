@@ -558,16 +558,28 @@ it('has nothing that changes anything, and asks nothing once disposed', async ()
   expect(vi.getTimerCount()).toBe(0);
 });
 
+// A number as the runtime's locale (LANG) writes it: the clock and the day are written in
+// that locale, and its digits are not always 0-9 (Arabic-Indic in ar-EG, for one).
+const digits = (value: number) =>
+  new Intl.NumberFormat(undefined, {
+    minimumIntegerDigits: 2,
+    useGrouping: false,
+  }).format(value);
+
 it('says when an event was recorded to the second, and on which day when not today', () => {
   const at = '2026-10-09T10:02:07Z';
   const local = new Date(at);
   // Several events share a minute: the second is part of the time shown.
-  expect(eventClock(at)).toContain(String(local.getSeconds()).padStart(2, '0'));
+  expect(eventClock(at)).toContain(digits(local.getSeconds()));
   expect(eventClock(at)).not.toBe(eventClock('2026-10-09T10:02:08Z'));
   // The day is said only when it is another one, and the year only when it is another.
   expect(eventDay(at, local.getTime() + 60_000)).toBe('');
   const nextDay = eventDay(at, local.getTime() + 36 * 3_600_000);
-  expect(nextDay).toContain(String(local.getDate()));
+  // The day of the month in the locale's own calendar and digits (fa-IR's is not Gregorian).
+  expect(nextDay).toContain(
+    new Intl.DateTimeFormat(undefined, { day: 'numeric' }).format(local),
+  );
+  // The year is appended as a plain number, not by the locale's formatter.
   expect(nextDay).not.toContain(String(local.getFullYear()));
   expect(eventDay(at, local.getTime() + 400 * 86_400_000)).toContain(
     String(local.getFullYear()),
@@ -578,24 +590,34 @@ it('says when an event was recorded to the second, and on which day when not tod
 });
 
 it('writes the time of an event as the preference says, in local time', () => {
-  const at = '2026-10-09T13:05:07Z';
-  const local = new Date(at);
-  const hour24 = String(local.getHours()).padStart(2, '0');
-  const twelve = String(local.getHours() % 12 || 12);
+  // 13:47:29 on the reader's own clock, whatever its time zone: hour, minute and second
+  // have no digit in common with each other or with the 12-hour hour.
+  const local = new Date(2026, 9, 9, 13, 47, 29);
+  const at = local.toISOString();
+  // The locale is the runtime's (LANG): nothing here assumes English. What a day period
+  // and a digit look like is asked of the same locale data the clock uses, so `p. m.`
+  // (es-AR), `午後` (ja-JP) and Arabic-Indic digits are each what they are.
+  const period = new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    hour12: true,
+  })
+    .formatToParts(local)
+    .find((part) => part.type === 'dayPeriod')?.value;
+  expect(period).toBeTruthy();
   const h24 = eventClock(at, 'h24');
   const h12 = eventClock(at, 'h12');
-  // 24-hour has no day period and a two-digit hour; 12-hour has one.
-  expect(h24).toMatch(new RegExp(`^${hour24}\\D`));
-  expect(h24).not.toMatch(/[AP]\.?M/i);
-  expect(h12).toMatch(/[AP]\.?M/i);
-  expect(h12).toMatch(new RegExp(`^0?${twelve}\\D`));
+  // 24-hour says 13 and has no day period; 12-hour says 1 and has one.
+  expect(h24).toContain(digits(13));
+  expect(h24).not.toContain(period);
+  expect(h12).toContain(digits(1));
+  expect(h12).not.toContain(digits(13));
+  expect(h12).toContain(period);
   // The system's own writing is what it was before the preference existed.
   expect(eventClock(at)).toBe(eventClock(at, 'system'));
   // The preference changes how the time reads, never which time it is.
   for (const format of ['system', 'h12', 'h24'] as const) {
-    expect(eventClock(at, format)).toContain(
-      String(local.getSeconds()).padStart(2, '0'),
-    );
+    expect(eventClock(at, format)).toContain(digits(47));
+    expect(eventClock(at, format)).toContain(digits(29));
     expect(eventClock('nonsense', format)).toBe('nonsense');
   }
 });
