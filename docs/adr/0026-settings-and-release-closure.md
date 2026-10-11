@@ -383,15 +383,47 @@ has not happened. No tag was created and history was not touched.
 
 Two limits of the build host are recorded rather than hidden. Its `bubblewrap` is 0.9.0
 and the Local Tools sandbox needs 0.11 or newer (it is looked for at `/usr/bin/bwrap`, which
-was not replaced), and it has no user service manager. Forty tests of the Rust suite
-fail for that reason; the same forty fail on a clean `origin/main`, and the 569 that pass
-include every test this phase added. The packaged desktop was started under Xvfb from
-the extracted `.deb` and AppImage with an isolated home, and stayed up; no authority could
-be started without a service manager. None of this stands in for the local acceptance.
+was not replaced), and it was not booted with systemd, so no `systemd --user` can run. Forty
+tests of the Rust suite fail for those two reasons (33 and 7, each one named in
+[`RELEASE.md`](../release/RELEASE.md)); the 570 that pass include every test this phase
+added. The packaged desktop was started under Xvfb from the extracted `.deb` and AppImage
+with an isolated home, and stayed up; no authority could be started without a service
+manager. None of this stands in for the local acceptance.
 
 The cloud did not run Codex: nothing in this phase touches runtime launching or the
 provider protocol, so a paid provider run would have repeated 3G's evidence and shown
 nothing new.
+
+## Findings of the release build
+
+Building and running the candidate found these, each reproduced first, fixed minimally and
+held by a test that fails without the fix:
+
+- **The pinned-runtime check was a window, not a field.** It accepted any difference that
+  fitted in 16 bytes anywhere in the runtime: sixteen patched bytes of its code, or a window
+  across the end of `.digest_md5` and the start of `.upd_info`. It now allows exactly the
+  `.digest_md5` section, found in the pinned runtime's own ELF section headers.
+- **The credential scan failed open.** A file larger than its read limit was skipped, and a
+  file with more than 50,000 places to look at stopped being read, both reporting clean. Both
+  are findings now, in the package scan and in the build-host scan.
+- **"No network" was not what the bundler had.** It has no proxy route and Cargo offline,
+  which stops clients that honour them, not a direct connection. The manifest says
+  `proxies-unreachable`; what covers the rest is the pinned tool set hashed again afterwards.
+- **Retry was offered and did nothing.** The authority lifecycle published a failed attempt,
+  with Retry on, a few instructions before the attempt's thread let go of its turn. The turn
+  is now released in the same step, under the view's lock, that publishes how the attempt
+  ended. Two tests that raced the same window, or assumed the view is a log, were made to say
+  what they mean; a terminal test that assumed `/bin/sh` is bash (dash leaves by itself when
+  its terminal goes away) now uses bash.
+- **Settings was drawn under every other view.** Every view stays mounted and is hidden with
+  the `hidden` attribute, and each class that sets `display` needs a `[hidden]` rule that
+  undoes it; Settings had none. Nothing in jsdom could show it, because jsdom does not apply
+  the stylesheet. It was seen in the packaged window under Xvfb. A test now requires the rule
+  for every view the window hides.
+- **The `.deb`'s root directory was 0700**, the private mode of the build's temporary
+  directory. It is 0755 and the verifier checks it.
+- **The README said** there was no authority or agent UI, that Codex was unusable from the
+  window and that the desktop never starts the authority. It no longer does.
 
 ## Known residuals
 

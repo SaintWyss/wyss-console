@@ -352,6 +352,7 @@ function makeRelease(
     | 'secret-inside'
     | 'fixture'
     | 'script'
+    | 'private-root'
     | 'wrong-checksum'
     | 'signed-claim'
     | 'authority-by-path'
@@ -435,6 +436,8 @@ function makeRelease(
       .map((e) => e.absolute),
   ])
     chmodSync(directory, 0o755);
+  // The root of a package that keeps the private mode of the directory it was made in.
+  if (wrong === 'private-root') chmodSync(pkgRoot, 0o700);
   const out = join(scratch, 'release');
   mkdirSync(out);
   const name = `wyss-console_${version}_amd64.deb`;
@@ -535,6 +538,7 @@ it.skipIf(!dpkg)(
       ['secret-inside', /no credential in any file/],
       ['fixture', /no credential, fixture, source or local state by name/],
       ['script', /it has no maintainer script/],
+      ['private-root', /its root directory is 0755/],
       ['wrong-checksum', /matches SHA256SUMS/],
       ['signed-claim', /does not claim a signature/],
       ['wrong-revision', /manifest revision is the commit the source is at/],

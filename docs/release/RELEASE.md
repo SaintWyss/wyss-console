@@ -163,13 +163,50 @@ test was redacted (`sk-ant-<FAKE_TEST_SECRET>`); a credential in that file now f
 GnuTLS compiles into the `libgnutls` the AppImage carries, each listed by digest in
 `scripts/reviewed-library-keys.json`.
 
-### What the cloud could not run
+### What was run, and what could not be
 
-The Rust suite on the cloud build host has the same failing tests as a clean `origin/main`:
-tests that need `bubblewrap` 0.11 or newer (the Local Tools sandbox uses `--overlay-src`; the
-host has 0.9.0 and the code requires `/usr/bin/bwrap`) and tests that need a real
-`systemd --user` manager. They have to be run on a machine that has both. The packaged
-desktop was started under Xvfb from the extracted `.deb` and AppImage with an isolated home
-and stayed up; that is not an observation of a real desktop session, `systemd --user` or
-Codex: those are in [`LOCAL_ACCEPTANCE.md`](LOCAL_ACCEPTANCE.md), all still
-`PENDING_LOCAL_ACCEPTANCE`.
+The build host was a disposable Ubuntu 24.04 container (x86_64) with Rust 1.97.0, Node 22.22.0
+and npm 10.9.4 unchanged; the system packages added for it were `libwebkit2gtk-4.1-dev`,
+`libayatana-appindicator3-dev`, `librsvg2-dev`, `libssl-dev`, `squashfs-tools`, `patchelf` and
+`desktop-file-utils`. Run on the exact commit that was packaged:
+
+| Check                                                                   | Result                        |
+| ----------------------------------------------------------------------- | ----------------------------- |
+| `format:check`, `lint`, `typecheck`, `build`                            | pass                          |
+| `npm test` (vitest)                                                     | 32 files, 599 tests, all pass |
+| `cargo fmt --check`, `cargo check --locked`, `cargo clippy -D warnings` | pass                          |
+| `cargo test --locked --no-fail-fast`                                    | **570 pass, 40 fail** (below) |
+| `lifecycle::` unit tests, 200 runs, 8 processes at once                 | no failure                    |
+| `release:package`, then `release:verify` on the artifacts               | 75 checks, 0 failed           |
+| An independent look at the packages (below)                             | as described                  |
+
+**The 40 failures are the host, not the code.** Each one is one of two things, and none is a
+regression:
+
+- 33 need `bubblewrap` 0.11 or newer. The Local Tools sandbox uses `--overlay-src`; the
+  host's distribution has 0.9.0 (`bwrap: Unknown option --overlay-src`, and a runtime that
+  then exits before it can be attested) and the code requires `/usr/bin/bwrap`. They are 5 of
+  the isolation unit tests and 28 of the process tests for approvals, events, runtime and turns.
+- 7 need a real `systemd --user` manager (`lifecycle_process`). The host was not booted with
+  systemd, so `systemd --user` refuses to run (`the system has not been booted with systemd`).
+
+They have to be run on a machine that has both.
+
+**Looked at independently of the verifier**, on the packages that `release:package` made:
+`SHA256SUMS` checks; the `.deb` has no maintainer script, installs the desktop in `usr/bin`, the
+authority in `usr/libexec/wyss-console`, a menu entry and icons, depends on `systemd`,
+`libwebkit2gtk-4.1-0` and `libgtk-3-0` and recommends `bubblewrap`; the AppImage's first bytes
+are the pinned runtime, byte for byte; the authority in both packages has the digest the
+manifest names, and the desktop of each carries that digest; each package holds one authority.
+
+**Started under Xvfb**, from the extracted `.deb` and from the AppImage
+(`--appimage-extract-and-run`: there is no FUSE here), with an isolated home and no service
+manager: the window opens, the terminal runs a shell, and the top bar says the authority
+could not start, with the notice and Retry the interface promises. Nothing was installed or
+written outside the application's own data directory: with no manager, no authority and no
+unit are written. This is where the Settings view was seen drawn under every other view (see
+[ADR 0026](../adr/0026-settings-and-release-closure.md#findings-of-the-release-build)).
+
+None of this is an observation of a real desktop session, of `systemd --user` running the
+authority, of Codex, or of KDE. Those are in [`LOCAL_ACCEPTANCE.md`](LOCAL_ACCEPTANCE.md), all
+still `PENDING_LOCAL_ACCEPTANCE`.

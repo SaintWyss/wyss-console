@@ -8,6 +8,10 @@ them. Run them on the machine the product is for, with the artifact from `.artif
 (check it against `SHA256SUMS` first), and change a line to `PASS` or `FAIL` only after
 running it.
 
+What the cloud did observe (a window started under Xvfb from the extracted packages, with an
+isolated home and no service manager; see `RELEASE.md`) is not any of these lines and none of
+them is marked from it.
+
 Do not use a checkout, `cargo` or `npm` for any of this. If a step needs one, that is a
 finding.
 
@@ -26,7 +30,7 @@ finding.
 | 11  | Settings do not weaken anything: after step 10 a new session is still created in Inference, and the Local Tools approval of step 8 still waits. Reset preferences: the defaults return and the sessions and history stay.  | PENDING_LOCAL_ACCEPTANCE |
 | 12  | Close and reopen: the authority survived (same sessions, same history, Connected at once). Log out and in, or reboot: opening the window starts it again.                                                                  | PENDING_LOCAL_ACCEPTANCE |
 | 13  | Native KDE blur: the window is translucent and blurred under KWin; with the blur refused or off it falls back to the opaque window and stays readable.                                                                     | PENDING_LOCAL_ACCEPTANCE |
-| 14  | 960×640: every view fits, Settings scrolls and nothing is cut off.                                                                                                                                                         | PENDING_LOCAL_ACCEPTANCE |
+| 14  | 960×640: every view fits, Settings scrolls and nothing is cut off, and no view shows the content of another (Settings in particular is only drawn in Settings).                                                            | PENDING_LOCAL_ACCEPTANCE |
 | 15  | Narrow layout (about 360 px wide): the top bar, the sidebar, Settings rows and the approval card stay usable.                                                                                                              | PENDING_LOCAL_ACCEPTANCE |
 | 16  | Upgrade from a previous managed authority (an install of the Phase 3G package, or an older 0.2.x): with it **running**, launch the new version — it connects, says `update pending`, and replaces nothing.                 | PENDING_LOCAL_ACCEPTANCE |
 | 17  | Then stop the authority (`systemctl --user stop wyss-control`) and launch again: the new authority is installed and started, and the sessions and history of before are still there.                                       | PENDING_LOCAL_ACCEPTANCE |

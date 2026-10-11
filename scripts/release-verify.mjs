@@ -388,6 +388,11 @@ for (const artifact of listed) {
       'deb: every installed file belongs to root',
       `${foreign.length} entries`,
     );
+    // The root of the package is a system directory: 0755, not a private temporary one.
+    check(
+      listing.some((line) => /^drwxr-xr-x\s.*\s\.\/$/.test(line)),
+      'deb: its root directory is 0755',
+    );
     // The desktop entry the application menu uses.
     const desktopEntry = join(
       tree,

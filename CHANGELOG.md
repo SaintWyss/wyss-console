@@ -31,6 +31,16 @@ not signed. Not yet accepted on a real desktop: see `docs/release/LOCAL_ACCEPTAN
   desktop only installs an authority whose SHA-256 it was built with.
 - `SHA256SUMS` and a release manifest; a verifier that opens the packages.
 
+### Build verification
+
+- Checked on the exact commit that was packaged: 599 frontend tests, 570 Rust tests, formatting,
+  lint, typecheck and Clippy; the packages were opened and the window was started from them
+  under Xvfb. 40 Rust tests need `bubblewrap` 0.11 or newer or a real `systemd --user` and
+  could not run there. See `docs/release/RELEASE.md`.
+- Found and fixed while building it: the AppImage runtime check was wider than the one field it
+  should allow; the credential scan could pass a file it had not read; Retry could be ignored
+  right after a failure; Settings was drawn under the other views; the `.deb` root was 0700.
+
 ### Known limits
 
 - Dark theme only. One Codex runtime, in one mode, at a time. History cannot be searched

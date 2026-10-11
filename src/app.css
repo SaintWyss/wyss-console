@@ -421,7 +421,8 @@ button:focus-visible {
 .sessions-feature[hidden],
 .agent-feature[hidden],
 .approvals-feature[hidden],
-.events-feature[hidden] {
+.events-feature[hidden],
+.settings-feature[hidden] {
   display: none;
 }
 .workspace-toolbar {

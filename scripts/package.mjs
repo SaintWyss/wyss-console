@@ -126,6 +126,9 @@ function repackDeb(source, destination, epoch) {
     `Installed-Size: ${kilobytes}`,
   );
   writeFileSync(join(tree, 'DEBIAN', 'control'), control);
+  // The root of the package is a directory of the system, not of this build's private
+  // temporary directory: 0755, as every package has it (`dpkg-deb -x` applies it too).
+  chmodSync(tree, 0o755);
   // xz: readable by every dpkg that is still in use, unlike the zstd the newest default to.
   must('dpkg-deb', ['--root-owner-group', '-Zxz', '-b', tree, destination], {
     env: { ...process.env, SOURCE_DATE_EPOCH: epoch },
