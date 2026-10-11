@@ -768,6 +768,28 @@ it('finds a credential that is only staged, and one that is only on disk', () =>
   expect(onDisk.out).toMatch(/README\.md \(OpenAI-style API key\)/);
 });
 
+it('scans what a tracked link points at on disk, without following it', () => {
+  // Git stores a link as its target; changed on disk, the new target is scanned too.
+  const result = scanOf({ 'README.md': 'hello\n' }, (repo) => {
+    symlinkSync('README.md', join(repo, 'link'));
+    gitIn(repo, 'add', 'link');
+    gitIn(repo, 'commit', '-q', '-m', 'link');
+    rmSync(join(repo, 'link'));
+    symlinkSync(real.github, join(repo, 'link'));
+  });
+  expect(result.status).toBe(1);
+  expect(result.out).toMatch(/link \(GitHub token\)/);
+  expect(result.out).not.toContain(real.github);
+  // A clean link is clean.
+  const clean = scanOf({ 'README.md': 'hello\n' }, (repo) => {
+    symlinkSync('README.md', join(repo, 'link'));
+    gitIn(repo, 'add', 'link');
+    gitIn(repo, 'commit', '-q', '-m', 'link');
+  });
+  expect(clean.out).not.toMatch(/^FAIL/m);
+  expect(clean.status).toBe(0);
+});
+
 it('finds a credential inside committed binary content that is gone from the disk', () => {
   const binary = Buffer.concat([
     Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0, 0, 0, 0xff, 0xfe]),

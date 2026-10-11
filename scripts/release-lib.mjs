@@ -485,11 +485,23 @@ export function scanCheckout(where, limits = {}) {
       continue;
     }
     if (mode === '120000') {
-      if (!stat.isSymbolicLink())
+      if (!stat.isSymbolicLink()) {
         problems.push({
           path,
           problem: 'tracked as a link and not one on disk',
         });
+        continue;
+      }
+      // A link's content, for Git, is its target: that is scanned, the link never followed.
+      /** @type {Buffer} */
+      let target;
+      try {
+        target = readlinkSync(absolute, { encoding: 'buffer' });
+      } catch {
+        problems.push({ path, problem: 'unreadable in the working tree' });
+        continue;
+      }
+      for (const kind of secretKindsIn(target, maxHits)) secret(path, kind);
       continue;
     }
     if (!stat.isFile()) {
