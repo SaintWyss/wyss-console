@@ -1093,6 +1093,52 @@ it('fails closed when it cannot read all of a file, instead of calling it clean'
   expect(secretsIn([entry('clean.bin', 'nothing here')])).toEqual([]);
 });
 
+it('finds the paths of any build machine, not only of the one verifying', () => {
+  const program = (text: string) => {
+    const path = join(scratch, `p-${Math.random().toString(16).slice(2)}`);
+    writeFileSync(
+      path,
+      Buffer.concat([Buffer.from([0x7f, 0x45, 0]), Buffer.from(text)]),
+    );
+    return [
+      {
+        path: 'usr/bin/wyss-console',
+        absolute: path,
+        type: 'file' as const,
+        mode: 0o755,
+        size: text.length + 3,
+      },
+    ];
+  };
+  const kinds = (text: string) =>
+    buildHostReferences(program(text), ['/somewhere/else']).map(
+      (h) => h.needle,
+    );
+  expect(
+    kinds('at /home/alice/src/wyss-console/src-tauri/src/main.rs'),
+  ).toEqual(['a home directory']);
+  expect(kinds('\0/root/.cache/x')).toEqual(["root's home directory"]);
+  expect(kinds('/opt/ci/.cargo/registry/src/index/x.rs')).toEqual([
+    'a Cargo home',
+  ]);
+  expect(kinds('/opt/ci/.rustup/toolchains/stable/lib')).toEqual([
+    'a rustup toolchain',
+  ]);
+  expect(kinds('/ci/src-tauri/target/release/build/x-1/out')).toEqual([
+    'a Cargo target directory',
+  ]);
+  expect(
+    kinds('/ci/target/x86_64-unknown-linux-gnu/release/deps/x.rlib'),
+  ).toEqual(['a Cargo target directory']);
+  // What a release build writes instead, and what the toolchain itself carries, is fine.
+  expect(
+    kinds(
+      '/build/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1/src/lib.rs\0' +
+        '/rustc/2d8144b7/library/std/src/panicking.rs\0src/main.rs\0/usr/lib/x\0/proc/self/exe\0/chroot/x',
+    ),
+  ).toEqual([]);
+});
+
 it('does not say the bundler had no network, or that the product has no authority or agent UI', () => {
   const read = (file: string) => readFileSync(join(root, file), 'utf8');
   const documents = [

@@ -192,8 +192,12 @@ it('finds a package that names the machine or the checkout that built it', () =>
   });
   expect(buildHostReferences(entries, ['/home/builder/wyss-console'])).toEqual([
     { path: 'usr/bin/wyss-console', needle: '/home/builder/wyss-console' },
+    { path: 'usr/bin/wyss-console', needle: 'a home directory' },
   ]);
-  expect(buildHostReferences(entries, ['/home/other'])).toEqual([]);
+  // Verified on another machine, whose own paths are elsewhere: still found.
+  expect(buildHostReferences(entries, ['/home/other'])).toEqual([
+    { path: 'usr/bin/wyss-console', needle: 'a home directory' },
+  ]);
 });
 
 it('finds what another account could have replaced', () => {
@@ -360,7 +364,8 @@ function makeRelease(
     | 'no-revision-in-desktop'
     | 'tooling-mismatch'
     | 'unpinned-tooling-claim'
-    | 'duplicate-authority',
+    | 'duplicate-authority'
+    | 'build-host-path',
 ) {
   // The source this release claims to be built from: a repository with one commit.
   const source = join(scratch, 'source');
@@ -385,7 +390,12 @@ function makeRelease(
     'usr/bin/wyss-console': Buffer.from(
       wrong === 'desktop-without-pin'
         ? 'desktop'
-        : `desktop pinned to ${pin}${wrong === 'no-revision-in-desktop' ? '' : ` built at ${short}`}`,
+        : `desktop pinned to ${pin}${wrong === 'no-revision-in-desktop' ? '' : ` built at ${short}`}${
+            // Built on another machine than the one verifying, without the remapping.
+            wrong === 'build-host-path'
+              ? ' panicked at /home/builder/.cargo/registry/src/index.crates.io-1/tokio-1/src/lib.rs'
+              : ''
+          }`,
     ),
     'usr/libexec/wyss-console/wyss-control':
       wrong === 'other-authority'
@@ -549,6 +559,10 @@ it.skipIf(!dpkg)(
       ['tooling-mismatch', /was the pinned one when it ran/],
       ['unpinned-tooling-claim', /was the pinned one when it ran/],
       ['duplicate-authority', /exactly one authority in the package/],
+      [
+        'build-host-path',
+        /neither program names the checkout or the build machine: usr\/bin\/wyss-console \(a home directory\)/,
+      ],
     ];
     for (const [wrong, expected] of cases) {
       rmSync(scratch, { recursive: true, force: true });

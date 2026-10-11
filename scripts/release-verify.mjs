@@ -306,7 +306,7 @@ function checkTree(tree, label) {
   check(
     host.length === 0,
     `${label}: neither program names the checkout or the build machine`,
-    host.map((h) => h.path).join(', '),
+    host.map((h) => `${h.path} (${h.needle})`).join(', '),
   );
   const writable = permissionProblems(entries);
   check(

@@ -521,8 +521,47 @@ export function scanCheckout(where, limits = {}) {
 }
 
 /**
+ * Paths that only a build machine has, whichever machine that was: a home directory,
+ * Cargo's or rustup's own directories, a Cargo target directory. A release names the
+ * checkout and Cargo's home by fixed, made-up paths (`/build/wyss-console`, `/build/cargo`),
+ * so a program that names one of these leaks the machine that built it, or was not built
+ * the way a release is. Unlike the checkout's own path, these do not depend on where the
+ * verifier happens to run.
+ * @type {{ kind: string, pattern: RegExp, anchors: string[] }[]}
+ */
+export const BUILD_PATH_PATTERNS = [
+  {
+    kind: 'a home directory',
+    pattern: /\/(?:home|Users)\/[A-Za-z0-9._-]+\//,
+    anchors: ['/home/', '/Users/'],
+  },
+  {
+    kind: "root's home directory",
+    pattern: /(?:^|[^A-Za-z0-9._-])\/root\//,
+    anchors: ['/root/'],
+  },
+  {
+    kind: 'a Cargo home',
+    pattern: /\/\.cargo\/(?:registry|git)\//,
+    anchors: ['/.cargo/'],
+  },
+  {
+    kind: 'a rustup toolchain',
+    pattern: /\/\.rustup\/toolchains\//,
+    anchors: ['/.rustup/'],
+  },
+  {
+    kind: 'a Cargo target directory',
+    pattern:
+      /\/target\/(?:[a-z0-9_]+-[a-z0-9_]+-[a-z0-9_]+(?:-[a-z0-9_]+)?\/)?(?:release|debug)\/(?:build|deps)\//,
+    anchors: ['/target/'],
+  },
+];
+
+/**
  * Strings that tie a package to the machine or the checkout that made it. A package that
- * works only where it was built is not a package.
+ * works only where it was built is not a package. `needles` are the paths this host knows
+ * (its checkout, its scratch directory); `BUILD_PATH_PATTERNS` are those of any build host.
  * @param {readonly Entry[]} entries
  * @param {readonly string[]} needles absolute paths of the build host, longest first
  * @param {number} [maxBytes]
@@ -541,6 +580,18 @@ export function buildHostReferences(entries, needles, maxBytes = MAX_SCAN) {
     for (const needle of needles)
       if (bytes.includes(Buffer.from(needle)))
         found.push({ path: entry.path, needle });
+    for (const { kind, pattern, anchors } of BUILD_PATH_PATTERNS) {
+      const results = anchors.map((anchor) =>
+        anchored(bytes, anchor, pattern, MAX_HITS),
+      );
+      if (results.includes('found'))
+        found.push({ path: entry.path, needle: kind });
+      else if (results.includes('exhausted'))
+        found.push({
+          path: entry.path,
+          needle: `${kind} (scan limit reached)`,
+        });
+    }
   }
   return found;
 }
