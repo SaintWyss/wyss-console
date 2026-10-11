@@ -482,6 +482,32 @@ it('asks before resetting, says what it does not touch, and resets only preferen
   ).toEqual([]);
 });
 
+it('brings the reset confirmation into view and gives the safe answer the focus', async () => {
+  // jsdom lays nothing out: what is checked here is that the confirmation asks to be
+  // shown and that Cancel holds the focus. That it then fits a 960×640 window was
+  // observed in a real browser engine.
+  const scrolled: Element[] = [];
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this);
+  };
+  try {
+    const settings = new FakeDesktopSettings();
+    await show(settings);
+    (button('Reset preferences…') as HTMLButtonElement).click();
+    await flush();
+    const dialog = page().querySelector('[role="alertdialog"]')!;
+    expect(scrolled).toContain(dialog);
+    expect(document.activeElement).toBe(button('Cancel'));
+    // Enter on what has the focus resets nothing.
+    (document.activeElement as HTMLButtonElement).click();
+    await flush();
+    expect(settings.calls.map((c) => c.command)).not.toContain('reset');
+  } finally {
+    Element.prototype.scrollIntoView = original;
+  }
+});
+
 it('does not touch the authority when a preference changes', async () => {
   const settings = new FakeDesktopSettings();
   const commands = await show(settings);

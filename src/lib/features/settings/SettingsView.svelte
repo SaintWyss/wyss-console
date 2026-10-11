@@ -60,6 +60,18 @@
     lifecycle.state === 'observed' && lifecycle.view.retry,
   );
   const about = $derived(settings.view?.about ?? null);
+
+  // The confirmation replaces the button at the foot of the page and is taller than it,
+  // so at 960×640 its buttons fell below the fold. It is brought into view when it opens,
+  // and Cancel, the answer that changes nothing, has the focus.
+  let resetConfirm: HTMLDivElement | undefined = $state();
+  $effect(() => {
+    if (!visible || !settings.confirmingReset || !resetConfirm) return;
+    resetConfirm.scrollIntoView?.({ block: 'nearest' });
+    resetConfirm
+      .querySelector<HTMLButtonElement>('button[data-reset-cancel]')
+      ?.focus();
+  });
   const protocol = $derived(
     authority.state === 'observed' && authority.view.authority
       ? `Version ${authority.view.authority.protocol_version}`
@@ -350,7 +362,12 @@
     <section class="settings-section" aria-labelledby="settings-reset">
       <h3 id="settings-reset">Reset</h3>
       {#if settings.confirmingReset}
-        <div class="close-confirm" role="alertdialog" aria-labelledby="reset-q">
+        <div
+          class="close-confirm"
+          role="alertdialog"
+          aria-labelledby="reset-q"
+          bind:this={resetConfirm}
+        >
           <p id="reset-q">Reset all preferences to their defaults?</p>
           <p class="setting-hint">
             Your sessions, history, approvals, workspaces and Codex login are
@@ -366,6 +383,7 @@
             <button
               type="button"
               class="action"
+              data-reset-cancel
               onclick={() => controller.cancelReset()}>Cancel</button
             >
           </div>
