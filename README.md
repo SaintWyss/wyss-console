@@ -140,8 +140,12 @@ libexec/wyss-console/wyss-control
 share/wyss-console/package.json
 ```
 
-`release:package` also writes `.artifacts/release/` with the `.deb`, the AppImage,
-`SHA256SUMS` and `release-manifest.json`. Both formats put the two programs below their
+`release:package` also makes the `.deb`, the AppImage, `SHA256SUMS` and
+`release-manifest.json`, verifies them, and puts them in `.artifacts/release/` only if they
+verify (a refused set goes to `.artifacts/release.rejected/`). It runs only in the release
+build environment, Ubuntu 24.04 x86_64 (`scripts/build-environment.json`); on any other Linux
+host, build in `scripts/release.Containerfile` (see
+[`docs/release/RELEASE.md`](docs/release/RELEASE.md#the-release-build-environment)). Both formats put the two programs below their
 prefix exactly as above (`usr/bin`, `usr/libexec/wyss-console`), so the desktop finds its
 authority by the same rule everywhere: from its own real executable, never from `PATH`,
 and only if its SHA-256 is the pinned one. It needs a clean committed tree, `dpkg-deb`,

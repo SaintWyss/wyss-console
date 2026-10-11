@@ -1,8 +1,9 @@
 # Wyss Console 0.2.0 — release candidate
 
-Status: **code complete and validated in the cloud; local acceptance pending**
-([`LOCAL_ACCEPTANCE.md`](LOCAL_ACCEPTANCE.md)). This is a candidate, not a released
-product. Nothing here has been tagged or published; both are for the owner to do.
+Status: **code complete; built and verified in the cloud, where 40 Rust tests cannot run;
+local acceptance not started** (0 of 19 controls, [`LOCAL_ACCEPTANCE.md`](LOCAL_ACCEPTANCE.md)).
+This is a candidate, not a released product. Nothing here has been tagged or published; both
+are for the owner to do.
 
 ## What this is
 
@@ -20,8 +21,10 @@ product. Nothing here has been tagged or published; both are for the owner to do
 - The `.deb`: Debian 12 / Ubuntu 22.04 or newer (needs `libwebkit2gtk-4.1`, `libgtk-3`,
   `systemd`). It recommends `bubblewrap`, which Local Tools needs, **0.11 or newer**: it uses
   `--overlay-src`; without it Local Tools cannot become Ready.
-- The AppImage: built on Ubuntu 24.04 with that system's libraries inside it; use a system
-  at least that recent. It needs FUSE 2 to be double-clicked, or `--appimage-extract-and-run`.
+- The AppImage: built in the release build environment (Ubuntu 24.04, below) with that
+  system's libraries inside it; use a system at least that recent. It needs FUSE 2 to be
+  double-clicked (`fuse2` on Arch-based systems such as CachyOS, `libfuse2t64` on Ubuntu
+  24.04), or `--appimage-extract-and-run`.
 - Codex, installed separately, on the `PATH` the service manager gives its units (a desktop
   session imports it at login, which is where `~/.local/bin` is). It is not packaged.
 - A display. Terminals and the managed surfaces run in the window.
@@ -30,7 +33,8 @@ product. Nothing here has been tagged or published; both are for the owner to do
 
 ```sh
 sha256sum -c SHA256SUMS --ignore-missing          # in the folder you downloaded to
-sudo apt install ./wyss-console_0.2.0_amd64.deb   # or: chmod +x the .AppImage
+sudo apt install ./wyss-console_0.2.0_amd64.deb   # Debian, Ubuntu
+chmod +x wyss-console_0.2.0_amd64.AppImage        # anywhere else (CachyOS, Arch: no apt, no .deb)
 ```
 
 The packages install no service and run no script. Installing, upgrading or removing one
@@ -73,7 +77,8 @@ wyss-control`, or after Retry following a crash loop), the authority carried by 
 
 ## Removal
 
-- `sudo apt remove wyss-console` (or deleting the AppImage) removes the desktop only.
+- `sudo apt remove wyss-console` (Debian, Ubuntu), or deleting the AppImage, removes the
+  desktop only.
 - The managed authority, its unit and your data are yours and are **not** removed. To
   uninstall the authority as well:
 
@@ -135,10 +140,46 @@ manifest's commit. If they are rebuilt, they are a new candidate with new digest
 
 ## How they are built
 
-`npm run release:package`, on Linux with `dpkg-deb`, `mksquashfs` and network access to
-GitHub's release downloads for the first fetch of the pinned tools:
+### The release build environment
 
-1. refuses a working tree that is not exactly the commit;
+Release artifacts are built in **one** environment, named in
+`scripts/build-environment.json`: **Ubuntu 24.04, x86_64**. It is not a preference. The
+AppImage carries the build host's shared libraries, and the one exception of the content scan
+(below) lists, by digest, the private-key blocks of _that_ system's `libgnutls`
+(`libgnutls30t64 3.8.3-1.1ubuntu3.6`). Built on another system, the AppImage carries other
+libraries: on CachyOS the verifier found a `libgnutls.so.30` with private-key blocks that are
+not in the list, and refused it, as it should. The list is not widened for other systems.
+
+- `npm run release:package` refuses any other host (by `/etc/os-release` and `uname -m`)
+  before it fetches or builds anything. `npm run desktop:package` still works anywhere.
+- The manifest records `build_environment`: the system, the architecture, and the versions
+  of the distribution packages whose files are in or made the packages.
+- `npm run release:verify` refuses a manifest of any other environment.
+
+On any Linux host with Docker or Podman, `scripts/release.Containerfile` is that environment,
+from pinned inputs: the Ubuntu 24.04 image by digest, every distribution package from one
+moment of the Ubuntu archive (`snapshot.ubuntu.com`, `UBUNTU_SNAPSHOT`), Node and `rustup-init`
+by version and SHA-256, Rust by release. The checkout is mounted at `/build/wyss-console`:
+
+```sh
+git status --short                 # must print nothing: a release is a commit
+docker build -f scripts/release.Containerfile -t wyss-console-release scripts
+docker run --rm -v "$PWD":/build/wyss-console wyss-console-release
+ls .artifacts/release/             # only if it verified
+```
+
+(`podman` takes the same arguments.) The container needs the network for `npm ci`, Cargo's
+crates and, the first time, the pinned AppImage tools; behind a TLS-intercepting proxy, give
+the build its CA as the secret `extra-ca` and the run the same file through
+`CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS` and `CARGO_HTTP_CAINFO`.
+
+### What `release:package` does
+
+`npm run release:package`, in that environment, with `dpkg-deb`, `mksquashfs` and network
+access to GitHub's release downloads for the first fetch of the pinned tools:
+
+1. refuses a working tree that is not exactly the commit, and a host that is not the release
+   build environment;
 2. builds the authority, takes its SHA-256, builds the desktop pinned to it;
 3. makes every AppImage build tool exactly the one pinned in `scripts/appimage-tools.json`
    (`AppRun`, `linuxdeploy`, `linuxdeploy-plugin-appimage` `1-alpha-20250213-1`, the AppImage
@@ -147,13 +188,17 @@ GitHub's release downloads for the first fetch of the pinned tools:
    Cargo offline (a proxy-aware download fails; a direct connection is not blocked, which is
    why the tools are hashed again afterwards and a printed download stops the release);
 4. removes the bundler's second copy of the authority, writes both packages again, writes
-   `SHA256SUMS` and `release-manifest.json`;
-5. opens what it made (`npm run release:verify`).
+   `SHA256SUMS` and `release-manifest.json`, all in `.artifacts/release.staging/`;
+5. opens what it made (`release-verify.mjs --repo`). Only a set that verified is moved to
+   `.artifacts/release/`. A set that did not is moved to `.artifacts/release.rejected/` with a
+   `REJECTED` note, and the command fails: a refused or unfinished build is never in the
+   place a candidate is taken from. All three are removed once the checks of step 1 pass,
+   before anything is built.
 
-Toolchain of the cloud build: Rust 1.97.0, Node v22.22.0, npm 10.9.4 (`package.json` asks for
-Node 26 and npm 12; the engines are advisory and everything ran on the older ones),
-`@tauri-apps/cli` 2.12.1, target `x86_64-unknown-linux-gnu`. The manifest records the exact
-versions of the build that made it.
+Toolchain of the cloud builds: Rust 1.97.0, Node v22.22.0, npm 10.9.4 (`package.json` asks for
+Node 26 and npm 12; the engines are advisory and everything ran on the older ones; the
+container pins the same versions), `@tauri-apps/cli` 2.12.1, target `x86_64-unknown-linux-gnu`.
+The manifest records the exact versions of the build that made it.
 
 ### What the content scan allows
 
@@ -163,50 +208,87 @@ test was redacted (`sk-ant-<FAKE_TEST_SECRET>`); a credential in that file now f
 GnuTLS compiles into the `libgnutls` the AppImage carries, each listed by digest in
 `scripts/reviewed-library-keys.json`.
 
+The checkout (`--repo`, `--repo-only`) is scanned as Git records it: every file of the
+committed tree and of the index is read from Git's objects, binary content included, so a
+file that was deleted or replaced on disk is still scanned as it was committed. Every tracked
+path also has to be on disk as the kind of entry Git records, and is scanned there too. No
+commit, an unreadable object, a submodule, an unmerged entry, a tracked file missing from or
+of another kind in the working tree, or a file too large to read: each fails the scan.
+
 ### What was run, and what could not be
 
-The build host was a disposable Ubuntu 24.04 container (x86_64) with Rust 1.97.0, Node 22.22.0
-and npm 10.9.4 unchanged; the system packages added for it were `libwebkit2gtk-4.1-dev`,
-`libayatana-appindicator3-dev`, `librsvg2-dev`, `libssl-dev`, `squashfs-tools`, `patchelf` and
-`desktop-file-utils`. Run on the exact commit that was packaged:
+Three kinds of evidence, kept apart. None of them is local acceptance.
 
-| Check                                                                   | Result                        |
-| ----------------------------------------------------------------------- | ----------------------------- |
-| `format:check`, `lint`, `typecheck`, `build`                            | pass                          |
-| `npm test` (vitest)                                                     | 32 files, 599 tests, all pass |
-| `cargo fmt --check`, `cargo check --locked`, `cargo clippy -D warnings` | pass                          |
-| `cargo test --locked --no-fail-fast`                                    | **570 pass, 40 fail** (below) |
-| `lifecycle::` unit tests, 200 runs, 8 processes at once                 | no failure                    |
-| `release:package`, then `release:verify` on the artifacts               | 75 checks, 0 failed           |
-| An independent look at the packages (below)                             | as described                  |
+#### 1. This branch, in the cloud
 
-**The 40 failures are the host, not the code.** Each one is one of two things, and none is a
-regression:
+Commit `bc1c79e` of `fix/settings-release-audit-closure`, 2026-10-11, on a disposable Ubuntu
+24.04 x86_64 container with Rust 1.97.0, Node 22.22.0 and npm 10.9.4. After that commit come
+this documentation and one change, to when `release:package` clears earlier output; the
+branch's head is built and verified again, in the container, for its own candidate. The packages added to it for the build are the
+ones `scripts/release.Containerfile` installs, plus `bubblewrap` (0.9.0, Ubuntu's) and the
+`es_AR.UTF-8` and `en_US.UTF-8` locales for the tests.
 
-- 33 need `bubblewrap` 0.11 or newer. The Local Tools sandbox uses `--overlay-src`; the
-  host's distribution has 0.9.0 (`bwrap: Unknown option --overlay-src`, and a runtime that
-  then exits before it can be attested) and the code requires `/usr/bin/bwrap`. They are 5 of
-  the isolation unit tests and 28 of the process tests for approvals, events, runtime and turns.
-- 7 need a real `systemd --user` manager (`lifecycle_process`). The host was not booted with
-  systemd, so `systemd --user` refuses to run (`the system has not been booted with systemd`).
+| Check                                                                   | Result                                                     |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `format:check`, `lint`, `typecheck`, `build`                            | pass                                                       |
+| `npm test` (vitest) with `LANG=es_AR.UTF-8`                             | 32 files, 611 tests, all pass                              |
+| `npm test` (vitest) with `LANG=en_US.UTF-8`                             | 32 files, 611 tests, all pass                              |
+| `cargo fmt --check`, `cargo check --locked`, `cargo clippy -D warnings` | pass                                                       |
+| `cargo test --locked --no-fail-fast`                                    | **570 pass, 40 fail**: the same 40 as before (below)       |
+| `npm run test:pty`                                                      | 23 Rust and 10 frontend tests, all pass                    |
+| `release:package` on the host, then `release:verify --repo`             | 80 checks, 0 failed; moved to `.artifacts/release/`        |
+| Tamper controls on those artifacts (below)                              | 15 of 15 as expected: 1 accepted, 14 refused               |
+| `release:package` on Ubuntu 22.04 (a container, clean tree)             | refused before building: not the release build environment |
 
-They have to be run on a machine that has both.
+**The 40 failures are the host, not the code**, and are the same 40 as on the previous
+candidate, by test binary: 33 need `bubblewrap` 0.11 or newer (the Local Tools sandbox uses
+`--overlay-src`; Ubuntu 24.04 has 0.9.0, and the code requires `/usr/bin/bwrap`): 5 isolation
+unit tests and 28 process tests (`approvals_process` 5, `events_process` 2, `runtime_process` 20,
+`turns_process` 1); each ends with the runtime unavailable or failed. 7 need a real
+`systemd --user` (`lifecycle_process`: "the private manager did not start"). Replacing this
+host's `/usr/bin/bwrap` with a 0.11 build was not permitted in this environment, so **these 40
+were not run anywhere for this branch**; the last time they passed is in (2).
 
-**Looked at independently of the verifier**, on the packages that `release:package` made:
-`SHA256SUMS` checks; the `.deb` has no maintainer script, installs the desktop in `usr/bin`, the
-authority in `usr/libexec/wyss-console`, a menu entry and icons, depends on `systemd`,
-`libwebkit2gtk-4.1-0` and `libgtk-3-0` and recommends `bubblewrap`; the AppImage's first bytes
-are the pinned runtime, byte for byte; the authority in both packages has the digest the
-manifest names, and the desktop of each carries that digest; each package holds one authority.
+**Tamper controls.** Each copies the accepted set, changes one thing and, where a forger would,
+rewrites `SHA256SUMS` and the manifest to match; `release:verify` has to refuse it. Refused: a
+byte of the `.deb`; a `.deb` with another authority, with a maintainer script, with a credential,
+with a world-writable desktop; an AppImage with another authority, with an unreviewed private-key
+block in `libgnutls.so.30` (the CachyOS case), with a byte of its runtime changed; a manifest
+naming another revision, another build environment, another authority, a signature, a build tool
+that was not the pinned one; an artifact missing. The set as built is accepted.
 
-**Started under Xvfb**, from the extracted `.deb` and from the AppImage
-(`--appimage-extract-and-run`: there is no FUSE here), with an isolated home and no service
-manager: the window opens, the terminal runs a shell, and the top bar says the authority
-could not start, with the notice and Retry the interface promises. Nothing was installed or
-written outside the application's own data directory: with no manager, no authority and no
-unit are written. This is where the Settings view was seen drawn under every other view (see
-[ADR 0026](../adr/0026-settings-and-release-closure.md#findings-of-the-release-build)).
+The build environment was also built from `scripts/release.Containerfile` (image digest, snapshot
+`20261011T220000Z`), and the same commit packaged in it from a fresh clone: `release:package`
+passed, 80 checks, 0 failed. Its manifest records the same revision, build environment, package
+versions, toolchain and host tools as the host build. **The two builds are not bit-for-bit
+identical**: the authority has the same size and differs in LLVM's internal symbol suffixes
+(`.llvm.<hash>`) and therefore its build ID, so each build is its own candidate with its own
+digests. Making the Rust build reproducible bit for bit is not done.
 
-None of this is an observation of a real desktop session, of `systemd --user` running the
-authority, of Codex, or of KDE. Those are in [`LOCAL_ACCEPTANCE.md`](LOCAL_ACCEPTANCE.md), all
-still `PENDING_LOCAL_ACCEPTANCE`.
+Every one of these artifacts was of `bc1c79e`; `release:verify` refuses them at any later commit,
+this documentation's included. The candidate of a commit is the set `release:package` makes and
+verifies at that commit.
+
+#### 2. Earlier evidence, not repeated here
+
+- The previous cloud build (candidate `ca86b8c`, same toolchain): vitest 599 tests, all passing
+  in that container's locale; `cargo test` 570 pass and the same 40 fail; `release:verify` on
+  its artifacts reported as 75 checks, 0 failed; run as `release:package` runs it (`--repo`),
+  that version of the verifier has 76 checks (counted again here, on this branch's artifacts).
+- The independent audit of `ca86b8c`: vitest **598 pass, 1 fail under `es_AR.UTF-8`** (the clock
+  test, fixed here) and 599 pass under `en_US.UTF-8`; `cargo test` **610 pass**, the whole suite,
+  so on a host that had both `bubblewrap` 0.11 and `systemd --user`; on CachyOS,
+  `release:package` completed and `release:verify` gave **75 passed, 1 failed**
+  (`libgnutls.so.30`, unreviewed key blocks), which led to the release build environment above.
+  `main` (`a8b507e`) had 500 vitest tests, all passing.
+
+These are as reported; they were not re-run for this branch, and the counts of the verifier
+differ between versions of it (it now has more checks).
+
+#### 3. Not observed by anyone yet
+
+A real desktop session, `systemd --user` running the packaged authority, Codex, KDE, an install
+from the menu, an upgrade, an uninstall: every line of [`LOCAL_ACCEPTANCE.md`](LOCAL_ACCEPTANCE.md),
+in both environments, is `NOT RUN`. The previous candidate's window was started under Xvfb from
+its packages (no service manager: the window said the authority could not start, with Retry); that
+was not repeated here and is not acceptance either.

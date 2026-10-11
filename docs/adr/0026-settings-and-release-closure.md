@@ -1,8 +1,11 @@
 # ADR 0026: Settings and release closure
 
-Status: Accepted (the architecture and the code). The physical release is **not** accepted:
-local acceptance is pending, see [Cloud and local](#cloud-and-local-validation).
-Date: 2026-10-10
+Status: Accepted for the architecture. The code meets its acceptance rule
+([below](#acceptance-of-this-decision)) except for one gate: 40 Rust tests that need
+`bubblewrap` 0.11 and a real `systemd --user` have not been run on this branch's head (they last
+passed on `ca86b8c`, in the independent audit). The release is **not** accepted: 0 of 19 local
+acceptance controls have been run, see [Cloud and local](#cloud-and-local-validation).
+Date: 2026-10-10 (release closure revised 2026-10-11)
 
 ## Decision
 
@@ -268,6 +271,28 @@ Not pinned, and recorded in the manifest instead: the build host's own `dpkg-deb
 distribution's packages, and the shared libraries the AppImage carries from the build host.
 They are not downloaded; a build on another host will say so in its manifest.
 
+### The release build environment
+
+The AppImage carries the build host's shared libraries, so where it is built decides what it
+contains. Release artifacts are built in one environment, `scripts/build-environment.json`:
+**Ubuntu 24.04, x86_64**, the system whose `libgnutls` private-key blocks were reviewed. A build
+on CachyOS completed and was refused by the verifier, for a `libgnutls.so.30` with blocks the
+list does not have; that is the content-bound exception working, and the answer is not to
+widen it but to build where it holds. So:
+
+```text
+release:package   another host (os-release, uname -m)?      refused before anything is built
+                  manifest.build_environment                 system, architecture, package versions
+                  artifacts -> .artifacts/release.staging/   verify -> .artifacts/release/ (accepted)
+                                                                    or .artifacts/release.rejected/ + REJECTED
+release:verify    a manifest of another environment?         refused
+```
+
+`scripts/release.Containerfile` builds that environment from pinned inputs on any host with a
+container runtime: the Ubuntu 24.04 image by digest, the distribution's packages from one
+snapshot of its archive, Node and `rustup-init` by version and SHA-256, Rust by release.
+Only a set that verified is ever in `.artifacts/release/`.
+
 ### Provenance is unchanged
 
 The desktop finds its authority from its own real executable (`/proc/self/exe`, links
@@ -292,22 +317,30 @@ that rule looks (`tests/release.test.ts` reads both).
 - the manifest, `SHA256SUMS` and each artifact agree (digest, size);
 - the `.deb` has the expected control data (name, version, `Depends: systemd`, the web
   view, `Recommends: bubblewrap`), no maintainer script, everything owned by root, a valid
-  menu entry and an icon;
+  menu entry and an icon; each of these is read with `dpkg-deb`, and a read that fails is a
+  failure, never an empty (and therefore clean) answer;
 - the AppImage unpacks without FUSE or a display;
 - in both: the desktop and the authority are where the desktop looks, executable; the
   authority's digest is the manifest's pin and the desktop contains that pin; there is
   exactly one authority and one desktop;
 - no forbidden name (`.env`, `auth.json`, keys, databases, `.git`, caches, fixtures, tests,
   sources, lock files, acceptance state), no credential-shaped content in any file,
-  binaries included, neither program names the checkout or the build machine, nothing
-  writable by group or others or set-id, no link leaving the package;
+  binaries included, neither program names the checkout or a build machine (the verifier's
+  own checkout, and any home directory, `/root`, un-remapped Cargo or rustup directory or Cargo
+  target directory, wherever the build ran), nothing writable by group or others or set-id,
+  no link leaving the package;
 - the manifest names the commit the source is at (`git rev-parse HEAD`), the short revision
   is its start, the desktop was compiled with that revision, and the tree was clean;
+- the manifest says it was built in the release build environment
+  (`scripts/build-environment.json`, below);
 - every build tool in the manifest is the pinned one, by version, source and digest, as it
   ran; the table itself is pinned; the bundler ran with every proxy unreachable and Cargo offline; the AppImage begins with
   the pinned runtime;
 - with `--repo` (or `--repo-only`): no credential file is tracked and no tracked file holds a
-  credential-shaped string, historical documents included.
+  credential-shaped string, historical documents included. What is scanned is what Git
+  records (every blob of the committed tree and of the index, read from Git's objects) and
+  what is on disk for every tracked path; a tracked file missing from the working tree, of
+  another kind there, unreadable, unmerged, a submodule, or no commit at all, is a failure.
 
 Findings name a file and a kind, never the bytes. A probable live credential stops the
 release.
@@ -381,14 +414,17 @@ has not happened. No tag was created and history was not touched.
 | That the window is granted no framework permission                            | KDE/KWin native blur; 960×640 and narrow layouts by eye      |
 |                                                                               | Upgrading from a running previous authority; uninstalling    |
 
-Two limits of the build host are recorded rather than hidden. Its `bubblewrap` is 0.9.0
+Two limits of the cloud host are recorded rather than hidden. Its `bubblewrap` is 0.9.0
 and the Local Tools sandbox needs 0.11 or newer (it is looked for at `/usr/bin/bwrap`, which
 was not replaced), and it was not booted with systemd, so no `systemd --user` can run. Forty
-tests of the Rust suite fail for those two reasons (33 and 7, each one named in
+tests of the Rust suite fail there for those two reasons (33 and 7, by test binary in
 [`RELEASE.md`](../release/RELEASE.md)); the 570 that pass include every test this phase
-added. The packaged desktop was started under Xvfb from the extracted `.deb` and AppImage
-with an isolated home, and stayed up; no authority could be started without a service
-manager. None of this stands in for the local acceptance.
+added. The independent audit ran the whole suite, 610 tests, on a host that has both, and
+they passed: that was the candidate `ca86b8c`, before this closure's fixes, none of which
+touches the code those 40 tests exercise. It is not evidence for a later commit until it is
+run again there. The previous candidate's packaged desktop was started under Xvfb with an
+isolated home, and stayed up; no authority could be started without a service manager. None
+of this stands in for the local acceptance.
 
 The cloud did not run Codex: nothing in this phase touches runtime launching or the
 provider protocol, so a paid provider run would have repeated 3G's evidence and shown
@@ -425,12 +461,39 @@ held by a test that fails without the fix:
 - **The README said** there was no authority or agent UI, that Codex was unusable from the
   window and that the desktop never starts the authority. It no longer does.
 
+The independent review of that candidate found more, each reproduced here first and held by a
+test that fails without its fix:
+
+- **The checkout scan failed open.** It listed tracked paths with `git ls-files` and read each
+  one from the working tree, skipping any that was not a regular file there: a committed file
+  holding a credential, deleted on disk, let `--repo-only` pass. It now reads what Git records
+  from Git's objects, and requires every tracked path on disk.
+- **A `.deb` that could not be read passed as clean.** The exit status of `dpkg-deb -e`, `-f`
+  and `-c` was ignored, so an unreadable control archive meant "no maintainer script".
+- **The build-host check knew one host.** It looked for the verifier's own checkout path only;
+  verified anywhere else, a program naming another build machine's paths passed (an existing
+  test required that). It now also looks for any build machine's paths.
+- **The release was reproducible only by accident.** Nothing said where it had to be built,
+  and a build on CachyOS made a complete-looking set of artifacts that verification refused,
+  left where an accepted one would be. Now the environment is named, enforced, recorded and
+  buildable from pinned inputs, and a refused set is moved aside.
+- **A frontend test assumed English.** The 12-hour clock test expected `AM`/`PM`; under
+  `es_AR.UTF-8` the clock correctly says `p. m.`, and the test failed. The tests now ask the
+  locale for its day period, digits and calendar; production did not change.
+- **A development build kept naming an old commit**: `build.rs` watched `.git/HEAD`, which a
+  commit on the current branch does not change. It now watches the branch's ref too.
+- **At 960×640 the reset confirmation's buttons were below the fold.** It now scrolls into view
+  when it opens, and Cancel has the focus.
+
 ## Known residuals
 
 - **Dark theme only**; Appearance is informational.
 - **Naming**: "Wyss AI" in the window and top bar, "Wyss Console" elsewhere.
-- **Unsigned**, and the AppImage is built from a build host's libraries: it was built on
-  Ubuntu 24.04 and needs a system at least that recent. The `.deb` needs the web view
+- **Unsigned**, and the AppImage is built from a build host's libraries: it is built in the
+  release build environment, Ubuntu 24.04, and needs a system at least that recent. The
+  distribution packages are pinned by a snapshot date in the container, not by the
+  verifier: a rebuild with another snapshot is a new candidate, and a `libgnutls` whose key
+  blocks changed stops it until they are reviewed. The `.deb` needs the web view
   (`libwebkit2gtk-4.1`) and `systemd`; `bubblewrap` is recommended because Local Tools
   needs it. Codex is not packaged.
 - **The pinned tools are GitHub release assets** and are trusted as far as the digest that
@@ -440,14 +503,20 @@ held by a test that fails without the fix:
 - **Host tools and libraries are the distribution's**: recorded in the manifest, not
   pinned. A `.deb` is built by the host's `dpkg-deb`, an AppImage carries the host's
   libraries.
+- **Not reproducible bit for bit.** Two builds of one commit in the release build environment
+  (on a host and in the container) both verified, with the same inputs recorded, and differ in
+  LLVM's internal symbol suffixes; each build is its own candidate.
 - **The desktop differs per format**: Tauri patches the executable with the bundle type,
   so the two desktops have different digests. The authority is the same file in both.
 - **An AppImage's terminals** inherit the environment its launcher sets (library paths).
 - Two desktops of one user write preferences last-writer-wins.
-- Graphical execution of either package was not observed.
+- Neither package has been run on a real desktop; the only graphical run was the previous
+  candidate's, under Xvfb, without a service manager.
 
 ## Acceptance of this decision
 
 The architecture and code are accepted when every automated gate is green and the
-artifacts verify. The release is accepted when every line of
-`docs/release/LOCAL_ACCEPTANCE.md` is `PASS`, on a real machine, from the real artifact.
+artifacts verify, with the gates run on the commit in question: a gate the cloud cannot run
+(the 40 Rust tests above) is green only once it has been run, for that commit, where it can.
+The release is accepted when every line of `docs/release/LOCAL_ACCEPTANCE.md` is `PASS`, in
+each environment it applies to, from the real artifact.

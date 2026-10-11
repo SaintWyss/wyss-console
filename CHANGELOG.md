@@ -33,17 +33,28 @@ not signed. Not yet accepted on a real desktop: see `docs/release/LOCAL_ACCEPTAN
 
 ### Build verification
 
-- Checked on the exact commit that was packaged: 599 frontend tests, 570 Rust tests, formatting,
-  lint, typecheck and Clippy; the packages were opened and the window was started from them
-  under Xvfb. 40 Rust tests need `bubblewrap` 0.11 or newer or a real `systemd --user` and
-  could not run there. See `docs/release/RELEASE.md`.
+- Built in the release build environment (Ubuntu 24.04, x86_64; `scripts/build-environment.json`,
+  buildable from pinned inputs with `scripts/release.Containerfile`); `release:package` refuses
+  any other host, and only a set that verified is put in `.artifacts/release/`.
+- Checked in the cloud on this branch: 611 frontend tests under both `es_AR.UTF-8` and
+  `en_US.UTF-8`, formatting, lint, typecheck, Clippy, 570 Rust tests, the packages opened and
+  verified (80 checks) and 14 deliberately tampered copies refused. 40 Rust tests need
+  `bubblewrap` 0.11 or newer or a real `systemd --user` and could not run there; they passed in
+  the independent audit of the previous candidate. See `docs/release/RELEASE.md`.
 - Found and fixed while building it: the AppImage runtime check was wider than the one field it
   should allow; the credential scan could pass a file it had not read; Retry could be ignored
   right after a failure; Settings was drawn under the other views; the `.deb` root was 0700.
+- Found by the independent review and fixed: the checkout scan skipped a committed file that was
+  missing from the working tree; an unreadable `.deb` control archive passed as having no
+  maintainer script; the build-host check knew only the verifier's own paths; nothing named or
+  enforced the build environment, and a refused build was left where an accepted one goes; a
+  frontend test assumed an English clock; a development build could show a stale revision; the
+  reset confirmation's buttons were below the fold at 960×640.
+- Not accepted on a desktop: 0 of 19 local acceptance controls run.
 
 ### Known limits
 
 - Dark theme only. One Codex runtime, in one mode, at a time. History cannot be searched
   or exported. No light theme, no Settings for approvals, by design.
-- The AppImage was built on Ubuntu 24.04 and needs a system at least that recent.
+- The AppImage is built on Ubuntu 24.04 and needs a system at least that recent.
 - Codex is not included and has to be installed separately.
