@@ -1,8 +1,36 @@
+/// What `git` prints for `args`, trimmed, when it succeeds.
+fn git(args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    Some(String::from_utf8(output.stdout).ok()?.trim().to_owned())
+}
+
+/// Asks Cargo to run this again when the commit `HEAD` names changes. `HEAD` itself only
+/// changes when another branch is checked out (or a commit is made detached): a commit on
+/// the branch moves the branch's ref, loose or packed, so those are watched too. Paths come
+/// from Git (`--git-path`), which knows where a worktree keeps them.
+fn watch_head() {
+    let mut watched = vec![git(&["rev-parse", "--git-path", "HEAD"])];
+    if let Some(branch) = git(&["symbolic-ref", "-q", "HEAD"]) {
+        // Watched even before it exists as a loose file: its creation is a new commit.
+        watched.push(git(&["rev-parse", "--git-path", &branch]));
+        watched.push(
+            git(&["rev-parse", "--git-path", "packed-refs"])
+                .filter(|path| std::path::Path::new(path).exists()),
+        );
+    }
+    for path in watched.into_iter().flatten() {
+        println!("cargo:rerun-if-changed={path}");
+    }
+}
+
 /// A short source revision for the About section: the packaging command names it, and
 /// a checkout is asked. A tree without one has none, and says so.
 fn revision() -> Option<String> {
     println!("cargo:rerun-if-env-changed=WYSS_BUILD_REVISION");
-    println!("cargo:rerun-if-changed=../.git/HEAD");
     let valid = |text: &str| {
         (7..=40).contains(&text.len())
             && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
@@ -10,12 +38,8 @@ fn revision() -> Option<String> {
     if let Ok(named) = std::env::var("WYSS_BUILD_REVISION") {
         return valid(&named).then_some(named);
     }
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--short=12", "HEAD"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())?;
-    let text = String::from_utf8(output.stdout).ok()?.trim().to_owned();
+    watch_head();
+    let text = git(&["rev-parse", "--short=12", "HEAD"])?;
     valid(&text).then_some(text)
 }
 
