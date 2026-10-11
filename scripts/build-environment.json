@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "comment": "The one environment release artifacts are built in. The AppImage carries this system's shared libraries, and scripts/reviewed-library-keys.json lists the private-key blocks of this system's libgnutls by content: on any other system the AppImage would carry other libraries, and verification would rightly refuse them. `npm run release:package` refuses another host before it builds anything, records what it ran on in the manifest, and `release:verify` refuses a manifest of another environment. scripts/release.Containerfile builds this environment from pinned inputs on any Linux host with a container runtime. The packages below are recorded in the manifest (not pinned here): the reviewed-key list binds the one library whose content matters to its bytes.",
+  "os": { "id": "ubuntu", "version_id": "24.04" },
+  "architecture": "x86_64",
+  "recorded_packages": [
+    "libgnutls30t64",
+    "libwebkit2gtk-4.1-0",
+    "libgtk-3-0t64",
+    "libc6",
+    "dpkg",
+    "squashfs-tools",
+    "patchelf",
+    "binutils"
+  ]
+}

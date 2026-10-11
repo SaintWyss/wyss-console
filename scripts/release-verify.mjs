@@ -27,6 +27,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configProblems } from './appimage-tools.mjs';
 import {
+  buildEnvironmentProblems,
   buildHostReferences,
   escapingLinks,
   forbiddenPaths,
@@ -96,6 +97,7 @@ const repoRoot = resolve(option('--repo-root', root));
 const sourceRoot = resolve(option('--source-root', root));
 const reviewedKeys = json(join(root, 'scripts', 'reviewed-library-keys.json'));
 const toolsConfig = json(join(root, 'scripts', 'appimage-tools.json'));
+const canonical = json(join(root, 'scripts', 'build-environment.json'));
 // Only the checkout: nothing about artifacts.
 if (flag('--repo-only')) {
   scanRepo(repoRoot);
@@ -147,6 +149,17 @@ check(
   wrongRevision.join('; '),
 );
 check(manifest.source_tree === 'clean', 'the manifest says the tree was clean');
+// Built where the libraries it carries were reviewed (`build-environment.json`): on any
+// other system the same build is another product.
+const elsewhere = buildEnvironmentProblems(
+  manifest.build_environment,
+  canonical,
+);
+check(
+  elsewhere.length === 0,
+  `the artifacts were built in the release build environment (${canonical.os.id} ${canonical.os.version_id}, ${canonical.architecture})`,
+  elsewhere.join('; '),
+);
 check(
   manifest.network_during_bundling === 'proxies-unreachable',
   'the manifest says the bundler ran with every proxy unreachable and Cargo offline',

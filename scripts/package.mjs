@@ -5,8 +5,10 @@
 //   <out>/share/wyss-console/package.json
 //
 // With `--release` it also produces the installable artifacts, a `.deb` and an AppImage,
-// in `.artifacts/release/`, with `SHA256SUMS` and `release-manifest.json`, and then
-// opens them with `release-verify.mjs`. Both formats lay the two programs out below
+// with `SHA256SUMS` and `release-manifest.json`, opens them with `release-verify.mjs`,
+// and only if they verify puts them in `.artifacts/release/` (a refused set goes to
+// `.artifacts/release.rejected/`). Releases are built only in the environment of
+// `build-environment.json`. Both formats lay the two programs out below
 // their prefix exactly as above (`usr/bin`, `usr/libexec/wyss-console`), so the desktop
 // finds its authority in an installed package by the same rule it uses in this one.
 //
@@ -29,7 +31,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { arch, release as kernelRelease } from 'node:os';
+import { arch, release as kernelRelease, machine } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -41,7 +43,12 @@ import {
   offlineEnvironment,
   provisionAll,
 } from './appimage-tools.mjs';
-import { runtimeIsPinned, sourceProblems } from './release-lib.mjs';
+import {
+  buildEnvironmentProblems,
+  parseOsRelease,
+  runtimeIsPinned,
+  sourceProblems,
+} from './release-lib.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const release = join(root, 'src-tauri', 'target', 'release');
@@ -298,6 +305,36 @@ if (releasing) {
     process.exit(1);
   }
 }
+// And it is built in the one environment its libraries were reviewed for
+// (`build-environment.json`): an AppImage carries the host's libraries, so a build on
+// another system is another, unreviewed product. Refused before anything is built; a
+// directory package (`desktop:package`) can still be made anywhere.
+/** @type {{ os: { id: string, version_id: string }, architecture: string, recorded_packages: string[] }} */
+const canonical = JSON.parse(
+  readFileSync(join(root, 'scripts', 'build-environment.json'), 'utf8'),
+);
+const osRelease = (() => {
+  try {
+    return parseOsRelease(readFileSync('/etc/os-release', 'utf8'));
+  } catch {
+    return {};
+  }
+})();
+const host = {
+  os: { id: osRelease.ID ?? null, version_id: osRelease.VERSION_ID ?? null },
+  architecture: machine(),
+};
+if (releasing) {
+  const elsewhere = buildEnvironmentProblems(host, canonical);
+  if (elsewhere.length > 0) {
+    for (const problem of elsewhere) console.error(`package: ${problem}`);
+    console.error(
+      'package: release artifacts are built in scripts/build-environment.json; ' +
+        'build them in scripts/release.Containerfile (docs/release/RELEASE.md)',
+    );
+    process.exit(1);
+  }
+}
 
 /** @type {import('./appimage-tools.mjs').ToolsConfig} */
 const toolsConfig = JSON.parse(
@@ -447,8 +484,14 @@ console.log(`package: authority sha256 ${digest}`);
 if (releasing) {
   // 4. The installable artifacts, collected under clean names, with their checksums.
   const bundles = join(release, 'bundle');
-  const target = join(root, '.artifacts', 'release');
-  rmSync(target, { recursive: true, force: true });
+  // The artifacts are made in a staging directory and become `.artifacts/release/` only
+  // once they verified: what is there was accepted, and a set that was refused or never
+  // finished is never found where an accepted one is looked for.
+  const accepted = join(root, '.artifacts', 'release');
+  const rejected = join(root, '.artifacts', 'release.rejected');
+  const target = join(root, '.artifacts', 'release.staging');
+  for (const old of [accepted, rejected, target])
+    rmSync(old, { recursive: true, force: true });
   mkdirSync(target, { recursive: true, mode: 0o755 });
   const debArch =
     arch() === 'x64' ? 'amd64' : arch() === 'arm64' ? 'arm64' : arch();
@@ -525,6 +568,17 @@ if (releasing) {
         system_tools: ['dpkg-deb', 'mksquashfs', 'patchelf', 'strip'].map(
           systemTool,
         ),
+        // What it was built on: the environment of `build-environment.json` (anything
+        // else was refused before the build), and the distribution's packages whose
+        // files are in or made the artifacts.
+        build_environment: {
+          os: host.os,
+          architecture: host.architecture,
+          packages: canonical.recorded_packages.map((name) => ({
+            name,
+            version: output('dpkg-query', ['-W', '-f=${Version}', name]),
+          })),
+        },
         toolchain: {
           rustc: version_of('rustc', ['--version']),
           cargo: version_of('cargo', ['--version']),
@@ -553,14 +607,34 @@ if (releasing) {
     console.error('package: the source changed while the release was built');
     process.exit(1);
   }
-  // 5. And opened again, from the files, before anyone is told it is a release.
+  // 5. And opened again, from the files, before anyone is told it is a release. Only a
+  // set that verified is moved to `.artifacts/release/`; one that did not is moved aside,
+  // with a note saying so, and the build fails.
   const verified = spawnSync(
     process.execPath,
-    [join(root, 'scripts', 'release-verify.mjs'), '--repo'],
+    [
+      join(root, 'scripts', 'release-verify.mjs'),
+      '--repo',
+      '--artifacts',
+      target,
+    ],
     {
       cwd: root,
       stdio: 'inherit',
     },
   );
-  if (verified.status !== 0) process.exit(verified.status ?? 1);
+  if (verified.status !== 0) {
+    writeFileSync(
+      join(target, 'REJECTED'),
+      'These files failed release verification. They are not a release candidate: ' +
+        'do not install, publish or checksum them as one.\n',
+    );
+    renameSync(target, rejected);
+    console.error(
+      `package: verification failed; the artifacts were moved to ${rejected}`,
+    );
+    process.exit(verified.status || 1);
+  }
+  renameSync(target, accepted);
+  console.log(`package: verified; the release candidate is in ${accepted}`);
 }

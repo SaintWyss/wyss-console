@@ -365,7 +365,8 @@ function makeRelease(
     | 'tooling-mismatch'
     | 'unpinned-tooling-claim'
     | 'duplicate-authority'
-    | 'build-host-path',
+    | 'build-host-path'
+    | 'other-build-environment',
 ) {
   // The source this release claims to be built from: a repository with one commit.
   const source = join(scratch, 'source');
@@ -475,6 +476,18 @@ function makeRelease(
       platform: 'linux-x86_64',
       authority_sha256: pin,
       network_during_bundling: 'proxies-unreachable',
+      build_environment:
+        wrong === 'other-build-environment'
+          ? {
+              os: { id: 'cachyos', version_id: null },
+              architecture: 'x86_64',
+              packages: [],
+            }
+          : {
+              os: { id: 'ubuntu', version_id: '24.04' },
+              architecture: 'x86_64',
+              packages: [],
+            },
       appimage_tooling: {
         downloaded: toolsConfig.tools.map(
           (t: Record<string, string>, i: number) => ({
@@ -559,6 +572,10 @@ it.skipIf(!dpkg)(
       ['tooling-mismatch', /was the pinned one when it ran/],
       ['unpinned-tooling-claim', /was the pinned one when it ran/],
       ['duplicate-authority', /exactly one authority in the package/],
+      [
+        'other-build-environment',
+        /built in the release build environment \(ubuntu 24\.04, x86_64\): the operating system is cachyos/,
+      ],
       [
         'build-host-path',
         /neither program names the checkout or the build machine: usr\/bin\/wyss-console \(a home directory\)/,

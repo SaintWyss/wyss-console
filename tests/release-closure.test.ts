@@ -28,8 +28,10 @@ import {
   transformed,
 } from '../scripts/appimage-tools.mjs';
 import {
+  buildEnvironmentProblems,
   buildHostReferences,
   onlyReviewedKeyBlocks,
+  parseOsRelease,
   privateKeyBlocks,
   revisionProblems,
   runtimeDigestField,
@@ -868,6 +870,66 @@ it('applies the same checkout scan in a full verification with --repo', () => {
   expect(result.out).toMatch(
     /FAIL\s+no credential in any of the 2 tracked files: leak\.txt \(GitHub token\)/,
   );
+});
+
+// ---------------------------------------------------------------- the build environment
+
+const environment = JSON.parse(
+  readFileSync(join(root, 'scripts/build-environment.json'), 'utf8'),
+);
+
+it('names one build environment, the one the reviewed library keys come from', () => {
+  expect(environment.os).toEqual({ id: 'ubuntu', version_id: '24.04' });
+  expect(environment.architecture).toBe('x86_64');
+  expect(environment.recorded_packages).toContain('libgnutls30t64');
+  const keys = JSON.parse(
+    readFileSync(join(root, 'scripts/reviewed-library-keys.json'), 'utf8'),
+  );
+  for (const library of keys.libraries)
+    expect(library.source).toMatch(/\(Ubuntu 24\.04\)$/);
+  // The container that builds it starts from the same release, pinned by digest.
+  const recipe = readFileSync(
+    join(root, 'scripts/release.Containerfile'),
+    'utf8',
+  );
+  expect(recipe).toMatch(
+    /^FROM docker\.io\/library\/ubuntu:24\.04@sha256:[0-9a-f]{64}$/m,
+  );
+});
+
+it('refuses every host but that one, and a host it cannot name', () => {
+  const ubuntu = parseOsRelease(
+    'PRETTY_NAME="Ubuntu 24.04.5 LTS"\nNAME="Ubuntu"\nVERSION_ID="24.04"\nID=ubuntu\nID_LIKE=debian\n',
+  );
+  expect(ubuntu.ID).toBe('ubuntu');
+  expect(ubuntu.VERSION_ID).toBe('24.04');
+  const host = (
+    id: string | undefined,
+    version: string | undefined,
+    arch = 'x86_64',
+  ) => ({
+    os: { id, version_id: version },
+    architecture: arch,
+  });
+  expect(
+    buildEnvironmentProblems(host('ubuntu', '24.04'), environment),
+  ).toEqual([]);
+  const cachy = parseOsRelease(
+    'NAME="CachyOS Linux"\nID=cachyos\nID_LIKE=arch\nBUILD_ID=rolling\n',
+  );
+  for (const [what, other] of [
+    ['CachyOS', host(cachy.ID, cachy.VERSION_ID)],
+    ['Arch', host('arch', undefined)],
+    ['Ubuntu 22.04', host('ubuntu', '22.04')],
+    ['Ubuntu 26.04', host('ubuntu', '26.04')],
+    ['Debian 12', host('debian', '12')],
+    ['an arm64 Ubuntu 24.04', host('ubuntu', '24.04', 'aarch64')],
+    ['an unnamed host', host(undefined, undefined, '')],
+  ] as const)
+    expect(buildEnvironmentProblems(other, environment), what).not.toEqual([]);
+  // A manifest that does not say where it was built is not one of that environment.
+  expect(buildEnvironmentProblems(undefined, environment)).toHaveLength(2);
+  expect(buildEnvironmentProblems(null, environment)).toHaveLength(2);
 });
 
 // ---------------------------------------------------------------- reviewed library keys

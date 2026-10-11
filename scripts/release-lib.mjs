@@ -714,6 +714,49 @@ export function revisionProblems(manifest, head) {
 }
 
 /**
+ * The fields of an `os-release` file (`/etc/os-release`), values unquoted.
+ * @param {string} text
+ * @returns {Record<string, string>}
+ */
+export function parseOsRelease(text) {
+  /** @type {Record<string, string>} */
+  const fields = {};
+  for (const line of text.split('\n')) {
+    const m = /^([A-Z0-9_]+)=(?:"([^"]*)"|'([^']*)'|(\S*))\s*$/.exec(line);
+    if (m) fields[/** @type {string} */ (m[1])] = m[2] ?? m[3] ?? m[4] ?? '';
+  }
+  return fields;
+}
+
+/**
+ * Whether a host is the one release artifacts are built in (`build-environment.json`).
+ * @param {{ os?: { id?: unknown, version_id?: unknown } | null, architecture?: unknown } | null | undefined} host
+ *   what the host is: its `os-release` ID and VERSION_ID, and `uname -m`
+ * @param {{ os: { id: string, version_id: string }, architecture: string }} canonical
+ * @returns {string[]} what differs; empty means it is that environment
+ */
+export function buildEnvironmentProblems(host, canonical) {
+  const named = `${canonical.os.id} ${canonical.os.version_id} (${canonical.architecture})`;
+  /** @type {string[]} */
+  const problems = [];
+  if (
+    host?.os?.id !== canonical.os.id ||
+    host?.os?.version_id !== canonical.os.version_id
+  )
+    problems.push(
+      `the operating system is ${String(host?.os?.id ?? 'unknown')} ${String(host?.os?.version_id ?? '')}, not ${named}`.replace(
+        /\s+,/,
+        ',',
+      ),
+    );
+  if (host?.architecture !== canonical.architecture)
+    problems.push(
+      `the architecture is ${String(host?.architecture ?? 'unknown')}, not ${canonical.architecture}`,
+    );
+  return problems;
+}
+
+/**
  * The private-key blocks in `bytes`, each from its BEGIN line to its END line, and how
  * many begin without ending within a few kilobytes. A block that does not end is not
  * one that can be recognised, so it counts against the file.
