@@ -290,7 +290,18 @@ fn close_releases_handles_reaps_child_and_removes_registry_entry() {
 #[test]
 fn close_escalates_when_shell_ignores_hangup() {
     let service = TerminalService::default();
-    let terminal = shell(&service);
+    // A shell that keeps running while it ignores the hangup. `dash`, which is `/bin/sh` on
+    // Debian and Ubuntu, leaves by itself when its terminal goes away (status 2) before the
+    // escalation, so the test would be about the shell and not about closing.
+    let bash = PathBuf::from("/bin/bash");
+    let program = if bash.exists() {
+        bash
+    } else {
+        PathBuf::from("/bin/sh")
+    };
+    let terminal = service
+        .create_with_shell(request(), program, PathBuf::from("/"))
+        .unwrap();
     service
         .write(
             &terminal.terminal_id,

@@ -18,6 +18,7 @@ use nix::{
     unistd::geteuid,
 };
 use std::{
+    cell::Cell,
     os::unix::{
         fs::{FileTypeExt, MetadataExt},
         net::UnixStream,
@@ -115,10 +116,31 @@ struct Inner {
 }
 
 /// Ends an attempt even if it panics, so that Retry is never left unusable.
-struct Attempt<'a>(&'a Inner);
+///
+/// The turn is let go of by the same step that publishes how the attempt ended, under the
+/// lock of the view (`Inner::update_in`): whoever sees `Failed` and `retry` finds the turn
+/// free. Letting go only when the attempt's thread unwinds left a window in which the view
+/// offered Retry and Retry did nothing.
+struct Attempt<'a> {
+    inner: &'a Inner,
+    held: Cell<bool>,
+}
+impl<'a> Attempt<'a> {
+    fn new(inner: &'a Inner) -> Self {
+        Self {
+            inner,
+            held: Cell::new(true),
+        }
+    }
+    fn release(&self) {
+        if self.held.replace(false) {
+            self.inner.attempting.store(false, Ordering::Release);
+        }
+    }
+}
 impl Drop for Attempt<'_> {
     fn drop(&mut self) {
-        self.0.attempting.store(false, Ordering::Release);
+        self.release();
     }
 }
 
@@ -137,6 +159,11 @@ impl Inner {
         self.view.lock().unwrap_or_else(PoisonError::into_inner)
     }
     fn update(&self, change: impl FnOnce(&mut LifecycleView)) {
+        self.update_in(None, change);
+    }
+    /// Publishes a change; an attempt that ends with it lets go of its turn before the
+    /// lock is released, so that no one reads the end of an attempt while it still holds it.
+    fn update_in(&self, ending: Option<&Attempt<'_>>, change: impl FnOnce(&mut LifecycleView)) {
         let mut view = self.lock();
         let mut draft = view.clone();
         change(&mut draft);
@@ -152,6 +179,9 @@ impl Inner {
             draft.revision = view.revision + 1;
             *view = draft;
             self.changed.notify_all();
+        }
+        if let Some(attempt) = ending {
+            attempt.release();
         }
     }
     fn phase(&self, phase: Phase) {
@@ -232,11 +262,14 @@ impl Inner {
 
     /// Follows what the link says while no attempt is being made.
     fn settle(&self, state: LinkState) {
+        self.settle_in(None, state);
+    }
+    fn settle_in(&self, ending: Option<&Attempt<'_>>, state: LinkState) {
         match state {
             LinkState::Connected | LinkState::Incompatible => {
                 let (installation, service, status) = self.examine();
                 let origin = self.origin(status.as_ref());
-                self.update(|view| {
+                self.update_in(ending, |view| {
                     view.phase = if state == LinkState::Connected {
                         Phase::Ready
                     } else {
@@ -247,14 +280,17 @@ impl Inner {
                     view.diagnostics.service = service;
                 });
             }
-            LinkState::Unsafe => self.fail(Failure::SocketUnsafe),
+            LinkState::Unsafe => self.fail_in(ending, Failure::SocketUnsafe),
             LinkState::Connecting => self.phase(Phase::Checking),
             LinkState::Absent | LinkState::Stopped => (),
         }
     }
     fn fail(&self, failure: Failure) {
+        self.fail_in(None, failure);
+    }
+    fn fail_in(&self, ending: Option<&Attempt<'_>>, failure: Failure) {
         let (installation, service, _) = self.examine();
-        self.update(|view| {
+        self.update_in(ending, |view| {
             view.phase = Phase::Failed;
             view.failure = Some(failure);
             view.diagnostics.installation = installation;
@@ -264,11 +300,11 @@ impl Inner {
 
     /// One bounded attempt. The caller holds `attempting`.
     fn attempt(&self, kind: Kind) {
-        let _attempt = Attempt(self);
+        let attempt = Attempt::new(self);
         self.phase(Phase::Checking);
         match self.carry_out(kind) {
-            Ok(state) => self.settle(state),
-            Err(failure) => self.fail(failure),
+            Ok(state) => self.settle_in(Some(&attempt), state),
+            Err(failure) => self.fail_in(Some(&attempt), failure),
         }
     }
     fn carry_out(&self, kind: Kind) -> Result<LinkState, Failure> {

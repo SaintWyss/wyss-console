@@ -1299,6 +1299,37 @@ fn with_no_authority_it_installs_starts_and_is_ready_only_when_the_link_connects
 }
 
 #[test]
+fn a_retry_that_is_offered_is_never_ignored() {
+    // The view that says `retry` is the view in which Retry works: the attempt that ended
+    // in it has let go of its turn by the time anyone can see it. Pressing Retry the
+    // instant a failure is shown used to find the turn still taken and do nothing. The
+    // window is a few instructions wide, so many worlds race at once.
+    let racers: Vec<_> = (0..8)
+        .map(|_| {
+            thread::spawn(|| {
+                for _ in 0..150 {
+                    let world = World::new(
+                        LinkState::Absent,
+                        |_| Provision::Development,
+                        Ok(not_installed()),
+                    );
+                    let failed = world.failed();
+                    assert!(failed.retry, "{failed:?}");
+                    let after = world.bootstrap.retry();
+                    assert!(
+                        after.revision > failed.revision,
+                        "Retry was offered by {failed:?} and changed nothing: {after:?}"
+                    );
+                }
+            })
+        })
+        .collect();
+    for racer in racers {
+        racer.join().expect("a retry that was offered was ignored");
+    }
+}
+
+#[test]
 fn a_build_that_carries_no_authority_installs_and_starts_none() {
     let world = World::new(
         LinkState::Absent,
@@ -1454,6 +1485,9 @@ fn it_starts_the_authority_by_itself_once_and_after_that_only_retry_does() {
     world.bootstrap.retry();
     world.link.set(LinkState::Connected);
     world.ready();
+    // The attempt may publish `Ready` before the follower of the link has seen it connected;
+    // the follower only acts on an absence after a connection it saw.
+    world.quiet();
     world.bootstrap.retry();
     world.quiet();
     assert_eq!(world.manager.count("start"), 2);
@@ -1471,6 +1505,9 @@ fn it_starts_the_authority_by_itself_once_and_after_that_only_retry_does() {
         .set(Ok(unit(ActiveState::Active, UnitResult::Success)));
     world.link.set(LinkState::Connected);
     world.ready();
+    // The attempt may publish `Ready` before the follower of the link has seen it connected;
+    // the follower only acts on an absence after a connection it saw.
+    world.quiet();
     // And when the manager gave up on it, or it was stopped, that is what is said.
     world
         .manager
@@ -1479,6 +1516,9 @@ fn it_starts_the_authority_by_itself_once_and_after_that_only_retry_does() {
     assert_eq!(world.failed().failure, Some(Failure::ExitedRepeatedly));
     world.link.set(LinkState::Connected);
     world.ready();
+    // The attempt may publish `Ready` before the follower of the link has seen it connected;
+    // the follower only acts on an absence after a connection it saw.
+    world.quiet();
     world
         .manager
         .set(Ok(unit(ActiveState::Inactive, UnitResult::Success)));
@@ -1492,6 +1532,9 @@ fn it_starts_the_authority_by_itself_once_and_after_that_only_retry_does() {
         .set(Ok(unit(ActiveState::Active, UnitResult::Success)));
     world.link.set(LinkState::Connected);
     world.ready();
+    // The attempt may publish `Ready` before the follower of the link has seen it connected;
+    // the follower only acts on an absence after a connection it saw.
+    world.quiet();
     world
         .manager
         .set(Ok(unit(ActiveState::Deactivating, UnitResult::Success)));
@@ -1569,7 +1612,14 @@ fn a_unit_the_manager_already_has_in_hand_is_neither_reinstalled_nor_started_aga
     ] {
         let world = World::packaged(LinkState::Absent, Ok(unit(active, UnitResult::Success)));
         let (_, phases) = world.until(|v| v.phase == Phase::Connecting);
-        assert_eq!(phases, [Phase::Checking, Phase::Connecting], "{active:?}");
+        // The view is the latest state, not a log: `Checking` may be replaced before this
+        // reads it. What matters is that nothing was installed or started on the way.
+        assert!(
+            phases
+                .iter()
+                .all(|p| matches!(p, Phase::Checking | Phase::Connecting)),
+            "{active:?}: {phases:?}"
+        );
         assert!(!world.installed(), "{active:?}");
         world.link.set(LinkState::Connected);
         world.ready();
