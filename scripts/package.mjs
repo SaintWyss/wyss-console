@@ -334,6 +334,10 @@ if (releasing) {
     );
     process.exit(1);
   }
+  // What an earlier run left is gone before anything is built: a build that stops halfway
+  // leaves no set, accepted or not, that could be taken for this one.
+  for (const old of ['release', 'release.staging', 'release.rejected'])
+    rmSync(join(root, '.artifacts', old), { recursive: true, force: true });
 }
 
 /** @type {import('./appimage-tools.mjs').ToolsConfig} */
