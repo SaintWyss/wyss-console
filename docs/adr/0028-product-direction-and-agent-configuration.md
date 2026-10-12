@@ -1,8 +1,9 @@
 # 0028 — Product direction: two execution planes and real agent configuration
 
-Status: **Proposed.** The owner answered its ten decisions on 2026-10-12 (see
-[Decisions](#decisions)). It is not marked accepted: the owner's closing conditions for
-acceptance are still to be received. Nothing in it is implemented.
+Status: **Accepted** on 2026-10-12. The owner answered its ten decisions (see
+[Decisions](#decisions)) and its compatibility with ADRs 0001 to 0027 was checked against
+their text (see [Compatibility](#compatibility-with-adrs-0001-to-0027)). This closes phase F0.
+Nothing in it is implemented.
 
 Date: 2026-10-12
 
@@ -52,6 +53,15 @@ built, in conflict.
 Every session shows its plane and the configuration it actually uses. Editing the global
 configuration never makes a managed session claim to use it.
 
+A native session is a human-operated terminal process, not a managed agent in the sense of
+ADR 0002. The Console grants it nothing, enforces nothing on it and never presents it as
+contained: what it may do is decided by the agent's own permissions and by the user who
+started it. ADR 0002 requires an external authority before any managed-agent execution,
+"including terminal/L0 fallback" (`0002:63-70`), and ADR 0008 repeats it for PTY fallback
+(`0008:197-200`). That stands: the day the Console is to hold any authority over a session in
+a terminal (a lease, an approval, a containment), that session belongs to the managed plane
+and to the authority.
+
 ### 2. A configuration subsystem outside the authority
 
 A Rust library (`src-tauri/src/agentconfig/`) hosted by the desktop backend, with no dependency
@@ -100,8 +110,8 @@ never shown as active because a file says so.
 ### 5. One mutation pipeline
 
 plan (pure) → show scope, redacted diff and affected sessions → confirm → check the file is
-still the one planned against → back up → write a new file and rename it over the old one →
-read back and verify → journal → report per session.
+still the one planned against → keep what undoing needs → write a new file and rename it over
+the old one → read back and verify → journal → report per session.
 
 - **Round-trip precondition.** Before a file is edited, parsing and writing it back unchanged
   must reproduce it byte for byte; otherwise that file is not edited. The diff of a change is
@@ -114,6 +124,10 @@ read back and verify → journal → report per session.
   after a native dialog that the backend itself opens and that the page cannot answer, as the
   project folder already is (ADR 0021). The page cannot declare a plan confirmed. An ordinary
   change keeps one confirmation in the page and no more.
+- **What that check is.** It protects the user's configuration from a compromised page and
+  from a slip. It is not a boundary against the user or against another process of his, which
+  can edit the same files directly; ADR 0018 already says the core has no protection there
+  (`0018:110-121`). It decides nothing about managed sessions, turns, leases or approvals.
 - **First, existing entries only.** The first mutations switch, remove and restore entries that
   already existed, byte for byte. This is the order of implementation and not a limit of the
   product: creating and editing rules, hooks, skills and settings follow in a later phase, as
@@ -127,7 +141,10 @@ read back and verify → journal → report per session.
 
 ### 6. No change to global hooks may break managed Inference silently
 
-Managed Inference requires zero enabled external Codex hooks (ADR 0015). Therefore:
+Managed Inference requires zero enabled external Codex hooks (ADR 0015). It already starts
+Codex with `features.hooks=false` among its fixed overrides (`0015:40-55`); a system policy can
+pin hooks on, as this machine's `/etc/codex/requirements.toml` does, which is why the hook
+definitions themselves are counted (`0015:145-146`). Therefore:
 
 1. **Shown at rest.** The Configuration view states, on the Codex hooks themselves, that
    managed Inference needs all of them disabled, and whether that holds now.
@@ -154,6 +171,10 @@ safety attestation have been verified and accepted in an ADR of their own:
 - there is no fallback that runs Inference with a weaker check, and no way for it to become
   unavailable without the window saying so first.
 
+The starting point of that research is what Local Tools already does: a private Codex home,
+the user's home hidden, an authority-owned requirements directory in place of `/etc/codex`, one
+validated credential capability and an attestation repeated before every turn (`0016:37-65`).
+
 Considered and not chosen: an explicit trade, in which the owner enables hooks knowing that
 managed Inference stops until they are disabled again.
 
@@ -164,19 +185,24 @@ Claude Code's hooks have no such coupling: no managed runtime reads them.
 The owner's `~/.claude/` is replicated between two computers; Wyss Console's private state is
 not. A hook removed on one computer disappears on the other, which has no parked copy.
 
-- **Parked entries stay in the private state of the computer that parked them** (decision D5),
-  with a backup of the whole previous file. A parked entry keeps what an exact restoration
-  needs: its bytes, the file and scope it came from, its event and matcher group, its position
-  among its neighbours, the hash of the file before and after, and when it was parked.
-- **A backup may hold secrets** and is treated so: a private directory of this user, files
-  readable by him alone, a bounded number kept, never sent to the page, never copied into the
-  history and never placed where it would be replicated.
+- **Parked entries stay in the private state of the computer that parked them** (decision D5).
+  A parked entry keeps what an exact restoration needs and no more: its bytes, the file and
+  scope it came from, its event and matcher group, its position among its neighbours, the hash
+  of the file before and after, and when it was parked.
+- **Restoration data is kept to the entries that can be restored.** No whole configuration
+  file is copied: the old file stays in place until the new one is renamed over it, so a
+  write needs no copy to be safe. Values of environment variables, credentials and any field
+  an adapter classifies as secret are never kept.
+- **What is kept may still hold a secret** (a command with a token written into it) and is
+  treated so: a private directory of this user, files readable by him alone, a bounded number
+  kept, never copied into the history and never placed where it would be replicated.
 - **A file that has diverged is never overwritten by itself.** A restoration is planned against
   the file as it is now; if the entry is already there it is not added twice, and if what is
   there contradicts it the two are shown and nothing is written.
-- **Every computer keeps its own last-seen copies.** The configuration subsystem keeps, per
-  file, the last contents it observed. When a file changes from outside and an entry is gone,
-  that computer can restore it from its own last-seen copy, without anything replicated.
+- **Every computer keeps its own last-seen entries.** The configuration subsystem keeps, per
+  file, the restorable entries it last observed there. When a file changes from outside and an
+  entry is gone, that computer can restore it from what it last saw, without anything
+  replicated.
 - **When there is no local copy** (the Console never saw that file there), the view says:
   disabled on another computer, no local backup. The entry can be carried over by an explicit
   export on one computer and an import on the other; nothing is replicated by itself.
@@ -222,40 +248,50 @@ takes an explicit technical decision and proof.
 
 ## Compatibility with ADRs 0001 to 0027
 
-Read for this matrix: the decision section of every ADR, and every clause in them about user
-configuration, hooks, process start, the window's permissions and audit. **Stands** means
-unchanged. **Extended** means 0028 adds beside it. **Constrains** means it limits how 0028 may
-be built. Nothing is superseded.
+Each ADR is classed as one of: **Preserved** (stands without modification), **Extended** (0028
+adds beside it), **Superseded in one area** (a named statement no longer holds in a named
+place; everything else in that ADR stands) or **Unaffected** (no contact). No accepted ADR is
+rewritten. No guarantee of the managed plane is changed.
 
-| ADR  | Clause that matters here                                                                                   | Effect     | What follows                                                                                           |
-| ---- | ---------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
-| 0001 | Skills, permissions and presets deferred (`:43-47`)                                                        | Extended   | The deferral ends for configuration in the native plane                                                |
-| 0002 | The Console is a client, not the security authority (`:9`)                                                 | Constrains | The configuration subsystem is Console-local and grants no authority                                   |
-| 0003 | EventEnvelope v1                                                                                           | Stands     | The configuration journal is not an envelope stream (D8)                                               |
-| 0004 | "Configuration projection" deferred (`:43`)                                                                | Extended   | A third category beside model provider and agent adapter: configuration adapter                        |
-| 0005 | The frontend supplies no executable, argv or environment (`:49-51`); no arbitrary spawn (`:141`)           | Constrains | Starting an agent in a terminal needs its own ADR: a closed catalogue resolved in the backend          |
-| 0006 | The frontend cannot choose an executable, argv or environment (`:86-87`)                                   | Constrains | Same                                                                                                   |
-| 0007 | Profiles, settings and persistent sessions deferred (`:86-88`)                                             | Extended   | A registry of native agent sessions comes with that later ADR                                          |
-| 0008 | `hooks` and `mcp_servers` are observe-only capabilities (`:91`); capability is not authority               | Stands     | Configuration capabilities are a separate declaration; 0008 gains no `request` on them                 |
-| 0009 | The Codex codec is offline                                                                                 | Stands     | Its decoding may be reused to read; it writes nothing                                                  |
-| 0010 | The probe reads and changes no configuration (`:14-16`)                                                    | Stands     | True of the probe. A live read of effective Codex state from the desktop needs its own ADR             |
-| 0011 | Only the authority commits control state                                                                   | Stands     | No control method is added                                                                             |
-| 0012 | One shared runtime (`:8`); Tauri neither starts nor connects to it (`:11`)                                 | Stands     | Several runtimes are not decided here                                                                  |
-| 0013 | Execution is denied by default                                                                             | Stands     | —                                                                                                      |
-| 0014 | One permanent binding per session                                                                          | Stands     | —                                                                                                      |
-| 0015 | One turn at a time (`:9`); zero enabled hooks (`:138-139`); "Wyss does not edit the user's hooks" (`:147`) | Constrains | The guarantee stands. The sentence is true of the authority and is narrowed to it. Section 6 and G-INF |
-| 0016 | Local Tools on a private Codex home (`:43-45`)                                                             | Stands     | The view says managed Local Tools does not use the global configuration                                |
-| 0017 | The event stream is audit, not authority                                                                   | Stands     | —                                                                                                      |
-| 0018 | The managed core is complete                                                                               | Stands     | No part of it is redesigned                                                                            |
-| 0019 | The desktop only reads the authority (`:8`)                                                                | Stands     | The Configuration view does not use `AuthorityService`                                                 |
-| 0020 | Session intents are "the only" mutations the desktop sends (`:10`)                                         | Stands     | True of control intents. A configuration write is not one and never reaches the authority              |
-| 0021 | A folder is chosen in a native dialog the page cannot answer                                               | Extended   | The same principle confirms a change that weakens security                                             |
-| 0022 | Managed turns from the window                                                                              | Stands     | —                                                                                                      |
-| 0023 | Local Tools and approvals from the window                                                                  | Stands     | —                                                                                                      |
-| 0024 | Events shows what the authority recorded                                                                   | Stands     | Configuration history is its own list (D8)                                                             |
-| 0025 | The desktop installs files for the user under a provenance rule                                            | Stands     | Precedent for writing outside its own directory with strict checks                                     |
-| 0026 | Settings never change what the product may do (`:18-20`)                                                   | Constrains | Configuration is a different view with a different contract and is not merged into Settings            |
-| 0027 | No distribution packaging                                                                                  | Stands     | No path, user name or host is fixed in code                                                            |
+| ADR  | Statement that matters here                                                                                                                                                                                                | Class                  | What follows                                                                                                                                                                                                                                                                                                         |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0001 | Skills, permissions and presets deferred (`:43-47`)                                                                                                                                                                        | Extended               | The deferral ends for configuration in the native plane                                                                                                                                                                                                                                                              |
+| 0002 | The Console is a client, not the security authority (`:9-10`); an external authority before any managed-agent execution, "including terminal/L0 fallback" (`:63-70`); permissions and gates are the authority's (`:28-46`) | Preserved              | Section 1 defines a native session inside these terms. The configuration subsystem is Console-local state and holds no permission, lease, approval or gate                                                                                                                                                           |
+| 0003 | "Secrets and credentials never enter durable storage" (`:69-72`); local diagnostics apart from control audit (`:55-58`)                                                                                                    | Superseded in one area | Stands for every event, for the authority's stream and for the configuration history, which hold no secret. It does not extend to restoration data (section 7): a user's own configuration entry, kept so that it can be put back, may contain a secret he wrote into it. Decision D5, minimised as section 7 states |
+| 0004 | "Configuration projection" deferred (`:43-44`); model provider and agent adapter (`:27-33`)                                                                                                                                | Extended               | A third category: configuration adapter                                                                                                                                                                                                                                                                              |
+| 0005 | The frontend supplies no executable, argv, environment (`:49-51`); no arbitrary spawn (`:141`)                                                                                                                             | Preserved              | Limits F3: starting an agent in a terminal needs its own ADR, with a closed catalogue resolved in the backend                                                                                                                                                                                                        |
+| 0006 | The frontend cannot choose an executable, argv or environment (`:86-87`)                                                                                                                                                   | Preserved              | Same                                                                                                                                                                                                                                                                                                                 |
+| 0007 | Profiles and persistent sessions deferred (`:86-88`)                                                                                                                                                                       | Preserved              | A registry of native sessions comes with the F3 ADR, not with this one                                                                                                                                                                                                                                               |
+| 0008 | `hooks` and `mcp_servers` are observe-only (`:91`); capability is not authority (`:14-15`); authority before PTY fallback (`:197-200`)                                                                                     | Preserved              | Configuration capabilities are a separate declaration. No `request` is added to 0008's vocabulary                                                                                                                                                                                                                    |
+| 0009 | The Codex codec is offline and starts nothing (`:14-17`)                                                                                                                                                                   | Unaffected             | Its decoding may be reused to read                                                                                                                                                                                                                                                                                   |
+| 0010 | The probe reads and changes no configuration file (`:14-16`)                                                                                                                                                               | Preserved              | True of the probe. A live read of Codex's effective state from the desktop is not part of F1 and needs its own ADR                                                                                                                                                                                                   |
+| 0011 | Only the authority commits control state (`:8-11`); no generic process or environment in its API (`:34-36`)                                                                                                                | Preserved              | No control method is added; the authority is given no configuration access                                                                                                                                                                                                                                           |
+| 0012 | One shared runtime (`:8`); Tauri neither starts nor connects to it (`:11`); "Wyss never reads token files, logs in, modifies Codex config" (`:111-113`)                                                                    | Superseded in one area | The authority and the runtime still never do. As a statement about the whole product, "never modifies Codex config" ends when the configuration subsystem first writes one, at the user's explicit request (F2b). Nothing else changes                                                                               |
+| 0013 | Execution denied by default; leases with exact scopes and a TTL (`:8-13`, `:24-31`)                                                                                                                                        | Preserved              | The configuration subsystem neither holds nor reads a lease                                                                                                                                                                                                                                                          |
+| 0014 | One permanent binding per session; the client cannot override workspace or thread (`:8-21`)                                                                                                                                | Unaffected             | —                                                                                                                                                                                                                                                                                                                    |
+| 0015 | One turn at a time (`:9-10`); zero enabled hooks, unknown is a rejection (`:138-139`); "Wyss does not edit the user's hooks, authentication or system policy" (`:147`)                                                     | Superseded in one area | The check and the single turn stand. As a statement about the whole product, "does not edit the user's hooks" ends with F2a for Claude Code and stays in force for Codex until G-INF. Authentication and system policy are never edited, by any part                                                                 |
+| 0016 | Local Tools on a private home, no user configuration loaded (`:43-46`); the profile proved again before every turn and Accept (`:60-65`)                                                                                   | Preserved              | The view says managed Local Tools does not use the global configuration. It is the template for F1b                                                                                                                                                                                                                  |
+| 0017 | The stream is audit and history, not the authority (`:13-16`)                                                                                                                                                              | Preserved              | Configuration history is not written to it                                                                                                                                                                                                                                                                           |
+| 0018 | The managed core is complete (`:8-11`); no protection against another process of the same user (`:110-121`)                                                                                                                | Preserved              | The configuration subsystem is such a process and gains nothing the trust model had withheld                                                                                                                                                                                                                         |
+| 0019 | "The desktop makes no authorization or security decision" (`:22-24`)                                                                                                                                                       | Superseded in one area | Stands for everything managed. In one place it no longer holds: the desktop backend validates and authorises changes to agent configuration files (decision D4, section 5), a domain the authority has never owned                                                                                                   |
+| 0020 | The desktop requests and the authority decides (`:20-23`); session intents are "the only" mutations it sends (`:10`)                                                                                                       | Preserved              | Said of control intents. A configuration write is not one and never reaches the authority                                                                                                                                                                                                                            |
+| 0021 | "The window is given no filesystem"; the dialog takes nothing from the page (`:94-96`)                                                                                                                                     | Extended               | The window is shown bounded, structured, redacted views of a closed list of provider files, and still names no path. The native dialog becomes the model for confirming a risky change                                                                                                                               |
+| 0022 | Managed turns from the window; the authority decides every start and cancel                                                                                                                                                | Unaffected             | —                                                                                                                                                                                                                                                                                                                    |
+| 0023 | Local Tools and approvals from the window; the authority holds every action                                                                                                                                                | Unaffected             | —                                                                                                                                                                                                                                                                                                                    |
+| 0024 | Events shows what the authority recorded and adds no authority (`:27-30`)                                                                                                                                                  | Preserved              | Configuration history has its own list                                                                                                                                                                                                                                                                               |
+| 0025 | Safe paths and atomic install for the files the desktop writes (`:142-171`)                                                                                                                                                | Preserved              | The same rules are the model for configuration writes; nothing of the bootstrap changes                                                                                                                                                                                                                              |
+| 0026 | "Preference is not authority"; a program or environment for a terminal is never a preference; anything with security significance needs its own phase (`:33-56`)                                                           | Preserved              | Configuration is a different view with a different contract. It is not added to Settings                                                                                                                                                                                                                             |
+| 0027 | No distribution format; a new one is a new decision (`:18-70`)                                                                                                                                                             | Preserved              | No path, user name or host is fixed in code. No packaging work follows from this ADR                                                                                                                                                                                                                                 |
+
+Read directly for this matrix: 0001 and 0004 in full; 0002 `:7-73`; 0003 `:7-36` and
+`:53-77`; 0005 `:7-25`, `:47-56`, `:136-146`; 0006 `:7-21`, `:84-90`; 0007 `:7-20`, `:84-90`;
+0008 `:6-25`, `:78-100`, `:187-215`; 0009 `:6-38`; 0010 `:6-25`; 0011 `:6-40`; 0012 `:6-50`,
+`:104-131`, `:180-200`; 0013 `:6-40`; 0014 `:6-21`; 0015 `:6-19`, `:40-62`, `:120-148`;
+0016 `:6-19`, `:36-66`, `:105-116`; 0017 `:6-24`; 0018 `:6-25`, `:110-127`; 0019 `:6-40`;
+0020 `:6-34`; 0021 `:6-22` and the passages about the dialog; 0022, 0023 and 0024 `:6-34`;
+0025 `:6-23`, `:142-171`; 0026 `:11-60`; 0027 in full. The remaining sections of the long
+ADRs (0017, 0018, 0021, 0023, 0025) were searched for statements about user configuration,
+hooks, the filesystem and the window's permissions, and not read line by line.
 
 `README.md:848` ("Wyss never edits them") is corrected to speak of the authority when the first
 mutation ships, not before.
@@ -266,7 +302,7 @@ Each phase leaves the terminal and managed Codex exactly as they are and can be 
 
 | Phase | Delivers                                                                                                                                                           | Before it                                                    | Accepted when                                                                                                                                             |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F0    | This ADR, `docs/PRODUCT.md`, the matrix above                                                                                                                      | —                                                            | The owner accepts this ADR                                                                                                                                |
+| F0    | **Done.** This ADR, `docs/PRODUCT.md`, the matrix above                                                                                                            | —                                                            | The owner accepts this ADR                                                                                                                                |
 | F1    | Read-only inventory for Claude Code and Codex; the Configuration view; outside changes and Syncthing conflicts noticed; section 6 point 1                          | F0 accepted and F1 authorised                                | Fixture inventories match exactly; no secret value reaches the page; **no file is written**                                                               |
 | F1b   | Research and security design only: managed Inference on a private Codex home. A written contract, its compatibility tests against the provider and its attestation | F1                                                           | A report and a draft ADR. The Inference that exists is not changed                                                                                        |
 | F2a   | Mutations with no managed coupling: Claude Code skills, plugins, all-hooks switch, hook parking and restore; backups, history and undo                             | F1                                                           | A file broken on purpose, an outside change mid-way and a simulated power cut all leave a valid file; undo is exact; a diverged file is never overwritten |

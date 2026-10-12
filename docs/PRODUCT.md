@@ -4,9 +4,8 @@ This page says what Wyss Console is for and what its owner has asked of it. It i
 document to read and the one the others answer to (see [Documents](#documents)). What is
 actually built is in the [README](../README.md); this page says so where the two differ.
 
-Status: its direction and the ten decisions behind it were approved by the owner on 2026-10-12.
-[ADR 0028](adr/0028-product-direction-and-agent-configuration.md), which records them, is still
-marked proposed.
+Status: approved by the owner on 2026-10-12, with the ten decisions recorded in
+[ADR 0028](adr/0028-product-direction-and-agent-configuration.md), which is accepted.
 
 ## What it is
 
