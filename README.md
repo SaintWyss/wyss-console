@@ -4,25 +4,25 @@ A Linux desktop for local terminals and for working with Codex in managed, appro
 sessions. Your terminals work on their own; managed sessions, approvals and history are
 kept by a separate authority that Wyss Console installs and starts for you.
 
-**Release candidate 0.2.0.** It is code complete and checked in the cloud; it has not
-yet been accepted on a real desktop ([`docs/release/LOCAL_ACCEPTANCE.md`](docs/release/LOCAL_ACCEPTANCE.md)).
-Release notes: [CHANGELOG](CHANGELOG.md) and [`docs/release/RELEASE.md`](docs/release/RELEASE.md).
+**Version 0.2.0.** A native desktop application for CachyOS with KDE Plasma, built and
+run from this repository. There is no installer and no published release: no `.deb`, no
+AppImage, no signed artifact. Changes: [CHANGELOG](CHANGELOG.md).
 
-## Install and use
+## Build and use
 
-You need Linux with a `systemd --user` session (any desktop session has one) and
+You need Linux with a `systemd --user` session (any desktop session has one),
 [Codex](https://developers.openai.com/codex) on the `PATH` your session gives its
-services, which is where a desktop session puts `~/.local/bin`. Nothing else: no
-repository, no Cargo, no npm, no terminal after installing.
+services, which is where a desktop session puts `~/.local/bin`, and `bubblewrap` 0.11 or
+newer for Local Tools (Inference does not need it). To build: stable Rust, Node 26+,
+npm 12+ and the [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
 
-1. Download `wyss-console_0.2.0_amd64.deb` (or the `.AppImage`) and `SHA256SUMS`, and
-   check it: `sha256sum -c SHA256SUMS --ignore-missing`. The files are checksummed and
-   **not signed**.
-2. Install it: `sudo apt install ./wyss-console_0.2.0_amd64.deb`, or make the AppImage
-   executable and run it. The `.deb` recommends `bubblewrap` (0.11 or newer), which Local
-   Tools needs; Inference does not.
-3. Open **Wyss Console** from your application menu. The authority is installed and started
-   by itself; the top bar goes from Starting to Connected.
+1. Build the package: `npm ci && npm run desktop:package`. It writes
+   `.artifacts/package/wyss-console-<version>-linux-<arch>/`.
+2. Run `bin/wyss-console` from that directory, in place or from wherever you copy the
+   whole directory to. Nobody but you may be able to write in it: the desktop refuses an
+   authority that someone else could have replaced.
+3. The authority is installed and started by itself; the top bar goes from Starting to
+   Connected.
 
 What you can do:
 
@@ -87,11 +87,12 @@ supported platform. See [ADR 0025](docs/adr/0025-authority-lifecycle-bootstrap.m
 | The authority        | `~/.local/share/wyss-console/authority/wyss-control`       |
 | Its service          | `~/.config/systemd/user/wyss-control.service`              |
 
-- **Upgrading** installs the new package over the old. A running authority is never
-  replaced: the window says `update pending`, and the new authority is installed the next
-  time none runs (after you log out, or stop it). Your sessions and history carry over.
-- **Removing the application** (`sudo apt remove wyss-console`, or deleting the AppImage)
-  removes the desktop only. The authority, its unit and your data stay. To remove them too:
+- **Upgrading** is building the package again and running the new one. A running authority
+  is never replaced: the window says `update pending`, and the new authority is installed
+  the next time none runs (after you log out, or stop it). Your sessions and history carry
+  over.
+- **Removing the application** is deleting the package directory, which removes the desktop
+  only. The authority, its unit and your data stay. To remove them too:
   `systemctl --user stop wyss-control`, delete the two files above, and, only if you want
   to lose your history, delete `~/.local/state/wyss-console/`.
 - **Settings → Reset preferences** restores the defaults and nothing else.
@@ -99,9 +100,6 @@ supported platform. See [ADR 0025](docs/adr/0025-authority-lifecycle-bootstrap.m
 ## Development
 
 Everything below is for working on Wyss Console itself.
-
-Requires stable Rust, Node 26+, npm 12+ and the
-[Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
 
 ```sh
 npm ci
@@ -117,22 +115,31 @@ Development and native-run commands keep Cargo/XDG caches inside ignored `.cache
 npm run check
 npm run check:rust
 npm run test:pty
+npm run scan:repo
 ```
 
 Frontend commands: `format:check`, `lint`, `typecheck`, `test`, `build`.
 Rust commands: `rust:fmt`, `rust:check`, `rust:test`, `rust:clippy`.
 `npm run format` applies frontend/config/document formatting.
 
+The Rust suite runs the real things, in private: the Local Tools tests need `bubblewrap`
+0.11 or newer at `/usr/bin/bwrap`, and the lifecycle tests start a `systemd --user` of their
+own on a temporary runtime directory and an empty home, so nothing of your session, units
+or Wyss state is read or touched.
+
+`scan:repo` scans every tracked file for credentials, as Git records it and as it is on
+disk: no credential file by name and no credential-shaped content, with no exception by
+path. A tracked file that is missing from the working tree fails it, so it is run on a
+committed tree.
+
 ## Production build
 
 ```sh
 npm run desktop:package    # the directory package: bin/, libexec/, share/
-npm run release:package    # the .deb and the AppImage, checksums, manifest, verification
-npm run release:verify     # open what was built and check it again
 ```
 
-Both build the authority, pin the desktop to its SHA-256 (`WYSS_AUTHORITY_SHA256`) and
-write the package to `.artifacts/package/wyss-console-<version>-linux-<arch>/`:
+It builds the authority, pins the desktop to its SHA-256 (`WYSS_AUTHORITY_SHA256`) and
+writes the package to `.artifacts/package/wyss-console-<version>-linux-<arch>/`:
 
 ```text
 bin/wyss-console
@@ -140,21 +147,10 @@ libexec/wyss-console/wyss-control
 share/wyss-console/package.json
 ```
 
-`release:package` also makes the `.deb`, the AppImage, `SHA256SUMS` and
-`release-manifest.json`, verifies them, and puts them in `.artifacts/release/` only if they
-verify (a refused set goes to `.artifacts/release.rejected/`). It runs only in the release
-build environment, Ubuntu 24.04 x86_64 (`scripts/build-environment.json`); on any other Linux
-host, build in `scripts/release.Containerfile` (see
-[`docs/release/RELEASE.md`](docs/release/RELEASE.md#the-release-build-environment)). Both formats put the two programs below their
-prefix exactly as above (`usr/bin`, `usr/libexec/wyss-console`), so the desktop finds its
-authority by the same rule everywhere: from its own real executable, never from `PATH`,
-and only if its SHA-256 is the pinned one. It needs a clean committed tree, `dpkg-deb`,
-`mksquashfs`, `patchelf`, the Tauri development libraries of the platform, and network access to GitHub's release downloads the first time, to fetch
-the AppImage build tools pinned in `scripts/appimage-tools.json` (each checked against a
-committed SHA-256 before it runs; the bundler then runs with every proxy unreachable and
-Cargo offline, and the tools are hashed again afterwards). The artifacts are
-of the commit they were built from, and say so in their untracked manifest. See
-[ADR 0026](docs/adr/0026-settings-and-release-closure.md).
+The desktop finds its authority from its own real executable, never from `PATH`, and
+installs and starts it only if its SHA-256 is the pinned one. That is the only package
+format: the Tauri bundler is off (`bundle.active` is false), and nothing is signed or
+published. See [ADR 0027](docs/adr/0027-local-product-no-distribution-packaging.md).
 
 ```sh
 npm run desktop:build    # the two binaries only, in src-tauri/target/release

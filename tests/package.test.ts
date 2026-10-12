@@ -1,0 +1,73 @@
+/// <reference types="node" />
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { expect, it } from 'vitest';
+import appInfo from './fixtures/app-info-v1.json';
+import tauriConfig from '../src-tauri/tauri.conf.json';
+
+const root = join(__dirname, '..');
+const read = (file: string) => readFileSync(join(root, file), 'utf8');
+
+it('lays the package out as the desktop looks for its authority', () => {
+  // The desktop's own rule: from its executable, one `parent().parent()`, then
+  // `libexec/wyss-console/wyss-control`. Kept in step by reading the code that applies it.
+  const rust = read('src-tauri/src/lifecycle/package.rs');
+  expect(rust).toMatch(/parent\(\)\?\s*\.parent\(\)\?/);
+  expect(rust).toMatch(
+    /\.join\("libexec"\)\s*\.join\("wyss-console"\)\s*\.join\("wyss-control"\)/,
+  );
+  // The packager puts the two programs exactly there, below one prefix.
+  const packager = read('scripts/package.mjs');
+  expect(packager).toContain("[desktop, 'bin/wyss-console']");
+  expect(packager).toContain(
+    "[authority, 'libexec/wyss-console/wyss-control']",
+  );
+});
+
+it('bundles no installer, no updater and no signing claim', () => {
+  const bundle = tauriConfig.bundle as Record<string, unknown>;
+  expect(bundle.active).toBe(false);
+  // No installer format, resource, sidecar or updater: the package is the desktop and the
+  // authority, and nothing is updated behind the user's back.
+  for (const key of [
+    'targets',
+    'linux',
+    'resources',
+    'externalBin',
+    'createUpdaterArtifacts',
+    'licenseFile',
+    'fileAssociations',
+  ])
+    expect(bundle[key], key).toBeUndefined();
+  // Signing is claimed nowhere in the configuration.
+  expect(JSON.stringify(tauriConfig)).not.toMatch(/sign|pubkey|updater/i);
+  // The window is granted exactly what it was.
+  expect(
+    (tauriConfig.app.security as { capabilities: string[] }).capabilities,
+  ).toEqual(['main']);
+});
+
+it('has one version, everywhere it is written', () => {
+  const pkg = JSON.parse(read('package.json'));
+  const cargo = /^version\s*=\s*"([^"]+)"/m.exec(
+    read('src-tauri/Cargo.toml'),
+  )?.[1];
+  const lock = /name = "wyss-console"\nversion = "([^"]+)"/.exec(
+    read('src-tauri/Cargo.lock'),
+  )?.[1];
+  const npmLock = JSON.parse(read('package-lock.json'));
+  expect(tauriConfig.version).toBe(pkg.version);
+  expect(cargo).toBe(pkg.version);
+  expect(lock).toBe(pkg.version);
+  expect(npmLock.version).toBe(pkg.version);
+  expect(npmLock.packages[''].version).toBe(pkg.version);
+  expect(appInfo.version).toBe(pkg.version);
+  // The 0.x line: it is not 1.0.
+  expect(pkg.version).toMatch(/^0\.\d+\.\d+$/);
+});
+
+it('does not deny what the product has', () => {
+  const readme = read('README.md');
+  expect(readme).not.toContain('No agent SDK, authority or agent UI');
+  expect(readme).not.toContain('Codex is not usable through the Console UI');
+});

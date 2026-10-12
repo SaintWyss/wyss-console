@@ -28,32 +28,12 @@
     }
   },
   "bundle": {
-    "active": true,
-    "targets": ["deb", "appimage"],
+    "active": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.png"
-    ],
-    "publisher": "Wyss",
-    "category": "Development",
-    "shortDescription": "Local terminals and managed Codex sessions",
-    "longDescription": "Wyss Console is a desktop client for local terminals and for managed Codex sessions. It starts its own authority (wyss-control) under your login session's service manager, which keeps your sessions, approvals and history. Linux with a systemd user session is supported.",
-    "linux": {
-      "deb": {
-        "depends": ["systemd"],
-        "recommends": ["bubblewrap"],
-        "section": "devel",
-        "files": {
-          "/usr/libexec/wyss-console/wyss-control": "target/release/wyss-control"
-        }
-      },
-      "appimage": {
-        "files": {
-          "usr/libexec/wyss-console/wyss-control": "target/release/wyss-control"
-        }
-      }
-    }
+    ]
   }
 }

@@ -1,9 +1,9 @@
 # Changelog
 
-## 0.2.0 — release candidate
+## 0.2.0
 
-The first installable Wyss Console. Linux, with a `systemd --user` session. Checksummed,
-not signed. Not yet accepted on a real desktop: see `docs/release/LOCAL_ACCEPTANCE.md`.
+A native desktop application for CachyOS with KDE Plasma, built and run from this
+repository. Linux, with a `systemd --user` session. No installer and no published release.
 
 ### What it does
 
@@ -27,35 +27,27 @@ not signed. Not yet accepted on a real desktop: see `docs/release/LOCAL_ACCEPTAN
 
 ### Packaging
 
-- A `.deb` and an AppImage, each carrying the authority the desktop was built with; the
-  desktop only installs an authority whose SHA-256 it was built with.
-- `SHA256SUMS` and a release manifest; a verifier that opens the packages.
+- One directory package (`npm run desktop:package`): the desktop and the authority it was
+  built with. The desktop only installs an authority whose SHA-256 it was built with.
+- No `.deb`, no AppImage, no release build environment and no acceptance matrix: they were
+  removed, with their scripts, tests and documents
+  ([ADR 0027](docs/adr/0027-local-product-no-distribution-packaging.md)).
 
-### Build verification
+### Checks
 
-- Built in the release build environment (Ubuntu 24.04, x86_64; `scripts/build-environment.json`,
-  buildable from pinned inputs with `scripts/release.Containerfile`); `release:package` refuses
-  any other host, and only a set that verified is put in `.artifacts/release/`.
-- Checked in the cloud on this branch: 612 frontend tests under both `es_AR.UTF-8` and
-  `en_US.UTF-8` (Node 26.11.1, npm 12.2.0, as declared), formatting, lint, typecheck, Clippy, 570 Rust tests, the packages opened and
-  verified (80 checks) and 14 deliberately tampered copies refused. 40 Rust tests need
-  `bubblewrap` 0.11 or newer or a real `systemd --user` and could not run there; they passed in
-  the independent audit of the previous candidate. See `docs/release/RELEASE.md`.
-- Found and fixed while building it: the AppImage runtime check was wider than the one field it
-  should allow; the credential scan could pass a file it had not read; Retry could be ignored
-  right after a failure; Settings was drawn under the other views; the `.deb` root was 0700.
-- Found by the independent review and fixed: the checkout scan skipped a committed file that was
-  missing from the working tree; an unreadable `.deb` control archive passed as having no
-  maintainer script; the build-host check knew only the verifier's own paths; nothing named or
-  enforced the build environment, and a refused build was left where an accepted one goes; a
-  frontend test assumed an English clock; a development build could show a stale revision; the
-  reset confirmation's buttons were below the fold at 960×640; a tracked link changed on disk was
-  not scanned; the build container ran a Node and npm older than the declared engines.
-- Not accepted on a desktop: 0 of 19 local acceptance controls run.
+- `npm run check` (formatting, lint, typecheck, the frontend tests, the build) and
+  `npm run check:rust` (formatting, check, the Rust suite, Clippy). The frontend tests do not
+  depend on the runtime locale or on the system they run on.
+- `npm run scan:repo`: every tracked file is scanned for credentials, as Git records it and
+  as it is on disk; it fails closed, and takes no replace ref's stand-in for an object.
+- Found and fixed while closing it: the credential scan could pass a file it had not read, or
+  a committed file missing from the working tree; Retry could be ignored right after a
+  failure; Settings was drawn under the other views; the reset confirmation's buttons were
+  below the fold at 960×640; a frontend test assumed an English clock; a development build
+  could show a stale revision.
 
 ### Known limits
 
 - Dark theme only. One Codex runtime, in one mode, at a time. History cannot be searched
   or exported. No light theme, no Settings for approvals, by design.
-- The AppImage is built on Ubuntu 24.04 and needs a system at least that recent.
 - Codex is not included and has to be installed separately.

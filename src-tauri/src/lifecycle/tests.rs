@@ -126,11 +126,11 @@ fn lay_out(at: &Path, executable: &str, payload: &str, bytes: &[u8]) -> PathBuf 
 }
 
 #[test]
-fn every_package_format_has_the_same_layout_below_its_prefix() {
+fn the_layout_is_the_same_below_any_prefix() {
     let account = Account::new();
     let pin = format!("{:?}", Digest::of(NEW));
-    // The directory package, the `.deb` (prefix `/usr`) and an AppImage (the `usr` of its
-    // mounted image): one rule finds the payload in all of them, from the executable.
+    // The directory package, a system prefix (`usr`) and a prefix inside another
+    // directory: one rule finds the payload in all of them, from the executable.
     for (name, executable, payload) in [
         (
             "directory",
@@ -138,12 +138,12 @@ fn every_package_format_has_the_same_layout_below_its_prefix() {
             "libexec/wyss-console/wyss-control",
         ),
         (
-            "deb",
+            "system prefix",
             "usr/bin/wyss-console",
             "usr/libexec/wyss-console/wyss-control",
         ),
         (
-            "appimage",
+            "nested prefix",
             ".mount_Wyss1a2b3c/usr/bin/wyss-console",
             ".mount_Wyss1a2b3c/usr/libexec/wyss-console/wyss-control",
         ),

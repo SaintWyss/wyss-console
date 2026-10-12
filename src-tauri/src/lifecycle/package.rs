@@ -137,11 +137,10 @@ impl Provision {
     /// The authority packaged beside this executable, if the build was pinned to one.
     ///
     /// The payload is found from the running executable and from nowhere else: not from
-    /// `PATH`, not from the working directory, not from a name the window sends. Every
-    /// package format lays the two out the same way, below one prefix:
+    /// `PATH`, not from the working directory, not from a name the window sends. A
+    /// package lays the two out below one prefix, wherever that prefix is:
     /// `<prefix>/bin/wyss-console` and `<prefix>/libexec/wyss-console/wyss-control`. The
-    /// directory package has its own folder as the prefix, the `.deb` has `/usr`, and an
-    /// AppImage has the `usr` of its mounted image.
+    /// directory package has its own folder as the prefix.
     pub fn of_build(pin: Option<&str>) -> Self {
         Self::beside(pin, std::env::current_exe().ok().as_deref())
     }
