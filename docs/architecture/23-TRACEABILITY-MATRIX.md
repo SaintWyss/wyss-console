@@ -1,0 +1,189 @@
+# 23 — Traceability matrix
+
+Requirement → design → component → phase → test → acceptance. Requirements are those of
+[02](02-REQUIREMENTS.md); design references are document and section; components are paths of
+[04 §6](04-TARGET-ARCHITECTURE.md), existing ones marked `[R]`; phases are those of
+[19](19-IMPLEMENTATION-ROADMAP.md); tests those of [20](20-VERIFICATION-AND-ACCEPTANCE.md).
+"—" means none is defined yet, which is itself a finding (see §3).
+
+## 1. Functional requirements
+
+| Requirement      | Design             | Component                                       | Phase       | Tests                       | Acceptance            |
+| ---------------- | ------------------ | ----------------------------------------------- | ----------- | --------------------------- | --------------------- |
+| FR-TERM-01       | 05 §1              | `terminal/` `[R]`                               | Built       | TS-TERM-01, TS-REG-01       | J1                    |
+| FR-TERM-02       | 05 §1              | `terminal/`, `features/terminal/` `[R]`         | Built       | TS-TERM-01, 02              | J1                    |
+| FR-TERM-03       | 05 §2 TF1          | `features/terminal/`                            | T1          | TS-TERM-05                  | T1                    |
+| FR-TERM-04       | 05 §1              | `settings/` `[R]`                               | Built       | Existing settings tests     | —                     |
+| FR-TERM-05       | 05 §1              | `features/terminal/controller.ts` `[R]`         | Built       | TS-TERM-03                  | P1                    |
+| FR-TERM-06       | 05 §1              | `features/terminal/renderer.ts` `[R]`           | Built       | TS-TERM-04 (manual today)   | P1                    |
+| FR-TERM-07       | 05 §1              | `terminal/contracts.rs` `[R]`                   | Built       | TS-TERM-02                  | —                     |
+| FR-TERM-08       | 05 §2 TF2          | `features/terminal/`                            | T1          | TS-TERM-06                  | T1                    |
+| FR-TERM-09       | 05 §1              | xterm `[R]`                                     | Built       | TS-TERM-04                  | P1                    |
+| FR-TERM-10       | 05 §2 TF4          | layout store                                    | T2          | TS-TERM-09                  | T2                    |
+| FR-TERM-11       | 16 §4              | host service                                    | F9          | TS-HOST-01 to 06            | F9                    |
+| FR-NAT-01        | 05 §4              | `native/`                                       | F3a         | TS-NAT-01, 03, 05           | AC-F3a-01             |
+| FR-NAT-02        | 05 §4.2, 09 §5     | `native/`, `desktop/workspace.rs` `[R]`         | F3a         | TS-NAT-05                   | AC-F3a-01             |
+| FR-NAT-03        | 09 §3, 12 §5       | `profiles/`                                     | F3c, F6b    | TS-PRF-01, TS-MOD-05        | AC-F3c-01             |
+| FR-NAT-04        | 05 §4.3            | `native/`                                       | F3a         | TS-NAT-02, 04               | AC-F3a-01             |
+| FR-NAT-05        | 05 §5, §6          | `native/`                                       | F3b         | TS-NAT-06, 07               | AC-F3b-02             |
+| FR-NAT-06        | 05 §5, 14 §3       | native registry                                 | F3b         | TS-NAT-06                   | AC-F3b-02             |
+| FR-NAT-07        | 05 §6              | `native/`                                       | F3b         | TS-NAT-08                   | AC-F3b-01             |
+| FR-NAT-08        | 13 S2              | `features/sessions/`                            | F3b         | TS-SES-01                   | AC-F3b-01             |
+| FR-NAT-09        | 09 §6              | `native/`                                       | F3a         | TS-NAT-06                   | J8                    |
+| FR-NAT-10        | 05 §6              | `native/`                                       | F3b         | TS-NAT-09                   | —                     |
+| FR-NAT-11        | 05 §4.2, 13 S3     | `features/sessions/`                            | F3a         | TS-UX-04                    | AC-F3a-03             |
+| FR-MAN-01        | 10 §3              | `sessions/`, `control/` `[R]`                   | Built       | Managed suite `[R]`         | J9                    |
+| FR-MAN-02        | 10 §2 SG-03        | `adapters/codex/` `[R]`                         | Built       | Managed suite               | J9                    |
+| FR-MAN-03        | 10 §3.1            | `control/mediation.rs` `[R]`                    | Built       | Managed suite               | J10                   |
+| FR-MAN-04        | 10 §2 SG-02        | `control/leases.rs` `[R]`                       | Built       | Managed suite               | —                     |
+| FR-MAN-05        | 10 §1              | `control/events.rs` `[R]`                       | Built       | Managed suite               | —                     |
+| FR-MAN-06        | 10 §2 SG-11        | `lifecycle/` `[R]`                              | Built       | Lifecycle suite `[R]`       | —                     |
+| FR-MAN-07        | 10 §5              | `adapters/codex/`, `control/`                   | G-INF       | AC-GINF-01 to 08            | AC-GINF-01, 02        |
+| FR-MAN-08        | 10 §6              | `control/`                                      | F8          | —                           | F8                    |
+| FR-MAN-09        | 06 §5              | `adapters/`                                     | F11b        | —                           | F11b                  |
+| FR-CFG-01        | 07 §4.1            | `agentconfig/providers/`                        | F1          | TS-CFG-01, TS-FS-01         | AC-F1-01              |
+| FR-CFG-02        | 07 §4.2            | `agentconfig/`                                  | F1          | TS-CFG-01 to 04             | AC-F1-01              |
+| FR-CFG-03        | 07 §3              | `agentconfig/model.rs`                          | F1          | TS-CFG-08                   | AC-F1-04              |
+| FR-CFG-04        | 07 §7              | `agentconfig/watch.rs`                          | F1          | TS-CFG-07, TS-LONG-02       | AC-F1-02              |
+| FR-CFG-05        | 07 §5, 08 §3       | `agentconfig/mutate.rs`                         | F2a, F2b    | TS-CFG-10 to 12, table test | AC-F2a-01, AC-F2b-01  |
+| FR-CFG-06        | 08 §3.4            | `agentconfig/mutate.rs`                         | F5          | TS-CFG-17 to 20             | F5                    |
+| FR-CFG-07        | 07 §5.5            | `agentconfig/mutate.rs`                         | F2a         | TS-CFG-10, TS-CONC-01       | AC-F2a-03             |
+| FR-CFG-08        | 07 §5.4            | `agentconfig/mutate.rs`                         | F2a         | TS-CFG-11, 12               | AC-F2a-02             |
+| FR-CFG-09        | 07 §5.7, 08 §6     | `agentconfig/restore.rs`                        | F2a         | TS-REC-01 to 03             | AC-F2a-02             |
+| FR-CFG-10        | 07 §9, 14 §3       | `agentconfig/journal.rs`                        | F2a         | TS-SEC-02                   | AC-F2a-05             |
+| FR-CFG-11        | 07 §2              | `agentconfig/providers/`                        | F1, F2a     | TS-CFG-01                   | —                     |
+| FR-CFG-12        | 07 §2              | `agentconfig/providers/`                        | F1          | TS-CFG-09                   | AC-F1-04              |
+| FR-CFG-13        | 07 §4.3, §4.4      | `agentconfig/`                                  | F1          | TS-CFG-09, TS-FS-03, 04     | —                     |
+| FR-CFG-14        | 10 §4, ADR 0028 §6 | `agentconfig/providers/codex.rs`                | F1          | TS-CFG-15                   | AC-F1-04              |
+| FR-CFG-15        | 16 §2.3            | `agentconfig/restore.rs`                        | F2a         | TS-SEC-06, TS-SYNC-04       | —                     |
+| FR-CFG-16        | 06 §4.2            | `agentconfig/` (redaction)                      | F1          | TS-SEC-01                   | AC-F1-01              |
+| FR-HRS-01        | 08 §3.1            | `agentconfig/providers/`                        | F1          | TS-CFG-01                   | AC-F1-01              |
+| FR-HRS-02        | 08 §3.2, §3.3      | `agentconfig/mutate.rs`                         | F2a, G-INF  | Table test, TS-CFG-15       | AC-F2a-01, AC-GINF-08 |
+| FR-HRS-03        | 08 §3.3            | `agentconfig/restore.rs`                        | F2a         | TS-REC-03, TS-SYNC-03       | AC-F2a-02             |
+| FR-HRS-04        | 08 §3.4            | `agentconfig/mutate.rs`                         | F5          | TS-CFG-17 to 20             | F5                    |
+| FR-HRS-05        | 08 §3.1            | `agentconfig/providers/`                        | F1, F5      | TS-CFG-01                   | —                     |
+| FR-HRS-06        | 08 §4              | `agentconfig/providers/`                        | F1          | TS-CFG-01                   | AC-F1-01              |
+| FR-HRS-07        | 08 §4              | `agentconfig/mutate.rs`                         | F2a, F5     | Table test                  | —                     |
+| FR-HRS-08        | 08 §5              | `agentconfig/`                                  | F1, F2a     | TS-CFG-01, table test       | AC-F1-01              |
+| FR-HRS-09        | 08 §5              | `agentconfig/`                                  | F1, F2b, F5 | TS-CFG-01                   | —                     |
+| FR-HRS-10        | 08 §5              | `agentconfig/`                                  | F1, F2a     | TS-CFG-01                   | —                     |
+| FR-HRS-11        | 08 §3.5, 09 §4     | `profiles/`                                     | F3c         | TS-PRF-01                   | AC-F3c-01             |
+| FR-HRS-12        | 08 §8, C-08        | `agentconfig/providers/codex.rs`                | F1          | TS-CFG-14                   | —                     |
+| FR-ADP-01        | 06 §4              | `agentconfig/providers/`                        | F1          | TS-CFG-01                   | —                     |
+| FR-ADP-02        | 06 §2              | `agentconfig/model.rs`                          | F1          | TS-UX-02                    | —                     |
+| FR-ADP-03        | 06 §1              | —                                               | F1          | TS-SEC-03                   | —                     |
+| FR-ADP-04        | 06 §6              | `agentconfig/`                                  | F1, F2a     | TS-CFG-13                   | —                     |
+| FR-ADP-05        | 06 §4              | `agentconfig/model.rs`                          | F1          | TS-CFG-03, TS-UX-01         | —                     |
+| FR-PRF-01        | 09 §4.1            | `profiles/`                                     | F3c         | TS-PRF-01                   | AC-F3c-01             |
+| FR-PRF-02        | 09 §4.6            | `profiles/`                                     | F3c         | TS-PRF-01                   | —                     |
+| FR-PRF-03        | 09 §4.3            | `profiles/`                                     | F3c         | TS-PRF-02                   | —                     |
+| FR-PRF-04        | 09 §2, §3          | `profiles/`, `native/`                          | F3c         | TS-PRF-05                   | AC-F3c-01             |
+| FR-PRF-05        | 09 §4.4            | `profiles/`                                     | F3c         | TS-PRF-06                   | —                     |
+| FR-PRF-06        | 09 §4.5            | `profiles/`                                     | F3c         | TS-PRF-07, TS-SEC-06        | —                     |
+| FR-PRF-07        | 09 §5              | `profiles/`                                     | F3c         | TS-PRF-01                   | —                     |
+| FR-PRF-08        | 09 §4.2            | `profiles/`                                     | F3c         | TS-PRF-03                   | AC-F3c-02             |
+| FR-PRF-09        | 09 §1              | `agentconfig/mutate.rs`                         | F5          | —                           | F5                    |
+| FR-MOD-01        | 12 §1              | `features/sessions/`                            | F3b         | TS-SES-01                   | —                     |
+| FR-MOD-02        | 12 §4              | `authority/view.rs` `[R]`, window               | F6a         | TS-MOD-01                   | J11                   |
+| FR-MOD-03        | 12 §4              | `agentconfig/`                                  | F1, F6a     | TS-CFG-01                   | —                     |
+| FR-MOD-04        | 12 §4              | `adapters/codex/normalize.rs` `[R]`, `control/` | F6a         | TS-MOD-01 to 04             | J11                   |
+| FR-MOD-05        | 12 §5              | `profiles/`                                     | F6b         | TS-MOD-05                   | —                     |
+| FR-MOD-06        | 12 §5              | —                                               | F6b         | TS-MOD-06                   | —                     |
+| FR-MOD-07        | 12 §3              | `agentconfig/`, window                          | F6a, F6b    | TS-MOD-01                   | —                     |
+| FR-MOD-08        | 12 §6              | —                                               | F6a         | —                           | —                     |
+| FR-MOD-09        | 12 §4              | `control/`                                      | F6a         | TS-MOD-04                   | —                     |
+| FR-MOD-10        | 12 §1              | window                                          | F6a         | TS-UX-01                    | —                     |
+| FR-SES-01        | 13 S2              | `features/sessions/`                            | F3b         | TS-SES-01                   | AC-F3b-01             |
+| FR-SES-02        | 05 §5, 10 §3       | `native/`; `control/` `[R]`                     | F3b         | TS-NAT-06                   | —                     |
+| FR-SES-03        | 09 §7              | window                                          | F3b         | TS-UX-01                    | —                     |
+| FR-SES-04        | 09 §7.1            | handoff                                         | F11a        | TS-SES-03                   | F11a                  |
+| FR-SES-05        | 09 §7.2            | handoff                                         | F11a        | TS-SES-04                   | F11a                  |
+| FR-SES-06        | 14 §5              | `native/`; `control/` `[R]`                     | F3b         | TS-NAT-06                   | AC-F3b-02             |
+| FR-OBS-01        | 13 S10             | `events/` `[R]`                                 | Built       | Existing events tests       | —                     |
+| FR-OBS-02        | 13 S10             | `agentconfig/journal.rs`                        | F2a         | TS-SEC-02                   | AC-F2a-05             |
+| FR-OBS-03        | 13 S10             | native registry                                 | F3b         | TS-NAT-06                   | —                     |
+| FR-OBS-04        | 14 §7              | window                                          | Built, F1   | TS-CFG-07                   | AC-F1-02              |
+| FR-OBS-05        | 18 §3              | —                                               | F13         | TS-SEC-02                   | —                     |
+| FR-OBS-06        | 15                 | benchmarks                                      | P1          | TS-PERF-01 to 12            | P1                    |
+| FR-SEC-01        | 11 §4              | native dialog                                   | F2a         | TS-SEC-05                   | AC-F2a-04             |
+| FR-SEC-02        | 11 §4              | `agentconfig/mutate.rs`                         | F2a         | TS-SEC-05                   | AC-F2a-04             |
+| FR-SEC-03        | 04 C-01            | `desktop/agentconfig.rs`                        | F1          | TS-SEC-04                   | —                     |
+| FR-SEC-04        | 06 §4.2            | `agentconfig/`                                  | F1          | TS-SEC-01                   | AC-F1-01              |
+| FR-SEC-05        | 04 C-08            | `agentconfig/`                                  | F1          | TS-CFG-14                   | —                     |
+| FR-SEC-06        | 04 C-09, 10 §5.4   | `agentconfig/`                                  | F1          | TS-CFG-09                   | AC-GINF-05            |
+| FR-SEC-07        | 10 §2              | `control/`, `adapters/codex/` `[R]`             | Always      | TS-REG-02                   | Every phase           |
+| FR-SEC-08        | 11 §5              | `agentconfig/restore.rs`                        | F2a         | TS-SEC-02, 07               | AC-F2a-06             |
+| FR-SEC-09        | 16 §5.2            | gateway                                         | F10a        | TS-REM-01 to 10             | F10a                  |
+| FR-DAT-01        | 14 §2              | —                                               | Always      | Review                      | —                     |
+| FR-DAT-02        | 14 §4              | `agentconfig/mutate.rs`                         | F2a         | TS-CFG-12                   | —                     |
+| FR-DAT-03        | 14 §3              | every store                                     | Always      | TS-REC-04                   | —                     |
+| FR-DAT-04        | 14 §3              | every store                                     | F2a         | —                           | —                     |
+| FR-DAT-05        | 14 §8              | `agentconfig/`                                  | F2a         | TS-REC-05                   | —                     |
+| FR-SYNC-01       | 16 §2.1            | `agentconfig/watch.rs`                          | F1          | TS-SYNC-01                  | AC-F1-02              |
+| FR-SYNC-02       | 16 §2.1            | `agentconfig/`                                  | F1, F2a     | TS-SYNC-02                  | AC-F1-03              |
+| FR-SYNC-03       | 16 §2.2            | `agentconfig/restore.rs`                        | F2a         | TS-SYNC-03                  | —                     |
+| FR-SYNC-04       | 16 §2.1            | `agentconfig/watch.rs`                          | F1          | TS-SYNC-01                  | —                     |
+| FR-REM-01 to 08  | 16 §5              | gateway, host service                           | F10a        | TS-REM-01 to 10             | J14                   |
+| FR-REM-09        | 16 §5              | phone client                                    | F10b        | TS-REM-11 to 13             | J15                   |
+| FR-AGT-01        | 17 §2              | `agentconfig/providers/hermes.rs`               | F4b         | TS-CFG-01 (Hermes fixtures) | F4b                   |
+| FR-AGT-02        | 17 §4              | —                                               | F12         | —                           | A written comparison  |
+| FR-AGT-03        | 17 §6              | —                                               | F12         | —                           | —                     |
+| FR-DIST-01       | 18 §2              | everywhere                                      | Always      | A scan test, proposed       | —                     |
+| FR-DIST-02 to 06 | 18 §3              | —                                               | F13         | TS-DIST-01 to 06            | F13                   |
+| FR-UX-01         | 13 §2              | `shell/nav.ts` `[R]`                            | Built       | Existing shell tests        | —                     |
+| FR-UX-02         | 13 S12, 05 §2 TF3  | window                                          | T1          | TS-UX-03, TS-A11Y-01        | T1                    |
+| FR-UX-03         | 13 §1.1            | window                                          | F1          | TS-UX-01                    | AC-F1-04              |
+| FR-UX-04         | 13 S13             | window                                          | Always      | TS-UX-01                    | —                     |
+| FR-UX-05         | 13 §1 U6           | window                                          | F1          | TS-UX-02                    | AC-F1-05              |
+| FR-UX-06         | 13 §1 U2           | window                                          | F1          | TS-UX-04                    | AC-F3a-03             |
+
+## 2. Non-functional requirements
+
+| Requirement       | Design           | Component                        | Phase            | Tests                  | Acceptance                |
+| ----------------- | ---------------- | -------------------------------- | ---------------- | ---------------------- | ------------------------- |
+| NFR-PERF-01, 02   | 15 §2 M01, M02   | whole application                | P1               | TS-PERF                | Baseline                  |
+| NFR-PERF-03, 04   | 15 §2 M03 to M05 | whole application                | P1               | TS-PERF, TS-PERF-13    | Baseline                  |
+| NFR-PERF-05       | 15 §2 M06, M12   | terminal                         | P1               | TS-PERF                | Baseline                  |
+| NFR-PERF-06       | 15 §2 M08        | terminal                         | P1               | TS-PERF                | Baseline                  |
+| NFR-PERF-07       | 15 §2 M09 to M11 | terminal                         | P1               | TS-PERF                | Baseline                  |
+| NFR-PERF-08       | 15 §2 M13        | terminal                         | P1               | TS-PERF                | Baseline                  |
+| NFR-PERF-09       | 07 §7, 15 M16    | `agentconfig/watch.rs`           | F1               | TS-PERF-13, TS-LONG-02 | F1 performance check      |
+| NFR-PERF-10       | 15 §2 M14        | `terminal/` `[R]`                | Built            | TS-PERF                | Baseline                  |
+| NFR-PERF-11       | 15 §2 M17        | whole application                | F3b              | TS-PERF                | AC-F3b-01                 |
+| NFR-SEC-01        | 04 C-01          | capability list `[R]`            | Built            | TS-REG-04, TS-SEC-04   | Every phase               |
+| NFR-SEC-02        | 04 C-06, C-11    | every reader                     | Built, per phase | TS-CFG-05, TS-TERM-02  | —                         |
+| NFR-SEC-03        | 10 §2            | `adapters/codex/safety.rs` `[R]` | Built            | Managed suite          | —                         |
+| NFR-SEC-04        | 11 §5.5          | every store                      | Built, per phase | TS-SEC-01, 02          | AC-F2a-06                 |
+| NFR-REL-01        | 14 §4            | `agentconfig/mutate.rs`          | F2a              | TS-CFG-12              | —                         |
+| NFR-REL-02        | 10 §2 SG-10      | `lifecycle/` `[R]`               | Built            | Lifecycle suite        | —                         |
+| NFR-REL-03        | 04 card A        | `terminal/` `[R]`                | Built            | TS-REG-01              | Every phase               |
+| NFR-REL-04        | 07 §4.2          | `agentconfig/`                   | F1               | TS-CFG-03              | —                         |
+| NFR-MNT-01        | 06 §6            | `agentconfig/providers/`         | F1               | TS-CFG-01, 13          | —                         |
+| NFR-MNT-02        | ADR 0028 §10     | `Cargo.toml`                     | Always           | Review                 | —                         |
+| NFR-MNT-03        | 20 §1            | test suites                      | Always           | TS-REG-05              | —                         |
+| NFR-PORT-01       | 18 §4            | `lifecycle/` `[R]`               | Built            | Lifecycle suite        | —                         |
+| NFR-PORT-02       | 18 §4            | —                                | F13              | —                      | —                         |
+| NFR-A11Y-01 to 03 | 13 §5            | window                           | Always           | TS-A11Y-01 to 03       | Every phase with a screen |
+| NFR-A11Y-04       | 13 §5            | `app.css` `[R]`                  | Built            | —                      | —                         |
+
+## 3. Gaps the matrix shows
+
+| Gap                                                                                | Where it is taken up             |
+| ---------------------------------------------------------------------------------- | -------------------------------- |
+| No test is defined for FR-MOD-08 (usage and cost): nothing is known to be reported | OQ-10; 12 §6                     |
+| No test for FR-DAT-04 (bounds on stores): bounds are not final                     | OQ-22                            |
+| FR-MAN-08, FR-MAN-09 have no tests: they have no design yet                        | DN-08; F8, F11b                  |
+| FR-AGT-02, 03 trace to a decision, not to code                                     | DN-06                            |
+| FR-DIST-* trace to one phase with no design beyond requirements                    | DN-07                            |
+| Several built requirements are held only by a manual check (FR-TERM-05, 06, 09)    | P1 automates them                |
+| NFR-A11Y-04 has no test                                                            | To be added with the next screen |
+| FR-PRF-09 (global profiles) has no test and little design                          | F5's planning                    |
+
+## 4. Reverse check
+
+Every design decision AD-01 to AD-18, every constraint C-01 to C-13 and every guarantee SG-01
+to SG-12 is referenced by at least one requirement above, except: AD-17 (measure before
+changing technology) and AD-18 (one store, one file), which are rules of method and trace to
+phases P1 and "Always". Every control CTL-01 to CTL-26 names its test in
+[11 §3.1](11-SECURITY-THREAT-MODEL.md). This check was done by reading, not by a tool; a
+script that verifies it is a small task of F1 `[N]`.
