@@ -4,8 +4,9 @@ This page says what Wyss Console is for and what its owner has asked of it. It i
 document to read and the one the others answer to (see [Documents](#documents)). What is
 actually built is in the [README](../README.md); this page says so where the two differ.
 
-Status: proposed with [ADR 0028](adr/0028-product-direction-and-agent-configuration.md), which
-is not accepted yet.
+Status: its direction and the ten decisions behind it were approved by the owner on 2026-10-12.
+[ADR 0028](adr/0028-product-direction-and-agent-configuration.md), which records them, is still
+marked proposed.
 
 ## What it is
 
@@ -40,18 +41,19 @@ it uses. A change to the global configuration never makes a managed session clai
 
 ## Requirements the owner has stated
 
-| #   | Requirement                                                                                     | Built today                                           |
-| --- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| R1  | A capable terminal on its own: low idle memory, fast start and input, correct resize and IME    | Yes, unmeasured: no performance figure exists yet     |
-| R2  | Read and change the real global configuration files of the installed agents, in both directions | No                                                    |
-| R3  | Show what is declared, what the agent resolved and what each running session uses, separately   | No                                                    |
-| R4  | Never report a change as active because a file was written                                      | No                                                    |
-| R5  | Security controls stay under the owner's control and never change silently                      | No                                                    |
-| R6  | Global editing and independent per-project or per-session profiles, as two distinct features    | No                                                    |
-| R7  | Start and supervise an agent from the Console, with profiles and observability                  | No. An agent can be started by hand in a terminal tab |
-| R8  | Codex, Claude Code, OpenCode and Hermes, through adapters that state what each can really do    | Codex only, managed                                   |
-| R9  | Keep the managed execution boundaries exactly as they are                                       | Yes                                                   |
-| R10 | Nothing tied to one person's paths, user name, host or provider settings                        | Yes in the code; the product is built for one desktop |
+| #   | Requirement                                                                                                                                                                          | Built today                                                                  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| R1  | A capable terminal on its own: low idle memory, fast start and input, correct resize and IME                                                                                         | Yes, unmeasured: no performance figure exists yet                            |
+| R2  | Read and change the real global configuration files of the installed agents, in both directions: first switching what exists, then creating and editing, as far as each agent allows | No                                                                           |
+| R3  | Show what is declared, what the agent resolved and what each running session uses, separately                                                                                        | No                                                                           |
+| R4  | Never report a change as active because a file was written                                                                                                                           | No                                                                           |
+| R5  | Security controls stay under the owner's control and never change silently                                                                                                           | No                                                                           |
+| R6  | Global editing and independent per-project or per-session profiles, as two distinct features                                                                                         | No                                                                           |
+| R7  | Start and supervise an agent from the Console, with profiles and observability                                                                                                       | No. An agent can be started by hand in a terminal tab                        |
+| R8  | Codex, Claude Code, OpenCode and Hermes, through adapters that state what each can really do                                                                                         | Codex only, managed                                                          |
+| R9  | Keep the managed execution boundaries exactly as they are                                                                                                                            | Yes                                                                          |
+| R10 | Nothing tied to one person's paths, user name, host or provider settings                                                                                                             | Yes in the code; the product is built for one desktop                        |
+| R11 | Native Codex runs the owner's real global hooks while managed Inference keeps working, independently of them                                                                         | No. Today managed Inference refuses to start while any Codex hook is enabled |
 
 ## Not now
 
@@ -69,6 +71,9 @@ stands).
 | 2     | `docs/spec/`, per feature | The exact behaviour of a feature and how it is accepted                                                 |
 | 3     | [`docs/adr/`](adr/)       | Technical decisions. A later one extends or supersedes an earlier one; an accepted one is not rewritten |
 | 4     | [README](../README.md)    | What is implemented and verified, and nothing else                                                      |
+
+A goal on this page does not by itself override an established security control. Changing one
+takes an explicit technical decision, recorded in an ADR, and proof.
 
 `docs origins/` (the archive of the original Wyss assistant), the base specification v0.1 and
 the research and vision reports that preceded this page are inputs. What is taken from them

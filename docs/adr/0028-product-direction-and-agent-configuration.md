@@ -1,7 +1,8 @@
 # 0028 — Product direction: two execution planes and real agent configuration
 
-Status: **Proposed.** Not accepted: seven of its ten decisions are still with the owner (see
-[Decisions put to the owner](#decisions-put-to-the-owner)). Nothing in it is implemented.
+Status: **Proposed.** The owner answered its ten decisions on 2026-10-12 (see
+[Decisions](#decisions)). It is not marked accepted: the owner's closing conditions for
+acceptance are still to be received. Nothing in it is implemented.
 
 Date: 2026-10-12
 
@@ -59,6 +60,11 @@ subsystem has no access to the control socket or to the authority's state. The w
 it through narrow commands that carry an item identifier and an operation, and never a path,
 file content or command text.
 
+Each adapter reaches only the files of its own provider, from a closed list it derives itself:
+there is no general file operation in the subsystem. Its interface is plain typed requests and
+answers, with no window, Tauri or socket type in it, so that it can later sit behind a service
+on the host. No remote architecture is built now.
+
 ### 3. Provider adapters that state what they can really do
 
 One configuration adapter per agent. For each operation it declares one of `native`,
@@ -76,6 +82,12 @@ Consequences: disabling one Claude Code hook means removing its entry and keepin
 so that it can be put back; Wyss Console never writes Codex's hook trust; only for Claude Code
 may a change be reported as adopted by an open session.
 
+Order of integration (decision D9): Claude Code, Codex, OpenCode, Hermes. The Codex
+configuration adapter is a new, separate piece: managed Codex (`src-tauri/src/adapters/codex/`,
+ADRs 0009 to 0018) is neither duplicated nor changed by it, and its read-only decoding is
+reused where it serves. Hermes is integrated as the original upstream agent; no fork of it is
+started or maintained here.
+
 ### 4. Four scopes and three states
 
 Scopes: system (read only), global, project, session. A session profile is applied when the
@@ -92,16 +104,22 @@ still the one planned against → back up → write a new file and rename it ove
 read back and verify → journal → report per session.
 
 - **Round-trip precondition.** Before a file is edited, parsing and writing it back unchanged
-  must reproduce it byte for byte; otherwise it is not edited. The diff of a change is then the
-  change and nothing else. (Checked by reading, on 2026-10-12: both of the owner's Claude Code
-  settings files round-trip exactly with key order preserved, two-space indentation and a final
-  newline.)
-- A change that weakens a security control, or that could introduce executable content, is
-  confirmed in a native dialog that the page cannot answer, as the project folder already is
-  (ADR 0021).
-- The first mutations only switch, remove and restore entries that already existed, byte for
-  byte. A hook runs commands: letting the page author one would turn a compromised page into
-  command execution.
+  must reproduce it byte for byte; otherwise that file is not edited. The diff of a change is
+  then the change and nothing else. The rule is checked on every file at the moment of editing
+  it, because no sample proves it for all files: that both of the owner's Claude Code settings
+  files round-trip exactly (read on 2026-10-12) is evidence, not proof. Format and comment
+  preservation are tested per provider with fixtures of their own.
+- **Risk is decided and enforced in the backend.** The backend classifies every plan. A plan
+  that weakens a security control, or that could introduce executable content, is applied only
+  after a native dialog that the backend itself opens and that the page cannot answer, as the
+  project folder already is (ADR 0021). The page cannot declare a plan confirmed. An ordinary
+  change keeps one confirmation in the page and no more.
+- **First, existing entries only.** The first mutations switch, remove and restore entries that
+  already existed, byte for byte. This is the order of implementation and not a limit of the
+  product: creating and editing rules, hooks, skills and settings follow in a later phase, as
+  far as each provider really allows. They wait because a hook runs commands: letting the page
+  author one would turn a compromised page into command execution, so authoring needs a
+  contract of its own for executable content.
 - Where the provider has its own writer (`claude mcp`, `codex mcp`) it is used. `~/.claude.json`,
   which Claude Code rewrites for itself, is never edited directly.
 - Files are classified by owner: user, system, provider-owned, generated, link. A link is
@@ -123,15 +141,21 @@ Managed Inference requires zero enabled external Codex hooks (ADR 0015). Therefo
    (`inference_safety_unproven`, `safety.rs:86`); the cause is added by the desktop from what
    the configuration subsystem knows, with no change to the authority.
 
-**Gate G-INF.** Enabling a Codex hook from the Console ships only when points 1, 2 and 4 are
-implemented and tested against the same fixtures as `zero_external_hooks`, and the owner has
-chosen how the conflict is resolved (decision D7):
+**Gate G-INF.** The intended resolution (decision D7) is decoupling: managed Inference on a
+private Codex home, as Local Tools already has, so that native Codex can run the owner's real
+global hooks while managed Inference keeps working, independently of them.
 
-- **A. Explicit trade.** The owner enables hooks knowing that managed Inference is unavailable
-  until they are disabled again; one confirmed action, one action to undo.
-- **B. Decoupling.** Inference runs on a private Codex home, as Local Tools does, so that the
-  user's hooks no longer reach it. This changes a security contract and needs its own ADR,
-  compatibility tests and the owner's approval before any implementation.
+That decision authorises research and security design. It does not authorise changing how
+Inference is built. Until the isolation design, its compatibility with the provider and its
+safety attestation have been verified and accepted in an ADR of their own:
+
+- the authority's check stays exactly as it is (`safety.rs:328-348`);
+- enabling a Codex hook is not offered from the Console (point 3);
+- there is no fallback that runs Inference with a weaker check, and no way for it to become
+  unavailable without the window saying so first.
+
+Considered and not chosen: an explicit trade, in which the owner enables hooks knowing that
+managed Inference stops until they are disabled again.
 
 Claude Code's hooks have no such coupling: no managed runtime reads them.
 
@@ -141,7 +165,15 @@ The owner's `~/.claude/` is replicated between two computers; Wyss Console's pri
 not. A hook removed on one computer disappears on the other, which has no parked copy.
 
 - **Parked entries stay in the private state of the computer that parked them** (decision D5),
-  with a backup of the whole previous file.
+  with a backup of the whole previous file. A parked entry keeps what an exact restoration
+  needs: its bytes, the file and scope it came from, its event and matcher group, its position
+  among its neighbours, the hash of the file before and after, and when it was parked.
+- **A backup may hold secrets** and is treated so: a private directory of this user, files
+  readable by him alone, a bounded number kept, never sent to the page, never copied into the
+  history and never placed where it would be replicated.
+- **A file that has diverged is never overwritten by itself.** A restoration is planned against
+  the file as it is now; if the entry is already there it is not added twice, and if what is
+  there contradicts it the two are shown and nothing is written.
 - **Every computer keeps its own last-seen copies.** The configuration subsystem keeps, per
   file, the last contents it observed. When a file changes from outside and an entry is gone,
   that computer can restore it from its own last-seen copy, without anything replicated.
@@ -160,16 +192,33 @@ fails without writing. A per-target lock serialises the Console's own writers. A
 writing between the last check and the rename cannot be excluded: it is detected on read-back
 and recoverable from the backup.
 
-### 9. Dependencies (decision D6)
+### 9. A configuration history of its own (decision D8)
 
-| Need                                  | Chosen                                               | New crates | Why                                                                                             |
-| ------------------------------------- | ---------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------- |
-| Edit JSON keeping key order           | `serde_json`, feature `preserve_order`               | 0          | `indexmap` is already in `Cargo.lock`; exact round trip verified on the real files              |
-| Edit TOML keeping comments and layout | `toml_edit` as a direct dependency                   | 0          | Already in `Cargo.lock` at 0.25.15 as a transitive dependency; maintained by the `toml` authors |
-| Notice outside changes                | `nix`, feature `inotify`                             | 0          | `nix` 0.28 is already a direct dependency; avoids the `notify` crate and its tree               |
-| Edit JSONC keeping comments           | Deferred to the OpenCode phase (`jsonc-parser` then) | 1, later   | Only OpenCode needs it; its file here has no comments today                                     |
+Configuration changes are recorded in a journal that belongs to the configuration subsystem and
+is separate from the authority's event stream (ADRs 0003 and 0017), which stays the record of
+managed execution. The journal holds, per entry: the item, the operation, the scope, the hash
+of the file before and after, the time, the outcome, and the conflicts and outside changes that
+were observed. It holds no file content, no value of any setting and no secret. It is what undo
+reads, and it has its own list in the window.
+
+### 10. Dependencies (decision D6)
+
+| Need                                  | Chosen                                               | New crates | Why                                                                                               |
+| ------------------------------------- | ---------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------- |
+| Edit JSON keeping key order           | `serde_json`, feature `preserve_order`               | 0          | `indexmap` is already in `Cargo.lock`; exact round trip seen on two real files, enforced per file |
+| Edit TOML keeping comments and layout | `toml_edit` as a direct dependency                   | 0          | Already in `Cargo.lock` at 0.25.15 as a transitive dependency; maintained by the `toml` authors   |
+| Notice outside changes                | `nix`, feature `inotify`                             | 0          | `nix` 0.28 is already a direct dependency; avoids the `notify` crate and its tree                 |
+| Edit JSONC keeping comments           | Deferred to the OpenCode phase (`jsonc-parser` then) | 1, later   | Only OpenCode needs it; its file here has no comments today                                       |
 
 Nothing is added before the phase that uses it.
+
+### 11. Which document rules (decision D10)
+
+[`docs/PRODUCT.md`](../PRODUCT.md) states the approved goals; a specification under
+`docs/spec/` states the functional contract of a feature; ADRs record technical decisions and
+which one supersedes which; the README describes what is implemented and verified. A goal in
+the product page does not by itself override an established security control: changing one
+takes an explicit technical decision and proof.
 
 ## Compatibility with ADRs 0001 to 0027
 
@@ -215,34 +264,37 @@ mutation ships, not before.
 
 Each phase leaves the terminal and managed Codex exactly as they are and can be the last.
 
-| Phase | Delivers                                                                                                          | Before it                            | Accepted when                                                                                                       |
-| ----- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| F0    | This ADR, `docs/PRODUCT.md`, the matrix above                                                                     | —                                    | The owner has answered D1 to D10                                                                                    |
-| F1    | Read-only inventory for Claude Code and Codex; the Configuration view; outside changes noticed; section 6 point 1 | F0 accepted                          | Fixture inventories match exactly; no secret value reaches the page; **no file is written**                         |
-| F1b   | Study only: can Inference run on a private Codex home? A written contract and its compatibility tests             | F1                                   | A report and a draft ADR. No guarantee is changed                                                                   |
-| F2a   | Mutations with no managed coupling: Claude Code skills, plugins, all-hooks switch, hook parking and restore       | F1; D3, D4, D5 answered              | A file broken on purpose, an outside change mid-way and a simulated power cut all leave a valid file; undo is exact |
-| F2b   | Mutations of Codex configuration, each with its effect on managed Inference predicted                             | F2a; section 6 points 2 and 4        | Enabling a hook is blocked with its reason                                                                          |
-| G-INF | Enabling a Codex hook                                                                                             | F2b; D7 answered (A, or B after F1b) | The conflict is shown before, named after and undone in one action                                                  |
-| F3    | Starting an agent in a terminal, a registry of native sessions, session profiles                                  | Its own ADR (0005 to 0007)           | Two sessions with different profiles at once and no global file changed                                             |
-| F4    | OpenCode and Hermes adapters, read only first                                                                     | F1                                   | As F1, per agent                                                                                                    |
+| Phase | Delivers                                                                                                                                                           | Before it                                                    | Accepted when                                                                                                                                             |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F0    | This ADR, `docs/PRODUCT.md`, the matrix above                                                                                                                      | —                                                            | The owner accepts this ADR                                                                                                                                |
+| F1    | Read-only inventory for Claude Code and Codex; the Configuration view; outside changes and Syncthing conflicts noticed; section 6 point 1                          | F0 accepted and F1 authorised                                | Fixture inventories match exactly; no secret value reaches the page; **no file is written**                                                               |
+| F1b   | Research and security design only: managed Inference on a private Codex home. A written contract, its compatibility tests against the provider and its attestation | F1                                                           | A report and a draft ADR. The Inference that exists is not changed                                                                                        |
+| F2a   | Mutations with no managed coupling: Claude Code skills, plugins, all-hooks switch, hook parking and restore; backups, history and undo                             | F1                                                           | A file broken on purpose, an outside change mid-way and a simulated power cut all leave a valid file; undo is exact; a diverged file is never overwritten |
+| F2b   | Mutations of Codex configuration, each with its effect on managed Inference predicted                                                                              | F2a; section 6 points 2 and 4                                | Enabling a hook is blocked with its reason                                                                                                                |
+| G-INF | Managed Inference on a private home; then enabling Codex hooks from the Console                                                                                    | F1b; its own ADR accepted; its tests and attestation passing | Native Codex runs with the owner's hooks while a managed Inference turn completes; the isolation tests that exist still pass                              |
+| F3    | Starting an agent in a terminal, a registry of native sessions, session profiles                                                                                   | Its own ADR (0005 to 0007)                                   | Two sessions with different profiles at once and no global file changed                                                                                   |
+| F4    | OpenCode, then Hermes as its original upstream; read only first                                                                                                    | F1                                                           | As F1, per agent                                                                                                                                          |
+| F5    | Creating and editing rules, hooks, skills and settings, as far as each provider allows                                                                             | F2a; a contract for executable content                       | To be written with that contract                                                                                                                          |
 
 Real integration on the owner's configuration happens only with his explicit authorisation, per
 phase. Everything else runs on synthetic fixtures and private homes.
 
-## Decisions put to the owner
+## Decisions
 
-| #   | Decision                                     | Recommended                                              | State                                                                                       |
-| --- | -------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| D1  | Two planes as the definition of the product  | Yes                                                      | General direction approved; not confirmed as D1                                             |
-| D2  | Where the configuration subsystem lives      | A library in the desktop backend, outside the authority  | General direction approved; not confirmed as D2                                             |
-| D3  | Scope of the first mutations                 | Switch, remove and restore existing entries only         | Open                                                                                        |
-| D4  | Confirming a change that weakens security    | A native dialog, every time                              | Open                                                                                        |
-| D5  | Where parked hooks are kept                  | The Console's private state, per computer                | **Answered, preliminary**: private state, with backup and restore; section 7                |
-| D6  | New dependencies                             | The set in section 9: no new crate until OpenCode        | **Answered, preliminary**: only what is needed, each justified; the set awaits confirmation |
-| D7  | Managed Inference and the user's Codex hooks | Study B (F1b); allow A meanwhile                         | **Answered, preliminary**: investigate only; no guarantee altered; A or B still to choose   |
-| D8  | Where configuration history is recorded      | Its own local journal, apart from the authority's stream | Open                                                                                        |
-| D9  | Order of agents                              | Claude Code, Codex, OpenCode, Hermes                     | Open                                                                                        |
-| D10 | Document hierarchy                           | `docs/PRODUCT.md`, `docs/spec/`, ADRs, README            | Open                                                                                        |
+Answered by the owner on 2026-10-12.
+
+| #   | Decision                                     | Chosen                                                | Conditions the owner attached                                                                                                                                                                                                    |
+| --- | -------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | The definition of the product                | Two execution planes                                  | Both kept; told apart in the interface                                                                                                                                                                                           |
+| D2  | Where the configuration subsystem lives      | The desktop's Rust backend, apart from `wyss-control` | Narrow, provider-specific file operations; interfaces that could later serve a remote backend, with no remote architecture now                                                                                                   |
+| D3  | The first mutations                          | Enable, disable and restore existing entries          | An order of implementation, not a limit: creating and editing follow, as providers allow                                                                                                                                         |
+| D4  | A change that weakens security               | A mandatory native confirmation                       | Authorisation and validation enforced in the backend, not only in the page; ordinary changes stay convenient                                                                                                                     |
+| D5  | Where disabled hooks are kept                | Private local backups, per computer                   | Enough content and metadata for an exact restoration; outside changes and Syncthing conflicts detected; a diverged file never overwritten by itself; a controlled export and import; backups treated as possibly holding secrets |
+| D6  | Dependencies                                 | The approach of section 10                            | Existing dependencies and their features first; format and comment preservation validated with fixtures per provider; a round trip on two samples is evidence, not proof; JSONC only with OpenCode                               |
+| D7  | Managed Inference and the user's Codex hooks | An isolated Inference home is the intended solution   | Research and security design only; the present protective check stays until design, provider compatibility and attestation are verified; no silent loss of managed Inference and no unsafe fallback                              |
+| D8  | Configuration history                        | An independent audit and history                      | Edits, rollbacks, conflicts and drift kept apart from the managed execution stream; no secret in it                                                                                                                              |
+| D9  | Order of agents                              | Claude Code, Codex, OpenCode, Hermes                  | The order of configuration integration; managed Codex neither duplicated nor regressed; Hermes as the original upstream, not a fork                                                                                              |
+| D10 | Document hierarchy                           | Product vision, current specification, ADRs, README   | The product vision does not by itself override an established security control: that takes an explicit technical decision and proof                                                                                              |
 
 ## Not decided here
 
