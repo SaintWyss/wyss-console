@@ -47,6 +47,18 @@ it('bundles no installer, no updater and no signing claim', () => {
   ).toEqual(['main']);
 });
 
+it('opens in a window wide enough for a full-width shell greeting', () => {
+  // Measured on CachyOS at the default 16 px font: a 960 px window gave the terminal 70
+  // columns, and the distribution's fastfetch greeting prints lines of up to 119. Each
+  // column is about 9.6 px, so 1440 px gives 119 or more.
+  const [main] = tauriConfig.app.windows;
+  expect(main.width).toBe(1440);
+  expect(main.height).toBe(810);
+  // It can still be made as narrow as before.
+  expect(main.minWidth).toBe(320);
+  expect(main.minHeight).toBe(320);
+});
+
 it('has one version, everywhere it is written', () => {
   const pkg = JSON.parse(read('package.json'));
   const cargo = /^version\s*=\s*"([^"]+)"/m.exec(

@@ -8,7 +8,8 @@ repository. Linux, with a `systemd --user` session. No installer and no publishe
 ### What it does
 
 - **Terminal.** Local terminals in tabs, with your own shell. They work whether or not
-  anything else does.
+  anything else does. The window opens at 1440×810, which gives the terminal about 120
+  columns at the default font: enough for a shell greeting as wide as CachyOS's fastfetch.
 - **Sessions.** Create a managed Codex session for a project folder, activate it, resume
   it, close it. Sessions start in Inference: Codex answers and nothing runs.
 - **Agent chat.** Give a session an objective and follow the answer as it arrives; cancel a
