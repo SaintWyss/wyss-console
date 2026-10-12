@@ -577,6 +577,17 @@ it('refuses to package a dirty tree, before it fetches or builds anything', () =
   result = run();
   expect(result.status).toBe(1);
   expect(result.stderr).toMatch(/uncommitted changes/);
+  // So is one that is clean only because a replace ref makes HEAD read as the commit
+  // the tree holds: the commit that would be named is not what would be built.
+  git('commit', '-q', '-a', '-m', 'edited');
+  const edited = git('rev-parse', 'HEAD').stdout.trim();
+  git('reset', '-q', '--soft', 'HEAD~1');
+  const named = git('rev-parse', 'HEAD').stdout.trim();
+  git('replace', '-f', named, edited);
+  expect(git('status', '--porcelain').stdout).toBe('');
+  result = run();
+  expect(result.status).toBe(1);
+  expect(result.stderr).toMatch(/uncommitted changes/);
   // Nothing was fetched or built: no cache, no artifacts.
   expect(existsSync(join(repo, '.cache'))).toBe(false);
   expect(existsSync(join(repo, '.artifacts'))).toBe(false);
@@ -749,6 +760,56 @@ it('finds a committed credential that the working tree replaced, hid or emptied'
       /FAIL\s+no credential in any of the \d+ tracked files: leak\.txt \(AWS access key id\)/,
     );
   }
+});
+
+// A replace ref (`git replace`) makes Git answer for one object with another. What is
+// scanned is the object a commit records, whatever stands in for it.
+it('scans the objects a commit records, not the replacements a replace ref names', () => {
+  const files = {
+    'README.md': 'hello\n',
+    'leak.txt': `token=${real.github}\n`,
+  };
+  // The whole commit replaced by a clean one, with the index and the disk made clean:
+  // to Git the checkout is the clean commit, and `git status` says nothing.
+  const hidden = (repo: string) => {
+    const leaking = gitIn(repo, 'rev-parse', 'HEAD').stdout.trim();
+    writeFileSync(join(repo, 'leak.txt'), 'clean\n');
+    gitIn(repo, 'commit', '-q', '-a', '-m', 'clean');
+    const clean = gitIn(repo, 'rev-parse', 'HEAD').stdout.trim();
+    gitIn(repo, 'reset', '-q', '--soft', leaking);
+    gitIn(repo, 'replace', '-f', leaking, clean);
+    expect(gitIn(repo, 'rev-parse', 'HEAD').stdout.trim()).toBe(leaking);
+    expect(gitIn(repo, 'status', '--porcelain').stdout).toBe('');
+    expect(gitIn(repo, 'show', 'HEAD:leak.txt').stdout).toBe('clean\n');
+  };
+  // Only the committed file's object replaced by a clean one, and the disk made clean.
+  const blob = (repo: string) => {
+    const leaking = gitIn(repo, 'rev-parse', 'HEAD:leak.txt').stdout.trim();
+    writeFileSync(join(repo, 'leak.txt'), 'clean\n');
+    const clean = gitIn(repo, 'hash-object', '-w', 'leak.txt').stdout.trim();
+    gitIn(repo, 'replace', '-f', leaking, clean);
+    expect(gitIn(repo, 'show', 'HEAD:leak.txt').stdout).toBe('clean\n');
+  };
+  for (const [what, replace] of [
+    ['the commit', hidden],
+    ['the file', blob],
+  ] as const) {
+    const result = scanOf(files, replace);
+    expect(result.status, what).toBe(1);
+    expect(result.out, what).toMatch(
+      /FAIL\s+no credential in any of the 2 tracked files: leak\.txt \(GitHub token\)/,
+    );
+    expect(result.out, what).not.toContain(real.github);
+  }
+  // A clean repository is clean, with or without a replace ref in it.
+  expect(scanOf({ 'README.md': 'hello\n' }).status).toBe(0);
+  const clean = scanOf({ 'README.md': 'hello\n' }, (repo) => {
+    const first = gitIn(repo, 'rev-parse', 'HEAD').stdout.trim();
+    gitIn(repo, 'commit', '-q', '--allow-empty', '-m', 'second');
+    gitIn(repo, 'replace', '-f', first, 'HEAD');
+  });
+  expect(clean.out).not.toMatch(/^FAIL/m);
+  expect(clean.status).toBe(0);
 });
 
 it('finds a credential that is only staged, and one that is only on disk', () => {

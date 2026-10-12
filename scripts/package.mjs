@@ -46,6 +46,7 @@ import {
 import {
   buildEnvironmentProblems,
   parseOsRelease,
+  recordedObjectsOnly,
   runtimeIsPinned,
   sourceProblems,
 } from './release-lib.mjs';
@@ -260,7 +261,12 @@ if (process.platform !== 'linux') {
  * @param {string[]} args
  */
 function output(command, args) {
-  const result = spawnSync(command, args, { cwd: root, encoding: 'utf8' });
+  const result = spawnSync(command, args, {
+    cwd: root,
+    encoding: 'utf8',
+    // What the source is, as Git recorded it: no replace ref stands in for a commit.
+    env: command === 'git' ? recordedObjectsOnly() : process.env,
+  });
   return result.status === 0 ? result.stdout.trim() : null;
 }
 /**

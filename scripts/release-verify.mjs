@@ -35,6 +35,7 @@ import {
   parseSums,
   payloadFor,
   permissionProblems,
+  recordedObjectsOnly,
   revisionProblems,
   scanCheckout,
   secretsIn,
@@ -139,6 +140,7 @@ check(
 const head = run('git', ['rev-parse', 'HEAD'], {
   cwd: sourceRoot,
   encoding: 'utf8',
+  env: recordedObjectsOnly(),
 });
 const headSha = head.status === 0 ? head.stdout.trim() : '';
 check(/^[0-9a-f]{40}$/.test(headSha), 'the source commit can be named');

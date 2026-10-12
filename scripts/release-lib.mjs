@@ -290,6 +290,19 @@ export function secretsIn(entries, limits = {}) {
 }
 
 /**
+ * The environment of every Git command a release takes an answer from: the objects Git
+ * recorded, never a replacement for them. A replace ref (`git replace`) makes Git answer
+ * for an object with another one, so a committed file reads as clean, and a working tree
+ * as unchanged, while the commit that is named (and published) holds something else.
+ * Only these commands are given it; Git is not changed for anything else.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function recordedObjectsOnly(env = process.env) {
+  return { ...env, GIT_NO_REPLACE_OBJECTS: '1' };
+}
+
+/**
  * @param {string} where
  * @param {string[]} args
  * @param {Buffer} [input]
@@ -298,6 +311,7 @@ function git(where, args, input) {
   return spawnSync('git', ['-C', where, ...args], {
     input,
     maxBuffer: 2 * MAX_SCAN,
+    env: recordedObjectsOnly(),
   });
 }
 
