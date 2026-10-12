@@ -290,7 +290,8 @@ release:verify    a manifest of another environment?         refused
 
 `scripts/release.Containerfile` builds that environment from pinned inputs on any host with a
 container runtime: the Ubuntu 24.04 image by digest, the distribution's packages from one
-snapshot of its archive, Node and `rustup-init` by version and SHA-256, Rust by release.
+snapshot of its archive, Node and npm at the versions `package.json` declares (enforced, not
+advisory) and `rustup-init`, each by version and SHA-256, Rust by release.
 Only a set that verified is ever in `.artifacts/release/`.
 
 ### Provenance is unchanged
@@ -484,6 +485,15 @@ test that fails without its fix:
   commit on the current branch does not change. It now watches the branch's ref too.
 - **At 960×640 the reset confirmation's buttons were below the fold.** It now scrolls into view
   when it opens, and Cancel has the focus.
+
+Its pull request's review found two more, fixed the same way:
+
+- **A tracked link changed on disk was not scanned.** Git stores a link as its target and the
+  committed target was scanned; a target changed in the working tree was not. It is read with
+  `readlink`, never followed, and scanned.
+- **The container did not meet the declared engines.** It ran Node 22.22.0 and npm 10.9.4 while
+  `package.json` (and several locked dependencies) declare more; npm only warned. It now pins
+  Node 26.11.1 and npm 12.2.0 and makes npm refuse an engine mismatch.
 
 ## Known residuals
 

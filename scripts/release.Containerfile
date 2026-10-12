@@ -40,10 +40,14 @@ RUN --mount=type=secret,id=extra-ca,required=false \
  && update-ca-certificates --fresh \
  && rm -rf /var/lib/apt/lists/*
 
-# Node, the version the release was validated with, against the digest nodejs.org
-# publishes for it (SHASUMS256.txt).
-ARG NODE_VERSION=22.22.0
-ARG NODE_SHA256=9aa8e9d2298ab68c600bd6fb86a6c13bce11a4eca1ba9b39d79fa021755d7c37
+# Node and npm, the versions package.json declares (engines: node >= 26, npm >= 12), against
+# the digests nodejs.org publishes for Node (SHASUMS256.txt) and the registry for npm (its
+# sha512 integrity, of which this is the SHA-256 of the same file). npm refuses, rather than
+# warns about, any dependency whose declared engines this toolchain does not meet.
+ARG NODE_VERSION=26.11.1
+ARG NODE_SHA256=3883bfc73f9a680ca4eab04b196068aaaab1373ffa77d8fc1a4408222495b651
+ARG NPM_VERSION=12.2.0
+ARG NPM_SHA256=6666b48816b39b86c3febac7b51a4ee4de6c5ca589c382ad8004b6b113f86677
 RUN --mount=type=secret,id=extra-ca,required=false \
     if [ -s /run/secrets/extra-ca ]; then export CURL_CA_BUNDLE=/run/secrets/extra-ca; fi \
  && curl -fsSLo /tmp/node.tar.xz \
@@ -51,7 +55,14 @@ RUN --mount=type=secret,id=extra-ca,required=false \
  && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
  && mkdir /opt/node \
  && tar -xJf /tmp/node.tar.xz -C /opt/node --strip-components=1 \
- && rm /tmp/node.tar.xz
+ && rm /tmp/node.tar.xz \
+ && curl -fsSLo /tmp/npm.tgz "https://registry.npmjs.org/npm/-/npm-${NPM_VERSION}.tgz" \
+ && echo "${NPM_SHA256}  /tmp/npm.tgz" | sha256sum -c - \
+ && export PATH=/opt/node/bin:$PATH \
+ && npm install --global --offline --no-audit --no-fund /tmp/npm.tgz \
+ && rm /tmp/npm.tgz \
+ && test "$(npm --version)" = "${NPM_VERSION}"
+ENV npm_config_engine_strict=true
 
 # Rust, through a rustup-init of a fixed version and digest; the toolchain is a fixed
 # release, which rustup checks against the digests of its own channel manifest.

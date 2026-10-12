@@ -158,8 +158,9 @@ not in the list, and refused it, as it should. The list is not widened for other
 
 On any Linux host with Docker or Podman, `scripts/release.Containerfile` is that environment,
 from pinned inputs: the Ubuntu 24.04 image by digest, every distribution package from one
-moment of the Ubuntu archive (`snapshot.ubuntu.com`, `UBUNTU_SNAPSHOT`), Node and `rustup-init`
-by version and SHA-256, Rust by release. The checkout is mounted at `/build/wyss-console`:
+moment of the Ubuntu archive (`snapshot.ubuntu.com`, `UBUNTU_SNAPSHOT`), Node and npm at the
+versions `package.json` declares (enforced) and `rustup-init`, each by version and SHA-256, Rust
+by release. The checkout is mounted at `/build/wyss-console`:
 
 ```sh
 git status --short                 # must print nothing: a release is a commit
@@ -195,10 +196,12 @@ access to GitHub's release downloads for the first fetch of the pinned tools:
    place a candidate is taken from. All three are removed once the checks of step 1 pass,
    before anything is built.
 
-Toolchain of the cloud builds: Rust 1.97.0, Node v22.22.0, npm 10.9.4 (`package.json` asks for
-Node 26 and npm 12; the engines are advisory and everything ran on the older ones; the
-container pins the same versions), `@tauri-apps/cli` 2.12.1, target `x86_64-unknown-linux-gnu`.
-The manifest records the exact versions of the build that made it.
+Toolchain: Rust 1.97.0, `@tauri-apps/cli` 2.12.1, target `x86_64-unknown-linux-gnu`. The
+container pins Node 26.11.1 and npm 12.2.0, the engines `package.json` declares, and makes npm
+refuse, not warn about, any engine a dependency declares and this toolchain does not meet
+(`npm_config_engine_strict`). The host builds of section 1 below, the first container build and
+the earlier cloud build ran Node 22.22.0 and npm 10.9.4, below those engines (npm warned). The
+manifest records the exact versions of the build that made it.
 
 ### What the content scan allows
 
@@ -257,13 +260,19 @@ block in `libgnutls.so.30` (the CachyOS case), with a byte of its runtime change
 naming another revision, another build environment, another authority, a signature, a build tool
 that was not the pinned one; an artifact missing. The set as built is accepted.
 
-The build environment was also built from `scripts/release.Containerfile` (image digest, snapshot
-`20261011T220000Z`), and the same commit packaged in it from a fresh clone: `release:package`
+The build environment was also built from `scripts/release.Containerfile` as it was at that
+commit (image digest, snapshot `20261011T220000Z`, Node 22.22.0), and the same commit packaged in
+it from a fresh clone: `release:package`
 passed, 80 checks, 0 failed. Its manifest records the same revision, build environment, package
 versions, toolchain and host tools as the host build. **The two builds are not bit-for-bit
 identical**: the authority has the same size and differs in LLVM's internal symbol suffixes
 (`.llvm.<hash>`) and therefore its build ID, so each build is its own candidate with its own
 digests. Making the Rust build reproducible bit for bit is not done.
+
+With the container's Node pinned to the declared engines (26.11.1, npm 12.2.0, strict), commit
+`df0592d` (this branch's code after the review's findings): `npm ci` with no engine warning;
+`format:check`, `lint`, `typecheck`, `build` pass; vitest 32 files, **612 tests, all pass** under
+`LANG=es_AR.UTF-8` and under `LANG=en_US.UTF-8`.
 
 Every one of these artifacts was of `bc1c79e`; `release:verify` refuses them at any later commit,
 this documentation's included. The candidate of a commit is the set `release:package` makes and

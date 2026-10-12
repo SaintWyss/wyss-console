@@ -36,8 +36,8 @@ not signed. Not yet accepted on a real desktop: see `docs/release/LOCAL_ACCEPTAN
 - Built in the release build environment (Ubuntu 24.04, x86_64; `scripts/build-environment.json`,
   buildable from pinned inputs with `scripts/release.Containerfile`); `release:package` refuses
   any other host, and only a set that verified is put in `.artifacts/release/`.
-- Checked in the cloud on this branch: 611 frontend tests under both `es_AR.UTF-8` and
-  `en_US.UTF-8`, formatting, lint, typecheck, Clippy, 570 Rust tests, the packages opened and
+- Checked in the cloud on this branch: 612 frontend tests under both `es_AR.UTF-8` and
+  `en_US.UTF-8` (Node 26.11.1, npm 12.2.0, as declared), formatting, lint, typecheck, Clippy, 570 Rust tests, the packages opened and
   verified (80 checks) and 14 deliberately tampered copies refused. 40 Rust tests need
   `bubblewrap` 0.11 or newer or a real `systemd --user` and could not run there; they passed in
   the independent audit of the previous candidate. See `docs/release/RELEASE.md`.
@@ -49,7 +49,8 @@ not signed. Not yet accepted on a real desktop: see `docs/release/LOCAL_ACCEPTAN
   maintainer script; the build-host check knew only the verifier's own paths; nothing named or
   enforced the build environment, and a refused build was left where an accepted one goes; a
   frontend test assumed an English clock; a development build could show a stale revision; the
-  reset confirmation's buttons were below the fold at 960×640.
+  reset confirmation's buttons were below the fold at 960×640; a tracked link changed on disk was
+  not scanned; the build container ran a Node and npm older than the declared engines.
 - Not accepted on a desktop: 0 of 19 local acceptance controls run.
 
 ### Known limits
