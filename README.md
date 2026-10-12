@@ -18,9 +18,12 @@ npm 12+ and the [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequis
 
 1. Build the package: `npm ci && npm run desktop:package`. It writes
    `.artifacts/package/wyss-console-<version>-linux-<arch>/`.
-2. Run `bin/wyss-console` from that directory, in place or from wherever you copy the
-   whole directory to. Nobody but you may be able to write in it: the desktop refuses an
-   authority that someone else could have replaced.
+2. Copy that whole directory to a place where it and every folder above it can be written
+   by you alone (or by root), for example `~/.local/opt/wyss-console/`, and run
+   `bin/wyss-console` from there. The desktop refuses an authority that someone else could
+   have replaced: run from a folder with a group-writable parent (`drwxrwxr-x`, which is
+   what a checkout is under a umask of 002), it says the authority could not be trusted,
+   installs nothing, and only the local terminals work.
 3. The authority is installed and started by itself; the top bar goes from Starting to
    Connected.
 
