@@ -104,6 +104,20 @@ pub async fn choose_workspace(
     }))
 }
 
+/// Where the dialog opens when the user has no folder of their own to open it in.
+const ROOT: &str = "/";
+
+/// Where the dialog opens: the user's home, or the root when that is not a folder. It is
+/// decided here from what the system says the home is; the request carries nothing that
+/// could choose it.
+fn start_folder(home: PathBuf) -> PathBuf {
+    if home.is_absolute() && home.is_dir() {
+        home
+    } else {
+        PathBuf::from(ROOT)
+    }
+}
+
 #[cfg(target_os = "linux")]
 thread_local! {
     /// GTK does not keep a native dialog alive: this does, until it is answered.
@@ -129,9 +143,10 @@ async fn pick_folder(window: tauri::WebviewWindow) -> Result<Option<PathBuf>, ()
                 Some("Cancel"),
             );
             dialog.set_modal(true);
-            // GTK opens on "Recent", where a typed path cannot be accepted. The user's
-            // home is a place of its own: it is fixed here and never comes from the page.
-            dialog.set_current_folder(gtk::glib::home_dir());
+            // GTK opens on "Recent", where a typed path cannot be accepted.
+            if !dialog.set_current_folder(start_folder(gtk::glib::home_dir())) {
+                dialog.set_current_folder(ROOT);
+            }
             dialog.connect_response(move |dialog, response| {
                 let chosen = (response == gtk::ResponseType::Accept)
                     .then(|| dialog.filename())
@@ -178,6 +193,27 @@ mod tests {
             use std::os::unix::ffi::OsStringExt;
             let not_text = std::ffi::OsString::from_vec(b"/not\xffutf8".to_vec());
             assert_eq!(selection(Some(not_text.into())), refused);
+        }
+    }
+
+    #[test]
+    fn the_dialog_opens_in_the_home_folder_or_in_the_root() {
+        // A folder that exists is where the dialog opens.
+        let home = std::env::temp_dir();
+        assert!(home.is_absolute() && home.is_dir());
+        assert_eq!(start_folder(home.clone()), home);
+        // Anything else would leave GTK on "Recent", where a typed path is not accepted.
+        for missing in [
+            home.join("wyss-console-no-such-home-folder"),
+            PathBuf::from("relative/home"),
+            PathBuf::from(""),
+            PathBuf::from("/etc/hostname"),
+        ] {
+            assert_eq!(
+                start_folder(missing.clone()),
+                PathBuf::from(ROOT),
+                "{missing:?}"
+            );
         }
     }
 

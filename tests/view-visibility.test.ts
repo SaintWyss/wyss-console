@@ -92,3 +92,25 @@ it('never removes a status from the top bar, at any width', () => {
     [...narrow].sort(),
   );
 });
+
+it('puts the Settings sections in two columns only in a wide window', () => {
+  // jsdom lays nothing out: what can be held here is that the rule exists, that it is
+  // conditional on the width of the view, and that what is not a section (a notice, the
+  // lede) is not squeezed into one of the columns.
+  const wide =
+    /@container \(min-width: 1000px\) \{\s*\.settings-body \{([^}]*)\}\s*\.settings-body > :not\(\.settings-section\) \{([^}]*)\}/.exec(
+      withoutComments,
+    );
+  expect(wide, 'the two-column rule of Settings').not.toBeNull();
+  expect(wide![1]).toMatch(/display:\s*grid/);
+  expect(wide![1]).toMatch(/grid-template-columns:\s*repeat\(2,/);
+  expect(wide![2]).toMatch(/grid-column:\s*1 \/ -1/);
+  // Outside that condition the body is the single column it was.
+  const base = rules.filter(
+    (rule) =>
+      rule.selectors.includes('.settings-body') &&
+      !/grid-template-columns/.test(rule.body),
+  );
+  expect(base).toHaveLength(1);
+  expect(base[0].body).toMatch(/flex-direction:\s*column/);
+});
