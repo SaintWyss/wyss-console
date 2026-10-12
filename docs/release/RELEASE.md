@@ -157,10 +157,14 @@ not in the list, and refused it, as it should. The list is not widened for other
 - `npm run release:verify` refuses a manifest of any other environment.
 
 On any Linux host with Docker or Podman, `scripts/release.Containerfile` is that environment,
-from pinned inputs: the Ubuntu 24.04 image by digest, every distribution package from one
-moment of the Ubuntu archive (`snapshot.ubuntu.com`, `UBUNTU_SNAPSHOT`), Node and npm at the
-versions `package.json` declares (enforced) and `rustup-init`, each by version and SHA-256, Rust
-by release. The checkout is mounted at `/build/wyss-console`:
+from pinned inputs: the Ubuntu 24.04 image by digest, every distribution package it adds from
+one moment of the Ubuntu archive (`snapshot.ubuntu.com`, `UBUNTU_SNAPSHOT`), Node and npm at
+the versions `package.json` declares (enforced) and `rustup-init`, each by version and SHA-256,
+Rust by release. The snapshot is only served over https, so `ca-certificates` is first taken
+from the live archive; whatever that installed or upgraded is then put back to the snapshot's
+version (downgraded if the archive has moved on), and the image is not built if any package
+that is not the base image's differs from the snapshot. The checkout is mounted at
+`/build/wyss-console`:
 
 ```sh
 git status --short                 # must print nothing: a release is a commit

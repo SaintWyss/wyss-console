@@ -22,21 +22,41 @@ FROM docker.io/library/ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d
 ARG UBUNTU_SNAPSHOT=20261011T220000Z
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 TZ=UTC
 
-# ca-certificates comes first, from the image's own archive, because the snapshot is only
-# served over https; everything after it is from the snapshot.
+# ca-certificates comes first, from the live archive, because the snapshot is only served
+# over https. What that brought (ca-certificates and whatever it pulled in or upgraded,
+# such as openssl and libssl3t64) is then put back to the snapshot's version, downgraded
+# if the archive has moved on: the snapshot is preferred over anything installed
+# (Pin-Priority 1001). Afterwards every package that is not the base image's has to be
+# the snapshot's version, or the build stops; nothing is left from the live archive.
 RUN --mount=type=secret,id=extra-ca,required=false \
-    apt-get update \
+    installed() { dpkg-query -W -f '${db:Status-Abbrev} ${Package} ${Version}\n' \
+      | awk '$1 == "ii" { print $2, $3 }' | LC_ALL=C sort; } \
+ && installed > /tmp/base-packages \
+ && apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && if [ -s /run/secrets/extra-ca ]; then \
       cp /run/secrets/extra-ca /usr/local/share/ca-certificates/extra-ca.crt \
       && update-ca-certificates; \
     fi \
+ && bootstrap="$(installed | LC_ALL=C comm -13 /tmp/base-packages - | cut -d' ' -f1)" \
+ && printf 'Package: *\nPin: origin snapshot.ubuntu.com\nPin-Priority: 1001\n' \
+      > /etc/apt/preferences.d/snapshot \
  && apt-get update --snapshot "$UBUNTU_SNAPSHOT" \
- && apt-get install -y --no-install-recommends --snapshot "$UBUNTU_SNAPSHOT" \
+ && apt-get install -y --no-install-recommends --allow-downgrades --snapshot "$UBUNTU_SNAPSHOT" \
+      $bootstrap \
       build-essential curl desktop-file-utils file git patchelf squashfs-tools xz-utils \
       libayatana-appindicator3-dev libgtk-3-dev librsvg2-dev libssl-dev \
       libwebkit2gtk-4.1-dev libxdo-dev \
- && rm -f /usr/local/share/ca-certificates/extra-ca.crt \
+ && installed | LC_ALL=C comm -13 /tmp/base-packages - | while read -r name version; do \
+      apt-cache madison --snapshot "$UBUNTU_SNAPSHOT" "$name" \
+        | awk -F ' [|] ' -v version="$version" \
+            -v from="https://snapshot.ubuntu.com/ubuntu/$UBUNTU_SNAPSHOT " \
+            '{ sub(/^ +/, "", $2) } $2 == version && index($3, from) == 1 { found = 1 } \
+             END { exit !found }' \
+        || { echo "not the snapshot's version: $name $version" >&2; exit 1; }; \
+    done \
+ && rm -f /usr/local/share/ca-certificates/extra-ca.crt /etc/apt/preferences.d/snapshot \
+      /tmp/base-packages \
  && update-ca-certificates --fresh \
  && rm -rf /var/lib/apt/lists/*
 
