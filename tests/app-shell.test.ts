@@ -156,7 +156,7 @@ it('lists every view, and every one of them exists', () => {
 it('renders the shell with brand, every view enabled and Console selected', async () => {
   component = mount(App, { target: document.body });
   await flush();
-  expect(document.querySelector('h1')?.textContent).toBe('Wyss AI');
+  expect(document.querySelector('h1')?.textContent).toBe('Wyss Console');
   const nav = Array.from(
     document.querySelectorAll<HTMLButtonElement>('.sidebar .nav-item'),
   );
@@ -216,6 +216,17 @@ it('shows the authority, its sessions and the managed agent from the projection'
   expect(agent?.textContent).toContain('Codex');
   expect(agent?.textContent).toContain('Failed');
   expect(agent?.getAttribute('data-tone')).toBe('error');
+  // A narrow window clips the state's word from view, so it is an element of its own and
+  // the tooltip says it first.
+  expect(agent?.querySelector('.pill-value')?.textContent).toBe('Failed');
+  expect(agent?.getAttribute('title')).toMatch(/^Failed · Codex/);
+  expect(authority?.querySelector('.pill-value')?.textContent).toBe(
+    'Connected',
+  );
+  expect(authority?.getAttribute('title')).toMatch(/^Connected · /);
+  expect(pill('terminal')?.getAttribute('title')).toMatch(
+    /^[A-Z][a-z ]+ · Local terminal\./,
+  );
   // The projection is all the window gets: the status area renders no identity.
   expect(document.querySelector('.status-cluster')?.innerHTML).not.toMatch(
     /[0-9a-f]{8}-[0-9a-f]{4}-/i,

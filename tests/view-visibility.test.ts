@@ -60,3 +60,35 @@ it('takes no space for a view that is hidden, whatever display its class sets', 
     ).toBe(true);
   }
 });
+
+it('never removes a status from the top bar, at any width', () => {
+  // A window of 800 px or less once dropped the Codex status, and one of 560 px or less
+  // the authority's: which of the three is broken could not be seen. A status may be drawn
+  // smaller (its state's word, then its name, are clipped); none may be taken away.
+  const statuses = [
+    '.status-cluster',
+    '.pill',
+    '.pill.terminal',
+    '.pill.agent',
+    '.pill.authority',
+    '.dot',
+  ];
+  const removed = rules
+    .filter((rule) => /display:\s*none/.test(rule.body))
+    .flatMap((rule) => rule.selectors)
+    .filter((selector) => statuses.includes(selector));
+  expect(removed).toEqual([]);
+  // What is clipped is clipped for the eye only: it keeps a box, so it is still read out.
+  const narrow = ['.top-bar .pill-value', '.top-bar .pill-key', '.brand h1'];
+  const about = rules.filter((rule) =>
+    rule.selectors.some((selector) => narrow.includes(selector)),
+  );
+  for (const rule of about)
+    expect(rule.body).not.toMatch(/display:\s*none|visibility:\s*hidden/);
+  const clipped = about.filter((rule) =>
+    /clip-path:\s*inset\(50%\)/.test(rule.body),
+  );
+  expect(clipped.flatMap((rule) => rule.selectors).sort()).toEqual(
+    [...narrow].sort(),
+  );
+});

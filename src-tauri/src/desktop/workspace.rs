@@ -129,6 +129,9 @@ async fn pick_folder(window: tauri::WebviewWindow) -> Result<Option<PathBuf>, ()
                 Some("Cancel"),
             );
             dialog.set_modal(true);
+            // GTK opens on "Recent", where a typed path cannot be accepted. The user's
+            // home is a place of its own: it is fixed here and never comes from the page.
+            dialog.set_current_folder(gtk::glib::home_dir());
             dialog.connect_response(move |dialog, response| {
                 let chosen = (response == gtk::ResponseType::Accept)
                     .then(|| dialog.filename())

@@ -186,13 +186,14 @@ export function summarizeAgent(
 ): StatusSummary {
   const agent =
     observation.state === 'observed' ? observation.view.agent : null;
+  // The status keeps one name whether or not anything is known about it: Codex is the one
+  // agent this product manages. Only its state is unknown without the authority.
   if (!agent)
     return {
-      key: 'Agent',
+      key: 'Codex',
       label: 'Unknown',
       tone: 'idle',
-      detail:
-        'Managed agent status is known only while the authority is connected.',
+      detail: 'Codex status is known only while the authority is connected.',
     };
   const name = agent.adapter === 'codex' ? 'Codex' : agent.adapter;
   return {

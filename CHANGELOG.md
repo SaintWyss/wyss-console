@@ -25,6 +25,11 @@ repository. Linux, with a `systemd --user` session. No installer and no publishe
 - **Settings.** Font size, scrollback and cursor of the terminals, how event times are
   written, the view Wyss Console opens on, a read-only look at the authority and the
   version, and a reset. Preferences change how Wyss Console looks, never what Codex may do.
+- **One name and every status, at every size.** The window and the top bar say Wyss
+  Console, as everything else does. The Terminal, Codex and Authority statuses stay in
+  the top bar down to the narrowest window: a narrow one drops the state's word, then the
+  status's name, and keeps the coloured dot and the tooltip. Settings uses two columns in
+  a wide window. The project folder dialog opens in your home folder.
 
 ### Packaging
 

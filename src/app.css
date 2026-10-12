@@ -1561,9 +1561,11 @@ html[data-glass='transparent'] .shell {
   background: rgba(34, 38, 46, 0.88);
 }
 
-/* Status steps back before the view title does. Each width is where the widest labels
-   (Initializing, Reconnecting) stop fitting next to it. The session count stays in the
-   authority pill's tooltip. */
+/* Status steps back before the view title does, and no status ever leaves: each width is
+   where the widest labels (Initializing, Reconnecting) stop fitting next to the title.
+   First the session count and the version go, then each state's word, then the product's
+   name, then each status's name. What is no longer drawn stays in the pill's tooltip and
+   is still read out: it is clipped, not removed. */
 @media (max-width: 1040px) {
   .pill-note {
     display: none;
@@ -1575,8 +1577,13 @@ html[data-glass='transparent'] .shell {
   }
 }
 @media (max-width: 800px) {
-  .pill.agent {
-    display: none;
+  .top-bar .pill-value {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
 /* Narrow windows: sidebar becomes an icon rail, secondary chrome steps back. */
@@ -1606,13 +1613,27 @@ html[data-glass='transparent'] .shell {
   }
 }
 @media (max-width: 560px) {
-  .pill.authority {
-    display: none;
+  .brand h1 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
 }
 @media (max-width: 520px) {
   .top-bar {
     gap: 10px;
+  }
+}
+@media (max-width: 420px) {
+  .top-bar .pill-key {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
 
@@ -1923,5 +1944,23 @@ html[data-glass='transparent'] .shell {
   }
   .setting-row .setting-hint {
     grid-column: 1;
+  }
+}
+/* A wide window: the sections sit in two columns instead of leaving half of it empty.
+   What is not a section (the notices, the lede) keeps the full width above them. */
+@container (min-width: 1000px) {
+  .settings-body {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 46rem));
+    align-content: start;
+    align-items: start;
+    /* The second column would otherwise end under the scrollbar. */
+    padding-right: 14px;
+  }
+  .settings-body > :not(.settings-section) {
+    grid-column: 1 / -1;
+  }
+  .settings-section {
+    max-width: none;
   }
 }

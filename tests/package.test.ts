@@ -59,6 +59,20 @@ it('opens in a window wide enough for a full-width shell greeting', () => {
   expect(main.minHeight).toBe(320);
 });
 
+it('has one name, everywhere it is shown', () => {
+  // The window and the top bar said "Wyss AI" while the package, the menu entry and
+  // Settings said "Wyss Console".
+  expect(tauriConfig.productName).toBe('Wyss Console');
+  expect(tauriConfig.app.windows[0].title).toBe(tauriConfig.productName);
+  expect(appInfo.name).toBe(tauriConfig.productName);
+  expect(read('src/lib/shell/TopBar.svelte')).toContain(
+    `<h1>${tauriConfig.productName}</h1>`,
+  );
+  expect(read('index.html')).toContain(
+    `<title>${tauriConfig.productName}</title>`,
+  );
+});
+
 it('has one version, everywhere it is written', () => {
   const pkg = JSON.parse(read('package.json'));
   const cargo = /^version\s*=\s*"([^"]+)"/m.exec(

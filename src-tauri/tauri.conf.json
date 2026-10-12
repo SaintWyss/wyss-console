@@ -14,7 +14,7 @@
       {
         "label": "main",
         "create": false,
-        "title": "Wyss AI",
+        "title": "Wyss Console",
         "width": 1440,
         "height": 810,
         "minWidth": 320,

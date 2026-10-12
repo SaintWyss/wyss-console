@@ -236,7 +236,7 @@ it('reports the managed agent only as the authority reports it', () => {
     observed(stopped),
   ] as AuthorityObservation[])
     expect(summarizeAgent(unknown)).toMatchObject({
-      key: 'Agent',
+      key: 'Codex',
       label: 'Unknown',
       tone: 'idle',
     });

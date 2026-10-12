@@ -42,31 +42,41 @@
       />
       <path d="M12 8.2l3.2 3.8-3.2 3.8-3.2-3.8z" fill="url(#wyss-mark)" />
     </svg>
-    <h1>Wyss AI</h1>
+    <h1>Wyss Console</h1>
   </div>
   <div class="context">
     <p class="context-title">{title}</p>
     <p class="context-subtitle">{subtitle}</p>
   </div>
+  <!-- Every status stays at every width. A narrow window drops the state's word and then
+       the status's name from view, never from the tooltip or from a screen reader. -->
   <div class="status-cluster">
     <span
       class="pill terminal"
       data-tone={runtime.tone}
-      title="Local terminal. It runs with or without the authority."
+      title={`${runtime.label} · Local terminal. It runs with or without the authority.`}
     >
       <span class="pill-key">Terminal</span>
       <span class="dot" aria-hidden="true"></span>
-      {runtime.label}
+      <span class="pill-value">{runtime.label}</span>
     </span>
-    <span class="pill agent" data-tone={agent.tone} title={agent.detail}>
+    <span
+      class="pill agent"
+      data-tone={agent.tone}
+      title={`${agent.label} · ${agent.detail}`}
+    >
       <span class="pill-key">{agent.key}</span>
       <span class="dot" aria-hidden="true"></span>
-      {agent.label}
+      <span class="pill-value">{agent.label}</span>
     </span>
-    <span class="pill authority" data-tone={link.tone} title={link.detail}>
+    <span
+      class="pill authority"
+      data-tone={link.tone}
+      title={`${link.label} · ${link.detail}`}
+    >
       <span class="pill-key">Authority</span>
       <span class="dot" aria-hidden="true"></span>
-      {link.label}
+      <span class="pill-value">{link.label}</span>
       {#if link.note}<span class="pill-note">{link.note}</span>{/if}
     </span>
     {#if version}<span class="version">v{version}</span>{/if}

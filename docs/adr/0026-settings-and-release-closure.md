@@ -180,8 +180,9 @@ to a user: it says "the authority". Offline states on Sessions, Approvals and Ev
 that the local terminals keep working. The Agents subtitle says what it is for. Sidebar
 placeholders (a disabled item, a "Soon" tag) are gone. A test visits every view in four
 authority states and refuses development vocabulary, raw enum or error codes and the
-internal name. The window and the top bar still say "Wyss AI" while the package, the menu
-entry and About say "Wyss Console": which is the product's name was left to its owner.
+internal name. The window and the top bar still said "Wyss AI" while the package, the menu
+entry and About said "Wyss Console": which is the product's name was left to its owner, who
+settled it on 2026-10-12: Wyss Console, everywhere.
 
 ## Packaging
 
@@ -319,7 +320,6 @@ held by a test that fails without the fix:
 ## Known residuals
 
 - **Dark theme only**; Appearance is informational.
-- **Naming**: "Wyss AI" in the window and top bar, "Wyss Console" elsewhere.
 - **No installer and nothing signed**: the product is built from this repository and run
   from its directory package. Codex is not packaged.
 - Two desktops of one user write preferences last-writer-wins.
