@@ -6,7 +6,8 @@ tree, after the owner's policy on secrets, a proposed ADR 0029 and one independe
 verdict was **reject** ([25](25-INDEPENDENT-REVIEW.md)). Revised again on 2026-10-13, after the
 owner decided that a protected private backup is allowed: ADR 0029 was redrafted, ADR 0030 was
 proposed, and documents 27 to 29 were added. Later that day the interface specification (13)
-was re-derived and a planning coverage audit (31) was added. None of these revisions has been
+was re-derived, a planning coverage audit (31) was added, and the terminal and native-session
+domain (05) was specified in full. None of these revisions has been
 reviewed by anyone but its author. No phase is authorised by this set, and none is authorised
 at all: implementation waits for the owner's word ([22](22-DECISIONS-AND-OPEN-QUESTIONS.md),
 DN-16). How far the design really is: [26](26-READINESS-ASSESSMENT.md).
@@ -128,6 +129,9 @@ Every factual claim in this set carries one of these marks where it matters.
 | `TS-<AREA>-nn`   | Test specification                                        | 20                 |
 | `AC-<phase>-nn`  | Acceptance criterion                                      | 19, 20             |
 | `D1`…`D10`       | The owner's decisions of 2026-10-12                       | ADR 0028           |
+| `TI1`…`TI9`      | Invariant of the split tree of a terminal tab             | 05                 |
+| `PS1`…`PS6`      | Rule of PTY size for panes                                | 05                 |
+| `KR1`…`KR6`      | Rule of the terminal key map                              | 05                 |
 | `U1`…`U15`       | Principle of the interface                                | 13                 |
 | `S1`…`S19`       | Screen of the interface                                   | 13                 |
 | `ND-nn`          | Native dialog of the interface                            | 13                 |

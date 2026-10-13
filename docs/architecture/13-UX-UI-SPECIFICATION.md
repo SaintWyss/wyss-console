@@ -38,7 +38,7 @@ document rules.
 | U10 | No optimistic display of a mutation. The page shows a change only after the backend returns its outcome; a change that restores a control reads "written" until it is observed again (28 §5) |
 | U11 | The page never authorises what a native dialog must authorise. While the dialog is open the page says so and offers nothing that could answer it (11 §4; 27 §6.1)                            |
 | U12 | A capability that waits for a gate says which gate and what would open it, in one sentence, where the user would have looked for the action (08 §3.2; 27 §5.7)                               |
-| U13 | A view does no work while it is hidden: no timer, no sampling, no rescan (§6; 15 §8)                                                                                                         |
+| U13 | A view does no work while it is hidden: no timer, no sampling, no rescan (§6; 15 §8). A hidden terminal still reads its program's output, which is transport, not view work (05 §18)         |
 | U14 | One closed word, one sentence. No screen composes its own error text (§9)                                                                                                                    |
 | U15 | Text that comes from a file, a provider or an agent is shown as text, never interpreted as markup, and never as an instruction of the Console (CTL-27)                                       |
 
@@ -889,21 +889,29 @@ One sentence per closed word (U14; TS-UX-01). Rules:
 
 The page's closed list (`controller.ts:290-301`) and the backend's codes
 (`terminal/contracts.rs:110-125`) `[R]`; today the page shows the word itself (S1, Error).
+The words of panes and of the layout store are added from 05 §10.3 and §15 `[P]`.
 
-| Word                 | Sentence                                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------------------- |
-| `spawn_failed`       | "The shell could not be started. Nothing else was affected. Open a new terminal to try again."    |
-| `invalid_cwd`        | "The folder for this terminal does not exist or cannot be opened. Open a new terminal elsewhere." |
-| `invalid_dimensions` | "The terminal could not be given a size. Resize the window or open a new terminal."               |
-| `write_failed`       | "Input could not be sent to the program. The terminal stopped; its last screen is kept."          |
-| `input_limit`        | "Too much input was waiting to be sent, so the terminal stopped. Its last screen is kept."        |
-| `resize_failed`      | "The terminal could not be resized. Its program keeps the previous size."                         |
-| `busy`               | "The terminal was busy and did not answer in time. Its last screen is kept."                      |
-| `limit_reached`      | "Wyss Console runs at most 16 terminals. Close one to open another."                              |
-| `operation_timeout`  | "The terminal did not answer in time and was stopped. Its last screen is kept."                   |
-| `close_timeout`      | "The terminal did not close in time. It was stopped."                                             |
-| `close_failed`       | "The terminal could not be closed cleanly. Its program may still be running."                     |
-| `terminal_error`     | "The terminal stopped because of an error. Its last screen is kept. Open a new terminal."         |
+| Word                   | Sentence                                                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `spawn_failed`         | "The shell could not be started. Nothing else was affected. Open a new terminal to try again."                           |
+| `invalid_cwd`          | "The folder for this terminal does not exist or cannot be opened. Open a new terminal elsewhere."                        |
+| `invalid_dimensions`   | "The terminal could not be given a size. Resize the window or open a new terminal."                                      |
+| `write_failed`         | "Input could not be sent to the program. The terminal stopped; its last screen is kept."                                 |
+| `input_limit`          | "Too much input was waiting to be sent, so the terminal stopped. Its last screen is kept."                               |
+| `resize_failed`        | "The terminal could not be resized. Its program keeps the previous size."                                                |
+| `busy`                 | "The terminal was busy and did not answer in time. Its last screen is kept."                                             |
+| `limit_reached`        | "Wyss Console runs at most 16 terminals. Close one to open another."                                                     |
+| `operation_timeout`    | "The terminal did not answer in time and was stopped. Its last screen is kept."                                          |
+| `close_timeout`        | "The terminal did not close in time. It was stopped."                                                                    |
+| `close_failed`         | "The terminal could not be closed cleanly. Its program may still be running."                                            |
+| `terminal_error`       | "The terminal stopped because of an error. Its last screen is kept. Open a new terminal."                                |
+| `too_deep`             | "Panes cannot be nested deeper here. Split another pane."                                                                |
+| `no_room`              | "Not enough room to split here."                                                                                         |
+| `inherit_unavailable`  | "The folder of that terminal could not be found, so the new one opens in your home folder."                              |
+| `layout_unreadable`    | "The saved layout could not be read. It was set aside."                                                                  |
+| `layout_newer_version` | "The layout was saved by a newer version of Wyss Console and was left as it is. This window's layout will not be saved." |
+| `layout_invalid`       | "Part of the saved layout was not valid and was left out."                                                               |
+| `layout_write_failed`  | "The layout could not be saved. The previous one is kept."                                                               |
 
 ### 9.2 Configuration (IF-CONFIG, SM-WRITE, SM-SOURCE; 07, 08) and the vault (IF-VAULT; 27)
 
@@ -964,7 +972,7 @@ The page's closed list (`controller.ts:290-301`) and the backend's codes
 | `export_unavailable`                | "Export is not available in this version."                                                                                                                                                 |
 | `import_invalid` (vault)            | "This file is not a valid export, or it was altered. Nothing was imported."                                                                                                                |
 | `import_duplicate`                  | "These entries were imported or kept before. Nothing was imported."                                                                                                                        |
-| `registry_unreadable`               | "The list of native sessions cannot be read. Terminals and managed sessions are not affected." (a word of the native registry, to be added to 05 §7)                                       |
+| `registry_unreadable`               | "The list of native sessions cannot be read. Terminals and managed sessions are not affected." (05 §7.2)                                                                                   |
 | Outcome `not_applied`               | "The file changed. Nothing was written. Prepare the change again."                                                                                                                         |
 | Outcome `lost_race`                 | "The agent wrote this file at the same moment. Your change was not applied and its version was kept."                                                                                      |
 | Outcome `superseded_outside`        | "The file was replaced from outside during the change. Wyss Console read it again: <the effect holds / the effect is gone>."                                                               |
@@ -986,6 +994,8 @@ The page's closed list (`controller.ts:290-301`) and the backend's codes
 | `spawn_failed`             | "<agent> could not be started. Nothing was left running."                                                                                                       |
 | `unknown_session`          | "This session is no longer known."                                                                                                                              |
 | `still_running`            | "This session is still running. Close its terminal first."                                                                                                      |
+| `placement_invalid`        | "The pane chosen for the agent no longer exists or has no room. Nothing was started."                                                                           |
+| `runtime_dir_unavailable`  | "This profile needs a temporary folder your session does not provide. Nothing was started; you can start the agent as configured."                              |
 
 ### 9.4 Profiles and launches (IF-PROFILE, SM-LAUNCH; 09)
 
