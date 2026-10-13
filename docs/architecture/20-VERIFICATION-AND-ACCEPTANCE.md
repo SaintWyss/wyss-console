@@ -304,17 +304,26 @@ vocabulary and raw codes (ADR 0026 `:181-182`); it is extended, not replaced.
 
 ## 9. Performance and reliability
 
-| ID               | Holds                                                                                            | Phase        |
-| ---------------- | ------------------------------------------------------------------------------------------------ | ------------ |
-| TS-PERF-01 to 12 | The metrics M01 to M19 of 15 §2, as scripts                                                      | P1           |
-| TS-PERF-13       | M03, M05, M16 after each phase against the baseline                                              | From F1      |
-| TS-PERF-14       | M20 to M24 of 05 §18: divider drag, restore, search, idle terminals, scrollback memory           | T1, T2       |
-| TS-LONG-01       | Eight hours with the maximum of terminals: memory and open descriptors do not grow without bound | P1, then F3b |
-| TS-LONG-02       | 10,000 outside changes: the watcher neither leaks nor misses the final state                     | F1           |
-| TS-CONC-01       | Two windows planning and applying against one file: exactly one write per plan, none lost        | F2a          |
+Procedures, workloads, aggregation and thresholds are 15 §2 to §4 and §11. Specified on
+2026-10-13; **none is written or run**.
+
+| ID               | Holds                                                                                                                                                                                                                        | Phase                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| TS-PERF-01 to 12 | The metrics M01 to M19 of 15 §2, by the benchmark suites of 15 §11.1, on both reference machines, with the result record of 15 §11.4                                                                                         | P1                       |
+| TS-PERF-13       | M03, M05, M16 and M23 after each phase against the baseline, with the regression rule of 15 §11.5                                                                                                                            | From F1                  |
+| TS-PERF-14       | M20 to M24 of 15 §2: divider drag, restore, search, idle terminals, scrollback memory                                                                                                                                        | T1, T2                   |
+| TS-PERF-15       | M25: no stage of the configuration engine, the vault, the registry's repair, the start-up repair, the layout of hidden tabs or the authority link precedes "first prompt drawn". **Fails** when one does, whatever the times | P1, then every phase     |
+| TS-PERF-16       | M26 and M27: launch overhead reported; no supervision round while the Sessions view is hidden. **Fails** on a round while hidden                                                                                             | F3a, F3b                 |
+| TS-PERF-17       | M28 and M29 on fixtures and a test custody, never the owner's keyring; the settling time reported and never shortened; every flush of 07 §5.4 present in a system-call trace. **Fails** when a flush is missing              | F2a, F2v                 |
+| TS-PERF-18       | M30: start-up repair with 0, 1 and 64 open intents runs after the first prompt; a source with an open intent refuses mutation until repair ends. **Fails** when a mutation is admitted earlier                               | F2a                      |
+| TS-PERF-19       | M32 and M33: interface interactions and scrolling                                                                                                                                                                            | Each phase with a screen |
+| TS-PERF-20       | The Ghostty comparison of 15 §3.3, on both machines, published with its conditions                                                                                                                                           | P1                       |
+| TS-LONG-01       | M31: eight hours with the maximum of terminals; proportional set size, descriptors, threads and page timers have no slope beyond 15 §4.2 after the first hour                                                                | P1, then F3b             |
+| TS-LONG-02       | 10,000 outside changes: the watcher neither leaks nor misses the final state                                                                                                                                                 | F1                       |
+| TS-CONC-01       | Two windows planning and applying against one file: exactly one write per plan, none lost                                                                                                                                    | F2a                      |
 
 Thresholds are the budgets of 15 §4 once restated after P1; until then these tests report and
-do not fail.
+do not fail, except where a row says **Fails**: those hold a structural rule, not a number.
 
 ## 10. Several computers and remote
 
@@ -347,24 +356,24 @@ project and, for configuration, first on a copy of a home and then on the real o
 Each phase is accepted when its tests pass, its acceptance criteria (19 §3) are met in front
 of the owner, its review gate is passed, and the regression set of §8 is green.
 
-| Phase | Tests                                                                                                                         | Acceptance criteria                    | Gate                                                              |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------- |
-| P1    | TS-PERF-01 to 12, TS-LONG-01, TS-TERM-03, 04                                                                                  | A baseline for every metric            | Owner                                                             |
-| F1    | TS-CFG-01 to 09, TS-FS-01 to 05, TS-SEC-01, 03, 04, TS-UX-01, 02, 05, 06, 10, TS-SYNC-01, 02, TS-LONG-02, TS-REG-01 to 05     | AC-F1-01 to 06                         | External review; owner                                            |
-| F1b   | Specifications only                                                                                                           | A recorded result per experiment       | Owner                                                             |
-| F2a   | TS-CFG-10 to 14, TS-WR-01 to 20, TS-FS-06 to 08, TS-SEC-02, 05, TS-REC-01 to 07, TS-CONC-01, TS-SYNC-03, 04, TS-UX-08, 09, 11 | AC-F2a-01 to 08                        | External security review; owner                                   |
-| F2v   | TS-VLT-01 to 08, 10 to 20, 24 to 30, TS-REC-08, TS-SEC-02, TS-SYNC-03                                                         | AC-F2v-01 to 05                        | Independent review of the design; external security review; owner |
-| F2h   | TS-VLT-21 to 23                                                                                                               | AC-F2h-01 to 03                        | External security review; owner                                   |
-| F2b   | TS-CFG-15, 16                                                                                                                 | AC-F2b-01 to 03                        | External review; owner                                            |
-| G-INF | AC-GINF-01 to 08 automated; TS-REG-02                                                                                         | AC-GINF-01, 02, 05 on the real machine | External security review; owner                                   |
-| F3a   | TS-NAT-01 to 05, 13 to 16, TS-UX-04                                                                                           | AC-F3a-01 to 03                        | Owner                                                             |
-| F3b   | TS-NAT-06 to 09, TS-TERM-25, TS-SES-01, 02                                                                                    | AC-F3b-01, 02                          | Owner                                                             |
-| F3c   | TS-PRF-01 to 08, TS-NAT-10 to 12                                                                                              | AC-F3c-01, 02                          | Owner                                                             |
-| T1    | TS-TERM-05 to 08, 10 to 18, 21, 23, 24, TS-PERF-14                                                                            | AC-T1-01 to 07                         | Owner                                                             |
-| T2    | TS-TERM-09, 19, 20, 22, 26, TS-PERF-14                                                                                        | AC-T2-01 to 04                         | Owner                                                             |
-| Later | As listed in 19 §3                                                                                                            | Written when the phase is planned      | As listed                                                         |
+| Phase | Tests                                                                                                                         | Acceptance criteria                         | Gate                                                              |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ----------------------------------------------------------------- |
+| P1    | TS-PERF-01 to 12, 15, 20, TS-LONG-01, TS-TERM-03, 04                                                                          | A baseline for every metric; AC-P1-01 to 05 | Owner                                                             |
+| F1    | TS-CFG-01 to 09, TS-FS-01 to 05, TS-SEC-01, 03, 04, TS-UX-01, 02, 05, 06, 10, TS-SYNC-01, 02, TS-LONG-02, TS-REG-01 to 05     | AC-F1-01 to 06                              | External review; owner                                            |
+| F1b   | Specifications only                                                                                                           | A recorded result per experiment            | Owner                                                             |
+| F2a   | TS-CFG-10 to 14, TS-WR-01 to 20, TS-FS-06 to 08, TS-SEC-02, 05, TS-REC-01 to 07, TS-CONC-01, TS-SYNC-03, 04, TS-UX-08, 09, 11 | AC-F2a-01 to 08                             | External security review; owner                                   |
+| F2v   | TS-VLT-01 to 08, 10 to 20, 24 to 30, TS-REC-08, TS-SEC-02, TS-SYNC-03                                                         | AC-F2v-01 to 05                             | Independent review of the design; external security review; owner |
+| F2h   | TS-VLT-21 to 23                                                                                                               | AC-F2h-01 to 03                             | External security review; owner                                   |
+| F2b   | TS-CFG-15, 16                                                                                                                 | AC-F2b-01 to 03                             | External review; owner                                            |
+| G-INF | AC-GINF-01 to 08 automated; TS-REG-02                                                                                         | AC-GINF-01, 02, 05 on the real machine      | External security review; owner                                   |
+| F3a   | TS-NAT-01 to 05, 13 to 16, TS-UX-04                                                                                           | AC-F3a-01 to 03                             | Owner                                                             |
+| F3b   | TS-NAT-06 to 09, TS-TERM-25, TS-SES-01, 02                                                                                    | AC-F3b-01, 02                               | Owner                                                             |
+| F3c   | TS-PRF-01 to 08, TS-NAT-10 to 12                                                                                              | AC-F3c-01, 02                               | Owner                                                             |
+| T1    | TS-TERM-05 to 08, 10 to 18, 21, 23, 24, TS-PERF-14                                                                            | AC-T1-01 to 07                              | Owner                                                             |
+| T2    | TS-TERM-09, 19, 20, 22, 26, TS-PERF-14                                                                                        | AC-T2-01 to 04                              | Owner                                                             |
+| Later | As listed in 19 §3                                                                                                            | Written when the phase is planned           | As listed                                                         |
 
-### 12.1 Acceptance criteria of the terminal phases
+### 12.1 Acceptance criteria of the terminal phases and of P1
 
 Defined here on 2026-10-13 from 05; 19 §3 lists T1 and T2 in one line each and refers to them.
 Accepted in front of the owner, in the nested display, with the regression set of §8 green.
@@ -382,6 +391,11 @@ Accepted in front of the owner, in the nested display, with the regression set o
 | AC-T2-02  | A pane that ran an agent comes back as DN-36 decides; no agent starts by itself                                                                                          |
 | AC-T2-03  | A corrupt layout file is set aside and the window opens with one terminal; a newer-version file is left untouched                                                        |
 | AC-T2-04  | M21 reported against M01                                                                                                                                                 |
+| AC-P1-01  | Every metric of 15 §2 that P1 covers has a result record (15 §11.4) on Acer and on Santiago-PC, with its confounders                                                     |
+| AC-P1-02  | Buckets B1 and B2 are reported apart from B3, B4 and B5 in every record (15 §1.2)                                                                                        |
+| AC-P1-03  | TS-PERF-15 passes: nothing but the terminal precedes the first prompt                                                                                                    |
+| AC-P1-04  | M23 is measured and DN-41 is put to the owner with the number; M12 and M24 are measured and DN-40 is put to the owner likewise                                           |
+| AC-P1-05  | The budgets of 15 §4.2 are restated from the baseline, each as "no worse than" or as a target with a deadline, and accepted by the owner                                 |
 | AC-F3b-03 | A catalogue agent typed by hand in a plain pane is marked "started by hand" and is not listed as a native session with a profile (FR-NAT-10)                             |
 | AC-F3b-04 | Moving between sessions changes nothing but what is shown: no terminal's size, input or process changes (FR-SES-03); every session shows its lifecycle state (FR-SES-02) |
 

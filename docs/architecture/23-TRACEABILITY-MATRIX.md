@@ -26,6 +26,10 @@ Updated a fourth time on 2026-10-13 after the terminal pass ([05](05-TERMINAL-AN
 03; FR-PRF-04; FR-UX-02. Tests TS-TERM-05 to 26 and TS-NAT-10 to 16 were specified, and acceptance
 criteria AC-T1-01 to 07, AC-T2-01 to 04 and AC-F3b-03, 04 were defined (20 §4, §12.1).
 
+Updated a fifth time on 2026-10-13 after the performance pass ([15](15-PERFORMANCE-ENGINEERING.md)).
+Rows that changed: NFR-PERF-01 to 08, 10, 11; FR-OBS-06. Tests TS-PERF-15 to 20 and acceptance
+criteria AC-P1-01 to 05 were added (20 §9, §12.1).
+
 ## 1. Functional requirements
 
 | Requirement      | Design                                      | Component                                                   | Phase                        | Tests                                                      | Acceptance                                     |
@@ -125,7 +129,7 @@ criteria AC-T1-01 to 07, AC-T2-01 to 04 and AC-F3b-03, 04 were defined (20 §4, 
 | FR-OBS-03        | 13 S10                                      | native registry                                             | F3b                          | TS-NAT-06                                                  | —                                              |
 | FR-OBS-04        | 14 §7; 13 §2.4, §5.3                        | window                                                      | Built, F1                    | TS-CFG-07, TS-UX-09                                        | AC-F1-02                                       |
 | FR-OBS-05        | 18 §3; 13 S19                               | —                                                           | F13                          | TS-SEC-02                                                  | —                                              |
-| FR-OBS-06        | 15                                          | benchmarks                                                  | P1                           | TS-PERF-01 to 12                                           | P1                                             |
+| FR-OBS-06        | 15 §1.2, §2, §11                            | benchmarks                                                  | P1                           | TS-PERF-01 to 20                                           | AC-P1-01, 02                                   |
 | FR-SEC-01        | 11 §4; 09 §3.1; 13 S4c                      | native dialog                                               | F2a, F3c                     | TS-SEC-05, TS-PRF-08                                       | AC-F2a-04, AC-F3c-03                           |
 | FR-SEC-02        | 11 §4                                       | `agentconfig/mutate.rs`                                     | F2a                          | TS-SEC-05                                                  | AC-F2a-04                                      |
 | FR-SEC-03        | 04 C-01                                     | `desktop/agentconfig.rs`                                    | F1                           | TS-SEC-04                                                  | —                                              |
@@ -162,32 +166,32 @@ criteria AC-T1-01 to 07, AC-T2-01 to 04 and AC-F3b-03, 04 were defined (20 §4, 
 
 ## 2. Non-functional requirements
 
-| Requirement       | Design           | Component                        | Phase            | Tests                      | Acceptance                |
-| ----------------- | ---------------- | -------------------------------- | ---------------- | -------------------------- | ------------------------- |
-| NFR-PERF-01, 02   | 15 §2 M01, M02   | whole application                | P1               | TS-PERF                    | Baseline                  |
-| NFR-PERF-03, 04   | 15 §2 M03 to M05 | whole application                | P1               | TS-PERF, TS-PERF-13        | Baseline                  |
-| NFR-PERF-05       | 15 §2 M06, M12   | terminal                         | P1               | TS-PERF                    | Baseline                  |
-| NFR-PERF-06       | 15 §2 M08        | terminal                         | P1               | TS-PERF                    | Baseline                  |
-| NFR-PERF-07       | 15 §2 M09 to M11 | terminal                         | P1               | TS-PERF                    | Baseline                  |
-| NFR-PERF-08       | 15 §2 M13        | terminal                         | P1               | TS-PERF                    | Baseline                  |
-| NFR-PERF-09       | 07 §7, 15 M16    | `agentconfig/watch.rs`           | F1               | TS-PERF-13, TS-LONG-02     | F1 performance check      |
-| NFR-PERF-10       | 15 §2 M14        | `terminal/` `[R]`                | Built            | TS-PERF                    | Baseline                  |
-| NFR-PERF-11       | 15 §2 M17        | whole application                | F3b              | TS-PERF                    | AC-F3b-01                 |
-| NFR-SEC-01        | 04 C-01          | capability list `[R]`            | Built            | TS-REG-04, TS-SEC-04       | Every phase               |
-| NFR-SEC-02        | 04 C-06, C-11    | every reader                     | Built, per phase | TS-CFG-05, TS-TERM-02      | —                         |
-| NFR-SEC-03        | 10 §2            | `adapters/codex/safety.rs` `[R]` | Built            | Managed suite              | —                         |
-| NFR-SEC-04        | 11 §5.5          | every store                      | Built, per phase | TS-SEC-01, 02              | AC-F2a-06                 |
-| NFR-REL-01        | 14 §4; 07 §5.4   | `agentconfig/mutate.rs`          | F2a              | TS-CFG-12, TS-WR-12        | AC-F2a-07                 |
-| NFR-REL-02        | 10 §2 SG-10      | `lifecycle/` `[R]`               | Built            | Lifecycle suite            | —                         |
-| NFR-REL-03        | 04 card A        | `terminal/` `[R]`                | Built            | TS-REG-01                  | Every phase               |
-| NFR-REL-04        | 07 §4.2          | `agentconfig/`                   | F1               | TS-CFG-03                  | —                         |
-| NFR-MNT-01        | 06 §6            | `agentconfig/providers/`         | F1               | TS-CFG-01, 13              | —                         |
-| NFR-MNT-02        | ADR 0028 §10     | `Cargo.toml`                     | Always           | Review                     | —                         |
-| NFR-MNT-03        | 20 §1            | test suites                      | Always           | TS-REG-05                  | —                         |
-| NFR-PORT-01       | 18 §4            | `lifecycle/` `[R]`               | Built            | Lifecycle suite            | —                         |
-| NFR-PORT-02       | 18 §4            | —                                | F13              | —                          | —                         |
-| NFR-A11Y-01 to 03 | 13 §5, §11       | window                           | Always           | TS-A11Y-01 to 03, TS-UX-06 | Every phase with a screen |
-| NFR-A11Y-04       | 13 §5            | `app.css` `[R]`                  | Built            | —                          | —                         |
+| Requirement       | Design                                      | Component                        | Phase            | Tests                        | Acceptance                |
+| ----------------- | ------------------------------------------- | -------------------------------- | ---------------- | ---------------------------- | ------------------------- |
+| NFR-PERF-01, 02   | 15 §2 M01, M02, M21, M25; §9 area 1         | whole application                | P1               | TS-PERF-01 to 12, 15         | AC-P1-01, 03, 05          |
+| NFR-PERF-03, 04   | 15 §2 M03 to M05, M18, M23; §6 PR-01, PR-05 | whole application                | P1               | TS-PERF-01 to 12, 13, 14     | AC-P1-01, 04, 05          |
+| NFR-PERF-05       | 15 §2 M06, M12, M24; DN-40                  | terminal                         | P1               | TS-PERF-01 to 12, 14         | AC-P1-01, 04              |
+| NFR-PERF-06       | 15 §2 M08                                   | terminal                         | P1               | TS-PERF-01 to 12, 20         | AC-P1-01, 05              |
+| NFR-PERF-07       | 15 §2 M09 to M11                            | terminal                         | P1               | TS-PERF-01 to 12, 20         | AC-P1-01, 05              |
+| NFR-PERF-08       | 15 §2 M13, M20, M33                         | terminal                         | P1               | TS-PERF-01 to 12, 14, 19     | AC-P1-01; AC-T1-01        |
+| NFR-PERF-09       | 07 §7, 15 M16                               | `agentconfig/watch.rs`           | F1               | TS-PERF-13, TS-LONG-02       | F1 performance check      |
+| NFR-PERF-10       | 15 §2 M14, M31; §10                         | `terminal/` `[R]`                | Built            | TS-PERF-01 to 12, TS-LONG-01 | AC-P1-01                  |
+| NFR-PERF-11       | 15 §2 M17, M23, M27                         | whole application                | F3b              | TS-PERF-14, 16               | AC-F3b-01                 |
+| NFR-SEC-01        | 04 C-01                                     | capability list `[R]`            | Built            | TS-REG-04, TS-SEC-04         | Every phase               |
+| NFR-SEC-02        | 04 C-06, C-11                               | every reader                     | Built, per phase | TS-CFG-05, TS-TERM-02        | —                         |
+| NFR-SEC-03        | 10 §2                                       | `adapters/codex/safety.rs` `[R]` | Built            | Managed suite                | —                         |
+| NFR-SEC-04        | 11 §5.5                                     | every store                      | Built, per phase | TS-SEC-01, 02                | AC-F2a-06                 |
+| NFR-REL-01        | 14 §4; 07 §5.4                              | `agentconfig/mutate.rs`          | F2a              | TS-CFG-12, TS-WR-12          | AC-F2a-07                 |
+| NFR-REL-02        | 10 §2 SG-10                                 | `lifecycle/` `[R]`               | Built            | Lifecycle suite              | —                         |
+| NFR-REL-03        | 04 card A                                   | `terminal/` `[R]`                | Built            | TS-REG-01                    | Every phase               |
+| NFR-REL-04        | 07 §4.2                                     | `agentconfig/`                   | F1               | TS-CFG-03                    | —                         |
+| NFR-MNT-01        | 06 §6                                       | `agentconfig/providers/`         | F1               | TS-CFG-01, 13                | —                         |
+| NFR-MNT-02        | ADR 0028 §10                                | `Cargo.toml`                     | Always           | Review                       | —                         |
+| NFR-MNT-03        | 20 §1                                       | test suites                      | Always           | TS-REG-05                    | —                         |
+| NFR-PORT-01       | 18 §4                                       | `lifecycle/` `[R]`               | Built            | Lifecycle suite              | —                         |
+| NFR-PORT-02       | 18 §4                                       | —                                | F13              | —                            | —                         |
+| NFR-A11Y-01 to 03 | 13 §5, §11                                  | window                           | Always           | TS-A11Y-01 to 03, TS-UX-06   | Every phase with a screen |
+| NFR-A11Y-04       | 13 §5                                       | `app.css` `[R]`                  | Built            | —                            | —                         |
 
 ## 3. Gaps the matrix shows
 

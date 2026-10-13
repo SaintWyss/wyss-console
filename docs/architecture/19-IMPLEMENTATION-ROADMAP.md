@@ -101,26 +101,26 @@ Each phase has the same fields. Requirement identifiers are those of
 
 ### P1 — Performance baseline
 
-| Field                    | Content                                                                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| Objective                | Replace every "to be replaced" of 15 §4 with a measured number, and compare with the reference terminal                  |
-| Scope                    | The benchmark scripts and corpora; one run on each reference machine; a written baseline; restated budgets               |
-| Exclusions               | Any optimisation; any change of renderer                                                                                 |
-| Prerequisites            | The reference terminal installed, with consent                                                                           |
-| Decisions required       | OQ-26 (timestamp hook in builds), OQ-27 (external latency method)                                                        |
-| Deliverables             | `benchmarks/` with scripts; `docs/spec/performance-baseline.md` with raw numbers and conditions                          |
-| Data, protocol           | None                                                                                                                     |
-| Security                 | A debug-only timestamp must not ship in the package unless decided                                                       |
-| Migration, compatibility | None                                                                                                                     |
-| Tests to write           | TS-PERF-01 to 12 as scripts                                                                                              |
-| Manual acceptance        | The owner reads the comparison and marks which gaps matter to him                                                        |
-| Performance checks       | Itself                                                                                                                   |
-| Failure, rollback        | Nothing to roll back; a procedure that cannot be made reproducible is dropped and said so                                |
-| Risks                    | Numbers that vary too much to compare; conclusions drawn from one machine                                                |
-| Definition of done       | Every metric of 15 §2 has a median and a 95th percentile on both machines, or a written reason why not; budgets restated |
-| Review gate              | Owner: which budgets become requirements                                                                                 |
-| Size                     | M                                                                                                                        |
-| Parallel                 | Fully independent                                                                                                        |
+| Field                    | Content                                                                                                                    |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| Objective                | Replace every "to be replaced" of 15 §4 with a measured number, and compare with the reference terminal                    |
+| Scope                    | The benchmark scripts and corpora; one run on each reference machine; a written baseline; restated budgets                 |
+| Exclusions               | Any optimisation; any change of renderer                                                                                   |
+| Prerequisites            | The reference terminal installed, with consent                                                                             |
+| Decisions required       | OQ-26 (timestamp hook in builds), OQ-27 (external latency method); DN-40 and DN-41 are put to the owner with their numbers |
+| Deliverables             | `benchmarks/` with scripts; `docs/spec/performance-baseline.md` with raw numbers and conditions                            |
+| Data, protocol           | None                                                                                                                       |
+| Security                 | A debug-only timestamp must not ship in the package unless decided                                                         |
+| Migration, compatibility | None                                                                                                                       |
+| Tests to write           | TS-PERF-01 to 12, 15 and 20 as scripts, per 15 §11 (20 §9)                                                                 |
+| Manual acceptance        | AC-P1-01 to 05 (20 §12.1); the owner reads the comparison and marks which gaps matter                                      |
+| Performance checks       | Itself                                                                                                                     |
+| Failure, rollback        | Nothing to roll back; a procedure that cannot be made reproducible is dropped and said so                                  |
+| Risks                    | Numbers that vary too much to compare; conclusions drawn from one machine                                                  |
+| Definition of done       | Every metric of 15 §2 has a median and a 95th percentile on both machines, or a written reason why not; budgets restated   |
+| Review gate              | Owner: which budgets become requirements                                                                                   |
+| Size                     | M                                                                                                                          |
+| Parallel                 | Fully independent                                                                                                          |
 
 ### F1 — Read-only agent configuration inventory
 

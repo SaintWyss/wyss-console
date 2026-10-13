@@ -815,15 +815,17 @@ running session is DN-38, open, and this document does not narrow it.
 
 ## 18. Performance and resources
 
-Every number is a proposal until P1 measures it (15). What this design adds to 15 §2:
+Every number is a proposal until P1 measures it. These metrics are defined, with their procedures and
+budgets, in [15 §2 to §4](15-PERFORMANCE-ENGINEERING.md), which rules where the two differ. What
+this design added to 15 §2:
 
-| ID  | Metric                       | Definition                                                                    | Proposed budget                                                                                           |
-| --- | ---------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| M20 | Divider drag                 | Resize requests per pane per second while dragging; frames dropped            | At most one per 60 ms; M11 under 100 ms                                                                   |
-| M21 | Restore                      | Time to the first prompt with a saved layout of 16 panes in 4 tabs            | M01 plus at most 10 %                                                                                     |
-| M22 | Search                       | Time to count matches in 50,000 lines                                         | Under 200 ms, on the page's thread                                                                        |
-| M23 | Idle terminals               | Wake-ups per second and M03 with 16 terminals open and idle, hidden and shown | Reported. The built transport polls an idle terminal every 320 ms; whether that fits M03 is P1's question |
-| M24 | Scrollback memory, all panes | M12 summed over 16 panes at 5,000 and at 50,000 lines                         | Reported; a global cap is decided from it                                                                 |
+| ID  | Metric                       | Definition                                                                    | Proposed budget                                                                                                                                   |
+| --- | ---------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M20 | Divider drag                 | Resize requests per pane per second while dragging; frames dropped            | At most one per 60 ms; M11 under 100 ms                                                                                                           |
+| M21 | Restore                      | Time to the first prompt with a saved layout of 16 panes in 4 tabs            | M01 plus at most 10 %                                                                                                                             |
+| M22 | Search                       | Time to count matches in 50,000 lines                                         | Under 200 ms, on the page's thread                                                                                                                |
+| M23 | Idle terminals               | Wake-ups per second and M03 with 16 terminals open and idle, hidden and shown | M03 with 16 idle terminals ≤ 1 % of one core; wake-ups and calls reported. The built transport polls an idle terminal every 320 ms (15 §6, PR-01) |
+| M24 | Scrollback memory, all panes | M12 summed over 16 panes at 5,000 and at 50,000 lines                         | Reported; a global cap is decided from it                                                                                                         |
 
 Design rules that hold whatever the numbers: hidden panes draw nothing and are not fitted; the
 search add-on and the palette's index load on first use; the foreground and the process tree are
