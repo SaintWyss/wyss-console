@@ -73,6 +73,7 @@ with the procedure that would settle it.
 | —   | [The focused security review](reviews/2026-10-13-focused-security-review-report.md) | The second independent review, of the vault and the write protocol: **reject**, eleven findings; unedited                                                                                                                            |
 | —   | [ADR 0029](../adr/0029-secrets-restoration-data-and-configuration-persistence.md)   | **Proposed**, second draft: secrets, restoration data, the vault, persistence                                                                                                                                                        |
 | —   | [ADR 0030](../adr/0030-corrections-to-adr-0028.md)                                  | **Proposed**: corrections to two security statements of ADR 0028                                                                                                                                                                     |
+| —   | [ADR 0031](../adr/0031-observed-model-of-managed-sessions.md)                       | **Proposed**: the observed model of managed sessions (DN-09)                                                                                                                                                                         |
 
 ## Hierarchy of documents
 
@@ -169,7 +170,7 @@ The revisions of this set written on 2026-10-13 were committed on the review bra
 was merged into that branch the same day, with no conflict. On that branch this index and
 documents 16 and 17 show the new path. `main` itself is not changed by the branch: nothing is
 merged into it, and the branch is published for review only. The planning is not complete, and
-ADR 0029 and ADR 0030 stay Proposed.
+ADR 0029, ADR 0030 and ADR 0031 stay Proposed.
 
 ## What this set does not do
 

@@ -262,12 +262,12 @@ Each card answers the same questions. "Detail" names the document that goes furt
 
 ### H — Model discovery and configuration (detail: 12)
 
-| Aspect         | Content                                                                                                         |
-| -------------- | --------------------------------------------------------------------------------------------------------------- |
-| Responsibility | Show catalogues, configured models and the model observed per turn; later, choose. `[P]`                        |
-| State owned    | None new: catalogues belong to runtimes, configuration to provider files, observations to whoever ran the turn. |
-| Prohibited     | Inferring the model in use from a default (AD-16); presenting a listing as an entitlement `[R]` (ADR 0012).     |
-| Compatibility  | Showing an observed model for managed turns changes the authority's projection: its own ADR (F6a).              |
+| Aspect         | Content                                                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Responsibility | Show catalogues, configured models and the model a provider reports, at the grain it reports it (12 §1.1); later, choose. `[P]` |
+| State owned    | None new: catalogues belong to runtimes, configuration to provider files, observations to whoever ran the turn.                 |
+| Prohibited     | Inferring the model in use from a default (AD-16); presenting a listing as an entitlement `[R]` (ADR 0012).                     |
+| Compatibility  | Showing an observed model for managed turns changes the authority's projection: its own ADR (F6a).                              |
 
 ### I — Session lifecycle management (detail: 05, 09, 10)
 

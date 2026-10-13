@@ -600,28 +600,29 @@ the attention list (§2.4).
 
 ### S7 — Models
 
-No navigation item. Four places, one vocabulary (12 §7), and the rule that a configured or chosen
-model is never shown as the model that answered (AD-16).
+No navigation item. Four places, one vocabulary (12 §1, §7.1), and the rule that a configured,
+selected or default model is never shown as the model in use (AD-16). Reconciled with 12 on
+2026-10-13 (fourth pass).
 
-| Place                                 | Shows                                                                                                                                                     | Phase                   |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| Configuration · Model category (S4.3) | The configured model and effort at each scope, the documented winner marked; "Applies to new sessions. N running sessions keep the previous one." (07 §6) | F1 (read), F2a (change) |
-| Launcher (S3)                         | A model field, for agents whose start flag has evidence; "listed, not guaranteed for your account" for a catalogue entry                                  | F6b                     |
-| Native session detail (S2.1)          | "Configured: X. In use: not reported" unless the agent reports it by a supported means (12 §4)                                                            | F3b                     |
-| Agents view, managed (S8)             | The catalogue with the default marked and "Offered by this runtime; not a guarantee for your account"; the observed model per turn once DN-09 is decided  | F6a                     |
+| Place                                 | Shows                                                                                                                                                                                                    | Phase                   |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| Configuration · Model category (S4.3) | The configured model and effort at each scope; the documented winner marked, or `scope_winner_unverified`; the sentence of 12 §1.9 about running sessions                                                | F1 (read), F2a (change) |
+| Launcher (S3)                         | A model field and an effort field, for agents whose start flag has grade A or B evidence (12 §5.3), offering only the profile's choices; "Wyss Console cannot check this name" (`model_unchecked`)       | F6b                     |
+| Native session detail (S2.1)          | "Started with: X" when the Console passed one (MV-06); "In use: not reported" (MV-07); the switch hint of 12 §5.2                                                                                        | F3b, F6b                |
+| Agents view, managed (S8)             | The catalogue with the default marked and "Offered by this runtime; not a guarantee for your account"; the model reported for the session, and a reroute on the turn it names, once ADR 0031 is accepted | F6a                     |
 
-What appears per provider, by evidence (12 §3). A field whose evidence is `[N]` is not shown;
-nothing is inferred.
+What appears per provider, by evidence (12 §3). A field whose evidence is `[N]`, or only grade C,
+is not shown. Nothing is inferred.
 
-| Field                       | Claude Code                                           | Codex (native) | Codex (managed)                                  | OpenCode       | Hermes         |
-| --------------------------- | ----------------------------------------------------- | -------------- | ------------------------------------------------ | -------------- | -------------- |
-| Configured model            | Shown `[D]`                                           | Shown `[D]`    | "Not applicable: the managed runtime takes none" | Shown `[D]`    | Shown `[D]`    |
-| Effort                      | Shown `[D]`                                           | Shown `[D]`    | From the catalogue `[R]`                         | Hidden         | Hidden         |
-| Choose at start             | Field `[O]`                                           | Field `[O]`    | Not offered (SG-12)                              | Hidden         | Hidden         |
-| Catalogue                   | "This provider has no list the Console can read"      | The same       | Shown `[R]`                                      | The same       | The same       |
-| Model of a turn             | "Not reported"                                        | "Not reported" | After DN-09                                      | "Not reported" | "Not reported" |
-| Switch in a running session | DN-38                                                 | DN-38          | Not designed                                     | DN-38          | DN-38          |
-| Usage and cost              | Only figures the provider reports; none today (12 §6) | The same       | The same                                         | The same       | The same       |
+| Field                       | Claude Code                           | Codex (native)           | Codex (managed)                                          | OpenCode                 | Hermes                      |
+| --------------------------- | ------------------------------------- | ------------------------ | -------------------------------------------------------- | ------------------------ | --------------------------- |
+| Configured model            | Shown `[D]`                           | Shown `[D]`              | "Not applicable: the managed runtime takes none"         | Shown `[D]`              | Shown `[D]`                 |
+| Effort                      | Shown `[D]`                           | Shown `[D]`              | From the catalogue `[R]`; reported effort after ADR 0031 | Hidden (grade C)         | Shown `[D]`                 |
+| Choose at start             | Field `[O]`; effort field `[D]`       | Field `[O]`              | Not offered (ADR 0014, 0015; DN-42)                      | Hidden (grade C)         | Field `[D]`                 |
+| Catalogue                   | `catalogue_not_readable`              | `catalogue_not_readable` | Shown `[R]`                                              | `catalogue_not_readable` | `catalogue_not_readable`    |
+| Model in use                | `model_not_reported`                  | `model_not_reported`     | "Reported for this session" after ADR 0031               | `model_not_reported`     | `model_not_reported`        |
+| Switch in a running session | Hint "Type /model …" (12 §5.2); DN-38 | `switch_command_unknown` | Not offered (DN-42)                                      | `switch_command_unknown` | Hint "Type /model …"; DN-38 |
+| Usage and cost              | `usage_not_reported` (12 §6)          | The same                 | The same; DN-43                                          | The same                 | The same                    |
 
 ### S8 — Agents (managed turns) `[R]`
 
@@ -854,7 +855,7 @@ of [01 §6](01-PRODUCT-VISION.md); J16 to J25 are added by this pass.
 | J8  | Two native agents in parallel                               | J2 twice, two agents                                                                                                                  | Two rows, each with its process and resources                                                                                                                                    | Same folder: a warning, not a block                                                                                                                                                                                                                                                                                                          |
 | J9  | Secure managed Codex                                        | Sessions → New managed session → folder → Create & activate → Open agent → objective                                                  | A turn runs under the authority `[R]`                                                                                                                                            | Authority down: notice and Retry `[R]`. Inference not provable because hooks are enabled: the cause is named                                                                                                                                                                                                                                 |
 | J10 | Permissions and approvals                                   | A Local Tools turn proposes a command → Approvals → Approve or Deny                                                                   | The command runs, or does not `[R]`                                                                                                                                              | Approval expired: the turn ends; nothing ran                                                                                                                                                                                                                                                                                                 |
-| J11 | Inspect models                                              | Agents → model line; session detail; Configuration → Model                                                                            | The wording of 12 §7, per S7                                                                                                                                                     | Not reported: said so                                                                                                                                                                                                                                                                                                                        |
+| J11 | Inspect models                                              | Agents → model line; session detail; Configuration → Model                                                                            | The wording of 12 §7.1, per S7                                                                                                                                                   | Not reported: said so                                                                                                                                                                                                                                                                                                                        |
 | J12 | Recover from a configuration conflict                       | A conflict copy appears                                                                                                               | The source is marked, changes blocked, both files named                                                                                                                          | The user resolves it outside; the Console never picks a side                                                                                                                                                                                                                                                                                 |
 | J13 | Recover from a crash                                        | Reopen the Console                                                                                                                    | Terminals are new (from T2, in their layout); native sessions **Lost**; managed sessions as the authority has them `[R]`; no file half written; repairs reported (S14)           | A repair that needs the keyring: `repair_pending` until unlocked                                                                                                                                                                                                                                                                             |
 | J14 | Resume from another computer                                | (F9, F10a) Select the home computer as host                                                                                           | Its sessions and terminals                                                                                                                                                       | Not reachable: the local computer's own view stays usable                                                                                                                                                                                                                                                                                    |
@@ -1013,6 +1014,25 @@ The words of panes and of the layout store are added from 05 §10.3 and §15 `[P
 | `import_invalid` (profile)        | "This file is not a profile Wyss Console can read. Nothing was imported."                                                         |
 | `failed`                          | "The start could not be prepared. Nothing was started and nothing was left behind."                                               |
 
+### 9.5 Models (IF-MODEL; 12 §7.2)
+
+| Word                       | Sentence                                                                                                       |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `catalogue_unavailable`    | "Codex is not running, so it has no list of models. Start it to see the list."                                 |
+| `catalogue_rejected`       | "Codex's list of models could not be accepted. Nothing from it is shown. Restart Codex to try again."          |
+| `catalogue_partial`        | "Codex offers more models than are shown here."                                                                |
+| `catalogue_not_readable`   | "<agent> has no list of models Wyss Console can read."                                                         |
+| `model_not_reported`       | "In use: not reported. <agent> does not tell Wyss Console which model answers."                                |
+| `model_not_in_catalogue`   | "<model> is not in this runtime's list. It is shown as reported."                                              |
+| `model_rerouted`           | "Codex moved this turn from <model> to <model>."                                                               |
+| `model_unchecked`          | "Wyss Console cannot check this name. <agent> says in the session if it does not know it."                     |
+| `model_identifier_invalid` | "This model name has spaces, control characters or a leading dash, or is too long. The profile was not saved." |
+| `start_flag_unverified`    | "Choosing a model at start is not verified for <agent> <version>. It starts with its own setting."             |
+| `switch_command_unknown`   | "How to change the model inside a running <agent> session is not verified."                                    |
+| `default_change_blocked`   | "Wyss Console cannot change <file> yet. Nothing was written. Edit it by hand, or use <agent>'s own command."   |
+| `scope_winner_unverified`  | "Which of these applies is not verified for <agent> <version>. Each is shown as written."                      |
+| `usage_not_reported`       | "No usage figures are reported to Wyss Console."                                                               |
+
 Managed-plane words are those already built (`src/lib/features/events/present.ts`) `[R]` and are
 not re-derived here.
 
@@ -1128,7 +1148,7 @@ represent them** (the owner's instruction of 2026-10-13).
 | FR-SES-01, 03, 06; FR-NAT-08, 10 | S2, S2.1, S14       | TS-SES-01                      |
 | FR-OBS-04                        | §2.4, §5.3          | TS-UX-09                       |
 | FR-DAT-06, FR-SEC-10             | S4b, S4c            | TS-VLT-05, 06, 25              |
-| FR-MOD-01 to 10                  | S7                  | TS-UX-01; TS-MOD-01 to 06      |
+| FR-MOD-01 to 10                  | S7; §9.5            | TS-UX-01; TS-MOD-01 to 16      |
 | NFR-A11Y-02, 03, 04              | §5, §11             | TS-A11Y-02, 03                 |
 | U10 (28 §5)                      | §1.1.3, S5.1, §10.1 | TS-UX-08                       |
 | U13, NFR-PERF-03, 09             | §6                  | TS-NAT-08, TS-PERF-13          |
