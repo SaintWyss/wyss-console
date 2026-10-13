@@ -82,7 +82,7 @@ When two documents disagree, the higher one rules and the lower one is corrected
    [04](04-TARGET-ARCHITECTURE.md) as the overall picture.
 4. **README and the implementation**: what exists. The README describes reality; it does not
    redefine the product.
-5. **Historical research and archived specifications**: `docs origins/`, the base
+5. **Historical research and archived specifications**: `wyss-agent-legacy/`, the base
    specification v0.1, the research report of 2026-10-01 and the vision report of 2026-10-12.
    Inputs, never authority.
 
@@ -144,10 +144,14 @@ Every factual claim in this set carries one of these marks where it matters.
 `origin/main` advanced from `537eabc` to `91180a6` by one commit that renames the archive of the
 original Wyss assistant, `docs origins/` → `wyss-agent-legacy/`, and updates the references to
 it. From that commit on, the archive's path is `wyss-agent-legacy/`, and any new text of this
-set uses it. The working tree that holds the uncommitted revisions of this set is still based
-on `537eabc`: it was not pulled, merged or rebased, so this index and document 16 still show
-the old path here until the tree is integrated. Read through the hosting service's interface,
-without fetching `[O]`.
+set uses it.
+
+The revisions of this set written on 2026-10-13 were committed on the review branch
+`docs/console-planning-review-2026-10-13`, on top of `537eabc`, and `origin/main` at `91180a6`
+was merged into that branch the same day, with no conflict. On that branch this index and
+documents 16 and 17 show the new path. `main` itself is not changed by the branch: nothing is
+merged into it, and the branch is published for review only. The planning is not complete, and
+ADR 0029 and ADR 0030 stay Proposed.
 
 ## What this set does not do
 

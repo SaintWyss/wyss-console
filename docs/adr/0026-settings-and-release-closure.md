@@ -26,7 +26,7 @@ changed is one visibility keyword (`lifecycle::descend`, which the preference st
 reuses) and the way `Provision::of_build` finds the executable it starts from, so that the
 layout could be tested below any prefix (the rule is the same).
 
-The documents archived in `docs origins/` were used as history and nothing else. When they
+The documents archived in `wyss-agent-legacy/` were used as history and nothing else. When they
 disagree with the code, the ADRs or the README, the code wins; no assumption of the
 earlier Python, hexagonal or multi-agent systems entered this phase.
 
