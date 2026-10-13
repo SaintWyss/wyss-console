@@ -23,14 +23,14 @@ add no `request` to ADR 0008.
 
 Every capability of a configuration adapter is a record:
 
-| Field       | Values                                                                                                                                                                                           |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `kind`      | `rule`, `hook`, `skill`, `mcp_server`, `plugin`, `setting`, `model_preference`                                                                                                                   |
-| `operation` | `inventory`, `enable`, `disable`, `restore`, `create`, `edit`, `delete`, `effective_read`                                                                                                        |
-| `support`   | `native` (the provider has this state), `by_removal` (the entry is taken out and kept), `by_provider_writer` (done through the provider's own command), `read_only`, `unsupported`, `unverified` |
-| `effect`    | `new_sessions`, `running_sessions` (provider reloads), `needs_restart`, `needs_provider_review`, `unknown`                                                                                       |
-| `evidence`  | One of the five marks, with its source                                                                                                                                                           |
-| `versions`  | The provider versions the evidence was gathered on                                                                                                                                               |
+| Field       | Values                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `kind`      | `rule`, `hook`, `skill`, `mcp_server`, `plugin`, `setting`, `model_preference`                                                                                                                                                                                                                                                                                           |
+| `operation` | `inventory`, `enable`, `disable`, `restore`, `create`, `edit`, `delete`, `effective_read`                                                                                                                                                                                                                                                                                |
+| `support`   | `native` (the provider has this state), `by_removal` (ADR 0028's word: the entry is disabled without a native switch; under proposed ADR 0029 it is kept inside the same file where that is verified, and otherwise removed and sealed in the protected vault), `by_provider_writer` (done through the provider's own command), `read_only`, `unsupported`, `unverified` |
+| `effect`    | `new_sessions`, `running_sessions` (provider reloads), `needs_restart`, `needs_provider_review`, `unknown`                                                                                                                                                                                                                                                               |
+| `evidence`  | One of the five marks, with its source                                                                                                                                                                                                                                                                                                                                   |
+| `versions`  | The provider versions the evidence was gathered on                                                                                                                                                                                                                                                                                                                       |
 
 Rules: a missing record means unknown, and unknown is never offered (ADR 0008 `:13-15` `[R]`).
 A capability whose evidence is `[N]` may be shown as an inventory fact and never as an action.
@@ -72,21 +72,21 @@ Installed version observed: 2.1.296 `[O]`.
 
 Capability table for the configuration adapter:
 
-| Kind · operation            | Support                                                                    | Effect             | Evidence                  |
-| --------------------------- | -------------------------------------------------------------------------- | ------------------ | ------------------------- |
-| hook · inventory            | native (read)                                                              | —                  | `[D]`                     |
-| hook · disable              | `by_removal`                                                               | `running_sessions` | `[D]` (no switch; reload) |
-| hook · restore              | `by_removal`                                                               | `running_sessions` | `[D]`                     |
-| hook · disable all          | native                                                                     | `running_sessions` | `[D]`                     |
-| hook · create, edit, delete | native (file edit)                                                         | `running_sessions` | `[D]`; gated to F5        |
-| rule · inventory            | native (read)                                                              | —                  | `[D]`, `[O]`              |
-| rule · disable, enable      | `by_removal` (move the file) or `unsupported` for a section of `CLAUDE.md` | `unknown`          | `[N]`                     |
-| skill · disable, enable     | native (`skillOverrides`)                                                  | `unknown`          | `[O]`, `[N]` (OQ-15)      |
-| plugin · disable, enable    | native (`enabledPlugins`)                                                  | `unknown`          | `[O]`, `[N]`              |
-| mcp_server · inventory      | native (read of `~/.claude.json`, bounded projection)                      | —                  | `[D]`                     |
-| mcp_server · add, remove    | `by_provider_writer` (`claude mcp`)                                        | `unknown`          | `[O]`; semantics `[N]`    |
-| setting · model_preference  | native                                                                     | `new_sessions`     | `[D]`                     |
-| any · effective_read        | `unverified`                                                               | —                  | `[N]` (OQ-05)             |
+| Kind · operation            | Support                                                                                                                                                            | Effect                              | Evidence                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | ----------------------------------------------------------------- |
+| hook · inventory            | native (read)                                                                                                                                                      | —                                   | `[D]`                                                             |
+| hook · disable              | `by_removal`: in place where the compatibility test of ADR 0029 §5 passed; otherwise to the protected vault (27). **Unavailable** until one of the two can be used | `running_sessions`, documented only | `[D]` for "no switch" and for the reload; `[N]` for the kept form |
+| hook · restore              | The same                                                                                                                                                           | `running_sessions`, documented only | `[N]`                                                             |
+| hook · disable all          | native                                                                                                                                                             | `running_sessions`                  | `[D]`                                                             |
+| hook · create, edit, delete | native (file edit)                                                                                                                                                 | `running_sessions`                  | `[D]`; gated to F5                                                |
+| rule · inventory            | native (read)                                                                                                                                                      | —                                   | `[D]`, `[O]`                                                      |
+| rule · disable, enable      | `unsupported` until a destination the provider does not read is verified (OQ-23); never for a section of `CLAUDE.md`                                               | `unknown`                           | `[N]`                                                             |
+| skill · disable, enable     | native (`skillOverrides`)                                                                                                                                          | `unknown`                           | `[O]`, `[N]` (OQ-15)                                              |
+| plugin · disable, enable    | native (`enabledPlugins`)                                                                                                                                          | `unknown`                           | `[O]`, `[N]`                                                      |
+| mcp_server · inventory      | native (read of `~/.claude.json`, bounded projection)                                                                                                              | —                                   | `[D]`                                                             |
+| mcp_server · add, remove    | `by_provider_writer` (`claude mcp`)                                                                                                                                | `unknown`                           | `[O]`; semantics `[N]`                                            |
+| setting · model_preference  | native                                                                                                                                                             | `new_sessions`                      | `[D]`                                                             |
+| any · effective_read        | `unverified`                                                                                                                                                       | —                                   | `[N]` (OQ-05)                                                     |
 
 ### 3.2 Codex
 
@@ -195,7 +195,7 @@ a path from its caller. `[P]`
 | `read(source)`                   | One of its own sources             | Parsed items, or a typed failure                                                                                        | Size, count, depth and link bounds (C-11); the path rules of `control/paths.rs`     |
 | `capabilities(version)`          | A version                          | The records of §2                                                                                                       | Unknown version → every mutation `unverified`                                       |
 | `redact(item)`                   | A parsed item                      | Its projection for the page                                                                                             | Secret classes removed before anything is serialised (C-07)                         |
-| `plan(operation, item, content)` | An operation and the current bytes | New bytes, a diff, a risk class, the restoration record it needs                                                        | Pure; no I/O                                                                        |
+| `plan(operation, item, content)` | An operation and the current bytes | New bytes, a diff, a risk class, how the entry stays restorable (ADR 0029 §3)                                           | Pure; no I/O                                                                        |
 | `verify(operation, content)`     | The bytes read back                | Whether the item is in the intended state                                                                               | Pure                                                                                |
 | `managed_effect(plan)`           | A plan                             | Whether the result is compatible with managed execution, and why                                                        | Only Codex has one today (10 §5)                                                    |
 | `reload_rule(kind)`              | A kind                             | The `effect` of §2                                                                                                      | From documentation, never guessed                                                   |
@@ -219,12 +219,13 @@ protected file is read only in the Console `[P]` (OQ-21).
 
 What an adapter must never let through to the page or to any record:
 
-| Class                                                             | Examples                                                             |
-| ----------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Credential files                                                  | `auth.json`, `.credentials.json`, `.env`: never opened at all        |
-| Values of environment maps                                        | `env` in settings, `env` of an MCP server: names shown, values never |
-| Headers and tokens of HTTP handlers                               | A hook of type `http`, an MCP server reached by URL with credentials |
-| Anything in a provider-owned state file that is not configuration | Sign-in and session state in `~/.claude.json`                        |
+| Class                                                             | Examples                                                                                                                                                                                                 |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Credential files                                                  | `auth.json`, `.credentials.json`, `.env`: never opened at all                                                                                                                                            |
+| Values of environment maps                                        | `env` in settings, `env` of an MCP server: names shown, values never                                                                                                                                     |
+| Headers and tokens of HTTP handlers                               | A hook of type `http`, an MCP server reached by URL with credentials                                                                                                                                     |
+| Token and credential fields of MCP server entries                 | Bearer-token and similar fields of a server reached over the network. Reported by the independent review from Codex's configuration reference; to be enumerated per provider version with fixtures `[N]` |
+| Anything in a provider-owned state file that is not configuration | Sign-in and session state in `~/.claude.json`                                                                                                                                                            |
 
 A hook's command line is configuration and is shown; it can still contain a secret the user
 wrote into it. That case is the subject of [11 §5](11-SECURITY-THREAT-MODEL.md).
@@ -237,13 +238,74 @@ any code: the provider's supported protocol with evidence, a safety contract equ
 0015 and 0016, an isolation attestation, and an ADR. Nothing in the native plane is a step
 towards it: starting `claude` in a terminal is not managing it.
 
-## 6. Version policy
+## 6. Version policy and compatibility evidence
 
-| Situation                                               | Inventory                                                          | Mutation                                               | Native start        |
-| ------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------ | ------------------- |
-| Version with recorded evidence                          | Yes                                                                | Per capability                                         | Yes                 |
-| Newer or older version, same major configuration format | Yes, marked unverified                                             | Refused (`unverified_version`) until evidence is added | Yes, with a warning |
-| Provider not installed                                  | Files are still listed if present, marked "provider not installed" | Refused                                                | No                  |
+A provider updates itself, independently of the Console. What was verified for one version may
+not hold for the next. This section is the design asked for by decision DN-23; nothing in it is
+built, and how a row is renewed is still that decision.
 
-Evidence is added by a fixture test that reproduces the provider's documented behaviour for
-that version, and a note in the adapter's version table (NFR-MNT-01).
+### 6.1 By situation
+
+| Situation                                               | Inventory                                                          | Mutation                                                           | Native start        |
+| ------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ | ------------------- |
+| Version with recorded evidence                          | Yes                                                                | Per capability                                                     | Yes                 |
+| Newer or older version, same major configuration format | Yes, marked unverified                                             | Per tier (§6.3): some refused (`unverified_version`), some allowed | Yes, with a warning |
+| Provider not installed                                  | Files are still listed if present, marked "provider not installed" | Refused                                                            | No                  |
+
+### 6.2 The evidence manifest
+
+One row per provider, version, capability and configuration form. A mutation is offered only
+where a row allows it.
+
+| Field              | Content                                                                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Provider           | Its identifier                                                                                                                                |
+| Version            | One exact version; or a range, only where §6.3 allows one, with its justification written in the row                                          |
+| Capability         | One identifier from the **closed set compiled into the build**: a row can switch a known capability on or off, and can never define a new one |
+| Form               | The file, and for a hook the event, the handler type and the position (ADR 0029 §5)                                                           |
+| Source of evidence | `fixture`, `documentation` with its date, or `real run` with its report                                                                       |
+| Verified on, by    | Date; who ran it                                                                                                                              |
+| Known limitations  | What the evidence does not cover: a rewrite path not exercised, a second computer not checked                                                 |
+| Status             | `valid`, `invalidated`, or `not applicable`                                                                                                   |
+| Invalidated by     | The version, date and reason, when a later observation contradicts the row                                                                    |
+
+### 6.3 Tiers, by what a wrong assumption costs
+
+| Tier | Capability                                              | Evidence valid for                                                                                                                                      | Why                                                                                                                                 |
+| ---- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| E0   | Reading and inventory                                   | Any version whose files parse; marked unverified outside recorded versions                                                                              | A misreading is shown, not written                                                                                                  |
+| E1   | A provider-native switch                                | Exact versions, or a range whose two ends both pass the same fixture and whose documented key did not change                                            | A wrong write of a documented key is visible and reversible                                                                         |
+| E2   | Removing an entry to the vault and putting it back      | Any version on which the adapter **recognises** the entry's place and the file passes the round-trip check. Gated by recognition, not by a version list | The file left behind holds only ordinary entries. If the provider moves or reshapes hooks, recognition fails and nothing is offered |
+| E3   | Keeping an entry in place, in a form the provider skips | One exact version, per cell. **Never a range**                                                                                                          | A provider that stops tolerating the form can drop every hook of the file (check V1)                                                |
+| E4   | Running the provider's own writer                       | One exact version; the command and its arguments are part of the row                                                                                    | The desktop starts a provider's program (DN-13)                                                                                     |
+
+The consequence that matters: the central capability, disabling one hook through the vault, is
+tier E2 and does **not** switch off at every provider update. Tier E3 does.
+
+### 6.4 Invalidation and safe degradation
+
+| Event                                                                        | Effect                                                                                                                         |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| The installed version has no row for a capability of tier E1, E3 or E4       | That capability is not offered (`unverified_version`), with the version it was last verified for. Nothing is written           |
+| A row is marked `invalidated`                                                | The capability is off for those versions even where it was used before                                                         |
+| Entries were kept in place (rung 2) under a version that no longer has a row | They are shown, never touched automatically, and can be restored only by the user's explicit act after a warning (ADR 0029 §5) |
+| The adapter no longer recognises where entries live (E2)                     | The source is read only; records already in the vault stay, and their content can be revealed to the user (27 §8.3)            |
+| The provider's version cannot be determined without running it               | Treated as unknown: tiers E1, E3 and E4 are off                                                                                |
+| The manifest itself cannot be read or verified                               | The manifest compiled into the build stands; a manifest that fails its signature is ignored whole. Never a partial trust       |
+
+Unsafe mutations fail closed. Nothing here ever widens what is allowed because evidence is
+missing.
+
+### 6.5 How a row is renewed for a new version (DN-23)
+
+| Option | Mechanism                                                                                                                                                                                                                                                                                                             | Keeps the feature alive | Risk                                                                                                                                           |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| R-a    | A new build of the Console carries the manifest                                                                                                                                                                                                                                                                       | No: off until the build | None new                                                                                                                                       |
+| R-b    | A **signed manifest**, separate from the build. Data only: it can mark a pair of provider version and compiled-in capability as valid or invalidated, and nothing else. It cannot add a capability, a command, an argument, a path or a format. Verified against a key pinned in the build; applied by the user's act | Yes, without a build    | A signing key to protect; a channel to deliver it, which belongs to distribution (DN-07). No network path is added to the configuration engine |
+| R-c    | A verification the user runs himself on a throwaway home, producing evidence valid for that installation only                                                                                                                                                                                                         | Yes, on that computer   | The Console runs a provider (DN-13, DN-24); the user's run is only as good as its procedure                                                    |
+| R-d    | Accepting a range of versions                                                                                                                                                                                                                                                                                         | Yes                     | It assumes what the evidence rule exists to avoid. Allowed for E1 by its own rule; never for E3                                                |
+
+Recommended: R-a now; tier E2 by recognition, so that the vault path survives provider updates;
+R-b designed with distribution; R-c studied with the procedures of research RS1; R-d only as
+§6.3 allows. A manifest never authorises an operation the build does not already contain, so a
+remote file cannot make the Console run something new.

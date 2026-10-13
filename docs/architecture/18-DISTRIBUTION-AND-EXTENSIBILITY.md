@@ -41,10 +41,10 @@ They keep the door open and are not distribution work.
 | Installation              | A documented, tested way to install without building; where the authority and its unit go; what is asked of the user                                 | ADR 0025's rules carried over |
 | Provenance                | The desktop still installs only the authority it was built with, from a place nobody else can write                                                  | SG-11                         |
 | Updates                   | How a new version arrives, how the authority is replaced only when none runs (as today), how a store is migrated, how to go back                     | ADR 0025; 14 §5               |
-| Uninstallation            | What is removed and what is kept; the user's history and restoration data are his and are listed before anything goes                                | README `:97-100` `[R]`; 14 §8 |
+| Uninstallation            | What is removed and what is kept; the user's history is his and is listed before anything goes                                                       | README `:97-100` `[R]`; 14 §8 |
 | Onboarding                | Which agents were found, at which versions, what the Console can do with each, what it cannot; no account needed, no agent required for the terminal | 06                            |
 | Safe defaults             | Read only until the user makes his first change; no telemetry by default; nothing leaves the machine                                                 | —                             |
-| Configuration portability | Session profiles export and import (09 §4.5); restoration records export and import (16 §2.3)                                                        | —                             |
+| Configuration portability | Session profiles export and import (09 §4.5). A disabled entry travels with the provider's own file (ADR 0029, proposed)                             | —                             |
 | Diagnostics               | A report the user can read before sending, holding versions, closed error words and counters, never content (FR-OBS-05)                              | 11 §5.5                       |
 | Documentation             | For users: what each plane is and is not; for each provider, what is verified. For contributors: the adapter contract                                | 06                            |
 | Accessibility             | The rules of 13 §5 verified on the supported platforms                                                                                               | —                             |
@@ -83,13 +83,13 @@ under whose control.
 
 ## 6. Data a public user must be able to trust
 
-| Promise                                                           | Mechanism                                                                                                |
-| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| The Console reads your agents' configuration and sends it nowhere | No network use by the configuration engine; held by a test that the module links no network client `[P]` |
-| It changes nothing without a plan you confirmed                   | 07 §5                                                                                                    |
-| It keeps no secret of yours                                       | 11 §5, once DN-01 is decided                                                                             |
-| You can remove everything it keeps                                | 14 §8                                                                                                    |
-| It tells you what it could not verify                             | The evidence marks, carried into the interface (13 §1.1)                                                 |
+| Promise                                                           | Mechanism                                                                                                                                                                                                                                                                                  |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The Console reads your agents' configuration and sends it nowhere | No network use by the configuration engine; held by a test that the module links no network client `[P]`                                                                                                                                                                                   |
+| It changes nothing without a plan you confirmed                   | 07 §5                                                                                                                                                                                                                                                                                      |
+| It keeps no secret of yours in clear, and none without asking     | History and indexes hold identifiers, hashes and times (11 §5.5). The content of a hook you disable may be kept, encrypted, on your computer, after a consent that says what, where and for how long (27 §7). What that protects against, and what it does not, is said in the same dialog |
+| You can remove everything it keeps                                | 14 §8                                                                                                                                                                                                                                                                                      |
+| It tells you what it could not verify                             | The evidence marks, carried into the interface (13 §1.1)                                                                                                                                                                                                                                   |
 
 ## 7. Order, when the time comes
 

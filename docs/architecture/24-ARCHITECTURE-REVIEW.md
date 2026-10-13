@@ -9,6 +9,22 @@ The list of things to look for came from the owner's brief, which reached the au
 after the tenth item ("False…"). Item §12 is the author's reading of that fragment: false
 claims of state, of hot reload and of completion.
 
+## 0. Status of this document
+
+Written before the owner stated his policy on secrets and before the independent review. It is
+kept as it was written, as the record of what the author found alone. Read it with
+[25](25-INDEPENDENT-REVIEW.md), which says which of these findings a second reader confirmed,
+which remedies would not have worked, and what was missed. In particular:
+
+| Finding here                                  | What happened to it                                                               |
+| --------------------------------------------- | --------------------------------------------------------------------------------- |
+| RV-43, a threshold for the classifier         | Withdrawn: no persistence depends on a classifier (the owner's policy; 25, IR-03) |
+| RV-05, the last-seen index                    | Settled by the owner's policy: it holds no content                                |
+| RV-02, RV-12, start-up repair and the journal | Superseded: recovery is rebuilt around an intent and an outcome (25, IR-02)       |
+| RV-03, the remedy for the write race          | Revised and still not a solution; the decision is DN-21 (25, IR-01)               |
+| RV-01, RV-06, RV-07, RV-20, their remedies    | Each found insufficient by the reviewer and revised (25 §5)                       |
+| §15 and §17                                   | Historical: they describe the pass in which this document was written             |
+
 ## 1. Result in short
 
 Fifty-two numbered findings, RV-01 to RV-53 (RV-15 is not used; it was merged into RV-01).

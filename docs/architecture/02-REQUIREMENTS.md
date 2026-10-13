@@ -60,41 +60,42 @@ hold; "where the provider allows" means the adapter declares the capability with
 
 ### 1.4 Configuration engine (CFG)
 
-| ID        | Requirement                                                                                         | Source             | Phase    |
-| --------- | --------------------------------------------------------------------------------------------------- | ------------------ | -------- |
-| FR-CFG-01 | The configuration sources of each installed provider are discovered, per scope                      | Owner              | F1       |
-| FR-CFG-02 | Each source is parsed into a typed inventory; what cannot be parsed is reported, not guessed        | Owner              | F1       |
-| FR-CFG-03 | Persisted, provider-resolved and session-effective state are shown apart for every element          | Owner; ADR 0028 §4 | F1       |
-| FR-CFG-04 | A change made outside the Console is detected and shown                                             | Owner              | F1       |
-| FR-CFG-05 | An existing entry can be enabled, disabled and restored, in the provider's real file                | Owner (D3)         | F2a, F2b |
-| FR-CFG-06 | Entries can be created, edited and deleted, where the provider allows                               | Owner (D3)         | F5       |
-| FR-CFG-07 | A file that changed since it was read is never overwritten: the change is refused and planned again | Owner (D5)         | F2a      |
-| FR-CFG-08 | A write is atomic, and is verified by reading the file back                                         | ADR 0028 §5        | F2a      |
-| FR-CFG-09 | A change can be undone while the file has not diverged                                              | Owner              | F2a      |
-| FR-CFG-10 | Changes, undos, conflicts and outside changes are kept in a history of their own                    | Owner (D8)         | F2a      |
-| FR-CFG-11 | Project-level configuration is managed with the same rules as global                                | Owner              | F1, F2a  |
-| FR-CFG-12 | System policy is shown, read only                                                                   | ADR 0028 §4        | F1       |
-| FR-CFG-13 | A link, a generated file and a file the provider rewrites are recognised and handled as such        | Owner              | F1       |
-| FR-CFG-14 | Whether the configuration is compatible with managed Inference is shown, with its reason            | Owner (D7)         | F1       |
-| FR-CFG-15 | Restoration data can be exported and imported between computers, by an explicit action              | Owner (D5)         | F2a      |
-| FR-CFG-16 | A secret value is never sent to the window                                                          | Owner              | F1       |
+| ID        | Requirement                                                                                                                                                                                              | Source             | Phase             |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----------------- |
+| FR-CFG-01 | The configuration sources of each installed provider are discovered, per scope                                                                                                                           | Owner              | F1                |
+| FR-CFG-02 | Each source is parsed into a typed inventory; what cannot be parsed is reported, not guessed                                                                                                             | Owner              | F1                |
+| FR-CFG-03 | Persisted, provider-resolved and session-effective state are shown apart for every element                                                                                                               | Owner; ADR 0028 §4 | F1                |
+| FR-CFG-04 | A change made outside the Console is detected and shown                                                                                                                                                  | Owner              | F1                |
+| FR-CFG-05 | An existing entry can be enabled, disabled and restored, in the provider's real file                                                                                                                     | Owner (D3)         | F2a, F2v, F2b     |
+| FR-CFG-06 | Entries can be created, edited and deleted, where the provider allows                                                                                                                                    | Owner (D3)         | F5                |
+| FR-CFG-07 | A file that changed since it was read is never overwritten: the change is refused and planned again                                                                                                      | Owner (D5)         | F2a               |
+| FR-CFG-08 | A write is atomic, and is verified by reading the file back                                                                                                                                              | ADR 0028 §5        | F2a               |
+| FR-CFG-09 | A change can be undone while the file has not diverged                                                                                                                                                   | Owner              | F2a               |
+| FR-CFG-10 | Changes, undos, conflicts and outside changes are kept in a history of their own                                                                                                                         | Owner (D8)         | F2a               |
+| FR-CFG-11 | Project-level configuration is managed with the same rules as global                                                                                                                                     | Owner              | F1, F2a           |
+| FR-CFG-12 | System policy is shown, read only                                                                                                                                                                        | ADR 0028 §4        | F1                |
+| FR-CFG-13 | A link, a generated file and a file the provider rewrites are recognised and handled as such                                                                                                             | Owner              | F1                |
+| FR-CFG-14 | Whether the configuration is compatible with managed Inference is shown, with its reason                                                                                                                 | Owner (D7)         | F1                |
+| FR-CFG-15 | Restoration data can be exported and imported between computers, by an explicit action, encrypted (27 §9.3)                                                                                              | Owner (D5)         | After F2v (DN-29) |
+| FR-CFG-16 | A secret value is never sent to the window                                                                                                                                                               | Owner              | F1                |
+| FR-CFG-17 | The user can keep, by an explicit choice made entry by entry, an encrypted recovery copy of selected entries, and recover one that was deleted or changed outside. Nothing is copied without that choice | Owner (2026-10-13) | F2h               |
 
 ### 1.5 Rules, hooks, skills, MCP (HRS)
 
-| ID        | Requirement                                                                                             | Source      | Phase                     |
-| --------- | ------------------------------------------------------------------------------------------------------- | ----------- | ------------------------- |
-| FR-HRS-01 | Hooks are listed with event, matcher, handler, source, scope and configured state                       | Owner       | F1                        |
-| FR-HRS-02 | A hook can be disabled and enabled, by the means its provider really has                                | Owner       | F2a, G-INF                |
-| FR-HRS-03 | A disabled hook can be restored exactly                                                                 | Owner (D5)  | F2a                       |
-| FR-HRS-04 | Hooks can be created, edited and deleted                                                                | Owner (D3)  | F5                        |
-| FR-HRS-05 | A hook is validated: known event, well-formed handler, bounded timeout, command that exists             | Design      | F1 (report), F5 (enforce) |
-| FR-HRS-06 | Rules and instruction files are listed with their source, scope, size and what they import              | Owner       | F1                        |
-| FR-HRS-07 | Rules can be switched and edited, where the provider's format makes that well defined                   | Owner       | F2a (switch), F5 (edit)   |
-| FR-HRS-08 | Skills are listed with their location and state, and can be switched                                    | Owner       | F1, F2a                   |
-| FR-HRS-09 | MCP servers are listed, switched, added and removed, through the provider's own writer where it has one | Owner       | F1, F2a, F5               |
-| FR-HRS-10 | Plugins are listed and can be switched                                                                  | Design      | F1, F2a                   |
-| FR-HRS-11 | Hooks, rules and skills can be associated with profiles and projects                                    | Owner       | F3c                       |
-| FR-HRS-12 | A provider's trust record for a hook is shown and never written by the Console                          | ADR 0028 §3 | F1                        |
+| ID        | Requirement                                                                                                         | Source      | Phase                     |
+| --------- | ------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------- |
+| FR-HRS-01 | Hooks are listed with event, matcher, handler, source, scope and configured state                                   | Owner       | F1                        |
+| FR-HRS-02 | A hook can be disabled and enabled, by the means its provider really has, and otherwise through the protected vault | Owner       | F2a, F2v, G-INF           |
+| FR-HRS-03 | A disabled hook can be restored exactly                                                                             | Owner (D5)  | F2v                       |
+| FR-HRS-04 | Hooks can be created, edited and deleted                                                                            | Owner (D3)  | F5                        |
+| FR-HRS-05 | A hook is validated: known event, well-formed handler, bounded timeout, command that exists                         | Design      | F1 (report), F5 (enforce) |
+| FR-HRS-06 | Rules and instruction files are listed with their source, scope, size and what they import                          | Owner       | F1                        |
+| FR-HRS-07 | Rules can be switched and edited, where the provider's format makes that well defined                               | Owner       | F2a (switch), F5 (edit)   |
+| FR-HRS-08 | Skills are listed with their location and state, and can be switched                                                | Owner       | F1, F2a                   |
+| FR-HRS-09 | MCP servers are listed, switched, added and removed, through the provider's own writer where it has one             | Owner       | F1, F2a, F5               |
+| FR-HRS-10 | Plugins are listed and can be switched                                                                              | Design      | F1, F2a                   |
+| FR-HRS-11 | Hooks, rules and skills can be associated with profiles and projects                                                | Owner       | F3c                       |
+| FR-HRS-12 | A provider's trust record for a hook is shown and never written by the Console                                      | ADR 0028 §3 | F1                        |
 
 ### 1.6 Adapters (ADP)
 
@@ -159,27 +160,29 @@ hold; "where the provider allows" means the adapter declares the capability with
 
 ### 1.11 Security (SEC)
 
-| ID        | Requirement                                                                                   | Source      | Phase  |
-| --------- | --------------------------------------------------------------------------------------------- | ----------- | ------ |
-| FR-SEC-01 | A change that weakens a security control is confirmed in a native dialog                      | Owner (D4)  | F2a    |
-| FR-SEC-02 | The risk of a change is classified and enforced in the backend                                | Owner (D4)  | F2a    |
-| FR-SEC-03 | The window never supplies a path, file content or command text to the configuration subsystem | ADR 0028 §2 | F1     |
-| FR-SEC-04 | Values classified as secret are redacted before they leave the backend                        | Owner       | F1     |
-| FR-SEC-05 | A provider's trust database is never written, forged or bypassed                              | Owner       | F1     |
-| FR-SEC-06 | A system policy is never bypassed                                                             | Owner       | F1     |
-| FR-SEC-07 | No guarantee of the managed plane changes without an ADR and evidence                         | Owner (D10) | Always |
-| FR-SEC-08 | What may be kept to restore an entry follows an approved storage policy                       | Owner       | F2a    |
-| FR-SEC-09 | A remote device acts only within what was granted to that device                              | Owner       | F10    |
+| ID        | Requirement                                                                                                                                      | Source             | Phase    |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ | -------- |
+| FR-SEC-01 | A change that weakens a security control is confirmed in a native dialog                                                                         | Owner (D4)         | F2a      |
+| FR-SEC-02 | The risk of a change is classified and enforced in the backend                                                                                   | Owner (D4)         | F2a      |
+| FR-SEC-03 | The window never supplies a path, file content or command text to the configuration subsystem                                                    | ADR 0028 §2        | F1       |
+| FR-SEC-04 | Values classified as secret are redacted before they leave the backend                                                                           | Owner              | F1       |
+| FR-SEC-05 | A provider's trust database is never written, forged or bypassed                                                                                 | Owner              | F1       |
+| FR-SEC-06 | A system policy is never bypassed                                                                                                                | Owner              | F1       |
+| FR-SEC-07 | No guarantee of the managed plane changes without an ADR and evidence                                                                            | Owner (D10)        | Always   |
+| FR-SEC-08 | What may be kept to restore an entry follows an approved storage policy (ADR 0029, proposed)                                                     | Owner              | F2a, F2v |
+| FR-SEC-09 | A remote device acts only within what was granted to that device                                                                                 | Owner              | F10      |
+| FR-SEC-10 | Content kept to restore an entry is held only in the protected vault: encrypted, after informed consent, never replicated, and in no other store | Owner (2026-10-13) | F2v      |
 
 ### 1.12 Data (DAT)
 
-| ID        | Requirement                                                        | Source   | Phase  |
-| --------- | ------------------------------------------------------------------ | -------- | ------ |
-| FR-DAT-01 | Each piece of state has one owner                                  | ADR 0002 | Always |
-| FR-DAT-02 | A crash at any point leaves every file whole                       | Design   | F2a    |
-| FR-DAT-03 | Every store has a version and a tested migration                   | ADR 0012 | Always |
-| FR-DAT-04 | Everything the Console keeps is bounded in size and in age         | Design   | F2a    |
-| FR-DAT-05 | The user can delete what the Console keeps about his configuration | Owner    | F2a    |
+| ID        | Requirement                                                                                                                        | Source             | Phase  |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------ |
+| FR-DAT-01 | Each piece of state has one owner                                                                                                  | ADR 0002           | Always |
+| FR-DAT-02 | A crash at any point leaves every file whole                                                                                       | Design             | F2a    |
+| FR-DAT-03 | Every store has a version and a tested migration                                                                                   | ADR 0012           | Always |
+| FR-DAT-04 | Everything the Console keeps is bounded in size and in age                                                                         | Design             | F2a    |
+| FR-DAT-05 | The user can delete what the Console keeps about his configuration                                                                 | Owner              | F2a    |
+| FR-DAT-06 | The user can list, restore, reveal and delete every entry the Console holds for restoration, and is told when one is the only copy | Owner (2026-10-13) | F2v    |
 
 ### 1.13 Several computers (SYNC)
 
@@ -187,7 +190,7 @@ hold; "where the provider allows" means the adapter declares the capability with
 | ---------- | ----------------------------------------------------------------------------------- | ---------- | ---------------------- |
 | FR-SYNC-01 | A configuration file replaced by a replication tool is treated as an outside change | Owner      | F1                     |
 | FR-SYNC-02 | A conflict copy left by a replication tool is shown and blocks changes to its file  | Owner (D5) | F1 (show), F2a (block) |
-| FR-SYNC-03 | Restoration data is private to the computer that made it                            | Owner (D5) | F2a                    |
+| FR-SYNC-03 | Restoration data is private to the computer that made it and is never replicated    | Owner (D5) | F2v                    |
 | FR-SYNC-04 | The design assumes no particular replication tool                                   | Design     | F1                     |
 
 ### 1.14 Remote (REM)
@@ -298,11 +301,11 @@ Budgets marked _proposed_ are targets of [15](15-PERFORMANCE-ENGINEERING.md), no
 
 ## 3. Requirements that conflict, and how
 
-| Conflict                                                                                       | Resolution                                                                         |
-| ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| FR-HRS-02 (enable a Codex hook) against FR-MAN-02 (Inference rejects any enabled hook)         | Enabling waits for G-INF (FR-MAN-07); 10 §5                                        |
-| FR-HRS-03 (restore exactly) against NFR-SEC-04 and ADR 0003 (no secret in durable storage)     | Open: DN-01 in 22; analysis in 11 §5                                               |
-| FR-CFG-05 (change the real global file) against FR-PRF-04 (independent sessions)               | Two features: global editing changes everyone; profiles change one session (09 §2) |
-| FR-NAT-01 (start an agent) against ADR 0005 (the window supplies no executable or argv)        | A closed catalogue resolved in the backend, with its own ADR (05 §4)               |
-| FR-TERM-11, FR-REM-03 (terminal outlives the window) against ADR 0005 (PTYs are Console-local) | Needs a host-owned PTY and its own ADR (16 §4)                                     |
-| NFR-PERF-* (Ghostty as reference) against the WebView architecture                             | Measure first (P1); no technology change without numbers (15 §6)                   |
+| Conflict                                                                                       | Resolution                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FR-HRS-02 (enable a Codex hook) against FR-MAN-02 (Inference rejects any enabled hook)         | Enabling waits for G-INF (FR-MAN-07); 10 §5                                                                                                                                                                                                                                                                                                                 |
+| FR-HRS-03 (restore exactly) against NFR-SEC-04 and ADR 0003 (no secret in durable storage)     | The owner's decision of 2026-10-13: a protected private backup is allowed. NFR-SEC-04 stands for every log, event, history and diagnostic; the content of a disabled entry may be held only in the encrypted vault, as a named exception to ADR 0003 (ADR 0029 §1, proposed; 27). Until that ADR is accepted, disabling one Claude Code hook is unavailable |
+| FR-CFG-05 (change the real global file) against FR-PRF-04 (independent sessions)               | Two features: global editing changes everyone; profiles change one session (09 §2)                                                                                                                                                                                                                                                                          |
+| FR-NAT-01 (start an agent) against ADR 0005 (the window supplies no executable or argv)        | A closed catalogue resolved in the backend, with its own ADR (05 §4)                                                                                                                                                                                                                                                                                        |
+| FR-TERM-11, FR-REM-03 (terminal outlives the window) against ADR 0005 (PTYs are Console-local) | Needs a host-owned PTY and its own ADR (16 §4)                                                                                                                                                                                                                                                                                                              |
+| NFR-PERF-* (Ghostty as reference) against the WebView architecture                             | Measure first (P1); no technology change without numbers (15 §6)                                                                                                                                                                                                                                                                                            |

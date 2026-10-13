@@ -33,45 +33,65 @@ for the exact patterns (OQ-13).
 ### 2.2 The case of the second computer
 
 The Console's own state is per computer and must never be replicated (ADR 0028 §7) `[R]`; on
-the owner's machines that directory is already excluded from replication `[O]`.
+the owner's machines that directory is already excluded from replication `[O]`. On rungs 1 and
+2 of ADR 0029 (proposed) that state holds no configuration content and nothing about a disabled
+entry depends on it. On rung 3 it holds the entry, sealed in the protected vault
+([27](27-PROTECTED-RESTORATION-VAULT.md)), and the two computers stop being symmetric.
+
+The diagram is the case of rungs 1 and 2. On rung 3, B receives a file without H, shows it as
+removed outside, and cannot restore it: only A can (27 §9.2).
 
 ```mermaid
 sequenceDiagram
   participant A as Computer A (Console open)
   participant S as Replication tool
   participant B as Computer B
-  A->>A: user disables hook H in settings.json; entry kept in A's private state
+  A->>A: user disables hook H: it is kept, disabled, inside settings.json
   A->>S: settings.json changed
   S->>B: settings.json replaced
-  alt Console open on B, and it had seen H
-    B->>B: outside change: H removed. B's last-seen data holds H
-    B-->>B: H shown as "removed elsewhere; restorable here"
-  else Console never saw H on B
-    B-->>B: H is simply absent. "Disabled on another computer; no restoration data here"
+  alt Console open on B
+    B->>B: outside change: H is now kept disabled
+    B-->>B: H shown as disabled, restorable here
   else Console not running on B
-    B-->>B: nothing is shown. Agents on B run without H
+    B-->>B: nothing is shown. Agents on B run without H, as on A
   end
 ```
 
-| Case                                                    | What B can do                                                                                                                                                                                                       |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| B saw the entry before it was removed                   | Restore it from its own last-seen data (subject to DN-01)                                                                                                                                                           |
-| B never saw it                                          | Import a restoration record exported from A by an explicit action (FR-CFG-15)                                                                                                                                       |
-| Restored on B                                           | The file changes on A through replication; A sees the entry back and marks its parked record "restored elsewhere"                                                                                                   |
-| Both computers changed the same file while disconnected | The tool leaves a conflict copy on one of them; the Console there blocks mutations of that file until the user resolves it                                                                                          |
-| The user wants the hook off on A and on on B            | Not possible while the file is replicated: it is one file. The Console says so; a session profile (09) is the way to differ per session, and an exclusion in the replication tool is the way to differ per computer |
+| Case                                                    | What B can do                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An entry disabled on A and kept in the file             | Restore it on B: the entry is in the file B received. Nothing has to be exported                                                                                                                                                                                                                                                |
+| An entry disabled on A with a native switch             | The same: the switch is in the file                                                                                                                                                                                                                                                                                             |
+| An entry disabled on A into A's vault (rung 3)          | Nothing: B sees it removed from outside and says it can be restored on the computer that disabled it. An encrypted export from A is designed and not offered at first (§2.3)                                                                                                                                                    |
+| An entry removed on A by hand, in an editor             | B sees it removed from outside. It is not restorable from the Console, unless the user had chosen to keep a recovery copy of that entry: then the computer that holds the copy, and only that one, can recover it (27 §3.6)                                                                                                     |
+| Restored on B                                           | The file changes on A through replication; A sees the entry enabled                                                                                                                                                                                                                                                             |
+| Both computers changed the same file while disconnected | If the replication tool leaves a conflict copy that the Console recognises, the Console there blocks mutations of that file until the user resolves it, and says that this is done outside. A tool that settles the conflict by itself leaves nothing to recognise: the Console sees an outside change and nothing more (OQ-13) |
+| A change made on A is replaced by B's older version     | A sees an outside change that undid its last operation and says so: "your change was replaced by a version from another computer"; applying it again is offered                                                                                                                                                                 |
+| The user wants the hook off on A and on on B            | Not possible while the file is replicated: it is one file. The Console says so; a session profile (09) is the way to differ per session, and an exclusion in the replication tool is the way to differ per computer                                                                                                             |
+| The provider on B is another version than on A          | The kept form must be tolerated by both: check V7 of ADR 0029 §5. The Console on A cannot see B's version; it reminds the user when the file is known to change from outside                                                                                                                                                    |
 
 What the Console on A can never know: which sessions on B adopted a change. It says "this file
 may be used on other computers; their sessions are not visible here" whenever it has seen a
 conflict copy or an outside change it did not cause.
 
-### 2.3 Export and import of restoration records
+### 2.3 Export and import of held entries
 
-A record is exported to a file the user places with a native dialog and imported the same way.
-The file holds what the record holds, under the same storage policy (DN-01); if entries that
-may contain a secret are ever storable, their export is a separate confirmed act. An import
-never applies anything: it adds a restorable entry, and restoring it is an ordinary plan with
-its native dialog.
+On rungs 1 and 2 a disabled entry travels with its file and nothing needs exporting. On rung 3
+it does not travel: the vault is per computer and is never replicated. What ADR 0028 §7 and
+requirement FR-CFG-15 ask for, carrying a disabled entry to the other computer by an explicit
+act, is designed as an encrypted export and import of vault records
+([27 §9.3](27-PROTECTED-RESTORATION-VAULT.md)): a file sealed under a passphrase the user
+types, authenticated as a whole, imported as untrusted executable content that is shown whole
+before any restoration. It is **not offered in the first vault phase** (DN-29).
+
+The replication tool's own history of versions, and filesystem snapshots, are not a recovery
+mechanism of this design. They may hold an entry or not; the Console neither reads them nor
+counts on them.
+
+A remote device (§5) sees at most the metadata of what a host holds. Restoring, showing,
+exporting and deleting held entries are not remote capabilities in the first remote design
+(27 §9.4).
+
+Session profiles keep their own export and import (09 §4.5); they hold references and no entry.
 
 ## 3. Remote control: what is wanted
 
