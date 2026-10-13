@@ -559,7 +559,7 @@ scrolling, screen-reader access) is OQ-43.
 | ND-10 | Enter the recovery code               | Recover                                                                          | A native input; nothing typed reaches the page                                                                                                                                                               | "Recover"                     |
 | ND-11 | A recovery incident                   | At once and at every start                                                       | The sentence of S14, never worded as success; with: try to protect it again; show it; save it where I choose; delete it, each a further confirmation                                                         | Per choice                    |
 | ND-12 | A launch that leaves out a control    | SM-LAUNCH `confirming`                                                           | Each control left out, by name; "This session will not be equivalent to your global configuration."; what is still in force, or "not known" (09 §3.2)                                                        | "Start without them"          |
-| ND-13 | Pair a device (F10a)                  | A device presents its code                                                       | The device's name and key fingerprint, the grants asked (default `observe` only) (16 §5.2)                                                                                                                   | "Pair"                        |
+| ND-13 | Pair a device (F10a)                  | A device proved a pairing offer                                                  | The device's name as text, both fingerprints, the comparison value, the grants asked (default LP1) and their expiry (16 §5.2.2)                                                                              | "Pair"                        |
 | ND-14 | Author a command (F5)                 | Create or edit a hook                                                            | The native input for the command (DN-12); the exact file, scope and resulting entry                                                                                                                          | "Save to <file>"              |
 | ND-15 | Export or import kept entries (later) | DN-29                                                                            | 27 §9.3: passphrase input, the list by metadata, the warning when the folder is replicated                                                                                                                   | "Export", "Import"            |
 
@@ -697,25 +697,24 @@ sentence per interface (§9, rule 2).
 
 A control in the top bar naming the computer whose terminals and sessions are shown, with its
 connection state: **This computer** · **<host>: connected** · **<host>: reconnecting** · **<host>:
-not reachable**. Absent until remote exists. Switching host changes only what is shown (FR-SES-03);
+not reachable** · **<host>: renew at that computer** (a suspended device, 16 §5.2.3). Absent until remote exists. Switching host changes only what is shown (FR-SES-03);
 a host that is not reachable leaves this computer's own views usable (J14). Every remote view
-carries the host's name in its title. Its design waits for DN-05.
+carries the host's name in its title. Designed in 16 §5 and §8 on 2026-10-13; the reachability it uses is DN-05.
 
 ### S16 — Devices and remote access (future, F10a, F10b)
 
-**Blocked by DN-05**; not designed beyond what 16 §5 fixes. What this specification fixes now, so
-that no later design weakens it:
+Designed in 16 §5 (2026-10-13, unreviewed); the reachability under it is DN-05, the owner's.
+Reconciled with 16's grants in the same pass (C17).
 
-| Element                  | Fixed now                                                                                                                                                                       |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Where it lives           | A navigation item **Devices**, on the host only, absent until F10a                                                                                                              |
-| Pairing                  | Started at the host's keyboard; a code or QR shown in the window; confirmed in ND-13 with name and fingerprint (16 §5.2)                                                        |
-| The list                 | Always visible on the host: each device, its grants, last seen, expiry; "Revoke" acts at once (FR-REM-08)                                                                       |
-| Grants                   | `observe` by default; `terminal_write` labelled "Full control of your account from that device"; `approve` and `configure` say they need a fresh unlock on the device each time |
-| What a device never does | Restore, show, export or delete kept entries (CTL-38; 27 §9.4); answer a native dialog of the host                                                                              |
-| On the device            | Every screen names the host; a dropped connection changes nothing and says "reconnecting" (FR-REM-06); a revoked device shows nothing and can send nothing (J15)                |
-
-The phone client's screens (F10b) are a future deliverable (§13).
+| Element                  | Fixed                                                                                                                                                                                                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Where it lives           | A navigation item **Devices**, on the host only, absent until F10a                                                                                                                                                                                          |
+| Pairing                  | Started at the host's keyboard; a QR or a short code shown in the window; a 6-digit comparison value shown on both; confirmed in ND-13 with name and fingerprints (16 §5.2.2)                                                                               |
+| The list                 | Always visible on the host: each device, its fingerprint, its state (SM-DEVICE), its grants with expiry, last seen. "Revoke" acts at once (FR-REM-08); "Revoke every device" is one action                                                                  |
+| Grants                   | Profiles LP1 to LP4 and add-ons (16 §5.3). LP1 by default. `terminal.write` labelled "Full control of your account from that device"; every grant above LP1 confirmed in a native dialog naming what it allows; grants that need the device's unlock say so |
+| Remote activity          | On every terminal a remote principal types in: "Typing from <device>" with one-key "Take back" (16 §4.6). The gateway's journal is a fourth tab of S10, never merged with the others (AD-11)                                                                |
+| What a device never does | Restore, show, export or delete kept entries (CTL-38; 27 §9.4); answer a native dialog of the host; pair or widen grants; apply a configuration change (a `config.request` waits here for the native confirmation)                                          |
+| On the device            | 16 §8, MS-01 to MS-10: every screen names the host and the plane; a dropped connection changes nothing and says "reconnecting" (FR-REM-06); a revoked device shows nothing and can send nothing (J15)                                                       |
 
 ### S17 — Hand over (future, F11a)
 
@@ -1033,6 +1032,58 @@ The words of panes and of the layout store are added from 05 §10.3 and §15 `[P
 | `scope_winner_unverified`  | "Which of these applies is not verified for <agent> <version>. Each is shown as written."                      |
 | `usage_not_reported`       | "No usage figures are reported to Wyss Console."                                                               |
 
+### 9.6 Host terminals (IF-HOST; 16 §4.14)
+
+| Word                    | Sentence                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------ |
+| `host_unavailable`      | "The terminal service is not running. New terminals open in this window and close with it."      |
+| `host_restarted`        | "The terminal service restarted. Its terminals ended; agent sessions in them are shown as lost." |
+| `host_version_mismatch` | "The terminal service is another version. Restart Wyss Console to use it."                       |
+| `too_many_clients`      | "Too many windows or devices are connected to this computer's terminals. Close one."             |
+| `unknown_terminal`      | "This terminal no longer exists."                                                                |
+| `terminal_not_running`  | "The program in this terminal has ended. Nothing was sent."                                      |
+| `terminal_closed`       | "This terminal was closed by <who>."                                                             |
+| `cwd_invalid`           | "That folder cannot be used. Nothing was started."                                               |
+| `spawn_failed`          | "The terminal could not be started. Nothing is running."                                         |
+| `too_many_terminals`    | "This computer has the most terminals allowed open. Close one first."                            |
+| `budget_exhausted`      | "Terminal memory is full. Close a terminal or lower scrollback in Settings."                     |
+| `too_many_attachments`  | "This terminal is already shown in too many places."                                             |
+| `attachment_expired`    | "This view lost its connection. It is reconnecting; nothing in the terminal changed."            |
+| `stale_ack`             | "The view fell out of step and was refreshed."                                                   |
+| `not_interactive`       | "This view is read only."                                                                        |
+| `input_claim_refused`   | "<who> is typing in this terminal. You can type when they stop."                                 |
+| `not_input_owner`       | "<who> has the keyboard for this terminal. Nothing you typed was sent."                          |
+| `stale_epoch`           | "Typing passed to <who>. What you typed after that was not sent."                                |
+| `input_saturated`       | "The program is not reading its input. What you typed last was not sent."                        |
+| `not_size_owner`        | "The terminal keeps the size of <who>'s view."                                                   |
+| `rate_limited`          | "Too many requests at once. Try again in a moment."                                              |
+| `already_closed`        | "This terminal was already closed."                                                              |
+| `close_timeout`         | "The program did not end in time. It is still being stopped."                                    |
+| `cursor_expired`        | "The list was refreshed."                                                                        |
+| `protocol_violation`    | "A client sent something the terminal service does not accept, and was disconnected."            |
+
+### 9.7 Remote devices (IF-REMOTE; 16 §5.2.7)
+
+On the device, every sentence names the host; on the host, the device.
+
+| Word                | Sentence                                                                                                 |
+| ------------------- | -------------------------------------------------------------------------------------------------------- |
+| `pairing_expired`   | "This pairing code expired. Start pairing again at the computer."                                        |
+| `pairing_failed`    | "The code did not match. Nothing was paired."                                                            |
+| `pairing_refused`   | "Pairing was not confirmed at the computer. Nothing was paired."                                         |
+| `host_key_mismatch` | "<host> did not prove it is the computer you paired with. Nothing was sent. Pair again at the computer." |
+| `device_unknown`    | "<host> does not know this device. Pair it at the computer."                                             |
+| `device_revoked`    | "This device was removed from <host>. Pair it again at the computer."                                    |
+| `device_suspended`  | "This device's access to <host> lapsed. Renew it at the computer."                                       |
+| `device_suspect`    | "<host> stopped this device after failed confirmations. Review it at the computer."                      |
+| `grant_missing`     | "This device is not allowed to do that on <host>. Change it at the computer."                            |
+| `grant_expired`     | "This permission expired. Renew it at the computer."                                                     |
+| `step_up_required`  | "Unlock this device to confirm."                                                                         |
+| `step_up_failed`    | "The confirmation was not accepted. Nothing was done."                                                   |
+| `stale_request`     | "This changed since you saw it. Nothing was done. Here is how it stands now."                            |
+| `audit_unavailable` | "<host> cannot record remote actions right now, so it accepts none. Nothing was done."                   |
+| `rate_limited`      | "Too many attempts. Wait a minute and try again."                                                        |
+
 Managed-plane words are those already built (`src/lib/features/events/present.ts`) `[R]` and are
 not re-derived here.
 
@@ -1119,21 +1170,21 @@ Static mockups are design deliverables, made in the project's design pipeline wh
 phase is planned; none is produced by this document and **no application code is written to
 represent them** (the owner's instruction of 2026-10-13).
 
-| Deliverable                              | Content                                                                             | Needed by                   |
-| ---------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------- |
-| Design contract per screen               | Layout, spacing, type, components, every state of §3, approved by the owner (19 §4) | Each phase with a screen    |
-| Static mockups: S4 and S4.3 per kind     | Read-only inventory with the three slots, every source state, every entry state     | F1                          |
-| Static mockups: S5 and S5.1              | Each outcome of §1.1.3, including "Written; checking that it stays"                 | F2a                         |
-| Static mockups: S4b and its strip        | Each vault state of §S4b.1, each record state of §S4b.2                             | F2v                         |
-| Native dialog drafts ND-01 to ND-12      | The text and layout each dialog must hold; checked against OQ-43                    | F2a, F2v, F3c               |
-| Static mockups: S1 with panes and search | A split tree, focus, the narrow case                                                | T1                          |
-| Static mockups: S2 and S2.1              | Both planes, lost sessions, outside sessions, markers                               | F3b                         |
-| Static mockups: S3 with the launch plan  | Each SM-LAUNCH state; a profile unavailable; ND-12                                  | F3a, F3c                    |
-| Static mockups: S6                       | Editor, resolved result, versions                                                   | F3c                         |
-| Static mockups: S7 per provider          | The visibility table of S7                                                          | F6a                         |
-| Static mockups: S15, S16, phone client   | After DN-05                                                                         | F10a, F10b                  |
-| Static mockups: S17                      | After the handoff format exists                                                     | F11a                        |
-| A token and component sheet              | The tokens of §11 with computed contrast for every pair (TS-A11Y-02)                | Before the first new screen |
+| Deliverable                                           | Content                                                                                 | Needed by                   |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------- |
+| Design contract per screen                            | Layout, spacing, type, components, every state of §3, approved by the owner (19 §4)     | Each phase with a screen    |
+| Static mockups: S4 and S4.3 per kind                  | Read-only inventory with the three slots, every source state, every entry state         | F1                          |
+| Static mockups: S5 and S5.1                           | Each outcome of §1.1.3, including "Written; checking that it stays"                     | F2a                         |
+| Static mockups: S4b and its strip                     | Each vault state of §S4b.1, each record state of §S4b.2                                 | F2v                         |
+| Native dialog drafts ND-01 to ND-12                   | The text and layout each dialog must hold; checked against OQ-43                        | F2a, F2v, F3c               |
+| Static mockups: S1 with panes and search              | A split tree, focus, the narrow case                                                    | T1                          |
+| Static mockups: S2 and S2.1                           | Both planes, lost sessions, outside sessions, markers                                   | F3b                         |
+| Static mockups: S3 with the launch plan               | Each SM-LAUNCH state; a profile unavailable; ND-12                                      | F3a, F3c                    |
+| Static mockups: S6                                    | Editor, resolved result, versions                                                       | F3c                         |
+| Static mockups: S7 per provider                       | The visibility table of S7                                                              | F6a                         |
+| Static mockups: S15, S16; phone client MS-01 to MS-10 | Every state listed in 16 §8, MS-05 portrait and landscape; S16's list and grant dialogs | F10a, F10b                  |
+| Static mockups: S17                                   | After the handoff format exists                                                         | F11a                        |
+| A token and component sheet                           | The tokens of §11 with computed contrast for every pair (TS-A11Y-02)                    | Before the first new screen |
 
 ## 14. Traceability of this document
 
