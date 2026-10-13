@@ -237,16 +237,22 @@ tests needs an ADR.
 
 ## 7. Interface and accessibility
 
-| ID         | Holds                                                                                                                                                        | Phase      |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
-| TS-UX-01   | Every view in every state of 13 §3 renders its fixed sentence and no raw code; every closed error word of IF-CONFIG, IF-NATIVE and IF-PROFILE has a sentence | Each phase |
-| TS-UX-02   | No control exists for a capability the adapter does not declare                                                                                              | F1         |
-| TS-UX-03   | With focus in the terminal, only the documented chords are not delivered to the program                                                                      | T1         |
-| TS-UX-04   | A native session never shows the words used for mediation; every session shows its plane                                                                     | F3a        |
-| TS-UX-05   | An instruction file is never labelled as a control                                                                                                           | F1         |
-| TS-A11Y-01 | Keyboard reachability of every control, per view                                                                                                             | Each phase |
-| TS-A11Y-02 | Contrast computed for every text and background pair of the tokens                                                                                           | Each phase |
-| TS-A11Y-03 | Every state indicator has a text alternative                                                                                                                 | Each phase |
+| ID         | Holds                                                                                                                                                                                                         | Phase                                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| TS-UX-01   | Every view in every state of 13 §3 renders its fixed sentence and no raw code; every closed error word of IF-CONFIG, IF-NATIVE, IF-PROFILE, IF-VAULT and the terminal (13 §9) has a sentence                  | Each phase                                    |
+| TS-UX-02   | No control exists for a capability the adapter does not declare                                                                                                                                               | F1                                            |
+| TS-UX-03   | With focus in the terminal, only the documented chords are not delivered to the program                                                                                                                       | T1                                            |
+| TS-UX-04   | A native session never shows the words used for mediation; every session shows its plane                                                                                                                      | F3a                                           |
+| TS-UX-05   | An instruction file is never labelled as a control                                                                                                                                                            | F1                                            |
+| TS-UX-06   | For every combination of the persisted, effective and session values of 07 §3, the three slots of 13 §1.1.1 render their words; a `documented` value never renders the verified indicator; no slot is omitted | F1                                            |
+| TS-UX-07   | The terminal view renders the sentences of 13 §9.1 and never the closed word itself                                                                                                                           | The next phase that changes the terminal view |
+| TS-UX-08   | No mutation result is rendered before the backend's outcome; a strengthening change renders "Written; checking that it stays" until the re-observations of 28 §5, and `reverted_outside` when one fails       | F2a                                           |
+| TS-UX-09   | The attention list holds exactly the live states of 13 §2.4 and drops each when it ends; live regions announce only the events of 13 §5.3                                                                     | F2a                                           |
+| TS-UX-10   | Text from a file, a provider or an agent that contains markup is shown literally (CTL-27; 13 U15)                                                                                                             | F1                                            |
+| TS-UX-11   | While a native dialog is open the page offers no control that answers it; afterwards focus returns to the control that asked (13 U11, §5.2)                                                                   | F2a                                           |
+| TS-A11Y-01 | Keyboard reachability of every control, per view                                                                                                                                                              | Each phase                                    |
+| TS-A11Y-02 | Contrast computed for every text and background pair of the tokens                                                                                                                                            | Each phase                                    |
+| TS-A11Y-03 | Every state indicator has a text alternative                                                                                                                                                                  | Each phase                                    |
 
 `[R]` today: a test visits every view in four authority states and refuses development
 vocabulary and raw codes (ADR 0026 `:181-182`); it is extended, not replaced.
@@ -305,20 +311,20 @@ project and, for configuration, first on a copy of a home and then on the real o
 Each phase is accepted when its tests pass, its acceptance criteria (19 §3) are met in front
 of the owner, its review gate is passed, and the regression set of §8 is green.
 
-| Phase | Tests                                                                                                             | Acceptance criteria                    | Gate                                                              |
-| ----- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------- |
-| P1    | TS-PERF-01 to 12, TS-LONG-01, TS-TERM-03, 04                                                                      | A baseline for every metric            | Owner                                                             |
-| F1    | TS-CFG-01 to 09, TS-FS-01 to 05, TS-SEC-01, 03, 04, TS-UX-01, 02, 05, TS-SYNC-01, 02, TS-LONG-02, TS-REG-01 to 05 | AC-F1-01 to 06                         | External review; owner                                            |
-| F1b   | Specifications only                                                                                               | A recorded result per experiment       | Owner                                                             |
-| F2a   | TS-CFG-10 to 14, TS-WR-01 to 20, TS-FS-06 to 08, TS-SEC-02, 05, TS-REC-01 to 07, TS-CONC-01, TS-SYNC-03, 04       | AC-F2a-01 to 08                        | External security review; owner                                   |
-| F2v   | TS-VLT-01 to 08, 10 to 20, 24 to 30, TS-REC-08, TS-SEC-02, TS-SYNC-03                                             | AC-F2v-01 to 05                        | Independent review of the design; external security review; owner |
-| F2h   | TS-VLT-21 to 23                                                                                                   | AC-F2h-01 to 03                        | External security review; owner                                   |
-| F2b   | TS-CFG-15, 16                                                                                                     | AC-F2b-01 to 03                        | External review; owner                                            |
-| G-INF | AC-GINF-01 to 08 automated; TS-REG-02                                                                             | AC-GINF-01, 02, 05 on the real machine | External security review; owner                                   |
-| F3a   | TS-NAT-01 to 05, TS-UX-04                                                                                         | AC-F3a-01 to 03                        | Owner                                                             |
-| F3b   | TS-NAT-06 to 09, TS-SES-01, 02                                                                                    | AC-F3b-01, 02                          | Owner                                                             |
-| F3c   | TS-PRF-01 to 07                                                                                                   | AC-F3c-01, 02                          | Owner                                                             |
-| Later | As listed in 19 §3                                                                                                | Written when the phase is planned      | As listed                                                         |
+| Phase | Tests                                                                                                                         | Acceptance criteria                    | Gate                                                              |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------- |
+| P1    | TS-PERF-01 to 12, TS-LONG-01, TS-TERM-03, 04                                                                                  | A baseline for every metric            | Owner                                                             |
+| F1    | TS-CFG-01 to 09, TS-FS-01 to 05, TS-SEC-01, 03, 04, TS-UX-01, 02, 05, 06, 10, TS-SYNC-01, 02, TS-LONG-02, TS-REG-01 to 05     | AC-F1-01 to 06                         | External review; owner                                            |
+| F1b   | Specifications only                                                                                                           | A recorded result per experiment       | Owner                                                             |
+| F2a   | TS-CFG-10 to 14, TS-WR-01 to 20, TS-FS-06 to 08, TS-SEC-02, 05, TS-REC-01 to 07, TS-CONC-01, TS-SYNC-03, 04, TS-UX-08, 09, 11 | AC-F2a-01 to 08                        | External security review; owner                                   |
+| F2v   | TS-VLT-01 to 08, 10 to 20, 24 to 30, TS-REC-08, TS-SEC-02, TS-SYNC-03                                                         | AC-F2v-01 to 05                        | Independent review of the design; external security review; owner |
+| F2h   | TS-VLT-21 to 23                                                                                                               | AC-F2h-01 to 03                        | External security review; owner                                   |
+| F2b   | TS-CFG-15, 16                                                                                                                 | AC-F2b-01 to 03                        | External review; owner                                            |
+| G-INF | AC-GINF-01 to 08 automated; TS-REG-02                                                                                         | AC-GINF-01, 02, 05 on the real machine | External security review; owner                                   |
+| F3a   | TS-NAT-01 to 05, TS-UX-04                                                                                                     | AC-F3a-01 to 03                        | Owner                                                             |
+| F3b   | TS-NAT-06 to 09, TS-SES-01, 02                                                                                                | AC-F3b-01, 02                          | Owner                                                             |
+| F3c   | TS-PRF-01 to 07                                                                                                               | AC-F3c-01, 02                          | Owner                                                             |
+| Later | As listed in 19 §3                                                                                                            | Written when the phase is planned      | As listed                                                         |
 
 ## 13. Not designed yet
 
