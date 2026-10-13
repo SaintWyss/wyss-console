@@ -54,8 +54,8 @@ with the procedure that would settle it.
 | 14  | [Data, persistence and recovery](14-DATA-PERSISTENCE-AND-RECOVERY.md)               | Ownership of state, crash consistency, rollback                                                                                                                                                                                      |
 | 15  | [Performance engineering](15-PERFORMANCE-ENGINEERING.md)                            | Metrics, benchmark procedures, proposed budgets                                                                                                                                                                                      |
 | 16  | [Multi-device and remote](16-MULTI-DEVICE-AND-REMOTE.md)                            | Two computers; the host service (F9); remote access, pairing, grants and their limits, a remote threat model, the phone's screens (F10a, F10b)                                                                                       |
-| 17  | [Wyss Agent and Hermes](17-WYSS-AGENT-AND-HERMES.md)                                | Hermes as a provider, the original Wyss, naming                                                                                                                                                                                      |
-| 18  | [Distribution and extensibility](18-DISTRIBUTION-AND-EXTENSIBILITY.md)              | The product for other developers                                                                                                                                                                                                     |
+| 17  | [Wyss Agent and Hermes](17-WYSS-AGENT-AND-HERMES.md)                                | Source research of the original Wyss and Hermes, options A to D for Wyss Agent, orchestration levels, naming                                                                                                                         |
+| 18  | [Distribution and maintenance](18-DISTRIBUTION-AND-EXTENSIBILITY.md)                | Platforms, packaging, installation, first run, updates and migrations, data removal, licences, security maintenance, extension boundaries                                                                                            |
 | 19  | [Implementation roadmap](19-IMPLEMENTATION-ROADMAP.md)                              | Phases, dependencies, definitions of done                                                                                                                                                                                            |
 | 20  | [Verification and acceptance](20-VERIFICATION-AND-ACCEPTANCE.md)                    | Master test plan and acceptance matrix                                                                                                                                                                                               |
 | 21  | [ADR reconciliation](21-ADR-RECONCILIATION.md)                                      | ADRs 0001 to 0028, one by one                                                                                                                                                                                                        |
@@ -108,42 +108,46 @@ Every factual claim in this set carries one of these marks where it matters.
 
 ## Identifiers
 
-| Prefix           | Is                                                        | Defined in         |
-| ---------------- | --------------------------------------------------------- | ------------------ |
-| `FR-<AREA>-nn`   | Functional requirement                                    | 02                 |
-| `NFR-<AREA>-nn`  | Non-functional requirement                                | 02                 |
-| `AD-nn`          | Architecture design decision of this set                  | 04                 |
-| `C-nn`           | Constraint, with the subsystem that enforces it           | 04                 |
-| `SG-nn`          | Security guarantee, with boundary and verification        | 10, 11             |
-| `T-nn`, `CTL-nn` | Threat, control                                           | 11                 |
-| `SM-<name>`      | State machine                                             | 05, 07, 08, 09, 27 |
-| `RV-nn`          | Finding of the architecture review                        | 24                 |
-| `IR-nn`          | Finding of the independent review                         | 25                 |
-| `W1`             | Invariant of the file replacement protocol                | 07                 |
-| `VA1`, `VA2`     | Invariants of the restoration vault                       | 27                 |
-| `G-D` … `G-N`    | Classes of guarantee of the concurrency contract          | 28                 |
-| `L1`…`L5`        | Ways a security control can be lost to a concurrent write | 28                 |
-| `TV-nn`          | Item of the technical validation plan                     | 30                 |
-| `IF-<name>`      | Interface contract                                        | 05, 06, 07, 09, 27 |
-| `OQ-nn`, `DN-nn` | Open question, decision needed                            | 22                 |
-| `F…`, `P…`       | Implementation phase, parallel track                      | 19                 |
-| `TS-<AREA>-nn`   | Test specification                                        | 20                 |
-| `AC-<phase>-nn`  | Acceptance criterion                                      | 19, 20             |
-| `D1`…`D10`       | The owner's decisions of 2026-10-12                       | ADR 0028           |
-| `TI1`…`TI9`      | Invariant of the split tree of a terminal tab             | 05                 |
-| `PS1`…`PS6`      | Rule of PTY size for panes                                | 05                 |
-| `KR1`…`KR6`      | Rule of the terminal key map                              | 05                 |
-| `M01`…`M33`      | Performance metric                                        | 15                 |
-| `PP1`…`PP7`      | Performance principle                                     | 15                 |
-| `PR-nn`          | Performance risk found in the existing design             | 15                 |
-| `DG-nn`          | Degradation rule under load                               | 15                 |
-| `BS-…`, `BC-nn`  | Benchmark suite, benchmark corpus                         | 15                 |
-| `U1`…`U15`       | Principle of the interface                                | 13                 |
-| `S1`…`S19`       | Screen of the interface                                   | 13                 |
-| `ND-nn`          | Native dialog of the interface                            | 13                 |
-| `J1`…`J25`       | Core user journey                                         | 01 (J1 to J15), 13 |
-| `C1`…`C11`       | Contradiction found by the coverage audit                 | 31                 |
-| `X1`…`X12`       | Cross-domain gap of the documentation backlog             | 31                 |
+| Prefix                                                                                          | Is                                                                                                                                        | Defined in         |
+| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `FR-<AREA>-nn`                                                                                  | Functional requirement                                                                                                                    | 02                 |
+| `NFR-<AREA>-nn`                                                                                 | Non-functional requirement                                                                                                                | 02                 |
+| `AD-nn`                                                                                         | Architecture design decision of this set                                                                                                  | 04                 |
+| `C-nn`                                                                                          | Constraint, with the subsystem that enforces it                                                                                           | 04                 |
+| `SG-nn`                                                                                         | Security guarantee, with boundary and verification                                                                                        | 10, 11             |
+| `T-nn`, `CTL-nn`                                                                                | Threat, control                                                                                                                           | 11                 |
+| `SM-<name>`                                                                                     | State machine                                                                                                                             | 05, 07, 08, 09, 27 |
+| `RV-nn`                                                                                         | Finding of the architecture review                                                                                                        | 24                 |
+| `IR-nn`                                                                                         | Finding of the independent review                                                                                                         | 25                 |
+| `W1`                                                                                            | Invariant of the file replacement protocol                                                                                                | 07                 |
+| `VA1`, `VA2`                                                                                    | Invariants of the restoration vault                                                                                                       | 27                 |
+| `G-D` … `G-N`                                                                                   | Classes of guarantee of the concurrency contract                                                                                          | 28                 |
+| `L1`…`L5`                                                                                       | Ways a security control can be lost to a concurrent write                                                                                 | 28                 |
+| `TV-nn`                                                                                         | Item of the technical validation plan                                                                                                     | 30                 |
+| `IF-<name>`                                                                                     | Interface contract                                                                                                                        | 05, 06, 07, 09, 27 |
+| `OQ-nn`, `DN-nn`                                                                                | Open question, decision needed                                                                                                            | 22                 |
+| `F…`, `P…`                                                                                      | Implementation phase, parallel track                                                                                                      | 19                 |
+| `TS-<AREA>-nn`                                                                                  | Test specification                                                                                                                        | 20                 |
+| `AC-<phase>-nn`                                                                                 | Acceptance criterion                                                                                                                      | 19, 20             |
+| `D1`…`D10`                                                                                      | The owner's decisions of 2026-10-12                                                                                                       | ADR 0028           |
+| `TI1`…`TI9`                                                                                     | Invariant of the split tree of a terminal tab                                                                                             | 05                 |
+| `PS1`…`PS6`                                                                                     | Rule of PTY size for panes                                                                                                                | 05                 |
+| `KR1`…`KR6`                                                                                     | Rule of the terminal key map                                                                                                              | 05                 |
+| `M01`…`M33`                                                                                     | Performance metric                                                                                                                        | 15                 |
+| `PP1`…`PP7`                                                                                     | Performance principle                                                                                                                     | 15                 |
+| `PR-nn`                                                                                         | Performance risk found in the existing design                                                                                             | 15                 |
+| `DG-nn`                                                                                         | Degradation rule under load                                                                                                               | 15                 |
+| `BS-…`, `BC-nn`                                                                                 | Benchmark suite, benchmark corpus                                                                                                         | 15                 |
+| `U1`…`U15`                                                                                      | Principle of the interface                                                                                                                | 13                 |
+| `S1`…`S19`                                                                                      | Screen of the interface                                                                                                                   | 13                 |
+| `ND-nn`                                                                                         | Native dialog of the interface                                                                                                            | 13                 |
+| `J1`…`J25`                                                                                      | Core user journey                                                                                                                         | 01 (J1 to J15), 13 |
+| `C1`…`C18`                                                                                      | Contradiction found by the coverage audit                                                                                                 | 31                 |
+| `X1`…`X14`                                                                                      | Cross-domain gap of the documentation backlog                                                                                             | 31                 |
+| `M1`…`M5`, `MC1`…`MC10`, `MV-nn`, `SP1`…`SP5`, `UR1`…`UR7`, `UC1`…`UC6`, `SRC-n`                | Model facts, provider capabilities, visibility values, switching paths, usage rules and capabilities, sources                             | 12                 |
+| `IO1`…`IO8`, `RZ1`…`RZ5`, `HS1`…`HS5`, `RA0`…`RA5`, `LP1`…`LP4`, `GR1`…`GR5`, `RT-nn`, `MS-nn`  | Host input and resize rules, service shapes, reachability options, remote profiles and grant rules, remote threats, phone screens         | 16                 |
+| `OW1`…`OW12`, `IC1`…`IC3`, `OL0`…`OL4`                                                          | Original Wyss inventory items, incompatibilities, orchestration levels                                                                    | 17                 |
+| `PT0`…`PT3`, `PF1`…`PF7`, `PK1`…`PK9`, `OB1`…`OB10`, `CP-nn`, `DR-nn`, `IN1`…`IN6`, `EC1`…`EC5` | Platform tiers, package formats and their requirements, first-run steps, component compatibility, data rows, incidents, extension classes | 18                 |
 
 ## Baseline when the set was written, as read without running anything
 

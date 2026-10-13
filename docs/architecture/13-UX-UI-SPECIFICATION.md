@@ -730,7 +730,8 @@ package's format and states are not designed (26 §2); this sheet is fixed as fa
 On the first start with nothing configured in the Console: one page that says which agents were
 found, at which versions, what Wyss Console can do with each on this version and what it cannot,
 and "Nothing of yours has been changed." (FR-DIST-02). It offers the terminal first. It asks for no
-account and needs no agent. Its full design belongs to F13 (18 §3).
+account and needs no agent. Its contract is 18 §5 (OB1 to OB10): no provider file changed,
+no service started, no device enrolled, nothing asked before first use.
 
 ### S19 — About and diagnostics
 

@@ -403,6 +403,29 @@ do not fail, except where a row says **Fails**: those hold a structural rule, no
 | TS-REM-17  | Phone renderer: the escape-sequence corpus of TS-TERM (OSC 52, title overrides, links) is applied by the phone client as by the desktop renderer                                                                                                                                                                       | F10b     |
 | TS-REM-18  | Phone client: no output or approval content is written to the phone's storage; it is cleared on lock and after 5 minutes in the background; reconnection resumes by offset and queues no action; MS-01 to MS-10 render every listed state                                                                              | F10b     |
 
+### 10.1 Distribution and maintenance
+
+Specified on 2026-10-13 from 18. Each runs on a clean virtual machine or container image of the
+platform under test, built from a recorded image, never on the owner's computers. None was run.
+
+| ID         | Holds                                                                                                                                                                                                                                                                                       | Phase  |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| TS-DIST-01 | No personal path, user name, host name or provider setting of the owner's in code, fixtures or packages (a tree scan for the known ones); every location derives from XDG and the home (FR-DIST-01)                                                                                         | Always |
+| TS-DIST-02 | Clean installation: the package installs on a fresh PT0 or PT1 image; the files and modes are exactly §4.3's; no file in any home, no unit enabled, no service started, no listener open after installation                                                                                 | F13    |
+| TS-DIST-03 | First run: with no provider installed, the onboarding page shows the terminal and "Not installed" for each; with fixtures of each provider at a verified and an unverified version, the states of 18 §5 OB2; no provider file changes (hash before and after) (FR-DIST-02)                  | F13    |
+| TS-DIST-04 | Missing dependencies and unsupported configurations: without `systemd --user`, without a Secret Service, with `bwrap` < 0.11, as root, with a group-writable install path: each produces its sentence and degrades as 18 §3.2 says; the terminal still works where the row says so          | F13    |
+| TS-DIST-05 | Keyring: absent, locked, and unlocked then locked during use: the vault says unavailable or locked; nothing else fails; no fallback custody appears that DN-25 did not allow                                                                                                                | F13    |
+| TS-DIST-06 | Uninstall: removing the package removes exactly its files; every row of 18 §7.1 that the table keeps is byte-identical afterwards; a reinstall finds the vault and its key                                                                                                                  | F13    |
+| TS-DIST-07 | Update with running processes: with an old authority and host running, a new desktop shows `update pending`, keeps the terminal, and replaces nothing until they stop; two desktops of different versions never produce two authorities (CP-01 to CP-03)                                    | F13    |
+| TS-DIST-08 | Migrations: each migration from every released schema to the current one on fixture stores; a pre-migration copy exists before the first change; an injected failure leaves the store byte-identical and the new binary refusing to start; an older binary refuses a migrated store (CP-07) | F13    |
+| TS-DIST-09 | Rollback: restoring a pre-migration copy is refused without confirmation; after confirmation the store opens in the older version and the first event records the restore; vault records written by the newer version are kept, not deleted (CP-08)                                         | F13    |
+| TS-DIST-10 | Interrupted update: the package transaction killed at each step on a fixture image leaves either the old or the new files, never a mixture the desktop accepts; the desktop's digest check refuses a partial authority                                                                      | F13    |
+| TS-DIST-11 | Service restart and recovery after update: the authority and host restart under their vendor units; a crash loop ends after the start limit; a leftover user unit from the directory package is detected and offered for removal, never silently replaced                                   | F13    |
+| TS-DIST-12 | Artifact provenance: the package's file list equals the declared one; `SHA256SUMS` and its signature verify; the provenance record names the commit, toolchain and lockfile digests; a tampered artifact fails verification                                                                 | F13    |
+| TS-DIST-13 | No network: the configuration engine and the desktop link no network client, and a run of TS-DIST-03 under a network namespace with no route behaves identically; the update check (DN-50) is absent by default                                                                             | F13    |
+| TS-DIST-14 | Licences: every shipped dependency in the lockfiles has a declared licence recorded in 18 §8 or the release's notices; a new dependency without one fails; the notices file is in the package                                                                                               | F13    |
+| TS-DIST-15 | Delete all data: refused while the vault holds a record, a device is paired or a service runs; otherwise it removes exactly the rows it lists; its dialog names what it cannot reach (snapshots, backups, other computers)                                                                  | F13    |
+
 ## 11. Real-provider acceptance
 
 Run by hand or by script on the owner's machine, each run authorised by him, on a throwaway
@@ -444,6 +467,7 @@ of the owner, its review gate is passed, and the regression set of §8 is green.
 | F9    | TS-HOST-01 to 12, TS-UX-01                                                                                                    | AC-F9-01 to 06                              | The host service ADR; owner                                       |
 | F10a  | TS-REM-01 to 16, TS-HOST-01 to 12                                                                                             | AC-F10a-01 to 08                            | The gateway ADR; external security review; owner                  |
 | F10b  | TS-REM-17, 18                                                                                                                 | AC-F10b-01 to 05                            | Owner                                                             |
+| F13   | TS-DIST-01 to 15                                                                                                              | AC-F13-01 to 08                             | The distribution ADR; the security maintenance ADR; owner         |
 | Later | As listed in 19 §3                                                                                                            | Written when the phase is planned           | As listed                                                         |
 
 ### 12.1 Acceptance criteria of the terminal phases and of P1
@@ -531,12 +555,24 @@ nothing here authorises a service, a listener or a device now.
 | AC-F12-02 | The owner's decision on DN-06 is recorded, with the evidence of OQ-55 to OQ-57 if option D is chosen                                                                             |
 | AC-F12-03 | The chosen Wyss Agent enters as a provider behind 17 §7's contract (FR-AGT-03); TS-AGT-01, 02 pass, and TS-AGT-03 to 05 under option D                                           |
 
+### 12.5 Acceptance criteria of F13
+
+| ID        | Criterion                                                                                                                                                                                                                    |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC-F13-01 | On a clean image of each PT1 platform, a person who has never used the product installs it from the published package and reaches the onboarding page; nothing in their home or their agents' files changed (FR-DIST-02, 03) |
+| AC-F13-02 | The support matrix of 18 §3.2 is published with the evidence of each PT1 row: the TS-DIST run and the phase acceptance criteria on that platform (FR-DIST-05)                                                                |
+| AC-F13-03 | An update from the previous release migrates every store with a pre-migration copy, and the previous release refuses the migrated stores with its sentence                                                                   |
+| AC-F13-04 | Uninstalling and reinstalling keeps every user data row of 18 §7.1; "Delete all Wyss Console data" is refused while the vault holds a record                                                                                 |
+| AC-F13-05 | Every artifact of the release verifies against its signature and provenance record; the notices file lists every shipped dependency's licence                                                                                |
+| AC-F13-06 | `SECURITY.md` exists with a private channel; a test report through it is acknowledged within the published time (FR-DIST-06)                                                                                                 |
+| AC-F13-07 | A new provider adapter is added in a branch without changing the core's interfaces (FR-DIST-04)                                                                                                                              |
+| AC-F13-08 | The diagnostic report of a fixture installation shows versions, closed words and counters, and no content, secret or path outside known locations (FR-OBS-05)                                                                |
+
 ## 13. Not designed yet
 
 | Tests                                                 | State                                                                                 | Depends on               |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------ |
 | TS-CFG-17 to 20, authoring                            | Named, not specified                                                                  | DN-12                    |
-| TS-DIST-01 to 06, distribution                        | **Reserved identifiers only.** 19 and 23 refer to them; nothing is specified          | DN-07                    |
 | Tests for a session profile that leaves out a control | Not named                                                                             | DN-20                    |
 | Tests of the kept form of a disabled hook             | Not named: they are the fixture form of checks V1 to V7 of ADR 0029 §5                | RS1                      |
 | TS-VLT-01 to 30, the vault                            | Specified by what each must hold; none written. TS-VLT-09 waits for export and import | ADR 0029; DN-25 to DN-30 |
