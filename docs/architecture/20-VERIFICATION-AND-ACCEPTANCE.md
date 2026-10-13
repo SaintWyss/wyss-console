@@ -284,6 +284,29 @@ tests needs an ADR.
 | TS-MOD-15 | Start gating: an agent version without grade A or B evidence for the flag gives `start_flag_unverified` and starts without a model. Managed: binding, activation and turn requests carrying `model`, `modelProvider` or `effort` are rejected as unknown fields                                                                                    | F6b   |
 | TS-MOD-16 | Switching: the switch hint sends nothing; no IF-MODEL or IF-NATIVE operation writes to a PTY; SP3 returns `default_change_blocked` and leaves the file's hash unchanged; a fixture file changed outside with a new model appears in configuration history as changed outside Wyss Console                                                          | F6b   |
 
+### 6.1 Hermes and Wyss Agent
+
+Specified on 2026-10-13 from 06 §3.4 and 17. Fixtures are synthetic Hermes homes built from the
+documentation at the pinned commit. Nothing runs Hermes.
+
+| ID        | Holds                                                                                                                                                                                                                                                     | Phase |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| TS-HRM-01 | Sources: a fixture home with every file of 06 §3.4.1 yields exactly the closed list; profiles under `profiles/` are separate homes; `/etc/hermes/config.yaml` is classed `system` and never written                                                       | F4b   |
+| TS-HRM-02 | Never opened: with sentinel content in `.env`, `auth.json`, `auth/`, `mcp-tokens/`, `pairing/`, `vault/`, `browser-profile/`, `cache/bws_cache.json` and `/etc/hermes/.env`, no sentinel reaches any projection, record, log or error (open calls traced) | F4b   |
+| TS-HRM-03 | YAML: YAML 1.1 booleans (`off`, `yes`) read as Hermes reads them; duplicate keys refused; oversize, deep and linked files refused with IF-CONFIG's words                                                                                                  | F4b   |
+| TS-HRM-04 | Redaction: MCP `env` values, headers and credential-shaped keys never serialised; an `UPPER_SNAKE` key in `config.yaml` reported as a stale copy without its value                                                                                        | F4b   |
+| TS-HRM-05 | Capabilities: MCP `enabled: false`, `skills.disabled`, `agent.disabled_toolsets` shown as native switches for a verified version only; an unknown version makes every mutation `unverified`                                                               | F4b   |
+| TS-HRM-06 | Weakened controls shown: `approvals.mode: off`, a container terminal backend, enabled `terminal` or `code_execution` toolsets each render their warning (13 U3)                                                                                           | F4b   |
+| TS-HRM-07 | Mutations blocked: while direct writes are blocked and DN-13 is undecided, every Hermes mutation returns `unavailable` with its reason; no `hermes` process is started by any plan                                                                        | F4b   |
+| TS-HRM-08 | Launch: a profile yields `hermes -p <profile> [-m] [--toolsets] [--in]`; `--yolo`, `HERMES_YOLO_MODE`, `-z`, `gateway`, `serve` and `acp` are never produced; a profile asking for them is refused                                                        | F4b   |
+| TS-HRM-09 | Outside writes: a fixture change to `~/.codex/config.toml` in the managed block Hermes writes is reported as an outside change of Codex's file                                                                                                            | F4b   |
+| TS-HRM-10 | Nothing started: no test, plan or view of the Console starts Hermes's gateway, cron, API server or messaging bots                                                                                                                                         | F4b   |
+| TS-AGT-01 | Provider contract: a fixture "Wyss Agent" provider with a CLI, a version and documented files is accepted by the catalogue and adapters like any other; removing it changes nothing else                                                                  | F12   |
+| TS-AGT-02 | No coupling: no code path of Wyss Console opens the original Wyss's socket, database or files                                                                                                                                                             | F12   |
+| TS-AGT-03 | Under option D only: with Hermes configured with no effectful toolset, every effect it attempts arrives as a Wyss tool call and is classified by Wyss's policy; an attempt to re-enable a toolset from inside its boundary fails                          | F12   |
+| TS-AGT-04 | Under option D only: Hermes cannot write its own `config.yaml`, plugins or hooks from inside its boundary (file tools and any remaining tool tried)                                                                                                       | F12   |
+| TS-AGT-05 | Under option D only: a prompt-injected request in Hermes's input that asks for an effect reaches Wyss as a proposal and waits for its confirmation at the level the policy assigns                                                                        | F12   |
+
 ## 7. Interface and accessibility
 
 | ID         | Holds                                                                                                                                                                                                                      | Phase                                         |
@@ -416,6 +439,8 @@ of the owner, its review gate is passed, and the regression set of §8 is green.
 | T2    | TS-TERM-09, 19, 20, 22, 26, TS-PERF-14                                                                                        | AC-T2-01 to 04                              | Owner                                                             |
 | F6a   | TS-MOD-01 to 13, TS-UX-01                                                                                                     | AC-F6a-01 to 05                             | Owner; for ADR 0031, its review                                   |
 | F6b   | TS-MOD-14 to 16, TS-UX-01                                                                                                     | AC-F6b-01 to 04                             | Owner                                                             |
+| F4b   | TS-HRM-01 to 10                                                                                                               | AC-F4b-01 to 04                             | Owner                                                             |
+| F12   | TS-AGT-01 to 05 (03 to 05 only under option D)                                                                                | AC-F12-01 to 03                             | Owner; a review of the decision                                   |
 | F9    | TS-HOST-01 to 12, TS-UX-01                                                                                                    | AC-F9-01 to 06                              | The host service ADR; owner                                       |
 | F10a  | TS-REM-01 to 16, TS-HOST-01 to 12                                                                                             | AC-F10a-01 to 08                            | The gateway ADR; external security review; owner                  |
 | F10b  | TS-REM-17, 18                                                                                                                 | AC-F10b-01 to 05                            | Owner                                                             |
@@ -493,6 +518,18 @@ nothing here authorises a service, a listener or a device now.
 | AC-SYNC-01 | With the replication tool copying a provider file between the two computers, each Console reports the change as from outside, with its time (FR-SYNC-01)                                        |
 | AC-SYNC-02 | An entry held in A's vault is reported on B as removed outside and not restorable there; no vault appears on B (FR-SYNC-03)                                                                     |
 | AC-SYNC-03 | A conflict copy named by a pattern the user added blocks changes to its file; no behaviour depends on the tool being Syncthing (FR-SYNC-04)                                                     |
+
+### 12.4 Acceptance criteria of F4b and F12
+
+| ID        | Criterion                                                                                                                                                                        |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC-F4b-01 | With Hermes installed by the owner, the Configuration view lists its home and profiles, settings, MCP servers, skills, hooks and plugins, and shows no secret (FR-AGT-01)        |
+| AC-F4b-02 | A Hermes session starts from the launcher in a terminal with its profile and is listed as a native session; nothing of Hermes's gateway, cron or API server is started           |
+| AC-F4b-03 | `approvals.mode: off`, YOLO and a container backend each show their warning wherever Hermes appears                                                                              |
+| AC-F4b-04 | The installed version's flags and files match 06 §3.4 as recorded fixtures; any difference is recorded as evidence before F4b closes                                             |
+| AC-F12-01 | A written comparison of the original Wyss and Hermes, redone with Hermes installed and the original Wyss's suite run in its own repository, is accepted by the owner (FR-AGT-02) |
+| AC-F12-02 | The owner's decision on DN-06 is recorded, with the evidence of OQ-55 to OQ-57 if option D is chosen                                                                             |
+| AC-F12-03 | The chosen Wyss Agent enters as a provider behind 17 §7's contract (FR-AGT-03); TS-AGT-01, 02 pass, and TS-AGT-03 to 05 under option D                                           |
 
 ## 13. Not designed yet
 
