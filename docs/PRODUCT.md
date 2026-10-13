@@ -74,6 +74,6 @@ stands).
 A goal on this page does not by itself override an established security control. Changing one
 takes an explicit technical decision, recorded in an ADR, and proof.
 
-`docs origins/` (the archive of the original Wyss assistant), the base specification v0.1 and
+`wyss-agent-legacy/` (the archive of the original Wyss assistant), the base specification v0.1 and
 the research and vision reports that preceded this page are inputs. What is taken from them
 enters through an ADR.

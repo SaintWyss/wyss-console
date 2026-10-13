@@ -200,7 +200,7 @@ function scanOf(
 }
 
 const HISTORICAL =
-  'docs origins/.planning/phases/03-pipeline-de-ingesta/03-PATTERNS.md';
+  'wyss-agent-legacy/.planning/phases/03-pipeline-de-ingesta/03-PATTERNS.md';
 // Built here, at run time, so that this file holds no credential-shaped string.
 const real = {
   anthropic: [

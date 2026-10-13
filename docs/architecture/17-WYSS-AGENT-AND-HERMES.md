@@ -2,7 +2,7 @@
 
 Domain O of [04](04-TARGET-ARCHITECTURE.md), plus the naming of the whole family. Hermes is not
 installed `[O]` and was read only in one page of its documentation `[D]`; the original Wyss
-assistant is known here from its archived documents `[R]` (`docs origins/`), not from its code
+assistant is known here from its archived documents `[R]` (`wyss-agent-legacy/`), not from its code
 or from running it. Nothing in this document is to be built or forked now (decision D9).
 
 ## 1. Names
@@ -13,7 +13,7 @@ The word "Wyss" names several different things. This set uses them as follows.
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | **Wyss Console**                              | This product: the terminal and control centre                                                                 | Built in part `[R]`                                                                                    |
 | **`wyss-control`**                            | The authority of Wyss Console's managed plane; a user service                                                 | Built `[R]`                                                                                            |
-| **The original Wyss** (also "Wyss assistant") | A separate product and repository (`SaintWyss/Wyss`): a personal operative assistant in Python, version 1.0.0 | Released 2026-07-20 `[R]` (`docs origins/root-documents/README.md:9`); archived here as documents only |
+| **The original Wyss** (also "Wyss assistant") | A separate product and repository (`SaintWyss/Wyss`): a personal operative assistant in Python, version 1.0.0 | Released 2026-07-20 `[R]` (`wyss-agent-legacy/root-documents/README.md:9`); archived here as documents only |
 | **The owner's methodology**                   | His rules, hooks, routing and controls for working with agents, kept in his agents' configuration             | Exists `[O]`; it is what Wyss Console is meant to make visible                                         |
 | **Hermes Agent**                              | An upstream open-source agent by a third party                                                                | Not installed `[O]`                                                                                    |
 | **Wyss Agent**                                | A future personal assistant with the owner's identity                                                         | Not started; not decided                                                                               |
@@ -47,7 +47,7 @@ surface than a coding CLI in a terminal. In the native plane the Console contain
 
 ## 3. The original Wyss assistant: inventory
 
-From its own description `[R]` (`docs origins/root-documents/README.md:5-162`):
+From its own description `[R]` (`wyss-agent-legacy/root-documents/README.md:5-162`):
 
 | Capability      | What it says it has                                                                                                                                                                                                                             |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

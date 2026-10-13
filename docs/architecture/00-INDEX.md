@@ -64,7 +64,7 @@ When two documents disagree, the higher one rules and the lower one is corrected
    [04](04-TARGET-ARCHITECTURE.md) as the overall picture.
 4. **README and the implementation**: what exists. The README describes reality; it does not
    redefine the product.
-5. **Historical research and archived specifications**: `docs origins/`, the base
+5. **Historical research and archived specifications**: `wyss-agent-legacy/`, the base
    specification v0.1, the research report of 2026-10-01 and the vision report of 2026-10-12.
    Inputs, never authority.
 
