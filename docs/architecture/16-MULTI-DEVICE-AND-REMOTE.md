@@ -208,7 +208,7 @@ This needs, in order:
 | What it is not   | Not the authority. It holds no lease, approval or managed state, and never connects to the managed runtime (AD-15). Not a network service: it listens on one Unix socket only, never on a network interface. Not a terminal emulator for the page: it moves bytes                                              |
 | Who runs it      | The user's service manager (`systemd --user`, AS4), as a user unit, started on demand when the window first needs a terminal. The window can also run without it (fallback below)                                                                                                                              |
 | Its clients      | The desktop window; from F10a, the gateway (§5). Each is a client over the same local protocol (§4.4). ADR 0002 allowed for this: terminal resources "may temporarily live in-process during terminal-only sprints" `[R]` (`0002:28-46`)                                                                       |
-| When it stops    | (a) when it has had no terminal and no client for 60 seconds (idle exit); (b) on an explicit stop from the local window, after the confirmation of 05 §11.6 listing running programs; (c) when the user's service manager stops, at logout, unless the owner enables lingering (DN-46); (d) on a crash (§4.11) |
+| When it stops    | (a) only after 60 seconds with no live PTY, no active/paused/waiting/recovering OL3 run and no required client (coordinator renewable keepalive); (b) on an explicit stop from the local window, after the confirmation of 05 §11.6 listing running programs; (c) when the user's service manager stops, at logout, unless the owner enables lingering (DN-46); (d) on a crash (§4.11) |
 | Fallback         | If the host service cannot start, the window offers its in-process terminals as today (ADR 0005), each marked "This terminal closes with the window". Never silently: the user sees which kind each terminal is                                                                                                |
 | Native behaviour | Programs run in real PTYs with real process groups, exactly as in the window today (05 §1). Nothing is simulated: no chat transcript stands in for a terminal, and an agent's terminal is the agent's own terminal user interface                                                                              |
 
@@ -371,8 +371,8 @@ A PTY has one size. Clients differ.
 | Situation            | Behaviour                                                                                                                                                                                                                                        |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | First start          | Socket activation or an explicit start by the window. A lock beside the socket ensures one instance; a second instance exits                                                                                                                     |
-| Start after any stop | New HostInstanceId. The registry marks `running` sessions `lost` (05 §5), never re-attached to processes found later. Clients that reconnect find no terminal of the old instance and say "The terminal service restarted; its terminals ended"  |
-| Crash                | The service manager restarts it on failure, at most 3 times in 60 s; then it stays down and the window says so and offers in-window terminals. Terminals of the crashed instance are gone: their programs received SIGHUP from the kernel        |
+| Start after any stop | New HostInstanceId. Old PTY master is lost; OS child exit must be **observed**, not inferred. Detached descendants may still exist as `ORPHANS_POSSIBLE`. Clients say "Terminal service restarted; the PTY is gone, other processes may still be running." Duplicate launches blocked pending reconciliation |
+| Crash                | Restart attempts bounded by the manager; on exhaustion expose `HOST_UNAVAILABLE`. PTY loss may send SIGHUP to foreground jobs but **does not prove every descendant terminated**. Do not offer an automatic replacement while effects are ambiguous |
 | Upgrade              | The host is replaced only when it has no terminal, or after the user confirms closing them (as the authority's `update pending` `[R]`). Keeping PTYs across a restart by handing their descriptors to the service manager is OQ-52, not designed |
 | Logout               | As the user's service manager decides (DN-46). Without lingering, terminals end at logout as they would with the window                                                                                                                          |
 | Graceful stop        | `host.stop` from the window, with 05 §11.6's confirmation; or idle exit (§4.1)                                                                                                                                                                   |
@@ -400,9 +400,9 @@ planned (X13).
 | -------- | -------- | ------------------------------------ | ------------------------------------------ | ---------------------------------------------- | ----------------------------------------------- |
 | absent   | starting | Activation                           | Lock free; directories pass the path rule  | New HostInstanceId                             | → absent; the window offers in-window terminals |
 | starting | ready    | Registry read, socket bound          | —                                          | Running sessions of earlier instances → `lost` | → failed                                        |
-| ready    | draining | `host.stop`, idle exit, service stop | Idle exit: no terminal, no client for 60 s | New attachments refused                        | —                                               |
+| ready    | draining | `host.stop`, idle exit, service stop | Idle exit: no PTY, no active/paused/waiting/recovering pipeline and no required client for 60 s (renewable coordinator keepalive) | New attachments refused                        | —                                               |
 | draining | stopped  | Every terminal closed                | —                                          | Socket removed                                 | Close timeouts recorded; stops anyway after 5 s |
-| ready    | failed   | Crash                                | —                                          | Kernel SIGHUP to terminals                     | Restart policy (§4.11)                          |
+| ready    | failed   | Crash                                | —                                          | PTY ownership lost; child/descendant status UNKNOWN until independently observed                     | Restart policy (§4.11)                          |
 
 **SM-HTERM**
 
@@ -689,7 +689,7 @@ Grant separation protects only against a client that **lacks** `terminal.write`.
 | LP1 Watch          | `sessions.read`, `managed.read`                              | Default for a new device               | Metadata of projects and sessions; approval contents                                                  |
 | LP2 Approve        | LP1 + `approvals.respond`                                    | A phone that answers managed approvals | Wrong decisions on managed actions; bounded by step-up per approval and by what Local Tools allows    |
 | LP3 Read terminals | LP1 + `terminal.read`                                        | Watching agents work                   | Everything printed in terminals                                                                       |
-| LP4 Full control   | LP3 + `terminal.write`, `managed.turns`, `approvals.respond` | The owner's own second computer        | **The whole account**. Labelled "Full control of your account from that device" (13 S16); 7-day grant |
+| LP4 Full control   | LP3 + `terminal.write`, `managed.turns`, `approvals.respond` | Owner's expressly authorised PC or Android, while verified local login present by default | **Whole account**; no default seven-day terminal input grant; short claim (candidate <=15 min); separate explicit LP4-away security choice is OPEN. Same-UID grant store can be tampered with by LP4 |
 
 **Four checks that are not equivalent:**
 
@@ -698,7 +698,7 @@ Grant separation protects only against a client that **lacks** `terminal.write`.
 | Remote authentication     | The gateway, by the device key                                          | This request comes from an enrolled device                                                                                                        |
 | Fresh user approval       | The device, by its presence key; verified by the gateway as a signature | Someone passed the device's own unlock just now. The host cannot see how; a phone's biometric is the phone's claim, not a check the host performs |
 | Local native confirmation | The host's desktop session (ND)                                         | Someone at the host's screen chose it. **No remote client can produce one**                                                                       |
-| Security boundary         | The OS user (same UID)                                                  | The only hard boundary. Every grant above is policy enforced by an uncompromised gateway                                                          |
+| Security boundary         | OS security principal; same-UID requests are NOT separated from native agents | A compromised same-UID process can invoke local control/gateway sockets; no claimed boundary between local approval APIs and a full host-user terminal                                                          |
 
 Therefore every operation that 11 §4 and 27 require to pass a native dialog **stays a host-only
 action**. Remote it can at most be prepared (`config.request`) and then waits at the host:
@@ -867,3 +867,29 @@ security claim, screen fidelity or network performance is
 verified by this owner decision. DN-31 remains blocking to
 provider-file mutations. No remote service or experiment is authorised.
 
+
+## 13. IR-01/02/06/07/08 safety correction (2026-10-14)
+
+The 2026-10-13 adversarial review in
+[reviews/2026-10-13-independent-post-owner-review.md](reviews/2026-10-13-independent-post-owner-review.md)
+returned REJECT. The accepted same-UID SO_PEERCRED model
+of ADR 0011 does **not** isolate the authority from an
+untrusted native child or LP4 shell. A remote full-account
+session can edit the account's services, SSH keys and even
+same-UID gateway grants; revoking the phone cannot undo
+previous effects. A present-device key or local UI dialog
+is not a separately privileged native confirmation when
+the same-UID agent can reach its issuer.
+
+Corrective directions and block states are in
+[42](42-POST-REJECT-CORRECTIVE-PLAN.md).
+In particular, LP4 defaults to no logged-out `terminal.write`;
+the original 7-day grant is not an approved full-write
+default. Per-gateway-instance epochs prevent auto-replay after
+ACK ambiguity; durable `wyss-control` intent receipts govern
+managed idempotency. Native descendants escaping a PTY/scope
+are possible even after host crashes; `ORPHANS_POSSIBLE`
+denies duplicate work and requires process review.
+Every stopped/failed host serving a pending OL3 run must show
+`HOST_UNAVAILABLE`, never silently mark the pipeline done.
+This is a proposal pending independent review and tests.
