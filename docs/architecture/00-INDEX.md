@@ -273,3 +273,20 @@ an additional open PR**. No full-plan acceptance
 or implementation approval follows from any
 of these documents.
 
+
+### Authority isolation feasibility verification (2026-10-14)
+
+[43](43-AUTHORITY-ISOLATION-FEASIBILITY-MATRIX.md) compares a
+different-UID protected approval/authority service with
+restricted native OL3 workers and a hybrid.
+It documents two **isolated synthetic Linux fixtures**:
+same-UID access to a mode-0600 socket/file succeeds, while
+a different unprivileged UID is denied by mode-0700/0600
+DAC. This does **not** validate Wyss provider compatibility,
+protected service provisioning, human approval signatures
+or production security. No ADR accepted, no code built.
+The apparent combination of an unrestricted same-UID agent,
+same-UID authority and unforgeable human approvals remains
+a hard contradiction until a real distinct trust principal
+or effect limitation is designed and independently reviewed.
+
