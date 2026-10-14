@@ -200,3 +200,37 @@ trust surface. Provider version pinning and
 fake token refresh tests must precede any
 real-use proposal. No secret bytes were read.
 
+## 9. Rootless Docker migration compatibility: upstream restrictions, no changes made
+
+To support a future informed D1-versus-D2 choice, compare **official
+Docker source documentation**, **not installed/rootless measurements**:
+
+| Feature | Official upstream rootless condition | What native CachyOS evidence supports / does not support |
+| --- | --- | --- |
+| Daemon privilege | Rootless mode runs dockerd and containers without host-root privileges, unlike `userns-remap` where dockerd stays root | Current daemon **is rootful** with group `docker` read/write. No rootless daemon was started or tested |
+| Kernel filesystem | Official supported rootless storage includes `overlay2` on newer kernels and `btrfs` under specified kernel/mount prerequisites | CachyOS kernel 6.18 and Btrfs root/home observed, but backing storage configuration and driver are **not verified** |
+| CPU/RAM/PID limits | Rootless resource limits depend on cgroup v2 and systemd delegation | cgroup v2 + systemd 262 observed; user controller delegation for new Docker daemon still **not verified** |
+| Published ports | Low ports (below 1024) need special setup or changed host port selection | Unknown which current workloads rely on 80/443 or host networking. Never silently migrate port bindings |
+| Networking | RootlessKit user-mode networking may add overhead, alter source IP behaviour and have feature limitations; overlay network not supported | No network/latency/Compose compatibility tests. Performance remains **UNKNOWN** |
+| Existing images/volumes | Rootless uses different daemon context and user-managed storage; must separately validate data and workload migration | Rootful images, database volumes, project networks, GPU/device requirements and current running workloads **NOT INVENTORIED** |
+| Boot & user lifecycle | Rootless Docker normally uses a user systemd service; login/linger lifecycle requires review | User manager running on observed CachyOS; no rootless unit or linger setting installed/changed |
+| Remote/admin consequences | Removing automatic rootful Docker access would reduce root-equivalent delegation; keeping `docker` group or live rootful API access nullifies that benefit | No group changes or root API calls authorised; **BLOCKED_ADMIN_DELEGATION** remains |
+
+Upstream references:
+- https://docs.docker.com/engine/security/rootless/
+- https://docs.docker.com/engine/security/rootless/troubleshoot/
+- https://docs.docker.com/engine/security/rootless/tips/
+- https://docs.docker.com/engine/security/userns-remap
+- https://docs.docker.com/engine/install/linux-postinstall/
+
+**Do not propose simply changing the Docker CLI context** as a root-security
+fix while the same user retains membership/access to the rootful daemon.
+A correctly configured rootless context might preserve many development
+commands, but a rootful daemon still reachable by the account remains a
+root-equivalent avenue under this threat model.
+
+**Stop gate:** a future migration plan must inventory the owner's actual
+Compose/workload/volumes/ports/service needs with separately authorised,
+nonsecret and non-disruptive evidence; define backup, import and rollback;
+and ask for **explicit** approval before changing daemon, groups,
+contexts or containers. None of this was performed.
