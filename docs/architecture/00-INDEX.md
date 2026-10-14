@@ -226,3 +226,18 @@ with critical/high threat questions, required 29-subsystem matrix,
 finding format and reject criteria. It is **not an independent review**,
 does not alter the two earlier REJECT verdicts and authorises no
 provider experiment, ADR acceptance or implementation.
+
+### Source-verification and disposable-environment evidence
+
+[39](39-REMOTE-CANDIDATE-SOURCE-EVIDENCE.md) pins iroh Kotlin/Android
+and Tailscale source claims. [40](40-HERMES-BOUNDARY-STATIC-EVIDENCE.md)
+inspects concrete Hermes source paths concerning code execution
+and approval bypasses, without running Hermes.
+[41](41-STATIC-TRACEABILITY-AND-ISOLATED-FILESYSTEM-CHECK.md)
+records 410 checked relative links across 41 architecture documents,
+40 new requirement/acceptance crosswalks and an isolated
+`renameat2` same-mount/cross-mount experiment.
+These **limited observations** do not establish reference-device
+compatibility, authorise configuration writes or overturn earlier
+independent REJECT decisions.
+
