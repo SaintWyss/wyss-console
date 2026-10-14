@@ -414,3 +414,16 @@ separate-UID A alone cannot satisfy FR-SEC-12.
 Accepting a proposed interface without the actual
 OS/daemon security boundary is not a PASS.
 
+
+### 9.1 Next evidence gate for the already traced Docker requirements
+
+[49](49-CACHYOS-COMPOSED-WORKER-SECURITY-CONTRACT.md)
+contains detailed FX-B1-A..E fixture acceptance
+for the existing trace:
+`FR-SEC-13 → TS-DOCKER-03 → AC-DOCKER-02`,
+`FR-PRF-12 → TS-DOCKER-04 → AC-DOCKER-03`,
+and `FR-ORC-04 → TS-SEC-OL3-02 → AC-IR-03`.
+No new product feature is inferred; no test has
+passed merely because its mock fixture is specified.
+`FR-SEC-12` remains **BLOCKED_ADMIN_DELEGATION**
+for unrestricted same-UID/LP4 under rootful Docker.
