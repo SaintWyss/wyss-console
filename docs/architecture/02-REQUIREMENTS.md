@@ -376,3 +376,22 @@ The selected DN-05 remote transport and DN-31 sensitive-state filesystem
 location remain **open evidence gates**; no requirement is interpreted
 as authorising a particular relay/vendor, plaintext snapshot exposure,
 reproduced provider credentials, or silent remote native consent.
+
+## 5. Native CachyOS privilege and Docker-coupled trust requirements (2026-10-14)
+
+Added following the [CachyOS-native test report](reviews/2026-10-14-cachyos-native-feasibility.md)
+and [architecture conflict analysis 47](47-CACHYOS-DOCKER-PRIVILEGE-AND-SANDBOX-DECISION.md).
+These requirements are final-product **targets**, not implemented safeguards
+or owner consent to change Docker.
+
+| ID | Requirement | Design/gate |
+| --- | --- | --- |
+| **FR-SEC-12** | Claims that managed approvals are protected against unrestricted native/LP4 processes MUST account for all delegated host-admin capabilities, including the current rootful Docker socket. If no genuine trusted boundary exists, display/record `BLOCKED_ADMIN_DELEGATION` rather than asserting approval integrity. | 47 §2–3 / TS-DOCKER-01–02 |
+| **FR-SEC-13** | An OL3 restricted native-worker profile MUST prove denial of control/authority, privileged Docker socket, host session IPC/X11/D-Bus, inherited FDs and unintended filesystem effects while preserving useful provider/mock workflow. A sandbox name or Landlock-only policy does not satisfy this. | 47 §4 / TS-DOCKER-03 |
+| **FR-PRF-12** | Provider authentication in a restricted worker MUST preserve the provider-supported in-place or atomic-replacement refresh mode through a narrowly bounded, verified capability; never copy credentials or widen to a whole unreviewed home to obtain a PASS. | 47 §4 / TS-DOCKER-04 |
+| **FR-REM-18** | Before any full-account LP4 grant, the client MUST disclose root-equivalent host delegation where present, bounded consent and honest revocation limitations. A remote gateway grant must not claim to protect a rootful Docker daemon from an unrestricted user shell. | 47 §2/6 / TS-DOCKER-06 |
+
+No Docker privilege migration is a required product feature by default.
+Any environmental change remains owner-controlled and must be
+independently planned and approved.
+
