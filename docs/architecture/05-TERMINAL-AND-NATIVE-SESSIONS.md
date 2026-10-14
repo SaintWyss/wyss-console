@@ -878,3 +878,24 @@ cost of that reading is M23.
 | OQ-46 | What happens to the backend and the page when the web view's renderer crashes or reloads                                                                          | Documentation, then a trial                    |
 | OQ-17 | M20 to M24                                                                                                                                                        | P1                                             |
 | —     | A terminal workspace ADR (T1, T2, §16.4) and the launcher ADR (F3a)                                                                                               | Owner                                          |
+
+## 22. Owner-selected terminal and workspace directions (2026-10-13)
+
+Target-only overlay; the preceding candidate architecture is not automatically accepted.
+The owner selected: DN-36=D (reattach surviving sessions, opt-in assisted restart of
+missing agents), DN-39=C (leader plus safe remappable direct shortcuts), DN-40=C
+(preserve already-retained scrollback at a global admission threshold), DN-46=B
+(owner-enabled lingering) and DN-47=B (faithful screen-state reattachment).
+Design consequences, negative cases and tests are in
+[32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md),
+[33](33-CROSS-DOMAIN-RECONCILIATION.md),
+[35](35-HOST-REMOTE-AND-MOBILE-DELTA.md),
+[02 §4](02-REQUIREMENTS.md) and [20 §14](20-VERIFICATION-AND-ACCEPTANCE.md).
+
+A byte-ring-only reattach as previously proposed is **insufficient as
+final-product acceptance** for DN-47=B unless reference tests independently
+prove the same fidelity. A long-lived escape parser must not be added without
+a separate hardening/isolation review. DN-40=C does not furnish an absolute
+memory cap; process, screen, ring and backlog budgets need measured limits.
+No new terminal transport, PTY backend or other functionality is authorised.
+
