@@ -246,3 +246,22 @@ self-convert the new REJECT to PASS. No code,
 provider experiment or ADR acceptance follows
 from documenting these blocked states.
 
+
+## 11. Feasibility gate after the two REJECT reviews (2026-10-14)
+
+[43](43-AUTHORITY-ISOLATION-FEASIBILITY-MATRIX.md)
+describes distinct-UID authority candidate A vs
+restricted automated native worker candidate B,
+their effect on normal provider authentication/hooks,
+headless LP4 and accepted ADR 0025 no-sudo bootstrap.
+Two tiny disposable Linux socket/file fixtures were run:
+same UID gained access; different unprivileged UID
+received EACCES under private directory/file modes.
+These checks are **only proof of synthetic DAC
+behaviour**, not Wyss approver integrity, provider
+compatibility, trusted UI/device approval or a
+working separate-user service. All of TV-ISO-03..10
+are NOT RUN; TV-ISO-02 is PARTIAL synthetic only.
+A genuine independently reviewed S1/S2 architecture
+and an informed owner trade-off remain mandatory.
+
