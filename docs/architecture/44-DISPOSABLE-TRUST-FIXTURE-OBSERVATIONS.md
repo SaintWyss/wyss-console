@@ -209,3 +209,52 @@ fixtures and one filesystem analogue are complete.
 No Wyss code was run, no security ADR accepted, no
 independent review changed from REJECT, and no
 authority implementation has begun.
+
+## 7. Kernel `openat2` anchored path-resolution fixture (2026-10-14)
+
+**Executed in the same throwaway tool container** with Linux
+kernel 6.18.44. Using Python `ctypes` to call the x86-64
+`openat2` syscall, a real directory descriptor rooted
+all operations in a new temporary `allowed/` directory.
+`open_how` used
+`O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC`,
+mode `0600`, and
+`RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS|RESOLVE_NO_MAGICLINKS`.
+A separate `elsewhere/` directory was the canary.
+This did not execute original Wyss or modify owner files.
+
+| Test | Submitted relative path | Observed | Meaning (fixture only) |
+| --- | --- | --- | --- |
+| FT-15 valid nested file | `nested/ok.txt` | **CREATED** | Allowed open still usable |
+| FT-16 parent escape | `../elsewhere/bad.txt` | **REFUSED EXDEV** (errno 18) | Escape cannot resolve |
+| FT-17 symlink component to outside | `redir/escape.txt` | **REFUSED ELOOP** (errno 40) | Symlink ancestor rejected |
+| FT-18 absolute pathname | `/tmp/escape.txt` | **REFUSED EXDEV** (errno 18) | Absolute path cannot bypass root |
+| FT-19 canary outside | inspect `elsewhere/` | **UNCHANGED** | None of refused writes reached canary |
+
+All fixture files were automatically removed. The Linux
+`openat2(2)` manual describes these resolution restrictions
+and `EAGAIN` on races when the kernel cannot ensure
+`RESOLVE_BENEATH` safety:
+https://man7.org/linux/man-pages/man2/openat2.2.html
+
+**What this does not prove:** an actual file adapter safely
+handles user-owned symlinks in *permitted* ancestors,
+hard links, shared/mutable mounts, Btrfs snapshots,
+concurrent providers with open descriptors, long-lived
+file locks, backups, rollbacks and exact loss-free
+application of the same changes. Disallowing all symlinks
+may conflict with the owner's `~/Data` directory links;
+the final per-operation policy must distinguish
+allowed stable links from adversarial redirection.
+A reference-machine test with a defined versioned
+transaction still remains **BLOCKED_FILESYSTEM**.
+
+Systemd corroboration:
+https://www.man7.org/linux/man-pages/man5/systemd.exec.5.html
+states that normal per-user service managers cannot set
+`User=` to an arbitrary different identity. The
+different-UID protected-authority design consequently
+needs separate deliberately approved system provisioning
+or another comparably effective trust-boundary method.
+This is a **documented platform constraint**, not a
+systemd unit installed or executed in this test.
