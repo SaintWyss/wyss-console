@@ -182,3 +182,29 @@ It does not authorise any implementation. A phase described in [19](19-IMPLEMENT
 starts only when the owner says so. It changes no accepted ADR: where it finds one that should
 change, it says so in [21](21-ADR-RECONCILIATION.md) and [22](22-DECISIONS-AND-OPEN-QUESTIONS.md)
 and leaves the ADR as it is.
+
+## Owner final-product consolidation — 2026-10-13
+
+The owner subsequently selected product scope and delegated routine design defaults
+without accepting any security ADR. Read these documents **after** the historical
+baseline and audit:
+
+| Document | Purpose | Authority |
+| --- | --- | --- |
+| [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md) | Owner-selected DN alternatives; delegated planning candidates; explicit open decisions | Product scope only; no implementation |
+| [33](33-CROSS-DOMAIN-RECONCILIATION.md) | Conflict register across security, remote, OL3, memory, models and storage | Candidate design; not independently reviewed |
+| [34](34-OL3-ORCHESTRATION-CONTRACT.md) | Finite supervised multi-agent DAG contract, state machines and failure modes | Candidate design for DN-15=OL3 |
+| [35](35-HOST-REMOTE-AND-MOBILE-DELTA.md) | Native Android/host/screen model; comparison of transparent P2P/overlay/relay choices | DN-05 remains open |
+| [36](36-PLANNING-CLOSURE-AND-VERIFICATION-GATES.md) | Hard blockers, validation and independent-review gates | No passing score or authorisation implied |
+
+[02 §4](02-REQUIREMENTS.md), [20 §14](20-VERIFICATION-AND-ACCEPTANCE.md)
+and [23 §5](23-TRACEABILITY-MATRIX.md) cross-reference the **new**
+final-product targets with acceptance specifications. The historical 64.2%
+coverage figure in 31 predates this consolidation; no new score is
+claimed without a new scored audit.
+
+This addendum does not make either of the two independent REJECT reviews
+pass. DN-16 and DN-24 remain **not authorised**, even if an owner-selected
+target is marked decided. PR #2 stays **draft** and must not be merged
+before review and explicit owner approval of the full plan.
+
