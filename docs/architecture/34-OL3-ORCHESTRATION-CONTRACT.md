@@ -79,7 +79,7 @@ and running finite pipelines must remain supervised after the window
 closes and, under owner-enabled lingering, after KDE logout. The
 candidate is a small separate user service named wyss-orchestrator that
 owns scheduler, admission control and metadata journal, talking over
-authenticated local IPC to wyss-host and wyss-control.
+UID-checked local IPC to wyss-host and wyss-control. This is **not** proof of a distinct human or a security boundary against compromised same-UID agents; see ER-01 in the Codex report.
 It is **not** a third product called Wyss CLI, not a privileged system
 daemon, not a native PTY owner and not a replacement for
 wyss-control's security policy. The UI is only a client.
@@ -290,14 +290,27 @@ make a system OL4.
   further dispatch; no infinite loop or indefinite spool.
 - **TS-ORC-10:** phone/watch client cannot create, widen, alter or approve privileged
   plans via metadata-only grants.
-- **TS-ORC-11:** managed tool approval stays inside `wyss-control`; coordinator
-  or native runtime cannot forge it.
+- **TS-ORC-11 (BLOCKED_TRUST_BOUNDARY):** managed tool approval
+  is decided by `wyss-control` under accepted ADR semantics.
+  **Current same-UID native processes can impersonate approval
+  callers**; tests must include native agents launched manually
+  outside OL3 and LP4 shells. Claiming approvals cannot be forged
+  requires a separately privileged, verifiable human approval
+  path and negative/positive adversarial tests. An internal
+  coordinator rule alone does not establish this property.
 - **TS-ORC-12:** across close/relaunch, logout, network loss and host crash, step
   state reflects reality; no silent resume of a dead process.
 - **TS-ORC-13:** prove no prompt/tool output, secret, private path or command body
   reaches durable journal, notification, or usage history.
-- **TS-ORC-14:** concurrency/load test of independent managed runtimes on each
-  reference PC; attach process/memory/CPU statistics and failure report.
+- **TS-ORC-14 (FUTURE / BLOCKED_MANAGED_CONCURRENCY):**
+  independent managed runtimes and parallel turns on reference
+  PCs may be tested as final-scope acceptance **only after**
+  an independently reviewed/accepted ADR supersedes ADR 0012
+  (one shared App Server) and ADR 0015 (one active turn).
+  For the current accepted baseline, exercise serial admission,
+  explicit queue/waiting behaviour, and responsive interactive
+  managed sessions during an OL3 pipeline. Never call that
+  baseline a completed DN-08=A feature.
 - **TS-ORC-15:** Hermes with direct effectful tools disabled cannot re-enable,
   escape the isolation boundary or issue effects except through Wyss policy.
   This is a **hard gate for DN-06=D**, not an assumption.
