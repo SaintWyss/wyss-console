@@ -37,11 +37,13 @@ an owner decision. None of the paths below was installed or tested for this chan
 | Network adapter | Reachability and encrypted authenticated channel established on verified endpoint keys | Issue application grants, alter input sequence semantics, expose plaintext via relay |
 | `wyss-console` UI | Distinct config and terminal capabilities (DN-22=B), native confirmations when locally present, project workspace | Resurrect dead sessions or treat remote opt-in as native host confirmation |
 
-If `wyss-host` parses untrusted terminal escapes to maintain screen state (DN-47=B),
-the parser must be treated as a separate attack surface with bounded resource use and
-a compartmentalised processing boundary. Whether the parser lives in a restricted helper,
-a separate process or a hardened library remains an ADR question; it cannot be declared
-safely in-process without proof.
+**Required:** the process owning PTY masters must be separate from
+untrusted terminal output parsers. Each terminal's parser runs in
+an individually restartable, resource-limited low-privilege helper.
+Parser crash/OOM degrades screen fidelity **without killing any
+PTY or sibling session**. The IPC, isolation mechanism, parser
+restart and fidelity acceptance require a new ADR and actual tests;
+this requirement is not itself proof.
 
 ### 2.1 Coordinator service is separate from the window
 
@@ -101,15 +103,21 @@ the decision unresolved; do not fabricate a score.
 - KDE logout normally may stop `systemd --user`; optional explicit
   `loginctl enable-linger` keeps its manager available. Enabling linger is a
   **host administration action**, not silently performed by the Console.
-- The service's idle shutdown applies only when **no live PTY, no in-flight
-  authorised pipeline and no required client** remains. Never use only
+- The host's idle shutdown requires **no live PTY, no active/paused/
+  waiting-approval/recovering finite pipeline, and no required
+  client**. The headless coordinator issues a bounded renewable
+  keepalive while the pipeline has work or waiting approvals.
+  Zero PTYs and viewers alone are insufficient. Never use only
   zero UI clients to infer that no work exists.
 - Power off, hibernate and reboot terminate or freeze local processes;
   do not promise continued execution. On host crash, mark lost process instances
   accurately and offer a fresh authorised restart.
-- A daemon restart loses its owned PTYs unless an explicitly validated external
-  survivor mechanism exists; systemd restarting a service does not revive the
-  original child process terminal or interactive display.
+- A daemon restart loses PTY masters unless a validated
+  survivor mechanism exists, but PTY loss **does not prove
+  child or detached descendant exit**. Native jobs need
+  cgroup/scope accounting; escaping descendants can remain
+  `ORPHANS_POSSIBLE`. Deny automatic duplicate launches
+  while effects could survive the host.
 - When not logged in, native host-only confirmation requests wait. Device
   presence on Android does not synthesize a KDE dialog response.
 - Host metadata can survive restart under a versioned schema with stable IDs and
@@ -158,17 +166,25 @@ paths or shell fragments. Compression must have bounded decompressed size.
 - Authentication proves a device key plus a pinned host endpoint; transport
   encryption is mandatory even on LAN. On relay fallback the relay must see
   only encrypted application payloads and minimal routing metadata.
-- Grants are scoped to host and device, have expiration/revocation, and do not
-  expand during network migration. The gateway consults revocation before
-  privileged actions and on fresh attachment.
+- Grants are host/device scoped, expiring and revocable for
+  future normal gateway actions, but **a compromised LP4
+  host-user shell can tamper with same-UID grant files and
+  install persistence**. Revocation cannot repair account
+  integrity. Independent, differently privileged grant
+  storage is an unproved future safety requirement
+  (see [42](42-POST-REJECT-CORRECTIVE-PLAN.md)).
 - Terminal output uses monotonically numbered frames and ACK watermark. After
   reconnect, offer a screen checkpoint and bounded scrollback tail. Missing
   history is labelled, never silently presented as complete.
-- Terminal input requires an exclusive *input claim* and a fresh device-presence
-  challenge for every grant acquisition. Each input batch includes claim epoch
-  and increasing sequence; duplicate batches are acknowledged as duplicates,
-  never written again; gaps trigger resync. A network switch cannot create
-  two simultaneous input owners.
+- Input requires an exclusive claim and a proven presence-key
+  capability. Bind claim to terminal/host generation, unpredictable
+  `gateway_instance_id` per boot, claim epoch and sequence.
+  A gateway restart invalidates old claims. If the gateway
+  could have executed input before crashing without sending
+  ACK, return `OUTCOME_UNKNOWN` and **never replay bytes
+  automatically**. In-instance duplicates must be refused.
+  Managed intents rely on the authority's durable intent
+  receipts, never only gateway in-memory deduplication.
 - A command typed remotely into a native PTY is not a typed managed action:
   it's a full shell-capability input. Show this at grant issuance and audit
   the fact of claim and expiry, not the command body.
@@ -191,19 +207,21 @@ approvals, Notifications, Devices/grants, Settings, Offline/reconnect.
 | First pair | Local host approval and two-device comparison (not just QR), bound device public key, explicit grants |
 | Reopen | Keystore-backed client identity; show actual host and connection type and last observation age |
 | Terminal attach | Read and write are separate privileges; show full-account warning before granting LP4 |
-| Begin input | Per-claim unlock/presence key use; keyboard shortcuts, Ctrl/Esc/tab, text paste guard and explicit ownership indicator |
+| Begin input | Default-deny LP4 when authenticated key attestation unavailable. Verified per-use presence; brief exclusive claim TTL (candidate <=15 min, not a 7-day unattended input privilege); Ctrl/Esc/tab and paste guard; ownership indicator |
 | Change network | No raw input automatically retransmitted; checkpoint/resync with "reconnected" and generation |
 | Approve managed action | Present exact managed-authority approval summary and per-operation step-up; no native-dialog imitation |
 | Prepare config request | Submit a versioned *proposal*, display "waiting for confirmation on the host"; cannot apply remotely |
-| Host logged out | Continue reading/typing **only** under valid grants and running service; local confirmation queue waits |
-| Lost phone | Other authorised host session revokes device and keys/connection epoch; document unavoidable compromise window |
+| Host logged out | Continue read/watch within applicable grants; **terminal.write denied by default** without an observed local login. Distinct owner-approved absent-host LP4 grant would require another reviewed policy, presence proof and short TTL. Host-only confirmation unavailable |
+| Lost phone | Revoke future gateway grants from a trusted context; do not claim previously executed commands undone or host account clean. Inspect persistence, user services, SSH keys, hooks and accessible credentials |
 | Notification | No command, path, prompt, output or recoverable content in push payload; local client fetches details only after authenticated open |
 | Offline | Read-only last-known *metadata*, visibly stale; no local queue of arbitrary shell commands |
 | App background/suspend | Work continues on host; reconnect and re-attest as Android lifecycle allows; no promise of perpetual Android background socket |
 
-Android hardware-backed key availability and StrongBox vary by device. Use
-Android Keystore's supported per-operation authentication; fallback behaviour
-must be explicit, not a false claim that biometric was verified by the host.
+Android TEE/StrongBox attestation varies. LP4 requires verified
+per-use authenticated key properties, not just possession. On
+failure or software-only evidence, LP4 is denied by default until
+an informed owner decision; an emulator cannot validate physical
+hardware backing. Device presence is not physical host consent.
 
 ## 8. Tests to design and later execute
 
@@ -253,3 +271,15 @@ measurements are required before adopting a transport.
 
 The final product must pass these gates; this document cannot grant permission
 to run their experiments or claim they are already satisfied.
+
+## 10. Post-REJECT safety overlay (2026-10-14)
+
+[42](42-POST-REJECT-CORRECTIVE-PLAN.md) records IR-02,
+IR-06–IR-10 and their explicit STOP gates. The old 7-day
+full-account LP4 option, in-memory-only gateway de-duplication,
+host owned terminal-parser failure domain and implied logout
+write access are **not accepted final design**. The owner's
+functional target (remote full control on chosen devices)
+remains; implementing it safely requires a real independently
+reviewed security boundary, hardware/Android evidence, process
+survival and restart tests. No deployment is authorised.
