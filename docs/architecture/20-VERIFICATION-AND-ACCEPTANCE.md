@@ -577,3 +577,85 @@ nothing here authorises a service, a listener or a device now.
 | Tests of the kept form of a disabled hook             | Not named: they are the fixture form of checks V1 to V7 of ADR 0029 §5                | RS1                      |
 | TS-VLT-01 to 30, the vault                            | Specified by what each must hold; none written. TS-VLT-09 waits for export and import | ADR 0029; DN-25 to DN-30 |
 | Fuzzing of the parsers                                | Recommended from F1, not specified                                                    | —                        |
+
+## 14. Owner-final scope: new security, orchestration, remote and UX acceptance
+
+**All tests below are proposed, none run**. Each must be made into reproducible
+unit/contract/integration/adversarial procedures with bounded fixtures and
+a clean throwaway environment. Provider experiments, real device tests,
+native production writes and code work require *separate* owner permission
+(DN-16/DN-24). Passing a mocked contract never substitutes for reference
+hardware or an independent security review. References are in
+[34](34-OL3-ORCHESTRATION-CONTRACT.md) and
+[35](35-HOST-REMOTE-AND-MOBILE-DELTA.md).
+
+| Test ID | Acceptance ID | Deterministic pass/fail criterion (negative cases included) |
+| --- | --- | --- |
+| TS-ORC-01 | AC-FINAL-01 | Reject cyclic, unsupported, unbounded and unapproved delegation; assert zero process starts. |
+| TS-ORC-03 | AC-FINAL-02 | A builder→test→review DAG obeys dependencies and cannot continue after mandatory failure. |
+| TS-ORC-02 | AC-FINAL-03 | Modify any material plan field after approval; execute denied until fresh confirmation. |
+| TS-ORC-05 | AC-FINAL-04 | Inject tool-looking text and paths in handoff; no capability/command results. |
+| TS-ORC-07 | AC-FINAL-05 | Crash between start and ACK; reconcile by attempt ID and require review for ambiguous effects. |
+| TS-ORC-04 | AC-FINAL-06 | Two concurrent managed sessions cannot reuse identities, leases or approve one another's steps. |
+| TS-ORC-09 | AC-FINAL-07 | Exceed finite wall-time/step/resource bounds; further dispatch blocked and explained. |
+| TS-ORC-13 | AC-FINAL-08 | Search event/history/notification/diagnostic fixtures; none contains protected content. |
+| TS-HYB-05 | AC-FINAL-09 | LP1–3 cannot write; explicitly opted-in LP4 states full host-account access. |
+| TS-HYB-01 | AC-FINAL-10 | Across LAN/mobile/relay configurations, connection follows authorised host key and same grants. |
+| TS-HYB-03 | AC-FINAL-11 | Disconnect before ACK, retry and reorder packets; PTY receives each input batch at most once. |
+| TS-HYB-06 | AC-FINAL-12 | Compare logout with/without lingering; no unconsented enablement and truthful session state. |
+| TS-HYB-09 | AC-FINAL-13 | Reference full-screen programs survive detach/resize; mismatch and incomplete history reported. |
+| TS-HYB-11 | AC-FINAL-14 | Remote approval cannot apply pending config; stale plan revalidated or refused. |
+| TS-HYB-04 | AC-FINAL-15 | Replay/stolen key/revocation/key mismatch rejected; no grant widening by transport. |
+| TS-HYB-14 | AC-FINAL-16 | Distinguish crash, suspend, power-off, network drop and UI close; no phantom running sessions. |
+| TS-FINAL-01 | AC-FINAL-17 | Reach global budget; existing history unchanged, new quota lower and clearly signalled. |
+| TS-HYB-08 | AC-FINAL-18 | Fuzz ANSI/OSC/DCS/title/hyperlinks; no file/network effect or unbounded allocation. |
+| TS-FINAL-02 | AC-FINAL-19 | Surviving PTY uses same ID; ended agent never auto-spawns; batch restart requires approvals. |
+| TS-FINAL-03 | AC-FINAL-20 | Forced slow client/host load remains bounded or visibly rejects new work; no silent vault purge. |
+| TS-FINAL-04 | AC-FINAL-21 | Invalid catalogue selection and stale generation denied; provider effective choice unassumed. |
+| TS-FINAL-05 | AC-FINAL-22 | Requested != reported fixture never labelled actual; unknown remains unverified. |
+| TS-FINAL-06 | AC-FINAL-23 | Session and turn reroutes recorded at proper grain; malformed reroute fails closed. |
+| TS-FINAL-07 | AC-FINAL-24 | Unsupported agent shows limitation; no silent terminal injection/config file write. |
+| TS-FINAL-08 | AC-FINAL-25 | Missing counters unknown; distinct session/model attribution and no cross-plan monetary sum. |
+| TS-FINAL-09 | AC-FINAL-26 | Keyboard and mouse reach exact areas; Devices added only when applicable. |
+| TS-FINAL-10 | AC-FINAL-27 | Known unavailable action disabled with reason, never clickable; missing area not false advertised. |
+| TS-FINAL-11 | AC-FINAL-28 | Automated contrast matrix plus real screen/terminal colours meets documented thresholds. |
+| TS-FINAL-12 | AC-FINAL-29 | Default disabled; enable each category; payload inspection excludes paths and content. |
+| TS-FINAL-13 | AC-FINAL-30 | KDE/IME conflicts cause fallback or rebind; escape and terminal program keys arrive. |
+| TS-FINAL-14 | AC-FINAL-31 | Advance clock past 30/90 days; only warning metadata changes, kept byte content unchanged. |
+| TS-ORC-08 | AC-FINAL-32 | Modify global hook/provider version; old approval rejected and omissions correctly shown. |
+| TS-FINAL-15 | AC-FINAL-33 | Unsupported provider path denied; no credential copying or impersonated sign-in. |
+| TS-FINAL-16 | AC-FINAL-34 | Compromised config view fails to invoke arbitrary executable; host confirmation remains. |
+| TS-FINAL-17 | AC-FINAL-35 | Arbitrary command/argv rejected; provider update invalidates unverified operation. |
+| TS-FINAL-18 | AC-FINAL-36 | Compromised config view cannot invoke terminal commands; terminal retains full OS-user risk. |
+| TS-ORC-15 | AC-FINAL-37 | Hermes attempts direct tool use and policy bypass; hard OS boundary blocks effect. |
+| TS-FINAL-19 | AC-FINAL-38 | Product labels and interfaces are consistent; no undocumented CLI dependency. |
+| TS-FINAL-20 | AC-FINAL-39 | Retention/eviction/history fixtures exclude prompt, output, credentials and paths. |
+| TS-FINAL-21 | AC-FINAL-40 | Reference-machine offline install/upgrade/rollback dry run avoids unrelated data and public channels. |
+
+### 14.1 Evidence grades and mandatory adversarial suites
+
+**Metadata-only verification:** list known forbidden fields and verify that no
+prompt, tool output, credentials, private file path, raw command or recoverable
+configuration content is written into events, analytics, desktop notifications
+or diagnostic artifacts. Test *every* failure and reconnect branch, not only
+happy paths. Where a display shows a model, assert the distinction
+`requested` / `reported` / `unverified` and the reporting scope.
+
+**Remote security:** use stolen/expired keys, revoked grants, replayed presence,
+alternate transports, race between two input owners, disconnect during input,
+relay outage and a compromised config view. Show that `terminal.write` is
+host-account access and that native confirmation cannot be supplied by Android.
+
+**Provider/state safety:** use a mismatched runtime generation, two parallel
+managed sessions, a changed hook after profile approval, unsupported agent
+version, unknown `model/rerouted`, and a process crash between fork and
+journal acknowledgement. Every ambiguity must deny automatic action.
+
+**Workstation fidelity:** actual KDE keyboard/IME, app restart, logout with
+and without lingering, power cycle, terminal full-screen/alternate-screen
+state, mobile backgrounding and measured RAM/CPU against the procedures
+in [15](15-PERFORMANCE-ENGINEERING.md).
+
+For all test IDs: provide fixture/version, test owner, no-secrets handling,
+assertion and actual result. A future review must mark each NOT RUN,
+PASS, FAIL or BLOCKED; it must not infer PASS from this specification.
