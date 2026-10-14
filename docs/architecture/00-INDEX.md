@@ -366,3 +366,16 @@ Per-provider negative/positive mock tests remain
 required; sandboxing that silently disables
 hooks/MCP/network is not a final-product PASS.
 
+
+### Composed native worker security case (2026-10-14)
+
+[49](49-CACHYOS-COMPOSED-WORKER-SECURITY-CONTRACT.md)
+turns the observed CachyOS Landlock/bubblewrap primitives
+into a falsifiable **positive-and-negative** sandbox test plan
+for a *synthetic* OL3 worker, covering fake credential refresh,
+Docker/authority IPC, ambient file descriptors, mock inference
+egress, worktree injection and PTY lifecycle. It distinguishes
+limited B1 containment from strong human approval integrity,
+which remains blocked by same-UID and rootful Docker
+delegation. No combined provider mock has yet been executed;
+no real provider/session/daemon or ADR was changed.
