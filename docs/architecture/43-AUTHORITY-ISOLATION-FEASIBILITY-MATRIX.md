@@ -225,7 +225,7 @@ the single synthetic same-UID observation (§2).
 | ID | Test target and assertion |
 | --- | --- |
 | TV-ISO-01 | **OBSERVED synthetic only:** two unprivileged same-UID processes; socket `0600` and file `0600` are accessible to peer; UID check alone does not attest human |
-| TV-ISO-02 | Disposable two-UID service: ordinary user/native agent cannot open trusted socket, rewrite trusted binary, service unit, DB/WAL/witness or modify signer; legitimate protected service accesses its state |
+| TV-ISO-02 | **PARTIAL synthetic only:** different-UID attacker cannot open a 0700 private directory, 0600 socket or dummy state file, while same-UID client can. **NOT RUN for real authority binary/unit, DB/WAL/witness, signer, D-Bus, FDs or real privilege changes.** |
 | TV-ISO-03 | Unrestricted native **manual**, OL3 and LP4 each try all `approvals.respond`, `grant_step`, `managed.turns`, `managedSession/*` and alternate executable/service paths; fail closed for protected operations |
 | TV-ISO-04 | Legitimate approval signed outside compromised user session verifies exact digest/time/scope and executes only permitted managed action; reordered, replayed, substituted and falsely displayed intents refuse |
 | TV-ISO-05 | Provision protected UID/unit without modifying existing user configs; test upgrade/rollback, user reboot, logout/lingering, failure recovery and explicit owner consent; conflict with ADR 0025 surfaced |
@@ -240,7 +240,7 @@ the single synthetic same-UID observation (§2).
 - Linux kernel and systemd semantics: **documented upstream**,
   including UID and user-service constraints.
 - Same UID mock socket/file: **observed only in isolated container**.
-- Distinct protected UID with real Wyss authority: **NOT RUN**.
+- Distinct UID synthetic DAC separation: **OBSERVED only in throwaway environment**, see §9; actual Wyss protected authority: **NOT RUN**.
 - Restricted provider model compatibility: **NOT RUN**.
 - Tauri IPC native host confirmation, Android key proofs
   and remote LP4-away: **NOT RUN**.
@@ -282,3 +282,57 @@ fixtures. Their outputs and an explicit capability
 matrix should be presented before seeking a single
 informed owner trade-off. **Do not begin implementation
 or accept ADRs from this paper comparison.**
+
+## 9. Additional isolated two-UID DAC fixture (2026-10-14)
+
+This **does not simulate Wyss**; it checks only Linux discretionary
+access for distinct genuine OS identities, under the same
+already-authorised disposable-fixture scope.
+
+**Environment:** isolated tool container, two existing non-login
+Linux test identities: `nobody` (UID 65534) for a dummy
+authority server, and `daemon` (UID 1) for a dummy
+unprivileged client. The fixture runner started as root
+**inside the container only** to assign disposable
+file ownership and launch both unprivileged processes;
+no command ran on either owner computer and no system user,
+service, provider, repository content or credential was created.
+Files were restricted to a temporary `/tmp` directory
+(`0700` UID 65534), mock socket `0600` and
+`protected.txt` `0600`.
+
+**Observed output:**
+
+```text
+SERVER READY 65534 SERVED_UID 65534 EXIT 0
+DIFFERENT_UID 1 => SOCKET_DENIED 13; FILE_DENIED 13
+SAME_UID 65534 => SOCKET=ALLOWED; FILE_READ= MOCK_STATE
+```
+
+- **PASS within synthetic fixture:** different ordinary UID
+  received `EACCES` (errno 13) for both the socket
+  and the protected mock state file.
+- **PASS within synthetic fixture:** server correctly
+  accepted a same-UID client using `SO_PEERCRED` and
+  the same-UID client read the mock state file.
+- **Cleanup:** temporary directory automatically deleted
+  on fixture completion; no file/content persists.
+- **Not tested / still blocked:** actual native agent
+  under different principal, Wyss authority binary
+  or state, admin-installed protected unit, keyring,
+  signing/physical presence, socket FD passing,
+  supplemental groups/ACL, user service override,
+  debugger/ptrace, root, credential refresh or
+  real network/remote. No attacker obtained access
+  to actual Wyss managed approvals.
+
+**Interpretation:** this directly supports the limited claim
+that two distinct unprivileged UIDs can be separated by
+ordinary filesystem ownership and Unix socket permissions.
+It does **not** establish a functioning secure owner-
+approval architecture, or that a protected separate-UID
+service can be provisioned without changing accepted
+ADR 0025. The next tests for S1/S2 require a
+concrete service/approval identity and compatible
+credential/host-login story. Do not count this fixture
+as having unblocked final-product OL3 or LP4.
