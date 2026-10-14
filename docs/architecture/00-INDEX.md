@@ -290,3 +290,17 @@ same-UID authority and unforgeable human approvals remains
 a hard contradiction until a real distinct trust principal
 or effect limitation is designed and independently reviewed.
 
+
+### Executed synthetic fixture report
+
+[44](44-DISPOSABLE-TRUST-FIXTURE-OBSERVATIONS.md)
+records precise mock results for different-UID Unix socket
+protection, mock signed approvals, replay/expiry/scope
+denial across restart, rootless namespace access to
+same-host-UID mock credentials, precheck/path-write
+symlink race, anchored directory descriptor and
+`openat2` escape checks. These are **disposable Linux
+fixtures only**, not tests of Wyss, provider login,
+Android, human approval or replica/snapshot safety.
+Their pass results do not change the current REJECT
+or authorise implementation.
