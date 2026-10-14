@@ -179,17 +179,20 @@ no plaintext log/event or unencrypted backup. An action
 changing a hook while the provider holds open config files
 must handle L1/L2/L5, not promise atomic replacement.
 
-**Planned negative tests TS-CFG-17..20** (previously named but not specified):
-- 17: compromised config webview injects executable text into
+**Additional negative tests TS-CFG-21..24**, *not* redefining
+the already specified TS-CFG-17..20 in 20 §3.4 (which
+retain create/validate, edit/delete undo disclosure, sealed
+vault undo and no executable from page):
+- 21: compromised config webview injects executable text into
   native authoring IPC -> backend rejects; native dialog cannot
   be confirmed by the page.
-- 18: invalid matcher/event, timeout overflow, missing executable,
+- 22: invalid matcher/event, timeout overflow, missing executable,
   symlinked provider path and unknown version -> visible refusal,
   no provider file change.
-- 19: concurrent external edit between review and recheck ->
+- 23: concurrent external edit between review and recheck ->
   STALE/CONFLICT, no unreviewed overwrite; preserve previous
   provider bytes according to the *approved* transaction if any.
-- 20: approved provider-native command closed-list check:
+- 24: approved provider-native command closed-list check:
   unknown arguments or executable identity are rejected; an
   observed provider-version change invalidates evidence.
 These are contracts/test plans, not proofs of safe writes.
@@ -201,7 +204,7 @@ visual design, brand identity or approved artwork.
 Only non-sensitive metadata is visible before unlock.
 
 ```text
-MS-01 HOSTS                      MS-04 TERMINAL
+MA-01 HOSTS                      MA-04 TERMINAL
 +--------------------------+     +--------------------------+
 | Wyss      Hosts          |     | Host A  Session #...     |
 | Available 2 / Last sync  |     | Read / Input claim      |
@@ -210,7 +213,7 @@ MS-01 HOSTS                      MS-04 TERMINAL
 | [Add trusted host]       |     | [Keyboard] [Detach]     |
 +--------------------------+     +--------------------------+
 
-MS-02 PAIR HOST                 MS-05 PIPELINE
+MA-02 PAIR HOST                 MA-05 PIPELINE
 +--------------------------+     +--------------------------+
 | Scan QR / Manual pairing |     | Run ID / Bounded plan    |
 | Compare code on host     |     | Step 1 done             |
@@ -219,7 +222,7 @@ MS-02 PAIR HOST                 MS-05 PIPELINE
 | [Confirm on host]        |     | Budget / expiry         |
 +--------------------------+     +--------------------------+
 
-MS-03 SESSIONS                  MS-06 APPROVAL
+MA-03 SESSIONS                  MA-06 APPROVAL
 +--------------------------+     +--------------------------+
 | Grouped by project       |     | Exact managed authority |
 | Running / Paused / Lost  |     | operation + scope       |
@@ -227,7 +230,7 @@ MS-03 SESSIONS                  MS-06 APPROVAL
 | [Attach] [Inspect]       |     | Expires in ...          |
 +--------------------------+     +--------------------------+
 
-MS-07 NOTIFICATIONS             MS-08 DEVICE GRANTS
+MA-07 NOTIFICATIONS             MA-08 DEVICE GRANTS
 +--------------------------+     +--------------------------+
 | Category preferences     |     | This device: Watch      |
 | Sensitive text: none     |     | Request input privilege |
@@ -235,7 +238,7 @@ MS-07 NOTIFICATIONS             MS-08 DEVICE GRANTS
 +--------------------------+     | [Revoke]                |
                                  +--------------------------+
 
-MS-09 CONFIG PROPOSAL           MS-10 OFFLINE
+MA-09 CONFIG PROPOSAL           MA-10 OFFLINE
 +--------------------------+     +--------------------------+
 | Read-only status         |     | Host unreachable        |
 | [Prepare change]         |     | Last known at ...       |
@@ -300,7 +303,7 @@ persistent analytics store or migration is authorised.
 
 S15 (agent actions), S16 (remote grants) and S17 (pairing)
 need mockups and error-state maps tied to 13 and 16.
-Use the Android MS-01..10 above as *state coverage*, not
+Use the Android MA-01..10 above (distinct from 16's MS-01..10) as *state coverage*, not
 approved final visual art. Desktop wireframes must preserve
 two distinct capability surfaces (config vs terminal) and
 identify which plane an action affects.
@@ -331,3 +334,20 @@ operable without accidental activation.
 
 This document is deliberately explicit about those unavailable
 facts; no unsupported implementation shortcut may infer them.
+
+## 8. Post-review contract stop conditions (2026-10-14)
+
+The limited-independence review in
+[reviews/2026-10-13-independent-post-owner-review.md](reviews/2026-10-13-independent-post-owner-review.md)
+returned REJECT. A handoff to an unattended native
+full-account agent is **NOT** a safe data-only operation.
+A native target requires the actual prompt/body to be
+reviewed and confirmed per launch; until accepted OS
+isolation from same-UID control sockets exists, dispatch is
+`BLOCKED_TRUST_BOUNDARY`. See
+[42](42-POST-REJECT-CORRECTIVE-PLAN.md).
+For vault operations under logout/lingering, a locked
+keyring returns `VAULT_LOCKED_NO_SESSION` without
+automatically applying queued remote proposals.
+TS-CFG-21..24 extend, never overwrite, the previous
+TS-CFG-17..20. Android mockups use MA to avoid collisions.
