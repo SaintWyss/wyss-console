@@ -323,3 +323,30 @@ provider tokens or host services.
 ## 15. Owner correction: native CachyOS first, no general VM requirement
 
 [46](46-CACHYOS-NATIVE-VERIFICATION-HANDOFF.md) supersedes [45](45-DISPOSABLE-VM-VERIFICATION-HANDOFF.md) as the default testing procedure. **The final system and its regular verification target is CachyOS KDE natively**, not a VM or Ubuntu. The prior environment blocker is only for **privileged/high-risk experiments**; safe read-only host capability checks and isolated throwaway synthetic tests can proceed on CachyOS, without real provider logins, privileged changes, systemd modifications, or owner file edits. If an individual test needs different Linux UID/service provisioning or fault injection, postpone **that test** until an independently isolated runner is available; do not block unrelated work or substitute a generic Ubuntu VM. This is an owner scope clarification, not an ADR acceptance.
+
+## 16. Critical native CachyOS Docker privilege finding
+
+[47](47-CACHYOS-DOCKER-PRIVILEGE-AND-SANDBOX-DECISION.md)
+traces observed Landlock ABI 7/bubblewrap capability
+and **rootful Docker daemon access** on the user's
+native CachyOS; the reference report is
+[2026-10-14](reviews/2026-10-14-cachyos-native-feasibility.md).
+Add **B-P0-07 / BLOCKED_ADMIN_DELEGATION**:
+a supposedly separate-UID trusted approval authority
+is not protected against an unconfined same-user
+attacker with root-level Docker daemon access.
+This finding applies to manual native agents and
+LP4 as well as OL3, and demands a distinct,
+owner-reviewed Docker privilege/host trust solution
+or an honestly weakened threat model.
+
+The user has **not** approved removing Docker access,
+changing daemon/user groups, service privilege,
+container contexts or provider credential architecture.
+Keep this P0 open and seek one concrete informed
+decision only after read-only workflow compatibility
+and a reversible plan have been prepared.
+No Docker socket/API interaction or provider tests
+are required to validate the *source-supported
+architectural conflict*.
+
