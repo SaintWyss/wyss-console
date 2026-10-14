@@ -371,3 +371,20 @@ and safe access scope remain **NOT_PROVEN**.
 Do not disable real required functions or copy
 real credentials to manufacture a sandbox PASS.
 
+
+## 16. Composed B1 proof required before an implementation decision
+
+[49](49-CACHYOS-COMPOSED-WORKER-SECURITY-CONTRACT.md)
+defines an explicit set of composed native-CachyOS fixture
+tests FX-B1-A..E. The success condition must preserve a
+**useful fake provider workflow** and deny fake authority
+and Docker brokers; passing a no-network/no-function sandbox
+is insufficient. Test all inherited FDs, pathname/abstract
+UNIX sockets and 0700 test homes under observed Landlock
+ABI 7, not a hypothetical later ABI. Provider inference
+egress and native credential refresh remain **NOT_PROVEN**.
+A report of those tests is a future evidence gate,
+not an approved worker profile.
+`BLOCKED_ADMIN_DELEGATION` and
+`BLOCKED_TRUST_BOUNDARY` still prohibit strong
+approval-security claims for unrestricted U/LP4.
