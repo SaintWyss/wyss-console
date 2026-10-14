@@ -332,3 +332,8 @@ owner's PC, accepting an ADR or merging PR #2.
 If a verifiably disposable VM is unavailable,
 the test agent must stop with a concrete blocker.
 This is a *handoff*, not a completed test.
+
+
+### CachyOS-native verification correction
+
+[46](46-CACHYOS-NATIVE-VERIFICATION-HANDOFF.md) **supersedes** the blanket VM requirement previously written in [45](45-DISPOSABLE-VM-VERIFICATION-HANDOFF.md). Wyss Console targets the owner's **native CachyOS KDE**. Read-only host inspection and unprivileged disposable mock tests can take place on CachyOS under strict no-personal-config/no-root/no-service-change guards. Only genuinely privileged/dangerous experiments need a separate disposable environment; no Ubuntu installation or VM is required for ordinary progress.
