@@ -404,3 +404,38 @@ authority requires a genuine independent
 trust principal and a meaningful human
 signer; the dummy signer does not provide it.
 
+## 12. Corrected A/B priority after native CachyOS observation
+
+[47](47-CACHYOS-DOCKER-PRIVILEGE-AND-SANDBOX-DECISION.md)
+supersedes the earlier unqualified preference for a
+different-UID A as the **immediate best choice**.
+The observed logged-in user can access the rootful
+Docker daemon's privileged API, which contradicts
+the A analysis's assumption of an ordinary
+nonadministrative same-UID attacker. Thus:
+
+- **A remains potentially useful**, but an extra
+  `BLOCKED_ADMIN_DELEGATION` prerequisite exists:
+  an authority under another UID **alone is not safe**
+  from an unrestricted account that can access
+  root-level Docker.
+- **B has native positive/negative synthetic evidence**:
+  bubblewrap hid sockets, Landlock ABI 7 denied
+  filesystem, but the ABI did not block pathname
+  Unix sockets. The provider's auth, network, hooks,
+  MCP, PTY and external authority access remain untested.
+- A hybrid may eventually preserve unrestricted manual
+  agents while restricting automatic workers and
+  protecting managed approvals, but **no combination
+  with unchanged rootful Docker access can claim
+  full host isolation against every unrestricted
+  native/LP4 agent**.
+- A rootless Docker migration or privileged-on-demand
+  policy is a possible future *separately authorised*
+  environmental change, not an implicit planning decision.
+  The owner must not lose container-development workflows
+  merely to make a test pass.
+
+All real provider/process/service operations remain
+blocked pending independent review.
+
