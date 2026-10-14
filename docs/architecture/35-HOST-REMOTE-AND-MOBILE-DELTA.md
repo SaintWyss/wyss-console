@@ -43,6 +43,19 @@ a compartmentalised processing boundary. Whether the parser lives in a restricte
 a separate process or a hardened library remains an ADR question; it cannot be declared
 safely in-process without proof.
 
+### 2.1 Coordinator service is separate from the window
+
+OL3 finite pipelines that outlive the desktop require a **headless**
+coordinator/user-service candidate (wyss-orchestrator; see
+[34 §2.1](34-OL3-ORCHESTRATION-CONTRACT.md)).
+It must not reuse wyss-control as a scheduler or acquire
+native PTY byte parsing. Owner-enabled lingering supports both
+wyss-host and the coordinator, but no user service can
+continue work after actual power-off. A reconnection to the
+Console must never create a second coordinator run for the same
+pipeline generation. This placement is an unaccepted
+architecture choice and needs lifecycle/footprint evidence.
+
 ## 3. Reachability comparison: no selection yet (DN-05)
 
 | Candidate | User experience | Operating/maintenance trade-off | Hard questions |
