@@ -767,3 +767,35 @@ clauses. Until then these tests are explicitly
 **NOT APPLICABLE TO CURRENT BASELINE / NOT RUN
 FOR FINAL PRODUCT**, never a contradictory pass
 by just running two sessions serially.
+
+## 17. Native CachyOS Docker delegated-privilege acceptance (NOT RUN)
+
+Reference [47](47-CACHYOS-DOCKER-PRIVILEGE-AND-SANDBOX-DECISION.md)
+and read-only/synthetic **observations**
+[2026-10-14](reviews/2026-10-14-cachyos-native-feasibility.md).
+Test IDs here are **future procedures**, not results. The source report
+CE-01..09 does NOT count as a passed product security mechanism.
+
+| Test ID | Acceptance | Pass/fail condition |
+| --- | --- | --- |
+| TS-DOCKER-01 | AC-DOCKER-01 | An unrestricted native/LP4 process retains the real CachyOS user's Docker group capability in the declared threat model; no unproven other-UID protection guarantee while a rootful Docker API remains accessible |
+| TS-DOCKER-02 | AC-DOCKER-01 | Proposed trusted approver actually protects signer, binary, unit, DB/WAL/anchor and human consent against every applicable admin delegate; if not, fail closed rather than reporting the authority secure |
+| TS-DOCKER-03 | AC-DOCKER-02 | Restricted OL3 worker starts and performs positive fake provider operations but cannot find/connect control or Docker sockets (including read-only binds, inherited FDs, alternative IPC, D-Bus, X11), tamper with trusted state or cause forbidden signals |
+| TS-DOCKER-04 | AC-DOCKER-03 | Pinned provider-specific in-place and replace-refresh fixtures show expected permitted refresh and rejected unsupported mode; no credential copying or broad unreviewed bind |
+| TS-DOCKER-05 | AC-DOCKER-05 | Before any separately approved host Docker change, the rootless-vs-on-demand privilege plan preserves documented existing workloads or lists concrete regressions, migrations, rollback and re-login requirements; **not authorised to execute** |
+| TS-DOCKER-06 | AC-DOCKER-04 | Full LP4 grant display warns of possible Docker root-level access, precise scope/expiry and impossibility of undoing previous malicious effects by device revocation |
+ 
+**AC-DOCKER-01:** no false *protected authority* claim in presence
+of root-level delegation; if protection from this attacker is a
+required functional guarantee, it remains BLOCKED until proven.
+**AC-DOCKER-02:** both useful restricted function and negative
+indirect capability checks required. **AC-DOCKER-03:** authenticator
+refresh without unauthorized credential re-homing. **AC-DOCKER-04:**
+accurate remote high-privilege consent and recovery limits.
+**AC-DOCKER-05:** informed reversible environment decision
+planning (not a product runtime test).
+
+**Result for every TS-DOCKER-xx:** `NOT RUN`.
+No Docker API call, privilege escalation or real provider launch
+is authorised by writing these test criteria.
+
