@@ -566,3 +566,32 @@ owner (the owner's directive).
 - That a COMPLETE design would survive review, measurement or implementation.
 - Anything about the code beyond the files cited `[R]`.
 - A date by which the planning will be complete.
+
+## 9. 2026-10-13 post-decision addendum — historical score, not a new result
+
+The owner made extensive final-product decisions **after** the
+64.2% score was calculated, and authorised documentation-only
+consolidation. The appendices [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md),
+[33](33-CROSS-DOMAIN-RECONCILIATION.md),
+[34](34-OL3-ORCHESTRATION-CONTRACT.md),
+[35](35-HOST-REMOTE-AND-MOBILE-DELTA.md) and
+[36](36-PLANNING-CLOSURE-AND-VERIFICATION-GATES.md)
+now record scope, contradictions, candidate designs and evidence
+gates. [02 §4](02-REQUIREMENTS.md), [20 §14](20-VERIFICATION-AND-ACCEPTANCE.md)
+and [23 §5](23-TRACEABILITY-MATRIX.md) add direct traceability for
+the new owner targets.
+
+**64.2% remains a historical pre-decision documentation score**;
+do not present it as an up-to-date score or as percentage of
+code completed, verified or independently reviewed. The extra
+paper does not turn BLOCKED into COMPLETE when L1/L2/L5,
+DN-05, DN-31, OQ-55–57, keyring evidence or independent
+review remain missing.
+
+To rescore: re-evaluate all 29 rows and all five dimensions in
+§1 under identical weights, link each new rating to the
+revised documents, note exceptions and maintain 0%
+independent review for the post-REJECT changes until an
+actually independent review is received. No model-author
+self-review can reverse the two previous REJECTs.
+
