@@ -185,3 +185,25 @@ and boundary-specific mandatory questions. It must be handed to an
 **independent reviewer** with access to the private PR.
 Neither this file nor writing the brief constitutes a
 review, a PASS or an owner signoff. Previous REJECTs stand.
+
+## 9. Verification-stage permission clarification (later 2026-10-13)
+
+The owner explicitly authorised advancing from documentation
+consolidation into **bounded technical verification on isolated
+disposable targets**, as well as an independent review.
+This is a *stage authorisation*, not a blanket permission
+for provider-account access, real configuration edits, normal
+user OS services, Android phone settings, or code implementation.
+A limited disposable `renameat2(RENAME_EXCHANGE)` experiment
+was performed in the isolated Linux execution container;
+see [41](41-STATIC-TRACEABILITY-AND-ISOLATED-FILESYSTEM-CHECK.md).
+
+An accessible isolation environment for full Hermes/Android
+integration **is not currently provisioned here**. The sandbox
+has no `cargo`, `adb`, Android emulator, Podman or Docker.
+Do not report the candidate remote/Hermes E2E tests as PASS.
+They remain pending a separate disposable test runner/device
+that does not carry the owner's secrets or provider sign-in.
+DN-16 **implementation remains prohibited** and this permission
+does not accept any ADR.
+
