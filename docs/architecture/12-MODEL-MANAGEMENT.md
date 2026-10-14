@@ -456,3 +456,31 @@ accepted.
 - That Hermes's `main` documentation describes any installed version.
 - That `model/rerouted` is ever sent to a client like the authority (OQ-50).
 - Any price, bill or entitlement.
+
+## 11. Final-product owner scope update (2026-10-13)
+
+Target directions in [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md)
+supersede the earlier **owner-choice assumptions**, not accepted ADRs:
+
+- **DN-09=C:** persist versioned *observed* session model and reroute events
+  where actually reported; ADR 0031 remains Proposed and its classifier
+  extension unapproved.
+- **DN-10=C (new):** infer effective configuration statically, with optional
+  read of an existing compatible session; no process starts solely to inspect.
+- **DN-38=D (new):** native visual model/effort selection via verified
+  provider mechanism only; never silent terminal injection.
+- **DN-42=C:** managed model/effort selection at session and per-turn scope;
+  requires a *separate* authority/security ADR, an accepted catalogue
+  guard and independent security review.
+- **DN-43=D:** historical provider-reported usage/limit metadata, with a
+  separately versioned, bounded privacy and retention contract; never
+  invented costs.
+
+A requested model, a provider's thread-grain report, a rerouted turn
+and an account rate-limit are four different observations. Do not
+assign provider thread data to a turn without report evidence, and
+do not infer money from tokens. Contracts/tests:
+[33](33-CROSS-DOMAIN-RECONCILIATION.md), [02 §4](02-REQUIREMENTS.md)
+and [20 §14](20-VERIFICATION-AND-ACCEPTANCE.md). Source protocol
+behaviour is still not measured (OQ-50/OQ-51). No ADR is accepted.
+
