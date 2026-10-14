@@ -211,7 +211,7 @@ approvals, Notifications, Devices/grants, Settings, Offline/reconnect.
 | Change network | No raw input automatically retransmitted; checkpoint/resync with "reconnected" and generation |
 | Approve managed action | Present exact managed-authority approval summary and per-operation step-up; no native-dialog imitation |
 | Prepare config request | Submit a versioned *proposal*, display "waiting for confirmation on the host"; cannot apply remotely |
-| Host logged out | Continue read/watch within applicable grants; **terminal.write denied by default** without an observed local login. Distinct owner-approved absent-host LP4 grant would require another reviewed policy, presence proof and short TTL. Host-only confirmation unavailable |
+| Host locked or logged out | Read/watch under valid separate grants; **LP4 terminal.write/create/close denied as temporary safe default** until a distinct owner-approved, independently reviewed absent-host policy exists. An active local login by itself is not a trustworthy human-presence signal under the same UID. This interim restriction does not satisfy the owner's final anywhere-control goal |
 | Lost phone | Revoke future gateway grants from a trusted context; do not claim previously executed commands undone or host account clean. Inspect persistence, user services, SSH keys, hooks and accessible credentials |
 | Notification | No command, path, prompt, output or recoverable content in push payload; local client fetches details only after authenticated open |
 | Offline | Read-only last-known *metadata*, visibly stale; no local queue of arbitrary shell commands |
@@ -283,3 +283,22 @@ functional target (remote full control on chosen devices)
 remains; implementing it safely requires a real independently
 reviewed security boundary, hardware/Android evidence, process
 survival and restart tests. No deployment is authorised.
+
+### 10.1 Interim lock/logout restriction is NOT final away-control acceptance
+
+The owner needs remote terminal control from outside the
+house even when the Linux desktop GUI is not open.
+A permanently refused LP4-away capability does **not**
+satisfy DN-44. Until a technically reviewed solution
+exists, default-deny LP4 input on screen lock *and*
+logout; a mere "session logged in" check by a
+same-UID gateway is not an OS security boundary.
+The final design must either securely offer
+explicitly consented LP4-away or obtain the owner's
+informed acceptance of the concrete restriction.
+Device grant, input claim, attested presence,
+gateway ownership and account-compromise recovery
+are separate required contracts, not interchangeable.
+See [the Codex audit](reviews/2026-10-14-post-reject-corrections-external-audit.md)
+ER-01 through ER-03. No runtime test or ADR
+has accepted this interim policy.
