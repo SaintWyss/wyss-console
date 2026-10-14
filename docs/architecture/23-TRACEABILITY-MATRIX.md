@@ -270,25 +270,25 @@ DN-05 and DN-31 remain unresolved; a design link does not equal acceptance.
 | FR-TERM-13 | 35 §5 | F9 | TS-HYB-08 | AC-FINAL-18 |
 | FR-TERM-14 | 34 §5; 35 §4 | T2/F9 | TS-FINAL-02 | AC-FINAL-19 |
 | FR-TERM-15 | 35 §5 | F9/P1 | TS-FINAL-03 | AC-FINAL-20 |
-| FR-MOD-11 | 33 C05; 12 §5 | F6b | TS-FINAL-04 | AC-FINAL-21 |
-| FR-MOD-12 | 33 C05; ADR 0031 | F6a/F6b | TS-FINAL-05 | AC-FINAL-22 |
+| FR-MOD-11 | 33 RC-05; 12 §5 | F6b | TS-FINAL-04 | AC-FINAL-21 |
+| FR-MOD-12 | 33 RC-05; ADR 0031 | F6a/F6b | TS-FINAL-05 | AC-FINAL-22 |
 | FR-MOD-13 | ADR 0031 §3–4 | F6a | TS-FINAL-06 | AC-FINAL-23 |
 | FR-MOD-14 | 12 §5; 32 DN-38 | F6b | TS-FINAL-07 | AC-FINAL-24 |
-| FR-MOD-15 | 33 C05; 12 §6 | F6a | TS-FINAL-08 | AC-FINAL-25 |
+| FR-MOD-15 | 33 RC-05; 12 §6 | F6a | TS-FINAL-08 | AC-FINAL-25 |
 | FR-UX-07 | 32 DN-32; 13 §2 | F3b/F10a | TS-FINAL-09 | AC-FINAL-26 |
 | FR-UX-08 | 32 DN-33; 13 §2 | F1/F5 | TS-FINAL-10 | AC-FINAL-27 |
 | FR-UX-09 | 32 DN-34; 13 §13 | F13/T1 | TS-FINAL-11 | AC-FINAL-28 |
-| FR-UX-10 | 32 DN-35; 33 C13 | F10a | TS-FINAL-12 | AC-FINAL-29 |
+| FR-UX-10 | 32 DN-35; 33 RC-13 | F10a | TS-FINAL-12 | AC-FINAL-29 |
 | FR-UX-11 | 32 DN-39; 05 §12 | T1 | TS-FINAL-13 | AC-FINAL-30 |
 | FR-UX-12 | 32 DN-37; 27 | F2v | TS-FINAL-14 | AC-FINAL-31 |
 | FR-PRF-10 | 32 DN-20; 09 §3 | F3a/F3c | TS-ORC-08 | AC-FINAL-32 |
 | FR-PRF-11 | 32 DN-14; 09 §3 | F3c | TS-FINAL-15 | AC-FINAL-33 |
-| FR-CFG-18 | 32 DN-12; 33 C12 | F5 | TS-FINAL-16 | AC-FINAL-34 |
-| FR-CFG-19 | 32 DN-13; 33 C12 | F4b/F5 | TS-FINAL-17 | AC-FINAL-35 |
-| FR-SEC-11 | 32 DN-22; 33 C02 | F5 | TS-FINAL-18 | AC-FINAL-36 |
-| FR-AGT-04 | 17 §6; 33 C04 | F12 | TS-ORC-15 | AC-FINAL-37 |
+| FR-CFG-18 | 32 DN-12; 33 RC-12 | F5 | TS-FINAL-16 | AC-FINAL-34 |
+| FR-CFG-19 | 32 DN-13; 33 RC-12 | F4b/F5 | TS-FINAL-17 | AC-FINAL-35 |
+| FR-SEC-11 | 32 DN-22; 33 RC-02 | F5 | TS-FINAL-18 | AC-FINAL-36 |
+| FR-AGT-04 | 17 §6; 33 RC-04 | F12 | TS-ORC-15 | AC-FINAL-37 |
 | FR-AGT-05 | 17 §1; 32 DN-11 | F12 | TS-FINAL-19 | AC-FINAL-38 |
-| FR-OBS-07 | 33 C05/C13; 12 §6 | F6a | TS-FINAL-20 | AC-FINAL-39 |
+| FR-OBS-07 | 33 RC-05/RC-13; 12 §6 | F6a | TS-FINAL-20 | AC-FINAL-39 |
 | FR-DIST-07 | 32 DN-07; 36 §4 | F13-personal | TS-FINAL-21 | AC-FINAL-40 |
 
 ### 5.1 Items that cannot be counted as verified
@@ -362,3 +362,33 @@ the new negative tests from 37 §3 use TS-CFG-21..24.
 Their approvals are respectively AC-CFG-AUTH-01
 and AC-CFG-AUTH-02. No source implies these tests
 were run or passed.
+
+## 8. Codex/Sol High REJECT consistency delta (2026-10-14)
+
+The latest adversarial audit
+[reviews/2026-10-14-post-reject-corrections-external-audit.md](reviews/2026-10-14-post-reject-corrections-external-audit.md)
+returns **REJECT**, not plan acceptance.
+`FR-ORC-06 / TS-ORC-04 / AC-FINAL-06`
+and `TS-ORC-14` are a **future, ADR-gated**
+acceptance track for DN-08=A, not proofs of
+today's multi-runtime capability. The accepted
+ADR 0012/0015 base must first pass
+`TS-SEC-MAN-01`: one shared App Server
+and one globally active managed turn, with
+honest queued/denied behaviour during OL3.
+
+`FR-HRS-04/05, FR-CFG-18/19` need
+all four original `TS-CFG-17..20`
+positive/negative authoring + exact-undo
+acceptances defined in [20 §16.1](20-VERIFICATION-AND-ACCEPTANCE.md).
+`AC-CFG-AUTH-01` is *defined there*, and
+`AC-CFG-AUTH-02` remains the additional
+four negative cases `TS-CFG-21..24`.
+
+`FR-REM-12/16` must also meet the
+revised `TS-HYB-03/AC-FINAL-11`:
+acknowledgement ambiguity fails as
+`OUTCOME_UNKNOWN` with **no byte replay**,
+not an invented global exactly-once guarantee.
+Neither this trace nor the PR's presence
+means any test or ADR passed.
