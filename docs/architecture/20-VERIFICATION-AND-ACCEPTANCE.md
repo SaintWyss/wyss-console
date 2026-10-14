@@ -676,7 +676,7 @@ or implementation authorisation.
 | TS-HAND-05 | AC-HAND-02 | Source generation changed and volatile draft lost: explicit stale result, no hidden content written |
 | TS-ADP-OC-01..09 | AC-ADP-OC-01 | Per-version OpenCode config precedence, JSONC round-trip, symlinks, overlapping skills, MCP secrets, plugin nonexecution, version drift and external writes cause read-only/refusal as documented in 37 §2.2 |
 | TS-ADP-HR-01..05 | AC-ADP-HR-01 | Hermes native TUI and planner persona separate; no direct effectful tool when planner-confined; wrong trust domain never inherits authority |
-| TS-CFG-17..20 | AC-CFG-AUTH-01 | Native executable-command dialog, invalid input, race with provider, native-writer allowlist: no page-controlled shell, no unsafe mutation |
+| TS-CFG-21..24 | AC-CFG-AUTH-02 | Native executable-command dialog, invalid input, race with provider, native-writer allowlist: no page-controlled shell, no unsafe mutation |
 | TS-MET-01..08 | AC-MET-01 | Model/usage observations stay provider-reported and proper grain; no duplicate aggregation, invented costs or secret-bearing durable events |
 | TS-UIX-01..07 | AC-UIX-01 | Three theme contrasts, keyboard+IME, screen-reader focus, denied/locked/offline, no notification secrets, no automatic agent restart, small Android viewport usability |
 | TS-UIX-08 | AC-UIX-02 | With reduced-motion OS preference, animations/transition effects are suppressed without obscuring status or focus |
@@ -688,3 +688,39 @@ or implementation authorisation.
 Hermes, source-version manifest acceptance, vault keyring/snapshot and
 write races, remote transport security, memory benchmarks and independent
 review. Test fixture descriptions alone cannot close them.
+
+## 16. IR-01–15 corrective security acceptance (2026-10-14)
+
+Review verdict **REJECT**, independent status limited:
+[reviews/2026-10-13-independent-post-owner-review.md](reviews/2026-10-13-independent-post-owner-review.md).
+The signed-off candidate correction spec is **not accepted**:
+[42](42-POST-REJECT-CORRECTIVE-PLAN.md). No tests below
+have been run; all results `NOT RUN`.
+The previous **TS-CFG-17..20** (20 §3.4) preserve their
+original meanings. **TS-CFG-21..24** (37 §3)
+are new independent negative cases, with
+`AC-CFG-AUTH-02`. No old identifier is overwritten.
+
+| ID | Acceptance | Required fail/pass assertion (NOT RUN) |
+| --- | --- | --- |
+| TS-SEC-OL3-01 | AC-IR-01 | A compromised native OL3 agent with same-UID rights can attempt `approvals.respond`, `submit`, `grant_step` and socket calls. Under current same-UID accepted ADR, **auto-native dispatch denied**; any proposed new OS boundary must deny all cross-layer calls |
+| TS-SEC-OL3-02 | AC-IR-03 | Whole-DAG approval + automatic malicious handoff may not launch any native/full-account step without verified OS isolation and per-attempt host-local confirmation of reviewed bytes |
+| TS-SEC-REM-01 | AC-IR-02 | Logged-out host rejects default LP4 input; only a *separately owner-approved and reviewed* absent-host grant could change this, with short TTL |
+| TS-SEC-REM-02 | AC-IR-02 | Revoked remote grant never labelled "host recovered" after malicious LP4 persistence; require explicit account integrity review |
+| TS-SEC-REM-03 | AC-IR-06 | Crash gateway after terminal effect before ACK: old claim epoch invalid; returns OUTCOME_UNKNOWN, never replays; managed intents dedup by authority receipts |
+| TS-SEC-HOST-01 | AC-IR-07 | Escape process scope/PTY and crash host; report ORPHANS_POSSIBLE, prohibit duplicate launch and record outstanding writers |
+| TS-SEC-HOST-02 | AC-IR-09 | Malicious terminal parser crash/OOM does not kill PTY supervisor or sibling terminal; show degraded screenshot |
+| TS-SEC-HOST-03 | AC-IR-08 | Waiting-approval OL3 causes coordinator keepalive, blocks host idle exit; manager restart exhaustion yields HOST_UNAVAILABLE |
+| TS-SEC-MOB-01 | AC-IR-10 | Missing/failing hardware key attestation and per-use authentication causes default LP4 denial; emulator result not hardware proof |
+| TS-SEC-ORC-01 | AC-IR-11 | Revoking authorising device pauses future dependent pipeline steps and reports already-running native work honestly |
+| TS-SEC-CFG-01 | AC-IR-12 | Vault locked without local login gives VAULT_LOCKED_NO_SESSION; config.request never auto-applies even on queued pending |
+| TS-SEC-AGT-01 | AC-IR-05 | Hermes-generated free shell, interpreters and encoded loaders blocked; only allowlisted typed Wyss operations admitted under policy |
+| TS-SEC-MAN-01 | AC-IR-04 | Existing ADR 0012+0015 forces one shared App Server and one active managed turn; second managed turn serializes or denies, never silently relaxes unique active index |
+| TS-CFG-21..24 | AC-CFG-AUTH-02 | Config page arbitrary executable refused, invalid paths rejected, concurrent-write conflict blocked, unverified writer args prohibited; TS-CFG-17..20 keep original undo semantics |
+| TS-SEC-TRACE-01 | AC-IR-13 | No reused test identifiers with differing definitions; TS-CFG-17..20 unchanged in §3.4, negative cases use 21..24 |
+| TS-SEC-TRACE-02 | AC-IR-14 | Android mockups MA-01..10 distinct from 16's MS-01..10, review collisions RC-01..16 distinct from 31's C1..C18 |
+| TS-SEC-EVID-01 | AC-IR-15 | Temporary `EXDEV` evidence in 41 never satisfies DN-31 or reference-host replica/snapshot gates; no PASS without proper evidence |
+
+**No test execution, ADR acceptance or implementation authorisation is implied.**
+Acceptance requires controlled disposable host/device environments
+where permitted and a genuinely independent third review.
