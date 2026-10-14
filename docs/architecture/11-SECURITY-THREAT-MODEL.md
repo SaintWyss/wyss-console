@@ -321,3 +321,27 @@ A test that merely disables every native process is not a
 final-product acceptance of DN-15.
 See [42](42-POST-REJECT-CORRECTIVE-PLAN.md) for current
 conservative gates. No ADR accepted, no tests run.
+
+## 10. Elevated host-user authority through Docker on CachyOS (2026-10-14)
+
+The [native CachyOS report](reviews/2026-10-14-cachyos-native-feasibility.md)
+observed the logged-in Linux user has group-access to the **rootful**
+`/run/docker.sock`, with `dockerd` running as real UID 0.
+Docker's own documentation warns group `docker` grants
+root-level privileges:
+https://docs.docker.com/engine/install/linux-postinstall/
+
+| Threat ID | Capability/asset | Correct boundary and evidence status |
+| --- | --- | --- |
+| T-50 | Unrestricted native agent or LP4 gains root-equivalent operations through user's pre-existing Docker daemon permissions | **BLOCKED_ADMIN_DELEGATION**: same-host different UID is insufficient to protect authority binary, service, DB, verifier/signing material from an attacker able to use rootful Docker. This is a *threat-model consequence*, not an exploited host in the test |
+| T-51 | A restricted OL3 worker inherits Docker socket, another connected FD, host D-Bus/X11 bridge or another privileged broker | Bubblewrap omitted the Docker/socket paths in synthetic tests, but full inherited capabilities, alternate IPC paths and actual provider extensions remain unproved. Missing mount only protects that sandboxed process, not any unrestricted same-UID process outside |
+| T-52 | Remote LP4 account compromise gains elevated host privileges beyond ordinary user files | Consent and lost-device recovery must disclose possible **root-level Docker delegation**, not claim gateway revocation restores integrity |
+
+Further design and tests are in
+[47](47-CACHYOS-DOCKER-PRIVILEGE-AND-SANDBOX-DECISION.md).
+Do **not** remove Docker group membership, contact its live socket,
+restart services or probe privileged containers as part of
+the documentation review. A migration to rootless Docker or
+separately authenticated privileged access is a *future owner
+choice* requiring compatibility and rollback review.
+
