@@ -239,3 +239,63 @@ changing technology) and AD-18 (one store, one file), which are rules of method 
 phases P1 and "Always". Every control CTL-01 to CTL-40 names its test in
 [11 §3.1](11-SECURITY-THREAT-MODEL.md). This check was done by reading, not by a tool; a
 script that verifies it is a small task of F1 `[N]`.
+
+## 5. Owner final-product expansion — direct traceability (not implemented)
+
+Historical rows in §1 and §2 remain unchanged unless superseded by an
+accepted ADR. New targets in [02 §4](02-REQUIREMENTS.md) trace as follows;
+a named test is a *specification*, not an executed check. The exact
+pass/fail criteria are in [20 §14](20-VERIFICATION-AND-ACCEPTANCE.md).
+DN-05 and DN-31 remain unresolved; a design link does not equal acceptance.
+
+| Requirement | Design contract | Candidate phase | Test | Acceptance |
+| --- | --- | --- | --- | --- |
+| FR-ORC-01 | 34 §1–4 | F11b | TS-ORC-01 | AC-FINAL-01 |
+| FR-ORC-02 | 34 §1–4 | F11b | TS-ORC-03 | AC-FINAL-02 |
+| FR-ORC-03 | 34 §3–4 | F11b | TS-ORC-02 | AC-FINAL-03 |
+| FR-ORC-04 | 34 §2/4 | F11b | TS-ORC-05 | AC-FINAL-04 |
+| FR-ORC-05 | 34 §3/5 | F11b | TS-ORC-07 | AC-FINAL-05 |
+| FR-ORC-06 | 34 §2/4 | F8/F11b | TS-ORC-04 | AC-FINAL-06 |
+| FR-ORC-07 | 34 §1/6 | F11b | TS-ORC-09 | AC-FINAL-07 |
+| FR-ORC-08 | 34 §2/7 | F11b | TS-ORC-13 | AC-FINAL-08 |
+| FR-REM-10 | 35 §7 | F10b | TS-HYB-05 | AC-FINAL-09 |
+| FR-REM-11 | 35 §3/6 | F10a | TS-HYB-01 | AC-FINAL-10 |
+| FR-REM-12 | 35 §6 | F10a | TS-HYB-03 | AC-FINAL-11 |
+| FR-REM-13 | 35 §4 | F9 | TS-HYB-06 | AC-FINAL-12 |
+| FR-REM-14 | 35 §5/6 | F9/F10a | TS-HYB-09 | AC-FINAL-13 |
+| FR-REM-15 | 35 §7 | F10b/F5 | TS-HYB-11 | AC-FINAL-14 |
+| FR-REM-16 | 35 §6/7 | F10a/F10b | TS-HYB-04 | AC-FINAL-15 |
+| FR-REM-17 | 35 §4/7 | F9 | TS-HYB-14 | AC-FINAL-16 |
+| FR-TERM-12 | 35 §5 | T1/P1 | TS-FINAL-01 | AC-FINAL-17 |
+| FR-TERM-13 | 35 §5 | F9 | TS-HYB-08 | AC-FINAL-18 |
+| FR-TERM-14 | 34 §5; 35 §4 | T2/F9 | TS-FINAL-02 | AC-FINAL-19 |
+| FR-TERM-15 | 35 §5 | F9/P1 | TS-FINAL-03 | AC-FINAL-20 |
+| FR-MOD-11 | 33 C05; 12 §5 | F6b | TS-FINAL-04 | AC-FINAL-21 |
+| FR-MOD-12 | 33 C05; ADR 0031 | F6a/F6b | TS-FINAL-05 | AC-FINAL-22 |
+| FR-MOD-13 | ADR 0031 §3–4 | F6a | TS-FINAL-06 | AC-FINAL-23 |
+| FR-MOD-14 | 12 §5; 32 DN-38 | F6b | TS-FINAL-07 | AC-FINAL-24 |
+| FR-MOD-15 | 33 C05; 12 §6 | F6a | TS-FINAL-08 | AC-FINAL-25 |
+| FR-UX-07 | 32 DN-32; 13 §2 | F3b/F10a | TS-FINAL-09 | AC-FINAL-26 |
+| FR-UX-08 | 32 DN-33; 13 §2 | F1/F5 | TS-FINAL-10 | AC-FINAL-27 |
+| FR-UX-09 | 32 DN-34; 13 §13 | F13/T1 | TS-FINAL-11 | AC-FINAL-28 |
+| FR-UX-10 | 32 DN-35; 33 C13 | F10a | TS-FINAL-12 | AC-FINAL-29 |
+| FR-UX-11 | 32 DN-39; 05 §12 | T1 | TS-FINAL-13 | AC-FINAL-30 |
+| FR-UX-12 | 32 DN-37; 27 | F2v | TS-FINAL-14 | AC-FINAL-31 |
+| FR-PRF-10 | 32 DN-20; 09 §3 | F3a/F3c | TS-ORC-08 | AC-FINAL-32 |
+| FR-PRF-11 | 32 DN-14; 09 §3 | F3c | TS-FINAL-15 | AC-FINAL-33 |
+| FR-CFG-18 | 32 DN-12; 33 C12 | F5 | TS-FINAL-16 | AC-FINAL-34 |
+| FR-CFG-19 | 32 DN-13; 33 C12 | F4b/F5 | TS-FINAL-17 | AC-FINAL-35 |
+| FR-SEC-11 | 32 DN-22; 33 C02 | F5 | TS-FINAL-18 | AC-FINAL-36 |
+| FR-AGT-04 | 17 §6; 33 C04 | F12 | TS-ORC-15 | AC-FINAL-37 |
+| FR-AGT-05 | 17 §1; 32 DN-11 | F12 | TS-FINAL-19 | AC-FINAL-38 |
+| FR-OBS-07 | 33 C05/C13; 12 §6 | F6a | TS-FINAL-20 | AC-FINAL-39 |
+| FR-DIST-07 | 32 DN-07; 36 §4 | F13-personal | TS-FINAL-21 | AC-FINAL-40 |
+
+### 5.1 Items that cannot be counted as verified
+
+- External review of `wyss-control` concurrency and the separate managed-model-selection ADR.
+- Acceptance of ADR 0031, reroute classifier protocol observations, analytics privacy/retention policy.
+- Remote transport DN-05, phone keying, gateway/pairing, relay confidentiality, host screen parser.
+- Provider write protocol L1/L2/L5, DN-31 snapshot and sync exclusion, vault keyring and B1.
+- Hermes process containment and effectful-tool proof (OQ-55–57).
+- All performance numbers and reference device runs; independence of post-REJECT review.
