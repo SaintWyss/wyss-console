@@ -839,3 +839,31 @@ They are specifications only. None was run.
 Nothing in F1 to F8 may assume these, except one rule that costs nothing now: the configuration
 engine's interface carries no window or socket type (ADR 0028 §2) `[R]`, so that it can be called
 from a gateway later.
+
+## 12. Owner-selected remote target vs original RA3 recommendation
+
+**2026-10-13:** The owner explicitly *did not choose DN-05*. The
+preferred final-product UX is a transparent connection on LAN, direct
+encrypted P2P where available and relay fallback elsewhere without
+manual VPN interaction per connection. The original §5.1's **HS1+RA3
+is a technical candidate, not an owner-approved decision**. An
+automatic overlay and an embedded P2P/relay transport must be
+compared before an ADR is selected; Sarmiento is optional infrastructure
+research, never automatic Wyss authentication.
+
+Owner selected DN-44=B (LP4 on Android and second PC, full host
+account privilege, default off), DN-45=B (prepare config remotely,
+confirm **on host** only), DN-46=B (explicit lingering), DN-47=B
+(screen-state fidelity) and DN-48=A (native Android client).
+The candidate design, transport decision procedure, reconnect
+protocol, screen-parser requirements and security gates are in
+[35](35-HOST-REMOTE-AND-MOBILE-DELTA.md) and
+[33](33-CROSS-DOMAIN-RECONCILIATION.md).
+
+The existing §5.3 is authoritative about the **consequence** of
+`terminal.write`: it grants shell/account power, irrespective of
+narrower config grants or phone presence checks. No remote
+security claim, screen fidelity or network performance is
+verified by this owner decision. DN-31 remains blocking to
+provider-file mutations. No remote service or experiment is authorised.
+
