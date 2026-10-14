@@ -299,3 +299,32 @@ DN-05 and DN-31 remain unresolved; a design link does not equal acceptance.
 - Provider write protocol L1/L2/L5, DN-31 snapshot and sync exclusion, vault keyring and B1.
 - Hermes process containment and effectful-tool proof (OQ-55–57).
 - All performance numbers and reference device runs; independence of post-REJECT review.
+
+## 6. Existing-requirement gap crosswalk — handoff, adapters, UX, analytics
+
+[37](37-HANDOFF-ADAPTERS-UX-AND-DATA-CONTRACTS.md) gives
+candidate contract detail to existing requirements whose trace was
+too shallow. Acceptance criteria and **NOT RUN** status are in
+[20 §15](20-VERIFICATION-AND-ACCEPTANCE.md).
+These rows supplement the historical matrix; they do not
+retroactively change accepted ADRs or implemented evidence.
+
+| Requirement | Candidate contract | Tests | Acceptance |
+| --- | --- | --- | --- |
+| FR-SES-04 | 37 §1 explicit handoff and state guards | TS-HAND-01/02/03/05 | AC-HAND-01 |
+| FR-SES-05 | 37 §1.2 plane boundary and new session | TS-HAND-04/05 | AC-HAND-02 |
+| FR-ADP-01..05 | 37 §2 exact-version descriptors for OpenCode and Hermes | TS-ADP-OC-01..09; TS-ADP-HR-01..05 | AC-ADP-OC-01; AC-ADP-HR-01 |
+| FR-HRS-04/05 | 37 §3 native authoring, review and failure states | TS-CFG-17..20 | AC-CFG-AUTH-01 |
+| FR-HRS-09 | 37 §3 closed provider-native operations | TS-CFG-20 | AC-CFG-AUTH-01 |
+| FR-MOD-08/09 | 37 §5 source-grain metadata and observed model events | TS-MET-01..08 | AC-MET-01 |
+| FR-UX-01/02/03/05 | 37 §4/6 Android screens and desktop capability segregation | TS-UIX-01..07 | AC-UIX-01 |
+| FR-REM-09 | 37 §4 native Android ten screen states | TS-UIX-04/07 | AC-UIX-01 |
+| NFR-A11Y-02/03 | 37 §6 accessible themes and state | TS-UIX-01/03 | AC-UIX-01 |
+| NFR-A11Y-04 | 37 §6 reduced-motion acceptance | TS-UIX-08 | AC-UIX-02 |
+| FR-OBS-01 | 20 §15 event reader acceptance | TS-OBS-01 | AC-OBS-01 |
+| FR-OBS-03 | 20 §15 native lifecycle acceptance | TS-OBS-02 | AC-OBS-02 |
+| FR-DAT-04 | 20 §15 persistence/quota acceptance | TS-DAT-04 | AC-DAT-04 |
+
+Acceptance IDs are *definitions of required outcomes*, not evidence
+that their tests were carried out. Release readiness still requires
+the independent review and blocked technical evidence of 36.
