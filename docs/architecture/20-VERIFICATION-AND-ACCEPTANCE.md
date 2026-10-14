@@ -799,3 +799,18 @@ planning (not a product runtime test).
 No Docker API call, privilege escalation or real provider launch
 is authorised by writing these test criteria.
 
+
+### 17.1 Composed B1 verification is different from kernel-primitives PASS
+
+[49](49-CACHYOS-COMPOSED-WORKER-SECURITY-CONTRACT.md)
+maps `FX-B1-A..E` to current
+`FR-SEC-13 / TS-DOCKER-03 / AC-DOCKER-02`,
+`FR-PRF-12 / TS-DOCKER-04 / AC-DOCKER-03`,
+and `FR-ORC-04 / TS-SEC-OL3-02 / AC-IR-03`.
+These tests demand *both* useful fake-provider actions
+and negative broker/IPC/FD checks. The prior
+CachyOS report checked individual primitives,
+not a full composed provider sandbox. Current result:
+**NOT RUN / NOT_PROVEN** for the composed profile.
+`FX-B1-C` (fake inference egress) must not pass
+via a provider that cannot make any useful request.
