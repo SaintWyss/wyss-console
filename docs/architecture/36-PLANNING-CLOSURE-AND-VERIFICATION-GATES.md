@@ -350,3 +350,24 @@ No Docker socket/API interaction or provider tests
 are required to validate the *source-supported
 architectural conflict*.
 
+## 17. Provider-native feature preservation under restricted OL3
+
+The source-only matrix in
+[48](48-PROVIDER-ISOLATION-AND-AUTH-COMPATIBILITY.md)
+identifies different credential storage, refresh
+and effective-config contracts for Codex, Claude,
+OpenCode and Hermes. The pinned **managed Codex**
+behaviour in ADR 0018 cannot be promoted to
+unrestricted *native* Codex, nor extrapolated
+to Claude's Linux `.credentials.json` or
+OpenCode's `auth.json`. The current
+CachyOS synthetic case supports in-place
+write under a narrow file bind and demonstrates
+that atomic-replace refresh may require a
+directory bind with greater authority.
+The actual native provider versions, token
+refresh style, hooks/MCP, inference network
+and safe access scope remain **NOT_PROVEN**.
+Do not disable real required functions or copy
+real credentials to manufacture a sandbox PASS.
+
