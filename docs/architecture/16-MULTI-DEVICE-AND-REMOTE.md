@@ -924,3 +924,25 @@ must specify byte-level ACK, partial writes, independent
 host/gateway restarts, claim invalidation, no replay on
 uncertainty and client-visible `OUTCOME_UNKNOWN`.
 All tests remain **NOT RUN**.
+
+## 15. Native CachyOS LP4 threat scope: rootful Docker access
+
+The [2026-10-14 native report](reviews/2026-10-14-cachyos-native-feasibility.md)
+observed rootful Docker socket access by the Linux user.
+Under that account configuration, unrestricted
+LP4 `terminal.write` grants a shell that **may
+operate Docker with root-level privileges**, not
+only edit owner files. This is a material expansion
+of the explicit informed-risk description required
+by DN-44. No such privileged operation was tested.
+Default-off LP4 and short writer claims are interim
+planning candidates, not accepted security guarantees
+or replacements for full remote product intent.
+
+[47](47-CACHYOS-DOCKER-PRIVILEGE-AND-SANDBOX-DECISION.md)
+defines the security alternatives; **none changes**
+user groups, daemon, Docker context, accepted ADRs
+or existing Sarmiento service. Revocation of an
+LP4 device cannot undo already executed host-account
+or Docker-level changes.
+
