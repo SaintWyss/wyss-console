@@ -1218,3 +1218,29 @@ represent them** (the owner's instruction of 2026-10-13).
 | The leader chord                                                                                                               | OQ-14                                 |
 | That the vault, the write protocol and the launcher exist                                                                      | Proposed; blocked as 26 §2 says       |
 | That any screen here is the right design                                                                                       | No design contract exists; unreviewed |
+
+## 16. Final-product UI choices and design delta (2026-10-13)
+
+The owner selected in [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md):
+DN-32=A (global navigation, sessions grouped by project, Devices with F10a);
+DN-33=C (explain a blocked item in place, hide whole unavailable areas);
+DN-34=C (dark/light/high contrast);
+DN-35=C (desktop notification categories individually opted in, no
+secret-bearing payload); DN-36=D (assist re-launch of dead agent panels
+without automatic execution); DN-37=B (30-day configurable vault
+review reminder); DN-38=D (native model switcher using safe
+provider mechanism); DN-39=C (leader and conflict-free direct chords).
+DN-48=A requires a separate **native Android UI**, not a responsive
+desktop web view substituted for it.
+
+These are functional contract requirements; this document's preexisting
+screens/mockups do not become visually approved by their selection.
+Android screens/states are enumerated in
+[35 §7](35-HOST-REMOTE-AND-MOBILE-DELTA.md); state-machine and
+threat interactions in [33](33-CROSS-DOMAIN-RECONCILIATION.md).
+The desktop config and terminal capabilities must be separated
+(DN-22=B), but no OS-user containment is thereby guaranteed.
+Acceptance tests are in [20 §14](20-VERIFICATION-AND-ACCEPTANCE.md).
+UI visual review, contrast measurements and real keyboard/IME tests
+remain unperformed. No production changes are authorised.
+
