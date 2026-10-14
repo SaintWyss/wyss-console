@@ -156,3 +156,49 @@ commands, secrets or real policies may be modified.
 This correction does not accept an ADR or prove
 Hermes confinement.
 
+## 6. Wyss original implementation: source-qualified guard evidence (2026-10-14)
+
+The earlier glob-only warning in §5 was **incomplete**
+as a description of real execution protections.
+Read-only source was checked at the exact commit
+`SaintWyss/wyss@0761dcdacdafa216c8afc25036e24685855d2228`:
+
+- `src/execution/shell.py:35–64, 92–116`: `ShellAdapter`
+  has a **fail-closed empty allowlist by default**,
+  receives `allowed_binaries` or a TOML config explicitly,
+  runs subprocesses with `argv` and `shell=False`,
+  with further guard/policy checks in the adapter.
+  Thus *accepting* a plan's string at policy level does
+  **not** imply that the shell executes it in the
+  default configuration.
+- `src/execution/filesystem.py:129–178`: second wall
+  resolves target and re-authorizes; rejects symlink
+  redirection on the final path component.
+- `src/execution/filesystem.py:285–297`: after the
+  path check, mutation uses normal
+  `resolved_path.write_bytes/write_text`; path
+  and ancestor state are not necessarily pinned by
+  file descriptors. A concurrent attacker changing
+  mutable directories between resolution and open
+  is a plausible TOCTOU risk, **not a proven exploit**.
+- `packages/wyss-core/src/core/policy/engine.py:77–90`:
+  target patterns are textual `fnmatch`. Multiple
+  **other guard layers** mean this fact alone does
+  not demonstrate a full execution bypass.
+
+Source links:
+- https://github.com/SaintWyss/wyss/blob/0761dcdacdafa216c8afc25036e24685855d2228/src/execution/shell.py
+- https://github.com/SaintWyss/wyss/blob/0761dcdacdafa216c8afc25036e24685855d2228/src/execution/filesystem.py
+- https://github.com/SaintWyss/wyss/blob/0761dcdacdafa216c8afc25036e24685855d2228/packages/wyss-core/src/core/policy/engine.py
+
+**Consequence for DN-06=D:** No new unrestricted shell
+policy is approved. A future closed typed action
+vocabulary still needs an explicit versioned adapter
+catalog, allowed operand ranges, derived/transitive
+effects, safe file descriptor/path handling, OS
+principal, approval integrity and failure/retry rules.
+An empty allowlist passing negative tests is NOT proof
+of useful Wyss Agent capabilities. E-HRM-09 must
+include **both positive useful actions and adverse
+variants**, not only invalid shell names. All runtime
+tests remain **NOT RUN**.
