@@ -188,3 +188,51 @@ the reviewer has legitimate access to this private PR.
 No request to run experiments, change credentials, install
 packages or merge code is included. Any later verification
 and final approval is a separate action by the owner.
+
+
+## 7. Post-REJECT third-review assignment (2026-10-14)
+
+A first post-owner adversarial report is now at
+[reviews/2026-10-13-independent-post-owner-review.md](reviews/2026-10-13-independent-post-owner-review.md).
+It returned **REJECT**, enumerated IR-01–15 and explicitly
+disclosed its author's overlap with earlier design documents.
+It **does not satisfy the independent-third-review gate**.
+
+Read that preserved report first, then
+[42](42-POST-REJECT-CORRECTIVE-PLAN.md) and the corrected
+33, 34, 35, 37, 16, 20, 23 and 40. Check the actual
+accepted ADRs 0011, 0012, 0015 and 0020 and
+the original Wyss policy source. A third reviewer
+**must not have authored the prior baseline or corrections**;
+do not reuse an earlier reviewer identity or claim the
+existing Claude report is independent.
+
+Required response: independent PASS/REJECT **on paper
+only**, and for each IR-01..15 either:
+(a) verified mitigated in *specification only*, with
+exact file/section and correct blocked implementation
+gate, (b) still defective, with counterexample,
+or (c) requiring technical evidence, explicitly NOT RUN.
+Verify preservation of TS-CFG-17..20, distinct
+TS-CFG-21..24, RC vs historic C, MA vs MS,
+and status of current ADR 0012/0015 concurrency.
+
+Focus beyond editorial consistency: whether a
+same-UID unrestricted native agent could impersonate
+approval APIs even after the proposed corrections;
+whether the selected trust boundary changes requested
+native-session functionality; whether device revocation
+could ever restore host integrity after LP4; whether
+a separate PTY/parser process really isolates crashes;
+and whether the proposed `LP4-away` fallback violates
+the owner's understanding of remote control. **Do not
+turn a blocking contradiction into a green badge merely
+because the next document calls it BLOCKED**.
+
+No app code, provider runs, services, personal file reads,
+new ADR acceptance, PR merge or owner-device tests.
+Independently authored report must say which files
+and pinned commits were actually reviewed. The
+final-product plan stays unapproved despite any
+positive paper verdict; the owner has a later,
+separate approval gate.
