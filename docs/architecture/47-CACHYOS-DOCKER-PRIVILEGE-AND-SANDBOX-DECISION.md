@@ -234,3 +234,18 @@ Compose/workload/volumes/ports/service needs with separately authorised,
 nonsecret and non-disruptive evidence; define backup, import and rollback;
 and ask for **explicit** approval before changing daemon, groups,
 contexts or containers. None of this was performed.
+
+
+## 10. Combined profile next-test contract
+
+[49](49-CACHYOS-COMPOSED-WORKER-SECURITY-CONTRACT.md)
+defines the narrowed B1 acceptance tests (FX-B1-A..E)
+for a real **synthetic** CachyOS worker with useful
+project and fake auth function, negative authority/
+Docker/D-Bus/FD coverage, inference-broker design
+and truthful PTY lifecycle. It does not alter the
+rootful Docker risk or approve a D1/D2 migration.
+For correct claim scope, **B1-local containment
+does not establish trusted human approvals or
+protection from independent unconfined U/LP4**
+while host-root delegation is reachable.
