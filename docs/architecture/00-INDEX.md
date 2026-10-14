@@ -337,3 +337,20 @@ This is a *handoff*, not a completed test.
 ### CachyOS-native verification correction
 
 [46](46-CACHYOS-NATIVE-VERIFICATION-HANDOFF.md) **supersedes** the blanket VM requirement previously written in [45](45-DISPOSABLE-VM-VERIFICATION-HANDOFF.md). Wyss Console targets the owner's **native CachyOS KDE**. Read-only host inspection and unprivileged disposable mock tests can take place on CachyOS under strict no-personal-config/no-root/no-service-change guards. Only genuinely privileged/dangerous experiments need a separate disposable environment; no Ubuntu installation or VM is required for ordinary progress.
+
+### CachyOS-specific Docker and sandbox security correction (2026-10-14)
+
+[47](47-CACHYOS-DOCKER-PRIVILEGE-AND-SANDBOX-DECISION.md)
+uses the [native CachyOS report](reviews/2026-10-14-cachyos-native-feasibility.md)
+to re-evaluate protected approval authority A,
+restricted worker B and remote LP4.
+**Landlock ABI 7 did not isolate pathname Unix socket
+connections by itself**; minimal bubblewrap mount
+views did in synthetic fixtures. Rootful Docker
+socket access creates `BLOCKED_ADMIN_DELEGATION`
+for claims that a different-UID authority protects
+against every unrestricted native/LP4 process.
+No host Docker, credential, service or OS setting
+was changed. This is a new P0 blocker,
+not a solved architecture or a review PASS.
+
