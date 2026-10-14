@@ -60,6 +60,7 @@ survives the death of its corresponding OS process.
 | C14 DN-07=A vs previous F13 public release obligations | Documentation could claim personal finished product requires public signing server and multi-platform release | Separate *personal installation/upgrade/backup acceptance* from public distribution; mark DN-49/DN-51 and public marketing/support tests N/A conditionally. No implementation, no publishing and ADR 0027 stands | Rewrite phase/traceability and acceptance, review |
 | C15 OL3 vs low-resource desktop | Unbounded agents could exhaust memory or cause two writers in a project | Explicit separate limits for managed runtimes, native PTYs, project write locks, process trees, queued work, clocks, tokens/usage where available; admission and graceful stop | M01–M33 measurement plan and concurrency evidence |
 
+| C16 DN-15=OL3 + DN-46=B | A coordinator owned by the desktop window stops scheduling or mis-replays work at UI close/logout | Coordinator is a headless user service independent of UI, managed authority and terminal parsing; no auto-launch on restoring UI (34 §2.1) | Headless lifecycle/restart tests and explicit linger consent |
 ## 3. Boundary diagram (target, not installed)
 
 ```mermaid
