@@ -227,3 +227,26 @@ isolation, provider, Android or filesystem tests.
 
 **No merge, no ADR acceptance, no code implementation.**
 
+## 7. CachyOS blocker: root-equivalent Docker delegation
+
+The [CachyOS report](reviews/2026-10-14-cachyos-native-feasibility.md)
+demonstrated group access to a live **rootful Docker socket**,
+without invoking it. Docker explicitly documents that the
+docker group provides root-level privileges. Accordingly,
+IR-01/IR-02 **cannot be fully remediated** by a different
+UID for protected authority while an unrestricted same-user
+agent/LP4 may use this delegated root capability.
+Mark `BLOCKED_ADMIN_DELEGATION` in addition to
+`BLOCKED_TRUST_BOUNDARY`.
+
+[47](47-CACHYOS-DOCKER-PRIVILEGE-AND-SANDBOX-DECISION.md)
+compares unchanged development access, rootless Docker,
+privileged-on-demand, honestly weaker approval guarantees
+and external approver options. None is selected or
+authorised as a host change. Native OL3 sandbox tests
+require non-mounted Docker socket AND closed indirect
+capabilities; regular manually launched unrestricted
+agents remain a separate attacker tier.
+The current host identity and Docker role cannot
+be claimed less privileged merely because `CapEff=0`.
+
