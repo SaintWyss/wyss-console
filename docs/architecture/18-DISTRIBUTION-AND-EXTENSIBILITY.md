@@ -544,3 +544,30 @@ A team sharing one methodology (a common set of rules and hooks, kept in step) w
 of the research report and is not a stated requirement of the owner. It is noted as a later
 study. It would build on profiles and on export and import, and it is where a "canonical
 configuration" idea, set aside for a single user by AD-03, would have to be examined again.
+
+## 14. Personal final-product scope override (DN-07=A, 2026-10-13)
+
+The owner's final-product target is **personal local deployment** to his
+own Linux computers and separately selected native Android client.
+No public distribution, external support/SLA, repository publication,
+release servers or user-facing packaging ecosystem is authorised.
+ADR 0027 remains in force. All earlier public delivery designs in
+§3–§11 remain *conditional research for a different future scope*,
+not current required implementation. DN-49/51 become not-applicable
+under current personal scope; DN-50 defaults to no network update check.
+
+Personal delivery still needs a secure, maintainable lifecycle:
+repeatable local install without damaging existing state; a supported
+update path, versioned migrations and verified rollback; private
+backups and key-loss handling; user-visible version, provenance
+and supported reference hardware; dependency/licence checks for any
+software actually shipped *even privately*. The scope cannot be used
+to skip security maintenance or protecting user secrets.
+The target is specified by FR-DIST-07 in
+[02 §4](02-REQUIREMENTS.md), TS-FINAL-21 and its acceptance in
+[20 §14](20-VERIFICATION-AND-ACCEPTANCE.md).
+
+Changing back to public distribution requires a separate owner
+scope decision, independent technical/legal/security review
+and reopening the conditional DN-49/51 choices.
+
