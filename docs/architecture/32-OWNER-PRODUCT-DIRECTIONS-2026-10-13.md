@@ -134,3 +134,26 @@ When an isolated provider setup or native Android/VM environment
 is actually available, each higher-risk probe still needs a named
 target, version, allowed data, exact procedure and rollback before execution.
 
+## 7. IR-01–15 REJECT overlays do not revoke the owner's product goals
+
+The post-owner review
+[reviews/2026-10-13-independent-post-owner-review.md](reviews/2026-10-13-independent-post-owner-review.md)
+is a **REJECT** of the proposed implementation
+contracts, not a rejection of the selected
+functionality DN-08, DN-15, DN-44, DN-46 or DN-48.
+New [42](42-POST-REJECT-CORRECTIVE-PLAN.md)
+states **fail-closed temporary blockers** for
+native OL3, managed concurrency, uncontrolled
+Hermes shell, absent-host LP4 and sensitive
+configuration mutation. Existing same-UID
+privileges cannot be treated as separate
+security principals.
+
+The owner asked to be consulted only when
+a meaningful product/security trade-off
+cannot be resolved by technical evidence.
+Safe defaults pending independent review
+do not preapprove a permanent reduction in
+final-product scope, unattended phone control
+or unauthenticated mobile fallbacks.
+
