@@ -207,3 +207,42 @@ that does not carry the owner's secrets or provider sign-in.
 DN-16 **implementation remains prohibited** and this permission
 does not accept any ADR.
 
+## 10. New REJECT and added P0 stop states (2026-10-14)
+
+The [post-owner adversarial report](reviews/2026-10-13-independent-post-owner-review.md)
+returns **REJECT** and declares limited independence.
+Its 15 findings and their corrective states are
+enumerated in [42](42-POST-REJECT-CORRECTIVE-PLAN.md).
+This extends the earlier P0 set with:
+
+- `BLOCKED_TRUST_BOUNDARY`: same-UID native agent/LP4
+  shell can impersonate local authority/gateway callers.
+  No native auto-step from OL3 until proven OS separation
+  AND per-launch current-context host confirmation.
+- `BLOCKED_NATIVE_HANDOFF`: full-DAG consent and
+  automated model output cannot trigger a native
+  full-account agent.
+- `BLOCKED_MANAGED_CONCURRENCY`: accepted ADR 0012
+  has one App Server; ADR 0015 has one global active
+  managed turn. Serialise until a separately
+  reviewed authority extension is accepted.
+- `BLOCKED_LP4_ABSENT`: remote terminal input denied
+  by default during host logout. A separate explicit
+  absent-host risk decision and technically reviewed
+  key/host boundary would be necessary.
+- `BLOCKED_FILESYSTEM`, `VAULT_LOCKED_NO_SESSION`:
+  no provider mutation or vault recovery if DN-31
+  unresolved or required keys unavailable.
+
+The 2026-10-13 [isolated EXDEV observation](41-STATIC-TRACEABILITY-AND-ISOLATED-FILESYSTEM-CHECK.md)
+is **only a negative cross-mount kernel check**. It
+cannot close DN-31, L1/L2/L5, snapshot exclusion,
+Syncthing ignore behaviour or the owner's actual
+filesystem proof.
+
+**Independent review is still outstanding.** The
+present author and earlier author/reviewer cannot
+self-convert the new REJECT to PASS. No code,
+provider experiment or ADR acceptance follows
+from documenting these blocked states.
+
