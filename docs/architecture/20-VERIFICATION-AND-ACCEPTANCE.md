@@ -659,3 +659,32 @@ in [15](15-PERFORMANCE-ENGINEERING.md).
 For all test IDs: provide fixture/version, test owner, no-secrets handling,
 assertion and actual result. A future review must mark each NOT RUN,
 PASS, FAIL or BLOCKED; it must not infer PASS from this specification.
+
+## 15. Contract-completion tests for older gap rows (not executed)
+
+Detailed behaviour specifications: [37](37-HANDOFF-ADAPTERS-UX-AND-DATA-CONTRACTS.md).
+The criteria below name required **future** fixtures and failure checks. Every
+result is currently `NOT RUN`; this addendum confers no provider-experiment
+or implementation authorisation.
+
+| Test ID | Acceptance | Required negative and positive behaviour |
+| --- | --- | --- |
+| TS-HAND-01 | AC-HAND-01 | Switch view/open new session: no implicit history, file, token or policy transfer |
+| TS-HAND-02 | AC-HAND-01 | Digest changed after review: no receiver launch until re-confirmed |
+| TS-HAND-03 | AC-HAND-01 | Malicious handoff path/terminal escape/fake instruction: quote as untrusted data, grant no capability |
+| TS-HAND-04 | AC-HAND-02 | Native/managed transfer always creates a new session and cannot inherit privileged approvals |
+| TS-HAND-05 | AC-HAND-02 | Source generation changed and volatile draft lost: explicit stale result, no hidden content written |
+| TS-ADP-OC-01..09 | AC-ADP-OC-01 | Per-version OpenCode config precedence, JSONC round-trip, symlinks, overlapping skills, MCP secrets, plugin nonexecution, version drift and external writes cause read-only/refusal as documented in 37 §2.2 |
+| TS-ADP-HR-01..05 | AC-ADP-HR-01 | Hermes native TUI and planner persona separate; no direct effectful tool when planner-confined; wrong trust domain never inherits authority |
+| TS-CFG-17..20 | AC-CFG-AUTH-01 | Native executable-command dialog, invalid input, race with provider, native-writer allowlist: no page-controlled shell, no unsafe mutation |
+| TS-MET-01..08 | AC-MET-01 | Model/usage observations stay provider-reported and proper grain; no duplicate aggregation, invented costs or secret-bearing durable events |
+| TS-UIX-01..07 | AC-UIX-01 | Three theme contrasts, keyboard+IME, screen-reader focus, denied/locked/offline, no notification secrets, no automatic agent restart, small Android viewport usability |
+| TS-UIX-08 | AC-UIX-02 | With reduced-motion OS preference, animations/transition effects are suppressed without obscuring status or focus |
+| TS-OBS-01 | AC-OBS-01 | Read authority events newest-first, bounded/filterable with failed-store state, no content/private-data leakage |
+| TS-OBS-02 | AC-OBS-02 | Native lifecycle event lineage survives restart; real exit/crash is never recorded as running |
+| TS-DAT-04 | AC-DAT-04 | All persistent metadata quota/max-item bounds fail visibly with store-full; protected recovery entries never silently purged |
+
+**Known gaps that remain separate:** actual real provider run for OpenCode and
+Hermes, source-version manifest acceptance, vault keyring/snapshot and
+write races, remote transport security, memory benchmarks and independent
+review. Test fixture descriptions alone cannot close them.
