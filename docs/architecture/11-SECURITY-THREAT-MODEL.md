@@ -290,7 +290,7 @@ so nothing of them can reach any store, the vault included.
 ## 9. Critical trust-boundary and remote threats added after REJECT (2026-10-14)
 
 The [Codex report](reviews/2026-10-14-post-reject-corrections-external-audit.md)
-and [Claude report](reviews/2026-10-14-external-audit-post-reject-corrections.md)
+and [Claude report on separate branch](https://github.com/SaintWyss/wyss-console/blob/santiagosw/tender-albattani-udd3ir/docs/architecture/reviews/2026-10-14-external-audit-post-reject-corrections.md)
 are REJECT reviews; the second remains on a separate unmerged branch
 and its link may not resolve on the PR branch. Neither is an
 executed exploit.
