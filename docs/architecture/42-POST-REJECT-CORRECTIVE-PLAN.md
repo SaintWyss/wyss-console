@@ -170,3 +170,60 @@ has been executed by writing this document.
 5. No new provider execution/Android/VM test may be labelled PASSED
    from document-only evidence. No implementation, new ADR
    acceptance or PR merge is authorised by these corrections.
+
+## 6. Codex/Sol High follow-up audit (2026-10-14) — remains REJECT
+
+Read [the newly committed Codex audit](reviews/2026-10-14-post-reject-corrections-external-audit.md)
+at commit `141b748d6e603ef25b0ee9c8c209d47ae86c2f7e`.
+It reviewed the correction baseline `906822f` and
+returned **REJECT**, with nine additional defect clusters
+ER-01..ER-09. It did not certify absolute historic reviewer
+independence or run any application/provider tests.
+
+The objective corrections now documented:
+- **ER-01:** approved ownership of `wyss-control` remains
+  same-UID; blocking OL3 automatic native steps does
+  not protect against native agents launched manually
+  or LP4. Audit all authority-state, service and
+  code paths, not only sockets.
+- **ER-02:** a restricted native persona loses capabilities;
+  preserve a provider-by-provider compatibility matrix.
+  Any loss of sign-in, required hooks, MCP or unattended
+  native work remains a blocked product decision.
+- **ER-03:** model eligibility grant, per-use LP4 claim,
+  gateway instance, terminal-writer receipt and managed
+  durable intent are distinct; the old seven-day
+  shell grant/24h volatile dedup is NOT a security guarantee.
+- **ER-04:** Hermes planner needs enumerated typed effects
+  and transitive-effect/TOCTOU controls. Original Wyss
+  has shell and filesystem defenses beyond matching globs;
+  see [40 §6](40-HERMES-BOUNDARY-STATIC-EVIDENCE.md).
+- **ER-05:** current accepted one-runtime/one-turn baseline
+  and future DN-08=A concurrency need separate, gated
+  acceptance; see [20 §16.2](20-VERIFICATION-AND-ACCEPTANCE.md).
+- **ER-06:** distinct parser PID does not itself imply
+  isolated OOM/FD/IPC failure domains or PTY survival.
+- **ER-07:** every new state needs owner, transition guard,
+  durable identity, loss/expiry rules and UI action mapping.
+- **ER-08:** revoking a device requires a defined ordering
+  vs pipeline STARTING and durable authorization lineage.
+- **ER-09:** original TS-CFG-17..20 need positive/negative
+  cases and AC-CFG-AUTH-01, added to [20 §16.1](20-VERIFICATION-AND-ACCEPTANCE.md).
+
+These changes correct contradictory *paper contracts*, not
+secure the application. The following engineering choices
+remain **OPEN / BLOCKED** pending feasibility evidence:
+(1) protecting managed approvals from any unrestricted
+native same-UID process, including external processes and LP4,
+without losing the selected native functionality;
+(2) full host-account LP4-away with short, real per-use
+authentication and honest post-compromise recovery;
+(3) multi-runtime authority extension under separately
+approved ADR; (4) provider credentials/auth without copying
+them across OS principals; (5) full parser and process-scope
+fault containment; (6) safe config writes and snapshots.
+Do not use another document-only "PASS" to replace actual
+isolation, provider, Android or filesystem tests.
+
+**No merge, no ADR acceptance, no code implementation.**
+
