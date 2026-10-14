@@ -286,3 +286,38 @@ so nothing of them can reach any store, the vault included.
 9. The vault is worth what the key's custody is worth. A keyring that opens without a password
    protects a copied disk no better than a plain file.
 10. A hook held in one computer's vault cannot be restored on the other.
+
+## 9. Critical trust-boundary and remote threats added after REJECT (2026-10-14)
+
+The [Codex report](reviews/2026-10-14-post-reject-corrections-external-audit.md)
+and [Claude report](reviews/2026-10-14-external-audit-post-reject-corrections.md)
+are REJECT reviews; the second remains on a separate unmerged branch
+and its link may not resolve on the PR branch. Neither is an
+executed exploit.
+
+| Threat ID | Threat actor / path | Asset and real boundary | Status / required gate |
+| --- | --- | --- | --- |
+| T-42 | Malicious manually launched native agent (not only OL3) reaches the same-UID control socket and submits owner-looking approval | A4; ADR 0011 same UID provides **no** separation | **BLOCKED_TRUST_BOUNDARY**. Inventory *all* native/manual/remote processes, socket request paths, writable authority binaries/DB/units/config, impersonation flows. External principal and trusted approval mechanism required before claiming protection |
+| T-43 | LP4 shell persists malicious user services, credentials, grants, PATH or approved controls even after device revocation | A1/A2/A4/A5/A9; host account fully compromised | Revocation only prevents future trusted gateway calls. Out-of-band host-integrity audit/credential rotation may be necessary; no "account restored" promise |
+| T-44 | Automatic OL3 handoff of hostile prompt or modified worktree rules/hooks steers a privileged native worker | A2/A3/A5; model data can induce effects | No unattended native handoff while same-UID trust absent. Per-attempt host review of **actual prompt and changed workspace/control source**; downstream effects must be independently constrained |
+| T-45 | Gateway crash after writing partial PTY bytes but before ACK yields duplicate command on resume | A5; network→gateway→host input writer | Client must never replay ambiguous bytes; `OUTCOME_UNKNOWN`, generation/claim invalidation; durable exact-once PTY claims prohibited without proof |
+| T-46 | File/symlink replacement races between resolving user-owned paths and effectful write | A2/A3/A5; path check and file open are distinct | Do not claim atomic no-follow semantics from `Path.resolve` + `write_text`. Require path-descriptor/openat2-style review and disposable adversarial race tests; do not run on user's real files |
+| T-47 | Terminal screen parser and PTY supervisor share cgroup/FD/resource-failure domain | A5/A8; untrusted escape input | Distinct parser helper **plus** separate resource domain, FD allowlist, bounded messages, controlled restarts. Process count alone is not isolation |
+| T-48 | Managed-turn id/capability and native full-account identity collapse under same user in selected multi-runtime target | A4; authority gating vs user principal | ADR 0012/0015 remain active; concurrency and human-authentic approvals require separate threat model and ADR, not merely TS-ORC-11 |
+| T-49 | Android attestation absent, spoofed or not verified by host; controller grants LP4 based only on possession | A9/A5; device→gateway | Default deny LP4 unless appropriate per-use key validation and physical evidence; same-UID server compromise remains outside device attestation boundary |
+
+**Important correction to optimistic older controls:** the table above is
+a proposed threat register, not a set of mitigations currently
+implemented. `CTL-04` native dialog, `SO_PEERCRED`,
+same-user file mode 0600 and a separate UI component
+do **not** prove human presence against a compromised
+same-UID native process (especially in a mutable desktop session).
+`terminal.write` inherently grants owner account effects
+including modifying the gateway/state if same UID.
+
+A future proof for T-42 must test both legitimately permitted
+native and managed workflows and denied same-UID impersonation.
+A test that merely disables every native process is not a
+final-product acceptance of DN-15.
+See [42](42-POST-REJECT-CORRECTIVE-PLAN.md) for current
+conservative gates. No ADR accepted, no tests run.
