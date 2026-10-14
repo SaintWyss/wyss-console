@@ -595,3 +595,14 @@ independent review for the post-REJECT changes until an
 actually independent review is received. No model-author
 self-review can reverse the two previous REJECTs.
 
+### Additional paper work after the historical score
+
+[37](37-HANDOFF-ADAPTERS-UX-AND-DATA-CONTRACTS.md)
+adds previously missing candidate interfaces and tests for
+handoff (row 17), OpenCode/Hermes adapters (row 15),
+configuration authoring (row 14), model usage storage
+(row 18/28), mobile screen states (row 24/21) and accessible
+UX (row 29). All remain **unreviewed and unverified**.
+The score in §2.2 remains historical and must not
+be modified by counting newly written paragraphs as test PASS.
+
