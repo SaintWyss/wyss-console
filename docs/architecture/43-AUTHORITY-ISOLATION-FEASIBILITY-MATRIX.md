@@ -336,3 +336,41 @@ ADR 0025. The next tests for S1/S2 require a
 concrete service/approval identity and compatible
 credential/host-login story. Do not count this fixture
 as having unblocked final-product OL3 or LP4.
+
+
+## 10. Follow-up simulated signer, credential and file-safety evidence
+
+[44](44-DISPOSABLE-TRUST-FIXTURE-OBSERVATIONS.md)
+documents **executed** disposable fixtures FT-01..19:
+
+- Separate protected UID's state and signer key were
+  inaccessible to the untrusted UID; a public request
+  socket accepted untrusted proposals but executed only
+  an exact signed dummy intent. Forgery, mutation,
+  expiry, scope mismatch and duplicate approval were
+  rejected, including after a mock server restart.
+- This mock signer was invoked by the fixture controller,
+  **not by an actual human**; thus TV-ISO-04 remains
+  **PARTIAL synthetic**, with trusted UI/device challenge
+  and exact human intent NOT RUN.
+- A provider-auth *dummy* file owned by the original UID
+  was unreadable by a distinct UID, while a rootless
+  `unshare -Ur` process displaying UID 0 inside its
+  namespace could still read the original host-UID
+  file. Consequently B needs a real auth/refresh
+  compatibility strategy; merely remapping IDs is
+  not sufficient.
+- A synthetic `Path.resolve` then path write redirected
+  through a swapped ancestor symlink, whereas an
+  anchored directory descriptor prevented redirect.
+  Real `openat2` on the disposable kernel allowed
+  an intended write and refused `../`, an absolute
+  path and symlink-based escape. These are narrow
+  kernel/file API tests, **not** original Wyss execution
+  or validation of DN-31 replica/snapshot safety.
+
+**Current evidence state:** TV-ISO-02, TV-ISO-04,
+TV-ISO-06 and TV-ISO-07 have **partial synthetic**
+coverage only. TV-ISO-03/05/08/09/10 for actual
+product paths are **NOT RUN**. All accepted ADR
+constraints and both REJECT reviews still stand.
