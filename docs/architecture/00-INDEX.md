@@ -217,3 +217,12 @@ wireframe states and durable model/usage event schema. It is
 **proposed documentation**; no provider behaviour or UI has been
 verified. The detailed test list was added to [20 §15](20-VERIFICATION-AND-ACCEPTANCE.md)
 and the crosswalk to [23 §6](23-TRACEABILITY-MATRIX.md).
+
+
+### Independent-review handoff
+
+[38](38-INDEPENDENT-REVIEW-HANDOFF.md) is a **read-only review brief**
+with critical/high threat questions, required 29-subsystem matrix,
+finding format and reject criteria. It is **not an independent review**,
+does not alter the two earlier REJECT verdicts and authorises no
+provider experiment, ADR acceptance or implementation.
