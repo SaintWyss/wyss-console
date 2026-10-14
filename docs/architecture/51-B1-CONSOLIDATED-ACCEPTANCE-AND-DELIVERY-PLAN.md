@@ -1,0 +1,78 @@
+# 51 — B1/FX-H01 consolidated acceptance gates and documentary delivery plan
+
+Date: 2026-10-14. **Status: PLANNING SPECIFICATION ONLY; NOT_RUN / NOT_IMPLEMENTED / ADR_NOT_ACCEPTED.**
+
+Companion to [49](49-CACHYOS-COMPOSED-WORKER-SECURITY-CONTRACT.md), [50](50-B1-STAGED-WORKSPACE-AND-QUARANTINED-RESULT-CONTRACT.md) and the [2026-10-14 decision reconciliation](reviews/2026-10-14-fx-h01-design-reconciliation.md). The previous native report at commit `3ff0d7a865e2b5aeddfa68a6c98a72c6f0667354` has FX-B1-A **FAIL**, B–E **PASS for their specific synthetic assertions**. FX-H01 is **OPEN**. Neither an accepted B1 architecture nor actual native-provider support follows from this document.
+
+## 1. Frozen owner decisions and scope
+
+- **O-1:** B1 returns **pending results only**, published to an independent quarantine store/ref; no direct working-tree writeback or automatic merge, even if no apparent concurrency.
+- **O-2:** per-task authorization of pinned base commit **plus** explicit, reviewed, exact-content overlays. OID/digest checks prove identity, not authority. Admission is authorized selection, not arbitrary sensitive-data detection.
+- **O-3:** include explicitly selected *staged/unstaged modifications to tracked paths*, deletes, renames, and untracked paths without requiring a commit. Default untracked/overlay admission: none. Every accepted change has typed path, old/base identity where relevant, new content identity/mode/link target, size, provenance/owner selection and snapshot consistency check. Missing/stale/inconsistent selection is a visible error.
+- B1/U split is a frozen product choice. U and LP4 remain unrestricted and are outside B1-local promises. No Docker daemon, privileges, services, root user, real secrets or providers may be used for this documentary phase.
+- Future real provider auth and egress are separate, currently blocked acceptance stages; do not silently broaden permission to make them pass.
+
+## 2. Consolidated gates (AT-01..12 plus G1..14 with no duplicated claims)
+
+Classification: **CORE** means required to accept the synthetic B1 design; **PROVIDER_LATER** means required before *any real provider use*, not part of synthetic completion. All are **NOT_RUN against any reconciled implementation** as of this document. FX-B1-A/B/C/D/E historical data are a baseline, never a substitute.
+
+| Gate | Class | Procedure (synthetic-only design) | Falsifiable PASS | Evidence boundary |
+| --- | --- | --- | --- | --- |
+| **CG-01** | CORE | Reproduce legacy FX-H01 with a project hardlink to a dummy forbidden signer and the old profile | Old profile actually reads canary and is labelled baseline FAIL; otherwise invalidate comparison and investigate | OS baseline; no real signer |
+| **CG-02** | CORE | Admit a commit/overlay containing a preexisting alias to a forbidden synthetic inode and a hostile archive hardlink entry | Admission rejects unsupported alias; worker, quarantine and logs contain no unauthorized canary bytes | Provenance/admission, **not** worker OS denial |
+| **CG-03** | CORE | Stage fresh files, attempt host-to-workspace hardlink, then mutate B1 files including an in-place overwrite | No mutable inode shared outside isolated task filesystem; rejected link/EXDEV as supported; external dummy canary unchanged; no unexpected host-visible workspace mount | OS object identity/mount map, content digests |
+| **CG-04** | CORE | Select committed base plus explicit overlay; add unapproved tracked edits, untracked extras, copied/transformed synthetic marker | Exactly selected version admitted; unselected paths/bytes absent. Known-marker digest detection is optional defense in depth, **not** a claim that copies/transformations are always detectable | Admission + authorization record |
+| **CG-05** | CORE | Import internal/external symlinks, chained/ancestor substitutions and two-step parent-symlink outputs | Explicitly supported internal symlink succeeds; external/escaping inputs rejected; hostile output symlink exported as inert data or rejected, never followed; canary unchanged | OS vs exporter/broker policy separated |
+| **CG-06** | CORE | Barrier-controlled mutation during staging of modified tracked/untracked inputs; test deletion/rename and staged vs unstaged disagreement | One exact approved snapshot (path/type/mode/bytes) materializes with recomputed digests or deterministic fail-closed rejection; no mixed version | Snapshot provenance + original source digests |
+| **CG-07** | CORE | Probe inherited file/dir/socket FDs, `/proc/self/fd`, SCM_RIGHTS, ptrace, signals and unsupported Landlock ABI from trusted first instruction | No ambient forbidden capability usable; explicitly allowed PTY/stdio still works; missing required ABI aborts before untrusted exec; supervisor protected under declared threat boundary | Launcher+OS; no mock cooperation |
+| **CG-08** | CORE | Hostile `.git`, alternates, includeIf/config, filters, hooks, Git plumbing and metadata in source/output | No external helper execution, host-path opening or worker-owned `.git` execution by preparer/exporter/broker; only bounded Git operations inside B1 | Marker binary evidence + broker/OS |
+| **CG-09** | CORE | Gitlink and `.git` alias paths, deferred execution surfaces (`.github/`, `.vscode/`, `.claude/`, `.codex/`, scripts, LFS, hooks, executable bits) | Disallowed paths/types rejected; allowed but potentially executable metadata flagged for owner review; classification cannot run code or authorize merge | Typed output/parser and classification |
+| **CG-10** | CORE | Double-fork child continues writes after task completion; FIFO/socket/device traps; kill/export race with barriers | B1 process tree reliably quiesced before export; unsupported nodes rejected without blocking; exported digest/bytes match quarantined result despite attempts to mutate | Process/cgroup/OS + exporter |
+| **CG-11** | CORE | Concurrent edits to live source, hostile outputs, tampering between export and publication, duplicate/CAS race, interrupted publish | Source working tree, `HEAD` and source `.git` unchanged; result bound to selected base, immutable/quarantined; mismatch/CAS collision visible; no partial publication or automatic merge | Quarantine records + source invariant |
+| **CG-12** | CORE | Meaningful code/text/binary edits, permissions, bounded Git, owned PTY and change preview including selected uncommitted files | Exact allowed edits/diffs and expected Git operations succeed; policy remains RO, output is pending and recoverable | Functional acceptance, not only denials |
+| **CG-13** | CORE | Re-run FX-B1-A..E on the new pipeline, preserving B matrix and C/D/E bounded features | A's positive and negative assertions now pass; B's rename denial/success matrix maintained; C mock inference without proxy escape; D mock handoff/digest controls without elevating policy to OS; E truthful generation/UNKNOWN/exit | Separate POSITIVE, OS, POLICY and LIMITATIONS fields |
+| **CG-14** | CORE | Fixed small/medium synthetic input; bounded tmpfs bytes/inodes, worker pids/FDs, CPU, RSS, PTY latency; induce controlled ENOSPC | Budgets fixed *before* test; ENOSPC and exhaustion visible; cancellation/cleanup verified; metrics under preagreed numeric limits or reported FAIL without changing thresholds after observing result | Measured environment/limits, no fabricated benchmarks |
+| **CG-15** | PROVIDER_LATER | After separate authorization: fake shared-auth symlink/FIFO swap, token refresh and version-pinned real-provider compatibility design | No write into U credential home via alias, no hanging refresh, no silent copying or wider permissions; unsupported provider remains BLOCKED | OS/provider contract; separate permission |
+| **CG-16** | PROVIDER_LATER | After separate authorization: synthetic egress with loopback, LAN, link-local, CGNAT/tailnet, rebinding, generic CONNECT, header injection attempts | Forbidden endpoints blocked *after resolution and at connection*, approved mock model exchange works; no reusable general host proxy, no unauthorized token disclosure | Broker design + OS network; real providers not implied |
+
+CG-01 is intentionally a *positive attack-control* on the old profile, not an acceptance of the old profile. CG-02/04 do not claim any content scanner can recognize all secret-derived bytes. CG-03 assumes an independently created filesystem, not an ordinary bind mount of an existing source subtree. Older `G14` ("outside Baloo/Syncthing") is folded into CG-03 for a private non-host-visible tmpfs; reinstate it if any on-disk workspace becomes a candidate.
+
+## 3. Required fixtures and deterministic evidence format
+
+Plan a **disposable and entirely synthetic** harness with distinct fake project, fake signer/authority, Git object source, auth file/directory, fake inference broker, PTY, canary process, malicious symlink/archive/Git metadata, staged+unstaged and untracked test files, and pending result store. A harness must never map fixtures onto real host secrets, personal projects, running services, current provider sessions or live Docker.
+
+For each gate record: gate ID, contract version/ref and fixture source/hash; test exact initial state and owner admission record; host/kernel/ABI/bwrap/runtime versions; namespace/mount and fd/process inventories; commands and exit/errno; permitted functional output; direct forbidden-attempt outcome; **OS vs policy vs simulator** classification; admission/export/quarantine manifests with object IDs/digests; timing/resource observations; cleanup (including descendant processes); PASS/FAIL/BLOCKED_UNSAFE and residual limitations. Tests should use synchronization barriers for races, not timing guesses alone.
+
+Results must be robust against a cooperative fake agent: force negative accesses, never rely on "the mock chose not to". Avoid scan/reads of arbitrary host files or sockets. If native safety is uncertain, mark `BLOCKED_UNSAFE` without performing the dangerous attempt. A blocked mandatory gate **does not** close FX-H01.
+
+## 4. Work packages and dependency graph (documentation only)
+
+| Package | Dependency | Deliverable / gate | Model/workflow recommendation |
+| --- | --- | --- | --- |
+| **P0 — decisions/baseline** | Verification `3ff0d7a` and O-1/O-2/O-3 | This reconciled contract; unchanged signed-off test evidence; status truthful | Read-only/doc baseline |
+| **P1 — protocol/spec** | P0 | Typed admission record schema and overlay semantics; authorized content capture; object/mount scope, worker/FD rights; freeze and exporter interface; quarantine output and CAS contract | Security architecture planning; no coding |
+| **P2 — independent bounded plan review** | P1 | Reviewer **not** Codex experiment/proposal author or Claude design coauthor checks RV-1..8, all CG gates and trust feasibility; yields explicit findings | Independent security reviewer |
+| **P3 — isolated implementation (future only)** | P2 and explicit implementation authorization | Bounded trusted admission, staging, pre-exec launcher, exporter and quarantine in separate increments; no broad refactor or host privileges | Scoped builder per component |
+| **P4 — synthetic verification (future only)** | P3 | CG-01..14, positive+negative assertions on native CachyOS, OS/policy distinction, resource measurements and failure-preserving evidence | Different verifier, no self-attestation |
+| **P5 — provider-stage design (later)** | P4 plus version-pinned provider evidence and explicit owner authorization | Separate auth/egress contract, CG-15..16; provider-by-provider compatibility gates | Security+compatibility reviewers |
+| **P6 — acceptance/ADR consideration (later)** | P2/P4/P5 as relevant | Owner evaluates evidence and ADR transition; B1-local cannot certify A/U host-global consent | Owner decision only |
+
+A planning package may define exact interface contracts and synthetic fixture specs but **must not mutate the running host**, vendor credentials or normal user repo, or claim that a paper plan passed acceptance. No staging code or synthetic fixtures were executed in authoring this file.
+
+## 5. Hard stop conditions and open engineering values
+
+- **Stop** if B1 sees the source tree through a direct writable bind, shares mutable inodes with U stores, inherits unexpected authority FDs, or broker reads worker paths as unconfined U or runs worker-controlled Git config/hooks.
+- **Stop** if results write to the live tree, source `HEAD` or Git store before a separate deliberate U action.
+- **Stop** if an admission token/digest is treated as an unforgeable host-global approval against compromised U.
+- **Stop** if a provider is enabled without actual version-specific auth/inference compatibility and permission; no silent fallback to home-wide grants.
+- **Stop** if planned acceptance requires Docker API calls, new Unix users, sudo, service changes or touching real files. Such experiments require separate scope and owner authorization; leave BLOCKED_UNSAFE otherwise.
+- To fix **before P3**: exact allowed Git modes/symlink semantics; accepted base-and-overlay identity and racing-source snapshot method; content budgets/limits; mount/FD and Landlock ABI floor; atomic quarantine format, fsck/CAS expectations, cleanup and cancellation; predeclared CG-14 performance budgets. Treat unknown numeric budgets as `TBD_BEFORE_TEST`, not as PASS.
+- Keep `BLOCKED_ADMIN_DELEGATION`, `BLOCKED_TRUST_BOUNDARY` and real A/approval limitations separate. B1 does not "fix Docker".
+
+## 6. Completion semantics
+
+**Documentary completion**: O-1/O-2/O-3 recorded, reconciled design RV-1..RV-8 addressed, CG-01..16 specified, P1..P6 scoped, documentation only and no ADR approval. **Security completion**: none of that closes FX-H01.
+
+**Planning ready (conditional)** only after the exact package P1 contracts and fresh independent P2 review. **Implementation ready** only following explicit owner authorization. **FX-H01 CLOSED** only after an independently verified implementation passes mandatory synthetic gates without loss of functionality, and no material open containment bypass remains.
+
+**Current status: `REVISE_DESIGN` / FX-H01 OPEN / B1 NOT_PROVEN / implementation NOT_AUTHORIZED / no tests executed in this document.**
