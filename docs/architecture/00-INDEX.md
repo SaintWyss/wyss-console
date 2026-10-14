@@ -354,3 +354,15 @@ No host Docker, credential, service or OS setting
 was changed. This is a new P0 blocker,
 not a solved architecture or a review PASS.
 
+### Native provider credential compatibility — source-only (2026-10-14)
+
+[48](48-PROVIDER-ISOLATION-AND-AUTH-COMPATIBILITY.md)
+contrasts official Claude Code and OpenCode documentation,
+accepted ADR 0018's **version-pinned managed Codex**
+credential capability and pinned Hermes/Wyss source.
+It does **not** read user credentials, run providers
+or prove any full native-OL3 login/refresh compatibility.
+Per-provider negative/positive mock tests remain
+required; sandboxing that silently disables
+hooks/MCP/network is not a final-product PASS.
+
