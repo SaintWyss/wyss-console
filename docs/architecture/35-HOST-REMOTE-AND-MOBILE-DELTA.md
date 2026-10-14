@@ -302,3 +302,25 @@ are separate required contracts, not interchangeable.
 See [the Codex audit](reviews/2026-10-14-post-reject-corrections-external-audit.md)
 ER-01 through ER-03. No runtime test or ADR
 has accepted this interim policy.
+
+## 11. Docker delegation and LP4-away scope
+
+The [observed CachyOS environment](reviews/2026-10-14-cachyos-native-feasibility.md)
+gives the desktop user read/write access to a
+rootful Docker daemon socket. An unrestricted
+Android/PC LP4 terminal inherits that user's
+Docker privileges and therefore may gain
+**root-level host control**, not simply access
+to files under its own UID. It is *not*
+legitimate to label the remote account as
+an ordinary nonadministrative sandbox.
+No real Docker API call/exploit was run.
+
+See [47](47-CACHYOS-DOCKER-PRIVILEGE-AND-SANDBOX-DECISION.md)
+for preservation-of-Docker alternatives and
+independent approval-authority constraints.
+An isolated automated worker's mount view
+can conceal Docker sockets, but does not
+limit a separate unrestricted manually
+launched native process or LP4 shell.
+
