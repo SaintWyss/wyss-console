@@ -374,3 +374,33 @@ TV-ISO-06 and TV-ISO-07 have **partial synthetic**
 coverage only. TV-ISO-03/05/08/09/10 for actual
 product paths are **NOT RUN**. All accepted ADR
 constraints and both REJECT reviews still stand.
+
+
+## 11. B sandbox availability constraint (2026-10-14)
+
+Before comparing real provider mock compatibility, the
+isolated tool container was queried for Landlock.
+`landlock_create_ruleset(NULL,0,VERSION)` returned
+**ENOSYS (38)** even on kernel 6.18.44.
+The container has no working user scope manager,
+`bwrap`, `cargo`, `adb` or QEMU.
+See [44 §8](44-DISPOSABLE-TRUST-FIXTURE-OBSERVATIONS.md).
+
+This is **BLOCKED_ENVIRONMENT**, not a negative
+verdict on Linux Landlock in general or on the
+owner's PC. No restricted worker profile with
+real provider auth, hooks or MCP was run.
+An externally available **disposable** Linux
+VM/runner with a supported LSM and current
+provider-mock fixtures is the next necessary
+test target. No personal files, login tokens
+or existing home services may be mounted into
+that target.
+
+The rootless namespace test from §10 shows
+that remapping visible UID alone is not the
+missing confinement. Likewise, a protected
+authority requires a genuine independent
+trust principal and a meaningful human
+signer; the dummy signer does not provide it.
+
