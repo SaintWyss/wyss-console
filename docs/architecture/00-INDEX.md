@@ -257,3 +257,19 @@ remain in force. The reviewer was not
 independent from all earlier documents;
 a third-party review remains mandatory.
 
+### Codex/Sol High audit of post-REJECT corrections (2026-10-14)
+
+[Review at `141b748`](reviews/2026-10-14-post-reject-corrections-external-audit.md)
+returns **REJECT** on the revised document set,
+with ER-01..ER-09 (same-UID native/manual/LP4,
+final native feature compatibility, terminal input
+protocol, managed concurrency, parser failure
+domains and original hook-authoring cases).
+The [correction register 42](42-POST-REJECT-CORRECTIVE-PLAN.md)
+now distinguishes fixed contradictions from actual
+security design gates. The Claude report from commit
+`344143d` is on a separate branch, **not
+an additional open PR**. No full-plan acceptance
+or implementation approval follows from any
+of these documents.
+
