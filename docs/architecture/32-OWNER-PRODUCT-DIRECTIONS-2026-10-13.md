@@ -113,3 +113,24 @@ The proposed elaborations live in [33](33-CROSS-DOMAIN-RECONCILIATION.md),
 [34](34-OL3-ORCHESTRATION-CONTRACT.md),
 [35](35-HOST-REMOTE-AND-MOBILE-DELTA.md) and
 [36](36-PLANNING-CLOSURE-AND-VERIFICATION-GATES.md).
+
+## 6. Later owner permission: isolated verification stage
+
+**Later on 2026-10-13**, after the docs-only consolidation, the owner
+answered **yes** to a *stage* of bounded technical verification
+in isolated/disposable environments and to obtaining an independent
+architecture review. This supersedes the earlier blanket prohibition
+only for that bounded verification stage. It does **not** constitute
+a per-run grant to open personal configuration/credentials or to
+modify the owner's desktop/phone, and it does not authorise
+implementation, actual product code change, service deployment,
+accepted ADR, public distribution or PR merge.
+The accessible execution container was used solely for a
+disposable filesystem name-exchange check recorded in
+[41](41-STATIC-TRACEABILITY-AND-ISOLATED-FILESYSTEM-CHECK.md).
+Source-reading evidence was recorded in [39](39-REMOTE-CANDIDATE-SOURCE-EVIDENCE.md)
+and [40](40-HERMES-BOUNDARY-STATIC-EVIDENCE.md).
+When an isolated provider setup or native Android/VM environment
+is actually available, each higher-risk probe still needs a named
+target, version, allowed data, exact procedure and rollback before execution.
+
