@@ -1,5 +1,13 @@
 # 22 — Decisions and open questions
 
+> **2026-10-13 owner decision update:** This historical alternatives register now includes target
+> choices and assistant-delegated planning candidates in the corresponding DN rows.
+> [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md) records exact source/authority;
+> [33](33-CROSS-DOMAIN-RECONCILIATION.md) identifies conflicts and
+> [36](36-PLANNING-CLOSURE-AND-VERIFICATION-GATES.md) the gates. "Open" or
+> "Proposed" technical state in an older row remains valid unless separately
+> reviewed and accepted: **no ADR acceptance, experiments or implementation**.
+
 Everything this set leaves undecided or unverified, in one place. A **decision needed** (DN) is
 a choice someone has to make; an **open question** (OQ) is a fact someone has to find out.
 Neither blocks anything until the phase named beside it.
@@ -117,6 +125,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | The page chooses from a closed catalogue and supplies no text. Code running in the page can still start agents; a native session is contained by nothing                                                                  |
 | User-experience consequences | One click instead of typing; the session says it is not mediated; where the process cannot be identified, it says so                                                                                                      |
 | Evidence required            | OQ-07: a start recipe per shell family, tested with a fake agent                                                                                                                                                          |
+| 2026-10-13 owner/planning note | Owner-delegated candidate: interactive-shell launcher with controlled direct fallback; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F3a                                                                                                                                                                                                                       |
 
 ### DN-03 — Isolation of managed Inference from the user's hooks
@@ -131,6 +140,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | A change to an accepted security contract (ADRs 0012, 0014, 0015). No fallback to the user's home. Host policy is never hidden without its own explicit decision                                                         |
 | User-experience consequences | Codex hooks become usable from the Console. Inference would need the sandbox tool that Local Tools needs. Sessions bound before the change may not resume (E7)                                                           |
 | Evidence required            | F1b: experiments E1 to E9 (10 §5.5), each with its control                                                                                                                                                               |
+| 2026-10-13 owner/planning note | Owner-delegated candidate: research I4, I1, then I2; no experiment authorised; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | G-INF                                                                                                                                                                                                                    |
 
 ### DN-04 — Further dependencies
@@ -145,6 +155,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | Supply chain; a parser handles hostile input                                                                                                                    |
 | User-experience consequences | Without the third, a file with an unusual layout is read only in the Console                                                                                    |
 | Evidence required            | Size, maintenance and licence of each; OQ-29's answer                                                                                                           |
+| 2026-10-13 owner/planning note | Owner-delegated candidate: dependencies only when justified, versioned and reviewed; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | T1, F4a, possibly F2a                                                                                                                                           |
 
 ### DN-05 — Host service and remote architecture
@@ -159,6 +170,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | `terminal.write` from a device is the user's whole account, and voids every other grant's restriction (16 §5.3). Device authentication, a step-up on the device, a native confirmation at the host and the OS-user boundary are four different things (16 §5.3). Operations that need a native dialog stay host-only                                                     |
 | User-experience consequences | Sessions outlive the window; a phone can watch and approve; configuration stays a host action                                                                                                                                                                                                                                                                            |
 | Evidence required            | OQ-18; OQ-52 to OQ-54; for the gateway ADR, an external security review                                                                                                                                                                                                                                                                                                  |
+| 2026-10-13 owner/planning note | OPEN: owner prioritises transparent LAN, direct P2P and relay fallback without per-connection VPN setup; no transport or ADR selected; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F9, F10a, F10b                                                                                                                                                                                                                                                                                                                                                           |
 
 ### DN-06 — What Wyss Agent is
@@ -173,6 +185,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | An agent that acts on a schedule and outside messages with the user's rights is contained by nothing in the native plane (T-18); a wrapper or hook inside Hermes does not change that                                                                                                                                               |
 | User-experience consequences | D gives up Hermes's terminal and code tools or re-provides them as typed Wyss actions                                                                                                                                                                                                                                               |
 | Evidence required            | OQ-55 to OQ-57 for D; the original Wyss's suite run in its own repository; Hermes installed with consent (OQ-11)                                                                                                                                                                                                                    |
+| 2026-10-13 owner/planning note | D: Wyss policies/effects, Hermes planner only; OS-level effect boundary unverified; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F12                                                                                                                                                                                                                                                                                                                                 |
 
 ### DN-07 — Distribution
@@ -187,6 +200,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | An update channel, a release key and a vulnerability policy become assets to protect (18 §9)                                                                                                     |
 | User-experience consequences | Installation and onboarding for a stranger (18 §4, §5)                                                                                                                                           |
 | Evidence required            | OQ-58 to OQ-60; a legal reading of the licences, which is not an engineering task                                                                                                                |
+| 2026-10-13 owner/planning note | A: personal Linux/Android product; no public distribution; ADR 0027 unchanged; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F13                                                                                                                                                                                              |
 
 ### DN-08 — Several managed runtimes or turns
@@ -201,6 +215,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | The core's invariants (one writer, one turn) are what its isolation tests rest on |
 | User-experience consequences | Parallel managed work                                                             |
 | Evidence required            | Measured need; a provider review of concurrent turns                              |
+| 2026-10-13 owner/planning note | A: independent managed runtime per session, bounded OL3; concurrency ADR unaccepted; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F8, F11b                                                                          |
 
 ### DN-09 — Where the observed model of a managed session lives
@@ -215,6 +230,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | Nothing a client can send changes; thread and turn parameters stay as ADR 0014 and 0015 fix them. SG-12's text is unchanged; it does not mention a model (C14). The classifier gains one strictly checked case                                                  |
 | User-experience consequences | "Model: X (reported for this session)"; "Codex moved this turn from X to Y" instead of a failed turn                                                                                                                                                            |
 | Evidence required            | OQ-10, answered from the pinned schema; OQ-50                                                                                                                                                                                                                   |
+| 2026-10-13 owner/planning note | C: live model observations plus versioned event history; ADR 0031 still Proposed; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F6a                                                                                                                                                                                                                                                             |
 
 ### DN-10 — Codex's provider-effective state in F1
@@ -224,11 +240,13 @@ DN-17 and DN-18 are decided (§1).
 | Question                     | Does F1 ask a running Codex what it resolved, or deduce it from files and documented precedence?                                                                                                                                                                                           |
 | Status                       | Proposed                                                                                                                                                                                                                                                                                   |
 | Alternatives                 | Static · a live read through an App Server started by the desktop                                                                                                                                                                                                                          |
+| New 2026-10-13 candidate      | C: static inference plus verification from an already-running compatible provider session only; no inspection-only process |
 | Recommended                  | Static in F1: discovery from the real files and the documented precedence. No App Server is started merely to display state. A live read only by its own ADR                                                                                                                               |
 | Reasons and trade-offs       | A live read means the desktop starts a provider process, which ADR 0028 keeps out of F1                                                                                                                                                                                                    |
 | Security consequences        | Static: none. Live: a new process, a new surface                                                                                                                                                                                                                                           |
 | User-experience consequences | Three things are kept apart everywhere: what the files persist; what the documented precedence makes effective, labelled "documented" or "inferred"; what a running session is verified to use, which a static read can never show. An inferred state is never displayed as a verified one |
 | Evidence required            | None for the static choice                                                                                                                                                                                                                                                                 |
+| 2026-10-13 owner/planning note | C: new variant — static config inference plus optional actual-state observation from an already-running compatible session, no inspection-only process; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F1                                                                                                                                                                                                                                                                                         |
 
 ### DN-11 — Names of the family
@@ -243,6 +261,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | None                                                                                          |
 | User-experience consequences | One name per thing                                                                            |
 | Evidence required            | None                                                                                          |
+| 2026-10-13 owner/planning note | A: Wyss Console and Wyss Agent are named products; no separate Wyss CLI; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F12, F13                                                                                      |
 
 ### DN-12 — Contract for authoring executable content
@@ -257,6 +276,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | The highest of the configuration side (T-02). Subject to DN-22: the page can already type into a terminal |
 | User-experience consequences | A second surface for one field                                                                            |
 | Evidence required            | A design of the dialog; a threat review                                                                   |
+| 2026-10-13 owner/planning note | A: hook editing in a separated native dialog; security unverified; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F5                                                                                                        |
 
 ### DN-13 — May the desktop run a provider's own configuration command
@@ -271,6 +291,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | A new process started by the desktop; arguments must be derived, never typed                                                          |
 | User-experience consequences | MCP servers manageable from the Console                                                                                               |
 | Evidence required            | Each command's behaviour verified per version                                                                                         |
+| 2026-10-13 owner/planning note | A: closed typed list of version-verified provider-native config operations; no execution authorised; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F4b, F5                                                                                                                               |
 
 ### DN-14 — Sharing a provider's sign-in with a separate home
@@ -285,6 +306,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | Credentials are never copied or read                                                                   |
 | User-experience consequences | Per-session isolation only as far as each provider's flags reach                                       |
 | Evidence required            | —                                                                                                      |
+| 2026-10-13 owner/planning note | C: only provider-official separated configuration preserving sign-in; no credential reading/copying; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | None, unless F3c proves insufficient                                                                   |
 
 ### DN-15 — Automatic coordination of agents
@@ -299,6 +321,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | Text from one agent given to another is untrusted input (T-19); an orchestrator that starts sessions is a new actor to audit                                                                                         |
 | User-experience consequences | From reviewing each handoff to approving pipelines and answering approvals remotely                                                                                                                                  |
 | Evidence required            | Use of F11a for OL2 and above                                                                                                                                                                                        |
+| 2026-10-13 owner/planning note | OL3: finite approved coordinated multi-agent DAG, not OL4; contract proposed in 34; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | Every phase beyond F11a that orchestrates                                                                                                                                                                            |
 
 ### DN-16 — Starting F1
@@ -322,6 +345,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | None: the authority's own check is what protects Inference, and it is not changed. The Console not offering an action is not a control. No weaker way for Inference to start is created                                  |
 | User-experience consequences | Codex hooks are read only in the Console until G-INF. The owner has all four off already `[O]`                                                                                                                           |
 | Evidence required            | For G-INF itself: the interactions of 10 §5.9 (home, system policy, enablement, limits, MCP, sign-in, trust, attestations), by experiments E1 to E9. A private home alone proves none of them. **None is authorised**    |
+| 2026-10-13 owner/planning note | Owner-delegated interim policy: do not toggle Codex hooks before G-INF; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F2b                                                                                                                                                                                                                      |
 
 ### DN-20 — Profiles that leave out the user's controls, and generated files
@@ -336,6 +360,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | A profile is otherwise a quiet way around the user's own controls. Controls the user owns are told apart from policy the provider or the system enforces; the second is listed as "still in force" only on evidence. No copy of an entry reaches a disk; none is built from the vault                                                                                                                                                                                         |
 | User-experience consequences | A dialog when something changed, none when nothing did. A session started this way is marked for its whole life and never shown as running the global configuration. Some templates are not one click                                                                                                                                                                                                                                                                         |
 | Evidence required            | OQ-02 (what leaving out the user source really drops), OQ-24, OQ-34. Provider compatibility is **not verified**                                                                                                                                                                                                                                                                                                                                                               |
+| 2026-10-13 owner/planning note | B: re-evaluate every session-start exclusion; native reapproval on changed controls/provider version; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F3a (the ADR), F3c                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ### DN-21 — How a provider's file is written when the provider may write it too
@@ -365,6 +390,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | Without (b), every safeguard of the configuration commands can be walked around by code in the page. That has been true of the terminal since ADR 0005 and is accepted there                                                                                                                                                                              |
 | User-experience consequences | None for (a). For (b), possibly none visible                                                                                                                                                                                                                                                                                                              |
 | Evidence required            | OQ-36                                                                                                                                                                                                                                                                                                                                                     |
+| 2026-10-13 owner/planning note | B: correct the claim and separate config/terminal view capabilities; ADR 0030 unaccepted; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F2a (the wording), F3a, F5                                                                                                                                                                                                                                                                                                                                |
 
 ### DN-23 — How evidence is renewed when a provider updates itself
@@ -379,6 +405,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | A kept form that a new version stops tolerating could drop every hook of the file (ADR 0029, check V1): that tier never trusts a range. An unverifiable manifest is ignored whole. Missing evidence never widens what is allowed                                                                                                                                                                                                       |
 | User-experience consequences | "Not verified for this version" appears for native switches and kept forms after an update, not for the vault path                                                                                                                                                                                                                                                                                                                     |
 | Evidence required            | How often the provider versions in use change; whether a version can be determined without running the provider; whether RS1's checks can be automated                                                                                                                                                                                                                                                                                 |
+| 2026-10-13 owner/planning note | Owner-delegated candidate: tiered provider evidence by operation/version; exact-version kept form; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F2a onward, in practice                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ### DN-24 — Research on throwaway homes
@@ -506,6 +533,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | None, provided every item keeps its plane marking (13 §2.5)                                                                                                                                                                              |
 | User-experience consequences | The order of the sidebar and of the palette's sections                                                                                                                                                                                   |
 | Evidence required            | The owner's workflow; nothing else                                                                                                                                                                                                       |
+| 2026-10-13 owner/planning note | A: global navigation with project-grouped Sessions, Devices in remote scope; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | The design contract of the navigation, before F1's Configuration view and F3b's Sessions view                                                                                                                                            |
 
 ### DN-33 — Capabilities that wait for a gate
@@ -520,6 +548,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | None: a disabled control is not a control (DN-19 says the same of an action not offered)                                                                                                                                                                        |
 | User-experience consequences | What the user sees on every entry before F2v                                                                                                                                                                                                                    |
 | Evidence required            | —                                                                                                                                                                                                                                                               |
+| 2026-10-13 owner/planning note | C: disabled contextual actions with reason; absent unavailable whole sections; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F1's design contract                                                                                                                                                                                                                                            |
 
 ### DN-34 — Themes and contrast modes
@@ -534,6 +563,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | None                                                                                                                                                    |
 | User-experience consequences | A preference in Settings (13 S11)                                                                                                                       |
 | Evidence required            | —                                                                                                                                                       |
+| 2026-10-13 owner/planning note | C: dark/light/high-contrast with accessibility and terminal colours; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | None before F13; the token sheet of 13 §13                                                                                                              |
 
 ### DN-35 — Notifications outside the window
@@ -548,6 +578,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | A notification is a disclosure channel; under (b) it holds only the kind of event and a count                                                                     |
 | User-experience consequences | Fewer expired approvals; one more preference                                                                                                                      |
 | Evidence required            | —                                                                                                                                                                 |
+| 2026-10-13 owner/planning note | C: category-specific, default-off and privacy-redacted desktop notifications; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | None; F10a at the latest                                                                                                                                          |
 
 ### DN-36 — Layout restore and agent panes
@@ -562,6 +593,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | (c) would bypass the start's confirmation; (a) and (b) none                                                                                                                                                                                                                                                                                                                                                                                                 |
 | User-experience consequences | One action to resume work in each agent pane                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Evidence required            | —                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 2026-10-13 owner/planning note | D: surviving sessions reattach; dead agent panels restored as explicit opt-in restart suggestions; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | T2                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ### DN-37 — Reminder threshold for kept entries
@@ -576,6 +608,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | None on what is kept; it changes how soon a forgotten secret is noticed                                                          |
 | User-experience consequences | A mark on old entries in 13 S4b                                                                                                  |
 | Evidence required            | —                                                                                                                                |
+| 2026-10-13 owner/planning note | B: 30-day editable reminder; never automatic deletion/modification by age; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F2v                                                                                                                              |
 
 ### DN-38 — Changing the model of a running native session
@@ -585,11 +618,13 @@ DN-17 and DN-18 are decided (§1).
 | Question                     | FR-MOD-06 asks that a model can be switched in a running session where the provider allows. 12 §5 says the user types the provider's own command and the Console does not type it. Is that the final behaviour?                                                                     |
 | Status                       | **Open**. The capability was weakened without a decision; this record makes it one (31 §4)                                                                                                                                                                                          |
 | Alternatives                 | (a) The user types the agent's command; the session detail shows which command, per provider, where documented · (b) the Console puts the command into the terminal's input line and the user sends it with Enter · (c) not offered                                                 |
+| New 2026-10-13 candidate      | D: integrated graphic model/effort selector only through verified safe mechanisms; show unsupported providers explicitly |
 | Recommended                  | (a) now. (b) studied with DN-22, because it is the page writing into a terminal, which is exactly the path ADR 0030 says the native confirmation does not contain. Visual switching stays a goal of the final product (12 §5.1); this record does not narrow it                     |
 | Reasons and trade-offs       | (a) keeps the terminal the user's alone and costs a few keystrokes. (b) saves them and makes the Console a writer into a running agent's input, which the user can still refuse by not pressing Enter                                                                               |
 | Security consequences        | (b) adds a supported path from the page into a terminal; today that path exists but is not a feature (11 §4)                                                                                                                                                                        |
 | User-experience consequences | (a): "Type /model in the session to change it." (b): one action                                                                                                                                                                                                                     |
 | Evidence required            | Per provider, the documented command and whether it also writes the default (12 §3, MC4, MC5): Claude Code `/model` saves the default; Hermes `/model` does only with `--global`; the Codex CLI and OpenCode wait for OQ-51. For (b), OQ-36, DN-22 and the preconditions of 12 §5.4 |
+| 2026-10-13 owner/planning note | D: new variant — graphic provider-safe model/effort selector, no silent terminal command injection; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F6b                                                                                                                                                                                                                                                                                 |
 
 ### DN-39 — The key model of the terminal workspace
@@ -604,6 +639,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | None directly; a chord the Console takes is input a program does not get                                                                                                                                                                                                                                                                                                             |
 | User-experience consequences | How many keystrokes each action costs; what the palette and the tooltips show                                                                                                                                                                                                                                                                                                        |
 | Evidence required            | OQ-14 (free chords with the owner's input method and desktop); OQ-45 (what the renderer and the web view deliver)                                                                                                                                                                                                                                                                    |
+| 2026-10-13 owner/planning note | C: leader+safe direct shortcuts, remappable; conflict testing pending; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | T1                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### DN-40 — A global bound on scrollback memory
@@ -618,6 +654,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | None: scrollback is never persisted (05 §13)                                                                                                                                                                                                                                      |
 | User-experience consequences | A notice when the budget is reached; under (b), "earlier lines were dropped to save memory" on a trimmed terminal                                                                                                                                                                 |
 | Evidence required            | M12, M24 (15)                                                                                                                                                                                                                                                                     |
+| 2026-10-13 owner/planning note | C: global scrollback admission budget protects previously retained lines; not a hard RAM guarantee; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | T1 (as a preference), P1 for its value                                                                                                                                                                                                                                            |
 
 ### DN-41 — The terminal output transport
@@ -632,6 +669,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | None, if the notification carries no data and the pull keeps its receipts                                                                                                                                                                                                       |
 | User-experience consequences | None visible; less processor at rest                                                                                                                                                                                                                                            |
 | Evidence required            | M23; OQ-48                                                                                                                                                                                                                                                                      |
+| 2026-10-13 owner/planning note | Owner-delegated candidate: measure M23 first; change event-driven transport only on regression evidence; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | None before P1; T1 if adopted                                                                                                                                                                                                                                                   |
 
 ### DN-42 — Managed model selection
@@ -646,6 +684,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | A new client input to the authority; whether SG-12 should name it explicitly is part of the same review (C14)                                                                                                                          |
 | User-experience consequences | A model field in the managed launcher and possibly per turn                                                                                                                                                                            |
 | Evidence required            | None to write the ADR; a real run to accept it                                                                                                                                                                                         |
+| 2026-10-13 owner/planning note | C: managed model/effort selection at launch and per turn; separate security ADR needed; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | Managed selection only; F6b's native part is not blocked                                                                                                                                                                               |
 
 ### DN-43 — Usage and rate-limit figures of managed turns
@@ -660,6 +699,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | The tolerated notifications become parsed ones; each needs strict validation like ADR 0031 §4.2. `credits` and `planType` describe the account and are not shown unless the owner asks |
 | User-experience consequences | "Tokens this turn: N (reported by Codex)"; "5-hour window: 72 % used, resets at …"                                                                                                     |
 | Evidence required            | Whether Codex sends them to this client, and when (as OQ-50)                                                                                                                           |
+| 2026-10-13 owner/planning note | D: historical provider-reported metrics and limits, with privacy design; no fabricated costs; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F6a's usage part (FR-MOD-08 is met without it: 12 §6)                                                                                                                                  |
 
 ### DN-44 — Remote terminal input
@@ -674,6 +714,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | 16 §5.3, §7 (RT-02, RT-03)                                                                                                                                                                    |
 | User-experience consequences | MS-05's "Type"; the host's "Typing from <device>"                                                                                                                                             |
 | Evidence required            | None to decide                                                                                                                                                                                |
+| 2026-10-13 owner/planning note | B: default-off revocable full terminal control on PC and Android; LP4 means full host account; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F10a (scope), F10b                                                                                                                                                                            |
 
 ### DN-45 — Remote configuration requests
@@ -688,6 +729,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | None beyond `config.read` while the confirmation stays at the host                                                                                            |
 | User-experience consequences | "Prepared on <device>; confirm it here"                                                                                                                       |
 | Evidence required            | The write protocol unblocked (L1, L2, L5; DN-21; DN-31)                                                                                                       |
+| 2026-10-13 owner/planning note | B: Android prepares config plans; only host local dialog can apply after revalidation; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | None now                                                                                                                                                      |
 
 ### DN-46 — Host terminals after logout
@@ -702,6 +744,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | With (b), a remote device reaches terminals while no one is at the computer                                                                  |
 | User-experience consequences | A line in S16 stating which is in force                                                                                                      |
 | Evidence required            | OQ-54                                                                                                                                        |
+| 2026-10-13 owner/planning note | B: explicit opt-in systemd user lingering after KDE logout; no implicit OS change; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F9 (the stated behaviour), not its design                                                                                                    |
 
 ### DN-47 — The host's screen model
@@ -716,6 +759,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | (b) adds attack surface to the host                                                                                                                                                                                         |
 | User-experience consequences | (a) can show "Output skipped" and a partial screen briefly                                                                                                                                                                  |
 | Evidence required            | M21-class measurements of re-attach on real programs (15)                                                                                                                                                                   |
+| 2026-10-13 owner/planning note | B: faithful reattachment screen state; terminal parser isolation and resource costs unverified; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F9                                                                                                                                                                                                                          |
 
 ### DN-48 — The phone client's form
@@ -730,6 +774,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | 16 §5.2.1 needs a presence key that the platform guards                                                                                                                        |
 | User-experience consequences | 16 §8                                                                                                                                                                          |
 | Evidence required            | OQ-53                                                                                                                                                                          |
+| 2026-10-13 owner/planning note | A: native Android client with Keystore/presence capabilities; hardware/provider testing pending; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F10b                                                                                                                                                                           |
 
 ### DN-49 — The first package format
@@ -744,6 +789,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | A release key to protect (18 §9.3)                                                                                                                                                                                 |
 | User-experience consequences | Installation through the package manager; an application-menu entry                                                                                                                                                |
 | Evidence required            | OQ-58                                                                                                                                                                                                              |
+| 2026-10-13 owner/planning note | Conditionally NOT APPLICABLE under DN-07=A personal scope; retain alternatives for future; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F13                                                                                                                                                                                                                |
 
 ### DN-50 — Network update check
@@ -758,6 +804,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | A network request reveals the user's address and version to the list's host                 |
 | User-experience consequences | A line in About                                                                             |
 | Evidence required            | None                                                                                        |
+| 2026-10-13 owner/planning note | Owner-delegated candidate: no automatic network update check for personal product; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F13 (the setting only)                                                                      |
 
 ### DN-51 — Officially supported platforms
@@ -772,6 +819,7 @@ DN-17 and DN-18 are decided (§1).
 | Security consequences        | Security fixes promised for each                                                                          |
 | User-experience consequences | Who can install it                                                                                        |
 | Evidence required            | OQ-58, OQ-59                                                                                              |
+| 2026-10-13 owner/planning note | Conditionally NOT APPLICABLE under DN-07=A personal scope; retain alternatives for future; source and authority: [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), follow-up in [33](33-CROSS-DOMAIN-RECONCILIATION.md). This is NOT an ADR acceptance or code authorisation |
 | Phases blocked               | F13                                                                                                       |
 
 ## 3. Open questions
