@@ -136,3 +136,17 @@ The administrator-capable host user's rootful Docker
 access is a separate and more fundamental A/S1/S2
 blocker; changing Docker is **not** a pre-approved
 dependency or instruction.
+
+
+## 7. Exact positive/negative fixture design for TV-PROV-02/03
+
+[49](49-CACHYOS-COMPOSED-WORKER-SECURITY-CONTRACT.md)
+specifies FX-B1-A..E as the next **synthetic**
+CachyOS verification target. The mock must perform
+nontrivial project, PTY, required policy and fake
+refresh operations while denying authority and
+privileged brokers; its inference call requires
+a *real narrow fake egress*, not a total network
+blackhole labelled provider-compatible.
+No actual Claude/Codex/Hermes/OpenCode binary,
+user auth or real provider process is authorised.
