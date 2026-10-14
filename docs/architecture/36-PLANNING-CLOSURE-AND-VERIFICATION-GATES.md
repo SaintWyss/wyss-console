@@ -318,3 +318,8 @@ report location. The current tool container cannot
 execute those full VM tests; nothing in that
 handoff grants access to the owner's actual PC,
 provider tokens or host services.
+
+
+## 15. Owner correction: native CachyOS first, no general VM requirement
+
+[46](46-CACHYOS-NATIVE-VERIFICATION-HANDOFF.md) supersedes [45](45-DISPOSABLE-VM-VERIFICATION-HANDOFF.md) as the default testing procedure. **The final system and its regular verification target is CachyOS KDE natively**, not a VM or Ubuntu. The prior environment blocker is only for **privileged/high-risk experiments**; safe read-only host capability checks and isolated throwaway synthetic tests can proceed on CachyOS, without real provider logins, privileged changes, systemd modifications, or owner file edits. If an individual test needs different Linux UID/service provisioning or fault injection, postpone **that test** until an independently isolated runner is available; do not block unrelated work or substitute a generic Ubuntu VM. This is an owner scope clarification, not an ADR acceptance.
