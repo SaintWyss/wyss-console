@@ -314,8 +314,8 @@ retroactively change accepted ADRs or implemented evidence.
 | FR-SES-04 | 37 §1 explicit handoff and state guards | TS-HAND-01/02/03/05 | AC-HAND-01 |
 | FR-SES-05 | 37 §1.2 plane boundary and new session | TS-HAND-04/05 | AC-HAND-02 |
 | FR-ADP-01..05 | 37 §2 exact-version descriptors for OpenCode and Hermes | TS-ADP-OC-01..09; TS-ADP-HR-01..05 | AC-ADP-OC-01; AC-ADP-HR-01 |
-| FR-HRS-04/05 | 37 §3 native authoring, review and failure states | TS-CFG-17..20 | AC-CFG-AUTH-01 |
-| FR-HRS-09 | 37 §3 closed provider-native operations | TS-CFG-20 | AC-CFG-AUTH-01 |
+| FR-HRS-04/05 | 37 §3 native authoring, review and failure states | TS-CFG-17..20 (original); TS-CFG-21..24 (additional) | AC-CFG-AUTH-01; AC-CFG-AUTH-02 |
+| FR-HRS-09 | 37 §3 closed provider-native operations | TS-CFG-24 | AC-CFG-AUTH-02 |
 | FR-MOD-08/09 | 37 §5 source-grain metadata and observed model events | TS-MET-01..08 | AC-MET-01 |
 | FR-UX-01/02/03/05 | 37 §4/6 Android screens and desktop capability segregation | TS-UIX-01..07 | AC-UIX-01 |
 | FR-REM-09 | 37 §4 native Android ten screen states | TS-UIX-04/07 | AC-UIX-01 |
@@ -328,3 +328,37 @@ retroactively change accepted ADRs or implemented evidence.
 Acceptance IDs are *definitions of required outcomes*, not evidence
 that their tests were carried out. Release readiness still requires
 the independent review and blocked technical evidence of 36.
+
+## 7. REJECT corrective crosswalk (NOT RUN)
+
+The partially independent review's IR-01–15 findings
+in [reviews/2026-10-13-independent-post-owner-review.md](reviews/2026-10-13-independent-post-owner-review.md)
+are mapped into
+[42](42-POST-REJECT-CORRECTIVE-PLAN.md) and
+[20 §16](20-VERIFICATION-AND-ACCEPTANCE.md).
+These are **additional acceptance criteria for the existing
+final-product target**, not evidence that runtime tests passed.
+
+| Finding | Affected targets / safety domain | Test / acceptance |
+| --- | --- | --- |
+| IR-01 | FR-ORC-01/02/04/06, FR-SEC-11; same-UID auth | TS-SEC-OL3-01 / AC-IR-01 |
+| IR-02 | FR-REM-10/13/16; LP4 and revocation | TS-SEC-REM-01/02 / AC-IR-02 |
+| IR-03 | FR-ORC-01/02/03, FR-SES-04; handoff and launch | TS-SEC-OL3-02 / AC-IR-03 |
+| IR-04 | FR-ORC-06, FR-MOD-11, FR-MAN-09; managed serialization | TS-SEC-MAN-01 / AC-IR-04 |
+| IR-05 | FR-AGT-04; original Wyss policy | TS-SEC-AGT-01 / AC-IR-05 |
+| IR-06 | FR-REM-12/16; gateway idempotence | TS-SEC-REM-03 / AC-IR-06 |
+| IR-07 | FR-REM-17, FR-TERM-14; native orphan effects | TS-SEC-HOST-01 / AC-IR-07 |
+| IR-08 | FR-REM-13, FR-ORC-05; host idle/keepalive | TS-SEC-HOST-03 / AC-IR-08 |
+| IR-09 | FR-TERM-13/15, FR-REM-14; parser containment | TS-SEC-HOST-02 / AC-IR-09 |
+| IR-10 | FR-REM-10/16; Android presence key | TS-SEC-MOB-01 / AC-IR-10 |
+| IR-11 | FR-ORC-05, FR-REM-16; device revocation | TS-SEC-ORC-01 / AC-IR-11 |
+| IR-12 | FR-CFG-18/19, FR-REM-15, FR-DAT-06; vault locked | TS-SEC-CFG-01 / AC-IR-12 |
+| IR-13 | FR-HRS-04, FR-CFG-18/19; original TS-CFG preserved | TS-SEC-TRACE-01 / AC-IR-13 |
+| IR-14 | Architecture/mockup identifier namespaces | TS-SEC-TRACE-02 / AC-IR-14 |
+| IR-15 | DN-31, provider write safety | TS-SEC-EVID-01 / AC-IR-15 |
+
+TS-CFG-17..20 remain authored under 20 §3.4;
+the new negative tests from 37 §3 use TS-CFG-21..24.
+Their approvals are respectively AC-CFG-AUTH-01
+and AC-CFG-AUTH-02. No source implies these tests
+were run or passed.
