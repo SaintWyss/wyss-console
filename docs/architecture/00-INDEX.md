@@ -241,3 +241,19 @@ These **limited observations** do not establish reference-device
 compatibility, authorise configuration writes or overturn earlier
 independent REJECT decisions.
 
+### Post-REJECT safety corrections (2026-10-14)
+
+The author-overlapping review
+[reviews/2026-10-13-independent-post-owner-review.md](reviews/2026-10-13-independent-post-owner-review.md)
+returned **REJECT**, with 15 findings IR-01–IR-15.
+[42](42-POST-REJECT-CORRECTIVE-PLAN.md)
+lists remediation and hard stop conditions,
+linked to expanded adversarial acceptance
+in [20 §16](20-VERIFICATION-AND-ACCEPTANCE.md)
+and [23 §7](23-TRACEABILITY-MATRIX.md).
+Accepted ADR 0011's same-UID limitation
+and ADR 0012/0015 managed-turn limits
+remain in force. The reviewer was not
+independent from all earlier documents;
+a third-party review remains mandatory.
+
