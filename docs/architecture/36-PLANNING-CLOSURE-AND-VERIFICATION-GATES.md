@@ -265,3 +265,21 @@ are NOT RUN; TV-ISO-02 is PARTIAL synthetic only.
 A genuine independently reviewed S1/S2 architecture
 and an informed owner trade-off remain mandatory.
 
+
+## 12. 2026-10-14 verification evidence scope update
+
+[44](44-DISPOSABLE-TRUST-FIXTURE-OBSERVATIONS.md)
+records 19 **synthetic, isolated** fixture assertions,
+not product tests. The mock different-UID verifier
+accepted one signed dummy action and rejected
+forgery/replay/scope/expiry; a rootless user namespace
+preserved access to original host-UID mock credentials;
+a path-swap analogue redirected a pathname write,
+while anchored descriptors and real `openat2`
+prevented the test-specific redirect/escape.
+All real Wyss, managed Codex, Hermes, Android,
+user-service and filesystem snapshot tests remain
+**NOT RUN**, and no reference-machine runtime is
+claimed. An independent post-correction security
+review is still required. The A/B solution and
+DN-16 remain **BLOCKED**.
