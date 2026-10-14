@@ -435,3 +435,14 @@ supports it, a revised roadmap needs explicit checkpoint-specific
 acceptance and roll-back contracts, not an automatic progressive
 MVP rollout.
 
+### F11a, adapter and analytics preconditions (2026-10-13)
+
+The explicit handoff package and states are in
+[37 §1](37-HANDOFF-ADAPTERS-UX-AND-DATA-CONTRACTS.md).
+OpenCode/Hermes version-sensitive adapter requirements,
+the native authoring flow, Android screen-state coverage and
+metric history store are in §2–§6 of that document. These
+are design prerequisites to F4a/F4b, F5, F6a, F10b and F11a,
+**not** approval to implement a phase. Their tests are specified
+in [20 §15](20-VERIFICATION-AND-ACCEPTANCE.md).
+
