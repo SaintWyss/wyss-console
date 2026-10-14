@@ -176,3 +176,12 @@ acceptance/crosswalk. They do **not** resolve actual
 provider compatibility, filesystem semantics, Android security,
 user-interface approval or the independent REJECT verdicts.
 
+
+## 8. Independent-review package prepared, NOT performed
+
+The concrete brief is [38](38-INDEPENDENT-REVIEW-HANDOFF.md):
+read-only, adversarial, all 29 subsystems, with traceability
+and boundary-specific mandatory questions. It must be handed to an
+**independent reviewer** with access to the private PR.
+Neither this file nor writing the brief constitutes a
+review, a PASS or an owner signoff. Previous REJECTs stand.
