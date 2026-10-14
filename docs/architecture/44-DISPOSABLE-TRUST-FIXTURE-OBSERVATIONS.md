@@ -258,3 +258,63 @@ needs separate deliberately approved system provisioning
 or another comparably effective trust-boundary method.
 This is a **documented platform constraint**, not a
 systemd unit installed or executed in this test.
+
+## 8. Restricted-worker Landlock availability preflight — BLOCKED locally
+
+The next proposed B alternative was to test a Linux
+Landlock policy applied to a **single same-host-UID
+synthetic worker**, allowing a dedicated mock provider
+token but denying access to the mock authority. This
+would be an *additional* unprivileged filesystem
+policy, **not** separate-UID protection or proof of
+complete isolation from same-UID IPC, shared session
+D-Bus, inherited file descriptors or process
+signalling.
+
+**Actual preflight in the isolated tool container:**
+
+```text
+kernel: Linux 6.18.44
+syscall: landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)
+result: -1
+errno: 38 ENOSYS
+Seccomp: 0, Seccomp_filters: 0
+/sys/kernel/security/lsm: not present
+bwrap: unavailable
+cargo: unavailable
+adb: unavailable
+qemu-system-x86_64: unavailable
+systemd --user: unavailable (no user scope bus)
+```
+
+**Meaning:** the container did **not** expose the
+Landlock interface; a working policy could not be
+created or tested in this environment. `ENOSYS`
+is the observed failure and is not proof that the
+owner's actual Linux installation lacks Landlock.
+No claim that a restriction succeeded or failed
+under a running Landlock policy can be made.
+
+Linux documentation identifies Landlock as an
+unprivileged, *stackable* LSM whose restrictions
+are inherited by descendants and require the
+kernel feature enabled at boot. Other outside
+processes of the same user that were **never
+restricted** remain outside that policy.
+Source: https://www.man7.org/linux/man-pages/man7/landlock.7.html
+
+**Next evidence gate:** use a separately authorised,
+empty Linux VM/runner exposing Landlock/bubblewrap,
+with only synthetic home/project/provider/authority
+files, to verify: (i) inaccessible control socket,
+state, executable and signer material;
+(ii) safe token refresh on a per-file path (if
+the provider's actual mechanism supports it);
+(iii) controlled workspace write;
+(iv) denial of IPC, process signalling, D-Bus,
+procfs, inherited FDs and policy-reset attempts;
+(v) positive provider-mock start plus performance.
+A sandbox that denies every effect but breaks the
+agent's useful work is **not a passing final-product
+test**. No actual provider credentials or software
+were launched in this preflight.
