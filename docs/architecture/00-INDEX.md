@@ -304,3 +304,19 @@ fixtures only**, not tests of Wyss, provider login,
 Android, human approval or replica/snapshot safety.
 Their pass results do not change the current REJECT
 or authorise implementation.
+
+
+### Environment blocker for next isolated run
+
+The mock approval and file-safety observations
+[44](44-DISPOSABLE-TRUST-FIXTURE-OBSERVATIONS.md)
+have reached the tool container's practical
+limit. A Landlock availability preflight
+returned `ENOSYS`; `bwrap`, QEMU, `cargo`,
+Android tooling and a user systemd bus are
+unavailable **in that container**. Further
+actual environment/credential compatibility
+requires a named disposable Linux VM/runner.
+Nothing in the tests means the owner's
+operating systems are missing these tools.
+
