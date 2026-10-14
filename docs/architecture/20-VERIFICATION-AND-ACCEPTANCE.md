@@ -596,12 +596,12 @@ hardware or an independent security review. References are in
 | TS-ORC-02 | AC-FINAL-03 | Modify any material plan field after approval; execute denied until fresh confirmation. |
 | TS-ORC-05 | AC-FINAL-04 | Inject tool-looking text and paths in handoff; no capability/command results. |
 | TS-ORC-07 | AC-FINAL-05 | Crash between start and ACK; reconcile by attempt ID and require review for ambiguous effects. |
-| TS-ORC-04 | AC-FINAL-06 | Two concurrent managed sessions cannot reuse identities, leases or approve one another's steps. |
+| TS-ORC-04 | AC-FINAL-06 (**FUTURE/BLOCKED until authority ADR**) | Under the accepted ADR 0012/0015 baseline a second active managed turn is rejected or queued, even if interactive sessions exist; only after an independently accepted multi-runtime/concurrency ADR may parallel sessions be tested for isolation of identities, leases and approvals. |
 | TS-ORC-09 | AC-FINAL-07 | Exceed finite wall-time/step/resource bounds; further dispatch blocked and explained. |
 | TS-ORC-13 | AC-FINAL-08 | Search event/history/notification/diagnostic fixtures; none contains protected content. |
 | TS-HYB-05 | AC-FINAL-09 | LP1–3 cannot write; explicitly opted-in LP4 states full host-account access. |
 | TS-HYB-01 | AC-FINAL-10 | Across LAN/mobile/relay configurations, connection follows authorised host key and same grants. |
-| TS-HYB-03 | AC-FINAL-11 | Disconnect before ACK, retry and reorder packets; PTY receives each input batch at most once. |
+| TS-HYB-03 | AC-FINAL-11 (**protocol blocked**) | If terminal bytes were written but ACK lost, reject same or stale input after gateway restart/eviction with OUTCOME_UNKNOWN and **no automatic retransmit**. Include partial write, current-boot duplicate, host crash and independent restart cases. No exactly-once claim for arbitrary shell effects. |
 | TS-HYB-06 | AC-FINAL-12 | Compare logout with/without lingering; no unconsented enablement and truthful session state. |
 | TS-HYB-09 | AC-FINAL-13 | Reference full-screen programs survive detach/resize; mismatch and incomplete history reported. |
 | TS-HYB-11 | AC-FINAL-14 | Remote approval cannot apply pending config; stale plan revalidated or refused. |
@@ -724,3 +724,46 @@ are new independent negative cases, with
 **No test execution, ADR acceptance or implementation authorisation is implied.**
 Acceptance requires controlled disposable host/device environments
 where permitted and a genuinely independent third review.
+
+### 16.1 Original hook-authoring positive cases and full baseline guard
+
+These refine the **preexisting** TS-CFG-17..20 definition
+in §3.4; the previous row has not been repurposed.
+All cases NOT RUN. Functional success can only be
+claimed once required filesystem, provider and vault
+evidence/ADR is accepted, not just by passing mocked IPC.
+
+| Test | AC-CFG-AUTH-01 positive + negative acceptance |
+| --- | --- |
+| TS-CFG-17 | A valid new hook is validated against the provider's version/event/matcher/timeout/executable rules; reject malformed config, executable injection, unknown provider version or unsupported scope without write. |
+| TS-CFG-18 | Before editing or deleting a hook, the user sees whether restoration/undo is available and what content/controls will be affected; deny when previously reviewed bytes or effective controls differ. |
+| TS-CFG-19 | For an explicitly reversible mutation, undo restores exact original bytes **only from the separately approved authenticated/sealed vault record**; missing/tampered/locked keyring returns a distinct error and changes no provider file. Never fabricate a previous version. |
+| TS-CFG-20 | No command text typed in the untrusted configuration page reaches an effectful provider command or terminal; native host-owned authoring is mandatory and has an independent authentication gate not provided by same-UID page data alone. |
+
+**AC-CFG-AUTH-01** = pass only when *all four* cases
+and both affirmative + denial paths pass on pinned provider
+versions with correct rollback, native review, and no loss
+of user-owned hooks. TS-CFG-21..24 / AC-CFG-AUTH-02
+remain **additional negative tests**, not substitutes.
+
+### 16.2 Two distinct managed concurrency baselines
+
+**Current accepted ADR baseline:** ADR 0012 permits at
+most **one shared long-lived Codex App Server**, and ADR
+0015 at most **one active starting/running managed turn
+globally**. Test second turns, OL3 queue fairness,
+stale approvals and visibility of interactive managed
+sessions while a pipeline occupies the global slot.
+`TS-SEC-MAN-01` may pass for this base without
+fulfilling DN-08=A or DN-42=C.
+
+**Final product target (BLOCKED_MANAGED_CONCURRENCY):**
+`TS-ORC-04 / AC-FINAL-06` and `TS-ORC-14`
+require separately designed runtime identities,
+turn admission, queue fairness, recovery and per-turn
+model selection, with an independently reviewed
+accepted ADR superseding the precise ADR 0012/0015
+clauses. Until then these tests are explicitly
+**NOT APPLICABLE TO CURRENT BASELINE / NOT RUN
+FOR FINAL PRODUCT**, never a contradictory pass
+by just running two sessions serially.
