@@ -339,3 +339,28 @@ None was run.
 - whether the original Wyss's suite passes at `0761dcd`;
 - the quality of either system's planning with a real model;
 - the resource cost of either.
+
+## 13. Owner-selected Wyss Agent and orchestration scope (2026-10-13)
+
+The owner selected **DN-06=D** (Wyss policy and effects controller,
+Hermes planning/intelligence behind a demonstrated OS boundary)
+and **DN-15=OL3** (finite user-approved coordinated multi-agent
+pipelines), not OL4. Wyss Console and Wyss Agent remain distinct
+products (DN-11=A). Those selections replace older statements
+in §6 and §8 that the *owner choice* is pending; their technical
+warnings and alternatives remain useful historical evidence.
+
+A planning-only design with typed steps, finite budgets, stop
+conditions, security ownership, recovery and tests now exists in
+[34](34-OL3-ORCHESTRATION-CONTRACT.md).
+The selected implementation is **not** a fact: Hermes's effectful
+tool confinement, the original Wyss tests, runtime costs,
+provider behaviour, managed concurrency and nested execution
+all remain unverified. The coordinator cannot give Hermes,
+a native agent or the gateway a managed approval. OQ-55–57
+and the required independent security review are hard gates.
+
+See [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md)
+and [36](36-PLANNING-CLOSURE-AND-VERIFICATION-GATES.md).
+No install, fork, native runtime or build is authorised.
+
