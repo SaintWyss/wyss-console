@@ -364,3 +364,25 @@ See [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md)
 and [36](36-PLANNING-CLOSURE-AND-VERIFICATION-GATES.md).
 No install, fork, native runtime or build is authorised.
 
+## 14. REJECT review limitation: Wyss's own policy needs an effect boundary
+
+[42](42-POST-REJECT-CORRECTIVE-PLAN.md), IR-05,
+shows that preventing Hermes from executing tools
+directly is **necessary but insufficient** for
+Wyss Agent's controlled execution. The existing original
+Wyss `shell.run` rule matcher operates on textual target
+patterns and substrings, not a complete shell-effects
+semantics parser. Hermes-internal planner proposals
+must therefore be restricted to a closed set of typed
+Wyss operations; opaque shell or interpreter actions
+are **DENIED** in that persona, with separate OS
+enforcement for all outbound effects. This does
+not restrict standalone native Hermes run as the
+owner's ordinary account outside the managed persona.
+
+No model-produced shell action may be described as
+'safely policy mediated' merely because it has an
+approval prompt. Pin the original source and run
+E-HRM-09 in an isolated target before any accepted
+architecture can assert non-bypassability.
+
