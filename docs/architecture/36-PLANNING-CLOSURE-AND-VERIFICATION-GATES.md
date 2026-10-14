@@ -283,3 +283,24 @@ user-service and filesystem snapshot tests remain
 claimed. An independent post-correction security
 review is still required. The A/B solution and
 DN-16 remain **BLOCKED**.
+
+
+## 13. Explicit environment access blocker
+
+The next owner-authorised test step needs a
+**named disposable Linux target** with a
+real systemd user manager and suitable
+Landlock/bubblewrap isolation, plus mock
+provider credentials and synthetic projects.
+The current tool container cannot run
+Landlock (ENOSYS) or provide QEMU/Android/
+`cargo`/`bwrap`. See [44 §8](44-DISPOSABLE-TRUST-FIXTURE-OBSERVATIONS.md).
+
+No real provider token, user home, user's
+background service, actual phone or production
+`wyss-control` should be used just to
+satisfy a test. If a clean VM cannot be
+identified, mark TV-ISO-03..10
+`BLOCKED_ENVIRONMENT`; a review must not
+relabel mocks as final-product evidence.
+
