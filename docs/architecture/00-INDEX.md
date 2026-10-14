@@ -208,3 +208,12 @@ pass. DN-16 and DN-24 remain **not authorised**, even if an owner-selected
 target is marked decided. PR #2 stays **draft** and must not be merged
 before review and explicit owner approval of the full plan.
 
+### Further contract gap closure
+
+[37](37-HANDOFF-ADAPTERS-UX-AND-DATA-CONTRACTS.md) specifies the
+explicit handoff state machine, version-sensitive OpenCode/Hermes
+adapter contracts, native hook authoring dialog, native Android
+wireframe states and durable model/usage event schema. It is
+**proposed documentation**; no provider behaviour or UI has been
+verified. The detailed test list was added to [20 §15](20-VERIFICATION-AND-ACCEPTANCE.md)
+and the crosswalk to [23 §6](23-TRACEABILITY-MATRIX.md).
