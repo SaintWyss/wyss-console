@@ -304,3 +304,17 @@ identified, mark TV-ISO-03..10
 `BLOCKED_ENVIRONMENT`; a review must not
 relabel mocks as final-product evidence.
 
+
+## 14. Evidence handoff for isolated guest runner
+
+The next specific step is
+[45](45-DISPOSABLE-VM-VERIFICATION-HANDOFF.md),
+a ten-case disposable-VM procedure for protected
+authority vs restricted worker. It contains exact
+stop conditions, fake credentials, real systemd/
+Landlock/bwrap feasibility requirements, negative
+tests, evidence classification and docs-only
+report location. The current tool container cannot
+execute those full VM tests; nothing in that
+handoff grants access to the owner's actual PC,
+provider tokens or host services.
