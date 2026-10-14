@@ -1,5 +1,8 @@
 # 45 — Disposable Linux VM verification handoff (next evidence gate)
 
+> **SUPERSEDED as general verification instruction (2026-10-14).** The owner requires native CachyOS, not Ubuntu/VM. Read [46 — CachyOS native verification](46-CACHYOS-NATIVE-VERIFICATION-HANDOFF.md) first. This document is retained **only** as a restricted procedure for risky/privileged tests that genuinely need a separate disposable guest. It is not permission or a requirement to create any VM.
+
+
 **Status:** procedures ONLY, not a passed test or implementation authorisation.
 The owner authorised isolated technical verification, but not application code
 changes, real provider execution, use of real credentials, host OS modification
