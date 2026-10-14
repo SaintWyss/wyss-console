@@ -22,11 +22,21 @@ allowed agent/provider/profile/model selection per task; task limits and precond
 maximum total steps, concurrency, clock duration, available provider usage/cost limits
 (only if reliably reported), retry allowance and a hard stop path; per-task
 effect classification (proposal only, native/full-account, managed);
-approval mode (each start or approval of entire finite bounded DAG);
+approval mode (a finite DAG approval for scheduling only; every native/full-account
+step additionally needs per-launch native confirmation and an accepted trust boundary);
 explicit expiration and revocation. Include the host and scope of effects in what
 the user sees. **No default unlimited budget**; if a quantitative provider budget
 cannot be enforced, do not present it as a hard monetary cap and offer an enforceable
 proxy or ask the user to narrow the pipeline.
+
+**BLOCKED:** An unrestricted native worker with the user's UID can reach
+the same-UID control sockets (accepted ADR 0011); a typed
+`native_confirmation` parameter or layer diagram cannot contain
+that compromise. Any OL3 native/full-account automated execution
+stops with `BLOCKED_TRUST_BOUNDARY` until an OS-level separation
+is selected, independently reviewed and validated. This is a
+blocker to the final product, not a silent deletion of native
+OL3 capability. See [42 §1](42-POST-REJECT-CORRECTIVE-PLAN.md).
 
 Approved envelope != approval of agent-produced tool commands. All existing managed
 tool leases and approvals remain enforced by `wyss-control`; a native agent acts
@@ -154,18 +164,31 @@ Distinguish:
    confirmation on the host.
 5. Wyss Agent policy decision for effectful actions (DN-06=D).
 
-Approval for one layer never satisfies a different layer. Every approval is
-bound to the exact step attempt, generation, plan digest, declared effect,
-expiry and originating device where relevant. A stale approval fails closed.
+**Required product behaviour, NOT a proven local trust boundary:**
+approval of one layer does not *legitimately* grant another layer.
+With same-UID Unix sockets, a compromised native/full-account process
+can impersonate callers and may request approvals directly. No
+component may claim per-layer approval authenticity until a
+distinct principal or independently proven native-confirmation
+boundary exists. Every native step needs fresh host-local,
+per-attempt confirmation after reviewing the actual handoff
+input and current controls; whole-DAG consent never substitutes
+for it. The native auto-dispatch feature remains BLOCKED while
+the same-UID impersonation path exists.
 
 ## 4. DAG and execution contract (IF-ORC v1 candidate)
 
 `prepare(plan)`: validate schema, DAG, providers, project and estimates; output
 plan digest plus structured failure reasons. No process start.
 
-`submit(approved_plan_digest, native_confirmation)`: create a run id after the
-front-end supplies only typed owner intent; the backend verifies confirmation and
-current config; no arbitrary executable/argv/client-provided environment.
+`submit(approved_plan_digest)`: a *candidate* scheduling
+request only; validates a finite DAG and current controls. The
+same-UID caller identity does not prove native presence or
+authorise a native child. Pending native steps remain
+`BLOCKED_TRUST_BOUNDARY` until the missing boundary is accepted;
+once safe they require a **separate**, host-owned per-launch
+review of exact step, current input, target and profile.
+No arbitrary frontend executable/argv/environment.
 
 `inspect(run_id)`: bounded status and statistics, with explicit UNKNOWN/OFFLINE.
 A separate, authorised attachment accesses output via `wyss-host`, never through
@@ -174,14 +197,22 @@ the metadata event journal.
 `pause/resume/stop(run_id, expected_revision)`: revision-checked, idempotent intents.
 Stop never skips an already required safety acknowledgement.
 
-`grant_step/deny_step(step_id, attempt_id, expected_generation)`: native confirmation
-or existing managed-authority request depending on step; denies never auto-retry.
+`grant_step/deny_step(step_id, attempt_id, expected_generation)`:
+requests only. The coordinator's same-UID socket must **never**
+treat a field named native_confirmation as physical proof.
+Until a real trust boundary is accepted, native launch requests
+return `BLOCKED_TRUST_BOUNDARY`; managed requests still obey
+the current authority gate. Denies never auto-retry.
 
 `submit_handoff(source, target, selection_digest)`: for human-approved handoff,
 review the actual content through a controlled dedicated surface, enforce size limits
 and no inherited permissions. Agent-generated URLs, file paths and instructions
-are untrusted. For automatic *data-only* handoff inside a reviewed bounded DAG,
-show clear provenance, quote/escape it and enforce risk restrictions independently.
+are untrusted. Automatic data-only handoff may target only managed or proposal-only
+steps whose effects remain enforced by an independent authority.
+It cannot trigger a native/full-account step, even inside an
+approved DAG; model-provided prompt text can cause executable
+effects at the recipient. A native target requires reviewed
+actual bytes, per-launch confirmation and an accepted OS boundary.
 
 `observe(event)`: consume only per-component versioned, typed events and reject
 unknown identifiers, generations, oversized payloads and out-of-order revisions.
@@ -191,8 +222,13 @@ No raw native terminal output is parsed by the coordinator for authority decisio
 
 - DAG acyclic and finite; fan-out bounded, fan-in explicit, one active attempt per
   step; no orchestration recursion from an agent's own delegator.
-- Independent managed runtime per managed session, as chosen in DN-08. A runtime
-  has its own attestation, lease and thread/turn binding, never shared.
+- **BLOCKED future requirement DN-08=A / DN-42=C**:
+  do not create one managed runtime per session, or send per-turn
+  model selection, under current accepted ADRs. ADR 0012 permits
+  one shared App Server; ADR 0015 enforces one global active
+  managed turn. All managed pipeline steps are **serialized**
+  until new separately reviewed/accepted authority ADRs and
+  compatibility tests change this. ADR 0031 remains Proposed.
 - Native subprocesses retain their native privilege; coordination never
   silently claims they were sandboxed.
 - Writes to the same workspace must either use a reviewed single-writer lock and
@@ -214,10 +250,10 @@ No raw native terminal output is parsed by the coordinator for authority decisio
 | Desktop UI closes/reloads | Coordinator/host do not depend on UI process; reconnect by run/session IDs, otherwise show UNKNOWN; never launch a duplicate |
 | Host user logs out | Runs continue *only* under owner-enabled lingering; native confirmations may wait for local login |
 | Coordinator crashes | Reconstruct metadata journal and query host/authority; ambiguous external step becomes NEEDS_REVIEW, not auto-run |
-| Host dies | Mark native sessions LOST after generation-check; preserve journal and explicit restart proposal |
+| Host dies | Mark PTY LOST, but process tree **UNKNOWN / ORPHANS_POSSIBLE** until isolation/scope observation; no restart proposal capable of acting while descendants may still write; preserve journal |
 | Authority rejects managed action | Record the exact refusal; pipeline pauses or fails; no native fallback |
 | Provider/model unavailable | Queue boundedly or fail, never substitute another model without the plan's explicit substitution rule and confirmation |
-| User revokes device | Device loses remote capability immediately; existing pipeline effects retain the original host-level authorisation but may be paused under configured revocation policy |
+| User revokes device | Reject new requests from it, **pause unstarted pipeline work** whose approval originated from the device, mark prior decisions for review; existing native processes may continue with OS-user privileges and must not be reported as revoked/stopped |
 | Network drops | Running work on host may continue inside approved finite limits; no queued commands replayed without sequence ACK |
 | Clock drift / quota unknown | Enforce local monotonic time where suitable, fail closed on expiry; do not assert monetary caps without reliable counters |
 | Secrets in an agent handoff | Reject known prohibited channels; no content persisted in events/usage analytics; surface controlled handoff needs separate reviewed design |
@@ -237,8 +273,11 @@ make a system OL4.
 - **TS-ORC-02:** mutated plan after approval changes digest and requires fresh consent.
 - **TS-ORC-03:** multi-step implementation→test→review follows dependency, fails
   at a blocking step, never runs dependent review on absent evidence.
-- **TS-ORC-04:** two managed sessions do not share attestations, runtime generations,
-  leases, catalogue selections, model observations or write transactions.
+- **TS-ORC-04 (BLOCKED pending ADR):** two managed sessions
+  do not share attestations, runtime generations, leases,
+  catalogues, model observations or write transactions. Under
+  current ADR 0012/0015 the expected behaviour is one shared
+  App Server and serial managed turns, not concurrent execution.
 - **TS-ORC-05:** native output containing prompt-injection, path escape or control-like
   strings yields no scheduler permissions or runnable command.
 - **TS-ORC-06:** cancellation halts new dispatch, reports live native process honestly,
