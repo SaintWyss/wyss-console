@@ -309,3 +309,70 @@ Budgets marked _proposed_ are targets of [15](15-PERFORMANCE-ENGINEERING.md), no
 | FR-NAT-01 (start an agent) against ADR 0005 (the window supplies no executable or argv)        | A closed catalogue resolved in the backend, with its own ADR (05 §4)                                                                                                                                                                                                                                                                                        |
 | FR-TERM-11, FR-REM-03 (terminal outlives the window) against ADR 0005 (PTYs are Console-local) | Needs a host-owned PTY and its own ADR (16 §4)                                                                                                                                                                                                                                                                                                              |
 | NFR-PERF-* (Ghostty as reference) against the WebView architecture                             | Measure first (P1); no technology change without numbers (15 §6)                                                                                                                                                                                                                                                                                            |
+
+## 4. Owner-selected final-product requirements (2026-10-13; not built)
+
+This appendix extends the original baseline with stable identifiers. The source is the
+owner's explicit final-product choices recorded in
+[32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md), with design in
+[33](33-CROSS-DOMAIN-RECONCILIATION.md),
+[34](34-OL3-ORCHESTRATION-CONTRACT.md) and
+[35](35-HOST-REMOTE-AND-MOBILE-DELTA.md).
+These are **targets**, never `Built`, never ADR acceptance and never implementation
+authorisation. Phases are candidate delivery dependencies, not authorised work.
+When the actual provider/OS does not allow a capability, the product must
+say so; it must not invent a fallback that weakens protection.
+
+| ID | Target functional requirement | Phase |
+| --- | --- | --- |
+| FR-ORC-01 | Agent-to-agent delegation proposes a typed task; nothing launches without explicit owner-approved bounded envelope. | F11b |
+| FR-ORC-02 | OL3 executes finite multi-agent DAGs with bounded steps, time, resources, concurrency, stop and audit. | F11b |
+| FR-ORC-03 | An edit of an approved pipeline invalidates its digest and requires new explicit owner consent. | F11b |
+| FR-ORC-04 | Coordinator output and handoffs never confer tools, permissions or managed leases. | F11b |
+| FR-ORC-05 | Coordinator crash, retry and cancellation never silently duplicate external actions or claim dead processes are active. | F11b |
+| FR-ORC-06 | Each managed session uses an independently bound runtime generation, catalogue, lease and attestation. | F8/F11b |
+| FR-ORC-07 | An OL3 pipeline cannot self-extend, auto-schedule new workflows or impersonate an owner approval. | F11b |
+| FR-ORC-08 | Pipeline run metadata excludes commands, prompts, outputs, credentials and recoverable content. | F11b |
+| FR-REM-10 | Native Android client offers scoped viewing, terminal input and managed approvals under per-device grants. | F10b |
+| FR-REM-11 | Remote connectivity attempts same-LAN/direct when feasible and falls back without manual VPN per connection. | F10a |
+| FR-REM-12 | Path migration and reconnect cannot replay a remote terminal input or create two writers. | F10a |
+| FR-REM-13 | User-enabled lingering allows host sessions to continue after KDE logout when computer is awake. | F9 |
+| FR-REM-14 | Reconnect presents bounded faithful current terminal screen state with explicit missing-history indicators. | F9/F10a |
+| FR-REM-15 | Android may prepare a versioned configuration change that only native host confirmation can apply. | F10b/F5 |
+| FR-REM-16 | Device pairing/revocation, host pinning, keystore presence checks and input claims survive transport changes. | F10a/F10b |
+| FR-REM-17 | A host crash or power-off is not reported as continued execution; explicit restart proposal only. | F9 |
+| FR-TERM-12 | Global scrollback budget reduces admission for new terminals without trimming existing retained output just for crossing threshold. | T1/P1 |
+| FR-TERM-13 | Host terminal screen parser bounds untrusted escape-sequence processing, memory and text effects. | F9 |
+| FR-TERM-14 | Restoring saved layout reattaches to existing sessions; stopped agents are presented for individually approved restart. | T2/F9 |
+| FR-TERM-15 | Interactive screen, scrollback, output backlog and renderer cache have distinct quotas and states. | F9/P1 |
+| FR-MOD-11 | Managed user may request model/effort at session start and per turn only through validated catalogue and separate authority contract. | F6b |
+| FR-MOD-12 | Model requested, model reported and actual observed reroute are separate labelled facts with source and granularity. | F6a/F6b |
+| FR-MOD-13 | Model-observation changes are versioned events without prompt/output or invented per-turn model. | F6a |
+| FR-MOD-14 | Native model/effort selector acts only via safe verified provider mechanism with explicit limitations. | F6b |
+| FR-MOD-15 | Provider-reported tokens, limits and history carry source/time, never fabricated costs or secret text. | F6a |
+| FR-UX-07 | Global navigation groups sessions by project and provides all named final-product areas. | F3b/F10a |
+| FR-UX-08 | Disabled contextual actions show blocking reason; unavailable whole areas remain absent. | F1/F5 |
+| FR-UX-09 | Dark, light and high-contrast modes include accessible terminal colours. | F13/T1 |
+| FR-UX-10 | Desktop notifications are opt-in per category and redact content sensitive in lock-screen/history. | F10a |
+| FR-UX-11 | A configurable leader plus safe direct shortcuts never silently capture program-owned key sequences. | T1 |
+| FR-UX-12 | A 30-day configurable review reminder never deletes or alters kept entries by age. | F2v |
+| FR-PRF-10 | Profile exclusions are evaluated against effective controls at every start; changes require native reapproval. | F3a/F3c |
+| FR-PRF-11 | Per-session separated configuration uses official provider authentication-preserving mechanisms only. | F3c |
+| FR-CFG-18 | Native hook command editor owns authoring; a page cannot submit unchecked executable text to the write path. | F5 |
+| FR-CFG-19 | Provider-native config operations use a typed, version-verified closed allowlist with review. | F4b/F5 |
+| FR-SEC-11 | Terminal and configuration views have separately enforced capabilities; confinement claim is limited to view-level boundary. | F5 |
+| FR-AGT-04 | Wyss Agent owns policies and effects; Hermes may propose plans but cannot invoke effectful tools directly. | F12 |
+| FR-AGT-05 | Wyss Console and Wyss Agent stay separate products; no distinct public Wyss CLI required. | F12 |
+| FR-OBS-07 | Durable usage statistics retain only bounded non-secret metrics and source/freshness; no raw content. | F6a |
+| FR-DIST-07 | Final personal deployment supports tested installation, upgrade, rollback and local recovery on owner's reference computers without publishing binaries. | F13-personal |
+
+### Conditional scope rules
+
+Under DN-07=A, historical FR-DIST-02 to 06 and the distribution acceptance
+set are **conditional on public distribution**, not silently deleted or
+claimed satisfied. FR-DIST-07 names local/personal delivery instead.
+DN-49/51 are not applicable until the owner expands scope.
+The selected DN-05 remote transport and DN-31 sensitive-state filesystem
+location remain **open evidence gates**; no requirement is interpreted
+as authorising a particular relay/vendor, plaintext snapshot exposure,
+reproduced provider credentials, or silent remote native consent.
