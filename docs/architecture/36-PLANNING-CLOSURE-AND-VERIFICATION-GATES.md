@@ -163,3 +163,16 @@ Only report full planning completion when:
 
 G0 paper direction alone does not satisfy G3/G4/G5/G6.
 No automatic permission is inferred from 'finish everything'.
+
+## 7. Specific further-paper deliverables (2026-10-13)
+
+[37](37-HANDOFF-ADAPTERS-UX-AND-DATA-CONTRACTS.md)
+provides the requested missing states for F11a, OpenCode/Hermes
+adapter evidence requirements, versioned config command authoring,
+Android mobile state sketches and history metadata contracts.
+[20 §15](20-VERIFICATION-AND-ACCEPTANCE.md) and
+[23 §6](23-TRACEABILITY-MATRIX.md) add the matching planned
+acceptance/crosswalk. They do **not** resolve actual
+provider compatibility, filesystem semantics, Android security,
+user-interface approval or the independent REJECT verdicts.
+
