@@ -402,7 +402,7 @@ and proposed [test criteria §17](20-VERIFICATION-AND-ACCEPTANCE.md).
 
 | Requirement | Contract | Phase gate | Test | Acceptance |
 | --- | --- | --- | --- | --- |
-| FR-SEC-12 | 47 §§2–3; 11 T-50 | G-INF / A trusted principal and approval ADR | TS-DOCKER-01/02 | AC-DOCKER-01 |
+| FR-SEC-12 | 47 §§2–3; 11 T-50 | G-INF / A trusted principal and approval ADR | TS-DOCKER-01, TS-DOCKER-02 | AC-DOCKER-01 |
 | FR-SEC-13 | 47 §4; 43 B profile | F11b / OL3 native isolation, authority review | TS-DOCKER-03 | AC-DOCKER-02 |
 | FR-PRF-12 | 47 §4; ADR 0018 credential capability; 43 auth | F3c/F11b / exact provider support | TS-DOCKER-04 | AC-DOCKER-03 |
 | FR-REM-18 | 47 §§2/6; 35 LP4 remote | F10a/F10b / explicit host-root delegation risk | TS-DOCKER-06 | AC-DOCKER-04 |
