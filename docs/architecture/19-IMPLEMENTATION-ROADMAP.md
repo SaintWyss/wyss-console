@@ -406,3 +406,32 @@ The same fields, more briefly: each of these is re-planned in full when it is ne
 | No change of terminal technology before P1                                                                                                                                                        | AD-17                                                                                                |
 | No distribution work before DN-07                                                                                                                                                                 | ADR 0027                                                                                             |
 | No phase of remote access, Wyss Agent or distribution (F9 to F13) before its decisions, its threat model, its interface contract and its acceptance tests are written and reviewed                | 16, 17 and 18 state requirements and options, not designs (25, IR-19)                                |
+
+## 6. 2026-10-13 scope overlay — planning only, NO phase authorisation
+
+The owner established a **final personal product**, not an MVP
+(DN-07=A), with OL3 coordinated agents (DN-15), separate managed
+runtimes (DN-08), Wyss/Hermes separation (DN-06), a native Android
+client (DN-48) and optional persistent user services (DN-46).
+The preexisting ordered phases remain candidate implementation
+dependencies and are **not** execution authorisations.
+
+Before any phase may begin: complete the target requirements in
+[02 §4](02-REQUIREMENTS.md), contracts [33–35](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md),
+their tests [20 §14](20-VERIFICATION-AND-ACCEPTANCE.md) and
+trace [23 §5](23-TRACEABILITY-MATRIX.md); resolve the hard blockers
+in [36](36-PLANNING-CLOSURE-AND-VERIFICATION-GATES.md);
+receive an independent all-domain review and the owner's
+explicit **final plan approval**. DN-16 and DN-24 remain
+not authorised. A phase label or a passed mock test grants nothing.
+
+F8/F11b must cover independent managed-runtime generations and
+finite OL3 state; F9/F10a/F10b must cover full screen reattach,
+lingering, gateway and a native Android client; F6a/F6b
+must cover observed/requested model separation, history and
+per-turn managed selection; F13 targets **personal installation,
+upgrade and recovery**, not public publication. Once evidence
+supports it, a revised roadmap needs explicit checkpoint-specific
+acceptance and roll-back contracts, not an automatic progressive
+MVP rollout.
+
