@@ -110,3 +110,49 @@ have passed. "Hermes is running with fewer toolsets" does
 not prove non-bypassability. This is a **hard P0 evidence
 gate**, not a reason to silently lower the owner's requested
 final-product scope.
+
+## 5. IR-05: Wyss policy textual matching is not a sandbox (2026-10-14)
+
+The post-owner review
+[reviews/2026-10-13-independent-post-owner-review.md](reviews/2026-10-13-independent-post-owner-review.md)
+identified a separate trust failure even if Hermes is fully isolated:
+the original Wyss policy compares executable targets by
+`fnmatch` over `action.target`, with optional
+`arg_substrings` string checks. Independently inspected
+read-only source from private `SaintWyss/wyss`:
+
+- `packages/wyss-core/src/core/policy/engine.py:77-88`
+  uses `fnmatch(action.type, rule.action_type)` and
+  `fnmatch(_normalize(action.target), p)`; parameters use
+  shallow equality, arg substrings are not a shell parser.
+- `packages/wyss-core/src/core/policy/builtin_deny.py`
+  lists textual target patterns for `disk-format`,
+  `shell-rm-bypass`, `shell-privilege-escalation` and
+  substring rules for `shell-fetch-pipe-exec`.
+
+**Source observation, not a demonstrated exploit:** equivalent
+command effects can have changed argument order, wrapper
+binaries or encoded interpreter bodies that are not
+semantically classified by target-name globs. The policy's
+default risk level for `shell.run` may require explicit
+human approval, but a misleading command summary plus
+approval is **not** a guarantee of semantic confinement.
+
+For **Hermes in Wyss Agent planner mode**, the safe
+planning requirement is a *closed typed effect vocabulary*.
+Unrestricted `shell.run`, Python code execution and other
+interpreter commands are **denied**, never made safe by
+a risk label or a friendly summary. Provider-native
+standalone Hermes is a separate full-account product
+capability and cannot be misrepresented as policy confined.
+
+**E-HRM-09 (NOT RUN):** use a disposable original-Wyss
+policy evaluator, comparing equivalent synthetic shell
+effects under argument reordering, shell quoting, process
+substitution, interpreters and encoded payloads. The
+planner persona must reject all opaque shell execution
+regardless of superficial token matches. No owner's
+commands, secrets or real policies may be modified.
+This correction does not accept an ADR or prove
+Hermes confinement.
+
