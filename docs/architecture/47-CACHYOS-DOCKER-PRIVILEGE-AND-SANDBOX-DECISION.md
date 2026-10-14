@@ -181,3 +181,22 @@ separation and a genuinely protected approval principal**.
 
 For now, **leave the OS untouched, ADRs Proposed/Accepted states unchanged,
 PR #2 draft, and all final-product native OL3 strong-security claims BLOCKED**.
+
+## 8. Provider auth evidence added from official documentation
+
+[48](48-PROVIDER-ISOLATION-AND-AUTH-COMPATIBILITY.md)
+refines TV-CA-01 without touching user accounts:
+Claude Code's official Linux credential location
+is `~/.claude/.credentials.json` and
+`CLAUDE_CONFIG_DIR` changes authentication,
+plugins/settings and session state scope.
+OpenCode documents `~/.local/share/opencode/auth.json`.
+Accepted ADR 0018 specifically covers Codex
+**0.159.0 managed** in-place credential refresh
+through a validated file bind. None proves
+new native OL3 provider compatibility, and
+Hermes remains an independent code-execution
+trust surface. Provider version pinning and
+fake token refresh tests must precede any
+real-use proposal. No secret bytes were read.
+
