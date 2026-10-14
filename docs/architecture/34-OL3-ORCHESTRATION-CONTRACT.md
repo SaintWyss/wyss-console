@@ -62,6 +62,35 @@ authority's runtime generation and catalogue version; every event binds
 pipeline/step/attempt/host. After restarts stale attachments must not be mistaken
 for live or approved ones.
 
+### 2.1 Headless coordinator ownership — required by DN-36/46
+
+**The coordinator cannot live only inside the Console UI.** Its pending
+and running finite pipelines must remain supervised after the window
+closes and, under owner-enabled lingering, after KDE logout. The
+candidate is a small separate user service named wyss-orchestrator that
+owns scheduler, admission control and metadata journal, talking over
+authenticated local IPC to wyss-host and wyss-control.
+It is **not** a third product called Wyss CLI, not a privileged system
+daemon, not a native PTY owner and not a replacement for
+wyss-control's security policy. The UI is only a client.
+
+Alternative co-location in wyss-host may be considered after
+security/performance review, but must not expose a terminal
+escape parser's attack surface to the managed authority or couple
+the scheduler's life to the UI's. The coordinator's own
+crash/restart must restore bounded metadata, reconcile live step
+attempt IDs with host/authority and pause *ambiguous* work,
+not spawn replacements or replay shell input. Startup can be on
+demand, but no idle exit while any approved pipeline is active
+or waiting on an owner decision. systemd user lingering
+must remain explicitly opted in under DN-46.
+
+**Acceptance extension:** TS-ORC-12 must close the window,
+log out of KDE under enabled lingering and reattach from Android,
+while a bounded two-step pipeline remains in progress. If
+the coordinator dies but child agents survive, it must not
+mistake a resumed UI for a fresh approval.
+
 ## 3. State machines
 
 ### 3.1 Pipeline (SM-ORC)
