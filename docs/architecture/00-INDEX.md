@@ -320,3 +320,15 @@ requires a named disposable Linux VM/runner.
 Nothing in the tests means the owner's
 operating systems are missing these tools.
 
+
+### Next VM evidence handoff
+
+[45](45-DISPOSABLE-VM-VERIFICATION-HANDOFF.md)
+defines a fail-closed set of ten test-only checks
+for a separate disposable Linux VM. It forbids
+running real providers, reading owner credentials,
+changing the host, installing a service on the
+owner's PC, accepting an ADR or merging PR #2.
+If a verifiably disposable VM is unavailable,
+the test agent must stop with a concrete blocker.
+This is a *handoff*, not a completed test.
