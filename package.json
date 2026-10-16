@@ -26,6 +26,7 @@
     "desktop:run": "node scripts/tool.mjs app",
     "desktop:package": "node scripts/package.mjs",
     "scan:repo": "node scripts/repo-scan.mjs",
+    "e2e:guard": "node scripts/check-no-fixture-backend.mjs",
     "test:pty": "node scripts/tool.mjs cargo test --locked --manifest-path src-tauri/Cargo.toml terminal:: && vitest run tests/terminal-client.test.ts"
   },
   "dependencies": {
