@@ -513,6 +513,7 @@ mod tests {
             "allow-managed-session-mode",
             "allow-choose-workspace",
             "allow-managed-turns",
+            "allow-managed-turns-older",
             "allow-managed-turn-read",
             "allow-managed-turn-start",
             "allow-managed-turn-cancel",

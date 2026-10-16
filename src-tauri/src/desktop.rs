@@ -92,6 +92,7 @@ pub fn run(authority_digest: Option<&'static str>) {
             sessions::managed_session_mode,
             workspace::choose_workspace,
             turns::managed_turns,
+            turns::managed_turns_older,
             turns::managed_turn_read,
             turns::managed_turn_start,
             turns::managed_turn_cancel,

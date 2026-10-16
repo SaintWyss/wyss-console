@@ -1073,6 +1073,11 @@ button:focus-visible {
   scrollbar-width: thin;
   scrollbar-color: var(--glass-line-strong) transparent;
 }
+/* Older turns are asked for from the top of the transcript, not across all of it. */
+.history-more {
+  align-self: center;
+  flex-shrink: 0;
+}
 .agent-blank {
   margin: auto;
   max-width: 44ch;

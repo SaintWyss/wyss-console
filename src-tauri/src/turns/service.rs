@@ -19,9 +19,19 @@
 //! event stream, where every admitted turn is recorded with its session. The service
 //! reads that stream once, from a bounded distance behind its head, and then only what
 //! was appended since. What a turn *is* always comes from `managedSession/turn/status`.
+//!
+//! **Older turns.** That first read stops a bounded distance behind the head, and the index
+//! keeps a few turns per session, so a long history is not all in it. Turns before the
+//! newest ones are found by reading the same stream, with the same `audit/read`, in bounded
+//! windows going back from a position a list or an earlier page handed out. The index is
+//! not consulted and not held: a page costs a bounded number of reads and remembers
+//! nothing, so history is never loaded as a whole and following a running turn never waits
+//! for it. Nothing is invented for an old turn: what it is comes from the authority, and
+//! its output is there only if the authority still holds it.
 use super::view::{
-    ApprovalNotice, SessionFacts, TURN_PAGE, TurnEvent, TurnList, TurnReceipt, TurnSummary,
-    TurnView, VIEW_SCHEMA_VERSION,
+    ApprovalNotice, HISTORY_SCHEMA_VERSION, HistoryCursor, LIST_SCHEMA_VERSION, SessionFacts,
+    TURN_PAGE, TurnEvent, TurnHistory, TurnList, TurnReceipt, TurnSummary, TurnView,
+    VIEW_SCHEMA_VERSION,
 };
 use crate::{
     contracts::{
@@ -58,6 +68,11 @@ const EVENT_PAGE: u16 = 50;
 const SCAN_PAGES: usize = 40;
 /// How far behind the head the first read of the turn index starts.
 const SCAN_EVENTS: u64 = SCAN_PAGES as u64 * MAX_PAGE as u64;
+/// Positions of the stream one step back in history looks at, and finishes before it
+/// counts what it found: a step that could not be finished is thrown away, never half used.
+const HISTORY_STEP: u64 = MAX_PAGE as u64;
+/// Audit pages one page of older turns reads at most.
+const HISTORY_PAGES: usize = SCAN_PAGES;
 /// Turns remembered for one session, and sessions remembered.
 const KEEP_TURNS: usize = 32;
 const KEEP_SESSIONS: usize = 64;
@@ -86,7 +101,10 @@ pub(super) struct Index {
     scanned: u64,
     /// A read began after where the one before it ended, or after the beginning.
     pub(super) partial: bool,
-    turns: HashMap<String, VecDeque<ManagedTurnId>>,
+    /// A turn or a whole session was forgotten to stay within the bounds below.
+    lossy: bool,
+    /// Each turn with the position of the event that admitted it, oldest first.
+    turns: HashMap<String, VecDeque<(ManagedTurnId, u64)>>,
     /// Sessions in the order they were first seen: the oldest is forgotten first.
     order: VecDeque<String>,
     /// The turn admitted last, whichever session it belongs to. The authority runs one
@@ -105,7 +123,7 @@ impl Index {
         }
         self.approvals.push_back(approval);
     }
-    fn admit(&mut self, session: &str, turn: ManagedTurnId) {
+    fn admit(&mut self, session: &str, turn: ManagedTurnId, sequence: u64) {
         self.last = Some(turn.clone());
         let key = session.to_ascii_lowercase();
         if !self.turns.contains_key(&key) {
@@ -113,18 +131,40 @@ impl Index {
                 && let Some(oldest) = self.order.pop_front()
             {
                 self.turns.remove(&oldest);
+                self.lossy = true;
             }
             self.order.push_back(key.clone());
         }
         let turns = self.turns.entry(key).or_default();
-        if turns.contains(&turn) {
+        if turns.iter().any(|(known, _)| known == &turn) {
             return;
         }
         if turns.len() == KEEP_TURNS {
             turns.pop_front();
+            self.lossy = true;
         }
-        turns.push_back(turn);
+        turns.push_back((turn, sequence));
     }
+    /// Where older turns of a session are looked for, when they may exist: the index is
+    /// not the whole history if it started late, jumped ahead, or forgot something, or if
+    /// it knows more turns than a list shows.
+    fn older(&self, more_known: bool, oldest_shown: Option<u64>) -> Option<HistoryCursor> {
+        if !(more_known || self.partial || self.lossy) {
+            return None;
+        }
+        // With nothing shown, everything the index looked at is still to be looked through.
+        let before = oldest_shown.unwrap_or(self.scanned + 1);
+        cursor(self.stream.as_deref()?, before)
+    }
+}
+
+/// A position of `stream` as the window is handed it. Nothing is before position one.
+pub(super) fn cursor(stream: &str, before: u64) -> Option<HistoryCursor> {
+    (before > 1).then_some(())?;
+    Some(HistoryCursor {
+        stream_id: WireUuid::try_from(stream.to_owned()).ok()?,
+        before: before.to_string().parse::<Sequence>().ok()?,
+    })
 }
 
 pub(super) struct Inner {
@@ -360,13 +400,15 @@ impl TurnService {
         let binding = client
             .binding_status(session.clone())
             .map_err(SessionError::of)?;
-        let known: Vec<ManagedTurnId> = index
+        let known: Vec<(ManagedTurnId, u64)> = index
             .turns
             .get(&session.as_str().to_ascii_lowercase())
-            .map(|turns| turns.iter().rev().take(TURN_PAGE).cloned().collect())
+            .map(|turns| turns.iter().rev().cloned().collect())
             .unwrap_or_default();
-        let mut turns = Vec::with_capacity(known.len());
-        for id in known {
+        let shown: Vec<(ManagedTurnId, u64)> = known.iter().take(TURN_PAGE).cloned().collect();
+        let older = index.older(known.len() > shown.len(), shown.last().map(|(_, at)| *at));
+        let mut turns = Vec::with_capacity(shown.len());
+        for (id, _) in shown {
             let status = client
                 .turn_status_projection(id)
                 .map_err(SessionError::of)?;
@@ -378,7 +420,7 @@ impl TurnService {
         }
         let running = turns.iter().any(|turn| turn.cancellable);
         Ok(TurnList {
-            schema_version: VIEW_SCHEMA_VERSION,
+            schema_version: LIST_SCHEMA_VERSION,
             head,
             runnable: record.control_state == ControlState::Prepared
                 && binding.state == BindingState::BoundAttached
@@ -393,8 +435,157 @@ impl TurnService {
             },
             turns,
             partial: index.partial,
+            older,
         })
     }
+
+    /// The turns of `session` before position `before` of `stream`, newest first, at most
+    /// one page. The window got that position from a list or an earlier page; a position of
+    /// another stream, or beyond the head of this one, is not read against this one: the
+    /// answer is that history changed.
+    ///
+    /// This holds neither the index nor anything else another read could wait for: it
+    /// asks the authority for the session, for a bounded stretch of the stream, and for
+    /// the turns it finds there.
+    pub fn older(
+        &self,
+        session: ManagedSessionId,
+        stream: WireUuid,
+        before: Sequence,
+    ) -> Result<TurnHistory, SessionError> {
+        let mut client = self.inner.sessions.connect()?;
+        let (current, head) = {
+            let hello = client.hello_status();
+            (
+                hello.stream_id.clone(),
+                hello.last_sequence.map_or(0, Sequence::get),
+            )
+        };
+        if !current.as_str().eq_ignore_ascii_case(stream.as_str()) || before.get() > head + 1 {
+            return Err(SessionError::new(SessionFailure::Changed));
+        }
+        // The session has to exist, and is the one every turn found is checked against.
+        let record = client.get(session).map_err(SessionError::of)?;
+        let (found, next) = walk(
+            &mut client,
+            &current,
+            &record.managed_session_id,
+            before.get(),
+        )
+        .map_err(SessionError::of)?;
+        let mut turns = Vec::with_capacity(found.len());
+        for (_, id) in found {
+            let status = client
+                .turn_status_projection(id)
+                .map_err(SessionError::of)?;
+            // The stream named this session for it; the record has to agree.
+            if status.turn.managed_session_id != record.managed_session_id {
+                return Err(SessionError::of(ControlError::CorrelationError));
+            }
+            turns.push(TurnSummary::of(status));
+        }
+        Ok(TurnHistory {
+            schema_version: HISTORY_SCHEMA_VERSION,
+            session: record.managed_session_id,
+            turns,
+            older: next.and_then(|before| cursor(current.as_str(), before)),
+        })
+    }
+}
+
+/// A turn with the position of the event that admitted it.
+type Admission = (u64, ManagedTurnId);
+/// What a walk found, newest first, and the position to go on from, if any.
+type Walked = (Vec<Admission>, Option<u64>);
+
+/// The turns admitted for `session` at positions before `before`, newest first, at most
+/// one page, and where to go on from. Nothing at or after the position it goes on from is
+/// looked at again, and nothing before it was looked at: a page that stopped early because
+/// it found enough, or because its reads ran out, goes on exactly from where it stopped.
+///
+/// Positions are read going back in steps, each step forwards from its start, because the
+/// stream can only be read forwards. A step counts only once all of it was read, and every
+/// event in it has to be the stream's, each one position after the one before: a hole is
+/// not history that happens to be empty, it is a failed read.
+fn walk(
+    client: &mut ControlClient,
+    stream: &WireUuid,
+    session: &ManagedSessionId,
+    before: u64,
+) -> ControlResult<Walked> {
+    let key = session.as_str().to_ascii_lowercase();
+    let mut found: Vec<Admission> = Vec::new();
+    // Positions at `settled` and after are done with.
+    let mut settled = before;
+    let mut pages = 0usize;
+    'steps: while settled > 1 && found.len() < TURN_PAGE {
+        let start = settled.saturating_sub(1 + HISTORY_STEP);
+        let (mut at, mut step) = (start, Vec::new());
+        while at < settled - 1 {
+            if pages == HISTORY_PAGES {
+                // Out of reads, mid-step: what this step found is not used.
+                break 'steps;
+            }
+            pages += 1;
+            let limit = u16::try_from((settled - 1 - at).min(u64::from(MAX_PAGE)))
+                .map_err(|_| ControlError::InternalError)?;
+            let ResultValue::Audit { events, .. } = client.audit(AuditRead {
+                stream_id: stream.clone(),
+                after_sequence: (at > 0)
+                    .then(|| at.to_string().parse::<Sequence>())
+                    .transpose()
+                    .map_err(|_| ControlError::InternalError)?,
+                limit,
+            })?
+            else {
+                return Err(ControlError::InvalidRequest);
+            };
+            // History up to `settled - 1` exists: an empty or an oversized answer is not it.
+            if events.is_empty() || events.len() > usize::from(limit) {
+                return Err(ControlError::CorrelationError);
+            }
+            for event in events {
+                let event =
+                    serde_json::to_value(&event).map_err(|_| ControlError::InternalError)?;
+                let sequence = event["sequence"]
+                    .as_str()
+                    .and_then(|text| text.parse::<Sequence>().ok())
+                    .map(Sequence::get)
+                    .ok_or(ControlError::CorrelationError)?;
+                let ours = event["stream_id"]
+                    .as_str()
+                    .is_some_and(|id| id.eq_ignore_ascii_case(stream.as_str()));
+                if sequence != at + 1 || !ours {
+                    return Err(ControlError::CorrelationError);
+                }
+                at = sequence;
+                if event["event_type"] != "authority.managed_turn.admitted" {
+                    continue;
+                }
+                let (Some(owner), Some(turn)) = (
+                    event["session_id"].as_str(),
+                    event["payload"]["managed_turn_id"]
+                        .as_str()
+                        .and_then(|id| ManagedTurnId::parse(id).ok()),
+                ) else {
+                    return Err(ControlError::CorrelationError);
+                };
+                if owner.to_ascii_lowercase() == key {
+                    step.push((sequence, turn));
+                }
+            }
+        }
+        found.extend(step);
+        settled = start + 1;
+    }
+    found.sort_by_key(|(sequence, _)| std::cmp::Reverse(*sequence));
+    // More than a page: the page is the newest, and goes on from its oldest turn, so the
+    // ones left over are found again rather than lost.
+    if found.len() > TURN_PAGE {
+        found.truncate(TURN_PAGE);
+        settled = found.last().map_or(settled, |(sequence, _)| *sequence);
+    }
+    Ok((found, (settled > 1).then_some(settled)))
 }
 
 /// One page of a turn's stream after `after`.
@@ -497,7 +688,7 @@ pub(super) fn scan(client: &mut ControlClient, index: &mut Index) -> ControlResu
             ) else {
                 return Err(ControlError::CorrelationError);
             };
-            index.admit(session, turn);
+            index.admit(session, turn, sequence);
         }
         if next.is_none() {
             break;

@@ -79,6 +79,20 @@ struct World {
     named: HashMap<usize, ManagedApprovalId>,
     /// Decisions the authority committed, by the intent that asked for them.
     decided: HashMap<String, ApprovalReceipt>,
+    /// Places of `audit` the stream does not answer: a hole in what it holds.
+    holes: Vec<usize>,
+    /// The most events one answer holds, whatever was asked: what a frame can carry.
+    audit_cap: Option<usize>,
+    /// An answer that is not what was asked for.
+    audit_fault: AuditFault,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AuditFault {
+    None,
+    /// No event, though history exists there.
+    Empty,
+    /// One event more than was asked for.
+    TooMany,
 }
 impl World {
     fn new(session: &ManagedSessionId) -> Self {
@@ -88,6 +102,9 @@ impl World {
             approvals: Vec::new(),
             named: HashMap::new(),
             decided: HashMap::new(),
+            holes: Vec::new(),
+            audit_cap: None,
+            audit_fault: AuditFault::None,
             session: session.clone(),
             gate: GateReason::Allowed,
             lease: None,
@@ -386,14 +403,21 @@ impl World {
                     .iter()
                     .enumerate()
                     .skip(after)
-                    .take(usize::from(p.limit))
+                    .filter(|(i, _)| !self.holes.contains(i))
+                    .take(match self.audit_fault {
+                        AuditFault::Empty => 0,
+                        AuditFault::TooMany => usize::from(p.limit) + 1,
+                        AuditFault::None => self
+                            .audit_cap
+                            .map_or(usize::from(p.limit), |cap| cap.min(usize::from(p.limit))),
+                    })
                     .map(|(i, (kind, session, turn))| {
                         envelope(&p.stream_id, i + 1, kind, session, turn, self.named.get(&i))
                     })
                     .collect();
                 let reached = after + events.len();
                 Ok(ResultValue::Audit {
-                    next: (reached < self.audit.len())
+                    next: (reached > 0 && reached < self.audit.len())
                         .then(|| reached.to_string().parse().unwrap()),
                     events,
                 })
@@ -1457,7 +1481,58 @@ fn the_window_s_fixture_has_exactly_the_shape_of_this_projection() {
         for turn in shown["turns"].as_array().unwrap() {
             assert_eq!(keys(turn), keys(&list["turns"][0]));
         }
+        assert_eq!(shown["schema_version"], 3);
     }
+    // The position older turns are looked for from, and a page of them.
+    let cursor = serde_json::to_value(HistoryCursor {
+        stream_id: WireUuid::try_from(
+            fixture["list"]["older"]["stream_id"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        )
+        .unwrap(),
+        before: "6".parse().unwrap(),
+    })
+    .unwrap();
+    // Not only the names: the very values, so a position is the decimal string the window
+    // parses and a stream is the text it was given.
+    assert_eq!(fixture["list"]["older"], cursor);
+    assert!(fixture["empty"]["older"].is_null());
+    let page = serde_json::to_value(TurnHistory {
+        schema_version: 1,
+        session: ManagedSessionId::parse(fixture["history"]["session"].as_str().unwrap()).unwrap(),
+        turns: Vec::new(),
+        older: None,
+    })
+    .unwrap();
+    for shown in [&fixture["history"], &fixture["history_end"]] {
+        assert_eq!(keys(shown), keys(&page));
+        assert_eq!(shown["schema_version"], 1);
+        for turn in shown["turns"].as_array().unwrap() {
+            assert_eq!(keys(turn), keys(&list["turns"][0]));
+        }
+    }
+    assert_eq!(
+        fixture["history"]["older"]["stream_id"],
+        cursor["stream_id"]
+    );
+    assert_eq!(fixture["history"]["older"]["before"], "3");
+    assert_eq!(
+        serde_json::to_value(HistoryCursor {
+            stream_id: WireUuid::try_from(
+                fixture["history"]["older"]["stream_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            )
+            .unwrap(),
+            before: "3".parse().unwrap(),
+        })
+        .unwrap(),
+        fixture["history"]["older"]
+    );
+    assert!(fixture["history_end"]["older"].is_null());
     // Every name the fixture uses for a state or a reason is one the contract has.
     let named = |v: &serde_json::Value| serde_json::from_value::<TurnState>(v.clone()).is_ok();
     assert!(named(&fixture["view"]["turn"]["state"]));
@@ -1469,3 +1544,5 @@ fn the_window_s_fixture_has_exactly_the_shape_of_this_projection() {
 
 #[path = "approval_tests.rs"]
 mod approvals;
+#[path = "history_tests.rs"]
+mod history;

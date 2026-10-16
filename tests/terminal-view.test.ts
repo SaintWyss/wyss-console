@@ -186,6 +186,7 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-managed-session-mode',
     'allow-choose-workspace',
     'allow-managed-turns',
+    'allow-managed-turns-older',
     'allow-managed-turn-read',
     'allow-managed-turn-start',
     'allow-managed-turn-cancel',
@@ -209,6 +210,16 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   // plugin (`fs:`, `shell:`, `dialog:`) or to the framework's core (`core:`).
   for (const permission of capability.permissions)
     expect(permission).toMatch(/^allow-[a-z-]+$/);
+  // Turns are read by exactly three commands (the newest, the ones before them, and one
+  // turn's stream) and changed by exactly two (start and cancel). Reading older turns
+  // takes a session and a position it was handed: nothing that starts, cancels or decides.
+  expect(capability.permissions.filter((p: string) => /turn/.test(p))).toEqual([
+    'allow-managed-turns',
+    'allow-managed-turns-older',
+    'allow-managed-turn-read',
+    'allow-managed-turn-start',
+    'allow-managed-turn-cancel',
+  ]);
   // An approval is answered by exactly two commands, one decision each. Nothing the
   // window is granted makes a rule, remembers a choice, edits a policy, changes a
   // lease, names a runtime profile or passes a control request through.
