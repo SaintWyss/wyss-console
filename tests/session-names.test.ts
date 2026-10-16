@@ -89,6 +89,21 @@ it('tells folders that end alike apart by their parents, only as deep as it take
   expect(nameOf(deep, 3)).toBe('other');
 });
 
+it('never leaves a session bound to the root without a name', () => {
+  // `/` has no folder name, so such a session is named by its identity, even beside a folder
+  // that happens to be named the same way.
+  const names = sessionNames([
+    source(0x20000001, '/', at(1)),
+    source(2, '/h/Session 20000001', at(2)),
+    source(3, '/h/Session 20000001', at(3)),
+  ]);
+  for (const name of names.values()) expect(name.trim()).not.toBe('');
+  expect(new Set(names.values()).size).toBe(3);
+  expect(nameOf(names, 0x20000001)).toBe(
+    `Session 20000001 · ${localTime(at(1))}`,
+  );
+});
+
 it('combines the two: folders told apart, and several sessions in one of them', () => {
   const names = sessionNames([
     source(1, '/home/a/app', at(1)),
@@ -130,6 +145,9 @@ it('never gives two sessions the same name, whatever the set', () => {
     '/x/lib/app',
     '/h/web',
     '/y/web',
+    // Folders named like the suffixes the names themselves gain.
+    '/h/app · 10000000',
+    '/h/Session 20000001',
     '/',
     null,
   ];
@@ -145,6 +163,47 @@ it('never gives two sessions the same name, whatever the set', () => {
     const written = [...names.values()];
     expect(new Set(written).size, JSON.stringify(list)).toBe(written.length);
     expect(written).toHaveLength(list.length);
-    for (const name of written) expect(name.trim()).not.toBe('');
+    for (const name of written)
+      expect(name.trim(), JSON.stringify([list, [...names]])).not.toBe('');
   }
+});
+
+it('keeps every name unique even when a generated name equals a name from another group', () => {
+  // Locale-free: no creation time, so the suffix is the short identity.
+  const names = sessionNames([
+    source(0xaaaa0001, '/x/app'),
+    source(0xbbbb0002, '/x/app'),
+    // A folder that is literally named like the first one's generated name.
+    source(3, '/x/app · aaaa0001'),
+  ]);
+  const written = [...names.values()];
+  expect(new Set(written).size).toBe(3);
+  // The names that were already unique are not touched.
+  expect(nameOf(names, 0xbbbb0002)).toBe('app · bbbb0002');
+});
+
+it('keeps names unique when identities share their first eight characters', () => {
+  const a = `12345678-aaaa-4000-8000-000000000001`;
+  const b = `12345678-bbbb-4000-8000-000000000002`;
+  const names = sessionNames([
+    { id: a, workspace: '/x/app' },
+    { id: b, workspace: '/x/app' },
+  ]);
+  expect(new Set(names.values()).size).toBe(2);
+  expect(names.get(a)).toContain(a);
+  expect(names.get(b)).toContain(b);
+});
+
+it('does not let the full identity it adds equal a name that already exists', () => {
+  const a = `12345678-aaaa-4000-8000-000000000001`;
+  const b = `12345678-bbbb-4000-8000-000000000002`;
+  const names = sessionNames([
+    { id: a, workspace: '/x/app' },
+    { id: b, workspace: '/x/app' },
+    // Named exactly like the name the first one would be given.
+    { id: id(3), workspace: `/x/app · 12345678 · ${a}` },
+  ]);
+  expect(new Set(names.values()).size).toBe(3);
+  // The unique name is the one that stays as it was.
+  expect(names.get(id(3))).toBe(`app · 12345678 · ${a}`);
 });

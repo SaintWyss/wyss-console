@@ -1107,3 +1107,18 @@ it('never shows two tabs under one name', async () => {
   h.controller.open(S2, 'other');
   expect(h.state().tabs.map((t) => t.label)).toEqual(['rag-corp', 'other']);
 });
+
+it('keeps tab names unique when a name equals the short identity another tab gained', () => {
+  const h = harness();
+  h.controller.observe(connected('9'));
+  // Two tabs under one name gain their short identities; a third is called exactly that.
+  h.controller.open(S, 'rag-corp');
+  h.controller.open(S2, 'rag-corp');
+  h.controller.open(
+    '99999999-9999-4999-8999-999999999999' as typeof S,
+    `rag-corp · ${S.slice(0, 8)}`,
+  );
+  const labels = h.state().tabs.map((t) => t.label);
+  expect(new Set(labels).size).toBe(3);
+  expect(h.shown().label).toBe(labels[2]);
+});

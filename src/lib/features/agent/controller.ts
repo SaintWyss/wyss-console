@@ -25,7 +25,7 @@ import {
   startTurn,
 } from '../../desktop/turns-client';
 import type { AuthorityObservation } from '../../shell/authority';
-import { folderName, shortId } from '../sessions/present';
+import { ensureUnique, folderName, shortId } from '../sessions/present';
 
 export type AgentLink = 'connecting' | 'offline' | 'connected';
 
@@ -235,11 +235,15 @@ export class AgentController {
     const count = new Map<string, number>();
     for (const { label } of this.models)
       count.set(label, (count.get(label) ?? 0) + 1);
-    return new Map(
-      this.models.map(({ session, label }) => [
-        session,
-        (count.get(label) ?? 0) > 1 ? `${label} · ${shortId(session)}` : label,
-      ]),
+    return ensureUnique(
+      new Map(
+        this.models.map(({ session, label }) => [
+          session,
+          (count.get(label) ?? 0) > 1
+            ? `${label} · ${shortId(session)}`
+            : label,
+        ]),
+      ),
     );
   }
 
