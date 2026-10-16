@@ -30,6 +30,11 @@ import {
   installFixtureCodex,
   sandboxEnv,
 } from './e2e-guard.mjs';
+import {
+  recordProcess,
+  terminateRecorded,
+  withCleanup,
+} from './e2e-process-ledger.mjs';
 
 const REPO = resolve('.');
 const FIXTURE = join(REPO, 'src-tauri/tests/fixtures/codex_runtime.py');
@@ -37,7 +42,7 @@ const DISPLAY = ':77';
 const SCENARIO = 'echo';
 const KWIN_SOCKET = 'wl-accept';
 
-/** @typedef {{ root: string, pids: Record<string, number>, groups: number[], workspace: string }} State */
+/** @typedef {{ root: string, pids: Record<string, number>, groups: number[], workspace: string, exitFile?: string, display?: string }} State */
 
 /** @param {string} root */
 function statePath(root) {
@@ -84,7 +89,8 @@ function launch(root, name, command, args, env) {
   });
   child.unref();
   if (child.pid === undefined) throw new Error(`could not start ${name}`);
-  return child.pid;
+  // Recorded at once, before anything else can fail, so a failed start can stop it.
+  return recordProcess(root, name, child.pid);
 }
 
 /**
@@ -132,34 +138,6 @@ function alive(pid) {
   } catch {
     return false;
   }
-}
-
-/**
- * Asks each recorded group to stop, then kills what did not stop. Returns the groups that
- * survived even SIGKILL, which the caller must report as a failure.
- * @param {number[]} groups
- * @returns {Promise<number[]>}
- */
-async function stopGroups(groups) {
-  for (const group of groups) {
-    try {
-      process.kill(-group, 'SIGTERM');
-    } catch {
-      // Already gone.
-    }
-  }
-  await new Promise((done) => setTimeout(done, 3000));
-  for (const group of groups) {
-    if (alive(group)) {
-      try {
-        process.kill(-group, 'SIGKILL');
-      } catch {
-        // Gone between the check and the kill.
-      }
-    }
-  }
-  await new Promise((done) => setTimeout(done, 1000));
-  return groups.filter((group) => alive(group));
 }
 
 /** @param {string} pkg @returns {string} */
@@ -219,7 +197,41 @@ async function up() {
     workspace: join(root, 'workspace'),
   };
   writeState(root, state);
+  await startUnderCleanup(root, state, pkg);
+  console.log(root);
+}
 
+/**
+ * Starts the stack. A failure stops every process recorded so far before the error
+ * propagates. An interrupt does the same, then exits.
+ * @param {string} root
+ * @param {State} state
+ * @param {string} pkg
+ */
+async function startUnderCleanup(root, state, pkg) {
+  /** @param {NodeJS.Signals} signal */
+  const onSignal = (signal) => {
+    terminateRecorded(root).finally(() =>
+      process.exit(signal === 'SIGINT' ? 130 : 143),
+    );
+  };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+  try {
+    await withCleanup(root, () => bringUp(root, state, pkg));
+  } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+  }
+}
+
+/**
+ * Starts the services in order. Each process is recorded as it is spawned.
+ * @param {string} root
+ * @param {State} state
+ * @param {string} pkg
+ */
+async function bringUp(root, state, pkg) {
   // 1. Private user service manager: the authority runs under it, with the fixture PATH.
   state.pids.systemd = launch(
     root,
@@ -244,19 +256,44 @@ async function up() {
     );
   }
 
-  // 2. Nested display, bound to the sandbox runtime directory.
-  const runEnv = {
+  // 2. One session bus for the sandbox, shared by the compositor, the desktop and the
+  // accessibility bus, so that tests can address the compositor from outside it.
+  const busEnv = {
     ...envOf(root),
-    ...sessionVars(),
     XDG_RUNTIME_DIR: join(root, 'run'),
+    DBUS_SESSION_BUS_ADDRESS: busAddress(root),
+  };
+  state.pids.bus = launch(
+    root,
+    'dbus',
+    'dbus-daemon',
+    ['--session', `--address=${busAddress(root)}`, '--nofork', '--nopidfile'],
+    busEnv,
+  );
+  state.groups.push(state.pids.bus);
+  if (!(await waitFor(join(root, 'run', 'bus'), 10)))
+    throw new Error('session bus did not start');
+  state.pids.atSpi = launch(
+    root,
+    'at-spi',
+    '/usr/lib/at-spi-bus-launcher',
+    ['--launch-immediately'],
+    busEnv,
+  );
+  state.groups.push(state.pids.atSpi);
+
+  // 3. Nested display, bound to the sandbox runtime directory and session bus.
+  const runEnv = {
+    ...busEnv,
+    ...sessionVars(),
+    // Script output (print) of the compositor goes to its log.
+    QT_LOGGING_RULES: 'kwin_scripting.debug=true',
   };
   const kwin = launch(
     root,
     'kwin-wayland',
-    'dbus-run-session',
+    'kwin_wayland',
     [
-      '--',
-      'kwin_wayland',
       '--virtual',
       '--width',
       '1400',
@@ -272,6 +309,9 @@ async function up() {
   state.groups.push(kwin);
   if (!(await waitFor(join(root, 'run', KWIN_SOCKET), 30)))
     throw new Error('nested compositor did not start');
+  // The harness starts the X server on a fixed display, as a client of the compositor. KWin's
+  // own `--xwayland` needs the user's KWin configuration to start its server, and the window
+  // stays black under it, so the known-good launch is kept.
   const xwayland = launch(
     root,
     'xwayland',
@@ -281,12 +321,13 @@ async function up() {
   );
   state.groups.push(xwayland);
   state.pids.xwayland = xwayland;
+  state.display = DISPLAY;
   await new Promise((done) => setTimeout(done, 3000));
+  writeFileSync(join(root, 'logs', 'display.txt'), `${DISPLAY}\n`);
 
-  // 3. The packaged desktop, in the same sandbox.
+  // 4. The packaged desktop, in the same sandbox.
   launchApp(root, state, pkg);
   writeState(root, state);
-  console.log(root);
 }
 
 /**
@@ -300,20 +341,31 @@ function launchApp(root, state, pkg) {
   const appEnv = {
     ...envOf(root),
     XDG_RUNTIME_DIR: join(root, 'run'),
-    DISPLAY,
+    DBUS_SESSION_BUS_ADDRESS: busAddress(root),
+    DISPLAY: state.display ?? DISPLAY,
     GDK_BACKEND: 'x11',
     XDG_CURRENT_DESKTOP: 'KDE',
     KDE_SESSION_VERSION: '6',
-    NO_AT_BRIDGE: '1',
+    // Accessibility is switched on for the test desktop only, so its tree is published.
+    GTK_A11Y: 'atspi',
+    WEBKIT_FORCE_A11Y: '1',
   };
+  // The wrapper keeps the desktop's exit status in the sandbox: a normal close is a
+  // zero, and nothing else is inferred from the process disappearing.
+  state.exitFile = join(root, 'app-exit-code');
   state.pids.app = launch(
     root,
     'app',
-    'dbus-run-session',
-    ['--', productBinary(pkg)],
+    'sh',
+    ['-c', '"$0"; echo $? > "$1"', productBinary(pkg), state.exitFile],
     appEnv,
   );
   state.groups.push(state.pids.app);
+}
+
+/** @param {string} root @returns {string} the sandbox session bus address */
+function busAddress(root) {
+  return `unix:path=${join(root, 'run', 'bus')}`;
 }
 
 /**
@@ -324,9 +376,13 @@ function launchApp(root, state, pkg) {
 async function relaunchApp(root) {
   const state = readState(root);
   const previous = state.pids.app;
-  const survivors = await stopGroups([previous]);
+  const survivors = (await terminateRecorded(root, { names: ['app'] })).filter(
+    (entry) => entry.outcome === 'survived',
+  );
   if (survivors.length > 0) {
-    throw new Error(`the desktop survived SIGKILL: ${survivors.join(', ')}`);
+    throw new Error(
+      `the desktop survived SIGKILL: ${survivors.map((entry) => entry.pid).join(', ')}`,
+    );
   }
   state.groups = state.groups.filter((group) => group !== previous);
   launchApp(root, state, packageDir());
@@ -398,24 +454,24 @@ function findSeeder() {
 async function down(root) {
   const state = readState(root);
   sctl(root, ['stop', 'wyss-control.service']);
-  const groups = [
-    ...state.groups,
-    ...(state.pids.systemd ? [state.pids.systemd] : []),
-  ];
-  const survivors = await stopGroups(groups);
+  // Every process this sandbox recorded, stopped only where its start time still matches.
+  const survivors = (await terminateRecorded(root)).filter(
+    (entry) => entry.outcome === 'survived',
+  );
   if (survivors.length > 0) {
     throw new Error(
-      `processes survived SIGKILL, sandbox kept for inspection: ${survivors.join(', ')}`,
+      `processes survived SIGKILL, sandbox kept for inspection: ${survivors.map((entry) => entry.pid).join(', ')}`,
     );
   }
   // The display lock and socket are not in the sandbox. They are removed only when they
   // name the Xwayland this run started, and that process is gone.
-  const lock = `/tmp/.X${DISPLAY.slice(1)}-lock`;
+  const shown = state.display ?? DISPLAY;
+  const lock = `/tmp/.X${shown.slice(1)}-lock`;
   if (existsSync(lock) && state.pids.xwayland !== undefined) {
     const owner = Number(readFileSync(lock, 'utf8').trim());
     if (owner === state.pids.xwayland && !alive(owner)) {
       rmSync(lock, { force: true });
-      rmSync(`/tmp/.X11-unix/X${DISPLAY.slice(1)}`, { force: true });
+      rmSync(`/tmp/.X11-unix/X${shown.slice(1)}`, { force: true });
     }
   }
   const keep = process.env.WYSS_E2E_LOGS;
