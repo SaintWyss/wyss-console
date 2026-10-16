@@ -4,7 +4,7 @@ import { mockIPC } from '@tauri-apps/api/mocks';
 import App from '../src/App.svelte';
 import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import { parseTerminalId } from '../src/lib/contracts/identities';
-import { listing } from './agent-harness';
+import { listing, S2, T2 } from './agent-harness';
 import {
   A1,
   OTHER_STREAM,
@@ -64,6 +64,8 @@ function desktop(head: string | null = '12') {
       return rawPage(0, 0, { head: '12' });
     },
     approval: (): unknown => approvals.command,
+    /** What a read of the approvals answers. */
+    approvals: (): unknown => approvals.empty,
     authority: undefined as ((view: unknown) => void) | undefined,
   };
   mockIPC((command, payload) => {
@@ -77,7 +79,7 @@ function desktop(head: string | null = '12') {
     if (command === 'managed_events') return world.events();
     if (command === 'managed_events_older') return world.older(request);
     if (command === 'managed_approval_read') return world.approval();
-    if (command === 'managed_approvals') return approvals.empty;
+    if (command === 'managed_approvals') return world.approvals();
     if (command === 'managed_sessions_page') return pages.loaded;
     if (command === 'managed_turns') return listing([]);
     if (command === 'terminal_read_output') return never();
@@ -425,6 +427,10 @@ it('shows what a record is about and takes the reader to where that lives', asyn
   await click(button('Open in Agents', details()!));
   expect(document.querySelector('.context-title')?.textContent).toBe('Agents');
   expect(ipc.of('managed_turns').at(-1)!.request).toEqual({ session_id: S1 });
+  // The tab is named for the session's folder, as read, and not left under its identity.
+  expect(text(document.querySelector('.agent-feature [role="tab"]'))).toBe(
+    'rag-corp',
+  );
   // And to the session in Sessions, selected.
   await click(nav('Events'));
   await click(button('Open session', details()!));
@@ -437,9 +443,8 @@ it('shows what a record is about and takes the reader to where that lives', asyn
   // From a session's details, its loaded history.
   await click(button('Events', document.querySelector('.sessions-feature')!));
   expect(document.querySelector('.context-title')?.textContent).toBe('Events');
-  expect(text(view().querySelector('.events-scope'))).toContain(
-    'Session 22222222',
-  );
+  // Sessions has listed it, so the scope is named for it and not only by its identity.
+  expect(text(view().querySelector('.events-scope'))).toContain('rag-corp');
   expect(titles()).toHaveLength(3);
 });
 
@@ -666,4 +671,37 @@ it('keeps loaded history when the authority goes away, and says it is from befor
   expect(view().querySelector('.sessions-status')).toBeNull();
   expect(rows()).toHaveLength(54);
   expect(button('Refresh')!.disabled).toBe(false);
+});
+
+it('identifies an approval by its session when Events was opened first and Sessions never was', async () => {
+  const twin = {
+    ...approvals.command,
+    approval: {
+      ...approvals.command.approval,
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      session: S2,
+      turn: T2,
+    },
+  };
+  const ipc = await opened();
+  expect(rows().length).toBeGreaterThan(0);
+  // Two sessions in one directory have an action waiting.
+  ipc.world.approvals = () => ({
+    ...approvals.empty,
+    head: '12',
+    pending: [approvals.command, twin],
+  });
+  await click(nav('Approvals'));
+  const cards = Array.from(
+    document.querySelectorAll<HTMLElement>('.approvals-feature .approval-card'),
+  );
+  expect(cards).toHaveLength(2);
+  // The Sessions page was not needed to say whose they are.
+  expect(ipc.count('managed_sessions_page')).toBe(0);
+  expect(
+    cards.map((card) => text(card.querySelector('.approval-context'))),
+  ).toEqual([
+    `rag-corp · session ${approvals.command.approval.session} · turn ${approvals.command.approval.turn.slice(0, 8)}`,
+    `rag-corp · session ${S2} · turn ${T2.slice(0, 8)}`,
+  ]);
 });

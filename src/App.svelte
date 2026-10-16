@@ -13,7 +13,11 @@
   import { setAppearance } from './lib/features/terminal/appearance';
   import EventsView from './lib/features/events/EventsView.svelte';
   import { SessionsController } from './lib/features/sessions/controller';
-  import { sessionLabel } from './lib/features/sessions/present';
+  import {
+    sessionLabel,
+    sessionNames,
+    shortId,
+  } from './lib/features/sessions/present';
   import SessionsView from './lib/features/sessions/SessionsView.svelte';
   import TerminalView from './lib/features/terminal/TerminalView.svelte';
   import type { WorkspaceState } from './lib/features/terminal/session-manager';
@@ -157,9 +161,21 @@
     activeView = view;
   }
 
+  // One name for each session the Sessions page has listed, unique among them. A name is
+  // for reading: nothing is looked up, sent or decided by it.
+  const names = $derived(sessionNames(sessions.page?.sessions ?? []));
+  const nameOf = (id: ManagedSessionId): string | null => names.get(id) ?? null;
+
   /** Opens a session the user picked in Sessions in the Agent view, and shows it. */
   function openAgent(session: SessionSummary) {
-    if (agentController.open(session.id, sessionLabel(session))) go('agents');
+    if (
+      agentController.open(
+        session.id,
+        names.get(session.id) ?? sessionLabel(session),
+        false,
+      )
+    )
+      go('agents');
   }
 
   // From a record to where the thing it names lives. Nothing is taken from the record:
@@ -169,11 +185,16 @@
     go('sessions');
   }
   function showAgent(session: ManagedSessionId) {
-    const known = sessions.page?.sessions.find((s) => s.id === session);
-    const label = known
-      ? sessionLabel(known)
-      : `Session ${session.slice(0, 8)}`;
-    if (agentController.open(session, label)) go('agents');
+    // A session the Sessions page has not listed is named from what the Agent view reads.
+    const label = nameOf(session);
+    if (
+      agentController.open(
+        session,
+        label ?? `Session ${shortId(session)}`,
+        label === null,
+      )
+    )
+      go('agents');
   }
   /** The loaded history of one session, from its details in Sessions. */
   function showEvents(session: SessionSummary) {
@@ -246,6 +267,7 @@
       {approvals}
       controller={approvalsController}
       {authority}
+      {names}
     />
     <EventsView
       visible={activeView === 'events'}
@@ -253,6 +275,7 @@
       controller={eventsController}
       {authority}
       timeFormat={settings.preferences.events.time_format}
+      {nameOf}
       onsession={showSession}
       onagent={showAgent}
       onapprovals={() => go('approvals')}

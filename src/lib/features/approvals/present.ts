@@ -6,6 +6,7 @@ import type {
 import type { SessionFailureCode } from '../../contracts/sessions';
 import type { ApprovalKind } from '../../contracts/turns';
 import type { RuntimeTone } from '../../shell/runtime';
+import { folderName, shortId } from '../sessions/present';
 import type { ApprovalCard, DecisionKind } from './controller';
 
 /** Presentation only: nothing here is read back as state. */
@@ -68,8 +69,7 @@ export function approvalWhere(
   workspace: string | null,
   session: string,
 ): string {
-  const name = workspace?.split('/').filter(Boolean).at(-1);
-  return name ?? `Session ${session.slice(0, 8)}`;
+  return folderName(workspace) ?? `Session ${shortId(session)}`;
 }
 
 /**

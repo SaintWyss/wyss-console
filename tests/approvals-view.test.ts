@@ -5,7 +5,8 @@ import App from '../src/App.svelte';
 import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import { parseTerminalId } from '../src/lib/contracts/identities';
 import type { TurnSummary } from '../src/lib/contracts/turns';
-import { listing, reading, T1, turn } from './agent-harness';
+import { localTime } from '../src/lib/features/sessions/present';
+import { listing, reading, S, S2, T1, T2, turn } from './agent-harness';
 import approvals from './fixtures/approval-list-v1.json';
 import views from './fixtures/authority-view-v1.json';
 import pages from './fixtures/session-page-v3.json';
@@ -79,6 +80,8 @@ function desktop() {
       return approvals.command;
     },
     authority: undefined as ((view: unknown) => void) | undefined,
+    /** The sessions Sessions lists, when the test needs others than `page`. */
+    sessions: undefined as typeof page.sessions | undefined,
   };
   mockIPC((command, payload) => {
     const request =
@@ -95,7 +98,8 @@ function desktop() {
       world.authority = resolve;
       return answer;
     }
-    if (command === 'managed_sessions_page') return page;
+    if (command === 'managed_sessions_page')
+      return { ...page, sessions: world.sessions ?? page.sessions };
     if (command === 'managed_turns')
       return listing(world.turns, { session: { mode: 'local_tools' } });
     if (command === 'managed_approvals') return world.approvals;
@@ -145,8 +149,11 @@ async function click(target: HTMLElement | undefined) {
   await flush();
 }
 /** The application with its Local Tools session open in the Agent view, a turn running. */
-async function running() {
+async function running(
+  setup: (ipc: ReturnType<typeof desktop>) => void = () => undefined,
+) {
   const ipc = desktop();
+  setup(ipc);
   component = mount(App, { target: document.body });
   await flush();
   await click(nav('Sessions'));
@@ -315,7 +322,11 @@ it('shows an approval under the turn that waits on it and in Approvals, and appr
   const listed = cards(approvalsView());
   expect(listed).toHaveLength(1);
   expect(text(listed[0].querySelector('.approval-context'))).toBe(
-    `rag-corp · turn ${T1.slice(0, 8)}`,
+    `rag-corp · session ${S} · turn ${T1.slice(0, 8)}`,
+  );
+  // Under its turn it carries the same identity, without the name the turn already has.
+  expect(text(inline[0].querySelector('.approval-context'))).toBe(
+    `session ${S} · turn ${T1.slice(0, 8)}`,
   );
   expect(text(approvalsView())).toContain('1 waiting for a decision');
   // One reader: showing the page asked for no second list.
@@ -590,9 +601,121 @@ it('never shows the approval of another turn under a turn, nor a command as mark
   await click(nav('Approvals'));
   const [card] = cards(approvalsView());
   expect(text(card.querySelector('.approval-context'))).toBe(
-    'rag-corp · turn bbbbbbbb',
+    `rag-corp · session ${S} · turn bbbbbbbb`,
   );
   expect(card.querySelector('.approval-code')!.textContent).toBe(hostile);
   expect(card.querySelectorAll('img, b, script')).toHaveLength(0);
   expect((window as unknown as { pwned?: number }).pwned).toBeUndefined();
+});
+
+it('names the session an approval belongs to so a twin in the same folder is not mistaken for it', async () => {
+  const mine = { ...bound, binding: 'bound_attached', mode: 'local_tools' };
+  const twin = {
+    ...mine,
+    id: '66666666-6666-4666-8666-666666666666',
+    position: '3',
+    created_at: '2026-10-09T09:30:00Z',
+    updated_at: '2026-10-09T09:30:00Z',
+  };
+  const ipc = await running((desktop) => {
+    desktop.world.sessions = [mine, twin];
+  });
+  await asks(ipc, approvals.command);
+  await click(nav('Approvals'));
+  const listed = cards(approvalsView());
+  expect(listed).toHaveLength(1);
+  // Two sessions share the folder: the name says which one is asking, not just the folder.
+  expect(text(listed[0].querySelector('.approval-context'))).toBe(
+    `rag-corp · ${localTime(mine.created_at)} · session ${S} · turn ${T1.slice(0, 8)}`,
+  );
+});
+
+/** A second pending approval, of another session in the very same directory. */
+const A2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+const ofTwin = {
+  ...approvals.command,
+  approval: {
+    ...approvals.command.approval,
+    id: A2,
+    session: S2,
+    turn: T2,
+  },
+};
+
+it('says whose action it is by the session identity when no Sessions page was ever read', async () => {
+  const ipc = desktop();
+  // Two managed sessions in one directory, each with an action waiting.
+  ipc.world.approvals = pendingList(approvals.command, ofTwin);
+  component = mount(App, { target: document.body });
+  await flush();
+  await click(nav('Approvals'));
+
+  // Nothing was read to name them: the identity is the approval's own.
+  expect(ipc.count('managed_sessions_page')).toBe(0);
+  const listed = cards(approvalsView());
+  expect(listed).toHaveLength(2);
+  const contexts = listed.map((card) =>
+    text(card.querySelector('.approval-context')),
+  );
+  // The same name twice, and two identities that cannot be mistaken for each other.
+  expect(contexts).toEqual([
+    `rag-corp · session ${S} · turn ${T1.slice(0, 8)}`,
+    `rag-corp · session ${S2} · turn ${T2.slice(0, 8)}`,
+  ]);
+  expect(S).not.toBe(S2);
+  expect(text(document.querySelector('.nav-tag.waiting'))).toBe('2');
+
+  // The answer goes to the approval of the card that was pressed, and to no other.
+  await click(button('Deny', listed[1]));
+  expect(ipc.of('managed_approval_deny').map((c) => c.request)).toEqual([
+    {
+      intent_id: expect.stringMatching(UUID),
+      approval_id: A2,
+      expected_revision: 1,
+    },
+  ]);
+  expect(ipc.count('managed_approval_approve')).toBe(0);
+  // Still without a Sessions page.
+  expect(ipc.count('managed_sessions_page')).toBe(0);
+});
+
+it('keeps an approval with the session it came from once the Sessions page is read', async () => {
+  const ipc = desktop();
+  ipc.world.approvals = pendingList(approvals.command, ofTwin);
+  component = mount(App, { target: document.body });
+  await flush();
+  await click(nav('Approvals'));
+  const before = cards(approvalsView()).map((card) =>
+    text(card.querySelector('.approval-context')),
+  );
+  // Sessions lists only one of the two: the other is beyond what that page holds.
+  await click(nav('Sessions'));
+  await click(nav('Approvals'));
+  const after = cards(approvalsView()).map((card) =>
+    text(card.querySelector('.approval-context')),
+  );
+  expect(after).toHaveLength(2);
+  // The identity of each did not change. Only a name may have gained words.
+  for (const [index, id] of [S, S2].entries()) {
+    expect(before[index]).toContain(`session ${id}`);
+    expect(after[index]).toContain(`session ${id}`);
+  }
+});
+
+it('names the session of an approval that has ended', async () => {
+  const ipc = desktop();
+  ipc.world.approvals = {
+    ...approvals.empty,
+    head: '11',
+    recent: [{ ...approvals.recent[0], id: A2, session: S2, turn: T2 }],
+  };
+  component = mount(App, { target: document.body });
+  await flush();
+  await click(nav('Approvals'));
+  const row = approvalsView().querySelector('.approval-row')!;
+  expect(text(row)).toContain(
+    `session ${S2.slice(0, 8)} · turn ${T2.slice(0, 8)}`,
+  );
+  expect(row.querySelector('[title]')?.getAttribute('title')).toBe(S2);
+  expect(ipc.count('managed_sessions_page')).toBe(0);
 });

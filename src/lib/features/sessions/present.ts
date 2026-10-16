@@ -15,10 +15,130 @@ export function agentName(adapter: string): string {
   return adapter === 'codex' ? 'Codex' : adapter;
 }
 
+/** The last segment of an absolute workspace path, or null when it has none. */
+export function folderName(workspace: string | null): string | null {
+  return workspace?.split('/').filter(Boolean).at(-1) ?? null;
+}
+/** The short form of a session's identity, as it is written where space is scarce. */
+export function shortId(id: string): string {
+  return id.slice(0, 8);
+}
+
 /** The last segment of the bound workspace, or a short form of the session's identity. */
-export function sessionLabel(session: SessionSummary): string {
-  const name = session.workspace?.split('/').filter(Boolean).at(-1);
-  return name ?? `Session ${session.id.slice(0, 8)}`;
+export function sessionLabel(session: {
+  id: string;
+  workspace: string | null;
+}): string {
+  return folderName(session.workspace) ?? `Session ${shortId(session.id)}`;
+}
+
+/** What a name is made from. Everything else about a session is not part of it. */
+export interface NameSource {
+  id: string;
+  workspace: string | null;
+  created_at?: string | null;
+}
+
+/** The last `count` segments of a path. */
+function tail(workspace: string, count: number): string {
+  return workspace.split('/').filter(Boolean).slice(-count).join('/');
+}
+
+/**
+ * Makes every name in `names` unique. A name that is already unique is left as it is; sessions
+ * that still share one take their full identity as well, which no other session has. This is the
+ * last word on uniqueness: a suffix made for one group can equal a name made for another, or a
+ * folder can be named like a suffix, and neither can be ruled out by the groups alone.
+ */
+export function ensureUnique<K extends string>(
+  names: ReadonlyMap<K, string>,
+): Map<K, string> {
+  const count = new Map<string, number>();
+  for (const name of names.values())
+    count.set(name, (count.get(name) ?? 0) + 1);
+  const unique = new Map(names);
+  const taken = new Set(
+    [...names.values()].filter((name) => count.get(name) === 1),
+  );
+  // In identity order, so the result does not depend on the order the sessions came in.
+  for (const id of [...names.keys()].sort()) {
+    const name = names.get(id) ?? '';
+    if (count.get(name) === 1) continue;
+    let candidate = `${name} · ${id}`;
+    while (taken.has(candidate)) candidate += ' ·';
+    taken.add(candidate);
+    unique.set(id, candidate);
+  }
+  return unique;
+}
+
+/**
+ * A name for each session that no other session in the same set has.
+ *
+ * A session is named for its folder. Two folders that end in the same name are told
+ * apart by their parents (`a/app`, `b/app`). Several sessions in one folder, which the
+ * product asks for when a project needs both Inference and Local Tools, are told apart
+ * by when they were created, or by their short identity when that does not do it. A name
+ * only gains words when it is needed, so it can change when another session appears in
+ * the same set, and it never changes what the session is. No two names are equal: see
+ * [`ensureUnique`].
+ */
+export function sessionNames(
+  sessions: readonly NameSource[],
+): Map<string, string> {
+  const names = new Map<string, string>();
+  const groups = new Map<string, NameSource[]>();
+  for (const session of sessions) {
+    if (names.has(session.id)) continue;
+    names.set(session.id, '');
+    const base = sessionLabel(session);
+    groups.set(base, [...(groups.get(base) ?? []), session]);
+  }
+  for (const [base, group] of groups) {
+    // Only a folder with a name of its own can be told apart by its parents. A session bound
+    // to `/` has none, and is named by its identity like one with no folder.
+    const named = (workspace: string | null): workspace is string =>
+      folderName(workspace) !== null;
+    const folders = [...new Set(group.map((s) => s.workspace).filter(named))];
+    let depth = 1;
+    if (folders.length > 1) {
+      const deepest = Math.max(
+        ...folders.map((f) => f.split('/').filter(Boolean).length),
+      );
+      while (
+        depth < deepest &&
+        new Set(folders.map((f) => tail(f, depth))).size < folders.length
+      )
+        depth++;
+    }
+    const sharing = new Map<string, NameSource[]>();
+    for (const session of group) {
+      const label =
+        named(session.workspace) && folders.length > 1
+          ? tail(session.workspace, depth)
+          : base;
+      sharing.set(label, [...(sharing.get(label) ?? []), session]);
+    }
+    for (const [label, members] of sharing) {
+      if (members.length === 1) {
+        names.set(members[0].id, label);
+        continue;
+      }
+      const stamps = members.map((m) =>
+        m.created_at ? localTime(m.created_at) : null,
+      );
+      const told = stamps.every((stamp) => stamp !== null)
+        ? new Set(stamps).size === members.length
+        : false;
+      members.forEach((member, index) =>
+        names.set(
+          member.id,
+          `${label} · ${told ? stamps[index] : shortId(member.id)}`,
+        ),
+      );
+    }
+  }
+  return ensureUnique(names);
 }
 
 export const STATE: Record<
