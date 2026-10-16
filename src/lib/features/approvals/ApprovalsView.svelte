@@ -129,7 +129,11 @@
               </span>
               <span class="approval-kind">{APPROVAL_KIND[approval.kind]}</span>
               <span class="session-meta">
-                turn <span class="mono">{approval.turn.slice(0, 8)}</span>
+                session
+                <span class="mono" title={approval.session}
+                  >{approval.session.slice(0, 8)}</span
+                >
+                · turn <span class="mono">{approval.turn.slice(0, 8)}</span>
                 {#if approval.ended_at}
                   · <time datetime={approval.ended_at}
                     >{localTime(approval.ended_at)}</time

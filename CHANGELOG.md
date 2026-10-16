@@ -15,6 +15,11 @@
 - **A tab opened from Events is named for its folder** once the Agent view has read it,
   instead of staying under the session's identity. Opening a session again from Sessions
   gives its tab the name Sessions shows.
+- **An approval always says which session it belongs to.** Every approval card, under its
+  turn and in Approvals, and every ended approval in the list shows the session's canonical
+  identity as the authority names it on the approval, next to the folder name. Two sessions in
+  one directory can no longer be mistaken for each other when the Sessions page was never
+  opened, or does not list the session (it lists one page of 25).
 - Names are for reading. Nothing is looked up, sent or decided by one, and no preference,
   approval or authority behavior changed.
 

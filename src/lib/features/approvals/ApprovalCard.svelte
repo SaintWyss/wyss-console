@@ -21,7 +21,7 @@
     card: ApprovalCard;
     controller: ApprovalsController;
     connected: boolean;
-    /** Name the session the approval belongs to: where it is not shown under its turn. */
+    /** Put the session's name before its identity: where the card is not shown under its turn. */
     context?: boolean;
     /** The session's name among the sessions shown with it, when it needs more than its folder. */
     where?: string;
@@ -38,12 +38,19 @@
 
 <div class="approval-card" role="group" aria-label="Approval">
   <p class="approval-title">{approvalTitle(card)}</p>
-  {#if context}
-    <p class="approval-context">
-      {where ?? approvalWhere(card.workspace, card.approval.session)} · turn
-      <span class="mono">{card.approval.turn.slice(0, 8)}</span>
-    </p>
-  {/if}
+  <!-- The session is its canonical identity, as the authority names it on the approval. The
+       name before it is for reading; this is what says whose action it is. -->
+  <p class="approval-context">
+    {#if context}
+      <span class="approval-where"
+        >{where ?? approvalWhere(card.workspace, card.approval.session)}</span
+      >
+      ·
+    {/if}
+    session
+    <span class="mono">{card.approval.session}</span> · turn
+    <span class="mono">{card.approval.turn.slice(0, 8)}</span>
+  </p>
 
   {#if card.command}
     <dl class="approval-fields">
