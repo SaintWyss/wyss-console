@@ -159,7 +159,7 @@ impl Index {
 }
 
 /// A position of `stream` as the window is handed it. Nothing is before position one.
-fn cursor(stream: &str, before: u64) -> Option<HistoryCursor> {
+pub(super) fn cursor(stream: &str, before: u64) -> Option<HistoryCursor> {
     (before > 1).then_some(())?;
     Some(HistoryCursor {
         stream_id: WireUuid::try_from(stream.to_owned()).ok()?,

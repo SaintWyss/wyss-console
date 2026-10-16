@@ -486,3 +486,102 @@ fn an_old_turn_is_what_the_authority_holds_and_its_output_is_never_filled_in() {
     }
     assert!(page.older.is_none());
 }
+
+#[test]
+fn no_cursor_names_the_first_position_or_one_before_it() {
+    let stream = uuid();
+    assert!(super::super::service::cursor(stream.as_str(), 0).is_none());
+    assert!(super::super::service::cursor(stream.as_str(), 1).is_none());
+    let two = super::super::service::cursor(stream.as_str(), 2).unwrap();
+    assert_eq!((two.before.get(), &two.stream_id), (2, &stream));
+    // Not a stream: no cursor either.
+    assert!(super::super::service::cursor("not a uuid", 9).is_none());
+}
+
+#[test]
+fn a_page_of_exactly_one_page_of_turns_stops_there_and_goes_on_from_the_end_of_what_it_read() {
+    let f = Fixture::new();
+    let ids = {
+        let mut world = f.world.lock().unwrap();
+        // Positions 1 to 50 hold thirty turns of this session and some quiet; 51 to 80 are
+        // quiet; 81 to 100 are twenty turns of this session: exactly one page, inside one
+        // step, with more history below it.
+        for _ in 0..30 {
+            world.past_turn(&f.session, false);
+        }
+        world.quiet(20);
+        world.quiet(30);
+        (0..20)
+            .map(|_| world.past_turn(&f.session, false))
+            .collect::<Vec<_>>()
+    };
+    f.settle();
+    let from = f.peer.requests().len();
+    let page = f
+        .turns
+        .older(f.session.clone(), f.stream(), "101".parse().unwrap())
+        .unwrap();
+    // Exactly a page, found in the one step that was read: the next step is not read for
+    // it, and the page goes on from the end of what it did read, not from its oldest turn.
+    let mut expected = ids.clone();
+    expected.reverse();
+    assert_eq!(
+        page.turns.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+        expected
+    );
+    assert_eq!(f.audit_reads(from), [(50, 50)]);
+    assert_eq!(page.older.unwrap().before.get(), 51);
+}
+
+#[test]
+fn a_stream_that_answers_fewer_events_than_asked_is_read_in_as_many_requests_as_it_takes() {
+    let f = Fixture::new();
+    let mine = {
+        let mut world = f.world.lock().unwrap();
+        let mine: Vec<_> = (0..12)
+            .map(|_| world.past_turn(&f.session, false))
+            .collect();
+        world.audit_cap = Some(5);
+        mine
+    };
+    f.settle();
+    let from = f.peer.requests().len();
+    let page = f
+        .turns
+        .older(f.session.clone(), f.stream(), "13".parse().unwrap())
+        .unwrap();
+    let mut expected = mine.clone();
+    expected.reverse();
+    assert_eq!(
+        page.turns.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+        expected
+    );
+    // Twelve positions, five at a time: each request asks for what is left, no more.
+    assert_eq!(f.audit_reads(from), [(0, 12), (5, 7), (10, 2)]);
+    assert!(page.older.is_none());
+}
+
+#[test]
+fn an_answer_that_is_empty_or_longer_than_asked_is_not_history_and_fails_the_page() {
+    for fault in [AuditFault::Empty, AuditFault::TooMany] {
+        let f = Fixture::new();
+        {
+            let mut world = f.world.lock().unwrap();
+            // More history than the step asks about, so that "too many" has events to
+            // overshoot with.
+            for _ in 0..12 {
+                world.past_turn(&f.session, false);
+            }
+            world.audit_fault = fault;
+        }
+        f.settle();
+        let error = f
+            .turns
+            .older(f.session.clone(), f.stream(), "9".parse().unwrap())
+            .unwrap_err();
+        assert_eq!(
+            error.code,
+            SessionError::of(ControlError::CorrelationError).code
+        );
+    }
+}

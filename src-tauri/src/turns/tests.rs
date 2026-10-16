@@ -81,6 +81,18 @@ struct World {
     decided: HashMap<String, ApprovalReceipt>,
     /// Places of `audit` the stream does not answer: a hole in what it holds.
     holes: Vec<usize>,
+    /// The most events one answer holds, whatever was asked: what a frame can carry.
+    audit_cap: Option<usize>,
+    /// An answer that is not what was asked for.
+    audit_fault: AuditFault,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AuditFault {
+    None,
+    /// No event, though history exists there.
+    Empty,
+    /// One event more than was asked for.
+    TooMany,
 }
 impl World {
     fn new(session: &ManagedSessionId) -> Self {
@@ -91,6 +103,8 @@ impl World {
             named: HashMap::new(),
             decided: HashMap::new(),
             holes: Vec::new(),
+            audit_cap: None,
+            audit_fault: AuditFault::None,
             session: session.clone(),
             gate: GateReason::Allowed,
             lease: None,
@@ -390,14 +404,20 @@ impl World {
                     .enumerate()
                     .skip(after)
                     .filter(|(i, _)| !self.holes.contains(i))
-                    .take(usize::from(p.limit))
+                    .take(match self.audit_fault {
+                        AuditFault::Empty => 0,
+                        AuditFault::TooMany => usize::from(p.limit) + 1,
+                        AuditFault::None => self
+                            .audit_cap
+                            .map_or(usize::from(p.limit), |cap| cap.min(usize::from(p.limit))),
+                    })
                     .map(|(i, (kind, session, turn))| {
                         envelope(&p.stream_id, i + 1, kind, session, turn, self.named.get(&i))
                     })
                     .collect();
                 let reached = after + events.len();
                 Ok(ResultValue::Audit {
-                    next: (reached < self.audit.len())
+                    next: (reached > 0 && reached < self.audit.len())
                         .then(|| reached.to_string().parse().unwrap()),
                     events,
                 })
