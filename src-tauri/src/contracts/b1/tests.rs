@@ -273,6 +273,9 @@ fn link_targets_are_relative_and_contained_from_their_location() {
         ("dir/l", "x\\y"),
         ("dir/l", "x\0y"),
         ("dir/l", ""),
+        ("dir/l", "C:foo"),
+        ("dir/l", "C:/etc/passwd"),
+        ("dir/l", "a:b"),
     ];
     for (location, text) in escapes {
         assert_eq!(
@@ -668,7 +671,16 @@ fn export_records_reject_renames_unsafe_nodes_and_collisions() {
 #[test]
 fn risk_flags_are_case_insensitive_and_apply_at_any_depth() {
     use RiskFlag::*;
-    let flags = |text: &str, executable: bool| classify_entry(&path(text), executable);
+    let flags = |text: &str, executable: bool| classify_entry(&path(text), executable, false);
+    // Binary content is a caller-declared fact, so it is flagged only when declared.
+    assert_eq!(
+        classify_entry(&path("tools/blob.dat"), false, true),
+        vec![Binary]
+    );
+    assert_eq!(
+        classify_entry(&path(".github/x"), true, true),
+        vec![GitHubWorkflow, Executable, Binary]
+    );
     assert_eq!(
         flags(".github/workflows/ci.yml", false),
         vec![GitHubWorkflow]

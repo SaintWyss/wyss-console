@@ -182,11 +182,15 @@ pub enum RiskFlag {
     GitMetadata,
     EnvironmentLoader,
     Executable,
+    Binary,
 }
 
 /// Flags a path by its components at any depth, comparing ASCII case-insensitively so that
 /// case-folding destinations cannot hide a delayed-execution surface.
-pub fn classify_entry(path: &B1RelPath, executable: bool) -> Vec<RiskFlag> {
+///
+/// `executable` and `binary` are facts the caller must supply from the mode and the bytes.
+/// This pure contract does not inspect content, so it cannot detect binary files itself.
+pub fn classify_entry(path: &B1RelPath, executable: bool, binary: bool) -> Vec<RiskFlag> {
     let mut flags = Vec::new();
     for component in path.components() {
         match component.to_ascii_lowercase().as_slice() {
@@ -211,6 +215,9 @@ pub fn classify_entry(path: &B1RelPath, executable: bool) -> Vec<RiskFlag> {
     }
     if executable {
         flags.push(RiskFlag::Executable);
+    }
+    if binary {
+        flags.push(RiskFlag::Binary);
     }
     flags.sort();
     flags.dedup();

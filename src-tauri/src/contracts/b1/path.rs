@@ -171,7 +171,7 @@ impl B1LinkTarget {
         }
         // Components always yield at least one item, so the link's own name is never missing.
         let mut depth = link.components().count() - 1;
-        for component in self.0.split(|&byte| byte == b'/') {
+        for (index, component) in self.0.split(|&byte| byte == b'/').enumerate() {
             match component {
                 b"" | b"." => return Err(unsafe_target()),
                 b".." => {
@@ -184,7 +184,9 @@ impl B1LinkTarget {
                     if component.len() > MAX_COMPONENT_BYTES {
                         return Err(B1Error::new("link_target", B1ErrorCode::LimitExceeded));
                     }
-                    if is_git_control(component) {
+                    // A drive-style first component (`C:foo`) is drive-relative on Windows, not
+                    // relative to the link's directory. Refuse it, as repository paths are refused.
+                    if (index == 0 && component.contains(&b':')) || is_git_control(component) {
                         return Err(unsafe_target());
                     }
                     depth += 1;
