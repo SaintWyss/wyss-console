@@ -742,7 +742,9 @@ fn mode_changes_are_refused() {
 fn symlink_targets_are_rechecked_for_identity_and_containment() {
     let (fixture, snapshot) = admitted();
     for (target, expected) in [
-        (&b"../OTHER.md"[..], B1ErrorCode::SnapshotMismatch),
+        // Same length as the original target, so only the digest can notice it.
+        (&b"../RFADME.md"[..], B1ErrorCode::SnapshotMismatch),
+        (b"../OTHER.md", B1ErrorCode::SnapshotMismatch),
         (b"../../outside", B1ErrorCode::LinkTargetUnsafe),
         (b"/etc/passwd", B1ErrorCode::LinkTargetUnsafe),
         (b"", B1ErrorCode::LinkTargetUnsafe),
@@ -1086,4 +1088,28 @@ fn selection_check_refuses_a_foreign_or_altered_selection() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn the_tree_digest_equals_an_independent_computation_from_the_selection() {
+    // The oracle never looks at snapshot entries: it digests the owner's declared overlay.
+    let (fixture, snapshot) = admitted();
+    let manifest: Vec<digest::ManifestEntry<'_>> = fixture
+        .selection
+        .admitted_overlay
+        .iter()
+        .map(|overlay| digest::ManifestEntry {
+            path: &overlay.path,
+            operation: digest::EntryOperation::from(overlay.operation),
+            content: digest::DigestContent::of(overlay.content.as_ref()),
+        })
+        .collect();
+    let expected = digest::source_manifest(
+        fixture.context.task_id(),
+        fixture.context.generation(),
+        fixture.base.base_oid(),
+        &manifest,
+    )
+    .unwrap();
+    assert_eq!(snapshot.record().admitted_tree_sha256, expected);
 }

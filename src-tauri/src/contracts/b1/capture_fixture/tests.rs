@@ -2,7 +2,8 @@
 //! created under the system temporary directory, and every "external canary" is a synthetic file
 //! in a second such root. No home directory, project, credential or agent runtime is read.
 use super::{
-    NodeKind, Phase, Stage, SyntheticCapture, SyntheticRoot, node_kind, openat2, read_prefix,
+    CONFINED, Identity, NodeKind, Phase, Stage, SyntheticCapture, SyntheticRoot, directory_error,
+    is_classified_leaf, leaf_error, node_kind, openat2, read_prefix, same_places,
 };
 use crate::contracts::b1::{
     B1ErrorCode, B1Result, GitOid, MAX_INPUT_BYTES,
@@ -553,7 +554,8 @@ fn a_symlink_replaced_during_capture_is_detected() {
     // A replacement with identical target bytes is deliberately absent. Inode numbers are reused
     // by delete and re-create, so it cannot be told apart by identity, and the bytes returned are
     // exactly what the path holds, so nothing observable is wrong.
-    let swaps: [(&str, fn(&SyntheticRoot, &SyntheticRoot)); 2] = [
+    type Swap = fn(&SyntheticRoot, &SyntheticRoot);
+    let swaps: [(&str, Swap); 2] = [
         ("new target", |root, _| {
             fs::remove_file(root.at("l")).unwrap();
             symlink("other", root.at("l")).unwrap();
@@ -936,4 +938,156 @@ fn confined_resolution_refuses_every_escape_spelling() {
     );
     // The same file, reached without a link, opens.
     assert!(open(b"d/f", read).is_ok());
+}
+
+// ---- Boundary logic pinned directly (found by mutation testing) ---------------------------------
+
+#[test]
+fn every_openat2_restriction_is_requested() {
+    // Written as literals so that a change to the composition of the mask is visible. Mount
+    // crossings (NO_XDEV) cannot be provoked without privilege, so this is the only check on it.
+    assert_eq!(libc::RESOLVE_NO_XDEV, 0x01);
+    assert_eq!(libc::RESOLVE_NO_MAGICLINKS, 0x02);
+    assert_eq!(libc::RESOLVE_NO_SYMLINKS, 0x04);
+    assert_eq!(libc::RESOLVE_BENEATH, 0x08);
+    assert_eq!(CONFINED, 0x0f);
+}
+
+#[test]
+fn open_errors_fail_closed_and_depend_on_the_phase() {
+    for errno in [Errno::ENOSYS, Errno::EPERM] {
+        assert_eq!(leaf_error(errno).code, B1ErrorCode::IsolationUnavailable);
+        for phase in [Phase::Initial, Phase::Recheck] {
+            assert_eq!(
+                directory_error(errno, phase).code,
+                B1ErrorCode::IsolationUnavailable
+            );
+        }
+    }
+    for errno in [Errno::ELOOP, Errno::EXDEV] {
+        assert_eq!(
+            directory_error(errno, Phase::Initial).code,
+            B1ErrorCode::HardlinkOrAliasUnsafe
+        );
+        assert_eq!(
+            directory_error(errno, Phase::Recheck).code,
+            B1ErrorCode::CaptureChanged
+        );
+        assert_eq!(leaf_error(errno).code, B1ErrorCode::CaptureChanged);
+    }
+    for errno in [Errno::ENOENT, Errno::ENOTDIR, Errno::EACCES, Errno::ENXIO] {
+        assert_eq!(leaf_error(errno).code, B1ErrorCode::CaptureChanged);
+        for phase in [Phase::Initial, Phase::Recheck] {
+            assert_eq!(
+                directory_error(errno, phase).code,
+                B1ErrorCode::CaptureChanged
+            );
+        }
+    }
+}
+
+#[test]
+fn identity_predicates_require_every_part_to_match() {
+    let a = Identity {
+        device: 1,
+        inode: 1,
+    };
+    let b = Identity {
+        device: 1,
+        inode: 2,
+    };
+    let c = Identity {
+        device: 2,
+        inode: 1,
+    };
+    let regular = libc::S_IFREG | 0o644;
+    assert!(is_classified_leaf(regular, a, a));
+    assert!(!is_classified_leaf(regular, a, b));
+    assert!(!is_classified_leaf(regular, a, c));
+    for other in [libc::S_IFIFO, libc::S_IFLNK, libc::S_IFDIR, libc::S_IFSOCK] {
+        assert!(!is_classified_leaf(other | 0o644, a, a));
+    }
+    assert!(same_places((a, a), (b, b)));
+    assert!(!same_places((a, b), (b, b)));
+    assert!(!same_places((a, a), (b, c)));
+    assert!(!same_places((a, b), (b, c)));
+}
+
+#[test]
+fn special_files_in_an_ancestor_position_are_never_opened() {
+    // Opening a FIFO for reading without O_DIRECTORY would block forever.
+    let _guard = watchdog();
+    let root = SyntheticRoot::create();
+    mkfifo(&root.at("pipe"), Mode::S_IRWXU).unwrap();
+    mknod(&root.at("sock"), SFlag::S_IFSOCK, Mode::S_IRWXU, 0).unwrap();
+    write(&root, "file", b"x");
+    for name in ["pipe/child", "pipe/a/b", "sock/child", "file/child"] {
+        let (selection, _) = selection_for(vec![regular(name, b"x")]);
+        assert_eq!(
+            capture_code(&enabled(&root), &selection),
+            B1ErrorCode::CaptureChanged,
+            "{name}"
+        );
+    }
+}
+
+fn sparse(root: &SyntheticRoot, name: &str, length: u64) {
+    File::create(root.at(name))
+        .unwrap()
+        .set_len(length)
+        .unwrap();
+}
+
+#[test]
+fn reads_stop_exactly_one_byte_past_the_declared_size() {
+    let root = SyntheticRoot::create();
+    sparse(&root, "big", 1024 * 1024);
+    // Sizes on both sides of the internal 8 KiB chunk, so an off-by-one in the loop shows.
+    for declared in [0usize, 1, 8191, 8192, 8193, 20_000] {
+        let expected = vec![0u8; declared];
+        let (selection, base) = selection_for(vec![regular("big", &expected)]);
+        let records = enabled(&root).capture(&selection).unwrap();
+        assert_eq!(only_regular(&records).1.len(), declared + 1, "{declared}");
+        assert_eq!(
+            admit_captured(&selection, &base, &records)
+                .unwrap_err()
+                .code,
+            B1ErrorCode::ContentSizeMismatch
+        );
+    }
+}
+
+#[test]
+fn the_maximum_declared_size_is_captured_and_one_more_byte_is_refused_by_admission() {
+    let root = SyntheticRoot::create();
+    let full = vec![0u8; MAX_INPUT_BYTES as usize];
+    sparse(&root, "exact", MAX_INPUT_BYTES);
+    sparse(&root, "over", MAX_INPUT_BYTES + 100);
+    let (exact, base) = selection_for(vec![regular("exact", &full)]);
+    let records = enabled(&root).capture(&exact).unwrap();
+    admit_captured(&exact, &base, &records).unwrap();
+    let (over, base) = selection_for(vec![regular("over", &full)]);
+    let records = enabled(&root).capture(&over).unwrap();
+    assert_eq!(only_regular(&records).1.len() as u64, MAX_INPUT_BYTES + 1);
+    // Admission refuses the per-input limit before it compares with the selection.
+    assert_eq!(
+        admit_captured(&over, &base, &records).unwrap_err().code,
+        B1ErrorCode::LimitExceeded
+    );
+}
+
+#[test]
+fn a_regular_file_where_the_selection_declares_a_symlink_is_bounded_by_the_input_limit() {
+    let root = SyntheticRoot::create();
+    sparse(&root, "exact", MAX_INPUT_BYTES);
+    sparse(&root, "over", MAX_INPUT_BYTES + 1);
+    // The owner declared a symlink, so no declared size bounds the read. The global limit does.
+    let (declared_exact, _) = selection_for(vec![symlink_want("exact", "t")]);
+    let records = enabled(&root).capture(&declared_exact).unwrap();
+    assert_eq!(only_regular(&records).1.len() as u64, MAX_INPUT_BYTES);
+    let (declared_over, _) = selection_for(vec![symlink_want("over", "t")]);
+    assert_eq!(
+        capture_code(&enabled(&root), &declared_over),
+        B1ErrorCode::LimitExceeded
+    );
 }

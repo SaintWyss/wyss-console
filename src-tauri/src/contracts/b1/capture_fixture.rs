@@ -61,12 +61,12 @@ use std::{
 #[cfg(test)]
 mod tests;
 
-const RESOLVE_NO_XDEV: u64 = 0x01;
-const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
-const RESOLVE_NO_SYMLINKS: u64 = 0x04;
-const RESOLVE_BENEATH: u64 = 0x08;
-const CONFINED: u64 =
-    RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_XDEV;
+/// Every resolution restriction at once. `RESOLVE_NO_SYMLINKS` already implies
+/// `RESOLVE_NO_MAGICLINKS`; both are named so that the intent survives a change of kernel semantics.
+const CONFINED: u64 = libc::RESOLVE_BENEATH
+    | libc::RESOLVE_NO_SYMLINKS
+    | libc::RESOLVE_NO_MAGICLINKS
+    | libc::RESOLVE_NO_XDEV;
 
 /// `struct open_how` from `openat2(2)`.
 #[repr(C)]
@@ -201,6 +201,8 @@ struct Identity {
 }
 
 impl Identity {
+    // `stat` field widths differ by target, so these casts are not redundant everywhere.
+    #[allow(clippy::unnecessary_cast)]
     fn of(stat: &FileStat) -> Self {
         Self {
             device: stat.st_dev as u64,
@@ -221,6 +223,7 @@ struct Stamp {
 }
 
 impl Stamp {
+    #[allow(clippy::unnecessary_cast)]
     fn of(stat: &FileStat) -> Self {
         Self {
             identity: Identity::of(stat),
@@ -245,6 +248,35 @@ fn changed() -> B1Error {
 
 fn unavailable() -> B1Error {
     B1Error::new("capture", B1ErrorCode::IsolationUnavailable)
+}
+
+/// A missing or blocked `openat2` fails closed. A symlinked or escaping ancestor is an alias,
+/// unless it appeared mid-capture, in which case the tree changed.
+fn directory_error(errno: Errno, phase: Phase) -> B1Error {
+    match errno {
+        Errno::ENOSYS | Errno::EPERM => unavailable(),
+        Errno::ELOOP | Errno::EXDEV if phase == Phase::Initial => {
+            B1Error::new("path", B1ErrorCode::HardlinkOrAliasUnsafe)
+        }
+        _ => changed(),
+    }
+}
+
+fn leaf_error(errno: Errno) -> B1Error {
+    match errno {
+        Errno::ENOSYS | Errno::EPERM => unavailable(),
+        _ => changed(),
+    }
+}
+
+/// The opened leaf must be the regular file that was classified, not a swapped-in node.
+fn is_classified_leaf(opened_mode: u32, opened: Identity, classified: Identity) -> bool {
+    node_kind(opened_mode) == NodeKind::Regular && opened == classified
+}
+
+/// After reading, the name must still reach the same directory and the same leaf.
+fn same_places(directory: (Identity, Identity), leaf: (Identity, Identity)) -> bool {
+    directory.0 == directory.1 && leaf.0 == leaf.1
 }
 
 /// Splits validated path bytes into the directory part and the single leaf name.
@@ -291,15 +323,7 @@ impl<'r> SyntheticCapture<'r> {
             directory,
             OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOCTTY,
         )
-        .map_err(|errno| match errno {
-            Errno::ENOSYS | Errno::EPERM => unavailable(),
-            // A symlinked or escaping ancestor is an alias. If it appeared mid-capture, the
-            // tree changed instead.
-            Errno::ELOOP | Errno::EXDEV if phase == Phase::Initial => {
-                B1Error::new("path", B1ErrorCode::HardlinkOrAliasUnsafe)
-            }
-            _ => changed(),
-        })
+        .map_err(|errno| directory_error(errno, phase))
     }
 
     fn read_regular(
@@ -321,15 +345,11 @@ impl<'r> SyntheticCapture<'r> {
             leaf,
             OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_NOCTTY,
         )
-        .map_err(|errno| match errno {
-            Errno::ENOSYS | Errno::EPERM => unavailable(),
-            _ => changed(),
-        })?;
+        .map_err(leaf_error)?;
         let file = File::from(descriptor);
         let before = Stamp::of(&fstat(file.as_raw_fd()).map_err(|_| changed())?);
         ensure(
-            node_kind(before.mode) == NodeKind::Regular
-                && before.identity == Identity::of(classified),
+            is_classified_leaf(before.mode, before.identity, Identity::of(classified)),
             "capture",
             B1ErrorCode::CaptureChanged,
         )?;
@@ -411,8 +431,7 @@ impl<'r> SyntheticCapture<'r> {
         };
         // The name must still lead to the same directory and the same leaf that were read.
         let recheck = self.open_directory(directory, Phase::Recheck)?;
-        let same_directory =
-            Identity::of(&fstat(recheck.as_raw_fd()).map_err(|_| changed())?) == parent_identity;
+        let directory_now = Identity::of(&fstat(recheck.as_raw_fd()).map_err(|_| changed())?);
         let leaf_now = fstatat(
             Some(recheck.as_raw_fd()),
             leaf,
@@ -420,7 +439,10 @@ impl<'r> SyntheticCapture<'r> {
         )
         .map_err(|_| changed())?;
         ensure(
-            same_directory && Identity::of(&leaf_now) == Identity::of(&classified),
+            same_places(
+                (directory_now, parent_identity),
+                (Identity::of(&leaf_now), Identity::of(&classified)),
+            ),
             "capture",
             B1ErrorCode::CaptureChanged,
         )?;
