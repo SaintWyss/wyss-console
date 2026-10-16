@@ -144,7 +144,7 @@ was given. Nothing is read while no turn is followed.
 
 Readings use connections of their own, one at a time, so a session call never waits
 behind one. Admission is counted apart from session calls and terminals: four reads and
-two intents at most.
+two intents at most, and one read of older turns, which has a slot of its own.
 
 ## Finding the turns of a session
 
@@ -155,6 +155,34 @@ than one read covers, the newest events are the ones read. Either way the list s
 that older turns exist that it did not read.
 
 A record that names another session than the stream did fails the list.
+
+### Older turns (addendum)
+
+The list shows the newest twenty and, until this addendum, said no more than that older
+turns exist. They are now reachable, by the same means and with no change to the control
+protocol: the authority has no list of turns, so older ones are found in the same durable
+stream, going back, with the same `audit/read`.
+
+- **Where to look.** `TurnList` is version 3 and carries `older`: a stream and a position,
+  or null when the desktop has seen the whole history. The window hands it back unchanged
+  to `managed_turns_older` (a session, a stream, a position) and decides nothing from it.
+  The reply, `TurnHistory` version 1, is up to twenty ended turns of that session, newest
+  first, and the position to go on from.
+- **Bounded.** A page reads at most forty `audit/read` pages, in steps of fifty positions
+  that count only once read whole. A page holds no index and no lock, remembers nothing, and
+  has a read slot of its own, so it never delays the read that follows a running turn.
+  The window keeps at most two hundred older turns of a session, then asks to start over.
+- **Correct.** A page goes on exactly from where the last one stopped, so nothing repeats
+  and nothing is skipped, across a restart of the desktop or of the authority. A position
+  of another stream, or beyond the head, is refused as `changed`. The session must exist,
+  every turn found must be that session's, and a hole in the stream, an empty answer
+  or one longer than asked fails the page.
+- **Nothing is made up.** An old turn is what `managedSession/turn/status` says now. Its
+  output is usually gone, which the view says, and what the user wrote is never shown.
+- **Security surface.** One more window permission, `allow-managed-turns-older`, a read that
+  takes a session and a position it was handed. The capability tests list it by name. No
+  control method is added or changed; a per-session list kept by the authority, which
+  would make a page cost one read instead of many, would be one, and needs its own decision.
 
 ## The Agent view
 
