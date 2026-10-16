@@ -493,6 +493,11 @@ impl TurnService {
     }
 }
 
+/// A turn with the position of the event that admitted it.
+type Admission = (u64, ManagedTurnId);
+/// What a walk found, newest first, and the position to go on from, if any.
+type Walked = (Vec<Admission>, Option<u64>);
+
 /// The turns admitted for `session` at positions before `before`, newest first, at most
 /// one page, and where to go on from. Nothing at or after the position it goes on from is
 /// looked at again, and nothing before it was looked at: a page that stopped early because
@@ -507,9 +512,9 @@ fn walk(
     stream: &WireUuid,
     session: &ManagedSessionId,
     before: u64,
-) -> ControlResult<(Vec<(u64, ManagedTurnId)>, Option<u64>)> {
+) -> ControlResult<Walked> {
     let key = session.as_str().to_ascii_lowercase();
-    let mut found: Vec<(u64, ManagedTurnId)> = Vec::new();
+    let mut found: Vec<Admission> = Vec::new();
     // Positions at `settled` and after are done with.
     let mut settled = before;
     let mut pages = 0usize;

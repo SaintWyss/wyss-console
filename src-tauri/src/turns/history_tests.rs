@@ -163,7 +163,7 @@ fn a_list_points_to_older_turns_only_where_the_index_may_not_hold_them_all() {
     f.settle();
     let partial = f.turns.list(f.session.clone()).unwrap();
     assert!(partial.partial);
-    assert_eq!(ids(&partial.turns), [recent.clone()]);
+    assert_eq!(ids(&partial.turns), std::slice::from_ref(&recent));
     assert_eq!(
         partial.older.unwrap().before.get(),
         f.world.lock().unwrap().position(&recent)
@@ -291,7 +291,7 @@ fn a_long_quiet_stretch_costs_bounded_reads_and_goes_on_exactly_where_it_stopped
     };
     f.settle();
     let listed = f.turns.list(f.session.clone()).unwrap();
-    assert_eq!(ids(&listed.turns), [recent.clone()]);
+    assert_eq!(ids(&listed.turns), std::slice::from_ref(&recent));
     let start = listed.older.unwrap();
     assert_eq!(start.before.get(), 4502);
 
