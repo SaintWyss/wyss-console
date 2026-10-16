@@ -8,6 +8,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
+pub mod admission;
 pub mod digest;
 pub mod lifecycle;
 pub mod path;
