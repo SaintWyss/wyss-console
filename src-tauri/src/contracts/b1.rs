@@ -3,12 +3,15 @@
 //!
 //! This module is data and rules only. It performs no filesystem, Git, process, sandbox,
 //! broker or provider work, and nothing here is reachable from control protocol v1 or
-//! `METHODS`. Validation proves that a record is well formed and internally consistent. It
+//! `METHODS`. The one exception is `capture_fixture`, a synthetic filesystem fixture that is
+//! compiled only into test builds and is not a trusted capture service. Validation proves that a record is well formed and internally consistent. It
 //! never proves authorization, containment, or that admitted bytes are harmless.
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
 pub mod admission;
+#[cfg(all(test, target_os = "linux"))]
+mod capture_fixture;
 pub mod digest;
 pub mod lifecycle;
 pub mod path;
