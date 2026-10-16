@@ -2,7 +2,7 @@
 //! assistant's answer, and nothing the product has no use for: no provider identity, no
 //! lease, no runtime instance, no reasoning text and no detail of a mediated action.
 use crate::contracts::{
-    Sequence, UtcTimestamp,
+    Sequence, UtcTimestamp, WireUuid,
     control::{
         ApprovalKind, ApprovalState, ApprovalStatus, BindingState, ControlState, ManagedTurnStatus,
         ManagedTurnStreamEventV1, StreamKind, TurnReason, TurnState,
@@ -12,7 +12,12 @@ use crate::contracts::{
 use crate::sessions::SessionMode;
 use serde::Serialize;
 
+/// One reading of a turn.
 pub(super) const VIEW_SCHEMA_VERSION: u8 = 2;
+/// A list of turns. Version 3 adds `older`: where the turns before the newest page begin.
+pub(super) const LIST_SCHEMA_VERSION: u8 = 3;
+/// One page of the turns before the newest ones.
+pub(super) const HISTORY_SCHEMA_VERSION: u8 = 1;
 /// Turns of one session the window is given at once, newest first.
 pub const TURN_PAGE: usize = 20;
 
@@ -186,6 +191,16 @@ pub struct SessionFacts {
     pub mode: SessionMode,
 }
 
+/// Where older turns are looked for: before a position of one durable stream. The window is
+/// handed it and hands it back unchanged; it decides nothing from it. A position of another
+/// stream, or beyond the head of this one, is refused as history that changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HistoryCursor {
+    pub stream_id: WireUuid,
+    /// Events at this position and after it have been looked at for this session.
+    pub before: Sequence,
+}
+
 /// The recent turns of one session, newest first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TurnList {
@@ -199,4 +214,20 @@ pub struct TurnList {
     pub runnable: bool,
     /// Older history exists that this desktop did not read.
     pub partial: bool,
+    /// Where to look for the turns before the newest ones listed. Null only when the
+    /// desktop has seen the whole history of the session and nothing older exists.
+    pub older: Option<HistoryCursor>,
+}
+
+/// One page of the turns before the ones a list or an earlier page showed, newest first.
+/// A turn is here because the durable stream says the authority admitted it for this
+/// session, and is what the authority holds of it now. Its output is usually gone: the
+/// authority keeps a few turns' output in memory, and that is said, not filled in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TurnHistory {
+    pub schema_version: u8,
+    pub session: ManagedSessionId,
+    pub turns: Vec<TurnSummary>,
+    /// Where the next older page begins. Null when the start of history was reached.
+    pub older: Option<HistoryCursor>,
 }

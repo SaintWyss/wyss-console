@@ -1,4 +1,4 @@
-//! The window's door to managed turns and their approvals: for turns two reads and two
+//! The window's door to managed turns and their approvals: for turns three reads and two
 //! product intents, for approvals two reads and two decisions.
 //!
 //! Each command takes one narrow request and names no control method. The window cannot
@@ -23,8 +23,8 @@ use crate::contracts::{
 };
 #[cfg(target_os = "linux")]
 pub use crate::turns::{
-    ApprovalDetail, ApprovalList, Decision, DecisionReceipt, TurnList, TurnReceipt, TurnService,
-    TurnView,
+    ApprovalDetail, ApprovalList, Decision, DecisionReceipt, TurnHistory, TurnList, TurnReceipt,
+    TurnService, TurnView,
 };
 
 /// Intents admitted at once. They run one at a time, with the session intents.
@@ -33,6 +33,10 @@ static INTENTS: AtomicUsize = AtomicUsize::new(0);
 /// Reads admitted at once: one follower, one list, and room for the page they replace.
 const MAX_READS: usize = 4;
 static READS: AtomicUsize = AtomicUsize::new(0);
+/// Reads of older turns admitted at once. They have a pool of their own, so a page of
+/// history can never take the place of the read that follows a running turn.
+const MAX_HISTORY: usize = 1;
+static HISTORY: AtomicUsize = AtomicUsize::new(0);
 
 struct Permit(&'static AtomicUsize);
 impl Drop for Permit {
@@ -79,6 +83,17 @@ pub struct ReadTurnRequest {
 #[serde(deny_unknown_fields)]
 pub struct TurnsRequest {
     session_id: ManagedSessionId,
+}
+/// The turns before the ones the window was shown. The window sends back the position a
+/// list or a page handed it, as it was handed it, and decides nothing from it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OlderTurnsRequest {
+    session_id: ManagedSessionId,
+    /// The stream the position belongs to.
+    stream_id: WireUuid,
+    /// Events at this position and after it were looked through for this session.
+    before: Sequence,
 }
 
 #[derive(Debug, Deserialize)]
@@ -132,6 +147,20 @@ pub async fn managed_turns(
         (&READS, MAX_READS),
         service.inner().clone(),
         move |service| service.list(request.session_id),
+    )
+    .await
+}
+/// One page of the turns before the ones already shown, newest first. A read like the
+/// others: it asks the authority and changes nothing.
+#[tauri::command]
+pub async fn managed_turns_older(
+    service: State<'_, TurnService>,
+    request: OlderTurnsRequest,
+) -> Result<TurnHistory, SessionError> {
+    blocking(
+        (&HISTORY, MAX_HISTORY),
+        service.inner().clone(),
+        move |service| service.older(request.session_id, request.stream_id, request.before),
     )
     .await
 }
@@ -269,6 +298,8 @@ mod unsupported {
     #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
     pub struct TurnList {}
     #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    pub struct TurnHistory {}
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
     pub struct TurnView {}
     #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
     pub struct TurnReceipt {}
@@ -283,6 +314,9 @@ mod unsupported {
             Err(SessionError::new(SessionFailure::Unavailable))
         }
         pub fn list(&self, _: ManagedSessionId) -> Refused<TurnList> {
+            Self::absent()
+        }
+        pub fn older(&self, _: ManagedSessionId, _: WireUuid, _: Sequence) -> Refused<TurnHistory> {
             Self::absent()
         }
         pub fn read(&self, _: ManagedTurnId, _: Option<Sequence>, _: bool) -> Refused<TurnView> {
@@ -343,8 +377,8 @@ mod unsupported {
 }
 #[cfg(not(target_os = "linux"))]
 pub use unsupported::{
-    ApprovalDetail, ApprovalList, Decision, DecisionReceipt, TurnList, TurnReceipt, TurnService,
-    TurnView,
+    ApprovalDetail, ApprovalList, Decision, DecisionReceipt, TurnHistory, TurnList, TurnReceipt,
+    TurnService, TurnView,
 };
 
 #[cfg(all(test, target_os = "linux"))]
@@ -352,6 +386,15 @@ mod tests {
     use super::*;
     use crate::sessions::SessionService;
     use serde_json::{Value, json};
+
+    /// The admission counters are process-wide, so the tests that count on them being quiet,
+    /// or fill them on purpose, run one at a time.
+    static POOLS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn pools() -> std::sync::MutexGuard<'static, ()> {
+        POOLS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 
     const INTENT: &str = "11111111-1111-4111-8111-111111111111";
     const SESSION: &str = "22222222-2222-4222-8222-222222222222";
@@ -362,6 +405,56 @@ mod tests {
     }
     fn code(error: SessionError) -> Value {
         serde_json::to_value(error).unwrap()
+    }
+
+    #[test]
+    fn a_request_for_older_turns_names_a_session_and_a_position_and_nothing_else() {
+        let older = serde_json::from_value::<OlderTurnsRequest>;
+        let full = json!({"session_id": SESSION, "stream_id": INTENT, "before": "12"});
+        let accepted = older(full.clone()).unwrap();
+        assert_eq!(accepted.session_id.as_str(), SESSION);
+        assert_eq!(accepted.stream_id.as_str(), INTENT);
+        assert_eq!(accepted.before.get(), 12);
+        // A position is a canonical positive decimal string, of a stream that is a UUID.
+        for (field, value) in [
+            ("session_id", json!("x")),
+            ("session_id", json!(7)),
+            ("stream_id", json!("x")),
+            ("stream_id", json!(null)),
+            ("before", json!(12)),
+            ("before", json!("0")),
+            ("before", json!("-1")),
+            ("before", json!("012")),
+            ("before", json!("1.5")),
+            ("before", json!("")),
+            ("before", json!(null)),
+        ] {
+            let mut tampered = full.clone();
+            tampered[field] = value;
+            assert!(older(tampered.clone()).is_err(), "{tampered}");
+        }
+        for extra in [
+            // How many, from where in the stream, which events, what to do with them.
+            "limit",
+            "after",
+            "after_sequence",
+            "turn_id",
+            "count",
+            "filter",
+            "method",
+            "wait",
+            "scopes",
+            "lease_id",
+        ] {
+            let mut tampered = full.clone();
+            tampered[extra] = json!("x");
+            assert!(older(tampered.clone()).is_err(), "{tampered}");
+        }
+        for missing in ["session_id", "stream_id", "before"] {
+            let mut tampered = full.clone();
+            tampered.as_object_mut().unwrap().remove(missing);
+            assert!(older(tampered.clone()).is_err(), "{tampered}");
+        }
     }
 
     #[test]
@@ -475,6 +568,7 @@ mod tests {
 
     #[test]
     fn an_approval_is_read_by_its_handle_and_decided_with_nothing_but_its_revision() {
+        let _pools = pools();
         const APPROVAL: &str = "44444444-4444-4444-8444-444444444444";
         let decide = serde_json::from_value::<DecideApprovalRequest>;
         let full = json!({"intent_id": INTENT, "approval_id": APPROVAL, "expected_revision": 1});
@@ -574,7 +668,42 @@ mod tests {
     }
 
     #[test]
+    fn older_turns_have_a_pool_of_their_own_that_refuses_beyond_its_bound_and_recovers() {
+        let _pools = pools();
+        // Not the pool the follower reads through: a page of history that is slow can make
+        // the next page wait, and can never make a running turn's reading busy.
+        assert!(!std::ptr::eq(&HISTORY, &READS));
+        assert_eq!(MAX_HISTORY, 1);
+        let service = TurnService::new(SessionService::new(None));
+        let ask = |service: TurnService| {
+            let stream = WireUuid::try_from(INTENT.to_owned()).unwrap();
+            let before = "5".parse::<Sequence>().unwrap();
+            block(blocking((&HISTORY, MAX_HISTORY), service, move |s| {
+                s.older(ManagedSessionId::parse(SESSION).unwrap(), stream, before)
+            }))
+        };
+        // No authority: nothing is reached, and the failure says it may be tried again.
+        assert_eq!(
+            code(ask(service.clone()).unwrap_err()),
+            json!({"code": "unavailable", "retry": true})
+        );
+        let held = Permit(&HISTORY);
+        HISTORY.fetch_add(1, Ordering::AcqRel);
+        assert_eq!(
+            code(ask(service.clone()).unwrap_err()),
+            json!({"code": "busy", "retry": true})
+        );
+        drop(held);
+        assert_eq!(HISTORY.load(Ordering::Acquire), 0);
+        assert_eq!(
+            code(ask(service).unwrap_err()),
+            json!({"code": "unavailable", "retry": true})
+        );
+    }
+
+    #[test]
     fn a_turn_call_without_an_authority_fails_safely_and_admission_recovers() {
+        let _pools = pools();
         // No runtime directory: nothing can be reached and nothing is sent.
         let sessions = SessionService::new(None);
         let service = TurnService::new(sessions.clone());
