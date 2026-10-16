@@ -62,7 +62,8 @@ export function assertSandboxRoot(root, real) {
  * @returns {Record<string, string>}
  */
 export function sandboxEnv({ root, fixtureDir, scenario, display }) {
-  return {
+  /** @type {Record<string, string>} */
+  const env = {
     HOME: join(root, 'home'),
     XDG_RUNTIME_DIR: join(root, 'run'),
     XDG_CONFIG_HOME: join(root, 'cfg'),
@@ -71,12 +72,17 @@ export function sandboxEnv({ root, fixtureDir, scenario, display }) {
     XDG_CACHE_HOME: join(root, 'cache'),
     PATH: `${join(root, 'bin')}:/usr/bin:/bin`,
     LANG: 'C.UTF-8',
-    DISPLAY: display,
     GDK_BACKEND: 'x11',
     NO_AT_BRIDGE: '1',
+    CODEX_HOME: join(root, 'codex-home'),
+    WYSS_FIXTURE_USER_HOME: join(root, 'codex-home'),
     WYSS_RUNTIME_FIXTURE: fixtureDir,
     WYSS_RUNTIME_SCENARIO: scenario,
   };
+  // A display is named only by the processes that draw on it: the compositor starts the
+  // server it serves, so it must not be pointed at that server before it exists.
+  if (display) env.DISPLAY = display;
+  return env;
 }
 
 /**

@@ -382,6 +382,8 @@ for line in sys.stdin:
         assert p['input'][0]['type']=='text' and p['input'][0]['textElements']==[]
         tid=p['threadId'];turn_id='provider-turn-'+str(len((root/'methods').read_text().splitlines()))
         current_turn={'id':turn_id,'items':[],'status':'inProgress','error':None}
+        # `echo`: the answer is the prompt itself, so each turn is distinguishable on screen.
+        reply = p['input'][0]['text'] if scenario == 'echo' else 'ASSISTANT_SENTINEL'
         (root/'turn-written').touch()
         if scenario=='turn_timeout':continue
         if scenario=='turn_hold':
@@ -397,7 +399,7 @@ for line in sys.stdin:
             threading.Thread(target=deferred_start,daemon=True).start()
             continue
         emit({'method':'turn/started','params':{'threadId':tid,'turn':current_turn}})
-        notice('item/agentMessage/delta',itemId='agent-item',delta='ASSISTANT_SENTINEL')
+        notice('item/agentMessage/delta',itemId='agent-item',delta=reply)
         emit({'id':message['id'],'result':{'turn':current_turn}})
         if scenario.startswith('isolation_'):
             kind=scenario[len('isolation_'):]
@@ -457,7 +459,7 @@ for line in sys.stdin:
         if scenario in ['turn_long','interrupt_timeout']:continue
         notice('item/reasoning/summaryTextDelta',itemId='reasoning-item',summaryIndex=0,delta='SUMMARY_SENTINEL')
         notice('item/reasoning/textDelta',itemId='reasoning-item',contentIndex=0,delta='RAW_PRIVATE_REASONING_SENTINEL')
-        notice('item/completed',completedAtMs=0,item={'type':'agentMessage','id':'agent-item','text':'ASSISTANT_SENTINEL','phase':'final_answer'})
+        notice('item/completed',completedAtMs=0,item={'type':'agentMessage','id':'agent-item','text':reply,'phase':'final_answer'})
         terminal=dict(current_turn,status='completed')
         emit({'method':'turn/completed','params':{'threadId':tid,'turn':terminal}})
         (root/'turn-completed').touch()

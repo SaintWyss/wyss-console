@@ -86,7 +86,12 @@ describe('sandboxEnv', () => {
   it('puts the sandbox bin first on PATH and nothing from the real session', () => {
     expect(env.PATH).toBe(`${root}/bin:/usr/bin:/bin`);
     expect(Object.keys(env)).not.toContain('DBUS_SESSION_BUS_ADDRESS');
-    expect(Object.keys(env)).not.toContain('CODEX_HOME');
+  });
+
+  it('points the Codex home at the sandbox, never at the real one', () => {
+    expect(env.CODEX_HOME).toBe(`${root}/codex-home`);
+    expect(env.WYSS_FIXTURE_USER_HOME).toBe(`${root}/codex-home`);
+    expect(env.CODEX_HOME.startsWith(real.home)).toBe(false);
   });
 });
 
