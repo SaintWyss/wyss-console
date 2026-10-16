@@ -170,6 +170,22 @@ export function readFailureMessage(code: SessionFailureCode): string {
         : 'This could not be read. Nothing is shown rather than something unverified.';
 }
 
+/** One sentence for older turns that could not be loaded. Nothing is shown in their place. */
+export function historyFailureMessage(code: SessionFailureCode): string {
+  switch (code) {
+    case 'unavailable':
+      return 'Older turns could not be loaded: the authority did not answer.';
+    case 'changed':
+      return 'The history changed while it was being read, so the place reached in it is no longer good. Reload the turns to start again from the newest.';
+    case 'not_found':
+      return 'Older turns could not be loaded: the authority no longer has this session.';
+    case 'busy':
+      return `Older turns could not be loaded. ${COMMON.busy}`;
+    default:
+      return 'Older turns could not be loaded. Nothing is shown rather than something unverified.';
+  }
+}
+
 /** Whether a failure is an outcome that is not known, as opposed to a refusal. */
 export function outcomeUnknown(code: SessionFailureCode): boolean {
   return code === 'unavailable' || code === 'uncertain';

@@ -614,6 +614,70 @@ fn one_turn_runs_at_a_time_and_cancel_is_the_authority_s_to_carry_out() {
 }
 
 #[test]
+fn older_turns_are_paged_back_at_the_real_authority_and_survive_its_restart() {
+    let _serial = serial();
+    let env = Sandbox::new("happy");
+    let mut authority = env.start();
+    let (sessions, turns) = env.services();
+    let session = env.activated(&sessions);
+    // More turns than one list shows, each ended before the next, as a user would run them.
+    let mut started = Vec::new();
+    for _ in 0..26 {
+        let turn = turns
+            .start(id(), session.clone(), 1, PROMPT.into())
+            .unwrap();
+        follow(&turns, &turn.id, ended);
+        started.push(turn.id);
+    }
+    started.reverse();
+    let ids = |turns: &[wyss_console::turns::TurnSummary]| -> Vec<ManagedTurnId> {
+        turns.iter().map(|t| t.id.clone()).collect()
+    };
+
+    let listed = turns.list(session.clone()).unwrap();
+    assert_eq!(ids(&listed.turns), started[..20]);
+    let cursor = listed.older.clone().expect("older turns exist");
+    let page = turns
+        .older(session.clone(), cursor.stream_id.clone(), cursor.before)
+        .unwrap();
+    // The rest, once and in order, and the start of history reached.
+    assert_eq!(ids(&page.turns), started[20..]);
+    assert!(page.older.is_none());
+    assert!(
+        page.turns
+            .iter()
+            .all(|t| t.session == session && t.state == TurnState::Completed)
+    );
+
+    // The authority dies without a word and comes back. The history is the durable
+    // stream's: the same position gives the same turns, to a desktop that remembers nothing.
+    drop(turns);
+    authority.stop(true);
+    let mut authority = env.start();
+    let (_sessions, turns) = env.services();
+    let again = turns
+        .older(session.clone(), cursor.stream_id.clone(), cursor.before)
+        .unwrap();
+    assert_eq!(ids(&again.turns), started[20..]);
+    assert_eq!(again.older, None);
+    // Nothing is made up for what the authority no longer holds: it kept no output of
+    // them across its restart, and says so.
+    assert!(again.turns.iter().all(|t| !t.output));
+    let relisted = turns.list(session.clone()).unwrap();
+    assert_eq!(ids(&relisted.turns), started[..20]);
+    assert_eq!(relisted.older, listed.older);
+
+    // A position of some other history is not read against this one.
+    let other = WireUuid::try_from(uuid::Uuid::new_v4().to_string()).unwrap();
+    let (code, retry) = failed(turns.older(session.clone(), other, cursor.before));
+    assert_eq!((code, retry), (SessionFailure::Changed, false));
+    // Nor is a position beyond what the stream holds.
+    let beyond = turns.older(session, cursor.stream_id, "99999999".parse().unwrap());
+    assert_eq!(failed(beyond).0, SessionFailure::Changed);
+    authority.stop(false);
+}
+
+#[test]
 fn a_turn_the_authority_fails_is_shown_as_failed_with_its_reason() {
     let _serial = serial();
     // This provider leaves the inference surface: the authority contains it.

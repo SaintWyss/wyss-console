@@ -1,5 +1,5 @@
 /**
- * TurnView v2 and TurnList v2: the desktop's projection of managed turns, and what its
+ * TurnView v2, TurnList v3 and TurnHistory v1: the desktop's projection of managed turns, and what its
  * turn intents answer. It is not the control contract. It names no control method and
  * carries no provider identity, no lease, no runtime instance, no reasoning text and no
  * detail of a mediated action: the only provider text in it is the assistant's answer.
@@ -12,6 +12,7 @@ import {
   type ManagedSessionId,
   type ManagedTurnId,
 } from './identities';
+import { parseUuid, type Uuid } from './uuid';
 import {
   AGENT_MODES,
   type SessionBinding,
@@ -151,8 +152,17 @@ export interface SessionFacts {
   /** The mode the session is attached in. `unknown` while it is not attached. */
   mode: SessionMode;
 }
+/**
+ * Where older turns are looked for: a position of one durable stream. The window is handed
+ * it and hands it back as it was; it decides nothing from it. Turns admitted at or after
+ * `before` have been looked through for the session.
+ */
+export interface HistoryCursor {
+  stream_id: Uuid;
+  before: string;
+}
 export interface TurnList {
-  schema_version: 2;
+  schema_version: 3;
   head: string | null;
   session: SessionFacts;
   /** Newest first. */
@@ -161,6 +171,23 @@ export interface TurnList {
   runnable: boolean;
   /** Older history exists that the desktop did not read. */
   partial: boolean;
+  /**
+   * Where the turns before the newest ones begin. Null only when the desktop has seen
+   * the whole history of the session and nothing older exists.
+   */
+  older: HistoryCursor | null;
+}
+/**
+ * One page of the turns before those already shown, newest first. A turn is here because
+ * the authority's durable stream says it was admitted for this session, and it is what
+ * the authority holds of it now: its output is usually gone, and that is said, not filled in.
+ */
+export interface TurnHistory {
+  schema_version: 1;
+  session: ManagedSessionId;
+  turns: TurnSummary[];
+  /** Where the next older page begins. Null when the start of history was reached. */
+  older: HistoryCursor | null;
 }
 
 /** Turns one list may hold, and events one reading may hold. The desktop sends no more. */
@@ -386,13 +413,34 @@ function parseFacts(value: unknown): SessionFacts {
   };
 }
 
+export function parseHistoryCursor(value: unknown): HistoryCursor {
+  const v = record(value, ['stream_id', 'before'], 'cursor');
+  let stream: Uuid;
+  try {
+    stream = parseUuid(v.stream_id);
+  } catch {
+    throw invalid('cursor');
+  }
+  // Position one is the first: nothing is before it, so no cursor names it.
+  if (sequence(v.before, 'cursor') === '1') throw invalid('cursor');
+  return { stream_id: stream, before: v.before as string };
+}
+
 export function parseTurnList(value: unknown): TurnList {
   const v = record(
     value,
-    ['schema_version', 'head', 'session', 'turns', 'runnable', 'partial'],
+    [
+      'schema_version',
+      'head',
+      'session',
+      'turns',
+      'runnable',
+      'partial',
+      'older',
+    ],
     'list',
   );
-  if (v.schema_version !== 2) throw invalid('schema_version');
+  if (v.schema_version !== 3) throw invalid('schema_version');
   const facts = parseFacts(v.session);
   if (!Array.isArray(v.turns) || v.turns.length > TURN_LIST_LIMIT)
     throw invalid('turns');
@@ -410,13 +458,44 @@ export function parseTurnList(value: unknown): TurnList {
       turns.some((t) => !turnEnded(t.state)))
   )
     throw invalid('hints');
+  const partial = flag(v.partial, 'partial');
+  const older = v.older === null ? null : parseHistoryCursor(v.older);
+  // A history that was not read whole has somewhere older to look, always.
+  if (partial && older === null) throw invalid('hints');
   return {
-    schema_version: 2,
+    schema_version: 3,
     head: v.head === null ? null : sequence(v.head, 'head'),
     session: facts,
     turns,
     runnable,
-    partial: flag(v.partial, 'partial'),
+    partial,
+    older,
+  };
+}
+
+export function parseTurnHistory(value: unknown): TurnHistory {
+  const v = record(
+    value,
+    ['schema_version', 'session', 'turns', 'older'],
+    'history',
+  );
+  if (v.schema_version !== 1) throw invalid('schema_version');
+  const owner = session(v.session);
+  if (!Array.isArray(v.turns) || v.turns.length > TURN_LIST_LIMIT)
+    throw invalid('turns');
+  const turns = v.turns.map(parseSummary);
+  // Every turn is the session's, each is listed once, and none of them is running: a turn
+  // that has not ended is the newest of its session and belongs to the list, not to history.
+  if (turns.some((t) => t.session.toLowerCase() !== owner.toLowerCase()))
+    throw invalid('turns');
+  if (new Set(turns.map((t) => t.id.toLowerCase())).size !== turns.length)
+    throw invalid('turns');
+  if (turns.some((t) => !turnEnded(t.state))) throw invalid('turns');
+  return {
+    schema_version: 1,
+    session: owner,
+    turns,
+    older: v.older === null ? null : parseHistoryCursor(v.older),
   };
 }
 

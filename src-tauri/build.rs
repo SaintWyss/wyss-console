@@ -91,6 +91,7 @@ fn main() {
             "managed_session_mode",
             "choose_workspace",
             "managed_turns",
+            "managed_turns_older",
             "managed_turn_read",
             "managed_turn_start",
             "managed_turn_cancel",

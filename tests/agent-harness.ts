@@ -8,7 +8,9 @@ import {
 import type { SessionFailure } from '../src/lib/contracts/sessions';
 import {
   turnEnded,
+  type HistoryCursor,
   type TurnEventKind,
+  type TurnHistory,
   type TurnList,
   type TurnReceipt,
   type TurnState,
@@ -73,11 +75,12 @@ export function listing(
 ): TurnList {
   const { session, ...rest } = over;
   return {
-    schema_version: 2,
+    schema_version: 3,
     head: '9',
     turns,
     runnable: turns.every((t) => turnEnded(t.state)),
     partial: false,
+    older: null,
     ...rest,
     session: {
       id: S,
@@ -89,6 +92,18 @@ export function listing(
       ...session,
     },
   };
+}
+/** Where older turns are looked for: a position of the stream the tests are reading. */
+export const STREAM = '66666666-6666-4666-8666-666666666666';
+export const cursor = (before: number, stream = STREAM): HistoryCursor =>
+  ({ stream_id: stream, before: String(before) }) as HistoryCursor;
+/** A page of older turns of `S`, newest first, going on from `older`. */
+export function historyPage(
+  turns: TurnSummary[],
+  older: HistoryCursor | null,
+  session: ManagedSessionId = S,
+): TurnHistory {
+  return { schema_version: 1, session, turns, older };
 }
 export type Told = [number, TurnEventKind, (string | null)?];
 /** One reading: `events` as `[position, kind, text]`, ending where they end. */
@@ -116,6 +131,10 @@ export function reading(
 /** A client whose every call waits to be answered by the test. */
 export function harness() {
   const lists: (Deferred<TurnList> & { session: ManagedSessionId })[] = [];
+  const olders: (Deferred<TurnHistory> & {
+    session: ManagedSessionId;
+    cursor: HistoryCursor;
+  })[] = [];
   const reads: (Deferred<TurnView> & {
     turn: ManagedTurnId;
     after: string | null;
@@ -142,6 +161,11 @@ export function harness() {
     turns(session) {
       const d = deferred<TurnList>();
       lists.push({ ...d, session });
+      return d.promise;
+    },
+    older(session, cursor) {
+      const d = deferred<TurnHistory>();
+      olders.push({ ...d, session, cursor });
       return d.promise;
     },
     read(of, after, wait) {
@@ -182,6 +206,7 @@ export function harness() {
     controller,
     client,
     lists,
+    olders,
     reads,
     starts,
     cancels,

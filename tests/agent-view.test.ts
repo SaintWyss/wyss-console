@@ -6,7 +6,17 @@ import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import { parseTerminalId } from '../src/lib/contracts/identities';
 import type { TurnSummary } from '../src/lib/contracts/turns';
 import { localTime } from '../src/lib/features/sessions/present';
-import { listing, reading, S, S2, T1, T2, turn } from './agent-harness';
+import {
+  cursor,
+  historyPage,
+  listing,
+  reading,
+  S,
+  S2,
+  T1,
+  T2,
+  turn,
+} from './agent-harness';
 import views from './fixtures/authority-view-v1.json';
 import pages from './fixtures/session-page-v3.json';
 
@@ -78,6 +88,10 @@ function desktop() {
     authority: undefined as ((view: unknown) => void) | undefined,
     /** The sessions Sessions lists, when the test needs others than `page`. */
     page: undefined as typeof page | undefined,
+    /** Where the list says older turns begin. */
+    older: null as ReturnType<typeof cursor> | null,
+    /** Where the list of a session other than `S` says older turns begin. */
+    olderOf: new Map<string, ReturnType<typeof cursor>>(),
   };
   mockIPC((command, payload) => {
     const request =
@@ -102,10 +116,15 @@ function desktop() {
           id: session,
           workspace:
             (world.page ?? page).sessions.find((s) => s.id === session)
-              ?.workspace ?? '/home/dev/rag-corp',
+              ?.workspace ??
+            (session === S2 ? '/home/dev/other' : '/home/dev/rag-corp'),
         },
+        older:
+          world.olderOf.get(session) ?? (session === S ? world.older : null),
       });
     }
+    // An ask for older turns waits for the test to answer it.
+    if (command === 'managed_turns_older') return answer;
     if (command.startsWith('managed_turn_')) return answer;
     if (command === 'terminal_read_output') return never();
     if (command === 'get_app_info')
@@ -669,4 +688,400 @@ it('tells two sessions of one project apart in Sessions and in the Agent view', 
   expect(
     agent().querySelector(`[aria-label="Close ${nameSecond}"]`),
   ).not.toBeNull();
+});
+
+// ---- Older turns -----------------------------------------------------------------------
+
+const tid = (n: number) =>
+  `${n.toString(16).padStart(8, '0')}-0000-4000-8000-000000000000` as typeof T1;
+/** An ended turn of `S` that the authority no longer holds the output of, started at minute `n`. */
+const old = (n: number) =>
+  turn(tid(n), 'completed', 3, {
+    output: false,
+    started_at: `2026-10-09T10:${String(n % 60).padStart(2, '0')}:00Z`,
+  });
+const span = (high: number, low: number) =>
+  Array.from({ length: high - low + 1 }, (_, i) => old(high - i));
+const older = () => agent().querySelector<HTMLButtonElement>('.history-more');
+const times = () =>
+  Array.from(agent().querySelectorAll('.turn-head time')).map((t) =>
+    t.getAttribute('datetime'),
+  );
+/** The application with `S` open, its newest twenty turns, and older ones beyond. */
+async function withHistory() {
+  const ipc = desktop();
+  ipc.world.turns.set(S, span(100, 81));
+  ipc.world.older = cursor(500);
+  component = mount(App, { target: document.body });
+  await flush();
+  await openAgent(1);
+  return ipc;
+}
+
+it('offers older turns only where there are some, and says nothing where there are none', async () => {
+  const ipc = desktop();
+  ipc.world.turns.set(S, span(3, 1));
+  component = mount(App, { target: document.body });
+  await flush();
+  await openAgent(1);
+  expect(turns()).toHaveLength(3);
+  expect(older()).toBeNull();
+  expect(text(agent())).not.toMatch(/older turns|start of this session/i);
+});
+
+it('loads older turns above the newest ones and says what is not kept, without inventing it', async () => {
+  const ipc = await withHistory();
+  expect(turns()).toHaveLength(20);
+  expect(text(older())).toBe('Load older turns');
+
+  await click(older()!);
+  // The ask carries the session and the position the list gave, and nothing else.
+  expect(ipc.of('managed_turns_older').map((c) => c.request)).toEqual([
+    { session_id: S, stream_id: cursor(500).stream_id, before: '500' },
+  ]);
+  // While it is read: said so, and not asked twice.
+  expect(text(agent())).toContain('Loading older turns…');
+  expect(agent().querySelector('[role="status"]')).not.toBeNull();
+  expect(older()).toBeNull();
+  expect(turns()).toHaveLength(20);
+
+  ipc
+    .last('managed_turns_older')
+    .resolve(historyPage(span(80, 61), cursor(300)));
+  await flush();
+  expect(turns()).toHaveLength(40);
+  // Oldest first, the older page above the newest, each turn once.
+  const shown = times();
+  expect(shown[0]).toBe('2026-10-09T10:01:00Z');
+  expect(shown[19]).toBe('2026-10-09T10:20:00Z');
+  expect(shown[20]).toBe('2026-10-09T10:21:00Z');
+  expect(new Set(shown).size).toBe(40);
+  // An old turn is shown as the authority holds it: it is over, and its output is gone.
+  const first = turns()[0];
+  expect(text(first.querySelector('.turn-head .pill'))).toBe('Completed');
+  expect(text(first.querySelector('.turn-answer'))).toBe(
+    'Codex The authority no longer holds the output of this turn.',
+  );
+  expect(text(first)).toContain('Wyss keeps no conversation text');
+  expect(first.querySelector('.turn-text')).toBeNull();
+  // More behind it, so it can be asked again, from where this one said.
+  expect(text(older())).toBe('Load older turns');
+  await click(older()!);
+  expect(ipc.last('managed_turns_older').request).toEqual({
+    session_id: S,
+    stream_id: cursor(300).stream_id,
+    before: '300',
+  });
+  ipc.last('managed_turns_older').resolve(historyPage(span(60, 41), null));
+  await flush();
+  expect(turns()).toHaveLength(60);
+  // The start of history: said, and nothing left to ask for.
+  expect(older()).toBeNull();
+  expect(text(agent())).toContain(
+    "This is the start of this session's history.",
+  );
+  // Nothing here started, cancelled or decided anything.
+  expect(ipc.count('managed_turn_start')).toBe(0);
+  expect(ipc.count('managed_turn_cancel')).toBe(0);
+  expect(ipc.count('managed_approval_approve')).toBe(0);
+});
+
+it('keeps the reader where they were when older turns are inserted above them', async () => {
+  const ipc = await withHistory();
+  const log = agent().querySelector<HTMLElement>('.agent-transcript')!;
+  // jsdom lays nothing out: give the transcript the sizes a reader scrolled up would see.
+  let height = 1000;
+  Object.defineProperty(log, 'scrollHeight', { get: () => height });
+  Object.defineProperty(log, 'clientHeight', { value: 300 });
+  log.scrollTop = 100;
+  log.dispatchEvent(new Event('scroll'));
+  await flush();
+
+  await click(older()!);
+  // Four hundred pixels of older turns arrive above what the reader was looking at.
+  height = 1400;
+  ipc
+    .last('managed_turns_older')
+    .resolve(historyPage(span(80, 61), cursor(300)));
+  await flush();
+  await flush();
+  // The same turns are under their eyes: the distance to the end did not change.
+  expect(log.scrollTop).toBe(1400 - (1000 - 100));
+});
+
+it('says when a stretch of history held no turn and lets the reader keep looking', async () => {
+  const ipc = await withHistory();
+  await click(older()!);
+  ipc.last('managed_turns_older').resolve(historyPage([], cursor(250)));
+  await flush();
+  expect(turns()).toHaveLength(20);
+  expect(text(agent())).toContain(
+    'No turns in the part of the history just searched',
+  );
+  expect(text(older())).toBe('Keep looking');
+  await click(older()!);
+  expect(ipc.last('managed_turns_older').request.before).toBe('250');
+  ipc.last('managed_turns_older').resolve(historyPage(span(40, 31), null));
+  await flush();
+  expect(turns()).toHaveLength(30);
+  expect(text(agent())).not.toContain('just searched');
+});
+
+it('says why older turns could not be loaded, keeps what is shown and asks again from the same place', async () => {
+  const ipc = await withHistory();
+  await click(older()!);
+  ipc.last('managed_turns_older').reject({ code: 'unavailable', retry: true });
+  await flush();
+  const alert = agent().querySelector('.turn-alert')!;
+  expect(text(alert)).toContain(
+    'Older turns could not be loaded: the authority did not answer',
+  );
+  expect(turns()).toHaveLength(20);
+  await click(button('Try again', alert as HTMLElement));
+  expect(ipc.count('managed_turns_older')).toBe(2);
+  expect(ipc.last('managed_turns_older').request.before).toBe('500');
+  expect(agent().querySelector('.turn-alert')).toBeNull();
+  ipc
+    .last('managed_turns_older')
+    .resolve(historyPage(span(80, 61), cursor(300)));
+  await flush();
+  expect(turns()).toHaveLength(40);
+});
+
+it('reloads the newest turns when the history changed under the place it had reached', async () => {
+  const ipc = await withHistory();
+  await click(older()!);
+  ipc
+    .last('managed_turns_older')
+    .resolve(historyPage(span(80, 61), cursor(300)));
+  await flush();
+  await click(older()!);
+  ipc.last('managed_turns_older').reject({ code: 'changed', retry: false });
+  await flush();
+  const alert = agent().querySelector('.turn-alert')!;
+  expect(text(alert)).toContain('The history changed');
+  // The only way on is to start again from the newest: there is no retry of a bad place.
+  expect(button('Try again', alert as HTMLElement)).toBeUndefined();
+  expect(turns()).toHaveLength(40);
+
+  ipc.world.older = cursor(900, '77777777-7777-4777-8777-777777777777');
+  const lists = ipc.count('managed_turns');
+  await click(button('Reload turns', alert as HTMLElement));
+  expect(ipc.count('managed_turns')).toBe(lists + 1);
+  expect(turns()).toHaveLength(20);
+  expect(agent().querySelector('.turn-alert')).toBeNull();
+  await click(older()!);
+  expect(ipc.last('managed_turns_older').request).toEqual({
+    session_id: S,
+    stream_id: '77777777-7777-4777-8777-777777777777',
+    before: '900',
+  });
+});
+
+it('keeps a running turn followed while older turns are asked for', async () => {
+  const ipc = desktop();
+  ipc.world.turns.set(S, [turn(T1, 'running', 2), ...span(99, 81)]);
+  ipc.world.older = cursor(500);
+  component = mount(App, { target: document.body });
+  await flush();
+  await openAgent(1);
+  // The running turn is followed from the first moment.
+  expect(ipc.of('managed_turn_read').map((c) => c.request)).toEqual([
+    { turn_id: T1, after: null, wait: true },
+  ]);
+  await click(older()!);
+  expect(ipc.count('managed_turns_older')).toBe(1);
+  // Its text arrives while the ask is still waiting, and the ask did not delay it.
+  ipc
+    .last('managed_turn_read')
+    .resolve(reading(turn(T1, 'running', 2), [[1, 'text', 'STILL GOING']]));
+  await flush();
+  expect(text(turns().at(-1)!.querySelector('.turn-answer'))).toContain(
+    'STILL GOING',
+  );
+  expect(text(agent())).toContain('Loading older turns…');
+  expect(ipc.count('managed_turn_read')).toBe(2);
+  ipc
+    .last('managed_turns_older')
+    .resolve(historyPage(span(80, 61), cursor(300)));
+  await flush();
+  expect(turns()).toHaveLength(40);
+  expect(text(turns().at(-1)!.querySelector('.turn-answer'))).toContain(
+    'STILL GOING',
+  );
+});
+
+it('does not pull a reader who scrolled up back to the end when new output arrives', async () => {
+  const ipc = desktop();
+  ipc.world.turns.set(S, [turn(T1, 'running', 2), ...span(99, 90)]);
+  component = mount(App, { target: document.body });
+  await flush();
+  await openAgent(1);
+  const log = agent().querySelector<HTMLElement>('.agent-transcript')!;
+  Object.defineProperty(log, 'scrollHeight', { get: () => 1000 });
+  Object.defineProperty(log, 'clientHeight', { value: 300 });
+  // The reader scrolls up to read, far from the end.
+  log.scrollTop = 100;
+  log.dispatchEvent(new Event('scroll'));
+  await flush();
+  for (const [at, chunk] of [
+    [1, 'FIRST '],
+    [2, 'SECOND '],
+  ] as const) {
+    ipc
+      .last('managed_turn_read')
+      .resolve(reading(turn(T1, 'running', 2), [[at, 'text', chunk]]));
+    await flush();
+    await flush();
+  }
+  // Output arrived twice, and the reader is still where they were.
+  expect(text(turns().at(-1)!.querySelector('.turn-answer'))).toContain(
+    'FIRST SECOND',
+  );
+  expect(log.scrollTop).toBe(100);
+});
+
+it('opens another session at the end of its transcript, wherever the reader was in the last', async () => {
+  const ipc = desktop();
+  ipc.world.turns.set(S, span(99, 90));
+  ipc.world.turns.set(S2, span(89, 80));
+  component = mount(App, { target: document.body });
+  await flush();
+  await openAgent(1);
+  const log = agent().querySelector<HTMLElement>('.agent-transcript')!;
+  Object.defineProperty(log, 'scrollHeight', { get: () => 1000 });
+  Object.defineProperty(log, 'clientHeight', { value: 300 });
+  log.scrollTop = 100;
+  log.dispatchEvent(new Event('scroll'));
+  await flush();
+  await openAgent(2);
+  await flush();
+  expect(log.scrollTop).toBe(1000);
+});
+
+// ---- Names and older turns, in one application ------------------------------------------
+
+/** Two Ready sessions of one project, which the Sessions page names apart. */
+function twins() {
+  const first = { ...bound, binding: 'bound_attached' };
+  const second = {
+    ...bound,
+    id: S2,
+    binding: 'bound_attached',
+    position: '3',
+    created_at: '2026-10-09T09:30:00Z',
+    updated_at: '2026-10-09T09:30:00Z',
+  };
+  return {
+    first,
+    second,
+    nameFirst: `rag-corp · ${localTime(first.created_at)}`,
+    nameSecond: `rag-corp · ${localTime(second.created_at)}`,
+  };
+}
+/** An ended turn of the second session, started on another day than the first's. */
+const oldTwo = (n: number) =>
+  turn(tid(n), 'completed', 3, {
+    session: S2,
+    output: false,
+    started_at: `2026-10-10T10:${String(n % 60).padStart(2, '0')}:00Z`,
+  });
+const spanTwo = (high: number, low: number) =>
+  Array.from({ length: high - low + 1 }, (_, i) => oldTwo(high - i));
+const tabs = () =>
+  Array.from(agent().querySelectorAll<HTMLElement>('[role="tab"]'));
+const day = (stamp: string | null) => stamp?.slice(0, 10);
+
+it('keeps two sessions of one project apart while each loads its own older turns', async () => {
+  const { first, second, nameFirst, nameSecond } = twins();
+  const ipc = desktop();
+  ipc.world.page = { ...page, sessions: [fresh, first, second] };
+  ipc.world.turns.set(S, span(100, 81));
+  ipc.world.turns.set(S2, spanTwo(60, 41));
+  ipc.world.older = cursor(500);
+  ipc.world.olderOf.set(S2, cursor(200));
+  component = mount(App, { target: document.body });
+  await flush();
+  await openAgent(1);
+  await openAgent(2);
+  expect(tabs().map(text)).toEqual([nameFirst, nameSecond]);
+  expect(text(agent().querySelector('.agent-session h2'))).toBe(nameSecond);
+  expect(turns()).toHaveLength(20);
+
+  // The second session asks for its own older turns, from the place its own list gave.
+  await click(older()!);
+  expect(ipc.of('managed_turns_older').map((c) => c.request)).toEqual([
+    { session_id: S2, stream_id: cursor(200).stream_id, before: '200' },
+  ]);
+  ipc
+    .last('managed_turns_older')
+    .resolve(historyPage(spanTwo(40, 21), cursor(100), S2));
+  await flush();
+  expect(turns()).toHaveLength(40);
+  expect(new Set(times().map(day))).toEqual(new Set(['2026-10-10']));
+  // Loading history does not rename anything.
+  expect(tabs().map(text)).toEqual([nameFirst, nameSecond]);
+  expect(text(agent().querySelector('.agent-session h2'))).toBe(nameSecond);
+
+  // The first session has its own history, and none of the second's reaches it.
+  await click(tabs()[0]);
+  expect(text(agent().querySelector('.agent-session h2'))).toBe(nameFirst);
+  expect(turns()).toHaveLength(20);
+  expect(new Set(times().map(day))).toEqual(new Set(['2026-10-09']));
+  await click(older()!);
+  expect(ipc.last('managed_turns_older').request).toEqual({
+    session_id: S,
+    stream_id: cursor(500).stream_id,
+    before: '500',
+  });
+  ipc.last('managed_turns_older').resolve(historyPage(span(80, 61), null));
+  await flush();
+  expect(turns()).toHaveLength(40);
+  expect(new Set(times().map(day))).toEqual(new Set(['2026-10-09']));
+  expect(text(agent())).toContain(
+    "This is the start of this session's history.",
+  );
+
+  // Back in the second, what it loaded is still there, and it can still go further back.
+  await click(tabs()[1]);
+  expect(turns()).toHaveLength(40);
+  expect(new Set(times().map(day))).toEqual(new Set(['2026-10-10']));
+  expect(text(older())).toBe('Load older turns');
+  expect(text(agent())).not.toContain('start of this session');
+  expect(ipc.count('managed_turns_older')).toBe(2);
+  // Reading history started, cancelled and decided nothing.
+  expect(ipc.count('managed_turn_start')).toBe(0);
+  expect(ipc.count('managed_turn_cancel')).toBe(0);
+  expect(ipc.count('managed_approval_approve')).toBe(0);
+});
+
+it('refuses a page of the twin session, and shows neither its turns nor a new name', async () => {
+  const { first, second, nameFirst, nameSecond } = twins();
+  const ipc = desktop();
+  ipc.world.page = { ...page, sessions: [fresh, first, second] };
+  ipc.world.turns.set(S, span(100, 81));
+  ipc.world.turns.set(S2, spanTwo(60, 41));
+  ipc.world.older = cursor(500);
+  ipc.world.olderOf.set(S2, cursor(200));
+  component = mount(App, { target: document.body });
+  await flush();
+  await openAgent(1);
+  await openAgent(2);
+
+  await click(older()!);
+  expect(ipc.last('managed_turns_older').request.session_id).toBe(S2);
+  // The authority answers with the first session's page, turns and all.
+  ipc.last('managed_turns_older').resolve(historyPage(span(80, 61), null, S));
+  await flush();
+  expect(turns()).toHaveLength(20);
+  expect(new Set(times().map(day))).toEqual(new Set(['2026-10-10']));
+  expect(text(agent().querySelector('.turn-alert'))).toContain(
+    'Nothing is shown rather than something unverified.',
+  );
+  expect(tabs().map(text)).toEqual([nameFirst, nameSecond]);
+  // Neither tab took anything from it.
+  await click(tabs()[0]);
+  expect(turns()).toHaveLength(20);
+  expect(agent().querySelector('.turn-alert')).toBeNull();
+  expect(text(older())).toBe('Load older turns');
 });

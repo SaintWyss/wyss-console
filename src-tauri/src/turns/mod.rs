@@ -20,8 +20,8 @@ pub use approvals::{
 };
 pub use service::TurnService;
 pub use view::{
-    ApprovalNotice, SessionFacts, TURN_PAGE, TurnEvent, TurnEventKind, TurnList, TurnReceipt,
-    TurnSummary, TurnView,
+    ApprovalNotice, HistoryCursor, SessionFacts, TURN_PAGE, TurnEvent, TurnEventKind, TurnHistory,
+    TurnList, TurnReceipt, TurnSummary, TurnView,
 };
 
 #[cfg(test)]
