@@ -1495,7 +1495,9 @@ fn the_window_s_fixture_has_exactly_the_shape_of_this_projection() {
         before: "6".parse().unwrap(),
     })
     .unwrap();
-    assert_eq!(keys(&fixture["list"]["older"]), keys(&cursor));
+    // Not only the names: the very values, so a position is the decimal string the window
+    // parses and a stream is the text it was given.
+    assert_eq!(fixture["list"]["older"], cursor);
     assert!(fixture["empty"]["older"].is_null());
     let page = serde_json::to_value(TurnHistory {
         schema_version: 1,
@@ -1511,7 +1513,25 @@ fn the_window_s_fixture_has_exactly_the_shape_of_this_projection() {
             assert_eq!(keys(turn), keys(&list["turns"][0]));
         }
     }
-    assert_eq!(keys(&fixture["history"]["older"]), keys(&cursor));
+    assert_eq!(
+        fixture["history"]["older"]["stream_id"],
+        cursor["stream_id"]
+    );
+    assert_eq!(fixture["history"]["older"]["before"], "3");
+    assert_eq!(
+        serde_json::to_value(HistoryCursor {
+            stream_id: WireUuid::try_from(
+                fixture["history"]["older"]["stream_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            )
+            .unwrap(),
+            before: "3".parse().unwrap(),
+        })
+        .unwrap(),
+        fixture["history"]["older"]
+    );
     assert!(fixture["history_end"]["older"].is_null());
     // Every name the fixture uses for a state or a reason is one the contract has.
     let named = |v: &serde_json::Value| serde_json::from_value::<TurnState>(v.clone()).is_ok();
