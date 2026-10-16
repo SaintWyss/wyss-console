@@ -37,3 +37,6 @@ pub mod binding;
 pub mod turn;
 
 pub mod approval;
+
+/// Pure B1 contract foundation. Not reachable from control protocol v1 or `METHODS`.
+pub mod b1;

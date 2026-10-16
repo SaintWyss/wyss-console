@@ -22,6 +22,24 @@
 //! let instance = AgentRuntimeInstanceId::parse("11111111-1111-4111-8111-111111111111").unwrap();
 //! let managed: ManagedSessionId = instance;
 //! ```
+//!
+//! B1 task identity is distinct from managed and local terminal identity.
+//!
+//! ```compile_fail
+//! use wyss_console::contracts::identities::{B1TaskId, ManagedSessionId};
+//! let task = B1TaskId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+//! let managed: ManagedSessionId = task;
+//! ```
+//! ```compile_fail
+//! use wyss_console::contracts::identities::{B1TaskId, TerminalId};
+//! let task = B1TaskId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+//! let terminal: TerminalId = task;
+//! ```
+//! ```compile_fail
+//! use wyss_console::contracts::identities::{B1SelectionId, B1TaskId};
+//! let selection = B1SelectionId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+//! let task: B1TaskId = selection;
+//! ```
 //! ```compile_fail
 //! use wyss_console::contracts::identities::{ManagedSessionId, ExecutionLeaseId};
 //! let session = ManagedSessionId::parse("11111111-1111-4111-8111-111111111111").unwrap();
@@ -70,6 +88,10 @@ identity!(ExecutionLeaseId);
 identity!(ManagedApprovalId);
 identity!(ConsoleSessionId);
 identity!(TerminalId);
+identity!(B1TaskId);
+identity!(B1SelectionId);
+identity!(B1RepoId);
+identity!(B1PolicyId);
 
 #[cfg(test)]
 mod tests {
