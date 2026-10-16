@@ -5,6 +5,7 @@ import App from '../src/App.svelte';
 import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import { parseTerminalId } from '../src/lib/contracts/identities';
 import type { TurnSummary } from '../src/lib/contracts/turns';
+import { localTime } from '../src/lib/features/sessions/present';
 import { listing, reading, S, S2, T1, T2, turn } from './agent-harness';
 import views from './fixtures/authority-view-v1.json';
 import pages from './fixtures/session-page-v3.json';
@@ -75,6 +76,8 @@ function desktop() {
     turns: new Map<string, TurnSummary[]>(),
     /** The authority read that is waiting for a change. */
     authority: undefined as ((view: unknown) => void) | undefined,
+    /** The sessions Sessions lists, when the test needs others than `page`. */
+    page: undefined as typeof page | undefined,
   };
   mockIPC((command, payload) => {
     const request =
@@ -91,11 +94,16 @@ function desktop() {
       world.authority = resolve;
       return answer;
     }
-    if (command === 'managed_sessions_page') return page;
+    if (command === 'managed_sessions_page') return world.page ?? page;
     if (command === 'managed_turns') {
       const session = request.session_id as typeof S;
       return listing(world.turns.get(session) ?? [], {
-        session: session === S2 ? { id: S2, workspace: '/home/dev/other' } : {},
+        session: {
+          id: session,
+          workspace:
+            (world.page ?? page).sessions.find((s) => s.id === session)
+              ?.workspace ?? '/home/dev/rag-corp',
+        },
       });
     }
     if (command.startsWith('managed_turn_')) return answer;
@@ -620,4 +628,45 @@ it('stops offering a turn when the authority goes away, and keeps what was read'
   await press({ key: 'Enter' });
   expect(ipc.count('managed_turn_start')).toBe(1);
   expect(box().value).toBe('typed while offline');
+});
+
+it('tells two sessions of one project apart in Sessions and in the Agent view', async () => {
+  const ipc = desktop();
+  const first = { ...bound, binding: 'bound_attached' };
+  const second = {
+    ...bound,
+    id: S2,
+    binding: 'bound_attached',
+    position: '3',
+    created_at: '2026-10-09T09:30:00Z',
+    updated_at: '2026-10-09T09:30:00Z',
+  };
+  ipc.world.page = { ...page, sessions: [fresh, first, second] };
+  component = mount(App, { target: document.body });
+  await flush();
+  await click(nav('Sessions'));
+  const nameFirst = `rag-corp · ${localTime(first.created_at)}`;
+  const nameSecond = `rag-corp · ${localTime(second.created_at)}`;
+  expect(nameFirst).not.toBe(nameSecond);
+  expect(
+    Array.from(sessions().querySelectorAll('.session-name')).map(text),
+  ).toEqual(['Session 33333333', nameFirst, nameSecond]);
+  // The prompts that name a session name this one, not its twin.
+  const rows = sessions().querySelectorAll<HTMLButtonElement>('.session-row');
+  await click(rows[2]);
+  expect(text(sessions().querySelector('.session-details h3'))).toBe(
+    nameSecond,
+  );
+
+  await click(button('Open agent', sessions()));
+  await openAgent(1);
+  const tabs = Array.from(
+    agent().querySelectorAll<HTMLElement>('[role="tab"]'),
+  );
+  expect(tabs.map(text)).toEqual([nameSecond, nameFirst]);
+  expect(text(agent().querySelector('.agent-session h2'))).toBe(nameFirst);
+  // Closing a tab names the one it closes.
+  expect(
+    agent().querySelector(`[aria-label="Close ${nameSecond}"]`),
+  ).not.toBeNull();
 });

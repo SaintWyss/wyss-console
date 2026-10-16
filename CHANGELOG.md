@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Sessions that can be told apart
+
+- **A session is named so that no other session shown with it has the same name.** Until
+  now every session was named for its project folder, and the product itself asks for a
+  second session in a folder (a Local Tools session next to an Inference one). The rows in
+  Sessions, the Agent tabs, the close, discard and mode prompts, the session an approval
+  belongs to and the scope in Events then read as the same name twice. Now two folders that
+  end alike are told apart by their parents (`a/app`, `b/app`), and several sessions in one
+  folder by when they were created, or by their short identity when the time does not do it.
+  A name that is already unique is left as it was.
+- **A tab opened from Events is named for its folder** once the Agent view has read it,
+  instead of staying under the session's identity. Opening a session again from Sessions
+  gives its tab the name Sessions shows.
+- Names are for reading. Nothing is looked up, sent or decided by one, and no preference,
+  approval or authority behavior changed.
+
 ## 0.2.0
 
 A native desktop application for CachyOS with KDE Plasma, built and run from this

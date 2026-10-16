@@ -16,12 +16,15 @@
     controller,
     connected,
     context = false,
+    where,
   }: {
     card: ApprovalCard;
     controller: ApprovalsController;
     connected: boolean;
     /** Name the session the approval belongs to: where it is not shown under its turn. */
     context?: boolean;
+    /** The session's name among the sessions shown with it, when it needs more than its folder. */
+    where?: string;
   } = $props();
 
   const id = $derived(card.approval.id);
@@ -37,7 +40,7 @@
   <p class="approval-title">{approvalTitle(card)}</p>
   {#if context}
     <p class="approval-context">
-      {approvalWhere(card.workspace, card.approval.session)} · turn
+      {where ?? approvalWhere(card.workspace, card.approval.session)} · turn
       <span class="mono">{card.approval.turn.slice(0, 8)}</span>
     </p>
   {/if}

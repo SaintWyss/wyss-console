@@ -5,6 +5,7 @@ import App from '../src/App.svelte';
 import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import { parseTerminalId } from '../src/lib/contracts/identities';
 import type { TurnSummary } from '../src/lib/contracts/turns';
+import { localTime } from '../src/lib/features/sessions/present';
 import { listing, reading, T1, turn } from './agent-harness';
 import approvals from './fixtures/approval-list-v1.json';
 import views from './fixtures/authority-view-v1.json';
@@ -79,6 +80,8 @@ function desktop() {
       return approvals.command;
     },
     authority: undefined as ((view: unknown) => void) | undefined,
+    /** The sessions Sessions lists, when the test needs others than `page`. */
+    sessions: undefined as typeof page.sessions | undefined,
   };
   mockIPC((command, payload) => {
     const request =
@@ -95,7 +98,8 @@ function desktop() {
       world.authority = resolve;
       return answer;
     }
-    if (command === 'managed_sessions_page') return page;
+    if (command === 'managed_sessions_page')
+      return { ...page, sessions: world.sessions ?? page.sessions };
     if (command === 'managed_turns')
       return listing(world.turns, { session: { mode: 'local_tools' } });
     if (command === 'managed_approvals') return world.approvals;
@@ -145,8 +149,11 @@ async function click(target: HTMLElement | undefined) {
   await flush();
 }
 /** The application with its Local Tools session open in the Agent view, a turn running. */
-async function running() {
+async function running(
+  setup: (ipc: ReturnType<typeof desktop>) => void = () => undefined,
+) {
   const ipc = desktop();
+  setup(ipc);
   component = mount(App, { target: document.body });
   await flush();
   await click(nav('Sessions'));
@@ -595,4 +602,26 @@ it('never shows the approval of another turn under a turn, nor a command as mark
   expect(card.querySelector('.approval-code')!.textContent).toBe(hostile);
   expect(card.querySelectorAll('img, b, script')).toHaveLength(0);
   expect((window as unknown as { pwned?: number }).pwned).toBeUndefined();
+});
+
+it('names the session an approval belongs to so a twin in the same folder is not mistaken for it', async () => {
+  const mine = { ...bound, binding: 'bound_attached', mode: 'local_tools' };
+  const twin = {
+    ...mine,
+    id: '66666666-6666-4666-8666-666666666666',
+    position: '3',
+    created_at: '2026-10-09T09:30:00Z',
+    updated_at: '2026-10-09T09:30:00Z',
+  };
+  const ipc = await running((desktop) => {
+    desktop.world.sessions = [mine, twin];
+  });
+  await asks(ipc, approvals.command);
+  await click(nav('Approvals'));
+  const listed = cards(approvalsView());
+  expect(listed).toHaveLength(1);
+  // Two sessions share the folder: the name says which one is asking, not just the folder.
+  expect(text(listed[0].querySelector('.approval-context'))).toBe(
+    `rag-corp · ${localTime(mine.created_at)} · turn ${T1.slice(0, 8)}`,
+  );
 });

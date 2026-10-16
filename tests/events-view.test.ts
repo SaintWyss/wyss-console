@@ -425,6 +425,10 @@ it('shows what a record is about and takes the reader to where that lives', asyn
   await click(button('Open in Agents', details()!));
   expect(document.querySelector('.context-title')?.textContent).toBe('Agents');
   expect(ipc.of('managed_turns').at(-1)!.request).toEqual({ session_id: S1 });
+  // The tab is named for the session's folder, as read, and not left under its identity.
+  expect(text(document.querySelector('.agent-feature [role="tab"]'))).toBe(
+    'rag-corp',
+  );
   // And to the session in Sessions, selected.
   await click(nav('Events'));
   await click(button('Open session', details()!));
@@ -437,9 +441,8 @@ it('shows what a record is about and takes the reader to where that lives', asyn
   // From a session's details, its loaded history.
   await click(button('Events', document.querySelector('.sessions-feature')!));
   expect(document.querySelector('.context-title')?.textContent).toBe('Events');
-  expect(text(view().querySelector('.events-scope'))).toContain(
-    'Session 22222222',
-  );
+  // Sessions has listed it, so the scope is named for it and not only by its identity.
+  expect(text(view().querySelector('.events-scope'))).toContain('rag-corp');
   expect(titles()).toHaveLength(3);
 });
 

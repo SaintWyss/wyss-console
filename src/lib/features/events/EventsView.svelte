@@ -43,6 +43,7 @@
     timeFormat = 'system',
     onsession,
     onagent,
+    nameOf = () => null,
     onapprovals,
     lookup = (id: ManagedApprovalId) => readApproval(id, null, null),
   }: {
@@ -57,6 +58,8 @@
     onsession: (session: ManagedSessionId) => void;
     /** Opens a session in Agents, where its turns are read. */
     onagent: (session: ManagedSessionId) => void;
+    /** A session's name, when the Sessions page has listed it. Presentation only. */
+    nameOf?: (session: ManagedSessionId) => string | null;
     onapprovals: () => void;
     /** A canonical read of one approval, as it is now. */
     lookup?: (approval: ManagedApprovalId) => Promise<ApprovalDetail>;
@@ -281,7 +284,8 @@
         <span class="events-scope">
           {events.scope.turn
             ? `Turn ${short(events.scope.turn)}`
-            : `Session ${short(events.scope.session)}`}
+            : (nameOf(events.scope.session) ??
+              `Session ${short(events.scope.session)}`)}
           <button
             type="button"
             class="action chip"

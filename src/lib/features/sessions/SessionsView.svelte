@@ -22,7 +22,7 @@
     readFailureMessage,
     resumeHint,
     runtimeLine,
-    sessionLabel,
+    sessionNames,
     STATE,
   } from './present';
 
@@ -46,6 +46,10 @@
   } = $props();
 
   const connected = $derived(sessions.link === 'connected');
+  /** Unique among the sessions listed, so two sessions of one project can be told apart. */
+  const names = $derived(sessionNames(sessions.page?.sessions ?? []));
+  const nameOf = (session: SessionSummary) =>
+    names.get(session.id) ?? session.id.slice(0, 8);
   const pending = $derived(sessions.operation?.status === 'pending');
   const page = $derived(sessions.page);
   const selected = $derived(
@@ -152,7 +156,7 @@
     >
       <div class="composer-text">
         <p class="composer-title">
-          {target ? `Activate ${sessionLabel(target)}` : 'New managed session'}
+          {target ? `Activate ${nameOf(target)}` : 'New managed session'}
         </p>
         <dl class="composer-fields">
           <dt>Project</dt>
@@ -285,7 +289,7 @@
                     session.id === sessions.selected ? null : session.id,
                   )}
               >
-                <span class="session-name">{sessionLabel(session)}</span>
+                <span class="session-name">{nameOf(session)}</span>
                 <span
                   class="pill compact"
                   data-tone={STATE[session.state].tone}
@@ -342,7 +346,7 @@
       {#if selected}
         <aside class="session-details" aria-label="Session details">
           <div class="details-head">
-            <h3>{sessionLabel(selected)}</h3>
+            <h3>{nameOf(selected)}</h3>
             <span class="pill compact" data-tone={STATE[selected.state].tone}>
               <span class="dot" aria-hidden="true"></span>
               {STATE[selected.state].label}
@@ -415,7 +419,7 @@
                 {asked === 'local_tools'
                   ? 'Enable Local Tools'
                   : 'Use Inference'}
-                for {sessionLabel(selected)}? {modeImpact(asked)}
+                for {nameOf(selected)}? {modeImpact(asked)}
               </p>
               <div class="session-actions">
                 <button

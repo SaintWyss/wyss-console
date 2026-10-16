@@ -18,12 +18,15 @@
     controller,
     authority,
     visible,
+    names = new Map(),
   }: {
     approvals: ApprovalsState;
     controller: ApprovalsController;
     /** The shell's one authority observation. Read here for wording only. */
     authority: AuthorityObservation;
     visible: boolean;
+    /** Sessions by name, as far as the Sessions page has been read. Never authority. */
+    names?: ReadonlyMap<string, string>;
   } = $props();
 
   const connected = $derived(approvals.link === 'connected');
@@ -100,7 +103,13 @@
         <ul class="approvals-list" aria-label="Pending approvals">
           {#each pending as card (card.approval.id)}
             <li>
-              <ApprovalCard {card} {controller} {connected} context />
+              <ApprovalCard
+                {card}
+                {controller}
+                {connected}
+                context
+                where={names.get(card.approval.session)}
+              />
             </li>
           {/each}
         </ul>

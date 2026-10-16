@@ -1059,3 +1059,51 @@ it('asks nothing and shows nothing after it is disposed', async () => {
   expect(h.calls()).toBe(calls);
   expect(h.published()).toBe(published);
 });
+
+/** A session opened under `label`, shown, and its first list answered. */
+async function showingAs(label: string, provisional: boolean) {
+  const h = harness();
+  h.controller.open(S, label, provisional);
+  h.controller.setVisible(true);
+  h.controller.observe(connected('9'));
+  h.lists[0].resolve(listing([]));
+  await settle();
+  return h;
+}
+
+it('names a tab from the folder the authority reports when it was opened without a name', async () => {
+  const h = await showingAs('Session 22222222', true);
+  expect(h.state().tabs).toEqual([{ session: S, label: 'rag-corp' }]);
+  expect(h.shown().label).toBe('rag-corp');
+});
+
+it('keeps the name it was given, and uses a better one when the session is opened again', async () => {
+  const h = await showingAs('rag-corp · Oct 8, 2026, 11:00 AM', false);
+  expect(h.state().tabs[0].label).toBe('rag-corp · Oct 8, 2026, 11:00 AM');
+  // A stand-in never replaces a name that was given.
+  h.controller.open(S, 'Session 22222222', true);
+  expect(h.state().tabs[0].label).toBe('rag-corp · Oct 8, 2026, 11:00 AM');
+  // A name from where it is known replaces the one held.
+  h.controller.open(S, 'rag-corp', false);
+  expect(h.state().tabs[0].label).toBe('rag-corp');
+  expect(h.state().tabs).toHaveLength(1);
+});
+
+it('never shows two tabs under one name', async () => {
+  const h = harness();
+  h.controller.observe(connected('9'));
+  h.controller.open(S, 'rag-corp');
+  expect(h.state().tabs.map((t) => t.label)).toEqual(['rag-corp']);
+  h.controller.open(S2, 'rag-corp');
+  const labels = h.state().tabs.map((t) => t.label);
+  expect(labels).toEqual([
+    `rag-corp · ${S.slice(0, 8)}`,
+    `rag-corp · ${S2.slice(0, 8)}`,
+  ]);
+  expect(new Set(labels).size).toBe(2);
+  // The session shown carries the same name as its tab.
+  expect(h.shown().label).toBe(`rag-corp · ${S2.slice(0, 8)}`);
+  // Once they differ, nothing is added.
+  h.controller.open(S2, 'other');
+  expect(h.state().tabs.map((t) => t.label)).toEqual(['rag-corp', 'other']);
+});

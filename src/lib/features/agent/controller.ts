@@ -25,6 +25,7 @@ import {
   startTurn,
 } from '../../desktop/turns-client';
 import type { AuthorityObservation } from '../../shell/authority';
+import { folderName, shortId } from '../sessions/present';
 
 export type AgentLink = 'connecting' | 'offline' | 'connected';
 
@@ -155,6 +156,8 @@ interface Start {
 interface Model {
   session: ManagedSessionId;
   label: string;
+  /** The label is a stand-in until the session's own folder is read. */
+  provisional: boolean;
   facts: SessionFacts | null;
   entries: Entry[];
   runnable: boolean;
@@ -224,15 +227,35 @@ export class AgentController {
     private readonly newIntent: () => string = () => crypto.randomUUID(),
   ) {}
 
+  /**
+   * What each open tab is called. Tabs that would read the same take the short identity of
+   * their session as well, so two sessions of one project are never one name twice.
+   */
+  private labels(): Map<ManagedSessionId, string> {
+    const count = new Map<string, number>();
+    for (const { label } of this.models)
+      count.set(label, (count.get(label) ?? 0) + 1);
+    return new Map(
+      this.models.map(({ session, label }) => [
+        session,
+        (count.get(label) ?? 0) > 1 ? `${label} · ${shortId(session)}` : label,
+      ]),
+    );
+  }
+
   state(): AgentState {
     const model = this.model();
+    const labels = this.labels();
     return {
       link: this.link,
       following: this.models.some((m) => m.entries.some((e) => !over(e))),
-      tabs: this.models.map(({ session, label }) => ({ session, label })),
+      tabs: this.models.map(({ session }) => ({
+        session,
+        label: labels.get(session) ?? '',
+      })),
       current: model && {
         session: model.session,
-        label: model.label,
+        label: labels.get(model.session) ?? model.label,
         facts: model.facts,
         turns: model.entries.map((entry) => ({
           id: entry.id,
@@ -316,11 +339,19 @@ export class AgentController {
 
   /**
    * Opens a session in the Agent view and shows it. Answers false when every tab is
-   * taken by a session with something in flight.
+   * taken by a session with something in flight. A `provisional` label stands in for a
+   * session whose folder is not known yet: it is replaced by the folder once it is read.
    */
-  open(session: ManagedSessionId, label: string): boolean {
+  open(session: ManagedSessionId, label: string, provisional = false): boolean {
     if (this.disposed) return false;
-    if (!this.model(session)) {
+    const known = this.model(session);
+    if (known) {
+      // Opened again from where its name is known: that name is the better one.
+      if (!provisional) {
+        known.label = label;
+        known.provisional = false;
+      }
+    } else {
       if (this.models.length >= MAX_TABS) {
         const idle = this.models.find(
           (m) =>
@@ -334,6 +365,7 @@ export class AgentController {
       this.models.push({
         session,
         label,
+        provisional,
         facts: null,
         entries: [],
         runnable: false,
@@ -428,6 +460,12 @@ export class AgentController {
   }
   private merge(model: Model, list: TurnList) {
     model.facts = list.session;
+    // A stand-in name gives way to the folder the authority says the session is bound to.
+    const folder = folderName(list.session.workspace);
+    if (model.provisional && folder !== null) {
+      model.label = folder;
+      model.provisional = false;
+    }
     model.runnable = list.runnable;
     model.partial = list.partial;
     model.head = list.head;
