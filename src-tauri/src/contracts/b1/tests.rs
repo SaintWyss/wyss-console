@@ -1,5 +1,8 @@
 //! Adversarial contract tests. Each rejection asserts its stable code, so a test cannot pass
 //! by failing for an unrelated reason.
+use super::digest;
+use super::{GitOid, Sha256Hex, source::B1OverlayEntryV1};
+const OTHER_TASK: &str = "77777777-7777-4777-8777-777777777777";
 use super::{
     B1ErrorCode, MAX_ENTRIES, MAX_INPUT_BYTES, MAX_PATH_BYTES,
     lifecycle::{B1PendingEvidence, B1TaskLifecycle, B1TaskState},
@@ -48,39 +51,40 @@ fn regular_content(size: u64, mode: u32) -> Value {
 
 fn add(text: &str) -> Value {
     json!({
-        "path": wire(text), "operation": "add", "expected_base_oid": null,
-        "rename_from": null, "content": regular_content(5, REGULAR_MODE),
-        "reviewed_sha256": SHA_B
+        "path": wire(text), "operation": "add", "origin": "untracked",
+        "expected_base_oid": null, "rename_from": null,
+        "content": regular_content(5, REGULAR_MODE), "reviewed_sha256": SHA_B
     })
 }
 
 fn modify(text: &str) -> Value {
     json!({
-        "path": wire(text), "operation": "modify", "expected_base_oid": BASE,
-        "rename_from": null, "content": regular_content(12, REGULAR_MODE),
-        "reviewed_sha256": SHA_B
+        "path": wire(text), "operation": "modify", "origin": "unstaged",
+        "expected_base_oid": BASE, "rename_from": null,
+        "content": regular_content(12, REGULAR_MODE), "reviewed_sha256": SHA_B
     })
 }
 
 fn delete(text: &str) -> Value {
     json!({
-        "path": wire(text), "operation": "delete", "expected_base_oid": BASE,
-        "rename_from": null, "content": null, "reviewed_sha256": SHA_B
+        "path": wire(text), "operation": "delete", "origin": "unstaged",
+        "expected_base_oid": BASE, "rename_from": null, "content": null,
+        "reviewed_sha256": SHA_B
     })
 }
 
 fn rename(to: &str, from: &str) -> Value {
     json!({
-        "path": wire(to), "operation": "rename", "expected_base_oid": BASE,
-        "rename_from": wire(from), "content": regular_content(7, REGULAR_MODE),
-        "reviewed_sha256": SHA_B
+        "path": wire(to), "operation": "rename", "origin": "staged",
+        "expected_base_oid": BASE, "rename_from": wire(from),
+        "content": regular_content(7, REGULAR_MODE), "reviewed_sha256": SHA_B
     })
 }
 
 fn symlink(text: &str, target: &[u8]) -> Value {
     json!({
-        "path": wire(text), "operation": "add", "expected_base_oid": null,
-        "rename_from": null,
+        "path": wire(text), "operation": "add", "origin": "untracked",
+        "expected_base_oid": null, "rename_from": null,
         "content": {"kind": "symlink", "target": wire_bytes(target)},
         "reviewed_sha256": SHA_B
     })
@@ -855,17 +859,27 @@ fn as_workspace(value: Value) -> B1WorkspaceReceiptV1 {
     typed(value)
 }
 
+/// A mutually consistent evidence set. Its digests are computed from the records, never typed.
 fn fixture_evidence() -> (
     B1AdmissionRecordV1,
     B1WorkspaceReceiptV1,
     B1ExportRecordV1,
     B1QuarantineReceiptV1,
 ) {
+    let admission = admission_record(admission_json());
+    let admission_digest = digest::admission_record(&admission).unwrap();
+    let mut export_value = export_json();
+    export_value["base_admission_sha256"] = json!(admission_digest.as_str());
+    let export: B1ExportRecordV1 = typed(export_value);
+    let export_digest = digest::export_record(&export).unwrap();
+    let mut quarantine_value = quarantine_json();
+    quarantine_value["admission_sha256"] = json!(admission_digest.as_str());
+    quarantine_value["export_sha256"] = json!(export_digest.as_str());
     (
-        admission_record(admission_json()),
+        admission,
         as_workspace(workspace_json()),
-        typed(export_json()),
-        as_quarantine(quarantine_json()),
+        export,
+        as_quarantine(quarantine_value),
     )
 }
 
@@ -892,14 +906,10 @@ fn validated_lifecycle() -> B1TaskLifecycle {
 fn happy_path_reaches_pending_only_through_cross_checked_evidence() {
     let mut lifecycle = validated_lifecycle();
     let (admission, workspace, export, quarantine) = fixture_evidence();
-    let admission_sha: crate::contracts::b1::Sha256Hex = typed(json!(SHA));
-    let export_sha: crate::contracts::b1::Sha256Hex = typed(json!(SHA_B));
     let evidence = B1PendingEvidence {
         admission: &admission,
-        admission_sha256: &admission_sha,
         workspace: &workspace,
         export: &export,
-        export_sha256: &export_sha,
         quarantine: &quarantine,
     };
     lifecycle.publish_pending(&evidence).unwrap();
@@ -1036,14 +1046,10 @@ fn pending_cannot_be_reached_by_a_generic_transition_or_from_the_wrong_stage() {
     assert_eq!(validated.state(), B1TaskState::Validated);
 
     let (admission, workspace, export, quarantine) = fixture_evidence();
-    let admission_sha: crate::contracts::b1::Sha256Hex = typed(json!(SHA));
-    let export_sha: crate::contracts::b1::Sha256Hex = typed(json!(SHA_B));
     let evidence = B1PendingEvidence {
         admission: &admission,
-        admission_sha256: &admission_sha,
         workspace: &workspace,
         export: &export,
-        export_sha256: &export_sha,
         quarantine: &quarantine,
     };
     let mut frozen = B1TaskLifecycle::new();
@@ -1066,81 +1072,94 @@ fn pending_cannot_be_reached_by_a_generic_transition_or_from_the_wrong_stage() {
     assert_eq!(frozen.state(), B1TaskState::Frozen);
 }
 
-#[test]
-fn mismatched_evidence_never_publishes_and_never_changes_state() {
-    let (admission, workspace, export, quarantine) = fixture_evidence();
-    let admission_sha: crate::contracts::b1::Sha256Hex = typed(json!(SHA));
-    let export_sha: crate::contracts::b1::Sha256Hex = typed(json!(SHA_B));
-    let other_sha: crate::contracts::b1::Sha256Hex = typed(json!("ef".repeat(32)));
+fn export_with(base_admission_sha256: &str) -> B1ExportRecordV1 {
+    let mut value = export_json();
+    value["base_admission_sha256"] = json!(base_admission_sha256);
+    typed(value)
+}
 
-    let check = |admission: &B1AdmissionRecordV1,
-                 admission_sha: &crate::contracts::b1::Sha256Hex,
-                 workspace: &B1WorkspaceReceiptV1,
-                 export: &B1ExportRecordV1,
-                 export_sha: &crate::contracts::b1::Sha256Hex,
-                 quarantine: &B1QuarantineReceiptV1|
-     -> B1ErrorCode {
-        let mut lifecycle = validated_lifecycle();
-        let evidence = B1PendingEvidence {
-            admission,
-            admission_sha256: admission_sha,
-            workspace,
-            export,
-            export_sha256: export_sha,
-            quarantine,
-        };
-        let code = lifecycle.publish_pending(&evidence).unwrap_err().code;
-        assert_eq!(lifecycle.state(), B1TaskState::Validated);
-        code
+fn quarantine_with(admission_sha256: &str, export_sha256: &str) -> B1QuarantineReceiptV1 {
+    let mut value = quarantine_json();
+    value["admission_sha256"] = json!(admission_sha256);
+    value["export_sha256"] = json!(export_sha256);
+    as_quarantine(value)
+}
+
+/// Runs `publish_pending` from a validated state. Refusal must leave the state unchanged.
+fn publish_refusal(
+    admission: &B1AdmissionRecordV1,
+    workspace: &B1WorkspaceReceiptV1,
+    export: &B1ExportRecordV1,
+    quarantine: &B1QuarantineReceiptV1,
+) -> B1ErrorCode {
+    let mut lifecycle = validated_lifecycle();
+    let evidence = B1PendingEvidence {
+        admission,
+        workspace,
+        export,
+        quarantine,
     };
+    let code = lifecycle.publish_pending(&evidence).unwrap_err().code;
+    assert_eq!(lifecycle.state(), B1TaskState::Validated);
+    code
+}
 
-    // The exact-match baseline still passes, so every failure below is attributable.
+#[test]
+fn consistent_computed_evidence_publishes() {
+    let (admission, workspace, export, quarantine) = fixture_evidence();
     let mut lifecycle = validated_lifecycle();
     lifecycle
         .publish_pending(&B1PendingEvidence {
             admission: &admission,
-            admission_sha256: &admission_sha,
             workspace: &workspace,
             export: &export,
-            export_sha256: &export_sha,
             quarantine: &quarantine,
         })
         .unwrap();
+    assert_eq!(lifecycle.state(), B1TaskState::Pending);
+}
+
+#[test]
+fn every_cross_record_binding_is_checked_against_the_records() {
+    let (admission, workspace, export, quarantine) = fixture_evidence();
+    let admission_digest = digest::admission_record(&admission).unwrap();
+    let export_digest = digest::export_record(&export).unwrap();
+    let admission_text = admission_digest.as_str().to_owned();
+    let export_text = export_digest.as_str().to_owned();
 
     assert_eq!(
-        check(
-            &admission,
-            &other_sha,
-            &workspace,
-            &export,
-            &export_sha,
-            &quarantine
-        ),
+        publish_refusal(&admission, &workspace, &export_with(SHA_B), &quarantine),
         B1ErrorCode::PendingEvidenceMismatch,
-        "admission digest"
+        "export bound to a different admission"
     );
     assert_eq!(
-        check(
+        publish_refusal(
             &admission,
-            &admission_sha,
             &workspace,
             &export,
-            &other_sha,
-            &quarantine
+            &quarantine_with(SHA, &export_text)
         ),
         B1ErrorCode::PendingEvidenceMismatch,
-        "export digest"
+        "quarantine admission digest"
+    );
+    assert_eq!(
+        publish_refusal(
+            &admission,
+            &workspace,
+            &export,
+            &quarantine_with(&admission_text, SHA)
+        ),
+        B1ErrorCode::PendingEvidenceMismatch,
+        "quarantine export digest"
     );
 
     let mut other_generation = workspace_json();
     other_generation["generation"] = json!(2);
     assert_eq!(
-        check(
+        publish_refusal(
             &admission,
-            &admission_sha,
             &as_workspace(other_generation),
             &export,
-            &export_sha,
             &quarantine
         ),
         B1ErrorCode::PendingEvidenceMismatch,
@@ -1150,73 +1169,34 @@ fn mismatched_evidence_never_publishes_and_never_changes_state() {
     let mut other_task = workspace_json();
     other_task["task_id"] = json!(SELECTION);
     assert_eq!(
-        check(
-            &admission,
-            &admission_sha,
-            &as_workspace(other_task),
-            &export,
-            &export_sha,
-            &quarantine
-        ),
+        publish_refusal(&admission, &as_workspace(other_task), &export, &quarantine),
         B1ErrorCode::PendingEvidenceMismatch,
         "workspace task"
     );
 
-    let mut export_bound_elsewhere = export_json();
-    export_bound_elsewhere["base_admission_sha256"] = json!(SHA_B);
-    assert_eq!(
-        check(
-            &admission,
-            &admission_sha,
-            &workspace,
-            &typed(export_bound_elsewhere),
-            &export_sha,
-            &quarantine
-        ),
-        B1ErrorCode::PendingEvidenceMismatch,
-        "export not bound to admission"
-    );
-
     let mut receipt_other_base = quarantine_json();
+    receipt_other_base["admission_sha256"] = json!(admission_text);
+    receipt_other_base["export_sha256"] = json!(export_text);
     receipt_other_base["source_base_oid"] = json!(BASE_B);
     receipt_other_base["result_tree_oid"] = json!(BASE);
     assert_eq!(
-        check(
+        publish_refusal(
             &admission,
-            &admission_sha,
             &workspace,
             &export,
-            &export_sha,
             &as_quarantine(receipt_other_base)
         ),
         B1ErrorCode::PendingEvidenceMismatch,
         "quarantine base"
     );
 
-    let mut receipt_other_export = quarantine_json();
-    receipt_other_export["export_sha256"] = json!(SHA);
-    assert_eq!(
-        check(
-            &admission,
-            &admission_sha,
-            &workspace,
-            &export,
-            &export_sha,
-            &as_quarantine(receipt_other_export)
-        ),
-        B1ErrorCode::PendingEvidenceMismatch,
-        "quarantine export digest"
-    );
-
     let mut invalid_admission = admission_json();
     invalid_admission["generation"] = json!(0);
     assert_eq!(
-        check(
+        publish_refusal(
             &admission_record(invalid_admission),
-            &admission_sha,
             &workspace,
             &export,
-            &export_sha,
             &quarantine
         ),
         B1ErrorCode::CounterInvalid,
@@ -1225,8 +1205,311 @@ fn mismatched_evidence_never_publishes_and_never_changes_state() {
 }
 
 #[test]
+fn fabricated_digests_are_refused_even_when_they_agree_with_each_other() {
+    // A forger who controls every record can make the digest text agree everywhere. The
+    // binding must still fail, because the digests are recomputed from the records.
+    let (admission, workspace, _export, _quarantine) = fixture_evidence();
+    let forged_export = export_with(SHA);
+    let forged_quarantine = quarantine_with(SHA, SHA_B);
+    assert_eq!(
+        publish_refusal(&admission, &workspace, &forged_export, &forged_quarantine),
+        B1ErrorCode::PendingEvidenceMismatch
+    );
+}
+
+#[test]
+fn computed_digests_are_deterministic_and_field_sensitive() {
+    let (admission, _workspace, export, _quarantine) = fixture_evidence();
+    let first = digest::admission_record(&admission).unwrap();
+    assert_eq!(first, digest::admission_record(&admission).unwrap());
+    let mut changed = admission.clone();
+    changed.admitted_bytes += 1;
+    assert_ne!(first, digest::admission_record(&changed).unwrap());
+    let mut export_changed = export.clone();
+    export_changed.generation = 2;
+    assert_ne!(
+        digest::export_record(&export).unwrap(),
+        digest::export_record(&export_changed).unwrap()
+    );
+}
+
+#[test]
 fn overlay_validation_is_callable_directly_for_fixture_inputs() {
     let entries: Vec<super::source::B1OverlayEntryV1> =
         [add("a"), modify("b")].into_iter().map(typed).collect();
     super::source::validate_overlay(&entries, super::ObjectFormat::Sha1).unwrap();
+}
+
+/// Vectors computed independently from the encoding grammar by a Python reference, so a drift
+/// in either implementation fails here.
+#[test]
+fn canonical_digests_match_the_independent_reference_vectors() {
+    let task: crate::contracts::identities::B1TaskId = typed(json!(TASK));
+    let hello = digest::raw_sha256(b"hello\n");
+    assert_eq!(
+        hello.as_str(),
+        "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
+    );
+    let regular = digest::DigestContent::Regular {
+        mode: REGULAR_MODE,
+        size: 6,
+        sha256: &hello,
+    };
+    assert_eq!(
+        digest::content_binding(&task, 1, &path("src/main.rs"), regular)
+            .unwrap()
+            .as_str(),
+        "7abed14e25359ad65f4cb45dbe7d6a2e9468c55f57206aea6cfb64dc7178b128"
+    );
+    let symlink = digest::DigestContent::Symlink { target: b"../x" };
+    assert_eq!(
+        digest::content_binding(&task, 1, &path("dir/l"), symlink)
+            .unwrap()
+            .as_str(),
+        "594158007739e053cd05a9ae9881e0de0a725f18554ccbb1f9abc8dd3ecfaff5"
+    );
+    let base: GitOid = typed(json!(BASE));
+    let a = path("a.txt");
+    let b = path("b.txt");
+    let entries = [
+        digest::ManifestEntry {
+            path: &a,
+            operation: digest::EntryOperation::Delete,
+            content: digest::DigestContent::Tombstone,
+        },
+        digest::ManifestEntry {
+            path: &b,
+            operation: digest::EntryOperation::Modify,
+            content: digest::DigestContent::Regular {
+                mode: EXECUTABLE_MODE,
+                size: 6,
+                sha256: &hello,
+            },
+        },
+    ];
+    assert_eq!(
+        digest::source_manifest(&task, 1, &base, &entries)
+            .unwrap()
+            .as_str(),
+        "d4a032eaabc4589af4e4206baacd4bede3e4b2a0e14e09b97e45dd1a8f6f7257"
+    );
+    let admission = admission_record(admission_json());
+    assert_eq!(
+        digest::admission_record(&admission).unwrap().as_str(),
+        "677ebc1297c7bbca8fbc080822b9eff2b497f074aad38b00d7918dea69242b9e"
+    );
+}
+
+#[test]
+fn content_verification_rejects_wrong_bytes_size_and_oversize_input() {
+    let expected = digest::raw_sha256(b"hello\n");
+    digest::verify_content(b"hello\n", &expected, 6).unwrap();
+    // Same length, one byte changed: a well-formed digest of other bytes.
+    assert_eq!(
+        digest::verify_content(b"hellO\n", &expected, 6)
+            .unwrap_err()
+            .code,
+        B1ErrorCode::ContentDigestMismatch
+    );
+    assert_eq!(
+        digest::verify_content(b"hello\n!", &expected, 6)
+            .unwrap_err()
+            .code,
+        B1ErrorCode::ContentSizeMismatch
+    );
+    assert_eq!(
+        digest::verify_content(b"hello\n", &expected, 7)
+            .unwrap_err()
+            .code,
+        B1ErrorCode::ContentSizeMismatch
+    );
+    let oversized = vec![0u8; MAX_INPUT_BYTES as usize + 1];
+    assert_eq!(
+        digest::verify_content(&oversized, &expected, MAX_INPUT_BYTES + 1)
+            .unwrap_err()
+            .code,
+        B1ErrorCode::LimitExceeded
+    );
+}
+
+#[test]
+fn manifests_refuse_unordered_duplicate_and_oversized_input() {
+    let task: crate::contracts::identities::B1TaskId = typed(json!(TASK));
+    let base: GitOid = typed(json!(BASE));
+    let a = path("a");
+    let b = path("b");
+    let tomb = digest::DigestContent::Tombstone;
+    let forward = [
+        digest::ManifestEntry {
+            path: &a,
+            operation: digest::EntryOperation::Delete,
+            content: tomb,
+        },
+        digest::ManifestEntry {
+            path: &b,
+            operation: digest::EntryOperation::Delete,
+            content: tomb,
+        },
+    ];
+    assert!(digest::source_manifest(&task, 1, &base, &forward).is_ok());
+    let reversed = [forward[1], forward[0]];
+    assert_eq!(
+        digest::source_manifest(&task, 1, &base, &reversed)
+            .unwrap_err()
+            .code,
+        B1ErrorCode::NonCanonicalOrder
+    );
+    let duplicated = [forward[0], forward[0]];
+    assert_eq!(
+        digest::source_manifest(&task, 1, &base, &duplicated)
+            .unwrap_err()
+            .code,
+        B1ErrorCode::NonCanonicalOrder
+    );
+    let many = vec![forward[0]; MAX_ENTRIES + 1];
+    assert_eq!(
+        digest::source_manifest(&task, 1, &base, &many)
+            .unwrap_err()
+            .code,
+        B1ErrorCode::LimitExceeded
+    );
+}
+
+#[test]
+fn digests_are_domain_separated_and_bound_to_task_generation_and_content() {
+    let task: crate::contracts::identities::B1TaskId = typed(json!(TASK));
+    let other: crate::contracts::identities::B1TaskId = typed(json!(OTHER_TASK));
+    let p = path("x");
+    let bytes = digest::raw_sha256(b"same bytes");
+    let as_regular = digest::DigestContent::Regular {
+        mode: REGULAR_MODE,
+        size: 10,
+        sha256: &bytes,
+    };
+    let base_binding = digest::content_binding(&task, 1, &p, as_regular).unwrap();
+    assert_ne!(
+        base_binding,
+        digest::content_binding(&other, 1, &p, as_regular).unwrap()
+    );
+    assert_ne!(
+        base_binding,
+        digest::content_binding(&task, 2, &p, as_regular).unwrap()
+    );
+    assert_ne!(
+        base_binding,
+        digest::content_binding(&task, 1, &path("y"), as_regular).unwrap()
+    );
+    let executable = digest::DigestContent::Regular {
+        mode: EXECUTABLE_MODE,
+        size: 10,
+        sha256: &bytes,
+    };
+    assert_ne!(
+        base_binding,
+        digest::content_binding(&task, 1, &p, executable).unwrap()
+    );
+    // A symlink whose target text equals the regular file's hash bytes is still a different kind.
+    let symlink = digest::DigestContent::Symlink {
+        target: bytes.as_str().as_bytes(),
+    };
+    assert_ne!(
+        base_binding,
+        digest::content_binding(&task, 1, &p, symlink).unwrap()
+    );
+    // The manifest purpose cannot be replayed as a content binding for the same fields.
+    let base: GitOid = typed(json!(BASE));
+    let single = [digest::ManifestEntry {
+        path: &p,
+        operation: digest::EntryOperation::Add,
+        content: as_regular,
+    }];
+    assert_ne!(
+        base_binding,
+        digest::source_manifest(&task, 1, &base, &single).unwrap()
+    );
+}
+
+#[test]
+fn overlay_manifest_binds_origin_base_and_review() {
+    let task: crate::contracts::identities::B1TaskId = typed(json!(TASK));
+    let base: GitOid = typed(json!(BASE));
+    let policy: Sha256Hex = typed(json!(SHA));
+    let staged: Vec<B1OverlayEntryV1> = vec![typed(modify("a"))];
+    let base_digest = digest::overlay_manifest(&task, &base, &policy, &staged).unwrap();
+    let mut value = modify("a");
+    value["origin"] = json!("staged");
+    let restaged: Vec<B1OverlayEntryV1> = vec![typed(value)];
+    assert_ne!(
+        base_digest,
+        digest::overlay_manifest(&task, &base, &policy, &restaged).unwrap()
+    );
+    let mut rereviewed = modify("a");
+    rereviewed["reviewed_sha256"] = json!("ef".repeat(32));
+    let other_review: Vec<B1OverlayEntryV1> = vec![typed(rereviewed)];
+    assert_ne!(
+        base_digest,
+        digest::overlay_manifest(&task, &base, &policy, &other_review).unwrap()
+    );
+    let other_base: GitOid = typed(json!(BASE_B));
+    assert_ne!(
+        base_digest,
+        digest::overlay_manifest(&task, &other_base, &policy, &staged).unwrap()
+    );
+}
+
+#[test]
+fn a_delete_and_an_add_differing_only_by_case_are_refused() {
+    // A case-insensitive materializer would treat these as one destination.
+    assert_eq!(
+        overlay_code(vec![delete("README"), add("readme")]),
+        B1ErrorCode::PathCollision
+    );
+}
+
+#[test]
+fn origin_must_match_the_operation() {
+    let mut add_unstaged = add("a");
+    add_unstaged["origin"] = json!("unstaged");
+    assert_eq!(entry_code(add_unstaged), B1ErrorCode::OverlayInvalid);
+
+    let mut modify_untracked = modify("a");
+    modify_untracked["origin"] = json!("untracked");
+    assert_eq!(entry_code(modify_untracked), B1ErrorCode::OverlayInvalid);
+
+    let mut delete_untracked = delete("a");
+    delete_untracked["origin"] = json!("untracked");
+    assert_eq!(entry_code(delete_untracked), B1ErrorCode::OverlayInvalid);
+
+    let mut staged_add = add("a");
+    staged_add["origin"] = json!("staged");
+    valid_selection(vec![staged_add]);
+
+    let mut unknown = add("a");
+    unknown["origin"] = json!("merged");
+    assert_shape_rejected(selection(vec![unknown]));
+}
+
+#[test]
+fn export_base_binding_is_checked_independently_of_the_export_digest() {
+    // The quarantine names the export's own digest correctly, so only the export's binding to
+    // the admission record can fail here.
+    let (admission, workspace, _export, _quarantine) = fixture_evidence();
+    let admission_text = digest::admission_record(&admission)
+        .unwrap()
+        .as_str()
+        .to_owned();
+    let unbound_export = export_with(SHA_B);
+    let unbound_text = digest::export_record(&unbound_export)
+        .unwrap()
+        .as_str()
+        .to_owned();
+    assert_eq!(
+        publish_refusal(
+            &admission,
+            &workspace,
+            &unbound_export,
+            &quarantine_with(&admission_text, &unbound_text)
+        ),
+        B1ErrorCode::PendingEvidenceMismatch
+    );
 }

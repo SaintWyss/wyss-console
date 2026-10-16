@@ -8,6 +8,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
+pub mod digest;
 pub mod lifecycle;
 pub mod path;
 pub mod records;
@@ -65,6 +66,11 @@ pub enum B1ErrorCode {
     InvalidTransition,
     PendingEvidenceMismatch,
     ReceiptInvalid,
+    UnselectedContent,
+    ContentDigestMismatch,
+    ContentSizeMismatch,
+    SnapshotMismatch,
+    StaleGeneration,
 }
 
 impl B1ErrorCode {
@@ -102,6 +108,11 @@ impl B1ErrorCode {
             Self::InvalidTransition => "INVALID_TRANSITION",
             Self::PendingEvidenceMismatch => "PENDING_EVIDENCE_MISMATCH",
             Self::ReceiptInvalid => "RECEIPT_INVALID",
+            Self::UnselectedContent => "UNSELECTED_CONTENT",
+            Self::ContentDigestMismatch => "CONTENT_DIGEST_MISMATCH",
+            Self::ContentSizeMismatch => "CONTENT_SIZE_MISMATCH",
+            Self::SnapshotMismatch => "SNAPSHOT_MISMATCH",
+            Self::StaleGeneration => "STALE_GENERATION",
         }
     }
 }
@@ -178,6 +189,33 @@ pub struct Sha256Hex(String);
 impl Sha256Hex {
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Builds the digest of computed bytes. It cannot fail, because the text is always 64
+    /// lowercase hex characters.
+    pub(crate) fn from_raw(raw: [u8; 32]) -> Self {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let text = raw
+            .iter()
+            .flat_map(|byte| {
+                [
+                    char::from(HEX[usize::from(byte >> 4)]),
+                    char::from(HEX[usize::from(byte & 0x0f)]),
+                ]
+            })
+            .collect();
+        Self(text)
+    }
+
+    pub(crate) fn to_raw(&self) -> Option<[u8; 32]> {
+        let bytes = self.0.as_bytes();
+        let mut raw = [0u8; 32];
+        for (index, pair) in bytes.chunks_exact(2).enumerate() {
+            let high = (pair[0] as char).to_digit(16)?;
+            let low = (pair[1] as char).to_digit(16)?;
+            raw[index] = u8::try_from(high * 16 + low).ok()?;
+        }
+        Some(raw)
     }
 }
 

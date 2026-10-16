@@ -234,3 +234,15 @@ pub fn validate_destination_set<'a>(paths: impl IntoIterator<Item = &'a B1RelPat
     }
     Ok(())
 }
+
+/// Rejects any two distinct paths that are equal after ASCII case folding. Unlike
+/// [`validate_destination_set`], this applies to every entry, including deletions.
+pub fn validate_case_distinct<'a>(paths: impl IntoIterator<Item = &'a B1RelPath>) -> B1Result {
+    let mut seen: HashSet<Vec<u8>> = HashSet::new();
+    for path in paths {
+        if !seen.insert(path.folded()) {
+            return Err(B1Error::new("path", B1ErrorCode::PathCollision));
+        }
+    }
+    Ok(())
+}

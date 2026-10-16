@@ -5,7 +5,7 @@
 use super::{
     B1ErrorCode, B1Result, GitOid, MAX_ENTRIES, MAX_INPUT_BYTES, MAX_TOTAL_CONTENT_BYTES,
     ObjectFormat, SchemaV1, Sha256Hex, ensure,
-    path::{B1LinkTarget, B1RelPath, validate_destination_set},
+    path::{B1LinkTarget, B1RelPath, validate_case_distinct, validate_destination_set},
 };
 use crate::contracts::{
     UtcTimestamp,
@@ -23,6 +23,16 @@ pub enum ChangeOperation {
     Modify,
     Delete,
     Rename,
+}
+
+/// Which working set the owner selected the bytes from. Staged and unstaged versions of one
+/// path are distinct selections, never merged. Untracked files may only be added.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeOrigin {
+    Staged,
+    Unstaged,
+    Untracked,
 }
 
 /// New content for a changed path. Gitlinks, special files and every unlisted mode are
@@ -67,9 +77,9 @@ impl OverlayContent {
 /// One exact, owner-reviewed change relative to the pinned base.
 ///
 /// Operation shape (enforced by [`B1OverlayEntryV1::validate`]):
-/// - `add`: no base object, new content.
-/// - `modify`: base object, new content.
-/// - `delete`: base object, no content (tombstone).
+/// - `add`: no base object, new content, origin `staged` or `untracked`.
+/// - `modify`: base object, new content, origin `staged` or `unstaged`.
+/// - `delete`: base object, no content (tombstone), origin `staged` or `unstaged`.
 /// - `rename`: a destination with new content, `rename_from` a different source path, and
 ///   the source's base object. The source must also appear as a `delete` in the same overlay.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +87,7 @@ impl OverlayContent {
 pub struct B1OverlayEntryV1 {
     pub path: B1RelPath,
     pub operation: ChangeOperation,
+    pub origin: ChangeOrigin,
     pub expected_base_oid: Option<GitOid>,
     pub rename_from: Option<B1RelPath>,
     pub content: Option<OverlayContent>,
@@ -93,6 +104,13 @@ impl B1OverlayEntryV1 {
                 B1ErrorCode::OidInvalid,
             )?;
         }
+        let origin_is_valid = match self.operation {
+            ChangeOperation::Add => self.origin != ChangeOrigin::Unstaged,
+            ChangeOperation::Modify | ChangeOperation::Delete | ChangeOperation::Rename => {
+                self.origin != ChangeOrigin::Untracked
+            }
+        };
+        ensure(origin_is_valid, "origin", B1ErrorCode::OverlayInvalid)?;
         let shape_is_valid = match self.operation {
             ChangeOperation::Add => {
                 self.expected_base_oid.is_none()
@@ -126,13 +144,14 @@ impl B1OverlayEntryV1 {
     }
 }
 
-/// Validates a complete overlay: canonical order, per-entry shape, budgets, destination
-/// collisions, and rename pairing. Entries must be strictly ascending by raw path bytes, so
-/// a reordered or duplicated list is refused rather than silently normalized.
+/// Validates a complete overlay: canonical order, per-entry shape, budgets, collisions, and
+/// rename pairing. Entries must be strictly ascending by raw path bytes, so a reordered or
+/// duplicated list is refused rather than silently normalized.
 ///
-/// Deletes do not occupy a destination, so a case-only replacement such as deleting `README`
-/// and adding `readme` is allowed here. Materialization on a case-insensitive filesystem must
-/// treat that pair as a single destination, which this pure check does not model.
+/// Any two distinct paths that are equal after ASCII case folding are refused, including a
+/// delete paired with an add. A case-only replacement therefore cannot slip past a
+/// case-insensitive materializer. Deletes otherwise free their destination, so deleting `a`
+/// and adding `a/b` remains a valid replacement.
 pub fn validate_overlay(entries: &[B1OverlayEntryV1], format: ObjectFormat) -> B1Result {
     ensure(
         entries.len() <= MAX_ENTRIES,
@@ -148,16 +167,18 @@ pub fn validate_overlay(entries: &[B1OverlayEntryV1], format: ObjectFormat) -> B
     for entry in entries {
         entry.validate(format)?;
         if let Some(content) = &entry.content {
-            total_bytes += content.budget_bytes();
-            ensure(
-                total_bytes <= MAX_TOTAL_CONTENT_BYTES,
-                "admitted_overlay",
-                B1ErrorCode::LimitExceeded,
-            )?;
+            total_bytes = total_bytes
+                .checked_add(content.budget_bytes())
+                .filter(|total| *total <= MAX_TOTAL_CONTENT_BYTES)
+                .ok_or(super::B1Error::new(
+                    "admitted_overlay",
+                    B1ErrorCode::LimitExceeded,
+                ))?;
         }
     }
+    validate_case_distinct(entries.iter().map(|entry| &entry.path))?;
     // Deletions free their destination, so a delete of `a` may be followed by an add of `a/b`.
-    // Every other destination must be unique and free of file/directory conflicts.
+    // Every other destination must be free of file/directory conflicts.
     validate_destination_set(
         entries
             .iter()

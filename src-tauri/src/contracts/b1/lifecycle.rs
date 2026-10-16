@@ -5,7 +5,7 @@
 //! are reachable only from the stages where doc 52 allows them, and terminal states never
 //! leave.
 use super::{
-    B1Error, B1ErrorCode, B1Result, Sha256Hex,
+    B1Error, B1ErrorCode, B1Result, digest,
     records::{B1AdmissionRecordV1, B1ExportRecordV1, B1QuarantineReceiptV1, B1WorkspaceReceiptV1},
 };
 use serde::{Deserialize, Serialize};
@@ -69,19 +69,22 @@ impl B1TaskState {
 #[derive(Debug, Clone, Copy)]
 pub struct B1PendingEvidence<'a> {
     pub admission: &'a B1AdmissionRecordV1,
-    pub admission_sha256: &'a Sha256Hex,
     pub workspace: &'a B1WorkspaceReceiptV1,
     pub export: &'a B1ExportRecordV1,
-    pub export_sha256: &'a Sha256Hex,
     pub quarantine: &'a B1QuarantineReceiptV1,
 }
 
 impl B1PendingEvidence<'_> {
+    /// Recomputes the admission and export digests from the records themselves. No digest
+    /// text supplied by a caller is trusted, so a consistent set of fabricated digests cannot
+    /// pass the cross-record binding.
     fn check(&self) -> B1Result {
         self.admission.validate()?;
         self.workspace.validate()?;
         self.export.validate()?;
         self.quarantine.validate()?;
+        let admission_digest = digest::admission_record(self.admission)?;
+        let export_digest = digest::export_record(self.export)?;
         let task = &self.admission.task_id;
         let generation = self.admission.generation;
         let consistent = self.workspace.task_id == *task
@@ -90,9 +93,9 @@ impl B1PendingEvidence<'_> {
             && self.workspace.generation == generation
             && self.export.generation == generation
             && self.quarantine.expected_generation == generation
-            && self.export.base_admission_sha256 == *self.admission_sha256
-            && self.quarantine.admission_sha256 == *self.admission_sha256
-            && self.quarantine.export_sha256 == *self.export_sha256
+            && self.export.base_admission_sha256 == admission_digest
+            && self.quarantine.admission_sha256 == admission_digest
+            && self.quarantine.export_sha256 == export_digest
             && self.quarantine.source_base_oid == self.admission.base_commit_oid;
         if consistent {
             Ok(())
