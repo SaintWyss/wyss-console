@@ -493,11 +493,18 @@ it('does not take an answer about another session, or one that does not go back'
     answer(over);
     return failure(readOlderTurns(SESSION, CURSOR));
   };
-  // Another session's turns are not the answer to this session's question.
+  // Another session's turns are not the answer to this session's question: not when the
+  // page contradicts itself, and not when it is whole and simply about someone else.
   expect(await refused({ session: OTHER })).toEqual({
     code: 'internal',
     retry: false,
   });
+  expect(
+    await refused({
+      session: OTHER,
+      turns: fixture.history.turns.map((t) => ({ ...t, session: OTHER })),
+    }),
+  ).toEqual({ code: 'internal', retry: false });
   // History only goes back, in the stream it was asked in.
   const next = (before: string, stream: string = CURSOR.stream_id) => ({
     older: { stream_id: stream, before },

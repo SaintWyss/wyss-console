@@ -372,11 +372,26 @@ it('does not hold up the turn that is running, and reads old output only when no
   expect(h.reads).toHaveLength(1);
   expect(h.flight.most).toBe(1);
 
+  // The running turn put something out and goes on. What is read next is that turn again,
+  // from where it got to, not the older turn that is waiting for its output to be read.
   h.reads[0].resolve(
-    reading(turn(tid(100), 'completed', 3), [
+    reading(turn(tid(100), 'running', 2), [
       [1, 'started'],
-      [2, 'text', 'Done.'],
-      [3, 'completed'],
+      [2, 'text', 'Still '],
+    ]),
+  );
+  await settle();
+  expect(h.reads.map((r) => [r.turn, r.after, r.wait]).at(-1)).toEqual([
+    tid(100),
+    '2',
+    true,
+  ]);
+  expect(h.reads).toHaveLength(2);
+
+  h.reads[1].resolve(
+    reading(turn(tid(100), 'completed', 3), [
+      [3, 'text', 'Done.'],
+      [4, 'completed'],
     ]),
   );
   await settle();
