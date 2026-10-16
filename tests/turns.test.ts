@@ -5,6 +5,9 @@ import {
   parseManagedTurnId,
 } from '../src/lib/contracts/identities';
 import {
+  type HistoryCursor,
+  parseHistoryCursor,
+  parseTurnHistory,
   parseTurnList,
   parseTurnReceipt,
   parseTurnView,
@@ -16,6 +19,7 @@ import {
 import { SessionCallError } from '../src/lib/desktop/sessions-client';
 import {
   cancelTurn,
+  readOlderTurns,
   readTurn,
   readTurns,
   startTurn,
@@ -379,6 +383,150 @@ it('reports a refusal by the name the desktop gave it, and anything else as inte
   });
   expect(await failure(readTurn(TURN, null, true))).toEqual({
     code: 'internal',
+    retry: false,
+  });
+});
+
+// ---- Older turns -----------------------------------------------------------------------
+
+const CURSOR = fixture.list.older as unknown as HistoryCursor;
+
+it('accepts a position in a stream and a page of older turns, and nothing beside them', () => {
+  expect(parseHistoryCursor(CURSOR)).toEqual(CURSOR);
+  expect(parseTurnHistory(fixture.history)).toEqual(fixture.history);
+  expect(parseTurnHistory(fixture.history_end)).toEqual(fixture.history_end);
+  // The list says where older turns begin, or that none do.
+  expect(parseTurnList(fixture.list).older).toEqual(CURSOR);
+  expect(parseTurnList(fixture.empty).older).toBeNull();
+
+  const cursor = (value: unknown) => () => parseHistoryCursor(value);
+  for (const bad of [
+    { ...CURSOR, stream_id: 'x' },
+    { ...CURSOR, stream_id: null },
+    { ...CURSOR, before: 6 },
+    { ...CURSOR, before: '0' },
+    { ...CURSOR, before: '06' },
+    { ...CURSOR, before: '-6' },
+    { ...CURSOR, before: '' },
+    // Position one is the first: nothing is before it, so nothing names it.
+    { ...CURSOR, before: '1' },
+    { ...CURSOR, extra: true },
+    { stream_id: CURSOR.stream_id },
+    { before: CURSOR.before },
+    null,
+    '6',
+    [],
+  ])
+    expect(cursor(bad), JSON.stringify(bad)).toThrow(/invalid_cursor/);
+});
+
+it('refuses a list or a page that is not exactly the projection or that contradicts itself', () => {
+  const list = (path: (string | number)[], value: unknown) => () =>
+    parseTurnList(tampered(fixture.list, path, value));
+  // The old shape is another version, and a missing field is not filled in.
+  expect(list(['schema_version'], 2)).toThrow(/schema_version/);
+  expect(list(['older'], undefined)).toThrow(/invalid_list/);
+  expect(list(['older', 'before'], '1')).toThrow(/invalid_cursor/);
+  // History that was not read whole always has somewhere older to look.
+  expect(list(['partial'], true)).not.toThrow();
+  expect(() =>
+    parseTurnList({ ...fixture.empty, partial: true, older: null }),
+  ).toThrow(/invalid_hints/);
+
+  const page = (path: (string | number)[], value: unknown) => () =>
+    parseTurnHistory(tampered(fixture.history, path, value));
+  expect(page(['schema_version'], 2)).toThrow(/schema_version/);
+  expect(page(['schema_version'], undefined)).toThrow(/invalid_history/);
+  expect(page(['extra'], 1)).toThrow(/invalid_history/);
+  expect(page(['older'], undefined)).toThrow(/invalid_history/);
+  expect(page(['session'], 'nope')).toThrow();
+  // Every turn is the session's, each is listed once, and none is still running.
+  expect(page(['turns', 0, 'session'], OTHER)).toThrow(/invalid_turns/);
+  expect(page(['turns', 1, 'id'], fixture.history.turns[0].id)).toThrow(
+    /invalid_turns/,
+  );
+  expect(
+    page(['turns', 0], {
+      ...fixture.history.turns[0],
+      state: 'running',
+      ended_at: null,
+      reason: null,
+      cancellable: true,
+    }),
+  ).toThrow(/invalid_turns/);
+  expect(page(['turns', 0, 'state'], 'paused')).toThrow();
+  expect(page(['turns'], 'none')).toThrow(/invalid_turns/);
+  expect(() =>
+    parseTurnHistory({
+      ...fixture.history,
+      turns: Array.from({ length: 21 }, (_, i) => ({
+        ...fixture.history.turns[0],
+        id: `${String(i).padStart(8, '0')}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+      })),
+    }),
+  ).toThrow(/invalid_turns/);
+  expect(page(['older', 'stream_id'], 'x')).toThrow(/invalid_cursor/);
+});
+
+it('asks for older turns with a session and the position it was handed, and nothing else', async () => {
+  const calls = bridge(() => fixture.history);
+  const page = await readOlderTurns(SESSION, CURSOR);
+  expect(page).toEqual(fixture.history);
+  expect(calls).toEqual([
+    {
+      command: 'managed_turns_older',
+      payload: {
+        request: {
+          session_id: SESSION,
+          stream_id: CURSOR.stream_id,
+          before: CURSOR.before,
+        },
+      },
+    },
+  ]);
+});
+
+it('does not take an answer about another session, or one that does not go back', async () => {
+  const answer = (over: object) =>
+    bridge(() => ({ ...fixture.history, ...over }));
+  const refused = async (over: object) => {
+    answer(over);
+    return failure(readOlderTurns(SESSION, CURSOR));
+  };
+  // Another session's turns are not the answer to this session's question.
+  expect(await refused({ session: OTHER })).toEqual({
+    code: 'internal',
+    retry: false,
+  });
+  // History only goes back, in the stream it was asked in.
+  const next = (before: string, stream: string = CURSOR.stream_id) => ({
+    older: { stream_id: stream, before },
+  });
+  for (const over of [
+    next(CURSOR.before),
+    next('7'),
+    next('99999'),
+    next('3', '77777777-7777-4777-8777-777777777777'),
+  ])
+    expect(await refused(over), JSON.stringify(over)).toEqual({
+      code: 'internal',
+      retry: false,
+    });
+  clearMocks();
+  bridge(() => ({ ...fixture.history, ...next('5') }));
+  expect((await readOlderTurns(SESSION, CURSOR)).older?.before).toBe('5');
+  // An answer that is not the projection is a failed bridge, never data.
+  clearMocks();
+  bridge(() => ({ ...fixture.history, schema_version: 3 }));
+  expect(await failure(readOlderTurns(SESSION, CURSOR))).toEqual({
+    code: 'internal',
+    retry: false,
+  });
+  // What the desktop refuses with is passed on as it is.
+  clearMocks();
+  bridge(() => Promise.reject({ code: 'changed', retry: false }));
+  expect(await failure(readOlderTurns(SESSION, CURSOR))).toEqual({
+    code: 'changed',
     retry: false,
   });
 });

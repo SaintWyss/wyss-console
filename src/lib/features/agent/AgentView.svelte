@@ -21,6 +21,7 @@
     agentLabel,
     approvalMessage,
     cancelFailureMessage,
+    historyFailureMessage,
     localClock,
     outcomeLabel,
     outcomeUnknown,
@@ -54,6 +55,7 @@
   } = $props();
 
   const view = $derived(agent.current);
+  const history = $derived(view?.history);
   const connected = $derived(agent.link === 'connected');
   const hint = $derived(view ? runHint(agent.link, view) : null);
   const runnable = $derived(
@@ -89,11 +91,28 @@
       if (transcript) transcript.scrollTop = transcript.scrollHeight;
     });
   });
-  // Another session is another transcript: it opens at its end.
+  // Another session is another transcript: it opens at its end. Only a change of session
+  // does that. The view is a new object on every update, so tracking it alone would pin a
+  // reader who scrolled up to read, and pull them to the end when the next output arrives.
+  let shownSession: string | undefined;
   $effect(() => {
-    void view?.session;
+    const session = view?.session;
+    if (session === shownSession) return;
+    shownSession = session;
     pinned = true;
   });
+
+  /**
+   * Loads the page of turns before the first one shown, and keeps the reader where they
+   * were: what is inserted above them must not move what they are looking at.
+   */
+  async function older() {
+    const node = transcript;
+    const kept = node ? node.scrollHeight - node.scrollTop : 0;
+    await controller.loadOlder();
+    await tick();
+    if (node && !pinned) node.scrollTop = node.scrollHeight - kept;
+  }
 
   function submit(event?: Event) {
     event?.preventDefault();
@@ -200,8 +219,63 @@
       bind:this={transcript}
       onscroll={scrolled}
     >
-      {#if view.partial}
-        <p class="turn-note">Older turns of this session are not listed.</p>
+      {#if !history}
+        <!-- Nothing is known of older turns until the first list. -->
+      {:else if history.status === 'loading'}
+        <p class="turn-activity live" role="status">
+          <span class="dot" aria-hidden="true"></span>
+          Loading older turns…
+        </p>
+      {:else if history.status === 'failed' && history.failure}
+        <div
+          class="turn-alert"
+          class:unknown={outcomeUnknown(history.failure.code)}
+          role="alert"
+        >
+          <p>{historyFailureMessage(history.failure.code)}</p>
+          {#if history.failure.code === 'changed'}
+            <button
+              type="button"
+              class="action"
+              onclick={() => controller.restartHistory()}>Reload turns</button
+            >
+          {:else}
+            <button
+              type="button"
+              class="action"
+              disabled={!connected}
+              onclick={older}>Try again</button
+            >
+          {/if}
+        </div>
+      {:else}
+        {#if history.searched}
+          <p class="turn-note">
+            No turns in the part of the history just searched. There is more
+            further back.
+          </p>
+        {/if}
+        {#if history.more}
+          <button
+            type="button"
+            class="action history-more"
+            disabled={!connected}
+            onclick={older}
+            >{history.searched ? 'Keep looking' : 'Load older turns'}</button
+          >
+        {:else if history.capped}
+          <p class="turn-note">
+            {history.loaded} older turns are shown, the most this view keeps.
+            <button
+              type="button"
+              class="action"
+              onclick={() => controller.restartHistory()}
+              >Start over from the newest</button
+            >
+          </p>
+        {:else if history.reachedStart}
+          <p class="turn-note">This is the start of this session's history.</p>
+        {/if}
       {/if}
       {#if view.turns.length === 0 && !view.start}
         <div class="agent-blank">

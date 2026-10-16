@@ -9,9 +9,11 @@ import {
   turnEnded,
   type ApprovalNotice,
   type ApprovalOutcome,
+  type HistoryCursor,
   type SessionFacts,
   type TurnEvent,
   type TurnEventKind,
+  type TurnHistory,
   type TurnList,
   type TurnReceipt,
   type TurnSummary,
@@ -20,6 +22,7 @@ import {
 import { SessionCallError } from '../../desktop/sessions-client';
 import {
   cancelTurn,
+  readOlderTurns,
   readTurn,
   readTurns,
   startTurn,
@@ -66,6 +69,23 @@ export interface StartView {
   prompt: string;
   failure?: SessionFailure;
 }
+export type HistoryStatus = 'idle' | 'loading' | 'failed';
+/** The older turns of a session: whether there are more to ask for, and how asking went. */
+export interface HistoryView {
+  /** Turns older than the first one shown may exist, and can be asked for. */
+  more: boolean;
+  status: HistoryStatus;
+  /** Why the last ask failed, until it is asked again. */
+  failure: SessionFailure | null;
+  /** The last ask looked through part of the history and found no turn in it. */
+  searched: boolean;
+  /** Older turns were loaded, and the start of the session's history was reached. */
+  reachedStart: boolean;
+  /** Turns shown that are older than the newest page. */
+  loaded: number;
+  /** The window keeps no more older turns than this; loading stops until it starts over. */
+  capped: boolean;
+}
 export interface AgentSessionView {
   session: ManagedSessionId;
   label: string;
@@ -77,6 +97,7 @@ export interface AgentSessionView {
   runnable: boolean;
   /** Older turns exist that were not read. */
   partial: boolean;
+  history: HistoryView;
   reading: boolean;
   readFailure: SessionFailure | null;
   draft: string;
@@ -94,6 +115,7 @@ export interface AgentState {
 
 export interface TurnsClient {
   turns(session: ManagedSessionId): Promise<TurnList>;
+  older(session: ManagedSessionId, cursor: HistoryCursor): Promise<TurnHistory>;
   read(
     turn: ManagedTurnId,
     after: string | null,
@@ -113,6 +135,7 @@ export interface TurnsClient {
 }
 const desktop: TurnsClient = {
   turns: readTurns,
+  older: readOlderTurns,
   read: readTurn,
   start: startTurn,
   cancel: cancelTurn,
@@ -124,6 +147,12 @@ export const MAX_TABS = 8;
 export const MAX_TURN_CHARS = 200_000;
 /** Items of one turn the window keeps. */
 export const MAX_TURN_ITEMS = 400;
+/**
+ * Turns older than the newest page that the window keeps for one session. History is read
+ * a page at a time and is never loaded as a whole: at this many, asking for more stops, and
+ * starting over goes back to the newest.
+ */
+export const MAX_HISTORY_TURNS = 200;
 /** Characters of a draft the composer holds. Far above what a turn can carry. */
 export const MAX_DRAFT_CHARS = 4 * PROMPT_MAX_BYTES;
 /**
@@ -144,6 +173,11 @@ interface Entry extends TurnEntry {
   paragraph: boolean;
   /** A list has named this turn. One that was, and no longer is, fell out of it. */
   listed: boolean;
+  /**
+   * The turn is older than the newest page: it was asked for, or it slid out of the newest
+   * page since it was listed. Such a turn is kept, so what is shown has no hole.
+   */
+  history: boolean;
 }
 interface Start {
   intent: string;
@@ -167,6 +201,18 @@ interface Model {
   wanted: boolean;
   listFailure: SessionFailure | null;
   generation: number;
+  /** Where the next older page begins; undefined before a list said, null when none. */
+  older: HistoryCursor | null | undefined;
+  /** The stream the cursors seen so far belong to. */
+  stream: string | null;
+  historyStatus: HistoryStatus;
+  historyFailure: SessionFailure | null;
+  /** Answers about older turns from before this are not taken. */
+  historyGeneration: number;
+  searched: boolean;
+  /** An older page said nothing is older still. */
+  ended: boolean;
+  capped: boolean;
   draft: string;
   start: Start | null;
 }
@@ -248,6 +294,15 @@ export class AgentController {
         })),
         runnable: model.runnable,
         partial: model.partial,
+        history: {
+          more: !!model.older && !model.capped,
+          status: model.historyStatus,
+          failure: model.historyFailure,
+          searched: model.searched,
+          reachedStart: model.ended,
+          loaded: model.entries.filter((e) => e.history).length,
+          capped: model.capped,
+        },
         reading: model.listing,
         readFailure: model.listFailure,
         draft: model.draft,
@@ -301,6 +356,9 @@ export class AgentController {
         model.head = undefined;
         model.listFailure = null;
         model.runnable = false;
+        // An ask for older turns that was in flight is not answered on this connection.
+        model.historyGeneration++;
+        if (model.historyStatus === 'loading') model.historyStatus = 'idle';
       }
     }
     this.publish();
@@ -345,6 +403,14 @@ export class AgentController {
         wanted: false,
         listFailure: null,
         generation: 0,
+        older: undefined,
+        stream: null,
+        historyStatus: 'idle',
+        historyFailure: null,
+        historyGeneration: 0,
+        searched: false,
+        ended: false,
+        capped: false,
         draft: '',
         start: null,
       });
@@ -440,13 +506,68 @@ export class AgentController {
       const entry = known.get(turn.id.toLowerCase()) ?? this.entry(turn.id);
       known.delete(turn.id.toLowerCase());
       entry.listed = true;
+      // In the newest page: whatever it was, it is not older than it now.
+      entry.history = false;
       this.record(entry, turn);
       entries.push(entry);
     }
-    // Not in the list: a turn started here that the list was read too early to name is
-    // kept, after the others. One that was named before fell out of what is listed.
-    for (const entry of known.values()) if (!entry.listed) entries.push(entry);
-    model.entries = entries.slice(-TURN_LIST_LIMIT);
+    // Not in the list. A turn started here that the list was read too early to name is
+    // kept, after the others. One that was named before and no longer is slid out of the
+    // newest page: it is kept as an older turn, because the older turns already asked for
+    // end where it begins and dropping it would leave a hole between them.
+    const older: Entry[] = [];
+    for (const entry of known.values()) {
+      if (entry.history || entry.listed) {
+        entry.history = true;
+        older.push(entry);
+      } else entries.push(entry);
+    }
+    model.entries = [...older, ...entries.slice(-TURN_LIST_LIMIT)];
+    this.boundHistory(model);
+    // Where older turns begin. Before any were asked for, that is what the newest page
+    // says. After, the position already held is deeper and stays, unless the list is of
+    // another history than the one it came from: then what was asked for is not this
+    // history's, and is let go.
+    const stream = list.older?.stream_id ?? null;
+    if (
+      stream !== null &&
+      model.stream !== null &&
+      !same(stream, model.stream) &&
+      model.entries.some((e) => e.history)
+    ) {
+      model.entries = model.entries.filter((e) => !e.history);
+      this.clearHistory(model);
+    }
+    if (!model.entries.some((e) => e.history)) {
+      model.older = list.older;
+      model.ended = false;
+      model.searched = false;
+    }
+    if (stream !== null) model.stream = stream;
+  }
+  /** Turns kept that are older than the newest page, oldest first. */
+  private historyCount(model: Model): number {
+    return model.entries.filter((e) => e.history).length;
+  }
+  /** Keeps the older turns within what the window holds, letting the oldest go. */
+  private boundHistory(model: Model) {
+    let excess = this.historyCount(model) - MAX_HISTORY_TURNS;
+    if (excess <= 0) return;
+    // Letting the oldest go keeps what is shown without a hole in it; asking for turns
+    // older than those would not, so asking stops until the view starts over.
+    model.entries = model.entries.filter((e) => !(e.history && excess-- > 0));
+    model.capped = true;
+  }
+  /** Forgets how far back older turns were asked for. The turns themselves are the caller's. */
+  private clearHistory(model: Model) {
+    model.historyGeneration++;
+    model.older = undefined;
+    model.stream = null;
+    model.historyStatus = 'idle';
+    model.historyFailure = null;
+    model.searched = false;
+    model.ended = false;
+    model.capped = false;
   }
   private entry(id: ManagedTurnId): Entry {
     return {
@@ -465,6 +586,7 @@ export class AgentController {
       loaded: false,
       paragraph: false,
       listed: false,
+      history: false,
     };
   }
   /** Takes a record of the turn, unless what is held is already newer. */
@@ -489,18 +611,100 @@ export class AgentController {
     if (!model) return;
     model.listFailure = null;
     for (const entry of model.entries) entry.readFailure = null;
+    // History that changed under the position held is read again from the newest.
+    if (model.historyFailure?.code === 'changed') this.dropHistory(model);
     this.rest();
     this.sync(true);
     this.pump();
   }
 
+  /**
+   * Asks for the turns before the oldest one shown: one page, behind the position the
+   * authority last handed out. Answers when that is settled, so a view can keep what the
+   * reader was looking at in place. It is the reader's action and runs at most once at a
+   * time per session; following a running turn does not wait for it.
+   */
+  async loadOlder(): Promise<void> {
+    const model = this.model();
+    const cursor = model?.older;
+    if (
+      this.disposed ||
+      this.link !== 'connected' ||
+      !model ||
+      !cursor ||
+      model.capped ||
+      model.historyStatus === 'loading'
+    )
+      return;
+    const generation = model.historyGeneration;
+    model.historyStatus = 'loading';
+    model.historyFailure = null;
+    this.publish();
+    let page: TurnHistory;
+    try {
+      page = await this.client.older(model.session, cursor);
+    } catch (error) {
+      if (!this.open_(model) || generation !== model.historyGeneration) return;
+      model.historyStatus = 'failed';
+      model.historyFailure = failureOf(error);
+      this.publish();
+      return;
+    }
+    // Nothing read on a connection that is gone, for a tab that is closed, or about a
+    // history that was let go is taken.
+    if (!this.open_(model) || generation !== model.historyGeneration) return;
+    this.takeOlder(model, page);
+    this.publish();
+    this.pump();
+  }
+  private takeOlder(model: Model, page: TurnHistory) {
+    const have = new Set(model.entries.map((e) => e.id.toLowerCase()));
+    // Newest first on the wire. A turn is taken where the page first names it: neither one
+    // that is shown, nor a second mention of one the page itself repeats.
+    const taken: Entry[] = [];
+    for (const turn of page.turns) {
+      if (have.has(turn.id.toLowerCase())) continue;
+      have.add(turn.id.toLowerCase());
+      const entry = this.entry(turn.id);
+      entry.history = true;
+      this.record(entry, turn);
+      taken.push(entry);
+    }
+    // Oldest first here.
+    const fresh = taken.reverse();
+    model.entries = [...fresh, ...model.entries];
+    model.older = page.older;
+    model.stream = page.older?.stream_id ?? model.stream;
+    model.historyStatus = 'idle';
+    model.historyFailure = null;
+    model.searched = page.turns.length === 0 && page.older !== null;
+    model.ended = page.older === null;
+    if (this.historyCount(model) >= MAX_HISTORY_TURNS) model.capped = true;
+  }
+  /** Lets the older turns go and reads the newest again: the way out of a stale position. */
+  restartHistory() {
+    const model = this.model();
+    if (this.disposed || !model) return;
+    this.dropHistory(model);
+    this.publish();
+    this.sync(true);
+    this.pump();
+  }
+  private dropHistory(model: Model) {
+    model.entries = model.entries.filter((e) => !e.history);
+    this.clearHistory(model);
+  }
+
   /** What to read next: the output still held of the shown session's ended turns,
-   *  newest first, then the turn that has not ended, in whichever open session. */
+   *  newest first, then the turn that has not ended, in whichever open session. Output
+   *  held of turns older than the newest page is read last, only while nothing runs. */
   private next(): { model: Model; entry: Entry; wait: boolean } | null {
     const shown = this.model();
+    const unread = (entry: Entry) =>
+      over(entry) && !entry.loaded && entry.readFailure === null;
     if (shown)
       for (const entry of [...shown.entries].reverse())
-        if (over(entry) && !entry.loaded && entry.readFailure === null)
+        if (!entry.history && unread(entry))
           return { model: shown, entry, wait: false };
     const models = shown
       ? [shown, ...this.models.filter((m) => m !== shown)]
@@ -510,6 +714,10 @@ export class AgentController {
         if (!over(entry) && entry.readFailure === null)
           // The first reading of a turn answers at once: it brings its record.
           return { model, entry, wait: entry.turn !== null };
+    if (shown)
+      for (const entry of [...shown.entries].reverse())
+        if (entry.history && unread(entry))
+          return { model: shown, entry, wait: false };
     return null;
   }
   private rest() {

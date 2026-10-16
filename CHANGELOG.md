@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+### Older turns of a session
+
+- **Load older turns.** The Agent view showed only the newest 20 turns of a session and said
+  older ones were not listed, with no way to reach them. It now has **Load older turns**:
+  one page of up to 20 at a time, newest first, above the ones already shown, with a
+  loading state, a clear message when a stretch of history held no turn or when the start of
+  the session's history is reached, and **Try again** when the authority did not answer.
+  The place in the list does not move when turns are inserted above it.
+- **Nothing is made up.** An old turn is shown as the authority holds it now: its state and
+  reason are real, its output is almost always gone (the authority keeps a few turns' output
+  in memory and none across its own restart) and says so, and what the user wrote is never
+  shown, because Wyss keeps no conversation text.
+- **Bounded.** The authority has no list of turns; the desktop finds them in the durable
+  event stream, and finds older ones the same way, going back. A page reads at most 40
+  pages of that stream and remembers nothing, so history is never loaded whole, and the
+  window keeps at most 200 older turns of a session before it asks to start over. Following
+  a running turn never waits for it: it has a read slot of its own, and output still held
+  for an old turn is read only while no turn runs.
+- **Correct.** Each page goes on exactly from where the last one stopped, so no turn is
+  shown twice and none is skipped, across a restart of the desktop or of the authority. A
+  position from another history, or beyond the end of this one, is refused as history that
+  changed, and the view offers to reload from the newest. Every turn must be the session's
+  own, and a hole in the stream fails the page instead of being read as empty.
+- **Interface changes.** `TurnList` is now version 3 (adds `older`, the position older turns
+  are looked for from), and the window is granted one more read, `managed_turns_older`,
+  which takes a session and a position it was handed and nothing else. No control-protocol
+  method was added or changed; it uses the `audit/read` the desktop already used.
+- **Found and fixed on the way:** a reader who scrolled up in the Agent view was pulled back
+  to the end each time new output arrived; and two desktop tests that shared a process-wide
+  counter failed about half of their runs.
+
 ## 0.2.0
 
 A native desktop application for CachyOS with KDE Plasma, built and run from this

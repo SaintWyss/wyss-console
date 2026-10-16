@@ -586,10 +586,11 @@ it('shows mediated actions as what happened and reasoning as nothing but its occ
     reason: 'approval_expired',
   });
 
-  // Nothing here can answer an approval: the client has two reads and two intents, and
+  // Nothing here can answer an approval: the client has three reads and two intents, and
   // the controller has no action that names one.
   expect(Object.keys(h.client).sort()).toEqual([
     'cancel',
+    'older',
     'read',
     'start',
     'turns',

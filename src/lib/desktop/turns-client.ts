@@ -2,9 +2,12 @@ import { invoke } from '@tauri-apps/api/core';
 import type { ManagedSessionId, ManagedTurnId } from '../contracts/identities';
 import { parseSessionFailure } from '../contracts/sessions';
 import {
+  parseTurnHistory,
   parseTurnList,
   parseTurnReceipt,
   parseTurnView,
+  type HistoryCursor,
+  type TurnHistory,
   type TurnList,
   type TurnReceipt,
   type TurnView,
@@ -12,7 +15,7 @@ import {
 import { SessionCallError } from './sessions-client';
 
 /**
- * The turn calls the window can make: two reads and two intents. None names a control
+ * The turn calls the window can make: three reads and two intents. None names a control
  * method, and none answers an approval. The window sends a session or a turn it was
  * shown, the revision it saw, the identity of its own action and, for a start, the text
  * the user wrote, as one field.
@@ -20,6 +23,7 @@ import { SessionCallError } from './sessions-client';
 async function call<T>(
   command:
     | 'managed_turns'
+    | 'managed_turns_older'
     | 'managed_turn_read'
     | 'managed_turn_start'
     | 'managed_turn_cancel',
@@ -49,6 +53,39 @@ export function readTurns(sessionId: ManagedSessionId): Promise<TurnList> {
       throw new Error('turn_list: other_session');
     return list;
   });
+}
+
+/**
+ * One page of the turns before those already shown, newest first, behind a position a list
+ * or an earlier page handed out. The position is sent back as it was handed out.
+ */
+export function readOlderTurns(
+  sessionId: ManagedSessionId,
+  cursor: HistoryCursor,
+): Promise<TurnHistory> {
+  return call(
+    'managed_turns_older',
+    {
+      session_id: sessionId,
+      stream_id: cursor.stream_id,
+      before: cursor.before,
+    },
+    (value) => {
+      const page = parseTurnHistory(value);
+      // An answer about another session is not an answer to this question.
+      if (page.session.toLowerCase() !== sessionId.toLowerCase())
+        throw new Error('turn_history: other_session');
+      // History only goes back: the next position is of the same stream and before this one.
+      if (
+        page.older !== null &&
+        (page.older.stream_id.toLowerCase() !==
+          cursor.stream_id.toLowerCase() ||
+          BigInt(page.older.before) >= BigInt(cursor.before))
+      )
+        throw new Error('turn_history: cursor');
+      return page;
+    },
+  );
 }
 
 /**
