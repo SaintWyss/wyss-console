@@ -4,6 +4,7 @@ import { parseManagedTurnId } from '../src/lib/contracts/identities';
 import type { TurnSummary } from '../src/lib/contracts/turns';
 import {
   cursor,
+  harness,
   historyPage,
   listing,
   reading,
@@ -463,4 +464,74 @@ it('shows a list of a session that has no older turns as it always did', async (
   await settle();
   expect(numbers(h)).toEqual(range(81, 101));
   expect(h.shown().history).toMatchObject({ more: false, loaded: 1 });
+});
+
+// ---- With the names of sessions ------------------------------------------------------
+
+it('names a tab opened without a name from its folder, and keeps that name through older turns', async () => {
+  const h = harness();
+  // As from Events: the session is not one Sessions has listed.
+  h.controller.open(S, `Session ${S.slice(0, 8)}`, true);
+  h.controller.setVisible(true);
+  h.controller.observe(connected('9'));
+  expect(h.state().tabs[0].label).toBe(`Session ${S.slice(0, 8)}`);
+  h.lists[0].resolve(listing(span(100, 81), { older: cursor(500) }));
+  await settle();
+  expect(h.state().tabs[0].label).toBe('rag-corp');
+
+  h.controller.loadOlder();
+  expect(h.olders.at(-1)!.session).toBe(S);
+  await answer(h, span(80, 61), cursor(300));
+  expect(numbers(h)).toEqual(range(61, 100));
+  expect(h.state().tabs[0].label).toBe('rag-corp');
+  expect(h.shown().label).toBe('rag-corp');
+
+  // A newer list changes neither the name nor the older turns already read.
+  h.controller.refresh();
+  h.lists
+    .at(-1)!
+    .resolve(listing([old(101), ...span(100, 82)], { older: cursor(520) }));
+  await settle();
+  expect(h.state().tabs[0].label).toBe('rag-corp');
+  expect(h.shown().label).toBe('rag-corp');
+  expect(numbers(h)).toEqual(range(61, 101));
+});
+
+it('keeps two tabs of one project apart, each with its own older turns', async () => {
+  const h = harness();
+  h.controller.setVisible(true);
+  h.controller.observe(connected('9'));
+  h.controller.open(S, 'rag-corp');
+  h.controller.open(S2, 'rag-corp');
+  const names = [`rag-corp · ${S.slice(0, 8)}`, `rag-corp · ${S2.slice(0, 8)}`];
+  expect(h.state().tabs.map((t) => t.label)).toEqual(names);
+  // Each session is listed once, with turns of its own.
+  const own = (session: typeof S, n: number) => span(n, n - 19, { session });
+  for (const list of h.lists) {
+    const base = list.session === S ? 100 : 60;
+    list.resolve(
+      listing(own(list.session, base), {
+        session: { id: list.session },
+        older: cursor(base * 5),
+      }),
+    );
+  }
+  await settle();
+
+  h.controller.loadOlder();
+  // The ask is the shown session's, with its position, and no other's.
+  expect(h.olders).toHaveLength(1);
+  expect(h.olders[0].session).toBe(S2);
+  expect(h.olders[0].cursor).toEqual(cursor(300));
+  h.olders[0].resolve(historyPage(span(40, 21, { session: S2 }), null, S2));
+  await settle();
+  expect(h.shown().turns).toHaveLength(40);
+  expect(h.shown().history.reachedStart).toBe(true);
+  expect(h.state().tabs.map((t) => t.label)).toEqual(names);
+
+  h.controller.select(S);
+  expect(h.shown().turns).toHaveLength(20);
+  expect(h.shown().history.reachedStart).toBe(false);
+  expect(h.shown().history.more).toBe(true);
+  expect(h.state().tabs.map((t) => t.label)).toEqual(names);
 });

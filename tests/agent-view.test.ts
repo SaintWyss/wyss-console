@@ -90,6 +90,8 @@ function desktop() {
     page: undefined as typeof page | undefined,
     /** Where the list says older turns begin. */
     older: null as ReturnType<typeof cursor> | null,
+    /** Where the list of a session other than `S` says older turns begin. */
+    olderOf: new Map<string, ReturnType<typeof cursor>>(),
   };
   mockIPC((command, payload) => {
     const request =
@@ -117,7 +119,8 @@ function desktop() {
               ?.workspace ??
             (session === S2 ? '/home/dev/other' : '/home/dev/rag-corp'),
         },
-        older: session === S ? world.older : null,
+        older:
+          world.olderOf.get(session) ?? (session === S ? world.older : null),
       });
     }
     // An ask for older turns waits for the test to answer it.
@@ -954,4 +957,131 @@ it('opens another session at the end of its transcript, wherever the reader was 
   await openAgent(2);
   await flush();
   expect(log.scrollTop).toBe(1000);
+});
+
+// ---- Names and older turns, in one application ------------------------------------------
+
+/** Two Ready sessions of one project, which the Sessions page names apart. */
+function twins() {
+  const first = { ...bound, binding: 'bound_attached' };
+  const second = {
+    ...bound,
+    id: S2,
+    binding: 'bound_attached',
+    position: '3',
+    created_at: '2026-10-09T09:30:00Z',
+    updated_at: '2026-10-09T09:30:00Z',
+  };
+  return {
+    first,
+    second,
+    nameFirst: `rag-corp · ${localTime(first.created_at)}`,
+    nameSecond: `rag-corp · ${localTime(second.created_at)}`,
+  };
+}
+/** An ended turn of the second session, started on another day than the first's. */
+const oldTwo = (n: number) =>
+  turn(tid(n), 'completed', 3, {
+    session: S2,
+    output: false,
+    started_at: `2026-10-10T10:${String(n % 60).padStart(2, '0')}:00Z`,
+  });
+const spanTwo = (high: number, low: number) =>
+  Array.from({ length: high - low + 1 }, (_, i) => oldTwo(high - i));
+const tabs = () =>
+  Array.from(agent().querySelectorAll<HTMLElement>('[role="tab"]'));
+const day = (stamp: string | null) => stamp?.slice(0, 10);
+
+it('keeps two sessions of one project apart while each loads its own older turns', async () => {
+  const { first, second, nameFirst, nameSecond } = twins();
+  const ipc = desktop();
+  ipc.world.page = { ...page, sessions: [fresh, first, second] };
+  ipc.world.turns.set(S, span(100, 81));
+  ipc.world.turns.set(S2, spanTwo(60, 41));
+  ipc.world.older = cursor(500);
+  ipc.world.olderOf.set(S2, cursor(200));
+  component = mount(App, { target: document.body });
+  await flush();
+  await openAgent(1);
+  await openAgent(2);
+  expect(tabs().map(text)).toEqual([nameFirst, nameSecond]);
+  expect(text(agent().querySelector('.agent-session h2'))).toBe(nameSecond);
+  expect(turns()).toHaveLength(20);
+
+  // The second session asks for its own older turns, from the place its own list gave.
+  await click(older()!);
+  expect(ipc.of('managed_turns_older').map((c) => c.request)).toEqual([
+    { session_id: S2, stream_id: cursor(200).stream_id, before: '200' },
+  ]);
+  ipc
+    .last('managed_turns_older')
+    .resolve(historyPage(spanTwo(40, 21), cursor(100), S2));
+  await flush();
+  expect(turns()).toHaveLength(40);
+  expect(new Set(times().map(day))).toEqual(new Set(['2026-10-10']));
+  // Loading history does not rename anything.
+  expect(tabs().map(text)).toEqual([nameFirst, nameSecond]);
+  expect(text(agent().querySelector('.agent-session h2'))).toBe(nameSecond);
+
+  // The first session has its own history, and none of the second's reaches it.
+  await click(tabs()[0]);
+  expect(text(agent().querySelector('.agent-session h2'))).toBe(nameFirst);
+  expect(turns()).toHaveLength(20);
+  expect(new Set(times().map(day))).toEqual(new Set(['2026-10-09']));
+  await click(older()!);
+  expect(ipc.last('managed_turns_older').request).toEqual({
+    session_id: S,
+    stream_id: cursor(500).stream_id,
+    before: '500',
+  });
+  ipc.last('managed_turns_older').resolve(historyPage(span(80, 61), null));
+  await flush();
+  expect(turns()).toHaveLength(40);
+  expect(new Set(times().map(day))).toEqual(new Set(['2026-10-09']));
+  expect(text(agent())).toContain(
+    "This is the start of this session's history.",
+  );
+
+  // Back in the second, what it loaded is still there, and it can still go further back.
+  await click(tabs()[1]);
+  expect(turns()).toHaveLength(40);
+  expect(new Set(times().map(day))).toEqual(new Set(['2026-10-10']));
+  expect(text(older())).toBe('Load older turns');
+  expect(text(agent())).not.toContain('start of this session');
+  expect(ipc.count('managed_turns_older')).toBe(2);
+  // Reading history started, cancelled and decided nothing.
+  expect(ipc.count('managed_turn_start')).toBe(0);
+  expect(ipc.count('managed_turn_cancel')).toBe(0);
+  expect(ipc.count('managed_approval_approve')).toBe(0);
+});
+
+it('refuses a page of the twin session, and shows neither its turns nor a new name', async () => {
+  const { first, second, nameFirst, nameSecond } = twins();
+  const ipc = desktop();
+  ipc.world.page = { ...page, sessions: [fresh, first, second] };
+  ipc.world.turns.set(S, span(100, 81));
+  ipc.world.turns.set(S2, spanTwo(60, 41));
+  ipc.world.older = cursor(500);
+  ipc.world.olderOf.set(S2, cursor(200));
+  component = mount(App, { target: document.body });
+  await flush();
+  await openAgent(1);
+  await openAgent(2);
+
+  await click(older()!);
+  expect(ipc.last('managed_turns_older').request.session_id).toBe(S2);
+  // The authority answers with the first session's page, turns and all.
+  ipc.last('managed_turns_older').resolve(historyPage(span(80, 61), null, S));
+  await flush();
+  expect(turns()).toHaveLength(20);
+  expect(new Set(times().map(day))).toEqual(new Set(['2026-10-10']));
+  expect(text(agent().querySelector('.turn-alert'))).toContain(
+    'Nothing is shown rather than something unverified.',
+  );
+  expect(tabs().map(text)).toEqual([nameFirst, nameSecond]);
+  // Neither tab took anything from it.
+  await click(tabs()[0]);
+  expect(turns()).toHaveLength(20);
+  expect(agent().querySelector('.turn-alert')).toBeNull();
+  expect(text(older())).toBe('Load older turns');
 });
