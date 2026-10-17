@@ -42,6 +42,7 @@ import {
   withCleanup,
 } from './e2e-process-ledger.mjs';
 import { seederFromCargoOutput } from './e2e-cargo-artifact.mjs';
+import { verifyManagerPeer } from './e2e-manager-peer.mjs';
 
 const REPO = resolve('.');
 const FIXTURE = join(REPO, 'src-tauri/tests/fixtures/codex_runtime.py');
@@ -147,6 +148,7 @@ function sctl(root, args) {
     { uid: process.getuid?.() ?? -1 },
     { requireManager: true },
   );
+  verifyManagerPeer(root);
   return spawnSync('systemctl', ['--user', ...args], {
     env: envOf(root),
     encoding: 'utf8',
