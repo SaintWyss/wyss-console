@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:net';
 import {
   chmodSync,
   existsSync,
@@ -77,6 +78,46 @@ describe('assertOwnedRuntime: what a service command reaches through XDG_RUNTIME
     const root = rootWithRun();
     writeFileSync(join(root, 'run', 'bus'), '');
     expect(() => assertOwnedRuntime(root, { uid })).toThrow(/not a socket/);
+  });
+
+  it('accepts an owned real UNIX manager socket before service commands', async () => {
+    const root = rootWithRun();
+    const systemd = join(root, 'run', 'systemd');
+    mkdirSync(systemd, { mode: 0o700 });
+    const server = createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(join(systemd, 'private'), resolve);
+    });
+    try {
+      expect(() =>
+        assertOwnedRuntime(root, { uid }, { requireManager: true }),
+      ).not.toThrow();
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it('refuses a symlinked manager private socket before any service call', () => {
+    const root = rootWithRun();
+    const systemd = join(root, 'run', 'systemd');
+    mkdirSync(systemd, { mode: 0o700 });
+    const outside = scratch('runtime-private-target-');
+    symlinkSync(join(outside, 'private'), join(systemd, 'private'));
+    expect(() =>
+      assertOwnedRuntime(root, { uid }, { requireManager: true }),
+    ).toThrow(/private manager socket/);
+  });
+
+  it('refuses missing manager private socket when service access is requested', () => {
+    const root = rootWithRun();
+    const systemd = join(root, 'run', 'systemd');
+    mkdirSync(systemd, { mode: 0o700 });
+    expect(() =>
+      assertOwnedRuntime(root, { uid }, { requireManager: true }),
+    ).toThrow(/private manager socket/);
   });
 
   it('refuses a service-manager directory that is a link', () => {
