@@ -76,6 +76,24 @@ describe('recording', () => {
   });
 });
 
+describe('ledger integrity', () => {
+  it('refuses malformed JSON instead of treating active processes as absent', async () => {
+    const root = sandbox();
+    writeFileSync(ledgerPath(root), '{incomplete');
+    expect(() => readLedger(root)).toThrow(/invalid process ledger/);
+    await expect(terminateRecorded(root)).rejects.toThrow(/invalid process ledger/);
+  });
+
+  it('refuses malformed entries rather than signaling unverified groups', async () => {
+    const root = sandbox();
+    writeFileSync(ledgerPath(root), JSON.stringify([
+      { name: 'untrusted', pid: -1, startTime: 'not-a-time' },
+    ]));
+    expect(() => readLedger(root)).toThrow(/invalid process ledger/);
+    await expect(terminateRecorded(root)).rejects.toThrow(/invalid process ledger/);
+  });
+});
+
 describe('terminating', () => {
   it('stops a recorded group, including members that outlive their leader', async () => {
     const root = sandbox();
