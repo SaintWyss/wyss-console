@@ -68,7 +68,7 @@ describe('the current native package selector', () => {
     expect(currentPackageDir(root)).toBe(dir);
   });
 
-  it('does not choose a stale package when another directory sorts first', () => {
+  it('ignores stale packages in neighboring directories', () => {
     const { root, dir } = fixture();
     mkdirSync(
       join(root, '.artifacts', 'package', 'wyss-console-0.1.0-linux-x64'),
