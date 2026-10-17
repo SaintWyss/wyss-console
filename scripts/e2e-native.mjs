@@ -41,6 +41,7 @@ import {
   terminateRecorded,
   withCleanup,
 } from './e2e-process-ledger.mjs';
+import { seederFromCargoOutput } from './e2e-cargo-artifact.mjs';
 
 const REPO = resolve('.');
 const FIXTURE = join(REPO, 'src-tauri/tests/fixtures/codex_runtime.py');
@@ -437,12 +438,17 @@ function seed(root) {
       '--test',
       'e2e_seed',
       '--no-run',
+      '--message-format=json',
     ],
-    { cwd: REPO, encoding: 'utf8' },
+    { cwd: REPO, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );
-  if (build.status !== 0)
-    throw new Error(`seeder build failed: ${build.stderr}`);
-  const binary = findSeeder();
+  if (build.error || build.status !== 0) {
+    throw new Error(`seeder build failed: ${build.error ?? build.stderr}`);
+  }
+  const binary = seederFromCargoOutput(
+    build.stdout,
+    join(REPO, 'src-tauri/target/debug/deps'),
+  );
   const result = spawnSync(
     binary,
     [
@@ -468,16 +474,6 @@ function seed(root) {
   if (result.status !== 0)
     throw new Error(`seeder failed with status ${result.status}`);
   console.log(readFileSync(report, 'utf8'));
-}
-
-/** @returns {string} the built seeder test binary */
-function findSeeder() {
-  const deps = join(REPO, 'src-tauri/target/debug/deps');
-  const [found] = readdirSync(deps).filter((name) =>
-    /^e2e_seed-[0-9a-f]+$/.test(name),
-  );
-  if (!found) throw new Error('seeder binary not built');
-  return join(deps, found);
 }
 
 /** @param {string} root */
