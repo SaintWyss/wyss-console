@@ -99,6 +99,23 @@ describe('ledger integrity', () => {
   });
 });
 
+describe('PID 1 broadcast-signal defense', () => {
+  it('rejects PID 1 from ledgers and direct recording without signaling anything', async () => {
+    const root = sandbox();
+    writeFileSync(
+      ledgerPath(root),
+      JSON.stringify([{ name: 'forged', pid: 1, startTime: '1' }]),
+    );
+    expect(() => readLedger(root)).toThrow(/invalid process ledger/);
+    await expect(terminateRecorded(root)).rejects.toThrow(
+      /invalid process ledger/,
+    );
+    expect(() => recordProcess(root, 'forged', 1)).toThrow(
+      /unsafe process group id/,
+    );
+  });
+});
+
 describe('terminating', () => {
   it('stops a recorded group, including members that outlive their leader', async () => {
     const root = sandbox();
