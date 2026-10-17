@@ -19,7 +19,12 @@ function fixture() {
   roots.push(root);
   const configDir = join(root, 'src-tauri');
   const release = join(configDir, 'target', 'release');
-  const dir = join(root, '.artifacts', 'package', `wyss-console-0.2.0-linux-${arch()}`);
+  const dir = join(
+    root,
+    '.artifacts',
+    'package',
+    `wyss-console-0.2.0-linux-${arch()}`,
+  );
   mkdirSync(release, { recursive: true });
   mkdirSync(join(dir, 'bin'), { recursive: true });
   mkdirSync(join(dir, 'libexec', 'wyss-console'), { recursive: true });
@@ -34,7 +39,10 @@ function fixture() {
   writeFileSync(join(release, 'wyss-console'), desktop);
   writeFileSync(join(release, 'wyss-control'), authority);
   writeFileSync(join(dir, 'bin', 'wyss-console'), desktop);
-  writeFileSync(join(dir, 'libexec', 'wyss-console', 'wyss-control'), authority);
+  writeFileSync(
+    join(dir, 'libexec', 'wyss-console', 'wyss-control'),
+    authority,
+  );
   const manifest = {
     schema_version: 1,
     name: 'wyss-console',
@@ -62,7 +70,9 @@ describe('the current native package selector', () => {
 
   it('does not choose a stale package when another directory sorts first', () => {
     const { root, dir } = fixture();
-    mkdirSync(join(root, '.artifacts', 'package', 'wyss-console-0.1.0-linux-x64'));
+    mkdirSync(
+      join(root, '.artifacts', 'package', 'wyss-console-0.1.0-linux-x64'),
+    );
     expect(currentPackageDir(root)).toBe(dir);
   });
 
