@@ -44,6 +44,7 @@ import {
 } from './e2e-process-ledger.mjs';
 import { seederFromCargoOutput } from './e2e-cargo-artifact.mjs';
 import { verifyManagerPeer } from './e2e-manager-peer.mjs';
+import { currentPackageDir } from './e2e-package-select.mjs';
 
 const REPO = resolve('.');
 const FIXTURE = join(REPO, 'src-tauri/tests/fixtures/codex_runtime.py');
@@ -177,17 +178,7 @@ function productBinary(pkg) {
 
 /** @returns {string} the packaged directory the harness runs */
 function packageDir() {
-  const named = process.env.WYSS_E2E_PACKAGE;
-  if (named) return resolve(named);
-  const base = join(REPO, '.artifacts/package');
-  const [only] = readdirSync(base).filter((entry) =>
-    entry.startsWith('wyss-console-'),
-  );
-  if (!only)
-    throw new Error(
-      'no packaged build under .artifacts/package; run desktop:package',
-    );
-  return join(base, only);
+  return currentPackageDir(REPO, process.env.WYSS_E2E_PACKAGE);
 }
 
 async function up() {
