@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -58,11 +59,7 @@ describe('native teardown requires authority stop confirmation', () => {
       );
       expect(run.status).not.toBe(0);
       expect(run.stderr).toContain('isolated authority stop failed');
-      expect(() =>
-        // The rejected down must not delete the sandbox state.
-        identityOf(process.pid),
-      ).not.toThrow();
-      const { existsSync } = await import('node:fs');
+      // Failed teardown must preserve its sandbox for inspection.
       expect(existsSync(join(root, 'state.json'))).toBe(true);
     } finally {
       await new Promise<void>((done) => manager.close(() => done()));
