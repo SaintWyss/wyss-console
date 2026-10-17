@@ -133,8 +133,19 @@ export function assertPlainFileOrAbsent(path) {
  * send `systemctl --user` to the real user's manager. Missing paths fail closed.
  * @param {string} root
  * @param {{ uid: number }} real the real user id
+ * @param {{ requireManager?: boolean }} [options] demand a live private socket before systemctl
  */
-export function assertOwnedRuntime(root, real) {
+export function assertOwnedRuntime(root, real, { requireManager = false } = {}) {
+  // Use lstat, not existsSync: a dangling symlink is still unsafe.
+  const statOrNull = (path) => {
+    try {
+      return lstatSync(path);
+    } catch (error) {
+      if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT')
+        return null;
+      throw error;
+    }
+  };
   const run = join(root, 'run');
   const runStat = lstatSync(run);
   if (
@@ -148,23 +159,31 @@ export function assertOwnedRuntime(root, real) {
       'runtime directory is not a private directory owned by this user',
     );
   }
-  const bus = join(run, 'bus');
-  if (existsSync(bus)) {
-    const busStat = lstatSync(bus);
-    if (!busStat.isSocket() || busStat.uid !== real.uid) {
-      throw new Error(
-        'session bus of the sandbox is not a socket owned by this user',
-      );
-    }
+  const busStat = statOrNull(join(run, 'bus'));
+  if (busStat && (!busStat.isSocket() || busStat.uid !== real.uid)) {
+    throw new Error('session bus of the sandbox is not a socket owned by this user');
   }
   const systemd = join(run, 'systemd');
-  if (existsSync(systemd)) {
-    const systemdStat = lstatSync(systemd);
-    if (systemdStat.isSymbolicLink() || !systemdStat.isDirectory()) {
-      throw new Error(
-        'service manager directory of the sandbox is not a plain directory',
-      );
-    }
+  const systemdStat = statOrNull(systemd);
+  if (
+    systemdStat &&
+    (systemdStat.isSymbolicLink() ||
+      !systemdStat.isDirectory() ||
+      systemdStat.uid !== real.uid)
+  ) {
+    throw new Error('service manager directory of the sandbox is not an owned plain directory');
+  }
+  if (requireManager && !systemdStat) {
+    throw new Error('sandbox service manager directory is missing');
+  }
+  // systemctl --user reaches this socket. Checking the parent directory alone
+  // does not prevent a symlink to /run/user/<uid>/systemd/private.
+  const privateStat = systemdStat ? statOrNull(join(systemd, 'private')) : null;
+  if (
+    (requireManager && !privateStat) ||
+    (privateStat && (!privateStat.isSocket() || privateStat.uid !== real.uid))
+  ) {
+    throw new Error('sandbox private manager socket is missing or unsafe');
   }
 }
 
