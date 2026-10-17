@@ -56,7 +56,7 @@ export function readLedger(root) {
         !Number.isSafeInteger(entry?.pid) ||
         entry.pid <= 0 ||
         typeof entry?.startTime !== 'string' ||
-        !/^\\d+$/.test(entry.startTime),
+        !/^\d+$/.test(entry.startTime),
     )
   ) {
     throw new Error('invalid process ledger: cannot safely clean up');
