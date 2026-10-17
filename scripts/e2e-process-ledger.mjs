@@ -57,7 +57,7 @@ export function readLedger(root) {
       (entry) =>
         typeof entry?.name !== 'string' ||
         !Number.isSafeInteger(entry?.pid) ||
-        entry.pid <= 0 ||
+        entry.pid <= 1 ||
         typeof entry?.startTime !== 'string' ||
         !/^\d+$/.test(entry.startTime),
     )
@@ -76,6 +76,7 @@ export function readLedger(root) {
  * @returns {number} the same PID
  */
 export function recordProcess(root, name, pid) {
+  assertSafeGroupId(pid);
   const startTime = identityOf(pid);
   if (startTime === null) {
     throw new Error(`${name} exited before it could be recorded`);
@@ -84,6 +85,18 @@ export function recordProcess(root, name, pid) {
   entries.push({ name, pid, startTime });
   writeFileSync(ledgerPath(root), `${JSON.stringify(entries, null, 2)}\n`);
   return pid;
+}
+
+/**
+ * Prevent Linux kill(-1, signal): it broadcasts to every permitted process,
+ * not to process group 1. Validate at the final signal boundary as well as
+ * when reading a ledger.
+ * @param {number} pid
+ */
+function assertSafeGroupId(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 1) {
+    throw new Error('unsafe process group id: refusing to signal');
+  }
 }
 
 /** @param {number} ms */
@@ -96,6 +109,7 @@ const pause = (ms) => new Promise((done) => setTimeout(done, ms));
  * @param {number} pid
  */
 function groupAlive(pid) {
+  assertSafeGroupId(pid);
   try {
     process.kill(-pid, 0);
     return true;
@@ -112,6 +126,7 @@ function groupAlive(pid) {
  * @param {NodeJS.Signals} signal
  */
 function signalRecorded(entry, signal) {
+  assertSafeGroupId(entry.pid);
   if (identityOf(entry.pid) !== entry.startTime) return false;
   try {
     process.kill(-entry.pid, signal);
