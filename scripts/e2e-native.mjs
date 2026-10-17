@@ -31,6 +31,8 @@ import {
   sandboxEnv,
 } from './e2e-guard.mjs';
 import {
+  ledgerPath,
+  readLedger,
   recordProcess,
   terminateRecorded,
   withCleanup,
@@ -465,6 +467,13 @@ function findSeeder() {
 /** @param {string} root */
 async function down(root) {
   const state = readState(root);
+  if (!existsSync(ledgerPath(root))) {
+    throw new Error('missing process ledger: refusing destructive cleanup');
+  }
+  const owned = readLedger(root);
+  if (Object.keys(state.pids).length > 0 && owned.length === 0) {
+    throw new Error('empty process ledger for a started sandbox: refusing cleanup');
+  }
   sctl(root, ['stop', 'wyss-control.service']);
   // Every process this sandbox recorded, stopped only where its start time still matches.
   const survivors = (await terminateRecorded(root)).filter(
