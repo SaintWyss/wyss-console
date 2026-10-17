@@ -470,7 +470,7 @@ function seed(root) {
   console.log(readFileSync(report, 'utf8'));
 }
 
-/** Returns the authority PID recorded by the isolated manager, or 0 if stopped. */
+/** @param {string} root @returns {number} Authority PID or 0 if stopped. */
 function authorityPid(root) {
   const result = sctl(root, [
     'show',
