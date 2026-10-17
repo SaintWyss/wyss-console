@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -23,9 +29,9 @@ const output = (...records: string[]) => `${records.join('\n')}\n`;
 
 describe('select the E2E seeder from this Cargo invocation', () => {
   it('chooses the reported current executable, never a stale directory peer', () => {
-    expect(seederFromCargoOutput(output(artifact(current), finished), deps)).toBe(
-      current,
-    );
+    expect(
+      seederFromCargoOutput(output(artifact(current), finished), deps),
+    ).toBe(current);
   });
 
   it('refuses a stale-only directory when the build reports no test artifact', () => {
@@ -57,9 +63,9 @@ describe('select the E2E seeder from this Cargo invocation', () => {
   });
 
   it('requires a successful Cargo completion record', () => {
-    expect(() => seederFromCargoOutput(output(artifact(current)), deps)).toThrow(
-      /exactly one current/,
-    );
+    expect(() =>
+      seederFromCargoOutput(output(artifact(current)), deps),
+    ).toThrow(/exactly one current/);
     expect(() =>
       seederFromCargoOutput(
         output(
