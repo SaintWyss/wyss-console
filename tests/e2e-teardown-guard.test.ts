@@ -17,7 +17,7 @@ afterAll(() => {
 });
 
 describe('native teardown requires authority stop confirmation', () => {
-  it('preserves the sandbox when the isolated authority stop command fails', async () => {
+  it('retains the sandbox if authority stop fails', async () => {
     const root = mkdtempSync('/tmp/wacc-');
     roots.push(root);
     for (const dir of ['bin', 'workspace', 'run', 'run/systemd']) {
