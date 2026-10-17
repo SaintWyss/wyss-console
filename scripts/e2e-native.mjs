@@ -491,7 +491,7 @@ function authorityPid(root) {
   if (
     result.error ||
     result.status !== 0 ||
-    !/^(0|[1-9]\\d*)$/.test(value ?? '')
+    !/^(0|[1-9]\d*)$/.test(value ?? '')
   ) {
     throw new Error('cannot verify isolated authority MainPID');
   }
