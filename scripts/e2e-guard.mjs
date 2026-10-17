@@ -14,7 +14,14 @@ import {
   readFileSync,
   statSync,
 } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from 'node:path';
 
 /** Strings only the test fixture contains. A release binary must contain none of them. */
 export const FIXTURE_MARKERS = [
@@ -25,6 +32,12 @@ export const FIXTURE_MARKERS = [
 
 /** Unix socket paths are limited to 108 bytes on Linux. */
 export const SOCKET_PATH_LIMIT = 108;
+
+/** The marker every native E2E state file carries. A file without it is not a harness state. */
+export const NATIVE_STATE_MARKER = 'wyss-console-native-e2e-v1';
+
+/** A display the harness may name: a colon and a number, nothing that can leave a path. */
+const DISPLAY_NAME = /^:\d{1,4}$/;
 
 /**
  * @param {string} child
@@ -85,7 +98,72 @@ export function assertManagedSandbox(root, real) {
     stat.uid !== real.uid ||
     (stat.mode & 0o777) !== 0o700
   ) {
-    throw new Error('sandbox ownership, canonical path, or permissions are unsafe');
+    throw new Error(
+      'sandbox ownership, canonical path, or permissions are unsafe',
+    );
+  }
+}
+
+/**
+ * Throws when `path` exists and is not a regular file. The harness reads and writes its state
+ * and ledger files, and a symlink would move those operations to a file outside the sandbox.
+ * A missing file passes: the caller decides whether it may be missing.
+ * @param {string} path
+ */
+export function assertPlainFileOrAbsent(path) {
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch (error) {
+    if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') return;
+    throw error;
+  }
+  if (!stat.isFile()) {
+    throw new Error(
+      `${basename(path)} is not a regular file; refusing to follow it`,
+    );
+  }
+}
+
+/**
+ * Throws unless a parsed state file is this harness's own state for `root`. Every field that
+ * a cleanup later turns into a path or a signal is checked here, before it is used.
+ * @param {unknown} state
+ * @param {string} root
+ */
+export function assertNativeState(state, root) {
+  const fail = () => {
+    throw new Error('invalid or foreign native E2E sandbox state');
+  };
+  if (typeof state !== 'object' || state === null) fail();
+  const record = /** @type {Record<string, unknown>} */ (state);
+  if (
+    record.harness !== NATIVE_STATE_MARKER ||
+    record.root !== root ||
+    record.workspace !== join(root, 'workspace')
+  ) {
+    fail();
+  }
+  if (
+    record.display !== undefined &&
+    (typeof record.display !== 'string' || !DISPLAY_NAME.test(record.display))
+  ) {
+    fail();
+  }
+  const positive = (/** @type {unknown} */ value) =>
+    Number.isSafeInteger(value) && /** @type {number} */ (value) > 0;
+  if (record.pids !== undefined) {
+    if (typeof record.pids !== 'object' || record.pids === null) fail();
+    if (
+      !Object.values(
+        /** @type {Record<string, unknown>} */ (record.pids),
+      ).every(positive)
+    ) {
+      fail();
+    }
+  }
+  if (record.groups !== undefined) {
+    if (!Array.isArray(record.groups) || !record.groups.every(positive)) fail();
   }
 }
 

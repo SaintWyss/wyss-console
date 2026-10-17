@@ -32,7 +32,10 @@ fn sandbox_runtime() -> PathBuf {
     let runtime = PathBuf::from(env::var_os("XDG_RUNTIME_DIR").expect("XDG_RUNTIME_DIR is set"));
     assert!(sandbox.is_absolute(), "the sandbox root is absolute");
     assert_eq!(home, sandbox.join("home"), "HOME is the sandbox home");
-    assert!(runtime.starts_with(&sandbox), "the runtime {runtime:?} is outside the sandbox");
+    assert!(
+        runtime.starts_with(&sandbox),
+        "the runtime {runtime:?} is outside the sandbox"
+    );
     runtime
 }
 
@@ -81,7 +84,10 @@ fn seed_two_sessions_in_one_workspace() {
         .unwrap_or(45);
     let workspace = env::var("WYSS_E2E_WORKSPACE").expect("WYSS_E2E_WORKSPACE names the project");
     let report = env::var("WYSS_E2E_REPORT").expect("WYSS_E2E_REPORT names the output file");
-    assert!(Path::new(&workspace).is_absolute(), "the workspace is absolute");
+    assert!(
+        Path::new(&workspace).is_absolute(),
+        "the workspace is absolute"
+    );
     // A test binary must not be able to write a report or run a session in an
     // arbitrary host directory through environment variables.
     let sandbox = PathBuf::from(env::var_os("WYSS_E2E_SANDBOX").unwrap());
@@ -95,7 +101,11 @@ fn seed_two_sessions_in_one_workspace() {
 
     for (label, session) in [("A", &first), ("B", &second)] {
         for n in 1..=turns_each {
-            run_turn(&turns, session, format!("E2E-{label}-{n:03} synthetic prompt"));
+            run_turn(
+                &turns,
+                session,
+                format!("E2E-{label}-{n:03} synthetic prompt"),
+            );
         }
     }
 

@@ -66,7 +66,7 @@ describe('assertSandboxRoot', () => {
 });
 
 describe('assertManagedSandbox: destructive command boundary', () => {
-  const host = { home: homedir(), uid: process.getuid() };
+  const host = { home: homedir(), uid: process.getuid?.() ?? -1 };
 
   it('accepts only an owned private sandbox created under /tmp/wacc-*', () => {
     const root = mkdtempSync('/tmp/wacc-');
@@ -83,11 +83,11 @@ describe('assertManagedSandbox: destructive command boundary', () => {
       expect(() => assertManagedSandbox(root, host)).toThrow(/canonical/);
       // Executing the real CLI must fail BEFORE recursive chmod/rm or any sctl call.
       writeFileSync(join(root, 'state.json'), '{"root":"placeholder"}');
-      const result = spawnSync(process.execPath, [
-        'scripts/e2e-native.mjs',
-        'down',
-        root,
-      ], { encoding: 'utf8' });
+      const result = spawnSync(
+        process.execPath,
+        ['scripts/e2e-native.mjs', 'down', root],
+        { encoding: 'utf8' },
+      );
       expect(result.status).not.toBe(0);
       expect(existsSync(join(root, 'state.json'))).toBe(true);
     } finally {
@@ -121,17 +121,20 @@ describe('assertManagedSandbox: destructive command boundary', () => {
   it('refuses a correctly named sandbox without its native E2E state marker', () => {
     const root = mkdtempSync('/tmp/wacc-');
     try {
-      writeFileSync(join(root, 'state.json'), JSON.stringify({
-        root,
-        workspace: join(root, 'workspace'),
-        pids: {},
-        groups: [],
-      }));
-      const result = spawnSync(process.execPath, [
-        'scripts/e2e-native.mjs',
-        'down',
-        root,
-      ], { encoding: 'utf8' });
+      writeFileSync(
+        join(root, 'state.json'),
+        JSON.stringify({
+          root,
+          workspace: join(root, 'workspace'),
+          pids: {},
+          groups: [],
+        }),
+      );
+      const result = spawnSync(
+        process.execPath,
+        ['scripts/e2e-native.mjs', 'down', root],
+        { encoding: 'utf8' },
+      );
       expect(result.status).not.toBe(0);
       expect(existsSync(join(root, 'state.json'))).toBe(true);
     } finally {

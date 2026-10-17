@@ -4,6 +4,7 @@
 // kernel has reused is never signalled, and nothing is found by name.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { assertPlainFileOrAbsent } from './e2e-guard.mjs';
 
 /**
  * Start time of a live process, from /proc/<pid>/stat. Null when the process does not exist
@@ -35,11 +36,13 @@ export function ledgerPath(root) {
  * @returns {{ name: string, pid: number, startTime: string }[]}
  */
 export function readLedger(root) {
+  assertPlainFileOrAbsent(ledgerPath(root));
   let content;
   try {
     content = readFileSync(ledgerPath(root), 'utf8');
   } catch (error) {
-    if (error?.code === 'ENOENT') return [];
+    if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT')
+      return [];
     throw error;
   }
   let entries;

@@ -81,16 +81,21 @@ describe('ledger integrity', () => {
     const root = sandbox();
     writeFileSync(ledgerPath(root), '{incomplete');
     expect(() => readLedger(root)).toThrow(/invalid process ledger/);
-    await expect(terminateRecorded(root)).rejects.toThrow(/invalid process ledger/);
+    await expect(terminateRecorded(root)).rejects.toThrow(
+      /invalid process ledger/,
+    );
   });
 
   it('refuses malformed entries rather than signaling unverified groups', async () => {
     const root = sandbox();
-    writeFileSync(ledgerPath(root), JSON.stringify([
-      { name: 'untrusted', pid: -1, startTime: 'not-a-time' },
-    ]));
+    writeFileSync(
+      ledgerPath(root),
+      JSON.stringify([{ name: 'untrusted', pid: -1, startTime: 'not-a-time' }]),
+    );
     expect(() => readLedger(root)).toThrow(/invalid process ledger/);
-    await expect(terminateRecorded(root)).rejects.toThrow(/invalid process ledger/);
+    await expect(terminateRecorded(root)).rejects.toThrow(
+      /invalid process ledger/,
+    );
   });
 });
 
