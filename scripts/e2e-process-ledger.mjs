@@ -35,11 +35,33 @@ export function ledgerPath(root) {
  * @returns {{ name: string, pid: number, startTime: string }[]}
  */
 export function readLedger(root) {
+  let content;
   try {
-    return JSON.parse(readFileSync(ledgerPath(root), 'utf8'));
-  } catch {
-    return [];
+    content = readFileSync(ledgerPath(root), 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
   }
+  let entries;
+  try {
+    entries = JSON.parse(content);
+  } catch {
+    throw new Error('invalid process ledger: cannot safely clean up');
+  }
+  if (
+    !Array.isArray(entries) ||
+    entries.some(
+      (entry) =>
+        typeof entry?.name !== 'string' ||
+        !Number.isSafeInteger(entry?.pid) ||
+        entry.pid <= 0 ||
+        typeof entry?.startTime !== 'string' ||
+        !/^\\d+$/.test(entry.startTime),
+    )
+  ) {
+    throw new Error('invalid process ledger: cannot safely clean up');
+  }
+  return entries;
 }
 
 /**
