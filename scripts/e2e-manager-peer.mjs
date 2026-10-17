@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { identityOf, readLedger } from './e2e-process-ledger.mjs';
 
-const peerScript = fileURLToPath(new URL('./e2e-manager-peer.py', import.meta.url));
+const peerScript = fileURLToPath(
+  new URL('./e2e-manager-peer.py', import.meta.url),
+);
 
 /**
  * @param {string} root
@@ -50,7 +52,9 @@ export function verifyManagerPeer(root) {
     peer.uid !== process.getuid?.() ||
     identityOf(manager.pid) !== manager.startTime
   ) {
-    throw new Error('sandbox private manager socket is served by another process');
+    throw new Error(
+      'sandbox private manager socket is served by another process',
+    );
   }
   return { pid: peer.pid, uid: peer.uid };
 }
