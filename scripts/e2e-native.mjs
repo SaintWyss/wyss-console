@@ -35,6 +35,7 @@ import {
   sandboxEnv,
 } from './e2e-guard.mjs';
 import {
+  identityOf,
   ledgerPath,
   readLedger,
   recordProcess,
@@ -478,6 +479,29 @@ function seed(root) {
   console.log(readFileSync(report, 'utf8'));
 }
 
+/** Returns the authority PID recorded by the isolated manager, or 0 if stopped. */
+function authorityPid(root) {
+  const result = sctl(root, [
+    'show',
+    '--property=MainPID',
+    '--value',
+    'wyss-control.service',
+  ]);
+  const value = result.stdout?.trim();
+  if (
+    result.error ||
+    result.status !== 0 ||
+    !/^(0|[1-9]\\d*)$/.test(value ?? '')
+  ) {
+    throw new Error('cannot verify isolated authority MainPID');
+  }
+  const pid = Number(value);
+  if (!Number.isSafeInteger(pid) || pid < 0) {
+    throw new Error('invalid isolated authority MainPID');
+  }
+  return pid;
+}
+
 /** @param {string} root */
 async function down(root) {
   const state = readState(root);
@@ -490,7 +514,20 @@ async function down(root) {
       'empty process ledger for a started sandbox: refusing cleanup',
     );
   }
-  sctl(root, ['stop', 'wyss-control.service']);
+  // The authority is manager-spawned and is not in our process-group ledger.
+  // Never delete its runtime when stop fails or its original PID is still alive.
+  const before = authorityPid(root);
+  const startedAt = before > 1 ? identityOf(before) : null;
+  const stopped = sctl(root, ['stop', 'wyss-control.service']);
+  if (stopped.error || stopped.status !== 0) {
+    throw new Error('isolated authority stop failed: sandbox retained');
+  }
+  if (
+    authorityPid(root) !== 0 ||
+    (before > 1 && startedAt !== null && identityOf(before) === startedAt)
+  ) {
+    throw new Error('isolated authority may still be alive: sandbox retained');
+  }
   // Every process this sandbox recorded, stopped only where its start time still matches.
   // Anything left that the ledger cannot verify blocks the removal as well as a survivor.
   const survivors = (await terminateRecorded(root)).filter((entry) =>
