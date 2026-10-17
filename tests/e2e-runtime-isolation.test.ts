@@ -125,7 +125,7 @@ describe('assertOwnedRuntime: what a service command reaches through XDG_RUNTIME
     const target = scratch('runtime-systemd-target-');
     symlinkSync(target, join(root, 'run', 'systemd'));
     expect(() => assertOwnedRuntime(root, { uid })).toThrow(
-      /not a plain directory/,
+      /not an owned plain directory/,
     );
   });
 });
