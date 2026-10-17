@@ -47,7 +47,7 @@ afterAll(() => {
 });
 
 describe('private systemd peer identity', () => {
-  it('accepts a socket served by the exact live process in the ledger', async () => {
+  it('accepts a socket served by its recorded manager', async () => {
     const root = rootWithSocketDir();
     const server = await serverAt(root);
     try {
@@ -61,7 +61,7 @@ describe('private systemd peer identity', () => {
     }
   });
 
-  it('rejects a same-UID relay whose PID differs from the recorded manager', async () => {
+  it('rejects a same-UID relay with a different PID', async () => {
     const root = rootWithSocketDir();
     const server = await serverAt(root);
     const child = spawn('sleep', ['120'], { stdio: 'ignore' });
