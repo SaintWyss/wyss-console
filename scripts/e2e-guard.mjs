@@ -8,7 +8,6 @@
 import {
   copyFileSync,
   chmodSync,
-  existsSync,
   lstatSync,
   realpathSync,
   readdirSync,
@@ -137,6 +136,7 @@ export function assertPlainFileOrAbsent(path) {
  */
 export function assertOwnedRuntime(root, real, { requireManager = false } = {}) {
   // Use lstat, not existsSync: a dangling symlink is still unsafe.
+  /** @param {string} path */
   const statOrNull = (path) => {
     try {
       return lstatSync(path);
@@ -161,7 +161,9 @@ export function assertOwnedRuntime(root, real, { requireManager = false } = {}) 
   }
   const busStat = statOrNull(join(run, 'bus'));
   if (busStat && (!busStat.isSocket() || busStat.uid !== real.uid)) {
-    throw new Error('session bus of the sandbox is not a socket owned by this user');
+    throw new Error(
+      'session bus of the sandbox is not a socket owned by this user',
+    );
   }
   const systemd = join(run, 'systemd');
   const systemdStat = statOrNull(systemd);
@@ -171,7 +173,9 @@ export function assertOwnedRuntime(root, real, { requireManager = false } = {}) 
       !systemdStat.isDirectory() ||
       systemdStat.uid !== real.uid)
   ) {
-    throw new Error('service manager directory of the sandbox is not an owned plain directory');
+    throw new Error(
+      'service manager directory of the sandbox is not an owned plain directory',
+    );
   }
   if (requireManager && !systemdStat) {
     throw new Error('sandbox service manager directory is missing');
