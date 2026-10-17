@@ -1,17 +1,21 @@
+import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   FIXTURE_MARKERS,
+  assertManagedSandbox,
   assertSandboxRoot,
   fixtureHits,
   fixtureHitsInFile,
@@ -58,6 +62,81 @@ describe('assertSandboxRoot', () => {
     expect(() => assertSandboxRoot(`/tmp/${'x'.repeat(120)}`, real)).toThrow(
       /108/,
     );
+  });
+});
+
+describe('assertManagedSandbox: destructive command boundary', () => {
+  const host = { home: homedir(), uid: process.getuid() };
+
+  it('accepts only an owned private sandbox created under /tmp/wacc-*', () => {
+    const root = mkdtempSync('/tmp/wacc-');
+    try {
+      expect(() => assertManagedSandbox(root, host)).not.toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an unrelated private directory, even outside HOME', () => {
+    const root = mkdtempSync(join(tmpdir(), 'unrelated-e2e-'));
+    try {
+      expect(() => assertManagedSandbox(root, host)).toThrow(/canonical/);
+      // Executing the real CLI must fail BEFORE recursive chmod/rm or any sctl call.
+      writeFileSync(join(root, 'state.json'), '{"root":"placeholder"}');
+      const result = spawnSync(process.execPath, [
+        'scripts/e2e-native.mjs',
+        'down',
+        root,
+      ], { encoding: 'utf8' });
+      expect(result.status).not.toBe(0);
+      expect(existsSync(join(root, 'state.json'))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a symlink alias even when its destination has the expected name', () => {
+    const root = mkdtempSync('/tmp/wacc-');
+    const alias = mkdtempSync('/tmp/wacc-');
+    rmSync(alias, { recursive: true });
+    symlinkSync(root, alias);
+    try {
+      expect(() => assertManagedSandbox(alias, host)).toThrow();
+    } finally {
+      rmSync(alias);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a sandbox directory that is group/world accessible', () => {
+    const root = mkdtempSync('/tmp/wacc-');
+    try {
+      chmodSync(root, 0o755);
+      expect(() => assertManagedSandbox(root, host)).toThrow(/unsafe/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a correctly named sandbox without its native E2E state marker', () => {
+    const root = mkdtempSync('/tmp/wacc-');
+    try {
+      writeFileSync(join(root, 'state.json'), JSON.stringify({
+        root,
+        workspace: join(root, 'workspace'),
+        pids: {},
+        groups: [],
+      }));
+      const result = spawnSync(process.execPath, [
+        'scripts/e2e-native.mjs',
+        'down',
+        root,
+      ], { encoding: 'utf8' });
+      expect(result.status).not.toBe(0);
+      expect(existsSync(join(root, 'state.json'))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
