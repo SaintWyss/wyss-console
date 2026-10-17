@@ -141,7 +141,11 @@ function envOf(root) {
  * @param {string[]} args
  */
 function sctl(root, args) {
-  assertOwnedRuntime(root, { uid: process.getuid?.() ?? -1 }, { requireManager: true });
+  assertOwnedRuntime(
+    root,
+    { uid: process.getuid?.() ?? -1 },
+    { requireManager: true },
+  );
   return spawnSync('systemctl', ['--user', ...args], {
     env: envOf(root),
     encoding: 'utf8',
