@@ -6,6 +6,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { arch } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 
+/** @param {string} path */
 const sha256 = (path) =>
   createHash('sha256').update(readFileSync(path)).digest('hex');
 
