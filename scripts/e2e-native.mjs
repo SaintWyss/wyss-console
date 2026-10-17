@@ -26,7 +26,7 @@ import {
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  assertSandboxRoot,
+  assertManagedSandbox,
   installFixtureCodex,
   sandboxEnv,
 } from './e2e-guard.mjs';
@@ -41,8 +41,9 @@ const FIXTURE = join(REPO, 'src-tauri/tests/fixtures/codex_runtime.py');
 const DISPLAY = ':77';
 const SCENARIO = 'echo';
 const KWIN_SOCKET = 'wl-accept';
+const HARNESS_MARKER = 'wyss-console-native-e2e-v1';
 
-/** @typedef {{ root: string, pids: Record<string, number>, groups: number[], workspace: string, exitFile?: string, display?: string }} State */
+/** @typedef {{ harness: string, root: string, pids: Record<string, number>, groups: number[], workspace: string, exitFile?: string, display?: string }} State */
 
 /** @param {string} root */
 function statePath(root) {
@@ -51,7 +52,17 @@ function statePath(root) {
 
 /** @param {string} root @returns {State} */
 function readState(root) {
-  return JSON.parse(readFileSync(statePath(root), 'utf8'));
+  // Must validate BEFORE reading state, spawning a service client or deleting paths.
+  assertManagedSandbox(root, { home: homedir(), uid: process.getuid() });
+  const state = JSON.parse(readFileSync(statePath(root), 'utf8'));
+  if (
+    state.harness !== HARNESS_MARKER ||
+    state.root !== root ||
+    state.workspace !== join(root, 'workspace')
+  ) {
+    throw new Error('invalid or foreign native E2E sandbox state');
+  }
+  return state;
 }
 
 /** @param {string} root @param {State} state */
@@ -182,7 +193,7 @@ async function up() {
   ]) {
     mkdirSync(join(root, dir), { recursive: true, mode: 0o700 });
   }
-  assertSandboxRoot(root, { home: homedir(), uid: process.getuid?.() ?? -1 });
+  assertManagedSandbox(root, { home: homedir(), uid: process.getuid() });
   writeFileSync(
     join(root, 'codex-home', 'models_cache.json'),
     '{"fetched_at":"2026-10-07T00:00:00Z","models":[{"slug":"fixture-model","tool_mode":"code_mode_only","shell_type":"unified_exec","apply_patch_tool_type":"freeform","multi_agent_version":"v2","experimental_supported_tools":["send_user_message_async","clock"]}]}',
@@ -191,6 +202,7 @@ async function up() {
   const pkg = packageDir();
   /** @type {State} */
   const state = {
+    harness: HARNESS_MARKER,
     root,
     pids: {},
     groups: [],
