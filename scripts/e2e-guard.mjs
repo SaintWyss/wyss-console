@@ -8,11 +8,13 @@
 import {
   copyFileSync,
   chmodSync,
+  lstatSync,
+  realpathSync,
   readdirSync,
   readFileSync,
   statSync,
 } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 /** Strings only the test fixture contains. A release binary must contain none of them. */
 export const FIXTURE_MARKERS = [
@@ -52,6 +54,38 @@ export function assertSandboxRoot(root, real) {
   const socket = join(root, 'run', 'wyss-console', 'control.sock');
   if (Buffer.byteLength(socket) > SOCKET_PATH_LIMIT) {
     throw new Error(`control socket path exceeds ${SOCKET_PATH_LIMIT} bytes`);
+  }
+}
+
+/**
+ * A destructive or stateful E2E command may target only a harness-owned sandbox,
+ * created directly under /tmp by mkdtempSync('/tmp/wacc-'). assertSandboxRoot alone
+ * is NOT sufficient: it intentionally accepts arbitrary directories outside HOME.
+ *
+ * Refuse symlinks, aliases, unexpected names, foreign ownership, and loose modes.
+ * The caller must additionally validate the state.json harness marker before acting.
+ * @param {string} root
+ * @param {{home: string, uid: number}} real
+ */
+export function assertManagedSandbox(root, real) {
+  assertSandboxRoot(root, real);
+  const tmp = realpathSync('/tmp');
+  if (
+    root !== resolve(root) ||
+    dirname(root) !== tmp ||
+    !/^wacc-[A-Za-z0-9]{6}$/.test(basename(root))
+  ) {
+    throw new Error('not a canonical harness-created /tmp/wacc-* sandbox');
+  }
+  const stat = lstatSync(root);
+  if (
+    !stat.isDirectory() ||
+    stat.isSymbolicLink() ||
+    realpathSync(root) !== root ||
+    stat.uid !== real.uid ||
+    (stat.mode & 0o777) !== 0o700
+  ) {
+    throw new Error('sandbox ownership, canonical path, or permissions are unsafe');
   }
 }
 
