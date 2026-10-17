@@ -105,14 +105,14 @@ function groupAlive(pid) {
 }
 
 /**
- * Sends a signal to a recorded group, if it is still the recorded one: its leader has the
- * recorded start time, or the leader has exited and the group still has members.
+ * Sends a signal to a recorded group, and only while its leader is still the recorded
+ * process. An absent leader is not proof that the group is still ours: a group that
+ * outlived its leader is reported, not signalled.
  * @param {{ pid: number, startTime: string }} entry
  * @param {NodeJS.Signals} signal
  */
 function signalRecorded(entry, signal) {
-  const leader = identityOf(entry.pid);
-  if (leader !== entry.startTime && leader !== null) return false;
+  if (identityOf(entry.pid) !== entry.startTime) return false;
   try {
     process.kill(-entry.pid, signal);
     return true;
@@ -145,7 +145,7 @@ export async function withCleanup(root, work) {
  * @param {{ graceMs?: number, names?: string[] }} [options] names limits the stop to those
  *   recorded names
  * @returns {Promise<{ name: string, pid: number, outcome: string }[]>} one outcome per entry:
- *   stopped, killed, already-gone, identity-changed or survived
+ *   stopped, killed, already-gone, identity-changed, unverified-members or survived
  */
 export async function terminateRecorded(root, { graceMs = 3000, names } = {}) {
   const report = [];
@@ -158,8 +158,14 @@ export async function terminateRecorded(root, { graceMs = 3000, names } = {}) {
       report.push({ name, pid, outcome: 'already-gone' });
       continue;
     }
+    // The recorded leader is the only proof that this group is ours. An absent leader is
+    // not, so its members are reported and left alone.
     const leader = identityOf(pid);
-    if (leader !== startTime && leader !== null) {
+    if (leader === null) {
+      report.push({ name, pid, outcome: 'unverified-members' });
+      continue;
+    }
+    if (leader !== startTime) {
       report.push({ name, pid, outcome: 'identity-changed' });
       continue;
     }
@@ -171,10 +177,14 @@ export async function terminateRecorded(root, { graceMs = 3000, names } = {}) {
     }
     let outcome = 'stopped';
     if (groupAlive(pid)) {
-      signalRecorded(entry, 'SIGKILL');
-      outcome = 'killed';
-      for (let i = 0; i < 30 && groupAlive(pid); i++) await pause(100);
-      if (groupAlive(pid)) outcome = 'survived';
+      if (signalRecorded(entry, 'SIGKILL')) {
+        outcome = 'killed';
+        for (let i = 0; i < 30 && groupAlive(pid); i++) await pause(100);
+        if (groupAlive(pid)) outcome = 'survived';
+      } else {
+        // The leader went away after SIGTERM: what is left cannot be verified.
+        outcome = groupAlive(pid) ? 'unverified-members' : 'stopped';
+      }
     }
     report.push({ name, pid, outcome });
   }

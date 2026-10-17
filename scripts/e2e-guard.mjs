@@ -8,6 +8,7 @@
 import {
   copyFileSync,
   chmodSync,
+  existsSync,
   lstatSync,
   realpathSync,
   readdirSync,
@@ -122,6 +123,48 @@ export function assertPlainFileOrAbsent(path) {
     throw new Error(
       `${basename(path)} is not a regular file; refusing to follow it`,
     );
+  }
+}
+
+/**
+ * Throws unless the sandbox's runtime directory is this user's private directory and every
+ * path a service command reads through it is a plain directory or socket of its own. The
+ * service manager and the bus are reached through `XDG_RUNTIME_DIR`, so a link there would
+ * send `systemctl --user` to the real user's manager. Missing paths fail closed.
+ * @param {string} root
+ * @param {{ uid: number }} real the real user id
+ */
+export function assertOwnedRuntime(root, real) {
+  const run = join(root, 'run');
+  const runStat = lstatSync(run);
+  if (
+    !runStat.isDirectory() ||
+    runStat.isSymbolicLink() ||
+    runStat.uid !== real.uid ||
+    (runStat.mode & 0o777) !== 0o700 ||
+    realpathSync(run) !== run
+  ) {
+    throw new Error(
+      'runtime directory is not a private directory owned by this user',
+    );
+  }
+  const bus = join(run, 'bus');
+  if (existsSync(bus)) {
+    const busStat = lstatSync(bus);
+    if (!busStat.isSocket() || busStat.uid !== real.uid) {
+      throw new Error(
+        'session bus of the sandbox is not a socket owned by this user',
+      );
+    }
+  }
+  const systemd = join(run, 'systemd');
+  if (existsSync(systemd)) {
+    const systemdStat = lstatSync(systemd);
+    if (systemdStat.isSymbolicLink() || !systemdStat.isDirectory()) {
+      throw new Error(
+        'service manager directory of the sandbox is not a plain directory',
+      );
+    }
   }
 }
 

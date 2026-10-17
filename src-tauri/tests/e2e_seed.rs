@@ -114,5 +114,73 @@ fn seed_two_sessions_in_one_workspace() {
         first.as_str(),
         second.as_str(),
     );
-    fs::write(report, lines).unwrap();
+    write_report(Path::new(&report), &lines).unwrap();
+}
+
+/// Writes the report into a file that does not exist yet. `create_new` is `O_CREAT | O_EXCL`,
+/// which fails on an existing path and never follows a link at the final component, so a
+/// planted symlink or an existing file is refused and its target stays as it was.
+fn write_report(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the report has no directory",
+        )
+    })?;
+    if fs::symlink_metadata(parent)?.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "the report directory is a link",
+        ));
+    }
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(contents.as_bytes())
+}
+
+#[cfg(test)]
+mod report_tests {
+    use super::write_report;
+    use std::{fs, os::unix::fs::symlink, path::PathBuf, time::SystemTime};
+
+    /// A scratch directory outside any sandbox, unique to this run.
+    fn scratch() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("seed-report-test-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn report_never_follows_a_link_or_overwrites_a_file() {
+        let dir = scratch();
+        let target = dir.join("outside.txt");
+        fs::write(&target, "keep").unwrap();
+
+        let link = dir.join("seed-report-link.json");
+        symlink(&target, &link).unwrap();
+        assert!(write_report(&link, "{}\n").is_err(), "a link is refused");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "keep");
+
+        let existing = dir.join("seed-report-existing.json");
+        fs::write(&existing, "old").unwrap();
+        assert!(
+            write_report(&existing, "{}\n").is_err(),
+            "an existing file is refused"
+        );
+        assert_eq!(fs::read_to_string(&existing).unwrap(), "old");
+
+        let fresh = dir.join("seed-report.json");
+        write_report(&fresh, "ok\n").unwrap();
+        assert_eq!(fs::read_to_string(&fresh).unwrap(), "ok\n");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }

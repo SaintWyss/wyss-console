@@ -29,6 +29,7 @@ import {
   NATIVE_STATE_MARKER,
   assertManagedSandbox,
   assertNativeState,
+  assertOwnedRuntime,
   assertPlainFileOrAbsent,
   installFixtureCodex,
   sandboxEnv,
@@ -132,8 +133,15 @@ function envOf(root) {
   });
 }
 
-/** @param {string} root @param {string[]} args */
+/**
+ * Runs `systemctl --user` against the sandbox's own manager. It runs only after the
+ * sandbox's runtime directory and bus are shown to be this user's and not links, so the
+ * command cannot reach the real user's service manager.
+ * @param {string} root
+ * @param {string[]} args
+ */
 function sctl(root, args) {
+  assertOwnedRuntime(root, { uid: process.getuid?.() ?? -1 });
   return spawnSync('systemctl', ['--user', ...args], {
     env: envOf(root),
     encoding: 'utf8',
@@ -395,7 +403,7 @@ async function relaunchApp(root) {
   const state = readState(root);
   const previous = state.pids.app;
   const survivors = (await terminateRecorded(root, { names: ['app'] })).filter(
-    (entry) => entry.outcome === 'survived',
+    (entry) => ['survived', 'unverified-members'].includes(entry.outcome),
   );
   if (survivors.length > 0) {
     throw new Error(
@@ -482,12 +490,13 @@ async function down(root) {
   }
   sctl(root, ['stop', 'wyss-control.service']);
   // Every process this sandbox recorded, stopped only where its start time still matches.
-  const survivors = (await terminateRecorded(root)).filter(
-    (entry) => entry.outcome === 'survived',
+  // Anything left that the ledger cannot verify blocks the removal as well as a survivor.
+  const survivors = (await terminateRecorded(root)).filter((entry) =>
+    ['survived', 'unverified-members'].includes(entry.outcome),
   );
   if (survivors.length > 0) {
     throw new Error(
-      `processes survived SIGKILL, sandbox kept for inspection: ${survivors.map((entry) => entry.pid).join(', ')}`,
+      `processes left running, sandbox kept for inspection: ${survivors.map((entry) => `${entry.pid} (${entry.outcome})`).join(', ')}`,
     );
   }
   // The display lock and socket are not in the sandbox. They are removed only when they
