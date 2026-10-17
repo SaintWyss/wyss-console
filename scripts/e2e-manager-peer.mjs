@@ -42,6 +42,10 @@ export function verifyManagerPeer(root) {
     throw new Error('invalid sandbox systemd peer credentials');
   }
   if (
+    typeof peer.pid !== 'number' ||
+    typeof peer.uid !== 'number' ||
+    !Number.isSafeInteger(peer.pid) ||
+    !Number.isSafeInteger(peer.uid) ||
     peer.pid !== manager.pid ||
     peer.uid !== process.getuid?.() ||
     identityOf(manager.pid) !== manager.startTime
