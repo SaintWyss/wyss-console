@@ -134,7 +134,11 @@ export function assertPlainFileOrAbsent(path) {
  * @param {{ uid: number }} real the real user id
  * @param {{ requireManager?: boolean }} [options] demand a live private socket before systemctl
  */
-export function assertOwnedRuntime(root, real, { requireManager = false } = {}) {
+export function assertOwnedRuntime(
+  root,
+  real,
+  { requireManager = false } = {},
+) {
   // Use lstat, not existsSync: a dangling symlink is still unsafe.
   /** @param {string} path */
   const statOrNull = (path) => {
