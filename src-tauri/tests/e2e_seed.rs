@@ -85,7 +85,7 @@ fn seed_two_sessions_in_one_workspace() {
     // A test binary must not be able to write a report or run a session in an
     // arbitrary host directory through environment variables.
     let sandbox = PathBuf::from(env::var_os("WYSS_E2E_SANDBOX").unwrap());
-    assert_eq!(workspace, sandbox.join("workspace").to_string_lossy());
+    assert_eq!(Path::new(&workspace), sandbox.join("workspace"));
     assert_eq!(Path::new(&report), sandbox.join("seed-report.json"));
 
     let sessions = SessionService::new(Some(runtime));
