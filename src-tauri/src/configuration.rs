@@ -9,7 +9,9 @@ use crate::agentconfig::{
     Bounds, Change, Changes, Environment, Faults, Inventory, InventoryService, Operation,
     SecretToolStore, Summary, Vault,
 };
-use crate::native_dialog::{Field, GtkConfirm, choose_file, passphrase, text_form};
+use crate::native_dialog::{
+    Field, GtkConfirm, choose_file, choose_file_titled, passphrase, text_form,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 use tauri::AppHandle;
@@ -360,6 +362,58 @@ fn mcp_from(typed: &[String], remote: bool) -> McpSpec {
     }
 }
 
+#[tauri::command]
+async fn configuration_document_export(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: ItemId,
+) -> Result<Done, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let item = checked(&request.item)?.to_owned();
+        // Resolve before drawing dialogs; text stays within the backend.
+        changes.document_current(&item)?;
+        let Some(secret) = passphrase(&app, true) else {
+            return Ok(Done { done: false });
+        };
+        let bytes = changes.export_document_template(&item, &secret)?;
+        let Some(path) = choose_file_titled(
+            &app,
+            true,
+            "instructions.wyss-template",
+            "Export instruction template",
+        ) else {
+            return Ok(Done { done: false });
+        };
+        write_private_file(&path, &bytes)
+            .map_err(|()| ConfigurationError::Change(ChangeFailure::Internal))?;
+        Ok(Done { done: true })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn configuration_document_import(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: ItemId,
+) -> Result<PlanView, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let item = checked(&request.item)?.to_owned();
+        let (label, expected) = changes.document_current(&item)?;
+        let path = choose_file_titled(&app, false, "", "Import instruction template").ok_or_else(cancelled)?;
+        let bytes = read_small_file(&path).map_err(|()| ConfigurationError::Change(ChangeFailure::ImportInvalid))?;
+        let secret = passphrase(&app, false).ok_or_else(cancelled)?;
+        let text = changes.open_document_template(&item, &bytes, &secret)?;
+        let typed = text_form(&app, "Review an instruction template",
+            &format!("Destination: {label} in your account. This imported text is untrusted. Review every instruction before replacing this existing file. Importing grants no permissions; a separate plan and native confirmation are still required."),
+            vec![Field { label: "Imported instructions (Markdown, at most 64 KiB)".to_owned(), initial: text, multiline: true }]
+        ).ok_or_else(cancelled)?;
+        Ok(changes.plan_authored(Authoring::EditDocument { item, text: typed[0].clone(), expected })?)
+    }).await
+}
+
 /// Instruction text never crosses the webview boundary, in either direction.
 #[tauri::command]
 async fn configuration_edit_document(
@@ -667,6 +721,8 @@ const COMMANDS: &[&str] = &[
     "configuration_author_mcp",
     "configuration_edit_mcp",
     "configuration_edit_document",
+    "configuration_document_export",
+    "configuration_document_import",
 ];
 
 /// What the desktop binary hands to the library: the commands, the state they read, and
@@ -689,7 +745,9 @@ pub fn extension() -> wyss_console::Extension {
             configuration_edit_hook,
             configuration_author_mcp,
             configuration_edit_mcp,
-            configuration_edit_document
+            configuration_edit_document,
+            configuration_document_export,
+            configuration_document_import
         ]),
         install: Box::new(|builder| builder.manage(Configuration::start())),
         on_exit: None,

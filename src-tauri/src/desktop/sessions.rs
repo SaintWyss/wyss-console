@@ -554,6 +554,8 @@ mod tests {
             "allow-configuration-author-mcp",
             "allow-configuration-edit-mcp",
             "allow-configuration-edit-document",
+            "allow-configuration-document-export",
+            "allow-configuration-document-import",
             // Native agent sessions and session profiles (F3, ADR 0035): an agent of the
             // closed catalogue, a project the native dialog returned, a session or a profile
             // of the desktop's own registry. None takes a command, an argument list, an

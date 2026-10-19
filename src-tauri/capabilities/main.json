@@ -51,6 +51,8 @@
     "allow-configuration-author-mcp",
     "allow-configuration-edit-mcp",
     "allow-configuration-edit-document",
+    "allow-configuration-document-export",
+    "allow-configuration-document-import",
     "allow-native-launcher",
     "allow-native-preview",
     "allow-native-start",

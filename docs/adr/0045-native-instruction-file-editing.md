@@ -39,6 +39,9 @@ restoration store. No authority or Managed protocol changes.
 
 ## Remaining F5 work
 
+Subsequent extension: [ADR 0046](0046-instruction-templates.md) delivers passphrase-sealed
+templates for existing instruction files. The following describes the original increment.
+
 Creation and deletion of instruction files, document templates, Codex skill-directory
 inventory/authoring and project authoring are not delivered by this increment. They must
 preserve absent-versus-empty state and concurrent-writer recovery before being offered.

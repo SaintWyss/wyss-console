@@ -4400,3 +4400,45 @@ fn an_imported_instruction_inverse_cannot_request_plaintext_storage() {
     );
     world.assert_no_secret_outside_the_file();
 }
+
+#[test]
+fn instruction_template_import_is_only_native_editor_input_until_a_separate_plan_is_confirmed() {
+    let world = World::new(SETTINGS);
+    let (item, path) = document_fixture(
+        &world,
+        SourceKey::ClaudeUserRules,
+        "rules/review.md",
+        "before\r\n",
+    );
+    let target = super::document::Target {
+        source: SourceKey::ClaudeUserRules,
+        name: "rules/review.md".into(),
+    };
+    let bytes =
+        super::instruction_template::export(&target, "imported\r\n", "test passphrase", 1000)
+            .unwrap();
+    let text = world
+        .service
+        .open_document_template(&item, &bytes, "test passphrase")
+        .unwrap();
+    assert_eq!(text, "imported\r\n");
+    assert_eq!(fs::read(&path).unwrap(), b"before\r\n");
+    assert!(world.service.history(None, 20).0.is_empty());
+    assert!(world.service.records().is_empty());
+    assert_eq!(
+        world.service.open_document_template(&item, &bytes, "wrong"),
+        Err(ChangeFailure::ImportInvalid)
+    );
+    fs::write(&path, "outside").unwrap();
+    assert_eq!(
+        edit_document(&world, &item, "before\r\n", &text),
+        Err(ChangeFailure::EntryChanged)
+    );
+    let plan = edit_document(&world, &item, "outside", &text).unwrap();
+    world.confirm.accept.store(false, Ordering::SeqCst);
+    assert_eq!(
+        world.service.apply(&plan.id).unwrap().outcome,
+        Outcome::RefusedByUser
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), "outside");
+}

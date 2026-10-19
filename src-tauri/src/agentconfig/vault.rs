@@ -43,6 +43,8 @@ pub enum RecordKind {
     Export,
     /// A provider's API key kept by the Console (F14).
     Credential,
+    /// An untrusted instruction template, sealed for transfer (F5).
+    InstructionTemplate,
 }
 
 impl RecordKind {
@@ -51,6 +53,7 @@ impl RecordKind {
             Self::Restoration => "restoration",
             Self::Export => "export",
             Self::Credential => "credential",
+            Self::InstructionTemplate => "instruction-template",
         }
     }
 }

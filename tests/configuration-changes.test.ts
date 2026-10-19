@@ -286,6 +286,22 @@ describe('the changes controller', () => {
     expect(fake.calls).toEqual(['edit_document:' + 'a'.repeat(32)]);
     expect(states.at(-1)?.plan).not.toBeNull();
   });
+  it('opens a template by selected inventory ID without applying it or granting anything', async () => {
+    controller.author((c) => c.importDocument('a'.repeat(32)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.calls).toEqual(['import_document:' + 'a'.repeat(32)]);
+    expect(states.at(-1)?.plan).not.toBeNull();
+    expect(fake.calls.some((c) => c.startsWith('apply'))).toBe(false);
+  });
+
+  it('exports a template through the desktop without exposing its text to the page', async () => {
+    controller.exportDocument('a'.repeat(32));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.calls).toContain('export_document:' + 'a'.repeat(32));
+    expect(states.at(-1)?.notice).toBe('exported');
+    expect(states.at(-1)?.plan).toBeNull();
+  });
+
   it('treats closing the desktop’s writing window as a cancel, not a failure', async () => {
     fake.failNext = 'cancelled';
     controller.author((c) => c.editHook('a'.repeat(32)));

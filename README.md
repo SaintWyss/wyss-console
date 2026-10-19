@@ -662,6 +662,14 @@ read, and never a path.
 - **Trying it on your own machine.** `cargo test -- --ignored real_machine --nocapture`
   prints counts and outcomes of your real configuration, never a value, and writes nothing.
 
+Existing user instruction files (Claude Code skills/rules, Codex `AGENTS.md` and
+`AGENTS.override.md`, OpenCode `AGENTS.md`) can be changed in the native editor, with a
+separate confirmation and always-encrypted exact undo. **Export template…** writes a
+versioned, passphrase-encrypted instruction template through a native chooser. **Apply
+template…** reviews untrusted imported text natively before making an ordinary edit plan;
+it grants nothing and never applies automatically. Provider reload is not inferred from a
+successful write. Creation/deletion and other F5 scope remain open (ADR 0045/0046).
+
 ## Installing, upgrading, rolling back, diagnosing
 
 After `npm run desktop:package`, `scripts/install.sh install --package

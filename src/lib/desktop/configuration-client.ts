@@ -107,6 +107,20 @@ export function authorHook(
     parsePlan,
   );
 }
+export function exportDocument(item: string): Promise<boolean> {
+  return checked(
+    'configuration_document_export',
+    { request: { item } },
+    parseDone,
+  );
+}
+export function importDocument(item: string): Promise<Plan> {
+  return checked(
+    'configuration_document_import',
+    { request: { item } },
+    parsePlan,
+  );
+}
 export function editDocument(item: string): Promise<Plan> {
   return checked(
     'configuration_edit_document',

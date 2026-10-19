@@ -23,8 +23,8 @@ Recheck both heads and `git status` before writing or pushing.
 ## Active
 
 Product completion authorised by Santiago on 2026-10-19. F5 existing user instruction-file
-editing is implemented and passed installed native GUI apply/undo (ADR 0045;
-`docs/acceptance/f5-instruction-editing-2026-10-19.md`). Creation/deletion and templates
+editing and passphrase-sealed instruction templates are implemented (ADR 0045/0046;
+`docs/acceptance/f5-instruction-editing-2026-10-19.md`). Native edit/import apply and exact undo passed in the normal environment. Creation/deletion, Codex skill authoring, project authoring and hook/MCP templates
 remain engineering work. Preserve the accepted provider writers and Managed authority guarantees.
 See `docs/acceptance/remaining-roadmap-2026-10-19.md` for the remaining scope.
 

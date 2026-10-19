@@ -429,6 +429,30 @@ impl ChangeService {
         Ok((target.label(), text))
     }
 
+    /// A portable template is always encrypted and never embeds a destination.
+    pub fn export_document_template(
+        &self,
+        item: &str,
+        passphrase: &str,
+    ) -> Result<Vec<u8>, ChangeFailure> {
+        let target = self.document_target(item)?;
+        let (_, text) = self.document_current(item)?;
+        super::instruction_template::export(&target, &text, passphrase, EXPORT_ROUNDS)
+            .map_err(|_| ChangeFailure::Internal)
+    }
+
+    /// Native-editor input only: opening a template neither plans nor applies anything.
+    pub fn open_document_template(
+        &self,
+        item: &str,
+        bytes: &[u8],
+        passphrase: &str,
+    ) -> Result<String, ChangeFailure> {
+        let target = self.document_target(item)?;
+        super::instruction_template::open(&target, bytes, passphrase)
+            .map_err(|_| ChangeFailure::ImportInvalid)
+    }
+
     /// The file a plan is made on: read through the approved roots, and writable only if it
     /// is this user's, in a place nobody else can change.
     fn read_target(&self, key: SourceKey) -> Result<(PathBuf, Vec<u8>), ChangeFailure> {

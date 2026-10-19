@@ -85,6 +85,16 @@ export class FakeChanges {
         this.check();
         return this.plan;
       },
+      exportDocument: async (item: string) => {
+        this.calls.push(`export_document:${item}`);
+        this.check();
+        return true;
+      },
+      importDocument: async (item: string) => {
+        this.calls.push(`import_document:${item}`);
+        this.check();
+        return this.plan;
+      },
       editDocument: async (item: string) => {
         this.calls.push(`edit_document:${item}`);
         this.check();

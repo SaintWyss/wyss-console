@@ -14,6 +14,8 @@ import {
   authorMcp,
   editHook,
   editDocument,
+  exportDocument,
+  importDocument,
   editMcp,
   deleteRecord,
   exportRecord,
@@ -36,6 +38,8 @@ export interface ChangesClient {
   ): Promise<Plan>;
   editHook(item: string): Promise<Plan>;
   editDocument(item: string): Promise<Plan>;
+  exportDocument(item: string): Promise<boolean>;
+  importDocument(item: string): Promise<Plan>;
   authorMcp(
     name: string,
     kind: 'local' | 'remote',
@@ -55,6 +59,8 @@ const desktopClient: ChangesClient = {
   authorHook,
   editHook,
   editDocument,
+  exportDocument,
+  importDocument,
   authorMcp,
   editMcp,
   records: readRecords,
@@ -326,6 +332,9 @@ export class ChangesController {
   }
   exportRecord(record: string) {
     this.record(() => this.client.exportRecord(record), 'exported');
+  }
+  exportDocument(item: string) {
+    this.record(() => this.client.exportDocument(item), 'exported');
   }
   importRecord() {
     this.record(() => this.client.importRecord(), 'imported');

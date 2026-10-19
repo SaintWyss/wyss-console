@@ -223,6 +223,8 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-configuration-author-mcp',
     'allow-configuration-edit-mcp',
     'allow-configuration-edit-document',
+    'allow-configuration-document-export',
+    'allow-configuration-document-import',
     // Native agent sessions (F3): the closed catalogue, a start that names an agent, a
     // project the user chose and a profile, the registry, and the profiles. None takes a
     // command, an argument list, an environment or a path.
@@ -330,6 +332,8 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   // One exception, deliberate and narrow (ADR 0034, F2a): exporting a kept hook. The page
   // names a record it was given and nothing else; the passphrase and the file are asked
   // for in native windows the page cannot reach, and what is written is ciphertext.
+  // The instruction-template export has the same native chooser/passphrase boundary:
+  // only an inventory ID enters; ciphertext leaves through the chosen native file.
   // Second exception, deliberate and bounded (ADR 0035, F3): the native sessions' own
   // commands. They name an agent of a closed catalogue, a project the native dialog
   // returned, a session or a profile of the desktop's own registry, and so they are
@@ -337,7 +341,9 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   // window can run something of its own stay forbidden for them below.
   for (const permission of capability.permissions.filter(
     (p: string) =>
-      p !== 'allow-configuration-export' && !p.startsWith('allow-native-'),
+      p !== 'allow-configuration-export' &&
+      p !== 'allow-configuration-document-export' &&
+      !p.startsWith('allow-native-'),
   ))
     expect(permission).not.toMatch(
       /always|remember|trust|rule|policy|allowlist|respond|decision|lease|scope|profile|runtime|control|request|invoke|exec|shell|spawn|process|socket|fs|audit|watch|replay|export|save|payload|envelope|service|unit|systemd|systemctl|dbus|install|binary|path|restart|stop|kill|command/,

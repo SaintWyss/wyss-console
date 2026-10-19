@@ -76,6 +76,48 @@ acceptance has not been claimed by this increment.
 
 ## Still open
 
-Creation/deletion with absent-versus-empty recovery; document templates; Codex skill
+Creation/deletion with absent-versus-empty recovery; Codex skill
 inventory/authoring; project authoring. F5 remains open. Individual Codex hooks still require
 G-INF. See `remaining-roadmap-2026-10-19.md` and `../CHECKPOINT.md`.
+
+## Subsequent increment: instruction templates (ADR 0046)
+
+Existing instruction files now support **Export template…** and **Apply template…**.
+The template is versioned and always passphrase-sealed in its own authentication domain.
+It contains a kind and text, never a provider destination or a permission grant. Importing
+opens an untrusted-text review in GTK; it does not write, activate or grant anything.
+A separate ordinary plan and native confirmation are required.
+
+Automated verification: frontend **800 tests** passed with formatting, lint, types and
+build; Rust **501 library + 291 binary + 1 authority-boundary** tests passed, 12 remained
+ignored; all-target clippy with `-D warnings` passed. The three additional Rust tests cover
+byte-preserving encrypted round trips, cross-domain and cross-kind rejection, unknown
+schemas/fields, oversized/tampered input, wrong passphrases, no write/grant on import,
+editor compare-and-swap and refusal of native consent. Two additional frontend tests
+verify ID-only export and import without automatic apply. Capability exceptions name the
+single new export command exactly; generic filesystem/process/shell grants remain absent.
+
+In the **normal native release GUI**, using the same real host, HOME, bus, state and wallet:
+
+1. A new real Claude user rule `rules/wyss-console-acceptance-template.md` (75 bytes,
+   mode 0600, SHA-256 prefix `377d159b850cf95d`) was backed up and selected.
+2. Export opened the native masked passphrase dialog (two entries) and native Save chooser.
+   The chosen `.wyss-template` was 511 bytes, mode 0600, contained the versioned encrypted
+   envelope and neither the source instruction text nor the passphrase.
+3. Apply template opened the native Open chooser and masked passphrase dialog. The native
+   review displayed the exact original text and explicitly called it untrusted. At this
+   point the real destination was still unchanged.
+4. A harmless comment was added **in that native editor**, then the plan and native
+   confirmation were accepted. The real file became 121 bytes. History → Undo → native
+   confirmation returned it to the exact original bytes and mode.
+5. After checking its backup, the newly created acceptance rule was removed, restoring
+   its prior absence. Claude settings, Codex TOML and OpenCode JSONC kept their original
+   checksums, owners and modes. No model or paid credential experiment was involved.
+
+Native evidence: `.artifacts/acceptance/f5-template-2026-10-19/` (`before.json`,
+`original.md`, encrypted template, native review screenshot, `result.json`). This was a
+release package run against the actual environment, with no alternative installation or
+HOME. It is not provider hot-reload evidence.
+
+Remaining F5 scope: absent-aware creation/deletion, Codex skill inventory/authoring,
+project authoring and hook/MCP templates. **The full product remains unfinished.**

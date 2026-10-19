@@ -1,7 +1,7 @@
 # Reconciliation of the 2026-10-19 drafts with the implementation
 
 The drafts in this folder were written without sight of the code. They stay **proposals**.
-The accepted record is ADR 0034–0045 and `docs/acceptance/`.
+The accepted record is ADR 0034–0046 and `docs/acceptance/`.
 
 | Draft topic                       | Where the implementation is the authority                                                                                                  |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -11,7 +11,7 @@ The accepted record is ADR 0034–0045 and `docs/acceptance/`.
 | Credentials (F14)                 | ADR 0038 (sealed in the encrypted store, key typed in a native dialog); the draft's vault contract is replaced                             |
 | Handoff (F11a)                    | ADR 0039 (brief as one argv word, new session)                                                                                             |
 | Install (F13)                     | ADR 0040, `scripts/install.sh`, `--diagnose`                                                                                               |
-| Authoring                         | ADR 0042/0044 cover hooks/MCP; ADR 0045 covers existing user instructions. Creation/deletion/templates remain open                         |
+| Authoring                         | ADR 0042/0044 cover hooks/MCP; ADR 0045/0046 cover existing user instructions and sealed templates. Creation/deletion remain open          |
 | Remote, F1b, F8, F12              | Current owner authorisation permits eligible engineering; specific security/network/install/credential boundaries still apply (CHECKPOINT) |
 
 Where a draft and an ADR disagree, the ADR wins. No code was changed to match a draft.

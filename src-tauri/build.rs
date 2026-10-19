@@ -125,6 +125,8 @@ fn main() {
             "configuration_author_mcp",
             "configuration_edit_mcp",
             "configuration_edit_document",
+            "configuration_document_export",
+            "configuration_document_import",
             "native_launcher",
             "native_preview",
             "native_start",

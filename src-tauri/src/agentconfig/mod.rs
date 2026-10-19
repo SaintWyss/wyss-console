@@ -45,6 +45,7 @@ pub mod declared;
 pub mod document;
 mod fault;
 mod fsutil;
+mod instruction_template;
 mod inventory;
 pub mod journal;
 mod jsonspan;

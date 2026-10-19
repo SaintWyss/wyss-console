@@ -1,7 +1,9 @@
 # Changelog
 
-## 2026-10-19 — Native instruction-file editing (F5 increment)
+## 2026-10-19 — Native instruction-file editing and templates (F5 increments)
 
+- Passphrase-sealed instruction templates, native import review and separate reversible
+  application (ADR 0046); imports grant no authority.
 - Existing user skills/rules open in the native editor, with mandatory native confirmation,
   always-sealed exact undo and concurrent-write/crash recovery (ADR 0045).
 - GUI-only upgrades can preserve the running host with `install --keep-host`.

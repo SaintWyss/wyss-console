@@ -631,6 +631,25 @@
                             c.editMcp(selected.id),
                           )}>Change it…</button
                 >
+                {#if selectedAuthoring.edit === 'document'}
+                  <button
+                    type="button"
+                    class="action"
+                    disabled={busy || changes.busy}
+                    onclick={() =>
+                      changesController.exportDocument(selected.id)}
+                    >Export template…</button
+                  >
+                  <button
+                    type="button"
+                    class="action"
+                    disabled={busy || changes.busy}
+                    onclick={() =>
+                      changesController.author((c) =>
+                        c.importDocument(selected.id),
+                      )}>Apply template…</button
+                  >
+                {/if}
                 {#if selectedAuthoring.remove}
                   <button
                     type="button"
