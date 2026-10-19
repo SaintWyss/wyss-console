@@ -137,6 +137,9 @@ fn main() {
             "native_profile_restore",
             "native_profile_export",
             "native_profile_import",
+            "host_terminals",
+            "host_info",
+            "terminal_redraw",
         ]),
     ))
     .expect("failed to build Wyss Console metadata");

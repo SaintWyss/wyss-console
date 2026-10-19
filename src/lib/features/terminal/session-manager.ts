@@ -3,7 +3,8 @@ import {
   type ConsoleSessionId,
 } from '../../contracts/identities';
 import type { StartReply } from '../../contracts/native';
-import type { TerminalInfo } from '../../contracts/terminal';
+import type { HostTerminal, TerminalInfo } from '../../contracts/terminal';
+import * as desktop from '../../desktop/terminal-client';
 import { TerminalController, type TerminalViewState } from './controller';
 import { createRenderer } from './renderer';
 
@@ -32,11 +33,14 @@ export type ControllerFactory = (
   host: HTMLElement,
   update: (state: TerminalViewState) => void,
   adopted?: TerminalInfo,
+  title?: string,
 ) => TerminalController;
 interface OwnedSession extends TerminalSession {
   controller?: TerminalController;
   closing?: Promise<void>;
   adopted?: TerminalInfo;
+  /** Made by an earlier window and held by the host: drawn again once attached. */
+  restored?: boolean;
 }
 export const SESSION_LIMIT = 16;
 
@@ -53,8 +57,24 @@ export class TerminalSessionManager {
 
   constructor(
     private readonly update: (state: WorkspaceState) => void,
-    private readonly factory: ControllerFactory = (host, update, adopted) =>
-      new TerminalController(host, createRenderer(host), update, adopted),
+    private readonly factory: ControllerFactory = (
+      host,
+      update,
+      adopted,
+      title,
+    ) =>
+      new TerminalController(
+        host,
+        createRenderer(host),
+        update,
+        adopted,
+        title,
+      ),
+    /**
+     * Terminals belong to a host that outlives this window: they are listed from it when the
+     * window opens, and leaving the window detaches them instead of closing them.
+     */
+    private readonly persistent = false,
   ) {}
   private publish() {
     if (!this.disposed)
@@ -73,7 +93,41 @@ export class TerminalSessionManager {
   start() {
     if (this.started || this.disposed) return;
     this.started = true;
-    this.create();
+    if (this.persistent) void this.restoreOrCreate();
+    else this.create();
+  }
+  /** What the host holds is shown again; with nothing held, one new terminal. */
+  private async restoreOrCreate() {
+    const held = await desktop.listHostTerminals();
+    if (this.disposed) return;
+    if (held.length === 0) {
+      this.create();
+      return;
+    }
+    this.ordinal = held.filter((h) => h.native === null).length;
+    held.forEach((entry, index) => this.adopt(entry, index === 0));
+  }
+  private adopt(entry: HostTerminal, activate: boolean) {
+    const id = parseConsoleSessionId(crypto.randomUUID());
+    const tag = entry.native;
+    this.sessions.push({
+      id,
+      title: entry.title,
+      view: { state: 'starting' },
+      adopted: entry.terminal,
+      restored: true,
+      native: tag
+        ? {
+            sessionId: tag.session_id,
+            agent: tag.agent_name,
+            project: tag.project,
+            profile: tag.profile,
+            throughShell: tag.through_shell,
+          }
+        : undefined,
+    });
+    if (activate) this.activate(id);
+    else this.publish();
   }
   create(): ConsoleSessionId | undefined {
     if (this.disposed || this.creating) return;
@@ -143,10 +197,16 @@ export class TerminalSessionManager {
           this.publish();
         },
         session.adopted,
+        session.title,
       );
       session.controller = controller;
       controller.setActive(this.active === id);
-      void controller.start().finally(() => this.created(id));
+      void controller.start().finally(() => {
+        this.created(id);
+        const info = session.adopted;
+        if (session.restored && info && session.view.state === 'running')
+          void desktop.redrawTerminal(info.terminal_id);
+      });
     } catch {
       session.view = { state: 'failed', error: 'renderer_error' };
       this.created(id);
@@ -199,8 +259,13 @@ export class TerminalSessionManager {
   dispose(): Promise<void> {
     if (this.disposal) return this.disposal;
     this.disposed = true;
+    // A host keeps the terminals past the window: they are let go of, not closed.
     this.disposal = Promise.all(
-      this.sessions.map((s) => this.close(s.id)),
+      this.sessions.map((s) =>
+        this.persistent
+          ? (s.controller?.detach() ?? Promise.resolve())
+          : this.close(s.id),
+      ),
     ).then(() => undefined);
     return this.disposal;
   }

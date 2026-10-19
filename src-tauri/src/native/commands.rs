@@ -1,62 +1,28 @@
-//! The window's commands for native sessions. Every request names something the desktop
-//! already holds (an agent from the closed catalogue, a session, a profile, a project the
-//! user chose) or carries a profile's closed words. None carries an executable, an argument
-//! list, an environment or a path (C-01): the folder of a project is only ever a folder the
-//! native dialog returned.
-use super::{
-    catalogue::AgentId,
-    profile::Body,
-    profiles::Summary,
-    service::{
-        LauncherView, NativeError, NativeService, PreviewView, SessionView, StartReply,
-        StartRequest,
-    },
-};
+//! The window's commands for native sessions. Every request names something the host already
+//! holds (an agent from the closed catalogue, a session, a profile, a project the user chose) or
+//! carries a profile's closed words. None carries an executable, an argument list, an
+//! environment or a path (C-01): the folder of a project is only ever a folder the native
+//! dialog returned. The sessions themselves live in the host (F9): these commands only
+//! validate the request and pass it on, and the answer comes back as the host made it.
+use super::{catalogue::AgentId, profile::Body, service::StartRequest};
+use crate::host::{client::HostLink, protocol::HostError};
 use crate::native_dialog::{choose_file_titled, choose_folder};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use tauri::{AppHandle, State};
-use wyss_console::terminal::{TerminalService, contracts::TerminalSize};
+use wyss_console::terminal::contracts::TerminalSize;
 
-/// The service as the desktop holds it: `None` when there is no private state directory,
-/// which the window is told instead of being shown an empty launcher.
-pub struct Native {
-    service: Option<NativeService>,
-}
-
-impl Native {
-    pub fn start() -> Self {
-        let home = std::env::var_os("HOME")
-            .map(std::path::PathBuf::from)
-            .filter(|p| p.is_absolute());
-        let base = std::env::var_os("XDG_STATE_HOME")
-            .map(std::path::PathBuf::from)
-            .filter(|p| p.is_absolute())
-            .or_else(|| home.as_ref().map(|h| h.join(".local/state")))
-            .map(|b| b.join("wyss-console").join("native"));
-        let service = home
-            .zip(base)
-            .and_then(|(home, base)| NativeService::open(base, home, std::env::var_os("PATH")));
-        Self { service }
-    }
-
-    fn service(&self) -> Result<&NativeService, NativeError> {
-        self.service
-            .as_ref()
-            .ok_or_else(|| NativeError::new("unavailable"))
-    }
-}
-
-fn well_formed(id: &str) -> Result<&str, NativeError> {
+fn well_formed(id: &str) -> Result<&str, HostError> {
     (id.len() == 32
         && id
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
     .then_some(id)
-    .ok_or_else(|| NativeError::new("request_invalid"))
+    .ok_or_else(|| HostError::new("request_invalid"))
 }
 
 /// A profile id: 32 hex digits, or a template's own word.
-fn profile_id(id: &str) -> Result<&str, NativeError> {
+fn profile_id(id: &str) -> Result<&str, HostError> {
     if id.starts_with("template-")
         && id.len() <= 40
         && id.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')
@@ -67,17 +33,20 @@ fn profile_id(id: &str) -> Result<&str, NativeError> {
 }
 
 async fn blocking<T: Send + 'static>(
-    work: impl FnOnce() -> Result<T, NativeError> + Send + 'static,
-) -> Result<T, NativeError> {
+    work: impl FnOnce() -> Result<T, HostError> + Send + 'static,
+) -> Result<T, HostError> {
     tauri::async_runtime::spawn_blocking(work)
         .await
-        .map_err(|_| NativeError::new("internal"))?
+        .map_err(|_| HostError::new("internal"))?
 }
 
+/// The host's answer, for the page to check against its own contract.
+type Answer = Result<Value, HostError>;
+
 #[tauri::command]
-pub async fn native_launcher(native: State<'_, Native>) -> Result<LauncherView, NativeError> {
-    let service = native.service()?.clone();
-    blocking(move || Ok(service.launcher())).await
+pub async fn native_launcher(link: State<'_, HostLink>) -> Answer {
+    let link = link.inner().clone();
+    blocking(move || link.call("native_launcher", Value::Null)).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,26 +57,38 @@ pub struct PreviewRequest {
 }
 
 #[tauri::command]
-pub fn native_preview(
-    native: State<'_, Native>,
-    request: PreviewRequest,
-) -> Result<PreviewView, NativeError> {
-    let profile = request.profile_id.as_deref().map(profile_id).transpose()?;
-    native.service()?.preview(request.agent_id, profile)
-}
-
-#[tauri::command]
-pub async fn native_start(
-    native: State<'_, Native>,
-    terminal: State<'_, TerminalService>,
-    request: StartRequest,
-) -> Result<StartReply, NativeError> {
-    let service = native.service()?.clone();
-    let terminal = terminal.inner().clone();
+pub async fn native_preview(link: State<'_, HostLink>, request: PreviewRequest) -> Answer {
     if let Some(id) = request.profile_id.as_deref() {
         profile_id(id)?;
     }
-    blocking(move || service.start(&terminal, request)).await
+    let link = link.inner().clone();
+    blocking(move || {
+        link.call(
+            "native_preview",
+            json!({"agent_id": request.agent_id, "profile_id": request.profile_id}),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn native_start(link: State<'_, HostLink>, request: StartRequest) -> Answer {
+    if let Some(id) = request.profile_id.as_deref() {
+        profile_id(id)?;
+    }
+    let link = link.inner().clone();
+    blocking(move || {
+        link.call(
+            "native_start",
+            json!({
+                "agent_id": request.agent_id,
+                "project": request.project,
+                "profile_id": request.profile_id,
+                "size": request.size,
+            }),
+        )
+    })
+    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,14 +98,9 @@ pub struct ListRequest {
 }
 
 #[tauri::command]
-pub async fn native_sessions(
-    native: State<'_, Native>,
-    terminal: State<'_, TerminalService>,
-    request: ListRequest,
-) -> Result<Vec<SessionView>, NativeError> {
-    let service = native.service()?.clone();
-    let terminal = terminal.inner().clone();
-    blocking(move || Ok(service.sessions(&terminal, request.sample))).await
+pub async fn native_sessions(link: State<'_, HostLink>, request: ListRequest) -> Answer {
+    let link = link.inner().clone();
+    blocking(move || link.call("native_sessions", json!({"sample": request.sample}))).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,14 +110,10 @@ pub struct SessionRequest {
 }
 
 #[tauri::command]
-pub async fn native_stop(
-    native: State<'_, Native>,
-    terminal: State<'_, TerminalService>,
-    request: SessionRequest,
-) -> Result<(), NativeError> {
-    let service = native.service()?.clone();
-    let terminal = terminal.inner().clone();
-    blocking(move || service.stop(&terminal, well_formed(&request.id)?)).await
+pub async fn native_stop(link: State<'_, HostLink>, request: SessionRequest) -> Answer {
+    well_formed(&request.id)?;
+    let link = link.inner().clone();
+    blocking(move || link.call("native_stop", json!({"id": request.id}))).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -152,22 +124,23 @@ pub struct RestartRequest {
 }
 
 #[tauri::command]
-pub async fn native_restart(
-    native: State<'_, Native>,
-    terminal: State<'_, TerminalService>,
-    request: RestartRequest,
-) -> Result<StartReply, NativeError> {
-    let service = native.service()?.clone();
-    let terminal = terminal.inner().clone();
-    blocking(move || service.restart(&terminal, well_formed(&request.id)?, request.size)).await
+pub async fn native_restart(link: State<'_, HostLink>, request: RestartRequest) -> Answer {
+    well_formed(&request.id)?;
+    let link = link.inner().clone();
+    blocking(move || {
+        link.call(
+            "native_restart",
+            json!({"id": request.id, "size": request.size}),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn native_forget(
-    native: State<'_, Native>,
-    request: SessionRequest,
-) -> Result<(), NativeError> {
-    native.service()?.forget(well_formed(&request.id)?)
+pub async fn native_forget(link: State<'_, HostLink>, request: SessionRequest) -> Answer {
+    well_formed(&request.id)?;
+    let link = link.inner().clone();
+    blocking(move || link.call("native_forget", json!({"id": request.id}))).await
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -175,14 +148,14 @@ pub struct Chosen {
     path: Option<String>,
 }
 
-/// The native folder dialog. What it returns is remembered for this run and is then the only
-/// kind of folder besides the home and the known projects a start may name.
+/// The native folder dialog. What it returns is remembered by the host for its lifetime and
+/// is then the only kind of folder besides the home and the known projects a start may name.
 #[tauri::command]
 pub async fn native_choose_project(
     app: AppHandle,
-    native: State<'_, Native>,
-) -> Result<Chosen, NativeError> {
-    let service = native.service()?.clone();
+    link: State<'_, HostLink>,
+) -> Result<Chosen, HostError> {
+    let link = link.inner().clone();
     blocking(move || {
         let Some(path) = choose_folder(&app) else {
             return Ok(Chosen { path: None });
@@ -192,8 +165,8 @@ pub async fn native_choose_project(
             .into_string()
             .ok()
             .filter(|t| t.starts_with('/') && t.len() <= 4096 && !t.chars().any(char::is_control))
-            .ok_or_else(|| NativeError::new("project_invalid"))?;
-        service.remember_chosen(text.clone());
+            .ok_or_else(|| HostError::new("project_invalid"))?;
+        link.call("native_remember_project", json!({"path": text}))?;
         Ok(Chosen { path: Some(text) })
     })
     .await
@@ -207,36 +180,38 @@ pub struct DefaultRequest {
 }
 
 #[tauri::command]
-pub fn native_project_default(
-    native: State<'_, Native>,
-    request: DefaultRequest,
-) -> Result<(), NativeError> {
-    let profile = request.profile_id.as_deref().map(profile_id).transpose()?;
-    native
-        .service()?
-        .set_project_default(&request.project, profile.map(str::to_owned))
+pub async fn native_project_default(link: State<'_, HostLink>, request: DefaultRequest) -> Answer {
+    if let Some(id) = request.profile_id.as_deref() {
+        profile_id(id)?;
+    }
+    let link = link.inner().clone();
+    blocking(move || {
+        link.call(
+            "native_project_default",
+            json!({"project": request.project, "profile_id": request.profile_id}),
+        )
+    })
+    .await
 }
 
 // ---- profiles -------------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn native_profiles(native: State<'_, Native>) -> Result<Vec<Summary>, NativeError> {
-    Ok(native.service()?.profiles().list())
-}
-
-#[derive(Debug, Serialize)]
-pub struct Created {
-    id: String,
+pub async fn native_profiles(link: State<'_, HostLink>) -> Answer {
+    let link = link.inner().clone();
+    blocking(move || link.call("profiles", Value::Null)).await
 }
 
 #[tauri::command]
-pub fn native_profile_create(
-    native: State<'_, Native>,
-    body: Body,
-) -> Result<Created, NativeError> {
-    Ok(Created {
-        id: native.service()?.profiles().create(body)?,
+pub async fn native_profile_create(link: State<'_, HostLink>, body: Body) -> Answer {
+    let link = link.inner().clone();
+    blocking(move || {
+        link.call(
+            "profile_create",
+            serde_json::to_value(body).map_err(|_| HostError::new("internal"))?,
+        )
     })
+    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -246,20 +221,17 @@ pub struct SaveRequest {
     body: Body,
 }
 
-#[derive(Debug, Serialize)]
-pub struct Saved {
-    version: u32,
-}
-
 #[tauri::command]
-pub fn native_profile_save(
-    native: State<'_, Native>,
-    request: SaveRequest,
-) -> Result<Saved, NativeError> {
-    let id = profile_id(&request.id)?;
-    Ok(Saved {
-        version: native.service()?.profiles().save(id, request.body)?,
+pub async fn native_profile_save(link: State<'_, HostLink>, request: SaveRequest) -> Answer {
+    profile_id(&request.id)?;
+    let link = link.inner().clone();
+    blocking(move || {
+        link.call(
+            "profile_save",
+            json!({"id": request.id, "body": request.body}),
+        )
     })
+    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -269,27 +241,20 @@ pub struct ProfileRequest {
 }
 
 #[tauri::command]
-pub fn native_profile_delete(
-    native: State<'_, Native>,
-    request: ProfileRequest,
-) -> Result<(), NativeError> {
-    Ok(native
-        .service()?
-        .profiles()
-        .delete(profile_id(&request.id)?)?)
+pub async fn native_profile_delete(link: State<'_, HostLink>, request: ProfileRequest) -> Answer {
+    profile_id(&request.id)?;
+    let link = link.inner().clone();
+    blocking(move || link.call("profile_delete", json!({"id": request.id}))).await
 }
 
 #[tauri::command]
-pub fn native_profile_duplicate(
-    native: State<'_, Native>,
+pub async fn native_profile_duplicate(
+    link: State<'_, HostLink>,
     request: ProfileRequest,
-) -> Result<Created, NativeError> {
-    Ok(Created {
-        id: native
-            .service()?
-            .profiles()
-            .duplicate(profile_id(&request.id)?)?,
-    })
+) -> Answer {
+    profile_id(&request.id)?;
+    let link = link.inner().clone();
+    blocking(move || link.call("profile_duplicate", json!({"id": request.id}))).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -300,14 +265,16 @@ pub struct RestoreRequest {
 }
 
 #[tauri::command]
-pub fn native_profile_restore(
-    native: State<'_, Native>,
-    request: RestoreRequest,
-) -> Result<(), NativeError> {
-    Ok(native
-        .service()?
-        .profiles()
-        .restore(profile_id(&request.id)?, request.version)?)
+pub async fn native_profile_restore(link: State<'_, HostLink>, request: RestoreRequest) -> Answer {
+    profile_id(&request.id)?;
+    let link = link.inner().clone();
+    blocking(move || {
+        link.call(
+            "profile_restore",
+            json!({"id": request.id, "version": request.version}),
+        )
+    })
+    .await
 }
 
 #[derive(Debug, Serialize)]
@@ -318,38 +285,37 @@ pub struct Done {
 #[tauri::command]
 pub async fn native_profile_export(
     app: AppHandle,
-    native: State<'_, Native>,
+    link: State<'_, HostLink>,
     request: ProfileRequest,
-) -> Result<Done, NativeError> {
-    let service = native.service()?.clone();
+) -> Result<Done, HostError> {
+    profile_id(&request.id)?;
+    let link = link.inner().clone();
     blocking(move || {
-        let bytes = service.profiles().export(profile_id(&request.id)?)?;
+        let exported = link.call("profile_export", json!({"id": request.id}))?;
+        let text = exported["text"].as_str().unwrap_or_default().to_owned();
         let Some(path) = choose_file_titled(&app, true, "wyss-profile.json", "Export profile")
         else {
             return Ok(Done { done: false });
         };
-        crate::configuration::write_private_file(&path, &bytes)
-            .map_err(|()| NativeError::new("export_failed"))?;
+        crate::configuration::write_private_file(&path, text.as_bytes())
+            .map_err(|()| HostError::new("export_failed"))?;
         Ok(Done { done: true })
     })
     .await
 }
 
 #[tauri::command]
-pub async fn native_profile_import(
-    app: AppHandle,
-    native: State<'_, Native>,
-) -> Result<Option<Created>, NativeError> {
-    let service = native.service()?.clone();
+pub async fn native_profile_import(app: AppHandle, link: State<'_, HostLink>) -> Answer {
+    let link = link.inner().clone();
     blocking(move || {
         let Some(path) = choose_file_titled(&app, false, "", "Import profile") else {
-            return Ok(None);
+            return Ok(Value::Null);
         };
         let bytes = crate::configuration::read_small_file(&path)
-            .map_err(|()| NativeError::new("profile_import_invalid"))?;
-        Ok(Some(Created {
-            id: service.profiles().import(&bytes)?,
-        }))
+            .map_err(|()| HostError::new("profile_import_invalid"))?;
+        let text =
+            String::from_utf8(bytes).map_err(|_| HostError::new("profile_import_invalid"))?;
+        link.call("profile_import", json!({"text": text}))
     })
     .await
 }
@@ -396,6 +362,8 @@ pub fn extension() -> wyss_console::Extension {
             native_profile_export,
             native_profile_import
         ]),
-        install: Box::new(|builder| builder.manage(Native::start())),
+        // The state they use is the host link, made by the terminal commands' extension.
+        install: Box::new(|builder| builder),
+        on_exit: None,
     }
 }

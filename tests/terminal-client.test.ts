@@ -55,7 +55,7 @@ describe('narrow terminal IPC bridge', () => {
       calls.push([command, args]);
       return command === 'terminal_write' ? 2 : info;
     });
-    await createTerminal({ rows: 24, cols: 80 }, '/example');
+    await createTerminal({ rows: 24, cols: 80 }, '/example', 'Work');
     expect(await writeTerminal(id, Uint8Array.from([0, 255]))).toBe(2);
     await resizeTerminal(id, { rows: 37, cols: 111 });
     await terminalStatus(id);
@@ -63,7 +63,13 @@ describe('narrow terminal IPC bridge', () => {
     expect(calls).toEqual([
       [
         'create_terminal',
-        { request: { size: { rows: 24, cols: 80 }, cwd: '/example' } },
+        {
+          request: {
+            size: { rows: 24, cols: 80 },
+            cwd: '/example',
+            title: 'Work',
+          },
+        },
       ],
       ['terminal_write', { request: { terminal_id: id, data: [0, 255] } }],
       [

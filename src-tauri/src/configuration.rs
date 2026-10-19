@@ -384,6 +384,7 @@ pub fn extension() -> wyss_console::Extension {
             configuration_import
         ]),
         install: Box::new(|builder| builder.manage(Configuration::start())),
+        on_exit: None,
     }
 }
 

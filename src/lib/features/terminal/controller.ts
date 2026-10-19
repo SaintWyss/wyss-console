@@ -23,6 +23,7 @@ export class TerminalController {
   private state: ViewState = 'starting';
   private stopped = false;
   private disposed = false;
+  private detached = false;
   private startTask?: Promise<void>;
   private closeTask?: Promise<void>;
   private disposeTask?: Promise<void>;
@@ -47,6 +48,8 @@ export class TerminalController {
     private readonly update: (state: TerminalViewState) => void,
     /** A terminal the desktop already made (a native session's): read, not created. */
     private readonly adopted?: TerminalInfo,
+    /** The name the host keeps for a terminal this controller makes. */
+    private readonly title?: string,
   ) {}
 
   setActive(active: boolean) {
@@ -87,11 +90,14 @@ export class TerminalController {
         rows: 24,
         cols: 80,
       };
-      this.info = this.adopted ?? (await desktop.createTerminal(size));
+      this.info =
+        this.adopted ??
+        (await desktop.createTerminal(size, null, this.title ?? null));
       this.id = this.info.terminal_id;
       this.sentSize = this.adopted ? this.adopted.size : size;
       if (this.stopped) {
-        await this.closeOnce();
+        // A window that is leaving keeps the terminal; one that was closed does not.
+        if (!this.detached) await this.closeOnce();
         return;
       }
       this.state = 'running';
@@ -315,6 +321,7 @@ export class TerminalController {
       'operation_timeout',
       'close_timeout',
       'input_limit',
+      'host_unavailable',
     ]);
     this.publish({ error: known.has(code) ? code : 'terminal_error' });
     void this.closeOnce().catch(() => undefined);
@@ -344,6 +351,21 @@ export class TerminalController {
       this.publish({ error: 'close_failed' });
     }
     this.renderer.dispose();
+  }
+  /**
+   * Stops reading and drawing and leaves the terminal as it is: the window is going away and
+   * the terminal belongs to a host that outlives it. Nothing is closed.
+   */
+  detach(): Promise<void> {
+    if (this.disposeTask) return this.disposeTask;
+    this.disposed = true;
+    this.detached = true;
+    this.disposeTask = (async () => {
+      this.stopIO();
+      await this.startTask?.catch(() => undefined);
+      this.renderer.dispose();
+    })();
+    return this.disposeTask;
   }
   dispose(): Promise<void> {
     if (this.disposeTask) return this.disposeTask;

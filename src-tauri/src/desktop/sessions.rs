@@ -568,6 +568,10 @@ mod tests {
             "allow-native-profile-restore",
             "allow-native-profile-export",
             "allow-native-profile-import",
+            // The host that holds the terminals past the window (F9).
+            "allow-host-terminals",
+            "allow-host-info",
+            "allow-terminal-redraw",
         ];
         assert_eq!(granted, expected);
         let manifest = include_str!("../../build.rs");

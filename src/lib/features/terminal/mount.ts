@@ -6,7 +6,7 @@ let retirement: Promise<void> = Promise.resolve();
 /** One workspace lease; each manager owns multiple independent terminal controllers. */
 export function mountWorkspace(update: (state: WorkspaceState) => void) {
   if (owner) retirement = owner.dispose();
-  const manager = new TerminalSessionManager(update);
+  const manager = new TerminalSessionManager(update, undefined, true);
   owner = manager;
   void retirement.then(() => manager.start());
   return {

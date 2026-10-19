@@ -1,10 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { TerminalId } from '../contracts/identities';
-import type {
-  TerminalInfo,
-  TerminalOutput,
-  TerminalOutputWire,
-  TerminalSize,
+import {
+  parseHostTerminals,
+  type HostTerminal,
+  type TerminalInfo,
+  type TerminalOutput,
+  type TerminalOutputWire,
+  type TerminalSize,
 } from '../contracts/terminal';
 import { parseUuid, type Uuid } from '../contracts/uuid';
 
@@ -17,13 +19,43 @@ const streams = new Map<
 export async function createTerminal(
   size: TerminalSize,
   cwd: string | null = null,
+  title: string | null = null,
 ): Promise<TerminalInfo> {
   const info = await invoke<TerminalInfo>('create_terminal', {
-    request: { size, cwd },
+    request: { size, cwd, title },
   });
   streams.set(info.terminal_id, { ack: null });
   return info;
 }
+/** The terminals a host holds, for a window that opens after they were made. */
+export async function listHostTerminals(): Promise<HostTerminal[]> {
+  try {
+    const rows = parseHostTerminals(await invoke<unknown>('host_terminals'));
+    for (const row of rows)
+      streams.set(row.terminal.terminal_id, { ack: null });
+    return rows;
+  } catch {
+    return [];
+  }
+}
+/** A program that drew its screen before this window attached draws it again. */
+export async function redrawTerminal(terminal_id: TerminalId): Promise<void> {
+  try {
+    await invoke<unknown>('terminal_redraw', { request: { terminal_id } });
+  } catch {
+    // The terminal may have ended meanwhile: there is nothing to redraw.
+  }
+}
+/** Whether the terminals live in a host that outlives this window. */
+export async function hostIsRemote(): Promise<boolean> {
+  try {
+    const answer = await invoke<{ remote?: unknown }>('host_info');
+    return answer?.remote === true;
+  } catch {
+    return false;
+  }
+}
+
 /** A terminal the desktop created for a native session: reading it is registered here. */
 export function adoptTerminal(info: TerminalInfo): void {
   streams.set(info.terminal_id, { ack: null });

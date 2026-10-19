@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Local application information, one read of the authority projection, one read and six intents for managed sessions, one native folder dialog, three reads and two intents for managed turns, two reads and two decisions for their approvals, one read, one update and one reset of the desktop's own preferences, two reads of the agents' configuration inventory and eight operations to change it with a way back, seventeen operations for native agent sessions and session profiles (none takes a command, an argument list, an environment or a path), and narrow human-terminal operations for the main window.",
+  "description": "Local application information, one read of the authority projection, one read and six intents for managed sessions, one native folder dialog, three reads and two intents for managed turns, two reads and two decisions for their approvals, one read, one update and one reset of the desktop's own preferences, two reads of the agents' configuration inventory and eight operations to change it with a way back, seventeen operations for native agent sessions and session profiles (none takes a command, an argument list, an environment or a path), three operations for the host that holds the terminals past the window (list what it holds, say whether it is a host process, redraw a program's screen), and narrow human-terminal operations for the main window.",
   "windows": ["main"],
   "permissions": [
     "allow-get-app-info",
@@ -62,6 +62,9 @@
     "allow-native-profile-duplicate",
     "allow-native-profile-restore",
     "allow-native-profile-export",
-    "allow-native-profile-import"
+    "allow-native-profile-import",
+    "allow-host-terminals",
+    "allow-host-info",
+    "allow-terminal-redraw"
   ]
 }

@@ -19,7 +19,7 @@ use wyss_console::{
 
 const SIZE: TerminalSize = TerminalSize { rows: 24, cols: 80 };
 
-struct World {
+pub(crate) struct World {
     base: PathBuf,
     home: PathBuf,
     bin: PathBuf,
@@ -27,12 +27,20 @@ struct World {
     service: NativeService,
 }
 
-fn script(path: &Path, body: &str) {
+pub(crate) fn script(path: &Path, body: &str) {
     fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
 impl World {
+    /// The directories of a world with fake agents, and nothing started.
+    pub(crate) fn directories() -> (PathBuf, PathBuf, PathBuf) {
+        let w = Self::new();
+        let dirs = (w.base.clone(), w.home.clone(), w.bin.clone());
+        std::mem::forget(w);
+        dirs
+    }
+
     fn new() -> Self {
         let root = fs::canonicalize(std::env::temp_dir())
             .unwrap()
@@ -70,7 +78,7 @@ impl World {
         }
     }
 
-    fn open(base: &Path, home: &Path, bin: &Path) -> NativeService {
+    pub(crate) fn open(base: &Path, home: &Path, bin: &Path) -> NativeService {
         let path = format!("{}:/usr/bin:/bin", bin.display());
         NativeService::open_with_env(
             base.to_owned(),

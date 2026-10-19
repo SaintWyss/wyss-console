@@ -238,6 +238,11 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-native-profile-restore',
     'allow-native-profile-export',
     'allow-native-profile-import',
+    // The host that holds the terminals past the window (F9): what it holds, whether it is
+    // a host process, and a redraw of a program's screen after a window attaches.
+    'allow-host-terminals',
+    'allow-host-info',
+    'allow-terminal-redraw',
   ]);
   // Every permission is one of this application's own commands: none belongs to a
   // plugin (`fs:`, `shell:`, `dialog:`) or to the framework's core (`core:`).

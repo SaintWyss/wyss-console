@@ -149,6 +149,16 @@ pub struct SessionView {
     pub usage: Option<Usage>,
 }
 
+/// What marks a terminal as an agent's: enough for a window that attaches later to label it.
+#[derive(Debug, Clone, Serialize)]
+pub struct NativeTag {
+    pub session_id: String,
+    pub agent_name: String,
+    pub project: String,
+    pub profile: Option<String>,
+    pub through_shell: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct StartReply {
     pub session: SessionView,
@@ -679,6 +689,32 @@ impl NativeService {
         if id_ok(id) {
             let _ = fs::remove_dir_all(self.inner.base.join("sessions").join(id));
         }
+    }
+
+    /// The native session whose terminal this is, while it runs.
+    pub fn tag_of(&self, terminal: &str) -> Option<NativeTag> {
+        let session_id = lock(&self.inner.live)
+            .iter()
+            .find(|(_, l)| l.terminal.as_str() == terminal)
+            .map(|(id, _)| id.clone())?;
+        let registry = lock(&self.inner.registry);
+        let session = registry.session(&session_id)?;
+        Some(NativeTag {
+            session_id,
+            agent_name: session.agent_name.clone(),
+            project: session.project.clone(),
+            profile: session.profile.as_ref().map(|p| p.name.clone()),
+            through_shell: session.through_shell,
+        })
+    }
+
+    /// Whether any native session is running or being started.
+    pub fn any_running(&self) -> bool {
+        lock(&self.inner.registry)
+            .data
+            .sessions
+            .iter()
+            .any(|s| !s.state.finished())
     }
 
     // ---- what is running now --------------------------------------------------------------
