@@ -50,7 +50,8 @@ library the authority links.
    and never stored. States: requested (shown as "restarting" for a restart), running, exited,
    stopped (the user stopped it), failed_start and lost. At the next start every session that
    was running is **lost**, never exited: the Console did not see it end, and its terminal died
-   with the window. Host-owned persistent terminals are F9; nothing here claims them.
+   with the window. ADR 0031 (F9) later moved the sessions into a host process that outlives
+   the window; `lost` then means the host itself went away.
 7. **Supervision without a thread.** State is refreshed from the terminal service when the
    overview asks (and slowly, without resources, while a session runs and the view is hidden).
    Processor and memory are read from `/proc` for the process tree only when the overview is

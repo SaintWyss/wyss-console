@@ -662,6 +662,17 @@ read, and never a path.
 - **Trying it on your own machine.** `cargo test -- --ignored real_machine --nocapture`
   prints counts and outcomes of your real configuration, never a value, and writes nothing.
 
+## Terminals that outlive the window (the host)
+
+The first window starts a **host** (`wyss-console --wyss-host`, a separate process) that owns
+every terminal and native agent session; windows are its clients over
+`$XDG_RUNTIME_DIR/wyss-console/host.sock` (private: 0700 directory, 0600 socket, peer uid
+checked). Close the window and everything keeps running; open one and the tabs come back with
+their scrollback. A host with nothing to hold exits after ten minutes. `wyss-console
+--wyss-host-stop` stops it (closing its terminals). Without a reachable host the window runs one
+of its own and says that terminals then end with it. Decision record:
+`docs/adr/0031-host-process-for-terminals-and-native-sessions.md`.
+
 ## Agents in the window (native sessions and profiles)
 
 The Workspace view starts the installed Claude Code or Codex in a terminal tab of the Console.

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { hostIsRemote } from '../../desktop/terminal-client';
   import type { AgentId, NativeSession, Preview } from '../../contracts/native';
   import type { NativeController, NativeState } from './controller';
   import {
@@ -97,8 +98,11 @@
     const timer = setInterval(() => (now = Date.now()), 5000);
     return () => clearInterval(timer);
   });
+  // Whether a host process holds the sessions (and so keeps them when the window closes).
+  let held = $state(false);
   onMount(() => {
     controller.start0();
+    void hostIsRemote().then((remote) => (held = remote));
   });
 
   async function chooseFolder() {
@@ -132,8 +136,11 @@
 >
   <p class="native-note">
     Start Claude Code or Codex in a terminal of this window. They run as
-    <strong>native</strong> sessions: your own agents in your own shell, not mediated,
-    contained or approved by the Console. Sessions here end when the window closes.
+    <strong>native</strong> sessions: your own agents in your own shell, not
+    mediated, contained or approved by the Console.
+    {#if held}They keep running when this window closes: a host process holds
+      them, and they end when it stops or you log out.{:else}Here they end when
+      the window closes: no host process could be started.{/if}
   </p>
 
   {#if native.failure}

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Sessions that outlive the window (F9)
+
+- **Terminals and native agent sessions are held by a host process** (`wyss-console
+--wyss-host`, started by the window when none answers). Close or kill the window: the
+  terminals and the agents keep running; open it again and every tab is back, with its
+  scrollback (512 KiB per terminal) and, for agents, its tag; the overview says Active with the
+  same process. A host that holds nothing exits after ten minutes; `--wyss-host-stop` stops it.
+- A private Unix socket (directory 0700, socket 0600, peer uid checked), one request per
+  connection, a closed list of operations. If no host can be started, the window runs one of its
+  own, as before, and says so. ADR 0031.
+- Plain terminals also lose the per-session variables of an agent session the Console was
+  started from.
+
 ### Native agent workspace (F3a, F3b, F3c)
 
 - **Start Claude Code and Codex from the Console** (new Workspace view). Pick an agent, a
