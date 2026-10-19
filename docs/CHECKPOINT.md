@@ -44,3 +44,5 @@ P1 (baselines) needs a reference terminal installed with consent: own-metric scr
 ## Commits of this stretch
 
 F3 backend `277b8f8`, window `5969b8f`, capability `d10b9cb`, env scrub `eb36717`, F9 `ad6a985`, T1/T2 `5708c09` + follow-up.
+
+The still-open roadmap and what each part needs: `docs/acceptance/remaining-roadmap-2026-10-19.md`.
