@@ -87,11 +87,18 @@ passphrase (PBKDF2-HMAC-SHA256, 600,000 rounds, random salt).
 
 ## Limits, said plainly
 
-- A provider takes no lock. A write by Claude Code between the last check and the rename is
-  either seen by the read-back (it lands after) or lost to the rename (it lands before, in
-  milliseconds that were not measured). Narrowing and detection are RV-03 / OQ-31.
+- A provider takes no lock. The new file is swapped in with `renameat2(RENAME_EXCHANGE)`: what
+  was in place goes to the temporary name and is compared with the file that was read. If a
+  provider wrote between the last check and the swap, its version is swapped back and the
+  apply ends `changed_outside`; nothing is lost (tested, for a rename-over and for an
+  in-place write). A file system that cannot exchange falls back to a plain rename. A
+  provider that holds the old file open and writes to it after the swap loses that write; no
+  user-space design can see it.
 - "Applied" means the file holds the change. That Claude Code adopts it in running sessions
   is documented, not verified for the user's sessions (07 §6).
+- `skillOverrides` is not in Claude Code's published settings reference (checked 2026-10-19):
+  the key was seen in the owner's own file and `"off"` is what is written; what the provider
+  does with it is unverified (OQ-15), and the plan says the effect is not known.
 - `enable_all_hooks` removes the key; an explicit `false` that was there before is not
   restored. `skill_on` removes the override; an override with another meaning is not touched.
 - A same-user process can ask the Secret Service for the key while it is unlocked. No

@@ -720,7 +720,16 @@ impl ChangeService {
     }
 
     pub fn import_record(&self, bytes: &[u8], passphrase: &str) -> Result<String, ChangeFailure> {
-        Ok(self.store.import(bytes, passphrase)?)
+        // A wrong passphrase and a file that is not a record look the same, on purpose: both
+        // are "this file did not open", never "the kept entry is damaged".
+        self.store
+            .import(bytes, passphrase)
+            .map_err(|error| match error {
+                RestoreError::Vault(VaultError::Tampered | VaultError::Malformed) => {
+                    ChangeFailure::ImportInvalid
+                }
+                other => other.into(),
+            })
     }
 
     /// At start: finish what a crash left (14 §4). An apply with an intent and no outcome is

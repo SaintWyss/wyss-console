@@ -491,7 +491,7 @@ fn a_record_exported_with_a_passphrase_restores_on_another_store() {
     assert_ne!(two.keys.key_hex(), one.keys.key_hex());
     assert_eq!(
         two.service.import_record(&file, "wrong").unwrap_err(),
-        ChangeFailure::RecordUnreadable
+        ChangeFailure::ImportInvalid
     );
     assert_eq!(
         two.service
@@ -999,4 +999,46 @@ fn the_change_replies_are_exactly_the_shared_fixture() {
         value, expected,
         "the contract changed: update the fixture on purpose"
     );
+}
+
+// ---- review finding: a provider write in the instant before the swap --------------------
+
+#[test]
+fn a_provider_write_between_the_last_look_and_the_swap_is_found_and_put_back() {
+    let world = World::new(SETTINGS);
+    let plan = world.park("Stop", 0, 0);
+    let path = settings_path(&world.home);
+    let theirs = SETTINGS.replace("\"opus\"", "\"written-by-the-provider\"");
+    let (target, text) = (path.clone(), theirs.clone());
+    // The provider replaces its file as editors do: a new file renamed over the name.
+    super::writer::seam::on_before_swap(move || {
+        let beside = target.with_extension("provider-tmp");
+        fs::write(&beside, &text).unwrap();
+        fs::set_permissions(&beside, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::rename(&beside, &target).unwrap();
+    });
+    assert_eq!(applied(&world, &plan), Outcome::ChangedOutside);
+    assert_eq!(
+        world.file(),
+        theirs,
+        "the provider's version must be the one in place"
+    );
+    assert!(
+        world.service.records().is_empty(),
+        "no record for a hook that did not leave"
+    );
+    assert!(world.leftovers().is_empty());
+}
+
+#[test]
+fn a_provider_that_appends_in_place_in_that_instant_is_found_too() {
+    let world = World::new(SETTINGS);
+    let plan = world.park("Stop", 0, 0);
+    let path = settings_path(&world.home);
+    let theirs = format!("{SETTINGS}  ");
+    let (target, text) = (path.clone(), theirs.clone());
+    super::writer::seam::on_before_swap(move || fs::write(&target, &text).unwrap());
+    assert_eq!(applied(&world, &plan), Outcome::ChangedOutside);
+    assert_eq!(world.file(), theirs);
+    assert!(world.service.records().is_empty());
 }

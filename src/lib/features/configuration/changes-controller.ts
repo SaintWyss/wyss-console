@@ -258,6 +258,7 @@ export class ChangesController {
     if (this.disposed || this.busy) return;
     this.busy = true;
     this.failure = null;
+    this.result = null;
     this.notice = null;
     this.emit();
     void work().then(

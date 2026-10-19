@@ -114,11 +114,11 @@
     "diff": [
       {
         "kind": "added",
-        "text": "[0].hooks[0].command: stop.sh"
+        "text": "Stop[0].hooks[0].command: stop.sh"
       },
       {
         "kind": "added",
-        "text": "[0].hooks[0].type: command"
+        "text": "Stop[0].hooks[0].type: command"
       }
     ],
     "effect": "hooks_reload_documented",

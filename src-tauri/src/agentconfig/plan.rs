@@ -491,7 +491,13 @@ pub fn draft_restore(
         body.matcher.as_deref().unwrap_or("*")
     );
     let label = redact::text(&name).text.as_str().to_owned();
-    let (diff, hidden) = redact_lines(&unit, DiffKind::Added, bounds);
+    // An event's member is shown under its event's name, as the parked hook's diff is.
+    let shown = if body.level == Level::Event {
+        serde_json::json!({ body.event.as_str(): unit.clone() })
+    } else {
+        unit.clone()
+    };
+    let (diff, hidden) = redact_lines(&shown, DiffKind::Added, bounds);
     let h0 = hash(bytes);
     let finish = |new_bytes: Vec<u8>, logical: Logical, already: bool| -> Drafted {
         Drafted {

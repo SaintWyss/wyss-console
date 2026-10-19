@@ -10,7 +10,7 @@ use super::fault::{Faults, Injected, Step};
 use super::place::Parent;
 use nix::{
     errno::Errno,
-    fcntl::{AtFlags, Flock, FlockArg, OFlag, openat, renameat},
+    fcntl::{AtFlags, Flock, FlockArg, OFlag, RenameFlags, openat, renameat, renameat2},
     sys::stat::{FchmodatFlags, FileStat, Mode, fchmodat, fstatat},
     unistd::{UnlinkatFlags, fsync, geteuid, unlinkat, write},
 };
@@ -162,19 +162,62 @@ pub fn replace(
     step(Step::TemporaryFlushed).map_err(cleanup)?;
     fsync(file.as_raw_fd()).map_err(|_| cleanup(WriteError::Failed))?;
 
-    // The last look before the rename: still the file that was read.
+    // The last look before the swap: still the file that was read.
     match identity_of(parent) {
         Ok(now) if now == expected => (),
         Ok(_) | Err(_) => return Err(cleanup(WriteError::Replaced)),
     }
     step(Step::Renamed).map_err(cleanup)?;
-    renameat(
+    #[cfg(test)]
+    seam::before_swap();
+    // The new file takes the old one's place and the old one goes to the temporary name,
+    // in one step. A provider that wrote between the look above and here has written to
+    // the file that is now at the temporary name: it is found there, and put back.
+    match renameat2(
         Some(dirfd),
         temporary.as_os_str(),
         Some(dirfd),
         parent.name.as_os_str(),
-    )
-    .map_err(|_| cleanup(WriteError::Failed))?;
+        RenameFlags::RENAME_EXCHANGE,
+    ) {
+        Ok(()) => {
+            let displaced = fstatat(
+                Some(dirfd),
+                temporary.as_os_str(),
+                AtFlags::AT_SYMLINK_NOFOLLOW,
+            )
+            .map(|stat| identity(&stat));
+            if displaced != Ok(expected) {
+                // Not the file that was read: undo the swap, so the other writer's version
+                // is the one in place, and say so.
+                let _ = renameat2(
+                    Some(dirfd),
+                    temporary.as_os_str(),
+                    Some(dirfd),
+                    parent.name.as_os_str(),
+                    RenameFlags::RENAME_EXCHANGE,
+                );
+                return Err(cleanup(WriteError::Replaced));
+            }
+            // What was there is now at the temporary name, and is removed.
+            let _ = unlinkat(
+                Some(dirfd),
+                temporary.as_os_str(),
+                UnlinkatFlags::NoRemoveDir,
+            );
+        }
+        // A file system that cannot exchange: the plain rename, as before.
+        Err(Errno::EINVAL | Errno::ENOSYS | Errno::EOPNOTSUPP) => {
+            renameat(
+                Some(dirfd),
+                temporary.as_os_str(),
+                Some(dirfd),
+                parent.name.as_os_str(),
+            )
+            .map_err(|_| cleanup(WriteError::Failed))?;
+        }
+        Err(_) => return Err(cleanup(WriteError::Failed)),
+    }
     step(Step::DirectoryFlushed).map_err(|error| match error {
         WriteError::Failed => WriteError::AfterRename,
         other => other,
@@ -245,4 +288,22 @@ pub fn remove_leftovers(parent: &Parent) -> usize {
         }
     }
     removed
+}
+
+/// A seam for a test to be the provider writing in the instant between the last look and the
+/// swap, which no lock can exclude.
+#[cfg(test)]
+pub(crate) mod seam {
+    use std::cell::RefCell;
+    thread_local! {
+        static BEFORE_SWAP: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
+    }
+    pub fn on_before_swap(action: impl FnOnce() + 'static) {
+        BEFORE_SWAP.with(|slot| *slot.borrow_mut() = Some(Box::new(action)));
+    }
+    pub(super) fn before_swap() {
+        if let Some(action) = BEFORE_SWAP.with(|slot| slot.borrow_mut().take()) {
+            action();
+        }
+    }
 }
