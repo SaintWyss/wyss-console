@@ -1,10 +1,10 @@
-# F10a/F10b — Remote workspace and phone control (proposed specification)
+# F10a/F10b — Remote agent/session control from desktop and phone (proposed specification)
 
 **Status:** Proposal; no remote deployment authorized. Sources: architecture 16 (§§3–8), 19, 11 and 13. Depends on F9 host, owner decision DN-05; F10a precedes F10b.
 
 ## Scope and non-goals
 
-F10a connects a remote desktop client to one selected host's native/managed workspace with authenticated pairing, capability-specific grants, revocation, accurate session states. F10b adds a phone client after desktop remote validation.
+F10a connects a Wyss Console client on another computer to one selected host's **agent/session workspace** with authenticated pairing, capability-specific grants, revocation and accurate session states. This is **not remote graphical desktop/screen sharing**; architecture 16 §3 explicitly excludes controlling the host graphical session. F10b adds a phone client after desktop remote validation.
 
 Do **not** forward the raw authority socket, expose its credentials or create an unaudited remote shell. No public listener by default. Replicated configuration and remote control are separate workflows: neither silently syncs/restores local files across devices.
 
@@ -72,7 +72,7 @@ Controls: authenticated encrypted transport with host identity validation; expli
 
 ## Delivery gates
 
-1. Owner chooses DN-05 and allowed test network.
+1. Owner chooses DN-05 and allowed test network. Existing F9 host ownership (reported ADR 0031) is not by itself approval of a remote gateway.
 2. Threat-reviewed gateway contract and offline-default local transport.
 3. Desktop pairing, scoped grants, revocation, terminal streams and GUI acceptance.
 4. Attack and recovery tests; independent security review; gateway-off rollback.
