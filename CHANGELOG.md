@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Changing Claude Code's configuration, with a way back (F2a)
+
+- **Decision DN-01 is made (ADR 0029).** Something the Console keeps to put an entry back may
+  hold a secret if it is encrypted at rest: authenticated encryption, with a key held by the
+  system's Secret Service and nowhere else. Without that, an entry that may hold a secret is
+  not turned off one by one; there is no silent plaintext. ADR 0003 and 0028 are reconciled,
+  and a protected API Credentials section is recorded as a future requirement.
+- **Hooks and skills can be turned off and on from the Configuration view.** A plan shows
+  what would change and how it would be kept; risky changes ask in a native window; the file
+  changes by exactly the bytes of the change, is checked against the plan and read back; a
+  file changed meanwhile is not written. Turning a hook off and back on gives the file back
+  byte for byte.
+- **A journal, a history and undo.** Every apply writes its intent before and its outcome after;
+  an interrupted one is repaired at start. Kept hooks can be exported under a passphrase,
+  imported, and forgotten.
+- **Failure injection at every step**, and tests that no store, journal, plan or dialog holds a
+  seeded secret, or the key.
+
 ### Reading the agents' configuration, first part (F1-PR1)
 
 - **The foundation of the configuration inventory exists in the desktop backend, and nothing

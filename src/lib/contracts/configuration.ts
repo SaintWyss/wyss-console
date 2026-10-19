@@ -190,8 +190,134 @@ export type Changes =
   | { result: 'changed'; revision: number; sources: SourceKey[] }
   | { result: 'resync'; revision: number };
 
-export const CONFIGURATION_FAILURES = ['unavailable', 'internal'] as const;
+/** The reasons a change is not made or planned: closed words the desktop sends. */
+export const CHANGE_FAILURES = [
+  'not_supported',
+  'not_writable',
+  'source_missing',
+  'source_unreadable',
+  'source_malformed',
+  'entry_gone',
+  'entry_changed',
+  'already_done',
+  'restore_conflict',
+  'key_store_unavailable',
+  'record_unreadable',
+  'key_lost',
+  'plan_unknown',
+  'not_undoable',
+  'import_invalid',
+  'no_passphrase',
+  'internal',
+] as const;
+export type ChangeFailure = (typeof CHANGE_FAILURES)[number];
+
+export const CONFIGURATION_FAILURES = [
+  'unavailable',
+  'invalid',
+  'internal',
+  ...CHANGE_FAILURES,
+] as const;
 export type ConfigurationFailure = (typeof CONFIGURATION_FAILURES)[number];
+
+export const OPERATIONS = [
+  'park_hook',
+  'restore_hook',
+  'disable_all_hooks',
+  'enable_all_hooks',
+  'skill_off',
+  'skill_on',
+] as const;
+export type Operation = (typeof OPERATIONS)[number];
+
+export const RISKS = ['normal', 'weakens_security', 'executes_code'] as const;
+export type Risk = (typeof RISKS)[number];
+
+export const EFFECTS = ['hooks_reload_documented', 'not_confirmed'] as const;
+export type Effect = (typeof EFFECTS)[number];
+
+export const PROTECTIONS = ['sealed', 'plain_no_secret'] as const;
+export type Protection = (typeof PROTECTIONS)[number];
+
+export const OUTCOMES = [
+  'applied',
+  'refused_by_user',
+  'changed_outside',
+  'entry_gone',
+  'entry_changed',
+  'conflict_copy_present',
+  'expired',
+  'key_store_unavailable',
+  'record_unreadable',
+  'write_failed',
+  'verify_failed',
+  'not_recorded',
+  'recovered_applied',
+  'recovered_not_applied',
+  'recovered_unverified',
+] as const;
+export type Outcome = (typeof OUTCOMES)[number];
+
+export interface DiffLine {
+  kind: 'removed' | 'added' | 'note';
+  text: string;
+}
+
+/** A change the desktop has drafted and not applied: redacted, with no bytes of the file. */
+export interface Plan {
+  id: string;
+  operation: Operation;
+  provider: Provider;
+  source: SourceKey;
+  scope: Scope;
+  name: string;
+  risk: Risk;
+  needs_native_dialog: boolean;
+  diff: DiffLine[];
+  storage: Protection | null;
+  holds_hidden_values: boolean;
+  effect: Effect;
+  expires_in_seconds: number;
+  undoes: string | null;
+}
+
+export interface Applied {
+  change: string;
+  outcome: Outcome;
+  revision: number;
+}
+
+/** One change in the history: closed words and hashes, never content. */
+export interface HistoryChange {
+  id: string;
+  at: number;
+  provider: Provider;
+  source: SourceKey;
+  operation: Operation;
+  item: string;
+  risk: Risk;
+  h0: string;
+  h1: string | null;
+  outcome: Outcome | null;
+  record: string | null;
+  undoes: string | null;
+}
+
+export interface History {
+  changes: HistoryChange[];
+  next: string | null;
+}
+
+/** A hook the user turned off, kept here to be put back. */
+export interface ParkedRecord {
+  id: string;
+  created: number;
+  state: 'parked' | 'used';
+  label: string;
+  secret_bearing: boolean;
+  protection: Protection;
+  past_retention: boolean;
+}
 
 /** The deepest a projection may nest; the desktop's bound is 32. */
 const MAX_DEPTH = 40;
@@ -480,9 +606,159 @@ export function parseChanges(value: unknown): Changes {
   return { result, revision: count(other.revision, 'changes') };
 }
 
-/** What a failed call came to. Anything but the desktop's own word is `internal`. */
+/**
+ * What a failed call came to. The desktop sends a closed word, or `{ change: word }` for
+ * why a change was not made. Anything else is `internal`.
+ */
 export function parseConfigurationFailure(
   error: unknown,
 ): ConfigurationFailure {
-  return error === 'unavailable' ? 'unavailable' : 'internal';
+  if (error === 'unavailable' || error === 'invalid') return error;
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    !Array.isArray(error) &&
+    Object.keys(error).length === 1 &&
+    'change' in error
+  ) {
+    const word = (error as { change: unknown }).change;
+    if (CHANGE_FAILURES.includes(word as ChangeFailure))
+      return word as ChangeFailure;
+  }
+  return 'internal';
+}
+
+function opt<T>(value: unknown, read: (v: unknown) => T): T | null {
+  return value === null ? null : read(value);
+}
+const ident = (value: unknown, field: string): string => {
+  if (typeof value !== 'string' || !/^[0-9a-f]{32}$/.test(value))
+    throw invalid(field);
+  return value;
+};
+
+export function parsePlan(value: unknown): Plan {
+  const p = record(
+    value,
+    [
+      'id',
+      'operation',
+      'provider',
+      'source',
+      'scope',
+      'name',
+      'risk',
+      'needs_native_dialog',
+      'diff',
+      'storage',
+      'holds_hidden_values',
+      'effect',
+      'expires_in_seconds',
+      'undoes',
+    ],
+    'plan',
+  );
+  return {
+    id: ident(p.id, 'plan'),
+    operation: member(p.operation, OPERATIONS, 'plan'),
+    provider: member(p.provider, PROVIDERS, 'plan'),
+    source: member(p.source, SOURCE_KEYS, 'plan'),
+    scope: member(p.scope, SCOPES, 'plan'),
+    name: text(p.name, 'plan'),
+    risk: member(p.risk, RISKS, 'plan'),
+    needs_native_dialog: flag(p.needs_native_dialog, 'plan'),
+    diff: list(p.diff, 'plan').map((line) => {
+      const l = record(line, ['kind', 'text'], 'plan');
+      return {
+        kind: member(l.kind, ['removed', 'added', 'note'] as const, 'plan'),
+        text: text(l.text, 'plan'),
+      };
+    }),
+    storage: opt(p.storage, (v) => member(v, PROTECTIONS, 'plan')),
+    holds_hidden_values: flag(p.holds_hidden_values, 'plan'),
+    effect: member(p.effect, EFFECTS, 'plan'),
+    expires_in_seconds: count(p.expires_in_seconds, 'plan'),
+    undoes: opt(p.undoes, (v) => ident(v, 'plan')),
+  };
+}
+
+export function parseApplied(value: unknown): Applied {
+  const a = record(value, ['change', 'outcome', 'revision'], 'applied');
+  return {
+    change: ident(a.change, 'applied'),
+    outcome: member(a.outcome, OUTCOMES, 'applied'),
+    revision: count(a.revision, 'applied'),
+  };
+}
+
+export function parseHistory(value: unknown): History {
+  const h = record(value, ['changes', 'next'], 'history');
+  return {
+    changes: list(h.changes, 'history').map((entry) => {
+      const c = record(
+        entry,
+        [
+          'id',
+          'at',
+          'provider',
+          'source',
+          'operation',
+          'item',
+          'risk',
+          'h0',
+          'h1',
+          'outcome',
+          'record',
+          'undoes',
+        ],
+        'history',
+      );
+      return {
+        id: ident(c.id, 'history'),
+        at: count(c.at, 'history'),
+        provider: member(c.provider, PROVIDERS, 'history'),
+        source: member(c.source, SOURCE_KEYS, 'history'),
+        operation: member(c.operation, OPERATIONS, 'history'),
+        item: text(c.item, 'history'),
+        risk: member(c.risk, RISKS, 'history'),
+        h0: digest(c.h0, 'history'),
+        h1: opt(c.h1, (v) => digest(v, 'history')),
+        outcome: opt(c.outcome, (v) => member(v, OUTCOMES, 'history')),
+        record: opt(c.record, (v) => ident(v, 'history')),
+        undoes: opt(c.undoes, (v) => ident(v, 'history')),
+      };
+    }),
+    next: opt(h.next, (v) => ident(v, 'history')),
+  };
+}
+
+export function parseRecords(value: unknown): ParkedRecord[] {
+  return list(value, 'records').map((entry) => {
+    const r = record(
+      entry,
+      [
+        'id',
+        'created',
+        'state',
+        'label',
+        'secret_bearing',
+        'protection',
+        'past_retention',
+      ],
+      'records',
+    );
+    return {
+      id: ident(r.id, 'records'),
+      created: count(r.created, 'records'),
+      state: member(r.state, ['parked', 'used'] as const, 'records'),
+      label: text(r.label, 'records'),
+      secret_bearing: flag(r.secret_bearing, 'records'),
+      protection: member(r.protection, PROTECTIONS, 'records'),
+      past_retention: flag(r.past_retention, 'records'),
+    };
+  });
+}
+
+export function parseDone(value: unknown): boolean {
+  return flag(record(value, ['done'], 'done').done, 'done');
 }

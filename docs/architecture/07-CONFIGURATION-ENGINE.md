@@ -173,6 +173,14 @@ and not before the ADR that allows the desktop to run one (DN-13).
 
 ## 5. Changing a configuration
 
+What F2a implements of this section (`agentconfig/plan.rs`, `writer.rs`, `journal.rs`,
+`restore.rs`, `vault.rs`, `changes.rs`; account in [docs/spec/configuration-changes.md](../spec/configuration-changes.md)):
+the planner for Claude Code hooks, `disableAllHooks` and `skillOverrides`; the byte-level
+editor; the writer with a per-target lock and descriptor-based rename; the journal with
+intent and outcome and repair at start; the restoration store sealed under ADR 0029; the
+native confirmation; history, undo, export and import. Codex (F2b), MCP and creating or
+editing entries are not implemented.
+
 ### 5.1 The lifecycle
 
 Discovery → parsing → normalisation → validation → projection → change request →

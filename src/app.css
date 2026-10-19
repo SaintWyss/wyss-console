@@ -2084,3 +2084,81 @@ html[data-glass='transparent'] .shell {
   align-items: center;
   gap: 4px 10px;
 }
+
+/* Configuration: the change to confirm, the history, what was turned off */
+.configuration-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(95, 212, 245, 0.35);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+.configuration-plan h3 {
+  margin: 0;
+  font-size: 13.5px;
+}
+.configuration-plan p {
+  margin: 0;
+}
+.configuration-warning {
+  font-size: 12.5px;
+  color: var(--warn);
+}
+.configuration-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.configuration-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 8px 10px;
+  list-style: none;
+  font-size: 12px;
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.25);
+  overflow-x: auto;
+}
+.configuration-diff li {
+  display: grid;
+  grid-template-columns: 1.2ch minmax(0, 1fr);
+  gap: 8px;
+}
+.configuration-diff li[data-kind='removed'] {
+  color: var(--warn);
+}
+.configuration-diff li[data-kind='added'] {
+  color: var(--ok, #6fcf97);
+}
+.configuration-history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 2px 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+}
+.configuration-history-row .event-title {
+  grid-column: 1;
+}
+.configuration-history-row .event-meta {
+  grid-column: 1;
+  grid-row: 2;
+}
+.configuration-history-row .pill {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+.configuration-history-row > .action,
+.configuration-record-actions {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  gap: 6px;
+}

@@ -903,3 +903,100 @@ fn a_change_made_by_a_second_window_waits_for_the_first_and_then_sees_the_file_a
     let fresh = world.park("PreToolUse", 0, 1);
     assert_eq!(applied(&world, &fresh), Outcome::Applied);
 }
+
+// ---- the contract with the window -------------------------------------------------------
+
+/// Random identifiers and times are replaced by stable stand-ins, so that the shape and the
+/// words are compared and nothing else.
+fn steady(value: &mut serde_json::Value, seen: &mut Vec<String>) {
+    use serde_json::Value;
+    match value {
+        Value::String(text) if text.len() == 32 && text.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            let index = seen.iter().position(|s| s == text).unwrap_or_else(|| {
+                seen.push(text.clone());
+                seen.len() - 1
+            });
+            *text = format!("{:032x}", index + 1);
+        }
+        Value::Array(items) => items.iter_mut().for_each(|v| steady(v, seen)),
+        Value::Object(entries) => {
+            for (key, inner) in entries.iter_mut() {
+                match key.as_str() {
+                    "at" | "created" | "revision" => *inner = serde_json::json!(0),
+                    "expires_in_seconds" => *inner = serde_json::json!(60),
+                    _ => steady(inner, seen),
+                }
+            }
+        }
+        _ => (),
+    }
+}
+
+/// The replies of the change commands, as one file both sides read:
+/// `tests/fixtures/configuration-changes-v1.json`. `WYSS_UPDATE_FIXTURES=1` writes it again.
+#[test]
+fn the_change_replies_are_exactly_the_shared_fixture() {
+    let world = World::new(SETTINGS);
+    let plan = world.park("PreToolUse", 0, 0);
+    let first = world.service.apply(&plan.id).unwrap();
+    let second_plan = world.park("PreToolUse", 0, 0);
+    world.confirm.accept.store(false, Ordering::SeqCst);
+    let refused = world.service.apply(&second_plan.id).unwrap();
+    world.confirm.accept.store(true, Ordering::SeqCst);
+    let stop = world.park("Stop", 0, 0);
+    let stop_applied = world.service.apply(&stop.id).unwrap();
+    let all = world
+        .service
+        .plan(Operation::DisableAllHooks, "claude_user_settings")
+        .unwrap();
+    let skill = world
+        .inventory
+        .snapshot()
+        .inventory
+        .items
+        .iter()
+        .find(|i| i.kind == ItemKind::Skill)
+        .unwrap()
+        .id
+        .clone();
+    let skill_plan = world.service.plan(Operation::SkillOff, &skill).unwrap();
+    let (changes, next) = world.service.history(None, 20);
+    let stop_record = world
+        .service
+        .records()
+        .into_iter()
+        .find(|r| r.label.starts_with("Stop"))
+        .unwrap();
+    let restore = world
+        .service
+        .plan(Operation::RestoreHook, &stop_record.id)
+        .unwrap();
+    let mut records = world.service.records();
+    records.sort_by(|a, b| a.label.cmp(&b.label));
+    let mut value = serde_json::json!({
+        "plan_park_blocking": plan,
+        "applied": first,
+        "applied_refused": refused,
+        "applied_stop": stop_applied,
+        "plan_all_hooks": all,
+        "plan_skill": skill_plan,
+        "plan_restore": restore,
+        "history": { "changes": changes, "next": next },
+        "records": records,
+        "done": { "done": true },
+    });
+    let text = serde_json::to_string(&value).unwrap();
+    assert!(!text.contains(world.home.to_str().unwrap()));
+    steady(&mut value, &mut Vec::new());
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/fixtures/configuration-changes-v1.json");
+    if std::env::var_os("WYSS_UPDATE_FIXTURES").is_some() {
+        fs::write(&path, serde_json::to_string_pretty(&value).unwrap() + "\n").unwrap();
+    }
+    let expected: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        value, expected,
+        "the contract changed: update the fixture on purpose"
+    );
+}

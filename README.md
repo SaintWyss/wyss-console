@@ -662,6 +662,28 @@ read, and never a path.
 - **Trying it on your own machine.** `cargo test -- --ignored real_machine --nocapture`
   prints counts and outcomes of your real configuration, never a value, and writes nothing.
 
+## Changing Claude Code's configuration
+
+From the Configuration view the user can turn a Claude Code hook off and back on, turn every
+hook off, and turn a skill off and on, in the real settings file, with a way back. The full
+account is [docs/spec/configuration-changes.md](docs/spec/configuration-changes.md); in short:
+
+- **A plan first.** Choosing a change shows what would change, how the entry would be kept,
+  and what "applied" does and does not mean. Nothing is written until it is confirmed.
+- **A native window for anything risky.** Turning off a hook that can block an action, or
+  putting a hook back, asks in a window the page cannot draw on or answer for.
+- **Only the change's bytes change.** The rest of the file is the same bytes. A file that
+  changed since the plan is not written. Putting a hook back into an untouched file gives
+  the original file back, byte for byte.
+- **A hook that was turned off is kept encrypted.** It may hold a secret, so it is sealed
+  with authenticated encryption under a key in the system's Secret Service (ADR 0029). If
+  that is unavailable, an entry that may hold a secret is not turned off one by one, and the
+  app says why. Losing the key means the kept hooks cannot be put back from here.
+- **History and undo.** Every change is journaled without its content; an undo is a plan
+  like any other. A hook can be exported under a passphrase and imported on another computer.
+- **Interrupted writes are repaired at start**, and every step of an apply is tested with an
+  injected failure and an injected crash.
+
 ## Authority-owned Codex runtime
 
 `wyss-control` can supervise one shared, long-lived `codex app-server`, independently
@@ -872,7 +894,9 @@ so the authority also launches the final child with its own normalized model cat
 receives zero model-visible tools. A catalog that cannot be proven safe keeps the
 runtime from starting. config/read and hooks/list must verify the safety preconditions, including
 zero enabled executable external hooks. Restoring user/project/plugin/managed hooks
-or incompatible configuration makes inference unavailable; Wyss never edits them.
+or incompatible configuration makes inference unavailable; the authority never edits them.
+The desktop edits Claude Code's own settings only when the user plans and confirms a change
+in the Configuration view (see below), never Codex's, and never silently.
 Explicit resume verifies the stored thread/workspace, readOnly sandbox and never
 approval policy before publishing its transient attachment profile.
 

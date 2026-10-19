@@ -208,6 +208,16 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     // The agents' configuration: two reads of what the desktop already holds.
     'allow-configuration-inventory',
     'allow-configuration-changes',
+    // Changing it, with a way back: a plan, its confirmation, the history, an undo, the
+    // hooks that were turned off, and their export and import in native windows.
+    'allow-configuration-plan',
+    'allow-configuration-apply',
+    'allow-configuration-history',
+    'allow-configuration-undo',
+    'allow-configuration-records',
+    'allow-configuration-record-delete',
+    'allow-configuration-export',
+    'allow-configuration-import',
   ]);
   // Every permission is one of this application's own commands: none belongs to a
   // plugin (`fs:`, `shell:`, `dialog:`) or to the framework's core (`core:`).
@@ -236,8 +246,13 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   ]);
   // History is read by exactly two commands. Nothing reads the audit as the authority
   // stores it, watches it, exports it, or performs again what an event describes.
+  // (The change history of the configuration is the desktop's own journal of what the user
+  // changed, read by one command of its own: it is not the authority's audit.)
   expect(
-    capability.permissions.filter((p: string) => /event|audit|histor/.test(p)),
+    capability.permissions.filter(
+      (p: string) =>
+        /event|audit|histor/.test(p) && !p.startsWith('allow-configuration-'),
+    ),
   ).toEqual(['allow-managed-events', 'allow-managed-events-older']);
   // The desktop's own preferences are one read, one replacement of the whole typed set
   // and one reset. There is no key to write, no file to name and nothing to run.
@@ -269,7 +284,12 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-authority-lifecycle',
     'allow-authority-retry',
   ]);
-  for (const permission of capability.permissions)
+  // One exception, deliberate and narrow (ADR 0029, F2a): exporting a kept hook. The page
+  // names a record it was given and nothing else; the passphrase and the file are asked
+  // for in native windows the page cannot reach, and what is written is ciphertext.
+  for (const permission of capability.permissions.filter(
+    (p: string) => p !== 'allow-configuration-export',
+  ))
     expect(permission).not.toMatch(
       /always|remember|trust|rule|policy|allowlist|respond|decision|lease|scope|profile|runtime|control|request|invoke|exec|shell|spawn|process|socket|fs|audit|watch|replay|export|save|payload|envelope|service|unit|systemd|systemctl|dbus|install|binary|path|restart|stop|kill|command/,
     );

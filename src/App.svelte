@@ -8,6 +8,7 @@
   import ApprovalsView from './lib/features/approvals/ApprovalsView.svelte';
   import { ApprovalsController } from './lib/features/approvals/controller';
   import ConfigurationView from './lib/features/configuration/ConfigurationView.svelte';
+  import { ChangesController } from './lib/features/configuration/changes-controller';
   import { ConfigurationController } from './lib/features/configuration/controller';
   import { EventsController } from './lib/features/events/controller';
   import { SettingsController } from './lib/features/settings/controller';
@@ -80,6 +81,15 @@
     configuration = next;
   });
   let configuration = $state(configurationController.state());
+  // Changing it: a plan is drafted, confirmed here, and applied by the desktop, which asks
+  // again in a window of its own when the change is risky.
+  const changesController = new ChangesController(
+    (next) => {
+      changes = next;
+    },
+    () => configurationController.refresh(),
+  );
+  let changes = $state(changesController.state());
   // The desktop's own preferences: read once, written only when the user changes one.
   const settingsController = new SettingsController((next) => {
     settings = next;
@@ -164,6 +174,7 @@
       approvalsController.dispose();
       eventsController.dispose();
       configurationController.dispose();
+      changesController.dispose();
       settingsController.dispose();
     };
   });
@@ -296,6 +307,8 @@
       visible={activeView === 'configuration'}
       {configuration}
       controller={configurationController}
+      {changes}
+      {changesController}
     />
     <SettingsView
       visible={activeView === 'settings'}

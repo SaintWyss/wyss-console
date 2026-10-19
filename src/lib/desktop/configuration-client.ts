@@ -1,11 +1,21 @@
 import { invoke } from '@tauri-apps/api/core';
 import {
+  parseApplied,
   parseChanges,
   parseConfigurationFailure,
+  parseDone,
+  parseHistory,
   parseInventoryReply,
+  parsePlan,
+  parseRecords,
+  type Applied,
   type Changes,
   type ConfigurationFailure,
+  type History,
   type InventoryReply,
+  type Operation,
+  type ParkedRecord,
+  type Plan,
 } from '../contracts/configuration';
 
 /**
@@ -51,4 +61,66 @@ export async function readConfigurationChanges(
   } catch {
     throw new ConfigurationCallError('internal');
   }
+}
+
+// ---- changing (F2a) ----------------------------------------------------------------------
+// Each call names what the desktop already holds: an item, a record, a plan or a change by
+// its identifier, a source by its closed word. No call carries a path or the text of an
+// entry, and every answer is checked before it is believed.
+
+async function checked<T>(
+  command: string,
+  args: Record<string, unknown>,
+  parse: (value: unknown) => T,
+): Promise<T> {
+  const answer = await call(command, args);
+  try {
+    return parse(answer);
+  } catch {
+    throw new ConfigurationCallError('internal');
+  }
+}
+
+export function planChange(
+  operation: Operation,
+  target: string,
+): Promise<Plan> {
+  return checked(
+    'configuration_plan',
+    { request: { operation, target } },
+    parsePlan,
+  );
+}
+export function applyPlan(plan: string): Promise<Applied> {
+  return checked('configuration_apply', { request: { plan } }, parseApplied);
+}
+export function readHistory(
+  cursor: string | null,
+  limit = 20,
+): Promise<History> {
+  return checked(
+    'configuration_history',
+    { request: { cursor, limit } },
+    parseHistory,
+  );
+}
+export function planUndo(change: string): Promise<Plan> {
+  return checked('configuration_undo', { request: { change } }, parsePlan);
+}
+export function readRecords(): Promise<ParkedRecord[]> {
+  return checked('configuration_records', {}, parseRecords);
+}
+export function deleteRecord(record: string): Promise<boolean> {
+  return checked(
+    'configuration_record_delete',
+    { request: { record } },
+    parseDone,
+  );
+}
+/** The desktop asks for a passphrase and a file in its own windows. */
+export function exportRecord(record: string): Promise<boolean> {
+  return checked('configuration_export', { request: { record } }, parseDone);
+}
+export function importRecord(): Promise<boolean> {
+  return checked('configuration_import', {}, parseDone);
 }

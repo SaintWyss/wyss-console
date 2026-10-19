@@ -1,11 +1,17 @@
 import type {
   ConfigItem,
+  ConfigurationFailure,
+  Effect,
   Effective,
   ItemKind,
   NotWritable,
+  Operation,
+  Outcome,
   Persisted,
   Projection,
+  Protection,
   Provider,
+  Risk,
   SecretClass,
   SourceFailure,
   SourceKey,
@@ -260,4 +266,176 @@ export function detailLines(projection: Projection | null): DetailLine[] {
   };
   if (projection !== null) walk(projection, '');
   return lines;
+}
+
+// ---- changing (F2a) ----------------------------------------------------------------------
+
+export const OPERATION_LABEL: Record<Operation, string> = {
+  park_hook: 'Turn off this hook',
+  restore_hook: 'Put this hook back',
+  disable_all_hooks: 'Turn off every hook',
+  enable_all_hooks: 'Allow hooks again',
+  skill_off: 'Turn off this skill',
+  skill_on: 'Turn on this skill',
+};
+
+export const RISK_LABEL: Record<Risk, string> = {
+  normal: '',
+  weakens_security:
+    'This can switch off something that stops an action. You will be asked to confirm in a separate window.',
+  executes_code:
+    'This puts back something that runs programs. You will be asked to confirm in a separate window.',
+};
+
+export const EFFECT_LABEL: Record<Effect, string> = {
+  hooks_reload_documented:
+    'Claude Code documents that it picks this up while running. That has not been checked for your sessions.',
+  not_confirmed: 'What running sessions do about it is not known.',
+};
+
+export const STORAGE_LABEL: Record<Protection, string> = {
+  sealed:
+    'The hook is kept on this computer, encrypted, with a key held by your system’s credential store. If that store is reset or its key is lost, it cannot be put back from here.',
+  plain_no_secret:
+    'The hook is kept on this computer as a private file that is not encrypted: it holds no secret, and no credential store could be reached.',
+};
+
+export const OUTCOME_LABEL: Record<
+  Outcome,
+  { tone: RuntimeTone; text: string }
+> = {
+  applied: { tone: 'ok', text: 'Done. The file was changed and read back.' },
+  refused_by_user: {
+    tone: 'idle',
+    text: 'Cancelled in the confirmation window. Nothing was changed.',
+  },
+  changed_outside: {
+    tone: 'warn',
+    text: 'The file changed after this was planned, so nothing was written. Plan it again.',
+  },
+  entry_gone: { tone: 'warn', text: 'The entry is no longer there.' },
+  entry_changed: {
+    tone: 'warn',
+    text: 'The entry is not the one that was planned. Nothing was written.',
+  },
+  conflict_copy_present: {
+    tone: 'warn',
+    text: 'A conflict copy of this file exists beside it. Resolve that first; nothing was written.',
+  },
+  expired: {
+    tone: 'idle',
+    text: 'The plan was too old and was dropped. Plan it again.',
+  },
+  key_store_unavailable: {
+    tone: 'error',
+    text: 'Your system’s credential store is not available, so an entry that may hold a secret is not kept. Nothing was written.',
+  },
+  record_unreadable: {
+    tone: 'error',
+    text: 'The kept entry cannot be read. Nothing was written.',
+  },
+  write_failed: {
+    tone: 'error',
+    text: 'The file could not be written. It is as it was.',
+  },
+  verify_failed: {
+    tone: 'error',
+    text: 'The file was written, but what it holds is not what was planned. Check it.',
+  },
+  not_recorded: {
+    tone: 'error',
+    text: 'The history could not be written, so nothing was changed.',
+  },
+  recovered_applied: {
+    tone: 'ok',
+    text: 'Interrupted, then found complete at start.',
+  },
+  recovered_not_applied: {
+    tone: 'idle',
+    text: 'Interrupted before it changed the file.',
+  },
+  recovered_unverified: {
+    tone: 'warn',
+    text: 'Interrupted, and the file holds neither version. Check it.',
+  },
+};
+
+export const CHANGE_FAILURE_TEXT: Record<ConfigurationFailure, string> = {
+  unavailable: 'Changing the configuration is not available here.',
+  invalid: 'That request is not one the app accepts.',
+  internal: 'Something went wrong. Nothing was changed.',
+  not_supported: 'That cannot be changed from here.',
+  not_writable:
+    'Its file is not one this app may write: it is shared, owned by someone else, or provider-owned.',
+  source_missing: 'Its file is not there.',
+  source_unreadable: 'Its file could not be read.',
+  source_malformed: 'Its file is not valid JSON, so it is left alone.',
+  entry_gone: 'The entry is no longer there.',
+  entry_changed:
+    'The entry is not the one that was planned, or has a value this app does not know how to change.',
+  already_done: 'It already is that way.',
+  restore_conflict:
+    'A different entry is where this one would go. Nothing was written.',
+  key_store_unavailable:
+    'Your system’s credential store is not available, and this entry may hold a secret, so it is not turned off individually. You can turn off every hook, or edit the file yourself.',
+  record_unreadable: 'The kept entry is damaged and was not used.',
+  key_lost:
+    'The key that protected this entry is gone, so it cannot be put back from here.',
+  plan_unknown: 'That plan is gone. Plan it again.',
+  not_undoable: 'That cannot be undone from here.',
+  import_invalid: 'That file is not a kept entry, or the passphrase is wrong.',
+  no_passphrase: 'A passphrase is needed.',
+};
+
+export const NOTICE_LABEL = {
+  exported: 'Exported. Keep the file and the passphrase safe.',
+  imported: 'Imported. It is listed under Turned off.',
+  not_done: 'Cancelled. Nothing was changed.',
+  expired: 'The plan was dropped because it was too old.',
+} as const;
+
+const SETTINGS_SOURCES: readonly SourceKey[] = [
+  'claude_user_settings',
+  'claude_project_settings',
+  'claude_project_local_settings',
+];
+
+/** What the button on an item does, if the item can be changed from here. */
+export function changeFor(
+  item: ConfigItem,
+): { operation: Operation; label: string } | null {
+  if (
+    item.provider !== 'claude_code' ||
+    item.not_writable !== 'not_in_this_phase'
+  )
+    return null;
+  if (
+    item.kind === 'hook' &&
+    SETTINGS_SOURCES.includes(item.source) &&
+    item.persisted === 'present_enabled'
+  )
+    return { operation: 'park_hook', label: 'Turn off' };
+  if (item.kind === 'skill') {
+    if (item.persisted === 'present_enabled')
+      return { operation: 'skill_off', label: 'Turn off' };
+    if (item.persisted === 'present_disabled')
+      return { operation: 'skill_on', label: 'Turn on' };
+  }
+  return null;
+}
+
+/** The one switch for every hook, and which way it goes now. */
+export function allHooksSwitch(
+  items: readonly ConfigItem[],
+): { operation: Operation; label: string } | null {
+  const hooks = items.filter(
+    (item) =>
+      item.provider === 'claude_code' &&
+      item.kind === 'hook' &&
+      item.source === 'claude_user_settings',
+  );
+  if (hooks.length === 0) return null;
+  return hooks.every((hook) => hook.persisted === 'present_disabled')
+    ? { operation: 'enable_all_hooks', label: 'Allow hooks again' }
+    : { operation: 'disable_all_hooks', label: 'Turn off every hook' };
 }
