@@ -61,6 +61,7 @@ const session = (state: 'starting' | 'running' | 'failed' | 'exited') => ({
 });
 const workspace = (over: Partial<WorkspaceState>): WorkspaceState => ({
   sessions: [],
+  tabs: [],
   creating: false,
   ...over,
 });

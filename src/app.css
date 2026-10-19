@@ -499,12 +499,113 @@ button:focus-visible {
 .new-terminal:disabled {
   opacity: 0.5;
 }
-.terminal-panel {
+/* The panes of the active tab are laid out inside this area by their share of it. */
+.pane-area {
   flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.terminal-panel {
+  position: absolute;
+  box-sizing: border-box;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+}
+/* Where the keyboard goes, when there is more than one pane to tell apart. */
+.terminal-panel.focused {
+  border-color: rgba(95, 212, 245, 0.35);
+}
+.pane-divider {
+  position: absolute;
+  z-index: 3;
+  background: transparent;
+}
+.pane-divider.row {
+  width: 8px;
+  margin-left: -4px;
+  cursor: col-resize;
+}
+.pane-divider:not(.row) {
+  height: 8px;
+  margin-top: -4px;
+  cursor: row-resize;
+}
+.pane-divider:hover {
+  background: rgba(95, 212, 245, 0.25);
+}
+.terminal-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--glass-line-strong);
+  border-radius: var(--radius-md);
+  background: rgba(11, 15, 23, 0.9);
+}
+.terminal-search input {
+  flex: 1;
+  min-width: 6rem;
+  min-height: 28px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-sm);
+}
+.terminal-search input:focus-visible,
+.terminal-search button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.terminal-search button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  font: inherit;
+  color: var(--text);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+.terminal-search button[aria-pressed='true'] {
+  border-color: rgba(95, 212, 245, 0.5);
+  background: var(--accent-soft);
+}
+.terminal-search-count {
+  min-width: 5.5rem;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.terminal-legend {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 16px;
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+}
+.terminal-legend dt {
+  font-family: var(--font-mono);
+  color: var(--accent-strong);
+}
+.terminal-legend dd {
+  margin: 0;
+  color: var(--muted);
+}
+.terminal-legend-note {
+  grid-column: 1 / -1;
 }
 .terminal-panel[hidden] {
   display: none;

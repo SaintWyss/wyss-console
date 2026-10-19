@@ -140,6 +140,8 @@ fn main() {
             "host_terminals",
             "host_info",
             "terminal_redraw",
+            "layout_read",
+            "layout_write",
         ]),
     ))
     .expect("failed to build Wyss Console metadata");

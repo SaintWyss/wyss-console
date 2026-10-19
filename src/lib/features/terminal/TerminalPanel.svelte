@@ -1,35 +1,81 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import type {
     TerminalSession,
     TerminalSessionManager,
   } from './session-manager';
   let {
     session,
-    active,
+    tabId,
+    visible,
+    focused,
+    place,
+    searching,
     manager,
+    onsearchclose,
   }: {
     session: TerminalSession;
-    active: boolean;
+    /** The tab the pane belongs to: the panel is labelled by it. */
+    tabId: string;
+    /** In the active tab: drawn. */
+    visible: boolean;
+    /** The pane the keyboard goes to. */
+    focused: boolean;
+    /** Where the pane sits in its tab, as fractions of the area. */
+    place: { x: number; y: number; w: number; h: number };
+    searching: boolean;
     manager: TerminalSessionManager;
+    onsearchclose: () => void;
   } = $props();
   let host: HTMLDivElement;
+  let query = $state('');
+  let caseSensitive = $state(false);
+  let result = $state({ total: 0, current: 0 });
+  let field = $state<HTMLInputElement>();
   onMount(() => {
     manager.attach(session.id, host);
   });
+  function find(step: 1 | -1 | 0) {
+    result = manager.search(session.id, query, { caseSensitive, step });
+  }
+  $effect(() => {
+    if (searching) void tick().then(() => field?.select());
+  });
+  function close() {
+    manager.clearSearch(session.id);
+    result = { total: 0, current: 0 };
+    onsearchclose();
+  }
+  function key(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close();
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      find(event.shiftKey ? -1 : 1);
+    }
+  }
 </script>
 
 <div
-  tabindex="0"
+  tabindex="-1"
   class="terminal-panel"
+  class:focused
   role="tabpanel"
   id={`panel-${session.id}`}
-  aria-labelledby={`tab-${session.id}`}
-  hidden={!active}
-  inert={!active}
+  aria-labelledby={`tab-${tabId}`}
+  hidden={!visible}
+  inert={!visible}
+  style:left={`${place.x * 100}%`}
+  style:top={`${place.y * 100}%`}
+  style:width={`${place.w * 100}%`}
+  style:height={`${place.h * 100}%`}
+  onpointerdowncapture={() => {
+    if (!focused) manager.activate(session.id);
+  }}
 >
   <div class="terminal-toolbar">
-    <p role="status" aria-live={active ? 'polite' : 'off'}>
+    <p role="status" aria-live={focused ? 'polite' : 'off'}>
       {#if session.native}
         <span
           class="pill compact"
@@ -59,6 +105,39 @@
         · Output truncated{/if}
     </p>
   </div>
+  {#if searching}
+    <div class="terminal-search" role="search">
+      <input
+        bind:this={field}
+        type="text"
+        aria-label="Search this terminal"
+        placeholder="Search…"
+        bind:value={query}
+        oninput={() => find(0)}
+        onkeydown={key}
+      />
+      <span class="terminal-search-count" role="status">
+        {#if query === ''}{:else if result.total === 0}No matches{:else}{result.current}
+          of {result.total}{result.total >= 5000 ? '+' : ''}{/if}
+      </span>
+      <button type="button" aria-label="Previous match" onclick={() => find(-1)}
+        >↑</button
+      >
+      <button type="button" aria-label="Next match" onclick={() => find(1)}
+        >↓</button
+      >
+      <button
+        type="button"
+        aria-pressed={caseSensitive}
+        title="Match case"
+        onclick={() => {
+          caseSensitive = !caseSensitive;
+          find(0);
+        }}>Aa</button
+      >
+      <button type="button" aria-label="Close search" onclick={close}>×</button>
+    </div>
+  {/if}
   <div class="terminal-surface">
     <div bind:this={host} class="terminal-host"></div>
   </div>

@@ -243,6 +243,9 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-host-terminals',
     'allow-host-info',
     'allow-terminal-redraw',
+    // The layout of tabs and panes (T2): one read, one bounded write of a JSON object.
+    'allow-layout-read',
+    'allow-layout-write',
   ]);
   // Every permission is one of this application's own commands: none belongs to a
   // plugin (`fs:`, `shell:`, `dialog:`) or to the framework's core (`core:`).

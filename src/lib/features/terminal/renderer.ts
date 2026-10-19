@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import type { TerminalSize } from '../../contracts/terminal';
 import { currentAppearance, followAppearance } from './appearance';
+import { leaderAction } from './keymap';
 
 export interface TerminalRenderer {
   fit(): TerminalSize | undefined;
@@ -19,8 +20,23 @@ export interface TerminalRenderer {
    */
   onMetricsChange?(listener: () => void): () => void;
   focus(): void;
+  /** Finds `query` in the scrollback and the screen and shows the match `step` from the last. */
+  search?(
+    query: string,
+    options: { caseSensitive: boolean; step: 1 | -1 | 0 },
+  ): SearchResult;
+  clearSearch?(): void;
   dispose(): void;
 }
+
+export interface SearchResult {
+  /** How many matches there are (at most `MAX_MATCHES`). */
+  total: number;
+  /** The one shown, from 1; 0 when there is none. */
+  current: number;
+}
+/** More matches than this are not counted: a search stays cheap. */
+export const MAX_MATCHES = 5000;
 
 export function createRenderer(host: HTMLElement): TerminalRenderer {
   const palette = () => {
@@ -51,7 +67,8 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
   let active = true;
   // Hidden terminals must still answer emulator protocol queries. disableStdin
   // gates those replies too, so visibility gates DOM user input separately.
-  term.attachCustomKeyEventHandler(() => active);
+  // The Console's own chords (Ctrl+Shift+…) are not the program's: they go on to the window.
+  term.attachCustomKeyEventHandler((event) => active && !leaderAction(event));
   const guardInput = (event: Event) => {
     if (!active) {
       event.preventDefault();
@@ -69,6 +86,8 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
   for (const event of guardedEvents)
     host.addEventListener(event, guardInput, true);
   let pending: ((processed: boolean) => void) | undefined;
+  let searchAt = -1;
+  let searchQuery = '';
   const colors = matchMedia('(prefers-color-scheme: dark)');
   const updateTheme = () => {
     term.options.theme = palette();
@@ -140,6 +159,54 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
     },
     focus() {
       if (!disposed) term.focus();
+    },
+    search(query, options) {
+      if (disposed || query === '') return { total: 0, current: 0 };
+      const buffer = term.buffer.active;
+      const needle = options.caseSensitive ? query : query.toLowerCase();
+      const found: { row: number; col: number }[] = [];
+      for (
+        let row = 0;
+        row < buffer.length && found.length < MAX_MATCHES;
+        row++
+      ) {
+        const line = buffer.getLine(row);
+        if (!line) continue;
+        const text = line.translateToString(false);
+        const hay = options.caseSensitive ? text : text.toLowerCase();
+        for (
+          let at = hay.indexOf(needle);
+          at >= 0 && found.length < MAX_MATCHES;
+          at = hay.indexOf(needle, at + Math.max(1, needle.length))
+        )
+          found.push({ row, col: at });
+      }
+      if (found.length === 0) {
+        term.clearSelection();
+        searchAt = -1;
+        return { total: 0, current: 0 };
+      }
+      // Forward from the match shown, or from the top of what is on screen for the first.
+      const first = buffer.viewportY;
+      const start =
+        searchAt >= 0 && searchQuery === `${options.caseSensitive}${query}`
+          ? searchAt + options.step
+          : Math.max(
+              0,
+              found.findIndex((m) => m.row >= first),
+            );
+      const index = ((start % found.length) + found.length) % found.length;
+      searchAt = index;
+      searchQuery = `${options.caseSensitive}${query}`;
+      const match = found[index]!;
+      term.select(match.col, match.row, query.length);
+      term.scrollToLine(Math.max(0, match.row - Math.floor(term.rows / 2)));
+      return { total: found.length, current: index + 1 };
+    },
+    clearSearch() {
+      searchAt = -1;
+      searchQuery = '';
+      if (!disposed) term.clearSelection();
     },
     dispose() {
       if (disposed) return;

@@ -16,11 +16,17 @@ push, no merge, no release. Verify with `git log --oneline | head` and `git stat
 
 ## Active
 
-See the last section of this file.
+T1/T2 (panes, search, key map, layout restore) is implemented and unit-tested but **not yet
+verified in the real GUI** and not yet committed as accepted: `layout.ts`, `keymap.ts`,
+`session-manager.ts` (tabs of panes), `TerminalView/Panel.svelte`, renderer `search`, Rust
+`layout_read/layout_write`. Remaining: a renderer search test (tests/terminal-renderer.test.ts
+pattern), a GUI walkthrough (split, drag a divider, Ctrl+Shift chords, search, close the window
+and reopen to see the layout), ADR 0032 for T1/T2 (own search instead of the xterm add-on, to add
+no dependency), CHANGELOG/README entries. Next executable action: run full validation, then GUI.
 
 ## Roadmap still open, in the order being taken
 
-T1 panes/search/keys · T2 layout restore · F14 credentials · F11a handoff · F6a/b models ·
+F14 credentials · F11a handoff · F6a/b models ·
 F5 authoring · F4a OpenCode · F13 packaging · F10a/b remote · F8 multi-runtime · F12 decision ·
 F1b/G-INF (research, needs throwaway homes and the provider's behaviour).
 P1 (baselines) needs a reference terminal installed with consent: own-metric scripts only.

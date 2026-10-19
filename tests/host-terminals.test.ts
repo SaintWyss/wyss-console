@@ -71,7 +71,7 @@ beforeEach(() => {
   );
   calls = [];
   list = held;
-  state = { sessions: [], creating: false };
+  state = { sessions: [], tabs: [], creating: false };
   mockIPC((command, args) => {
     const request =
       (args as { request?: Record<string, unknown> })?.request ?? {};

@@ -50,9 +50,22 @@ export class TerminalController {
     private readonly adopted?: TerminalInfo,
     /** The name the host keeps for a terminal this controller makes. */
     private readonly title?: string,
+    /** Where a shell this controller makes starts. */
+    private readonly cwd?: string,
   ) {}
 
-  setActive(active: boolean) {
+  /** Searches this terminal's text; see the renderer. */
+  search(query: string, options: { caseSensitive: boolean; step: 1 | -1 | 0 }) {
+    return this.renderer.search?.(query, options) ?? { total: 0, current: 0 };
+  }
+  clearSearch() {
+    this.renderer.clearSearch?.();
+  }
+  /**
+   * `active`: the terminal is shown and takes part in layout. `focus`: it is also the one the
+   * keyboard goes to. Panes of one tab are all shown, and only one has the focus.
+   */
+  setActive(active: boolean, focus = true) {
     this.active = active;
     this.renderer.setActive(active);
     if (!active) {
@@ -61,7 +74,7 @@ export class TerminalController {
       this.desiredSize = undefined;
       this.focusPending = false;
     } else if (!this.stopped) {
-      this.focusPending = true;
+      this.focusPending = focus;
       this.requestFit();
     }
   }
@@ -92,7 +105,11 @@ export class TerminalController {
       };
       this.info =
         this.adopted ??
-        (await desktop.createTerminal(size, null, this.title ?? null));
+        (await desktop.createTerminal(
+          size,
+          this.cwd ?? null,
+          this.title ?? null,
+        ));
       this.id = this.info.terminal_id;
       this.sentSize = this.adopted ? this.adopted.size : size;
       if (this.stopped) {

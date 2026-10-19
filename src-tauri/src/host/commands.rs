@@ -265,6 +265,45 @@ pub async fn host_info(link: State<'_, HostLink>) -> Result<Value, WireError> {
     .await
 }
 
+// ---- the layout of tabs and panes (T2) -------------------------------------------------------
+
+/// Most bytes of a saved layout. Sixteen tabs of sixteen panes with their titles fit in a few
+/// kilobytes; anything near this bound is not a layout.
+const MAX_LAYOUT: usize = 64 * 1024;
+
+fn layout_path() -> Option<std::path::PathBuf> {
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state"))
+        })?;
+    Some(state.join("wyss-console").join("layout.json"))
+}
+
+/// The saved layout, or null. The window checks its shape; the desktop only keeps it.
+#[tauri::command]
+pub fn layout_read() -> Value {
+    layout_path()
+        .and_then(|path| crate::native::store::read_bounded(&path, MAX_LAYOUT as u64))
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or(Value::Null)
+}
+
+/// Keeps the layout: a JSON object of bounded size, written atomically (0600) in the
+/// Console's own state directory. Nothing in it is ever run.
+#[tauri::command]
+pub fn layout_write(layout: Value) -> Result<(), WireError> {
+    let bytes = serde_json::to_vec(&layout).map_err(|_| invalid())?;
+    if !layout.is_object() || bytes.len() > MAX_LAYOUT {
+        return Err(invalid());
+    }
+    let path = layout_path().ok_or_else(invalid)?;
+    let dir = path.parent().ok_or_else(invalid)?;
+    crate::native::store::private_dir(dir).map_err(|_| invalid())?;
+    crate::native::store::write_atomic(&path, &bytes).map_err(|_| invalid())
+}
+
 const COMMANDS: &[&str] = &[
     "create_terminal",
     "terminal_write",
@@ -275,6 +314,8 @@ const COMMANDS: &[&str] = &[
     "terminal_redraw",
     "host_terminals",
     "host_info",
+    "layout_read",
+    "layout_write",
 ];
 
 pub fn extension() -> wyss_console::Extension {
@@ -289,7 +330,9 @@ pub fn extension() -> wyss_console::Extension {
             terminal_redraw,
             terminal_read_output,
             host_terminals,
-            host_info
+            host_info,
+            layout_read,
+            layout_write
         ]),
         install: Box::new(|builder| builder.manage(HostLink::new()).manage(Cursors::default())),
         on_exit: Some(Box::new(|app| {

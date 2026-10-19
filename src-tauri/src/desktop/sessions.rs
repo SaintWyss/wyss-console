@@ -572,6 +572,9 @@ mod tests {
             "allow-host-terminals",
             "allow-host-info",
             "allow-terminal-redraw",
+            // The layout of tabs and panes (T2).
+            "allow-layout-read",
+            "allow-layout-write",
         ];
         assert_eq!(granted, expected);
         let manifest = include_str!("../../build.rs");

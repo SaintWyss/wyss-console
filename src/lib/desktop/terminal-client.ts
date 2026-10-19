@@ -46,6 +46,22 @@ export async function redrawTerminal(terminal_id: TerminalId): Promise<void> {
     // The terminal may have ended meanwhile: there is nothing to redraw.
   }
 }
+/** The saved layout of tabs and panes, as the desktop kept it; `null` when there is none. */
+export async function readLayout(): Promise<unknown> {
+  try {
+    return await invoke<unknown>('layout_read');
+  } catch {
+    return null;
+  }
+}
+export async function writeLayout(layout: unknown): Promise<void> {
+  if (layout === null) return;
+  try {
+    await invoke<unknown>('layout_write', { layout });
+  } catch {
+    // A layout that could not be written is not worth a failed window.
+  }
+}
 /** Whether the terminals live in a host that outlives this window. */
 export async function hostIsRemote(): Promise<boolean> {
   try {
