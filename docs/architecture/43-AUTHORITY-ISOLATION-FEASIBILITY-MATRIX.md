@@ -18,7 +18,7 @@ Review context: [Codex REJECT](reviews/2026-10-14-post-reject-corrections-extern
 ## 1. What is being protected? Separate three different promises
 
 **S1 — Human-approval origin integrity:** a malicious process operating as the
-ordinary Linux user must not be able to impersonate the *human's* approval of a
+ordinary Linux user must not be able to impersonate the _human's_ approval of a
 managed tool or a pipeline. Today, `SO_PEERCRED` only attests a UNIX identity.
 Accepted ADR 0018 says same-UID processes can connect, grant leases and
 approve managed actions and modify user-owned authority storage.
@@ -27,7 +27,7 @@ approve managed actions and modify user-owned authority storage.
 trusted authority's binary, unit file, database/witness/audit, policy,
 credential verifier, IPC, launch environment, or signature/key material
 used to decide S1. Socket mode `0600` is irrelevant to an attacker
-with the *same* UID. Even S1's separate cryptographic approval is
+with the _same_ UID. Even S1's separate cryptographic approval is
 meaningless if the same attacker can replace its verifier or rewrite
 the canonical approved state.
 
@@ -57,12 +57,12 @@ under uid 65534 connected to the server, sent the literal
 test text `synthetic-intent` and read `DISPOSABLE_ONLY`
 from the test file. The server inspected `SO_PEERCRED`.
 
-| Assertion | Actual observation | Interpretation |
-| --- | --- | --- |
-| Server and client same nonroot UID | Both uid 65534 | Under this ordinary discretionary-access design they belong to one security principal |
-| Peer has access to socket `0600` | Connection succeeded; server received `synthetic-intent` | Kernel UID check is not human-consent proof |
-| Peer reads same-UID file `0600` | Child read `DISPOSABLE_ONLY` | Secret authority DB/state owned by same UID cannot be claimed protected from other same-UID processes |
-| Temporary content remains after test | Directory deleted after context exit | Test touched only dummy fixtures; no product runtime, home or secret |
+| Assertion                            | Actual observation                                       | Interpretation                                                                                        |
+| ------------------------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Server and client same nonroot UID   | Both uid 65534                                           | Under this ordinary discretionary-access design they belong to one security principal                 |
+| Peer has access to socket `0600`     | Connection succeeded; server received `synthetic-intent` | Kernel UID check is not human-consent proof                                                           |
+| Peer reads same-UID file `0600`      | Child read `DISPOSABLE_ONLY`                             | Secret authority DB/state owned by same UID cannot be claimed protected from other same-UID processes |
+| Temporary content remains after test | Directory deleted after context exit                     | Test touched only dummy fixtures; no product runtime, home or secret                                  |
 
 **Important limitations:** the test did not run the actual
 `wyss-control` daemon, attempt any real approval RPC, test
@@ -72,6 +72,7 @@ claim also follows independently from accepted ADR 0011/0018
 and Linux's `unix(7)` peer-credentials contract.
 
 Relevant official documentation:
+
 - https://man7.org/linux/man-pages/man7/unix.7.html (SO_PEERCRED)
 - https://man7.org/linux/man-pages/man7/user_namespaces.7.html (UID mappings)
 - https://github.com/systemd/systemd/blob/main/man/systemd.exec.xml
@@ -79,19 +80,19 @@ Relevant official documentation:
 
 ## 3. Comparison of candidate architectures
 
-| Criterion | **A: protect approval/authority under distinct genuine host principal** | **B: restrict automated native workers** | **H: hybrid A + B when genuinely needed** |
-| --- | --- | --- | --- |
-| S1 human-approval provenance | **Potentially** strong, if host cannot forge signing proof and authority verifies it | Protects if every untrusted worker and input source truly cannot access the issuer/authority; same-UID unrestricted manual/native/LP4 remains | Potentially strongest, with independent review |
-| S2 binary, DB, policy, service integrity | Requires different ownership/access protection plus service startup and unmodifiable verifier; a separate PID or user `systemd --user` unit alone is NOT enough | Worker sandbox may hide trusted surfaces from **that worker**, but not an unconfined same-UID native/LP4 process | Requires protected authority regardless of worker sandbox |
-| S3 arbitrary changes to user's files | **Not protected** against unrestricted native/LP4 shell by a separate authority | Worker changes limited to assigned workspace/effects if true OS confinement proven; other unrestricted native processes remain | Restricted auto-work + full-account manually labelled |
-| Native agent sign-in and refresh | Can keep original provider user/home in unrestricted native sessions; protected approval service must not ingest auth tokens | **Unverified per provider**: separate UID/mount/home may break refresh, keyring, MCP, hooks, project permissions or own subprocesses | Separate native profiles, provider-by-provider evidence |
-| Ordinary native terminal equivalence | Preserved for the native program but does **not** make program activity subject to authority | Altered where controls deny capabilities; not 'unrestricted native' | Separate "unrestricted full account" and "restricted OL3 worker" entry points |
-| OL3 native auto start | Still unsafe until trusted approval path, native-work handoff policy, mutable worktree/hooks and effect ownership resolved | Potentially safe inside an expressly bounded sandbox if working provider+project experience demonstrated | Target only if both authority and worker gates pass |
-| LP4 remote host shell after logout | Possible as an **inherently full-account** action with explicit remote key/presence, bounded claims, protected grant issuer; compromise still changes user-owned state | Can remote into bounded shell instead, but **not equivalent** to selected LP4 full control | May offer both as distinct grants; no accidental escalation |
-| Headless logout/lifecycle | Requires service design independent of user's tamperable unit and proper host admin setup/upgrade/recovery | Can operate under unprivileged user service when reference OS enforces sandbox; keyring auth unresolved | Greater IPC/process/resource maintenance |
-| Personal installation with no sudo | **Conflicts with the accepted ADR 0025 experience** if a genuinely different protected OS principal/system unit must be created; one-time privileged provisioning / policy delegation is a *future owner trade-off* | Rootless sandbox may be possible but capabilities, UID mapping, kernel policy and provider behaviour need evidence | Usually incurs provisioning and testing costs |
-| Security proof currently available | **SOURCE-SUPPORTED PRINCIPLE / UNIMPLEMENTED** | **SOURCE-SUPPORTED POSSIBILITY / UNTESTED PROVIDERS** | **UNTESTED, NOT SELECTED** |
-| Final recommendation status | **A first to investigate**, not adopted | Keep as a comparator and possible OL3 profile | Evaluate after A/B constraints are known |
+| Criterion                                | **A: protect approval/authority under distinct genuine host principal**                                                                                                                                             | **B: restrict automated native workers**                                                                                                      | **H: hybrid A + B when genuinely needed**                                     |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| S1 human-approval provenance             | **Potentially** strong, if host cannot forge signing proof and authority verifies it                                                                                                                                | Protects if every untrusted worker and input source truly cannot access the issuer/authority; same-UID unrestricted manual/native/LP4 remains | Potentially strongest, with independent review                                |
+| S2 binary, DB, policy, service integrity | Requires different ownership/access protection plus service startup and unmodifiable verifier; a separate PID or user `systemd --user` unit alone is NOT enough                                                     | Worker sandbox may hide trusted surfaces from **that worker**, but not an unconfined same-UID native/LP4 process                              | Requires protected authority regardless of worker sandbox                     |
+| S3 arbitrary changes to user's files     | **Not protected** against unrestricted native/LP4 shell by a separate authority                                                                                                                                     | Worker changes limited to assigned workspace/effects if true OS confinement proven; other unrestricted native processes remain                | Restricted auto-work + full-account manually labelled                         |
+| Native agent sign-in and refresh         | Can keep original provider user/home in unrestricted native sessions; protected approval service must not ingest auth tokens                                                                                        | **Unverified per provider**: separate UID/mount/home may break refresh, keyring, MCP, hooks, project permissions or own subprocesses          | Separate native profiles, provider-by-provider evidence                       |
+| Ordinary native terminal equivalence     | Preserved for the native program but does **not** make program activity subject to authority                                                                                                                        | Altered where controls deny capabilities; not 'unrestricted native'                                                                           | Separate "unrestricted full account" and "restricted OL3 worker" entry points |
+| OL3 native auto start                    | Still unsafe until trusted approval path, native-work handoff policy, mutable worktree/hooks and effect ownership resolved                                                                                          | Potentially safe inside an expressly bounded sandbox if working provider+project experience demonstrated                                      | Target only if both authority and worker gates pass                           |
+| LP4 remote host shell after logout       | Possible as an **inherently full-account** action with explicit remote key/presence, bounded claims, protected grant issuer; compromise still changes user-owned state                                              | Can remote into bounded shell instead, but **not equivalent** to selected LP4 full control                                                    | May offer both as distinct grants; no accidental escalation                   |
+| Headless logout/lifecycle                | Requires service design independent of user's tamperable unit and proper host admin setup/upgrade/recovery                                                                                                          | Can operate under unprivileged user service when reference OS enforces sandbox; keyring auth unresolved                                       | Greater IPC/process/resource maintenance                                      |
+| Personal installation with no sudo       | **Conflicts with the accepted ADR 0025 experience** if a genuinely different protected OS principal/system unit must be created; one-time privileged provisioning / policy delegation is a _future owner trade-off_ | Rootless sandbox may be possible but capabilities, UID mapping, kernel policy and provider behaviour need evidence                            | Usually incurs provisioning and testing costs                                 |
+| Security proof currently available       | **SOURCE-SUPPORTED PRINCIPLE / UNIMPLEMENTED**                                                                                                                                                                      | **SOURCE-SUPPORTED POSSIBILITY / UNTESTED PROVIDERS**                                                                                         | **UNTESTED, NOT SELECTED**                                                    |
+| Final recommendation status              | **A first to investigate**, not adopted                                                                                                                                                                             | Keep as a comparator and possible OL3 profile                                                                                                 | Evaluate after A/B constraints are known                                      |
 
 **Fundamental incompatibility under current accepted trust model:**
 `same UNIX UID for authority, unrestricted agent and LP4` +
@@ -161,17 +162,17 @@ exact normal unrestricted native terminal. Its sandbox
 may still run provider models and write into a bounded
 workspace, but each capability needs an actual fixture:
 
-| Native feature | A ordinary user native | B restricted OL3 worker | Required evidence |
-| --- | --- | --- | --- |
-| CLI/TUI startup, resize, PTY | Expected unchanged; **not newly tested** | Unknown: PTY and terminal helper permissions | Exact provider version and isolated PTY integration |
-| Existing provider login / refresh | Original user's normal mechanisms | Unknown; auth copy prohibited by DN-14; read-only file bind may break token refresh | Separate no-real-account provider mock + documented official auth configuration |
-| Provider global hooks/rules | User-owned, so mutable by ordinary agent | Unknown: could be absent, blocked, altered by overlay; required controls must remain | Per-provider effective config and mandatory-hook tests |
-| MCP/plugins/subagents | Native capabilities | Unknown: sockets/exec/net restrictions may break them or introduce bypass | Enumerate and deny escape, then positive useful pipeline |
-| Project read/write and Git | Ordinary user permissions | Needs idmapped grants/ACL/overlay/worktree design | Write allowed only intended path; tests with symlinks and worktree hooks |
-| Shell commands/test runners | Ordinary shell | Restricted to verified effect vocabulary or reviewed OS sandbox | Positive build/test workload + negative external action |
-| Keyring/KWallet/desktop D-Bus | Native session may access | Unknown; isolated UID/namespace often disrupts access | Mock keyring then real per-device compatibility after separate permission |
-| Network/model API | Native account network access | Egress whitelist and per-provider binding need proof | Allow legitimate provider traffic; reject unauthorized destinations |
-| Performance/resource use | Baseline | Sandbox/FFI overhead, startup and RAM unknown | p50/p95 launch, idle CPU/RAM, throughput on reference machines |
+| Native feature                    | A ordinary user native                   | B restricted OL3 worker                                                              | Required evidence                                                               |
+| --------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| CLI/TUI startup, resize, PTY      | Expected unchanged; **not newly tested** | Unknown: PTY and terminal helper permissions                                         | Exact provider version and isolated PTY integration                             |
+| Existing provider login / refresh | Original user's normal mechanisms        | Unknown; auth copy prohibited by DN-14; read-only file bind may break token refresh  | Separate no-real-account provider mock + documented official auth configuration |
+| Provider global hooks/rules       | User-owned, so mutable by ordinary agent | Unknown: could be absent, blocked, altered by overlay; required controls must remain | Per-provider effective config and mandatory-hook tests                          |
+| MCP/plugins/subagents             | Native capabilities                      | Unknown: sockets/exec/net restrictions may break them or introduce bypass            | Enumerate and deny escape, then positive useful pipeline                        |
+| Project read/write and Git        | Ordinary user permissions                | Needs idmapped grants/ACL/overlay/worktree design                                    | Write allowed only intended path; tests with symlinks and worktree hooks        |
+| Shell commands/test runners       | Ordinary shell                           | Restricted to verified effect vocabulary or reviewed OS sandbox                      | Positive build/test workload + negative external action                         |
+| Keyring/KWallet/desktop D-Bus     | Native session may access                | Unknown; isolated UID/namespace often disrupts access                                | Mock keyring then real per-device compatibility after separate permission       |
+| Network/model API                 | Native account network access            | Egress whitelist and per-provider binding need proof                                 | Allow legitimate provider traffic; reject unauthorized destinations             |
+| Performance/resource use          | Baseline                                 | Sandbox/FFI overhead, startup and RAM unknown                                        | p50/p95 launch, idle CPU/RAM, throughput on reference machines                  |
 
 If the restricted persona cannot preserve a mandatory feature,
 there is a **genuine owner decision**: use an alternative
@@ -194,7 +195,7 @@ No forced adoption merely because B can deny sockets.
    attacker. The signing device, policy and recovery are
    separate trust assumptions.
 3. **Remote LP4-away:** native remote shell after screen lock
-   or KDE logout is *explicitly required* by the owner's
+   or KDE logout is _explicitly required_ by the owner's
    usage pattern; default-off is a safe interim state,
    **not final product acceptance**. A separate, narrowly
    consented absent-host entitlement may enable
@@ -216,24 +217,24 @@ No forced adoption merely because B can deny sockets.
 
 ## 7. Verification gates: positive and negative tests
 
-Each needs a *named disposable target*, pinned versions,
+Each needs a _named disposable target_, pinned versions,
 test data, expected failure/positive path, teardown and
 evidence with output hashes before any implementation/ADR
 acceptance. They are listed below as **NOT RUN** except
 the single synthetic same-UID observation (§2).
 
-| ID | Test target and assertion |
-| --- | --- |
-| TV-ISO-01 | **OBSERVED synthetic only:** two unprivileged same-UID processes; socket `0600` and file `0600` are accessible to peer; UID check alone does not attest human |
+| ID        | Test target and assertion                                                                                                                                                                                                                                      |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TV-ISO-01 | **OBSERVED synthetic only:** two unprivileged same-UID processes; socket `0600` and file `0600` are accessible to peer; UID check alone does not attest human                                                                                                  |
 | TV-ISO-02 | **PARTIAL synthetic only:** different-UID attacker cannot open a 0700 private directory, 0600 socket or dummy state file, while same-UID client can. **NOT RUN for real authority binary/unit, DB/WAL/witness, signer, D-Bus, FDs or real privilege changes.** |
-| TV-ISO-03 | Unrestricted native **manual**, OL3 and LP4 each try all `approvals.respond`, `grant_step`, `managed.turns`, `managedSession/*` and alternate executable/service paths; fail closed for protected operations |
-| TV-ISO-04 | Legitimate approval signed outside compromised user session verifies exact digest/time/scope and executes only permitted managed action; reordered, replayed, substituted and falsely displayed intents refuse |
-| TV-ISO-05 | Provision protected UID/unit without modifying existing user configs; test upgrade/rollback, user reboot, logout/lingering, failure recovery and explicit owner consent; conflict with ADR 0025 surfaced |
-| TV-ISO-06 | Restricted provider profile for each of Claude Code, Codex and Hermes: login persistence, token refresh, hooks, plugins/MCP, project file edit, git, test command, required egress, PTY work, restart |
-| TV-ISO-07 | Worker tries to reach authority by pathname, inherited FD, D-Bus, process signals, writable launcher and service files; not only authority.sock; test mutable PATH/wrapper and provider configs |
-| TV-ISO-08 | Native/managed worktree contamination through hooks, instructions and executable source changes; stale prior approvals never authorize effects |
-| TV-ISO-09 | LP4-away valid phone/PC performs an explicitly approved remote input while no KDE session exists; stolen/expired key/revoked device denied; account compromise is not labelled restored |
-| TV-ISO-10 | Both candidates measured CPU/RAM/latency, process count, profile usability, maintenance complexity; costs and real hardware scope reported not invented |
+| TV-ISO-03 | Unrestricted native **manual**, OL3 and LP4 each try all `approvals.respond`, `grant_step`, `managed.turns`, `managedSession/*` and alternate executable/service paths; fail closed for protected operations                                                   |
+| TV-ISO-04 | Legitimate approval signed outside compromised user session verifies exact digest/time/scope and executes only permitted managed action; reordered, replayed, substituted and falsely displayed intents refuse                                                 |
+| TV-ISO-05 | Provision protected UID/unit without modifying existing user configs; test upgrade/rollback, user reboot, logout/lingering, failure recovery and explicit owner consent; conflict with ADR 0025 surfaced                                                       |
+| TV-ISO-06 | Restricted provider profile for each of Claude Code, Codex and Hermes: login persistence, token refresh, hooks, plugins/MCP, project file edit, git, test command, required egress, PTY work, restart                                                          |
+| TV-ISO-07 | Worker tries to reach authority by pathname, inherited FD, D-Bus, process signals, writable launcher and service files; not only authority.sock; test mutable PATH/wrapper and provider configs                                                                |
+| TV-ISO-08 | Native/managed worktree contamination through hooks, instructions and executable source changes; stale prior approvals never authorize effects                                                                                                                 |
+| TV-ISO-09 | LP4-away valid phone/PC performs an explicitly approved remote input while no KDE session exists; stolen/expired key/revoked device denied; account compromise is not labelled restored                                                                        |
+| TV-ISO-10 | Both candidates measured CPU/RAM/latency, process count, profile usability, maintenance complexity; costs and real hardware scope reported not invented                                                                                                        |
 
 **Current evidence by category:**
 
@@ -250,7 +251,7 @@ the single synthetic same-UID observation (§2).
 ## 8. Provisional design judgment and next action
 
 **Prioritize A for further proof**, because it has the best
-*potential* to preserve everyday unrestricted native agents
+_potential_ to preserve everyday unrestricted native agents
 and existing provider authentication, while moving human
 approval integrity away from their identity. It also has
 important **costs**: a different system trust principal,
@@ -262,7 +263,7 @@ non-phone fallback or accept it as a hard requirement).
 **B remains a serious, but narrower, candidate** for
 automated OL3 steps, not a drop-in replacement for
 native full-account sessions. A hybrid might be warranted
-if approvals are protected separately *and* unrestricted
+if approvals are protected separately _and_ unrestricted
 automatic workers remain too risky.
 
 **Formal stop condition:** if the owner insists at once
@@ -337,7 +338,6 @@ concrete service/approval identity and compatible
 credential/host-login story. Do not count this fixture
 as having unblocked final-product OL3 or LP4.
 
-
 ## 10. Follow-up simulated signer, credential and file-safety evidence
 
 [44](44-DISPOSABLE-TRUST-FIXTURE-OBSERVATIONS.md)
@@ -353,7 +353,7 @@ documents **executed** disposable fixtures FT-01..19:
   **not by an actual human**; thus TV-ISO-04 remains
   **PARTIAL synthetic**, with trusted UI/device challenge
   and exact human intent NOT RUN.
-- A provider-auth *dummy* file owned by the original UID
+- A provider-auth _dummy_ file owned by the original UID
   was unreadable by a distinct UID, while a rootless
   `unshare -Ur` process displaying UID 0 inside its
   namespace could still read the original host-UID
@@ -374,7 +374,6 @@ TV-ISO-06 and TV-ISO-07 have **partial synthetic**
 coverage only. TV-ISO-03/05/08/09/10 for actual
 product paths are **NOT RUN**. All accepted ADR
 constraints and both REJECT reviews still stand.
-
 
 ## 11. B sandbox availability constraint (2026-10-14)
 
@@ -431,11 +430,10 @@ nonadministrative same-UID attacker. Thus:
   full host isolation against every unrestricted
   native/LP4 agent**.
 - A rootless Docker migration or privileged-on-demand
-  policy is a possible future *separately authorised*
+  policy is a possible future _separately authorised_
   environmental change, not an implicit planning decision.
   The owner must not lose container-development workflows
   merely to make a test pass.
 
 All real provider/process/service operations remain
 blocked pending independent review.
-

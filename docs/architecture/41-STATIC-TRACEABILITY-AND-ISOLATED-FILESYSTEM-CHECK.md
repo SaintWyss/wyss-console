@@ -20,16 +20,17 @@ relative to the source document; check existence in the
 repository inventory. External links and fragment identifiers
 are outside this existence check.
 
-| Batch | Architecture docs read | Relative links checked | Missing destinations |
-| --- | ---: | ---: | ---: |
-| 00–11 | 12 | 121 | 0 |
-| 12–23 | 12 | 162 | 0 |
-| 24–35 | 12 | 87 | 0 |
-| 36–40 | 5 | 40 | 0 |
-| **Total** | **41** | **410** | **0** |
+| Batch     | Architecture docs read | Relative links checked | Missing destinations |
+| --------- | ---------------------: | ---------------------: | -------------------: |
+| 00–11     |                     12 |                    121 |                    0 |
+| 12–23     |                     12 |                    162 |                    0 |
+| 24–35     |                     12 |                     87 |                    0 |
+| 36–40     |                      5 |                     40 |                    0 |
+| **Total** |                 **41** |                **410** |                **0** |
 
 The root index links to `../adr/` as a directory; the checker
 verified that directory exists. This report does **not** claim:
+
 - anchor/heading fragment resolution,
 - external URL liveness,
 - natural-language consistency between linked documents,
@@ -39,12 +40,13 @@ verified that directory exists. This report does **not** claim:
 
 Fetched [02](02-REQUIREMENTS.md), [20](20-VERIFICATION-AND-ACCEPTANCE.md)
 and [23](23-TRACEABILITY-MATRIX.md) on the planning branch.
-Identified **40 new stable FR-* requirements** added in 02 §4.
+Identified _*40 new stable FR-* requirements_* added in 02 §4.
 Checked each has a matching identifier in 23 §5.
 Checked the 40 associated `AC-FINAL-01..40` in 23
 exist in the acceptance specification in 20 §14, and each
 new `TS-ORC/TS-HYB/TS-FINAL` used in that crosswalk has a
 matching test ID in 20 §14. Results:
+
 - Missing new requirement IDs from trace: **0**.
 - Missing new AC-FINAL specifications: **0**.
 - Missing crosswalk TS-ORC/TS-HYB/TS-FINAL specifications: **0**.
@@ -78,9 +80,9 @@ Then attempt exchange across mounts between
 `a='B'` under `/tmp` and `c='C'` under
 `/dev/shm`; check both contents unchanged.
 
-| Case | Expected | Observed result |
-| --- | --- | --- |
-| Same mount, same directory | Successful atomic name exchange | Success; `a='B', b='A'` |
+| Case                                 | Expected                                         | Observed result                                                     |
+| ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------- |
+| Same mount, same directory           | Successful atomic name exchange                  | Success; `a='B', b='A'`                                             |
 | Different mounts, even both writable | Explicit error; no exchange, preserve both files | `errno=18 EXDEV` (Invalid cross-device link); `a='B', c='C'` intact |
 
 **Interpretation:** reinforces the known boundary that a staging

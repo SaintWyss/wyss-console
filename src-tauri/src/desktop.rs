@@ -54,7 +54,56 @@ fn build_main_window(
         .build()
 }
 
-pub fn run(authority_digest: Option<&'static str>) {
+/// What the binary adds to the desktop: commands and the state they need. They live in the
+/// binary because the code behind them must not be in the library the authority links
+/// (C-02, TS-SEC-03). The library only routes: a command named in `commands` goes to
+/// `handler`, every other one to the library's own.
+/// Called when the application exits.
+pub type ExitHook = Box<dyn Fn(&tauri::AppHandle) + Send + Sync + 'static>;
+
+pub struct Extension {
+    pub commands: &'static [&'static str],
+    pub handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static>,
+    pub install: Box<dyn FnOnce(tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry>>,
+    /// Called when the application is exiting, after its terminals were asked to stop.
+    pub on_exit: Option<ExitHook>,
+}
+
+impl Extension {
+    /// Two extensions as one: a command goes to the extension that names it.
+    pub fn merge(self, other: Self) -> Self {
+        let commands: Vec<&'static str> = self
+            .commands
+            .iter()
+            .chain(other.commands.iter())
+            .copied()
+            .collect();
+        let first = self.commands;
+        let (first_handler, second_handler) = (self.handler, other.handler);
+        let (first_install, second_install) = (self.install, other.install);
+        let on_exit: Option<ExitHook> = match (self.on_exit, other.on_exit) {
+            (Some(a), Some(b)) => Some(Box::new(move |app| {
+                a(app);
+                b(app);
+            })),
+            (a, b) => a.or(b),
+        };
+        Self {
+            commands: Box::leak(commands.into_boxed_slice()),
+            handler: Box::new(move |invoke| {
+                if first.contains(&invoke.message.command()) {
+                    first_handler(invoke)
+                } else {
+                    second_handler(invoke)
+                }
+            }),
+            install: Box::new(move |builder| second_install(first_install(builder))),
+            on_exit,
+        }
+    }
+}
+
+pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>) {
     let stopping = Arc::new(AtomicBool::new(false));
     let managed_sessions = sessions::SessionService::from_environment();
     let authority = authority::AuthorityService::from_environment();
@@ -63,7 +112,58 @@ pub fn run(authority_digest: Option<&'static str>) {
     // Makes an authority available where none answers. It follows the observer above
     // and never stands in for it: connected is what the observer says.
     let bootstrap = lifecycle::start(&authority, authority_digest);
-    tauri::Builder::default()
+    type Handler = Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync>;
+    let ours: Handler = Box::new(tauri::generate_handler![
+        get_app_info,
+        authority::authority_state,
+        lifecycle::authority_lifecycle,
+        lifecycle::authority_retry,
+        sessions::managed_sessions_page,
+        sessions::managed_session_prepare,
+        sessions::managed_session_resume,
+        sessions::managed_session_close,
+        sessions::managed_session_activate,
+        sessions::managed_session_abandon,
+        sessions::managed_session_mode,
+        workspace::choose_workspace,
+        turns::managed_turns,
+        turns::managed_turns_older,
+        turns::managed_turn_read,
+        turns::managed_turn_start,
+        turns::managed_turn_cancel,
+        turns::managed_approvals,
+        turns::managed_approval_read,
+        turns::managed_approval_approve,
+        turns::managed_approval_deny,
+        events::managed_events,
+        events::managed_events_older,
+        settings::settings_read,
+        settings::settings_update,
+        settings::settings_reset,
+        terminal::create_terminal,
+        terminal::terminal_write,
+        terminal::terminal_read_output,
+        terminal::terminal_resize,
+        terminal::close_terminal,
+        terminal::terminal_status
+    ]);
+    let (routed, theirs, install, on_exit) = match extension {
+        Some(extension) => (
+            extension.commands,
+            Some(extension.handler),
+            Some(extension.install),
+            extension
+                .on_exit
+                .map(|f| Arc::<dyn Fn(&tauri::AppHandle) + Send + Sync>::from(f)),
+        ),
+        None => (&[][..], None, None, None),
+    };
+    let builder = tauri::Builder::default();
+    let builder = match install {
+        Some(install) => install(builder),
+        None => builder,
+    };
+    builder
         .setup(|app| open_main_window(app))
         .manage(TerminalService::default())
         // Read-only and independent: no terminal operation waits on, or learns of, it.
@@ -78,40 +178,10 @@ pub fn run(authority_digest: Option<&'static str>) {
         .manage(managed_sessions)
         // What the native folder dialog returned: the only paths an activation may name.
         .manage(workspace::WorkspaceSelections::default())
-        .invoke_handler(tauri::generate_handler![
-            get_app_info,
-            authority::authority_state,
-            lifecycle::authority_lifecycle,
-            lifecycle::authority_retry,
-            sessions::managed_sessions_page,
-            sessions::managed_session_prepare,
-            sessions::managed_session_resume,
-            sessions::managed_session_close,
-            sessions::managed_session_activate,
-            sessions::managed_session_abandon,
-            sessions::managed_session_mode,
-            workspace::choose_workspace,
-            turns::managed_turns,
-            turns::managed_turns_older,
-            turns::managed_turn_read,
-            turns::managed_turn_start,
-            turns::managed_turn_cancel,
-            turns::managed_approvals,
-            turns::managed_approval_read,
-            turns::managed_approval_approve,
-            turns::managed_approval_deny,
-            events::managed_events,
-            events::managed_events_older,
-            settings::settings_read,
-            settings::settings_update,
-            settings::settings_reset,
-            terminal::create_terminal,
-            terminal::terminal_write,
-            terminal::terminal_read_output,
-            terminal::terminal_resize,
-            terminal::close_terminal,
-            terminal::terminal_status
-        ])
+        .invoke_handler(move |invoke| match &theirs {
+            Some(theirs) if routed.contains(&invoke.message.command()) => theirs(invoke),
+            _ => ours(invoke),
+        })
         .build(tauri::generate_context!())
         .expect("failed to build Wyss Console")
         .run(move |handle, event| {
@@ -130,12 +200,17 @@ pub fn run(authority_digest: Option<&'static str>) {
                     .clone();
                 let sessions = handle.state::<sessions::SessionService>().inner().clone();
                 let app = handle.clone();
+                let on_exit = on_exit.clone();
+                let for_exit = handle.clone();
                 tauri::async_runtime::spawn(async move {
                     let result = tauri::async_runtime::spawn_blocking(move || {
                         // A session call in flight is cancelled; none is admitted after.
                         sessions.shutdown();
                         // Terminals first: the link's bounded stop never delays them.
                         let result = service.shutdown();
+                        if let Some(on_exit) = &on_exit {
+                            on_exit(&for_exit);
+                        }
                         authority.shutdown();
                         // Only the following ends. The authority is not stopped: its
                         // lifetime is the service manager's, not this window's.

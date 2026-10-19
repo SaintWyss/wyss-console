@@ -1,0 +1,542 @@
+{
+  "inventory": {
+    "items": [
+      {
+        "detail": {
+          "kind": "map",
+          "value": [
+            [
+              "command",
+              {
+                "kind": "text",
+                "value": {
+                  "found": ["secret_field"],
+                  "text": "guard.sh --token [redacted]"
+                }
+              }
+            ],
+            [
+              "timeout",
+              {
+                "kind": "number",
+                "value": 5
+              }
+            ],
+            [
+              "type",
+              {
+                "kind": "text",
+                "value": {
+                  "found": [],
+                  "text": "command"
+                }
+              }
+            ]
+          ]
+        },
+        "effective": "documented",
+        "hash": null,
+        "id": "3509f91842ae6d3540a6c182b5491893",
+        "kind": "hook",
+        "name": "PreToolUse · Bash",
+        "not_writable": "not_in_this_phase",
+        "persisted": "present_enabled",
+        "provider": "claude_code",
+        "scope": "global",
+        "session_use": "unknown",
+        "source": "claude_user_settings"
+      },
+      {
+        "detail": {
+          "kind": "text",
+          "value": {
+            "found": [],
+            "text": "opus"
+          }
+        },
+        "effective": "documented",
+        "hash": null,
+        "id": "b8f099d252f9f9c07859470326f52588",
+        "kind": "model_preference",
+        "name": "model",
+        "not_writable": "not_in_this_phase",
+        "persisted": "present_enabled",
+        "provider": "claude_code",
+        "scope": "global",
+        "session_use": "unknown",
+        "source": "claude_user_settings"
+      },
+      {
+        "detail": {
+          "kind": "map",
+          "value": [
+            [
+              "args",
+              {
+                "kind": "list",
+                "value": [
+                  {
+                    "kind": "text",
+                    "value": {
+                      "found": [],
+                      "text": "-y"
+                    }
+                  },
+                  {
+                    "kind": "text",
+                    "value": {
+                      "found": [],
+                      "text": "ctx"
+                    }
+                  }
+                ]
+              }
+            ],
+            [
+              "command",
+              {
+                "kind": "text",
+                "value": {
+                  "found": [],
+                  "text": "npx"
+                }
+              }
+            ],
+            [
+              "env",
+              {
+                "kind": "map",
+                "value": [
+                  [
+                    "CONTEXT7_API_KEY",
+                    {
+                      "kind": "hidden",
+                      "value": "environment_value"
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        },
+        "effective": "not_verifiable",
+        "hash": null,
+        "id": "415ccd3e9baa2e9bcb9b76599b44444b",
+        "kind": "mcp_server",
+        "name": "context7",
+        "not_writable": "provider_owned",
+        "persisted": "present_enabled",
+        "provider": "claude_code",
+        "scope": "global",
+        "session_use": "unknown",
+        "source": "claude_user_state"
+      },
+      {
+        "detail": null,
+        "effective": "documented",
+        "hash": null,
+        "id": "4dadecba81158fed2b5d162fa7214374",
+        "kind": "skill",
+        "name": "useful",
+        "not_writable": "not_in_this_phase",
+        "persisted": "present_enabled",
+        "provider": "claude_code",
+        "scope": "global",
+        "session_use": "unknown",
+        "source": "claude_user_skills"
+      },
+      {
+        "detail": null,
+        "effective": "not_verifiable",
+        "hash": null,
+        "id": "ed032c48475010bad9e641ca60395f6b",
+        "kind": "skill",
+        "name": "noisy",
+        "not_writable": "not_in_this_phase",
+        "persisted": "present_disabled",
+        "provider": "claude_code",
+        "scope": "global",
+        "session_use": "unknown",
+        "source": "claude_user_skills"
+      },
+      {
+        "detail": null,
+        "effective": "documented",
+        "hash": "6c621d1a05138a7888d37d9269a9da8e2e11e4aced2f6cfd24b05ab1b9e61bb0",
+        "id": "905e584802a9c5229a8dca83010ecfc2",
+        "kind": "rule_file",
+        "name": "CLAUDE.md",
+        "not_writable": "not_in_this_phase",
+        "persisted": "present_enabled",
+        "provider": "claude_code",
+        "scope": "global",
+        "session_use": "unknown",
+        "source": "claude_user_rules"
+      },
+      {
+        "detail": {
+          "kind": "map",
+          "value": [
+            [
+              "command",
+              {
+                "kind": "text",
+                "value": {
+                  "found": ["secret_field"],
+                  "text": "guard.sh --token [redacted]"
+                }
+              }
+            ],
+            [
+              "timeout",
+              {
+                "kind": "number",
+                "value": 5
+              }
+            ],
+            [
+              "type",
+              {
+                "kind": "text",
+                "value": {
+                  "found": [],
+                  "text": "command"
+                }
+              }
+            ]
+          ]
+        },
+        "effective": "documented",
+        "hash": null,
+        "id": "a52d1f33f7fea03db26349dae0fc12ea",
+        "kind": "hook",
+        "name": "PreToolUse · Bash",
+        "not_writable": "not_in_this_phase",
+        "persisted": "present_enabled",
+        "provider": "claude_code",
+        "scope": "project",
+        "session_use": "unknown",
+        "source": "claude_project_settings"
+      },
+      {
+        "detail": {
+          "kind": "text",
+          "value": {
+            "found": [],
+            "text": "opus"
+          }
+        },
+        "effective": "documented",
+        "hash": null,
+        "id": "bb3678e22c6eb51163b99b9364d022a0",
+        "kind": "model_preference",
+        "name": "model",
+        "not_writable": "not_in_this_phase",
+        "persisted": "present_enabled",
+        "provider": "claude_code",
+        "scope": "project",
+        "session_use": "unknown",
+        "source": "claude_project_settings"
+      },
+      {
+        "detail": null,
+        "effective": "documented",
+        "hash": null,
+        "id": "395090801f78e09407cea67ca78c5ebf",
+        "kind": "skill",
+        "name": "useful",
+        "not_writable": "not_in_this_phase",
+        "persisted": "present_enabled",
+        "provider": "claude_code",
+        "scope": "project",
+        "session_use": "unknown",
+        "source": "claude_project_skills"
+      },
+      {
+        "detail": null,
+        "effective": "not_verifiable",
+        "hash": null,
+        "id": "b942ebc8bc04361e139a96f4bf78a193",
+        "kind": "skill",
+        "name": "noisy",
+        "not_writable": "not_in_this_phase",
+        "persisted": "present_disabled",
+        "provider": "claude_code",
+        "scope": "project",
+        "session_use": "unknown",
+        "source": "claude_project_skills"
+      },
+      {
+        "detail": null,
+        "effective": "documented",
+        "hash": "6c621d1a05138a7888d37d9269a9da8e2e11e4aced2f6cfd24b05ab1b9e61bb0",
+        "id": "2928e75b0b938ea721ae43cf2124d102",
+        "kind": "rule_file",
+        "name": ".claude/CLAUDE.md",
+        "not_writable": "not_in_this_phase",
+        "persisted": "present_enabled",
+        "provider": "claude_code",
+        "scope": "project",
+        "session_use": "unknown",
+        "source": "claude_project_rules"
+      },
+      {
+        "detail": {
+          "kind": "map",
+          "value": [
+            [
+              "command",
+              {
+                "kind": "text",
+                "value": {
+                  "found": [],
+                  "text": "x"
+                }
+              }
+            ],
+            [
+              "enabled",
+              {
+                "kind": "bool",
+                "value": false
+              }
+            ]
+          ]
+        },
+        "effective": "not_verifiable",
+        "hash": null,
+        "id": "657a15a2bad79246852673cd075804bc",
+        "kind": "mcp_server",
+        "name": "off",
+        "not_writable": "shared_path",
+        "persisted": "present_disabled",
+        "provider": "codex",
+        "scope": "global",
+        "session_use": "unknown",
+        "source": "codex_user_config"
+      },
+      {
+        "detail": {
+          "kind": "text",
+          "value": {
+            "found": [],
+            "text": "gpt-6"
+          }
+        },
+        "effective": "not_verifiable",
+        "hash": null,
+        "id": "92ceee461857a022ef8c876c7507f94f",
+        "kind": "model_preference",
+        "name": "model",
+        "not_writable": "shared_path",
+        "persisted": "present_enabled",
+        "provider": "codex",
+        "scope": "global",
+        "session_use": "unknown",
+        "source": "codex_user_config"
+      }
+    ],
+    "sources": [
+      {
+        "class": "system",
+        "key": "claude_managed_settings",
+        "not_writable": "system",
+        "outcome": "absent",
+        "provider": "claude_code",
+        "scope": "system"
+      },
+      {
+        "class": "user",
+        "conflict_copy": false,
+        "followed_links": 0,
+        "hash": "5f2af9ad85dfce5f1c14b0280c08ca7d5c0dd15f09b290cc3506cd61e459f617",
+        "key": "claude_user_settings",
+        "not_writable": "not_in_this_phase",
+        "outcome": "read",
+        "provider": "claude_code",
+        "scope": "global",
+        "trust": {
+          "trust": "trusted"
+        },
+        "unrecognised": 0
+      },
+      {
+        "class": "provider_owned",
+        "conflict_copy": false,
+        "followed_links": 0,
+        "hash": "1a3fccb77eec6de7bbd1c1baea155e71ef0054b9e460f0e20ae6f30afb0c9410",
+        "key": "claude_user_state",
+        "not_writable": "provider_owned",
+        "outcome": "read",
+        "provider": "claude_code",
+        "scope": "global",
+        "trust": {
+          "trust": "trusted"
+        },
+        "unrecognised": 0
+      },
+      {
+        "class": "user",
+        "conflict_copy": false,
+        "followed_links": 0,
+        "hash": "4ccb976b6d54904b4411dcfe968102940777ef6b3a5e1a881e842c7856e0e0d6",
+        "key": "claude_user_skills",
+        "not_writable": "not_in_this_phase",
+        "outcome": "read",
+        "provider": "claude_code",
+        "scope": "global",
+        "trust": {
+          "trust": "trusted"
+        },
+        "unrecognised": 0
+      },
+      {
+        "class": "user",
+        "conflict_copy": false,
+        "followed_links": 0,
+        "hash": "6c088fb16b75a5ee91dc03f77852c42157cbedfc6963f9a42173c7a169e0d7f7",
+        "key": "claude_user_rules",
+        "not_writable": "not_in_this_phase",
+        "outcome": "read",
+        "provider": "claude_code",
+        "scope": "global",
+        "trust": {
+          "trust": "trusted"
+        },
+        "unrecognised": 0
+      },
+      {
+        "class": "project",
+        "conflict_copy": false,
+        "followed_links": 0,
+        "hash": "5f2af9ad85dfce5f1c14b0280c08ca7d5c0dd15f09b290cc3506cd61e459f617",
+        "key": "claude_project_settings",
+        "not_writable": "not_in_this_phase",
+        "outcome": "read",
+        "provider": "claude_code",
+        "scope": "project",
+        "trust": {
+          "trust": "trusted"
+        },
+        "unrecognised": 0
+      },
+      {
+        "class": "project",
+        "key": "claude_project_local_settings",
+        "not_writable": "not_in_this_phase",
+        "outcome": "absent",
+        "provider": "claude_code",
+        "scope": "project"
+      },
+      {
+        "class": "project",
+        "key": "claude_project_mcp",
+        "not_writable": "not_in_this_phase",
+        "outcome": "absent",
+        "provider": "claude_code",
+        "scope": "project"
+      },
+      {
+        "class": "project",
+        "conflict_copy": false,
+        "followed_links": 0,
+        "hash": "4ccb976b6d54904b4411dcfe968102940777ef6b3a5e1a881e842c7856e0e0d6",
+        "key": "claude_project_skills",
+        "not_writable": "not_in_this_phase",
+        "outcome": "read",
+        "provider": "claude_code",
+        "scope": "project",
+        "trust": {
+          "trust": "trusted"
+        },
+        "unrecognised": 0
+      },
+      {
+        "class": "project",
+        "conflict_copy": false,
+        "followed_links": 0,
+        "hash": "6c088fb16b75a5ee91dc03f77852c42157cbedfc6963f9a42173c7a169e0d7f7",
+        "key": "claude_project_rules",
+        "not_writable": "not_in_this_phase",
+        "outcome": "read",
+        "provider": "claude_code",
+        "scope": "project",
+        "trust": {
+          "trust": "trusted"
+        },
+        "unrecognised": 0
+      },
+      {
+        "class": "system",
+        "key": "codex_system_requirements",
+        "not_writable": "system",
+        "outcome": "absent",
+        "provider": "codex",
+        "scope": "system"
+      },
+      {
+        "class": "system",
+        "key": "codex_system_managed",
+        "not_writable": "system",
+        "outcome": "absent",
+        "provider": "codex",
+        "scope": "system"
+      },
+      {
+        "class": "user",
+        "conflict_copy": false,
+        "followed_links": 0,
+        "hash": "5750d5963c54229bb7c4ed854f88d4465cf1ba0233163a2e631ffd953f3ac6b7",
+        "key": "codex_user_config",
+        "not_writable": "shared_path",
+        "outcome": "read",
+        "provider": "codex",
+        "scope": "global",
+        "trust": {
+          "reason": "group_writable",
+          "trust": "read_only"
+        },
+        "unrecognised": 0
+      },
+      {
+        "class": "user",
+        "failure": {
+          "column": 3,
+          "failure": "malformed",
+          "line": 1
+        },
+        "key": "codex_user_hooks",
+        "not_writable": "not_in_this_phase",
+        "outcome": "failed",
+        "provider": "codex",
+        "scope": "global"
+      },
+      {
+        "class": "user",
+        "key": "codex_user_rules",
+        "not_writable": "not_in_this_phase",
+        "outcome": "absent",
+        "provider": "codex",
+        "scope": "global"
+      },
+      {
+        "class": "project",
+        "key": "codex_project_config",
+        "not_writable": "not_in_this_phase",
+        "outcome": "project_not_trusted",
+        "provider": "codex",
+        "scope": "project"
+      },
+      {
+        "class": "project",
+        "key": "codex_project_rules",
+        "not_writable": "not_in_this_phase",
+        "outcome": "absent",
+        "provider": "codex",
+        "scope": "project"
+      }
+    ],
+    "truncated": false
+  },
+  "revision": 1
+}

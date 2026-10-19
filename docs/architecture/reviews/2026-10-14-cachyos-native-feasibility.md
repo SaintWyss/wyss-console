@@ -46,13 +46,13 @@ trabajo. Es evidencia nativa nueva, con límites explícitos.
 
 ## 2. Guardas y clasificación
 
-| Clase | Uso en este informe |
-| --- | --- |
-| READ_ONLY_HOST_FACT | Dato obtenido de metadatos del kernel, OS, paquetes, mounts o managers existentes |
-| OBSERVED_ON_CACHYOS_SYNTHETIC | Resultado de procesos sin privilegios host y datos exclusivamente ficticios |
-| BLOCKED_UNSAFE | Prueba no ejecutada porque necesitaría privilegios/cambios o podría afectar el sistema real |
-| BLOCKED_ENVIRONMENT | Interfaz no disponible o acceso rechazado bajo las restricciones actuales |
-| NOT_RUN | No se ensayó esa garantía; no se infiere de otra prueba |
+| Clase                         | Uso en este informe                                                                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| READ_ONLY_HOST_FACT           | Dato obtenido de metadatos del kernel, OS, paquetes, mounts o managers existentes           |
+| OBSERVED_ON_CACHYOS_SYNTHETIC | Resultado de procesos sin privilegios host y datos exclusivamente ficticios                 |
+| BLOCKED_UNSAFE                | Prueba no ejecutada porque necesitaría privilegios/cambios o podría afectar el sistema real |
+| BLOCKED_ENVIRONMENT           | Interfaz no disponible o acceso rechazado bajo las restricciones actuales                   |
+| NOT_RUN                       | No se ensayó esa garantía; no se infiere de otra prueba                                     |
 
 Todos los fixtures pertenecieron al UID 1000, en un directorio aleatorio `0700` bajo `/tmp`.
 La comparación cross-mount usó además otro directorio propio `0700` bajo `/dev/shm`.
@@ -75,28 +75,28 @@ modificaron controles de cgroups, servicios, linger, grupos, paquetes o configur
 
 Todos los datos de esta sección son **READ_ONLY_HOST_FACT**, tomados durante esta pasada.
 
-| Capacidad | Resultado observado | Interpretación acotada |
-| --- | --- | --- |
-| Distribución | `/etc/os-release`: `ID=cachyos`, `ID_LIKE=arch`, `BUILD_ID=rolling` | Host solicitado |
-| Kernel | `6.18.55-2-cachyos-lts`, x86_64; build 2026-10-09 | No extrapolar desde el kernel del contenedor de 44 |
-| Desktop | `XDG_CURRENT_DESKTOP=KDE`, `XDG_SESSION_TYPE=x11`; sesión 2 | Esta ejecución ocurre durante una sesión local; no se probó logout |
-| Entorno | PID 1 `systemd`; `systemd-detect-virt` y `--container`: `none` | Evidencia conjunta de ejecución nativa |
-| Principal actual | UID/EUID 1000, GID 1000; `CapEff=0`, `NoNewPrivs=0`, `Seccomp=0` | El runner no tenía capacidades host; esto no elimina privilegios delegados por grupos/sockets |
-| LSM activos | `capability,landlock,lockdown,yama,bpf` | Landlock activo; flags de compilación de systemd no son evidencia de una política AppArmor/SELinux activa |
-| Kernel config | `CONFIG_SECURITY_LANDLOCK=y`; USER_NS, NAMESPACES, PID_NS, NET_NS, CGROUPS, MEMCG, CGROUP_PIDS, SECCOMP y SECCOMP_FILTER = `y` | Interfaces compiladas; los ensayos distinguen disponibilidad de funcionamiento |
-| Landlock ABI | `landlock_create_ruleset(NULL,0,VERSION)` = **7**, errno 0 | Se puede crear y aplicar un dominio; no asumir derechos de ABI posteriores |
-| User namespaces | `unprivileged_userns_clone=1`; `user.max_user_namespaces=62346` | Creación rootless permitida; observada en CN-03/04 |
-| Bubblewrap | `0.13.0`, paquete `0.13.0-1.1`; binario root:root, `0755`, sin file capabilities informadas por getcap | Instalado y usado sin sudo ni setuid |
-| Util-linux | `2.42.4`, paquete `2.42.4-1.1` | `unshare` disponible |
-| systemd | Paquete `262-1`; managers system/user reportan `262-1-arch`; `/usr/lib/systemd/systemd --version` = 262 | El binario no estaba en PATH como `systemd`, pero está instalado; no es una dependencia faltante |
-| Manager de usuario | `systemctl --user is-system-running`: `running`, rc 0 | Accesible en la sesión actual; no se probó iniciar ni cambiar una unidad |
-| Cgroups | cgroup v2; controladores raíz: `cpuset cpu io memory hugetlb pids rdma misc dmem` | No se escribieron knobs ni crearon subgrupos |
-| Cgroup de la sesión de herramientas | Bajo `user@1000.service/...WarpOss...`; controladores `cpu memory pids`; localmente `memory.max=max`, `memory.high=max`, `memory.oom.group=0`, `pids.max=18703` | Valores de ese grupo, no garantía sobre todos los ancestros ni sobre futuros workers |
-| Delegación visible | `os.access(W_OK)` positivo para varios knobs del cgroup actual y directorio del manager de usuario; raíz cgroup no writable | Metadatos de acceso, no prueba de límites aislados; cambiar el grupo actual afectaría procesos ajenos al fixture |
-| Btrfs tools | `btrfs-progs 7.1-1` | Inspección de B-tree bloqueada sin privilegios; véase §4 |
-| Python | `3.14.8` | Runtime de fixtures, no de proveedores |
-| Compiladores instalados | GCC `16.2.1+r23+gd564253eb6c8-1`; Clang `23.1.1-1.1` | No hizo falta compilar ni instalar nada |
-| Helper CLI `landlock-restrict` | No encontrado en PATH | No bloqueó pruebas: se usó directamente la syscall con ctypes |
+| Capacidad                           | Resultado observado                                                                                                                                             | Interpretación acotada                                                                                           |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Distribución                        | `/etc/os-release`: `ID=cachyos`, `ID_LIKE=arch`, `BUILD_ID=rolling`                                                                                             | Host solicitado                                                                                                  |
+| Kernel                              | `6.18.55-2-cachyos-lts`, x86_64; build 2026-10-09                                                                                                               | No extrapolar desde el kernel del contenedor de 44                                                               |
+| Desktop                             | `XDG_CURRENT_DESKTOP=KDE`, `XDG_SESSION_TYPE=x11`; sesión 2                                                                                                     | Esta ejecución ocurre durante una sesión local; no se probó logout                                               |
+| Entorno                             | PID 1 `systemd`; `systemd-detect-virt` y `--container`: `none`                                                                                                  | Evidencia conjunta de ejecución nativa                                                                           |
+| Principal actual                    | UID/EUID 1000, GID 1000; `CapEff=0`, `NoNewPrivs=0`, `Seccomp=0`                                                                                                | El runner no tenía capacidades host; esto no elimina privilegios delegados por grupos/sockets                    |
+| LSM activos                         | `capability,landlock,lockdown,yama,bpf`                                                                                                                         | Landlock activo; flags de compilación de systemd no son evidencia de una política AppArmor/SELinux activa        |
+| Kernel config                       | `CONFIG_SECURITY_LANDLOCK=y`; USER_NS, NAMESPACES, PID_NS, NET_NS, CGROUPS, MEMCG, CGROUP_PIDS, SECCOMP y SECCOMP_FILTER = `y`                                  | Interfaces compiladas; los ensayos distinguen disponibilidad de funcionamiento                                   |
+| Landlock ABI                        | `landlock_create_ruleset(NULL,0,VERSION)` = **7**, errno 0                                                                                                      | Se puede crear y aplicar un dominio; no asumir derechos de ABI posteriores                                       |
+| User namespaces                     | `unprivileged_userns_clone=1`; `user.max_user_namespaces=62346`                                                                                                 | Creación rootless permitida; observada en CN-03/04                                                               |
+| Bubblewrap                          | `0.13.0`, paquete `0.13.0-1.1`; binario root:root, `0755`, sin file capabilities informadas por getcap                                                          | Instalado y usado sin sudo ni setuid                                                                             |
+| Util-linux                          | `2.42.4`, paquete `2.42.4-1.1`                                                                                                                                  | `unshare` disponible                                                                                             |
+| systemd                             | Paquete `262-1`; managers system/user reportan `262-1-arch`; `/usr/lib/systemd/systemd --version` = 262                                                         | El binario no estaba en PATH como `systemd`, pero está instalado; no es una dependencia faltante                 |
+| Manager de usuario                  | `systemctl --user is-system-running`: `running`, rc 0                                                                                                           | Accesible en la sesión actual; no se probó iniciar ni cambiar una unidad                                         |
+| Cgroups                             | cgroup v2; controladores raíz: `cpuset cpu io memory hugetlb pids rdma misc dmem`                                                                               | No se escribieron knobs ni crearon subgrupos                                                                     |
+| Cgroup de la sesión de herramientas | Bajo `user@1000.service/...WarpOss...`; controladores `cpu memory pids`; localmente `memory.max=max`, `memory.high=max`, `memory.oom.group=0`, `pids.max=18703` | Valores de ese grupo, no garantía sobre todos los ancestros ni sobre futuros workers                             |
+| Delegación visible                  | `os.access(W_OK)` positivo para varios knobs del cgroup actual y directorio del manager de usuario; raíz cgroup no writable                                     | Metadatos de acceso, no prueba de límites aislados; cambiar el grupo actual afectaría procesos ajenos al fixture |
+| Btrfs tools                         | `btrfs-progs 7.1-1`                                                                                                                                             | Inspección de B-tree bloqueada sin privilegios; véase §4                                                         |
+| Python                              | `3.14.8`                                                                                                                                                        | Runtime de fixtures, no de proveedores                                                                           |
+| Compiladores instalados             | GCC `16.2.1+r23+gd564253eb6c8-1`; Clang `23.1.1-1.1`                                                                                                            | No hizo falta compilar ni instalar nada                                                                          |
+| Helper CLI `landlock-restrict`      | No encontrado en PATH                                                                                                                                           | No bloqueó pruebas: se usó directamente la syscall con ctypes                                                    |
 
 ### 3.1 Autoridad existente y privilegios administrativos heredados
 
@@ -133,16 +133,16 @@ prueba una autorización sin contraseña: no se consultaron reglas ni credencial
 Se usó `findmnt --target <ruta> --output TARGET,FSTYPE,FSROOT,OPTIONS` y `stat` sobre
 roots conocidos; no se recorrieron archivos personales.
 
-| Ruta/clase | Observación | Estado |
-| --- | --- | --- |
-| `/` | Btrfs, FSROOT `/@`, `subvolid=256`, rw/noatime, compress=zstd:1 | READ_ONLY_HOST_FACT |
-| Home y repositorio | Btrfs montado en `/home`, FSROOT `/@home`, `subvolid=257`, mismas opciones principales; home UID 1000 modo `0710` | READ_ONLY_HOST_FACT |
-| `/tmp` | tmpfs, distinto mount del home; fixtures privados `0700` | READ_ONLY_HOST_FACT + ensayos sintéticos |
-| `/dev/shm` | tmpfs, distinto mount de `/tmp`, nosuid/nodev | READ_ONLY_HOST_FACT + un control cross-mount |
-| `/sys/fs/cgroup` | cgroup2, nsdelegate y memory_recursiveprot visibles | READ_ONLY_HOST_FACT; sin escrituras |
-| `btrfs subvolume show /home` y `/` | rc 1: `Could not search B-tree: Operation not permitted` | BLOCKED_ENVIRONMENT con estos privilegios; no se usó sudo |
-| `btrfs subvolume list -o /home` | rc 1: `can't perform the search: Operation not permitted` | BLOCKED_ENVIRONMENT; topología completa/snapshots pendiente |
-| Snapshots, sync, exclusiones y archivos reales abiertos | No se inspeccionaron reglas de sincronización, contenidos de snapshots ni provider configs | NOT_RUN; no inferir DN-31 de la tabla de mounts |
+| Ruta/clase                                              | Observación                                                                                                       | Estado                                                      |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `/`                                                     | Btrfs, FSROOT `/@`, `subvolid=256`, rw/noatime, compress=zstd:1                                                   | READ_ONLY_HOST_FACT                                         |
+| Home y repositorio                                      | Btrfs montado en `/home`, FSROOT `/@home`, `subvolid=257`, mismas opciones principales; home UID 1000 modo `0710` | READ_ONLY_HOST_FACT                                         |
+| `/tmp`                                                  | tmpfs, distinto mount del home; fixtures privados `0700`                                                          | READ_ONLY_HOST_FACT + ensayos sintéticos                    |
+| `/dev/shm`                                              | tmpfs, distinto mount de `/tmp`, nosuid/nodev                                                                     | READ_ONLY_HOST_FACT + un control cross-mount                |
+| `/sys/fs/cgroup`                                        | cgroup2, nsdelegate y memory_recursiveprot visibles                                                               | READ_ONLY_HOST_FACT; sin escrituras                         |
+| `btrfs subvolume show /home` y `/`                      | rc 1: `Could not search B-tree: Operation not permitted`                                                          | BLOCKED_ENVIRONMENT con estos privilegios; no se usó sudo   |
+| `btrfs subvolume list -o /home`                         | rc 1: `can't perform the search: Operation not permitted`                                                         | BLOCKED_ENVIRONMENT; topología completa/snapshots pendiente |
+| Snapshots, sync, exclusiones y archivos reales abiertos | No se inspeccionaron reglas de sincronización, contenidos de snapshots ni provider configs                        | NOT_RUN; no inferir DN-31 de la tabla de mounts             |
 
 Los tests de exchange fueron en **tmpfs**, no en el home Btrfs. No se crearon subvolúmenes,
 snapshots, mounts persistentes o directorios de prueba dentro del home. Tampoco se probó un
@@ -155,11 +155,11 @@ PASS aquí se limita a la aserción del fixture, nunca a Wyss Console completo.
 
 ### 5.1 Misma cuenta y user namespaces
 
-| Caso | Procedimiento y expectativa | Observado | Resultado acotado |
-| --- | --- | --- | --- |
-| CN-01-SAME-UID | Child independiente UID 1000 abre archivo `0600` y conecta a socket `0600` bajo directorio `0700` del mismo usuario | Lee `DUMMY_AUTHORITY`; servidor recibe `SYNTHETIC_ONLY`; SO_PEERCRED UID/GID = 1000/1000 | Confirmada la limitación de identidad humana por UID; no se llamó una API real |
-| CN-03-USERNS | `unshare --user --map-root-user` y lectura de ese archivo ficticio | UID interior 0; map `0 1000 1`; lectura permitida | PASS del control negativo: root en userns no creó otro usuario host protegido |
-| CN-04-NAMESPACES | `unshare --user --map-root-user --mount --pid --fork --net --ipc --uts --cgroup` ejecuta solo Python y lee identidades de namespaces | rc 0, UID interior 0, PID 1; namespaces nuevos user/mnt/pid/net/ipc/uts/cgroup | PASS de creación rootless; no prueba cuotas, egress de un proveedor ni contención de procesos ya externos |
+| Caso             | Procedimiento y expectativa                                                                                                          | Observado                                                                                | Resultado acotado                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| CN-01-SAME-UID   | Child independiente UID 1000 abre archivo `0600` y conecta a socket `0600` bajo directorio `0700` del mismo usuario                  | Lee `DUMMY_AUTHORITY`; servidor recibe `SYNTHETIC_ONLY`; SO_PEERCRED UID/GID = 1000/1000 | Confirmada la limitación de identidad humana por UID; no se llamó una API real                            |
+| CN-03-USERNS     | `unshare --user --map-root-user` y lectura de ese archivo ficticio                                                                   | UID interior 0; map `0 1000 1`; lectura permitida                                        | PASS del control negativo: root en userns no creó otro usuario host protegido                             |
+| CN-04-NAMESPACES | `unshare --user --map-root-user --mount --pid --fork --net --ipc --uts --cgroup` ejecuta solo Python y lee identidades de namespaces | rc 0, UID interior 0, PID 1; namespaces nuevos user/mnt/pid/net/ipc/uts/cgroup           | PASS de creación rootless; no prueba cuotas, egress de un proveedor ni contención de procesos ya externos |
 
 ### 5.2 Landlock ABI 7 aplicado a un worker
 
@@ -175,20 +175,20 @@ en variante **FILE**, o directorio ficticio dedicado RW en variante **DIRECTORY*
 autoridad fue permitido por reglas de archivos. Código/imports del fixture ya estaban cargados
 antes de restringirse; no es una prueba de startup dinámico de un proveedor.
 
-| Operación en CN-02 | Esperado | FILE / DIRECTORY observado | Interpretación |
-| --- | --- | --- | --- |
-| Escribir resultado en proyecto | Permitido | Éxito, 17 bytes, ambas | Función útil mínima conservada |
-| Leer política obligatoria ficticia | Permitido | `MOCK_REQUIRED_POLICY`, ambas | No se la omitió para hacer pasar el test; no se ejecutaron hooks reales |
-| Leer/escribir nuevo FD de estado autoridad | Denegado | EACCES 13, ambas | PASS de restricción de archivos |
-| Symlink en proyecto apunta a estado autoridad | Denegado | EACCES 13, ambas | La concesión del proyecto no permitió leer ese target |
-| Leer token ficticio | Permitido | `NO_REAL_SECRET`, ambas | No se leyó auth real |
-| Refresh de token en el lugar | Permitido | Éxito, 20 bytes, ambas | Compatible con este mock de escritura in-place |
-| Refresh creando token.new + os.replace | FILE deniega; DIRECTORY permite | FILE: EACCES 13; DIRECTORY: `FAKE_REFRESH_RENAME` | FAIL de compatibilidad para refresh por reemplazo con grant de archivo; ampliar al directorio cambia el alcance |
-| Descendiente fork lee autoridad | Denegado | EACCES 13, ambas | Restricción heredada en el fixture |
-| Agregar después ruleset permisivo sobre todo el fixture | No relajar el anterior | Lectura autoridad sigue EACCES 13, ambas | El proceso no removió su restricción anterior |
-| `kill(runner_pid,0)` | Sin entregar señal; permiso hacia dominio externo denegado | EPERM 1, ambas | Control de permiso para signal 0; no se enviaron SIGTERM/SIGKILL a procesos reales |
-| Leer FD de estado abierto **antes** de restringirse | Mostrar alcance residual | Lee `DUMMY_AUTHORITY`, ambas | FAIL si se supone revocación de FD heredados; cerrar/revisar capacidades antes del sandbox |
-| Conectar a socket **por pathname** de la autoridad ficticia | Detectar límite de esta ABI | Éxito, servidor recibe `SYNTHETIC_ONLY`, ambas | **FAIL para aislamiento IPC solo con este Landlock** |
+| Operación en CN-02                                          | Esperado                                                   | FILE / DIRECTORY observado                        | Interpretación                                                                                                  |
+| ----------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Escribir resultado en proyecto                              | Permitido                                                  | Éxito, 17 bytes, ambas                            | Función útil mínima conservada                                                                                  |
+| Leer política obligatoria ficticia                          | Permitido                                                  | `MOCK_REQUIRED_POLICY`, ambas                     | No se la omitió para hacer pasar el test; no se ejecutaron hooks reales                                         |
+| Leer/escribir nuevo FD de estado autoridad                  | Denegado                                                   | EACCES 13, ambas                                  | PASS de restricción de archivos                                                                                 |
+| Symlink en proyecto apunta a estado autoridad               | Denegado                                                   | EACCES 13, ambas                                  | La concesión del proyecto no permitió leer ese target                                                           |
+| Leer token ficticio                                         | Permitido                                                  | `NO_REAL_SECRET`, ambas                           | No se leyó auth real                                                                                            |
+| Refresh de token en el lugar                                | Permitido                                                  | Éxito, 20 bytes, ambas                            | Compatible con este mock de escritura in-place                                                                  |
+| Refresh creando token.new + os.replace                      | FILE deniega; DIRECTORY permite                            | FILE: EACCES 13; DIRECTORY: `FAKE_REFRESH_RENAME` | FAIL de compatibilidad para refresh por reemplazo con grant de archivo; ampliar al directorio cambia el alcance |
+| Descendiente fork lee autoridad                             | Denegado                                                   | EACCES 13, ambas                                  | Restricción heredada en el fixture                                                                              |
+| Agregar después ruleset permisivo sobre todo el fixture     | No relajar el anterior                                     | Lectura autoridad sigue EACCES 13, ambas          | El proceso no removió su restricción anterior                                                                   |
+| `kill(runner_pid,0)`                                        | Sin entregar señal; permiso hacia dominio externo denegado | EPERM 1, ambas                                    | Control de permiso para signal 0; no se enviaron SIGTERM/SIGKILL a procesos reales                              |
+| Leer FD de estado abierto **antes** de restringirse         | Mostrar alcance residual                                   | Lee `DUMMY_AUTHORITY`, ambas                      | FAIL si se supone revocación de FD heredados; cerrar/revisar capacidades antes del sandbox                      |
+| Conectar a socket **por pathname** de la autoridad ficticia | Detectar límite de esta ABI                                | Éxito, servidor recibe `SYNTHETIC_ONLY`, ambas    | **FAIL para aislamiento IPC solo con este Landlock**                                                            |
 
 El estado de autoridad no cambió en estas pruebas. Python 3.14 emitió un DeprecationWarning
 por el layout ctypes `_pack_`; las syscalls devolvieron éxito y los resultados arriba. Se
@@ -221,15 +221,15 @@ de proveedores. `/usr` se expuso read-only como runtime; su integridad frente al
 de atacante no fue auditada. `--dev /dev` es privado de bubblewrap; no se otorgó acceso al
 árbol de dispositivos del host ni se ejercitó hardware. No se añadió filtro seccomp propio.
 
-| Operación | FILE / DIRECTORY observado | Resultado acotado |
-| --- | --- | --- |
-| Control sin sandbox al socket vivo | Éxito antes de las variantes; `SYNTHETIC_ONLY` | La denegación no se atribuye a un servidor inexistente |
-| Proyecto escribible | Éxito, 5 bytes, ambas | PASS de uso mínimo |
-| Política ficticia legible pero no editable | Lectura correcta; escritura EROFS 30 | PASS del mount read-only de archivo |
-| Estado y socket por path original no expuesto | ENOENT 2, ambas | PASS de ocultamiento por vista de mounts en este perfil |
-| Refresh ficticio in-place | Éxito, 18 bytes, ambas | PASS del mock |
-| Crear token.new + replace | FILE: EBUSY 16; DIRECTORY: `FAKE_BWRAP_RENAME` | Bind por archivo rompe ese refresh; bind del directorio dedicado lo conserva |
-| Namespace net | `/proc/net/dev` muestra solo `lo`, contadores cero | Sin tráfico externo; no demuestra egress selectivo útil |
+| Operación                                                         | FILE / DIRECTORY observado                                                            | Resultado acotado                                                                   |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Control sin sandbox al socket vivo                                | Éxito antes de las variantes; `SYNTHETIC_ONLY`                                        | La denegación no se atribuye a un servidor inexistente                              |
+| Proyecto escribible                                               | Éxito, 5 bytes, ambas                                                                 | PASS de uso mínimo                                                                  |
+| Política ficticia legible pero no editable                        | Lectura correcta; escritura EROFS 30                                                  | PASS del mount read-only de archivo                                                 |
+| Estado y socket por path original no expuesto                     | ENOENT 2, ambas                                                                       | PASS de ocultamiento por vista de mounts en este perfil                             |
+| Refresh ficticio in-place                                         | Éxito, 18 bytes, ambas                                                                | PASS del mock                                                                       |
+| Crear token.new + replace                                         | FILE: EBUSY 16; DIRECTORY: `FAKE_BWRAP_RENAME`                                        | Bind por archivo rompe ese refresh; bind del directorio dedicado lo conserva        |
+| Namespace net                                                     | `/proc/net/dev` muestra solo `lo`, contadores cero                                    | Sin tráfico externo; no demuestra egress selectivo útil                             |
 | CN-11: **ro-bind intencional del directorio del socket ficticio** | Child conecta, manda `SYNTHETIC_RO_SOCKET`; peer visto desde host = UID/GID 1000/1000 | Confirmada la insuficiencia de read-only para impedir conexión a un socket expuesto |
 
 Dentro de bubblewrap se vio UID 1000 y `uid_map` inmediato `1000 0 1`. En namespaces
@@ -244,16 +244,16 @@ requisito sigue NOT_PROVEN y no se elimina del producto para obtener un PASS.
 
 ### 5.4 Resolución de paths, exchange y PTY
 
-| Caso | Procedimiento | Observado / resultado |
-| --- | --- | --- |
-| CN-06-OPENAT2 positivo | Dirfd de raíz ficticia; syscall 437; O_WRONLY/O_CREAT/O_EXCL/O_CLOEXEC, mode 0600; RESOLVE_BENEATH/NO_SYMLINKS/NO_MAGICLINKS (`0x0e`); `nested/ok` | Crea y escribe el archivo; PASS acotado |
-| CN-06 parent/absolute | Mismos parámetros; `../authority/escape` o path absoluto solo dentro del fixture | EXDEV 18; no se crea canary afuera |
-| CN-06 symlink | Ancestro `redir` apunta al directorio ficticio protegido | ELOOP 40; canary intacto |
-| CN-07 precheck/use | Resolve de path permitido; rename del directorio; symlink sustituto a otro directorio ficticio; write por pathname viejo | **Redirigido** a archivo dummy de autoridad; reproduce una clase de TOCTOU, no explota Wyss real |
-| CN-07 variante anclada | Dirfd abierto antes del swap con O_DIRECTORY/O_NOFOLLOW; creación relativa O_CREAT/O_EXCL/O_NOFOLLOW | Escribe en el directorio original renombrado; no en destino del symlink |
-| CN-08 exchange mismo mount | `renameat2(...,RENAME_EXCHANGE=2)` entre dos archivos propios en `/tmp` | rc 0; A/B quedan B/A; filesystem **tmpfs** |
-| CN-09 cross-mount | Mismo exchange entre archivo propio de `/tmp` y archivo propio de `/dev/shm` | rc -1, EXDEV 18; ambos contenidos conservados |
-| CN-10 PTY | openpty, modo raw, TIOCSWINSZ/TIOCGWINSZ; child fijo lee cuatro bytes PING y responde | Tamaño 31×97; `MOCK:PING`; rc 0, child reaped |
+| Caso                       | Procedimiento                                                                                                                                      | Observado / resultado                                                                            |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| CN-06-OPENAT2 positivo     | Dirfd de raíz ficticia; syscall 437; O_WRONLY/O_CREAT/O_EXCL/O_CLOEXEC, mode 0600; RESOLVE_BENEATH/NO_SYMLINKS/NO_MAGICLINKS (`0x0e`); `nested/ok` | Crea y escribe el archivo; PASS acotado                                                          |
+| CN-06 parent/absolute      | Mismos parámetros; `../authority/escape` o path absoluto solo dentro del fixture                                                                   | EXDEV 18; no se crea canary afuera                                                               |
+| CN-06 symlink              | Ancestro `redir` apunta al directorio ficticio protegido                                                                                           | ELOOP 40; canary intacto                                                                         |
+| CN-07 precheck/use         | Resolve de path permitido; rename del directorio; symlink sustituto a otro directorio ficticio; write por pathname viejo                           | **Redirigido** a archivo dummy de autoridad; reproduce una clase de TOCTOU, no explota Wyss real |
+| CN-07 variante anclada     | Dirfd abierto antes del swap con O_DIRECTORY/O_NOFOLLOW; creación relativa O_CREAT/O_EXCL/O_NOFOLLOW                                               | Escribe en el directorio original renombrado; no en destino del symlink                          |
+| CN-08 exchange mismo mount | `renameat2(...,RENAME_EXCHANGE=2)` entre dos archivos propios en `/tmp`                                                                            | rc 0; A/B quedan B/A; filesystem **tmpfs**                                                       |
+| CN-09 cross-mount          | Mismo exchange entre archivo propio de `/tmp` y archivo propio de `/dev/shm`                                                                       | rc -1, EXDEV 18; ambos contenidos conservados                                                    |
+| CN-10 PTY                  | openpty, modo raw, TIOCSWINSZ/TIOCGWINSZ; child fijo lee cuatro bytes PING y responde                                                              | Tamaño 31×97; `MOCK:PING`; rc 0, child reaped                                                    |
 
 El ensayo determinista de swap no ejecutó concurrencia contra un proyecto real. Un único
 dirfd no resuelve la política de todos los ancestros, hardlinks, mounts, contenidos mutables
@@ -266,18 +266,18 @@ El PTY no prueba fidelidad ANSI, parser aislado, OOM, desconexión, linger ni vi
 S1 = autenticidad de aprobación humana; S2 = integridad de autoridad/código/estado/política;
 S3 = integridad del resto de la cuenta y proyectos, siguiendo 43.
 
-| Aspecto | A: autoridad protegida | B: workers restringidos | Resultado de esta pasada |
-| --- | --- | --- | --- |
-| Principal real distinto | Requiere instalación/custodia que el atacante no controle | Userns rootless probado conserva vínculo con UID host; Landlock/bwrap restringen procesos específicos | A **NOT_PROVEN** nativo; B no crea por sí mismo un UID host protegido |
-| S1 aprobación humana | Hace falta emisor protegido que ligue bytes mostrados a la acción; UI mismo UID no basta | Bloquear IPC de un worker no protege frente a otro proceso irrestricto ni prueba consentimiento | Ambos **NOT_PROVEN**; no se implementó firma/Android/native confirmation |
-| S2 archivos/IPC | Otro UID puede ser base, pero depende de binarios/unidades/DB y privilegios reales del atacante | Landlock deniega archivos; ABI 7 deja pathname sockets; bwrap los oculta si no se montan; FD preabiertos siguen importando | B tiene evidencia parcial útil; ningún PASS global de S2 |
-| Cuenta con administración delegada | Docker root accesible hace inadecuada la hipótesis de atacante meramente DAC sin más análisis | Perfil mínimo omitió `/run`, credenciales y servicios; no validó toda fuga a un broker privilegiado | Restricción crítica de alcance para A; evitar toda promesa basada solo en UID distinto |
-| S3 cuenta completa | No contenida si nativos/LP4 quedan irrestrictos | Solo procesos que realmente entren al perfil quedan acotados | No llamar aislada a la sesión nativa irrestricta |
-| Auth existente | Puede conservar el flujo nativo, pero cómo se supervisa el runtime desde A sigue abierto | Refresh in-place del mock funciona; reemplazo requiere más permisos y ambos perfiles por archivo lo rompen | Compatibilidad real Claude/Codex/Hermes **NOT_PROVEN**; no copiar auth ni ampliar al home completo |
-| Hooks/policies | Su confianza y ownership deben protegerse | Lectura mock preservada, mount read-only observado; no se ejecutaron hooks ni MCP | No sacrificar controles obligatorios para conseguir startup |
-| Red útil | Separar requests/approval/proveedor sigue pendiente | Namespace sin red aísla, pero rompe inferencia; egress selectivo no ensayado | No confundir «sin red» con proveedor funcional |
-| Instalación personal | User manager operativo no permite asumir creación de otro usuario con User= | Los fixtures rootless funcionan sin aprovisionamiento | A requiere decisión/validación futura; B permite continuar investigación segura ahora |
-| Recursos/parser/persistencia | Una autoridad separada no resuelve PTYs, procesos huérfanos ni parser | Nuevos PID/namespaces no prueban dominio OOM independiente | Cgroups detectados; límites/enforcement, crash, logout y recuperación **NOT_RUN** |
+| Aspecto                            | A: autoridad protegida                                                                          | B: workers restringidos                                                                                                    | Resultado de esta pasada                                                                           |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Principal real distinto            | Requiere instalación/custodia que el atacante no controle                                       | Userns rootless probado conserva vínculo con UID host; Landlock/bwrap restringen procesos específicos                      | A **NOT_PROVEN** nativo; B no crea por sí mismo un UID host protegido                              |
+| S1 aprobación humana               | Hace falta emisor protegido que ligue bytes mostrados a la acción; UI mismo UID no basta        | Bloquear IPC de un worker no protege frente a otro proceso irrestricto ni prueba consentimiento                            | Ambos **NOT_PROVEN**; no se implementó firma/Android/native confirmation                           |
+| S2 archivos/IPC                    | Otro UID puede ser base, pero depende de binarios/unidades/DB y privilegios reales del atacante | Landlock deniega archivos; ABI 7 deja pathname sockets; bwrap los oculta si no se montan; FD preabiertos siguen importando | B tiene evidencia parcial útil; ningún PASS global de S2                                           |
+| Cuenta con administración delegada | Docker root accesible hace inadecuada la hipótesis de atacante meramente DAC sin más análisis   | Perfil mínimo omitió `/run`, credenciales y servicios; no validó toda fuga a un broker privilegiado                        | Restricción crítica de alcance para A; evitar toda promesa basada solo en UID distinto             |
+| S3 cuenta completa                 | No contenida si nativos/LP4 quedan irrestrictos                                                 | Solo procesos que realmente entren al perfil quedan acotados                                                               | No llamar aislada a la sesión nativa irrestricta                                                   |
+| Auth existente                     | Puede conservar el flujo nativo, pero cómo se supervisa el runtime desde A sigue abierto        | Refresh in-place del mock funciona; reemplazo requiere más permisos y ambos perfiles por archivo lo rompen                 | Compatibilidad real Claude/Codex/Hermes **NOT_PROVEN**; no copiar auth ni ampliar al home completo |
+| Hooks/policies                     | Su confianza y ownership deben protegerse                                                       | Lectura mock preservada, mount read-only observado; no se ejecutaron hooks ni MCP                                          | No sacrificar controles obligatorios para conseguir startup                                        |
+| Red útil                           | Separar requests/approval/proveedor sigue pendiente                                             | Namespace sin red aísla, pero rompe inferencia; egress selectivo no ensayado                                               | No confundir «sin red» con proveedor funcional                                                     |
+| Instalación personal               | User manager operativo no permite asumir creación de otro usuario con User=                     | Los fixtures rootless funcionan sin aprovisionamiento                                                                      | A requiere decisión/validación futura; B permite continuar investigación segura ahora              |
+| Recursos/parser/persistencia       | Una autoridad separada no resuelve PTYs, procesos huérfanos ni parser                           | Nuevos PID/namespaces no prueban dominio OOM independiente                                                                 | Cgroups detectados; límites/enforcement, crash, logout y recuperación **NOT_RUN**                  |
 
 **Juicio provisional:** continuar con B como perfil sintético de comparación es viable en este
 CachyOS sin instalaciones. A sigue siendo candidata para conservar sesiones nativas completas,
@@ -289,20 +289,20 @@ seleccionada ni implementada; un híbrido no hereda automáticamente las garant�
 
 Estas restricciones no detuvieron L0/L1. Cada fila queda pendiente sin intentar elevar permisos.
 
-| Prueba o cambio | Estado | Razón y resultado que todavía falta |
-| --- | --- | --- |
-| Crear UID/grupos/ACL para autoridad, usar setuid a otro usuario host, sudo/polkit | BLOCKED_UNSAFE | Cambia identidad/privilegios o exige autorización fuera de esta tarea; otro UID real no se probó aquí |
-| Instalar/modificar unidades, iniciar/reiniciar Wyss u otros servicios, systemd-run, habilitar linger | BLOCKED_UNSAFE | El usuario prohibió cambios de servicios; no convertir un test transitorio en excepción silenciosa |
-| Ejercitar Docker root, cached sudo o un broker administrativo | BLOCKED_UNSAFE | Metadatos bastan para identificar el problema de amenaza; no ejecutar escalada ni contenedores |
-| Escribir knobs/mover procesos en cgroups reales | BLOCKED_UNSAFE | Algunos knobs son writable, pero el grupo actual pertenece a la sesión/herramientas; afectaría otros procesos |
-| OOM, límites agresivos, matar managers/autoridad, logout/reboot/suspend | BLOCKED_UNSAFE | Puede cerrar trabajo real; no necesario para comprobar Landlock/bwrap/paths con fixtures |
-| PTY parser hostil con presión de memoria o FD hacia servicios reales | BLOCKED_UNSAFE | No se validó aislamiento suficiente para aceptar ese efecto en el host normal |
-| Ampliar btrfs show/list mediante privilegios; crear snapshot/subvolume/mount | BLOCKED_ENVIRONMENT / BLOCKED_UNSAFE para el remedio privilegiado | La inspección devolvió EPERM; no alterar el filesystem para completar una tabla |
-| Races sobre Claude/Codex/Hermes/Wyss reales, snapshots o réplica del home | BLOCKED_UNSAFE | Solo se autorizó dato ficticio en directorios propios; DN-31 requiere otro procedimiento delimitado |
-| Startup real/login/refresh, hooks, MCP, keyring, sesión D-Bus/X11, autenticación móvil | NOT_RUN | Prohibidos providers/config/auth reales en esta pasada; el mock no prueba compatibilidad instalada |
-| Human approval firmado, LP4-away, revocación versus STARTING, replay tras crash | NOT_RUN | Requiere contratos y fixtures específicos adicionales; UID/socket y PTY no prueban esas propiedades |
-| Filtro seccomp y egress selectivo | NOT_RUN | Kernel capaz, pero no se diseñó/aplicó ese filtro ni se hizo tráfico de red |
-| Composición completa Landlock+bwrap+FD hygiene+cgroups | NOT_RUN | Se probaron primitivas y perfiles parciales, no una política combinada final |
+| Prueba o cambio                                                                                      | Estado                                                            | Razón y resultado que todavía falta                                                                           |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Crear UID/grupos/ACL para autoridad, usar setuid a otro usuario host, sudo/polkit                    | BLOCKED_UNSAFE                                                    | Cambia identidad/privilegios o exige autorización fuera de esta tarea; otro UID real no se probó aquí         |
+| Instalar/modificar unidades, iniciar/reiniciar Wyss u otros servicios, systemd-run, habilitar linger | BLOCKED_UNSAFE                                                    | El usuario prohibió cambios de servicios; no convertir un test transitorio en excepción silenciosa            |
+| Ejercitar Docker root, cached sudo o un broker administrativo                                        | BLOCKED_UNSAFE                                                    | Metadatos bastan para identificar el problema de amenaza; no ejecutar escalada ni contenedores                |
+| Escribir knobs/mover procesos en cgroups reales                                                      | BLOCKED_UNSAFE                                                    | Algunos knobs son writable, pero el grupo actual pertenece a la sesión/herramientas; afectaría otros procesos |
+| OOM, límites agresivos, matar managers/autoridad, logout/reboot/suspend                              | BLOCKED_UNSAFE                                                    | Puede cerrar trabajo real; no necesario para comprobar Landlock/bwrap/paths con fixtures                      |
+| PTY parser hostil con presión de memoria o FD hacia servicios reales                                 | BLOCKED_UNSAFE                                                    | No se validó aislamiento suficiente para aceptar ese efecto en el host normal                                 |
+| Ampliar btrfs show/list mediante privilegios; crear snapshot/subvolume/mount                         | BLOCKED_ENVIRONMENT / BLOCKED_UNSAFE para el remedio privilegiado | La inspección devolvió EPERM; no alterar el filesystem para completar una tabla                               |
+| Races sobre Claude/Codex/Hermes/Wyss reales, snapshots o réplica del home                            | BLOCKED_UNSAFE                                                    | Solo se autorizó dato ficticio en directorios propios; DN-31 requiere otro procedimiento delimitado           |
+| Startup real/login/refresh, hooks, MCP, keyring, sesión D-Bus/X11, autenticación móvil               | NOT_RUN                                                           | Prohibidos providers/config/auth reales en esta pasada; el mock no prueba compatibilidad instalada            |
+| Human approval firmado, LP4-away, revocación versus STARTING, replay tras crash                      | NOT_RUN                                                           | Requiere contratos y fixtures específicos adicionales; UID/socket y PTY no prueban esas propiedades           |
+| Filtro seccomp y egress selectivo                                                                    | NOT_RUN                                                           | Kernel capaz, pero no se diseñó/aplicó ese filtro ni se hizo tráfico de red                                   |
+| Composición completa Landlock+bwrap+FD hygiene+cgroups                                               | NOT_RUN                                                           | Se probaron primitivas y perfiles parciales, no una política combinada final                                  |
 
 No se propone una VM como paso genérico. Lo siguiente que puede hacerse sin privilegios
 es diseñar y ensayar mocks adicionales de la política combinada, gates de aprobación y

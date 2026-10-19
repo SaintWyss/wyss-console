@@ -7,9 +7,18 @@
   import { AgentController } from './lib/features/agent/controller';
   import ApprovalsView from './lib/features/approvals/ApprovalsView.svelte';
   import { ApprovalsController } from './lib/features/approvals/controller';
+  import ConfigurationView from './lib/features/configuration/ConfigurationView.svelte';
+  import { ChangesController } from './lib/features/configuration/changes-controller';
+  import { ConfigurationController } from './lib/features/configuration/controller';
+  import { CredentialsController } from './lib/features/credentials/controller';
+  import CredentialsView from './lib/features/credentials/CredentialsView.svelte';
   import { EventsController } from './lib/features/events/controller';
+  import { NativeController } from './lib/features/native/controller';
+  import ProfilesView from './lib/features/native/ProfilesView.svelte';
+  import WorkspaceView from './lib/features/native/WorkspaceView.svelte';
   import { SettingsController } from './lib/features/settings/controller';
   import SettingsView from './lib/features/settings/SettingsView.svelte';
+  import { currentWorkspace } from './lib/features/native/bridge';
   import { setAppearance } from './lib/features/terminal/appearance';
   import EventsView from './lib/features/events/EventsView.svelte';
   import { SessionsController } from './lib/features/sessions/controller';
@@ -72,6 +81,38 @@
     events = next;
   });
   let events = $state(eventsController.state());
+  // What the agents are configured with: read, and followed for changes, only while its
+  // view is shown. The desktop's watcher sees the files; the window only asks it.
+  const configurationController = new ConfigurationController((next) => {
+    configuration = next;
+  });
+  let configuration = $state(configurationController.state());
+  // Changing it: a plan is drafted, confirmed here, and applied by the desktop, which asks
+  // again in a window of its own when the change is risky.
+  const changesController = new ChangesController(
+    (next) => {
+      changes = next;
+    },
+    () => configurationController.refresh(),
+  );
+  let changes = $state(changesController.state());
+  // Agents started in terminals and the profiles they start with. An agent that was started
+  // opens as a tab of the Console, which is shown.
+  const nativeController = new NativeController(
+    (next) => {
+      native = next;
+    },
+    (reply) => {
+      currentWorkspace()?.createNative(reply);
+      go('console');
+    },
+  );
+  let native = $state(nativeController.state());
+  // API keys: listed by name while their view is shown; a key never reaches the window.
+  const credentialsController = new CredentialsController((next) => {
+    credentials = next;
+  });
+  let credentials = $state(credentialsController.state());
   // The desktop's own preferences: read once, written only when the user changes one.
   const settingsController = new SettingsController((next) => {
     settings = next;
@@ -99,6 +140,19 @@
   });
   $effect(() => {
     eventsController.setVisible(activeView === 'events');
+  });
+  $effect(() => {
+    configurationController.setVisible(activeView === 'configuration');
+  });
+  $effect(() => {
+    credentialsController.setVisible(activeView === 'credentials');
+  });
+  // The overview reads the registry (with resources) while it is shown, and the profiles
+  // are read once when either of their views first is.
+  $effect(() => {
+    nativeController.setVisible(
+      activeView === 'workspace' || activeView === 'profiles',
+    );
   });
 
   // The window opens on the view the preferences name, unless the user has already
@@ -152,6 +206,10 @@
       agentController.dispose();
       approvalsController.dispose();
       eventsController.dispose();
+      configurationController.dispose();
+      changesController.dispose();
+      nativeController.dispose();
+      credentialsController.dispose();
       settingsController.dispose();
     };
   });
@@ -244,6 +302,13 @@
     <TerminalView
       visible={activeView === 'console'}
       onworkspace={observeWorkspace}
+      onagents={() => go('workspace')}
+    />
+    <WorkspaceView
+      visible={activeView === 'workspace'}
+      {native}
+      controller={nativeController}
+      onconsole={() => go('console')}
     />
     <SessionsView
       visible={activeView === 'sessions'}
@@ -279,6 +344,23 @@
       onsession={showSession}
       onagent={showAgent}
       onapprovals={() => go('approvals')}
+    />
+    <ConfigurationView
+      visible={activeView === 'configuration'}
+      {configuration}
+      controller={configurationController}
+      {changes}
+      {changesController}
+    />
+    <ProfilesView
+      visible={activeView === 'profiles'}
+      {native}
+      controller={nativeController}
+    />
+    <CredentialsView
+      visible={activeView === 'credentials'}
+      {credentials}
+      controller={credentialsController}
     />
     <SettingsView
       visible={activeView === 'settings'}

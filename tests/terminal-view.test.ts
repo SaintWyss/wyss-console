@@ -205,6 +205,54 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-terminal-resize',
     'allow-close-terminal',
     'allow-terminal-status',
+    // The agents' configuration: two reads of what the desktop already holds.
+    'allow-configuration-inventory',
+    'allow-configuration-changes',
+    // Changing it, with a way back: a plan, its confirmation, the history, an undo, the
+    // hooks that were turned off, and their export and import in native windows.
+    'allow-configuration-plan',
+    'allow-configuration-apply',
+    'allow-configuration-history',
+    'allow-configuration-undo',
+    'allow-configuration-records',
+    'allow-configuration-record-delete',
+    'allow-configuration-export',
+    'allow-configuration-import',
+    // Native agent sessions (F3): the closed catalogue, a start that names an agent, a
+    // project the user chose and a profile, the registry, and the profiles. None takes a
+    // command, an argument list, an environment or a path.
+    'allow-native-launcher',
+    'allow-native-preview',
+    'allow-native-start',
+    'allow-native-sessions',
+    'allow-native-stop',
+    'allow-native-restart',
+    'allow-native-forget',
+    'allow-native-choose-project',
+    'allow-native-project-default',
+    'allow-native-profiles',
+    'allow-native-profile-create',
+    'allow-native-profile-save',
+    'allow-native-profile-delete',
+    'allow-native-profile-duplicate',
+    'allow-native-profile-restore',
+    'allow-native-profile-export',
+    'allow-native-profile-import',
+    // The host that holds the terminals past the window (F9): what it holds, whether it is
+    // a host process, and a redraw of a program's screen after a window attaches.
+    'allow-host-terminals',
+    'allow-host-info',
+    'allow-terminal-redraw',
+    // The layout of tabs and panes (T2): one read, one bounded write of a JSON object.
+    'allow-layout-read',
+    'allow-layout-write',
+    // API credentials (F14): a key is typed in a native window and never returned.
+    'allow-credentials-list',
+    'allow-credential-add',
+    'allow-credential-replace',
+    'allow-credential-rename',
+    'allow-credential-delete',
+    'allow-credential-verify',
   ]);
   // Every permission is one of this application's own commands: none belongs to a
   // plugin (`fs:`, `shell:`, `dialog:`) or to the framework's core (`core:`).
@@ -233,8 +281,13 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   ]);
   // History is read by exactly two commands. Nothing reads the audit as the authority
   // stores it, watches it, exports it, or performs again what an event describes.
+  // (The change history of the configuration is the desktop's own journal of what the user
+  // changed, read by one command of its own: it is not the authority's audit.)
   expect(
-    capability.permissions.filter((p: string) => /event|audit|histor/.test(p)),
+    capability.permissions.filter(
+      (p: string) =>
+        /event|audit|histor/.test(p) && !p.startsWith('allow-configuration-'),
+    ),
   ).toEqual(['allow-managed-events', 'allow-managed-events-older']);
   // The desktop's own preferences are one read, one replacement of the whole typed set
   // and one reset. There is no key to write, no file to name and nothing to run.
@@ -266,9 +319,26 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-authority-lifecycle',
     'allow-authority-retry',
   ]);
-  for (const permission of capability.permissions)
+  // One exception, deliberate and narrow (ADR 0034, F2a): exporting a kept hook. The page
+  // names a record it was given and nothing else; the passphrase and the file are asked
+  // for in native windows the page cannot reach, and what is written is ciphertext.
+  // Second exception, deliberate and bounded (ADR 0035, F3): the native sessions' own
+  // commands. They name an agent of a closed catalogue, a project the native dialog
+  // returned, a session or a profile of the desktop's own registry, and so they are
+  // allowed words like stop, restart, profile and export; the words that would mean the
+  // window can run something of its own stay forbidden for them below.
+  for (const permission of capability.permissions.filter(
+    (p: string) =>
+      p !== 'allow-configuration-export' && !p.startsWith('allow-native-'),
+  ))
     expect(permission).not.toMatch(
       /always|remember|trust|rule|policy|allowlist|respond|decision|lease|scope|profile|runtime|control|request|invoke|exec|shell|spawn|process|socket|fs|audit|watch|replay|export|save|payload|envelope|service|unit|systemd|systemctl|dbus|install|binary|path|restart|stop|kill|command/,
+    );
+  for (const permission of capability.permissions.filter((p: string) =>
+    p.startsWith('allow-native-'),
+  ))
+    expect(permission).not.toMatch(
+      /exec|shell|spawn|command|path|invoke|socket|systemd|systemctl|dbus|install|binary|process|fs|run|env|argv|argument/,
     );
   const directives = Object.fromEntries(
     config.app.security.csp

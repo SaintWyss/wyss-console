@@ -39,6 +39,18 @@ pub struct CreateTerminal {
     pub cwd: Option<String>,
 }
 
+/// What a terminal runs: a program, its arguments as separate words, and variables added to
+/// the environment. Rust only: the window never sends one (C-01); the desktop binary derives
+/// it from a closed catalogue.
+#[derive(Debug, Clone)]
+pub struct Launch {
+    pub program: std::path::PathBuf,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    /// Variables of the Console's own environment the program must not inherit.
+    pub remove_env: Vec<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TerminalTarget {

@@ -2,8 +2,8 @@
 
 Date: 2026-10-13. **Static documentation / source review only.**
 The owner authorised bounded isolated technical verification after paper
-consolidation. The following is verified only as *upstream source/documentation
-statements*, not as observed operation, performance, security or integration
+consolidation. The following is verified only as _upstream source/documentation
+statements_, not as observed operation, performance, security or integration
 on the owner's CachyOS desktop or native Android device. No package
 installed, binaries run, network endpoint contacted or device setting changed.
 
@@ -16,19 +16,20 @@ per connection**, not necessarily "no VPN at all".
 
 ## 1. Source evidence with stable revision
 
-| Evidence | Claim that the source actually supports | Level |
-| --- | --- | --- |
-| `n0-computer/iroh-ffi` at commit `3103bf5295be6d50c5272ff7a426e9b539f3f587`, `support-matrix.yaml` | A declared Kotlin binding covers endpoints, protocols/ALPN, multipath, custom relays, services | Source read, NOT Android runtime observation |
-| Same commit, `README.kotlin.md` | Android cross-compilation is documented through Android NDK and targets including aarch64/armv7/x86; examples target Android API 29 | Source read, NOT tested on device |
-| Same commit, `Cargo.toml` | FFI version `1.1.0`; Rust core dependency listed as `iroh = 1.0.0`; Android JNI/NDK-specific dependencies; license MIT OR Apache-2.0 | Source read; check actual installed/runtime versions before use |
-| Same commit, `README.md` | Kotlin/JVM Maven coordinates documented: `computer.iroh:iroh`; project expressly includes Kotlin/Swift/Python/Node bindings | Source read |
-| `iroh` Rust 1.3.0 API docs: https://docs.rs/iroh/latest/iroh/ | An endpoint connects over QUIC, using relay discovery and direct NAT traversal where possible, with authenticated endpoint IDs; the application's authorisation remains the application's responsibility | Provider documentation, NOT actual LAN/P2P result |
-| iroh security/privacy docs: https://docs.iroh.computer/deployment/security-privacy (historical URL may move) | Relay data is end-to-end encrypted, but relays see metadata; public shared relays are **not recommended by maintainers for sensitive/confidential data** | Cached provider docs; confirm latest canonical URL before adoption |
-| https://tailscale.com/docs/features/tsnet | `tsnet` embeds Tailscale into **Go** programs, not a turnkey Kotlin/Rust Android SDK | Provider docs validated July 2026 |
-| https://tailscale.com/docs/install/android | Tailscale has a separately installed Android app that enables a device-level VPN configuration | Provider docs validated January 2026 |
-| https://tailscale.com/docs/concepts/traffic-routing-through-tailscale | Tailscale normally uses direct encrypted links and relays through DERP when direct routing is impossible | Provider docs validated January 2026 |
+| Evidence                                                                                                     | Claim that the source actually supports                                                                                                                                                                  | Level                                                              |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `n0-computer/iroh-ffi` at commit `3103bf5295be6d50c5272ff7a426e9b539f3f587`, `support-matrix.yaml`           | A declared Kotlin binding covers endpoints, protocols/ALPN, multipath, custom relays, services                                                                                                           | Source read, NOT Android runtime observation                       |
+| Same commit, `README.kotlin.md`                                                                              | Android cross-compilation is documented through Android NDK and targets including aarch64/armv7/x86; examples target Android API 29                                                                      | Source read, NOT tested on device                                  |
+| Same commit, `Cargo.toml`                                                                                    | FFI version `1.1.0`; Rust core dependency listed as `iroh = 1.0.0`; Android JNI/NDK-specific dependencies; license MIT OR Apache-2.0                                                                     | Source read; check actual installed/runtime versions before use    |
+| Same commit, `README.md`                                                                                     | Kotlin/JVM Maven coordinates documented: `computer.iroh:iroh`; project expressly includes Kotlin/Swift/Python/Node bindings                                                                              | Source read                                                        |
+| `iroh` Rust 1.3.0 API docs: https://docs.rs/iroh/latest/iroh/                                                | An endpoint connects over QUIC, using relay discovery and direct NAT traversal where possible, with authenticated endpoint IDs; the application's authorisation remains the application's responsibility | Provider documentation, NOT actual LAN/P2P result                  |
+| iroh security/privacy docs: https://docs.iroh.computer/deployment/security-privacy (historical URL may move) | Relay data is end-to-end encrypted, but relays see metadata; public shared relays are **not recommended by maintainers for sensitive/confidential data**                                                 | Cached provider docs; confirm latest canonical URL before adoption |
+| https://tailscale.com/docs/features/tsnet                                                                    | `tsnet` embeds Tailscale into **Go** programs, not a turnkey Kotlin/Rust Android SDK                                                                                                                     | Provider docs validated July 2026                                  |
+| https://tailscale.com/docs/install/android                                                                   | Tailscale has a separately installed Android app that enables a device-level VPN configuration                                                                                                           | Provider docs validated January 2026                               |
+| https://tailscale.com/docs/concepts/traffic-routing-through-tailscale                                        | Tailscale normally uses direct encrypted links and relays through DERP when direct routing is impossible                                                                                                 | Provider docs validated January 2026                               |
 
 Source URLs:
+
 - https://github.com/n0-computer/iroh-ffi/blob/3103bf5295be6d50c5272ff7a426e9b539f3f587/support-matrix.yaml
 - https://github.com/n0-computer/iroh-ffi/blob/3103bf5295be6d50c5272ff7a426e9b539f3f587/README.kotlin.md
 - https://github.com/n0-computer/iroh-ffi/blob/3103bf5295be6d50c5272ff7a426e9b539f3f587/Cargo.toml
@@ -71,23 +72,23 @@ relay for Wyss.
 
 ## 3. Current comparison without fabricated metrics
 
-| Factor | H1 external automatic overlay | H2 iroh embedded |
-| --- | --- | --- |
-| Android client | Separate Tailscale VPN app; Wyss app talks through tailnet | Native Kotlin FFI documented; Wyss owns integration |
-| Network path | P2P direct where possible, DERP relays otherwise | P2P direct where possible, iroh relays otherwise |
-| Additional infrastructure | Tailnet identity/control plane and client daemon | Endpoint discovery/relay configuration, key lifecycle, Android JNI |
-| Initial user setup | Device VPN approval and tailnet enrolment | Wyss pairing plus endpoint enrolment, maybe trusted relay configuration |
-| Gateway permissions | Required independent LP4 grants | Required independent LP4 grants |
-| Operator data exposure | Relay/routing metadata; must review Tailscale docs | Relay/routing metadata; upstream cautions on shared public relays |
-| p50/p95 latency, RAM, battery, loss | **UNMEASURED** | **UNMEASURED** |
-| Host logout / crash recovery | **UNTESTED** | **UNTESTED** |
-| Total ownership cost | **UNKNOWN** | **UNKNOWN** |
-| Android network migration correctness | **UNTESTED** | **UNTESTED** |
+| Factor                                | H1 external automatic overlay                              | H2 iroh embedded                                                        |
+| ------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Android client                        | Separate Tailscale VPN app; Wyss app talks through tailnet | Native Kotlin FFI documented; Wyss owns integration                     |
+| Network path                          | P2P direct where possible, DERP relays otherwise           | P2P direct where possible, iroh relays otherwise                        |
+| Additional infrastructure             | Tailnet identity/control plane and client daemon           | Endpoint discovery/relay configuration, key lifecycle, Android JNI      |
+| Initial user setup                    | Device VPN approval and tailnet enrolment                  | Wyss pairing plus endpoint enrolment, maybe trusted relay configuration |
+| Gateway permissions                   | Required independent LP4 grants                            | Required independent LP4 grants                                         |
+| Operator data exposure                | Relay/routing metadata; must review Tailscale docs         | Relay/routing metadata; upstream cautions on shared public relays       |
+| p50/p95 latency, RAM, battery, loss   | **UNMEASURED**                                             | **UNMEASURED**                                                          |
+| Host logout / crash recovery          | **UNTESTED**                                               | **UNTESTED**                                                            |
+| Total ownership cost                  | **UNKNOWN**                                                | **UNKNOWN**                                                             |
+| Android network migration correctness | **UNTESTED**                                               | **UNTESTED**                                                            |
 
 ## 4. Precise future isolated experiment plan (not executed)
 
 With the owner's already-granted permission for disposable
-environments, these tests can be prepared but need a *reachable*
+environments, these tests can be prepared but need a _reachable_
 isolated Linux target and Android test device/emulator with no
 personal credentials/configuration. Do **not** run on user's actual
 host session or phone without naming the target and agreement on

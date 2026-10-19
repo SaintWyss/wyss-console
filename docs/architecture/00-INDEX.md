@@ -189,13 +189,13 @@ The owner subsequently selected product scope and delegated routine design defau
 without accepting any security ADR. Read these documents **after** the historical
 baseline and audit:
 
-| Document | Purpose | Authority |
-| --- | --- | --- |
-| [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md) | Owner-selected DN alternatives; delegated planning candidates; explicit open decisions | Product scope only; no implementation |
-| [33](33-CROSS-DOMAIN-RECONCILIATION.md) | Conflict register across security, remote, OL3, memory, models and storage | Candidate design; not independently reviewed |
-| [34](34-OL3-ORCHESTRATION-CONTRACT.md) | Finite supervised multi-agent DAG contract, state machines and failure modes | Candidate design for DN-15=OL3 |
-| [35](35-HOST-REMOTE-AND-MOBILE-DELTA.md) | Native Android/host/screen model; comparison of transparent P2P/overlay/relay choices | DN-05 remains open |
-| [36](36-PLANNING-CLOSURE-AND-VERIFICATION-GATES.md) | Hard blockers, validation and independent-review gates | No passing score or authorisation implied |
+| Document                                            | Purpose                                                                                | Authority                                    |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------- |
+| [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md)     | Owner-selected DN alternatives; delegated planning candidates; explicit open decisions | Product scope only; no implementation        |
+| [33](33-CROSS-DOMAIN-RECONCILIATION.md)             | Conflict register across security, remote, OL3, memory, models and storage             | Candidate design; not independently reviewed |
+| [34](34-OL3-ORCHESTRATION-CONTRACT.md)              | Finite supervised multi-agent DAG contract, state machines and failure modes           | Candidate design for DN-15=OL3               |
+| [35](35-HOST-REMOTE-AND-MOBILE-DELTA.md)            | Native Android/host/screen model; comparison of transparent P2P/overlay/relay choices  | DN-05 remains open                           |
+| [36](36-PLANNING-CLOSURE-AND-VERIFICATION-GATES.md) | Hard blockers, validation and independent-review gates                                 | No passing score or authorisation implied    |
 
 [02 §4](02-REQUIREMENTS.md), [20 §14](20-VERIFICATION-AND-ACCEPTANCE.md)
 and [23 §5](23-TRACEABILITY-MATRIX.md) cross-reference the **new**
@@ -217,7 +217,6 @@ wireframe states and durable model/usage event schema. It is
 **proposed documentation**; no provider behaviour or UI has been
 verified. The detailed test list was added to [20 §15](20-VERIFICATION-AND-ACCEPTANCE.md)
 and the crosswalk to [23 §6](23-TRACEABILITY-MATRIX.md).
-
 
 ### Independent-review handoff
 
@@ -273,7 +272,6 @@ an additional open PR**. No full-plan acceptance
 or implementation approval follows from any
 of these documents.
 
-
 ### Authority isolation feasibility verification (2026-10-14)
 
 [43](43-AUTHORITY-ISOLATION-FEASIBILITY-MATRIX.md) compares a
@@ -290,7 +288,6 @@ same-UID authority and unforgeable human approvals remains
 a hard contradiction until a real distinct trust principal
 or effect limitation is designed and independently reviewed.
 
-
 ### Executed synthetic fixture report
 
 [44](44-DISPOSABLE-TRUST-FIXTURE-OBSERVATIONS.md)
@@ -304,7 +301,6 @@ fixtures only**, not tests of Wyss, provider login,
 Android, human approval or replica/snapshot safety.
 Their pass results do not change the current REJECT
 or authorise implementation.
-
 
 ### Environment blocker for next isolated run
 
@@ -320,7 +316,6 @@ requires a named disposable Linux VM/runner.
 Nothing in the tests means the owner's
 operating systems are missing these tools.
 
-
 ### Next VM evidence handoff
 
 [45](45-DISPOSABLE-VM-VERIFICATION-HANDOFF.md)
@@ -331,8 +326,7 @@ changing the host, installing a service on the
 owner's PC, accepting an ADR or merging PR #2.
 If a verifiably disposable VM is unavailable,
 the test agent must stop with a concrete blocker.
-This is a *handoff*, not a completed test.
-
+This is a _handoff_, not a completed test.
 
 ### CachyOS-native verification correction
 
@@ -366,13 +360,12 @@ Per-provider negative/positive mock tests remain
 required; sandboxing that silently disables
 hooks/MCP/network is not a final-product PASS.
 
-
 ### Composed native worker security case (2026-10-14)
 
 [49](49-CACHYOS-COMPOSED-WORKER-SECURITY-CONTRACT.md)
 turns the observed CachyOS Landlock/bubblewrap primitives
 into a falsifiable **positive-and-negative** sandbox test plan
-for a *synthetic* OL3 worker, covering fake credential refresh,
+for a _synthetic_ OL3 worker, covering fake credential refresh,
 Docker/authority IPC, ambient file descriptors, mock inference
 egress, worktree injection and PTY lifecycle. It distinguishes
 limited B1 containment from strong human approval integrity,

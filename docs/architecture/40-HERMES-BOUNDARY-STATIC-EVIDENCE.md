@@ -9,15 +9,16 @@ against code**; it does not establish actual runtime confinement on Linux.
 
 ## 1. Specific findings at pinned revision
 
-| Finding | Pinned source | Security implication |
-| --- | --- | --- |
-| `execute_code` is not merely an RPC for seven tools; it runs an LLM-generated Python program in an environment backend. The seven RPC tool stubs are additionally filtered by enabled tools | `tools/code_execution_tool.py:1-11, 42-45` | Disabling a subset of RPC tool names does not prove the script itself lacks OS effects; remove `execute_code` from the *planner* persona entirely and enforce OS sandbox |
-| Remote execute-code ships scripts and per-invocation RPC token/environment to a backend and launches via `env.execute` | `tools/code_execution_tool.py:467-495`, `tools/code_execution_rpc.py:44-76` | Must not give a Hermes *planner* an unmediated execution backend, filesystem write, network/SSH credentials or host account |
-| `HERMES_YOLO_MODE`, session-scoped YOLO and `approvals.mode: off` are three ways the Hermes approval checks may be bypassed; hardline and user deny floors are separate checks | `tools/approval.py:43-46, 481-488` | Hermes approval configuration is not Wyss Agent's deterministic policy and must not serve as an OS boundary or sole authorisation |
-| Session `/yolo` toggles and persisted bypass restoration are supported in CLI/TUI/Desktop/gateway | `tools/approval_yolo.py:1-5, 30-73` | Wrapper-level assurances that a model can't change its own mode are unsafe without a frozen, separately owned confinement policy |
-| Hermes `tool_guardrails` contains opt-in interactive hard-stops; guardrail mode is configurable | `agent/tool_guardrails.py:119-145, 362-364` | Guardrails improve behaviour but aren't a complete effect reference monitor for Wyss policy |
+| Finding                                                                                                                                                                                     | Pinned source                                                               | Security implication                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `execute_code` is not merely an RPC for seven tools; it runs an LLM-generated Python program in an environment backend. The seven RPC tool stubs are additionally filtered by enabled tools | `tools/code_execution_tool.py:1-11, 42-45`                                  | Disabling a subset of RPC tool names does not prove the script itself lacks OS effects; remove `execute_code` from the _planner_ persona entirely and enforce OS sandbox |
+| Remote execute-code ships scripts and per-invocation RPC token/environment to a backend and launches via `env.execute`                                                                      | `tools/code_execution_tool.py:467-495`, `tools/code_execution_rpc.py:44-76` | Must not give a Hermes _planner_ an unmediated execution backend, filesystem write, network/SSH credentials or host account                                              |
+| `HERMES_YOLO_MODE`, session-scoped YOLO and `approvals.mode: off` are three ways the Hermes approval checks may be bypassed; hardline and user deny floors are separate checks              | `tools/approval.py:43-46, 481-488`                                          | Hermes approval configuration is not Wyss Agent's deterministic policy and must not serve as an OS boundary or sole authorisation                                        |
+| Session `/yolo` toggles and persisted bypass restoration are supported in CLI/TUI/Desktop/gateway                                                                                           | `tools/approval_yolo.py:1-5, 30-73`                                         | Wrapper-level assurances that a model can't change its own mode are unsafe without a frozen, separately owned confinement policy                                         |
+| Hermes `tool_guardrails` contains opt-in interactive hard-stops; guardrail mode is configurable                                                                                             | `agent/tool_guardrails.py:119-145, 362-364`                                 | Guardrails improve behaviour but aren't a complete effect reference monitor for Wyss policy                                                                              |
 
 Canonical source URLs:
+
 - https://github.com/NousResearch/hermes-agent/blob/e06df9c2eae6901f4c88f464e0ae6e753c0428b8/tools/code_execution_tool.py
 - https://github.com/NousResearch/hermes-agent/blob/e06df9c2eae6901f4c88f464e0ae6e753c0428b8/tools/code_execution_rpc.py
 - https://github.com/NousResearch/hermes-agent/blob/e06df9c2eae6901f4c88f464e0ae6e753c0428b8/tools/approval.py
@@ -139,7 +140,7 @@ human approval, but a misleading command summary plus
 approval is **not** a guarantee of semantic confinement.
 
 For **Hermes in Wyss Agent planner mode**, the safe
-planning requirement is a *closed typed effect vocabulary*.
+planning requirement is a _closed typed effect vocabulary_.
 Unrestricted `shell.run`, Python code execution and other
 interpreter commands are **denied**, never made safe by
 a risk label or a friendly summary. Provider-native
@@ -168,7 +169,7 @@ Read-only source was checked at the exact commit
   receives `allowed_binaries` or a TOML config explicitly,
   runs subprocesses with `argv` and `shell=False`,
   with further guard/policy checks in the adapter.
-  Thus *accepting* a plan's string at policy level does
+  Thus _accepting_ a plan's string at policy level does
   **not** imply that the shell executes it in the
   default configuration.
 - `src/execution/filesystem.py:129–178`: second wall
@@ -187,6 +188,7 @@ Read-only source was checked at the exact commit
   not demonstrate a full execution bypass.
 
 Source links:
+
 - https://github.com/SaintWyss/wyss/blob/0761dcdacdafa216c8afc25036e24685855d2228/src/execution/shell.py
 - https://github.com/SaintWyss/wyss/blob/0761dcdacdafa216c8afc25036e24685855d2228/src/execution/filesystem.py
 - https://github.com/SaintWyss/wyss/blob/0761dcdacdafa216c8afc25036e24685855d2228/packages/wyss-core/src/core/policy/engine.py

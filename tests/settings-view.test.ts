@@ -345,7 +345,7 @@ it('opens on the preferred view, unless the user already went somewhere', async 
   component = mount(App, { target: document.body });
   await flush();
   document
-    .querySelectorAll<HTMLButtonElement>('.sidebar .nav-item')[1]!
+    .querySelectorAll<HTMLButtonElement>('.sidebar .nav-item')[2]!
     .click();
   await flush();
   answer(undefined);

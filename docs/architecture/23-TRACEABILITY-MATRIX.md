@@ -244,52 +244,52 @@ script that verifies it is a small task of F1 `[N]`.
 
 Historical rows in §1 and §2 remain unchanged unless superseded by an
 accepted ADR. New targets in [02 §4](02-REQUIREMENTS.md) trace as follows;
-a named test is a *specification*, not an executed check. The exact
+a named test is a _specification_, not an executed check. The exact
 pass/fail criteria are in [20 §14](20-VERIFICATION-AND-ACCEPTANCE.md).
 DN-05 and DN-31 remain unresolved; a design link does not equal acceptance.
 
-| Requirement | Design contract | Candidate phase | Test | Acceptance |
-| --- | --- | --- | --- | --- |
-| FR-ORC-01 | 34 §1–4 | F11b | TS-ORC-01 | AC-FINAL-01 |
-| FR-ORC-02 | 34 §1–4 | F11b | TS-ORC-03 | AC-FINAL-02 |
-| FR-ORC-03 | 34 §3–4 | F11b | TS-ORC-02 | AC-FINAL-03 |
-| FR-ORC-04 | 34 §2/4 | F11b | TS-ORC-05 | AC-FINAL-04 |
-| FR-ORC-05 | 34 §3/5 | F11b | TS-ORC-07 | AC-FINAL-05 |
-| FR-ORC-06 | 34 §2/4 | F8/F11b | TS-ORC-04 | AC-FINAL-06 |
-| FR-ORC-07 | 34 §1/6 | F11b | TS-ORC-09 | AC-FINAL-07 |
-| FR-ORC-08 | 34 §2/7 | F11b | TS-ORC-13 | AC-FINAL-08 |
-| FR-REM-10 | 35 §7 | F10b | TS-HYB-05 | AC-FINAL-09 |
-| FR-REM-11 | 35 §3/6 | F10a | TS-HYB-01 | AC-FINAL-10 |
-| FR-REM-12 | 35 §6 | F10a | TS-HYB-03 | AC-FINAL-11 |
-| FR-REM-13 | 35 §4 | F9 | TS-HYB-06 | AC-FINAL-12 |
-| FR-REM-14 | 35 §5/6 | F9/F10a | TS-HYB-09 | AC-FINAL-13 |
-| FR-REM-15 | 35 §7 | F10b/F5 | TS-HYB-11 | AC-FINAL-14 |
-| FR-REM-16 | 35 §6/7 | F10a/F10b | TS-HYB-04 | AC-FINAL-15 |
-| FR-REM-17 | 35 §4/7 | F9 | TS-HYB-14 | AC-FINAL-16 |
-| FR-TERM-12 | 35 §5 | T1/P1 | TS-FINAL-01 | AC-FINAL-17 |
-| FR-TERM-13 | 35 §5 | F9 | TS-HYB-08 | AC-FINAL-18 |
-| FR-TERM-14 | 34 §5; 35 §4 | T2/F9 | TS-FINAL-02 | AC-FINAL-19 |
-| FR-TERM-15 | 35 §5 | F9/P1 | TS-FINAL-03 | AC-FINAL-20 |
-| FR-MOD-11 | 33 RC-05; 12 §5 | F6b | TS-FINAL-04 | AC-FINAL-21 |
-| FR-MOD-12 | 33 RC-05; ADR 0031 | F6a/F6b | TS-FINAL-05 | AC-FINAL-22 |
-| FR-MOD-13 | ADR 0031 §3–4 | F6a | TS-FINAL-06 | AC-FINAL-23 |
-| FR-MOD-14 | 12 §5; 32 DN-38 | F6b | TS-FINAL-07 | AC-FINAL-24 |
-| FR-MOD-15 | 33 RC-05; 12 §6 | F6a | TS-FINAL-08 | AC-FINAL-25 |
-| FR-UX-07 | 32 DN-32; 13 §2 | F3b/F10a | TS-FINAL-09 | AC-FINAL-26 |
-| FR-UX-08 | 32 DN-33; 13 §2 | F1/F5 | TS-FINAL-10 | AC-FINAL-27 |
-| FR-UX-09 | 32 DN-34; 13 §13 | F13/T1 | TS-FINAL-11 | AC-FINAL-28 |
-| FR-UX-10 | 32 DN-35; 33 RC-13 | F10a | TS-FINAL-12 | AC-FINAL-29 |
-| FR-UX-11 | 32 DN-39; 05 §12 | T1 | TS-FINAL-13 | AC-FINAL-30 |
-| FR-UX-12 | 32 DN-37; 27 | F2v | TS-FINAL-14 | AC-FINAL-31 |
-| FR-PRF-10 | 32 DN-20; 09 §3 | F3a/F3c | TS-ORC-08 | AC-FINAL-32 |
-| FR-PRF-11 | 32 DN-14; 09 §3 | F3c | TS-FINAL-15 | AC-FINAL-33 |
-| FR-CFG-18 | 32 DN-12; 33 RC-12 | F5 | TS-FINAL-16 | AC-FINAL-34 |
-| FR-CFG-19 | 32 DN-13; 33 RC-12 | F4b/F5 | TS-FINAL-17 | AC-FINAL-35 |
-| FR-SEC-11 | 32 DN-22; 33 RC-02 | F5 | TS-FINAL-18 | AC-FINAL-36 |
-| FR-AGT-04 | 17 §6; 33 RC-04 | F12 | TS-ORC-15 | AC-FINAL-37 |
-| FR-AGT-05 | 17 §1; 32 DN-11 | F12 | TS-FINAL-19 | AC-FINAL-38 |
-| FR-OBS-07 | 33 RC-05/RC-13; 12 §6 | F6a | TS-FINAL-20 | AC-FINAL-39 |
-| FR-DIST-07 | 32 DN-07; 36 §4 | F13-personal | TS-FINAL-21 | AC-FINAL-40 |
+| Requirement | Design contract       | Candidate phase | Test        | Acceptance  |
+| ----------- | --------------------- | --------------- | ----------- | ----------- |
+| FR-ORC-01   | 34 §1–4               | F11b            | TS-ORC-01   | AC-FINAL-01 |
+| FR-ORC-02   | 34 §1–4               | F11b            | TS-ORC-03   | AC-FINAL-02 |
+| FR-ORC-03   | 34 §3–4               | F11b            | TS-ORC-02   | AC-FINAL-03 |
+| FR-ORC-04   | 34 §2/4               | F11b            | TS-ORC-05   | AC-FINAL-04 |
+| FR-ORC-05   | 34 §3/5               | F11b            | TS-ORC-07   | AC-FINAL-05 |
+| FR-ORC-06   | 34 §2/4               | F8/F11b         | TS-ORC-04   | AC-FINAL-06 |
+| FR-ORC-07   | 34 §1/6               | F11b            | TS-ORC-09   | AC-FINAL-07 |
+| FR-ORC-08   | 34 §2/7               | F11b            | TS-ORC-13   | AC-FINAL-08 |
+| FR-REM-10   | 35 §7                 | F10b            | TS-HYB-05   | AC-FINAL-09 |
+| FR-REM-11   | 35 §3/6               | F10a            | TS-HYB-01   | AC-FINAL-10 |
+| FR-REM-12   | 35 §6                 | F10a            | TS-HYB-03   | AC-FINAL-11 |
+| FR-REM-13   | 35 §4                 | F9              | TS-HYB-06   | AC-FINAL-12 |
+| FR-REM-14   | 35 §5/6               | F9/F10a         | TS-HYB-09   | AC-FINAL-13 |
+| FR-REM-15   | 35 §7                 | F10b/F5         | TS-HYB-11   | AC-FINAL-14 |
+| FR-REM-16   | 35 §6/7               | F10a/F10b       | TS-HYB-04   | AC-FINAL-15 |
+| FR-REM-17   | 35 §4/7               | F9              | TS-HYB-14   | AC-FINAL-16 |
+| FR-TERM-12  | 35 §5                 | T1/P1           | TS-FINAL-01 | AC-FINAL-17 |
+| FR-TERM-13  | 35 §5                 | F9              | TS-HYB-08   | AC-FINAL-18 |
+| FR-TERM-14  | 34 §5; 35 §4          | T2/F9           | TS-FINAL-02 | AC-FINAL-19 |
+| FR-TERM-15  | 35 §5                 | F9/P1           | TS-FINAL-03 | AC-FINAL-20 |
+| FR-MOD-11   | 33 RC-05; 12 §5       | F6b             | TS-FINAL-04 | AC-FINAL-21 |
+| FR-MOD-12   | 33 RC-05; ADR 0031    | F6a/F6b         | TS-FINAL-05 | AC-FINAL-22 |
+| FR-MOD-13   | ADR 0031 §3–4         | F6a             | TS-FINAL-06 | AC-FINAL-23 |
+| FR-MOD-14   | 12 §5; 32 DN-38       | F6b             | TS-FINAL-07 | AC-FINAL-24 |
+| FR-MOD-15   | 33 RC-05; 12 §6       | F6a             | TS-FINAL-08 | AC-FINAL-25 |
+| FR-UX-07    | 32 DN-32; 13 §2       | F3b/F10a        | TS-FINAL-09 | AC-FINAL-26 |
+| FR-UX-08    | 32 DN-33; 13 §2       | F1/F5           | TS-FINAL-10 | AC-FINAL-27 |
+| FR-UX-09    | 32 DN-34; 13 §13      | F13/T1          | TS-FINAL-11 | AC-FINAL-28 |
+| FR-UX-10    | 32 DN-35; 33 RC-13    | F10a            | TS-FINAL-12 | AC-FINAL-29 |
+| FR-UX-11    | 32 DN-39; 05 §12      | T1              | TS-FINAL-13 | AC-FINAL-30 |
+| FR-UX-12    | 32 DN-37; 27          | F2v             | TS-FINAL-14 | AC-FINAL-31 |
+| FR-PRF-10   | 32 DN-20; 09 §3       | F3a/F3c         | TS-ORC-08   | AC-FINAL-32 |
+| FR-PRF-11   | 32 DN-14; 09 §3       | F3c             | TS-FINAL-15 | AC-FINAL-33 |
+| FR-CFG-18   | 32 DN-12; 33 RC-12    | F5              | TS-FINAL-16 | AC-FINAL-34 |
+| FR-CFG-19   | 32 DN-13; 33 RC-12    | F4b/F5          | TS-FINAL-17 | AC-FINAL-35 |
+| FR-SEC-11   | 32 DN-22; 33 RC-02    | F5              | TS-FINAL-18 | AC-FINAL-36 |
+| FR-AGT-04   | 17 §6; 33 RC-04       | F12             | TS-ORC-15   | AC-FINAL-37 |
+| FR-AGT-05   | 17 §1; 32 DN-11       | F12             | TS-FINAL-19 | AC-FINAL-38 |
+| FR-OBS-07   | 33 RC-05/RC-13; 12 §6 | F6a             | TS-FINAL-20 | AC-FINAL-39 |
+| FR-DIST-07  | 32 DN-07; 36 §4       | F13-personal    | TS-FINAL-21 | AC-FINAL-40 |
 
 ### 5.1 Items that cannot be counted as verified
 
@@ -309,23 +309,23 @@ too shallow. Acceptance criteria and **NOT RUN** status are in
 These rows supplement the historical matrix; they do not
 retroactively change accepted ADRs or implemented evidence.
 
-| Requirement | Candidate contract | Tests | Acceptance |
-| --- | --- | --- | --- |
-| FR-SES-04 | 37 §1 explicit handoff and state guards | TS-HAND-01/02/03/05 | AC-HAND-01 |
-| FR-SES-05 | 37 §1.2 plane boundary and new session | TS-HAND-04/05 | AC-HAND-02 |
-| FR-ADP-01..05 | 37 §2 exact-version descriptors for OpenCode and Hermes | TS-ADP-OC-01..09; TS-ADP-HR-01..05 | AC-ADP-OC-01; AC-ADP-HR-01 |
-| FR-HRS-04/05 | 37 §3 native authoring, review and failure states | TS-CFG-17..20 (original); TS-CFG-21..24 (additional) | AC-CFG-AUTH-01; AC-CFG-AUTH-02 |
-| FR-HRS-09 | 37 §3 closed provider-native operations | TS-CFG-24 | AC-CFG-AUTH-02 |
-| FR-MOD-08/09 | 37 §5 source-grain metadata and observed model events | TS-MET-01..08 | AC-MET-01 |
-| FR-UX-01/02/03/05 | 37 §4/6 Android screens and desktop capability segregation | TS-UIX-01..07 | AC-UIX-01 |
-| FR-REM-09 | 37 §4 native Android ten screen states | TS-UIX-04/07 | AC-UIX-01 |
-| NFR-A11Y-02/03 | 37 §6 accessible themes and state | TS-UIX-01/03 | AC-UIX-01 |
-| NFR-A11Y-04 | 37 §6 reduced-motion acceptance | TS-UIX-08 | AC-UIX-02 |
-| FR-OBS-01 | 20 §15 event reader acceptance | TS-OBS-01 | AC-OBS-01 |
-| FR-OBS-03 | 20 §15 native lifecycle acceptance | TS-OBS-02 | AC-OBS-02 |
-| FR-DAT-04 | 20 §15 persistence/quota acceptance | TS-DAT-04 | AC-DAT-04 |
+| Requirement       | Candidate contract                                         | Tests                                                | Acceptance                     |
+| ----------------- | ---------------------------------------------------------- | ---------------------------------------------------- | ------------------------------ |
+| FR-SES-04         | 37 §1 explicit handoff and state guards                    | TS-HAND-01/02/03/05                                  | AC-HAND-01                     |
+| FR-SES-05         | 37 §1.2 plane boundary and new session                     | TS-HAND-04/05                                        | AC-HAND-02                     |
+| FR-ADP-01..05     | 37 §2 exact-version descriptors for OpenCode and Hermes    | TS-ADP-OC-01..09; TS-ADP-HR-01..05                   | AC-ADP-OC-01; AC-ADP-HR-01     |
+| FR-HRS-04/05      | 37 §3 native authoring, review and failure states          | TS-CFG-17..20 (original); TS-CFG-21..24 (additional) | AC-CFG-AUTH-01; AC-CFG-AUTH-02 |
+| FR-HRS-09         | 37 §3 closed provider-native operations                    | TS-CFG-24                                            | AC-CFG-AUTH-02                 |
+| FR-MOD-08/09      | 37 §5 source-grain metadata and observed model events      | TS-MET-01..08                                        | AC-MET-01                      |
+| FR-UX-01/02/03/05 | 37 §4/6 Android screens and desktop capability segregation | TS-UIX-01..07                                        | AC-UIX-01                      |
+| FR-REM-09         | 37 §4 native Android ten screen states                     | TS-UIX-04/07                                         | AC-UIX-01                      |
+| NFR-A11Y-02/03    | 37 §6 accessible themes and state                          | TS-UIX-01/03                                         | AC-UIX-01                      |
+| NFR-A11Y-04       | 37 §6 reduced-motion acceptance                            | TS-UIX-08                                            | AC-UIX-02                      |
+| FR-OBS-01         | 20 §15 event reader acceptance                             | TS-OBS-01                                            | AC-OBS-01                      |
+| FR-OBS-03         | 20 §15 native lifecycle acceptance                         | TS-OBS-02                                            | AC-OBS-02                      |
+| FR-DAT-04         | 20 §15 persistence/quota acceptance                        | TS-DAT-04                                            | AC-DAT-04                      |
 
-Acceptance IDs are *definitions of required outcomes*, not evidence
+Acceptance IDs are _definitions of required outcomes_, not evidence
 that their tests were carried out. Release readiness still requires
 the independent review and blocked technical evidence of 36.
 
@@ -339,23 +339,23 @@ are mapped into
 These are **additional acceptance criteria for the existing
 final-product target**, not evidence that runtime tests passed.
 
-| Finding | Affected targets / safety domain | Test / acceptance |
-| --- | --- | --- |
-| IR-01 | FR-ORC-01/02/04/06, FR-SEC-11; same-UID auth | TS-SEC-OL3-01 / AC-IR-01 |
-| IR-02 | FR-REM-10/13/16; LP4 and revocation | TS-SEC-REM-01/02 / AC-IR-02 |
-| IR-03 | FR-ORC-01/02/03, FR-SES-04; handoff and launch | TS-SEC-OL3-02 / AC-IR-03 |
-| IR-04 | FR-ORC-06, FR-MOD-11, FR-MAN-09; managed serialization | TS-SEC-MAN-01 / AC-IR-04 |
-| IR-05 | FR-AGT-04; original Wyss policy | TS-SEC-AGT-01 / AC-IR-05 |
-| IR-06 | FR-REM-12/16; gateway idempotence | TS-SEC-REM-03 / AC-IR-06 |
-| IR-07 | FR-REM-17, FR-TERM-14; native orphan effects | TS-SEC-HOST-01 / AC-IR-07 |
-| IR-08 | FR-REM-13, FR-ORC-05; host idle/keepalive | TS-SEC-HOST-03 / AC-IR-08 |
-| IR-09 | FR-TERM-13/15, FR-REM-14; parser containment | TS-SEC-HOST-02 / AC-IR-09 |
-| IR-10 | FR-REM-10/16; Android presence key | TS-SEC-MOB-01 / AC-IR-10 |
-| IR-11 | FR-ORC-05, FR-REM-16; device revocation | TS-SEC-ORC-01 / AC-IR-11 |
-| IR-12 | FR-CFG-18/19, FR-REM-15, FR-DAT-06; vault locked | TS-SEC-CFG-01 / AC-IR-12 |
-| IR-13 | FR-HRS-04, FR-CFG-18/19; original TS-CFG preserved | TS-SEC-TRACE-01 / AC-IR-13 |
-| IR-14 | Architecture/mockup identifier namespaces | TS-SEC-TRACE-02 / AC-IR-14 |
-| IR-15 | DN-31, provider write safety | TS-SEC-EVID-01 / AC-IR-15 |
+| Finding | Affected targets / safety domain                       | Test / acceptance           |
+| ------- | ------------------------------------------------------ | --------------------------- |
+| IR-01   | FR-ORC-01/02/04/06, FR-SEC-11; same-UID auth           | TS-SEC-OL3-01 / AC-IR-01    |
+| IR-02   | FR-REM-10/13/16; LP4 and revocation                    | TS-SEC-REM-01/02 / AC-IR-02 |
+| IR-03   | FR-ORC-01/02/03, FR-SES-04; handoff and launch         | TS-SEC-OL3-02 / AC-IR-03    |
+| IR-04   | FR-ORC-06, FR-MOD-11, FR-MAN-09; managed serialization | TS-SEC-MAN-01 / AC-IR-04    |
+| IR-05   | FR-AGT-04; original Wyss policy                        | TS-SEC-AGT-01 / AC-IR-05    |
+| IR-06   | FR-REM-12/16; gateway idempotence                      | TS-SEC-REM-03 / AC-IR-06    |
+| IR-07   | FR-REM-17, FR-TERM-14; native orphan effects           | TS-SEC-HOST-01 / AC-IR-07   |
+| IR-08   | FR-REM-13, FR-ORC-05; host idle/keepalive              | TS-SEC-HOST-03 / AC-IR-08   |
+| IR-09   | FR-TERM-13/15, FR-REM-14; parser containment           | TS-SEC-HOST-02 / AC-IR-09   |
+| IR-10   | FR-REM-10/16; Android presence key                     | TS-SEC-MOB-01 / AC-IR-10    |
+| IR-11   | FR-ORC-05, FR-REM-16; device revocation                | TS-SEC-ORC-01 / AC-IR-11    |
+| IR-12   | FR-CFG-18/19, FR-REM-15, FR-DAT-06; vault locked       | TS-SEC-CFG-01 / AC-IR-12    |
+| IR-13   | FR-HRS-04, FR-CFG-18/19; original TS-CFG preserved     | TS-SEC-TRACE-01 / AC-IR-13  |
+| IR-14   | Architecture/mockup identifier namespaces              | TS-SEC-TRACE-02 / AC-IR-14  |
+| IR-15   | DN-31, provider write safety                           | TS-SEC-EVID-01 / AC-IR-15   |
 
 TS-CFG-17..20 remain authored under 20 §3.4;
 the new negative tests from 37 §3 use TS-CFG-21..24.
@@ -381,7 +381,7 @@ honest queued/denied behaviour during OL3.
 all four original `TS-CFG-17..20`
 positive/negative authoring + exact-undo
 acceptances defined in [20 §16.1](20-VERIFICATION-AND-ACCEPTANCE.md).
-`AC-CFG-AUTH-01` is *defined there*, and
+`AC-CFG-AUTH-01` is _defined there_, and
 `AC-CFG-AUTH-02` remains the additional
 four negative cases `TS-CFG-21..24`.
 
@@ -400,20 +400,19 @@ Based on [47](47-CACHYOS-DOCKER-PRIVILEGE-AND-SANDBOX-DECISION.md),
 the source [native fixture report](reviews/2026-10-14-cachyos-native-feasibility.md)
 and proposed [test criteria §17](20-VERIFICATION-AND-ACCEPTANCE.md).
 
-| Requirement | Contract | Phase gate | Test | Acceptance |
-| --- | --- | --- | --- | --- |
-| FR-SEC-12 | 47 §§2–3; 11 T-50 | G-INF / A trusted principal and approval ADR | TS-DOCKER-01, TS-DOCKER-02 | AC-DOCKER-01 |
-| FR-SEC-13 | 47 §4; 43 B profile | F11b / OL3 native isolation, authority review | TS-DOCKER-03 | AC-DOCKER-02 |
-| FR-PRF-12 | 47 §4; ADR 0018 credential capability; 43 auth | F3c/F11b / exact provider support | TS-DOCKER-04 | AC-DOCKER-03 |
-| FR-REM-18 | 47 §§2/6; 35 LP4 remote | F10a/F10b / explicit host-root delegation risk | TS-DOCKER-06 | AC-DOCKER-04 |
-| **Owner-only environmental decision (not FR)** | 47 §3 D1 vs D2, no automatic migration | Owner consent + explicit rollback | TS-DOCKER-05 | AC-DOCKER-05 |
+| Requirement                                    | Contract                                       | Phase gate                                     | Test                       | Acceptance   |
+| ---------------------------------------------- | ---------------------------------------------- | ---------------------------------------------- | -------------------------- | ------------ |
+| FR-SEC-12                                      | 47 §§2–3; 11 T-50                              | G-INF / A trusted principal and approval ADR   | TS-DOCKER-01, TS-DOCKER-02 | AC-DOCKER-01 |
+| FR-SEC-13                                      | 47 §4; 43 B profile                            | F11b / OL3 native isolation, authority review  | TS-DOCKER-03               | AC-DOCKER-02 |
+| FR-PRF-12                                      | 47 §4; ADR 0018 credential capability; 43 auth | F3c/F11b / exact provider support              | TS-DOCKER-04               | AC-DOCKER-03 |
+| FR-REM-18                                      | 47 §§2/6; 35 LP4 remote                        | F10a/F10b / explicit host-root delegation risk | TS-DOCKER-06               | AC-DOCKER-04 |
+| **Owner-only environmental decision (not FR)** | 47 §3 D1 vs D2, no automatic migration         | Owner consent + explicit rollback              | TS-DOCKER-05               | AC-DOCKER-05 |
 
 All test results are **NOT RUN**. Since ordinary
 native U may have Docker root-level host access, a
 separate-UID A alone cannot satisfy FR-SEC-12.
 Accepting a proposed interface without the actual
 OS/daemon security boundary is not a PASS.
-
 
 ### 9.1 Next evidence gate for the already traced Docker requirements
 

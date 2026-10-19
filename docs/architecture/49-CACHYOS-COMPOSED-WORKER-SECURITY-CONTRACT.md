@@ -6,6 +6,7 @@ not installation, privilege changes, provider execution, real credential access,
 to the working desktop. This document is not an instruction to silently run the tests.
 
 Read with:
+
 - [47](47-CACHYOS-DOCKER-PRIVILEGE-AND-SANDBOX-DECISION.md) — delegated root and possible Docker changes;
 - [48](48-PROVIDER-ISOLATION-AND-AUTH-COMPATIBILITY.md) — native provider credential compatibility;
 - [CachyOS report](reviews/2026-10-14-cachyos-native-feasibility.md) — real **synthetic** observations;
@@ -15,7 +16,7 @@ Read with:
 
 ## 1. Precisely what B can and cannot prove
 
-A restricted OL3 worker **B1** is an intentionally lower-trust *automated*
+A restricted OL3 worker **B1** is an intentionally lower-trust _automated_
 native-provider profile. It is separate from:
 
 - **U:** ordinary unrestricted native PTY and LP4 full-account shell, potentially
@@ -34,7 +35,7 @@ native-provider profile. It is separate from:
 Two different security claims must be checked independently:
 
 **B1-local containment:** `B1` cannot directly reach sensitive
-host IPC, admin brokers or non-project files *from its actual process tree*.
+host IPC, admin brokers or non-project files _from its actual process tree_.
 This may be feasible on native CachyOS with bubblewrap, a private mount/PID
 view, FD closure, Landlock and additional tested restrictions.
 
@@ -51,21 +52,21 @@ strong approval. The current threat-model finding is
 
 ## 2. Non-optional B1 containment contract
 
-All clauses below are *candidate acceptance conditions*, not an implementation
+All clauses below are _candidate acceptance conditions_, not an implementation
 prescription; select and independently review exact mechanisms before an ADR:
 
-| Area | Minimum positive functionality | Required negative boundary |
-| --- | --- | --- |
-| Host identity | Process runs unprivileged on native CachyOS | No rootful Docker delegation, sudo, polkit, host container runtime or alternative privileged broker; no inherited FD to any of them |
-| Mount namespace | Specific versioned native provider executable/library paths readable; synthetic project and required policy available | `control.sock`, `control.sqlite3`/WAL/SHM/witness, host Docker socket, keyring, X11, user D-Bus, unintended `~/.config`, `~/.local`, `/run` or whole home not visible |
-| File policy | One disposable project writable, mandatory policy read-only, dedicated **fake** auth capability scoped to provider refresh mode | Symlink/hardlink/ancestor swap cannot expose forbidden files; no global hooks edited, no arbitrary home/SSH secrets |
-| Landlock ABI 7 | Further restrict new file accesses/selected process signalling as supported by actual kernel | **Do not claim pathname UNIX socket protection** under ABI 7; socket-name isolation depends on mount visibility plus other verified controls; do not assume Landlock revokes preopened FDs |
-| Process/FD | PTY input/resize, useful dummy worker exits cleanly and all descendants are tracked | Close ambient FDs except explicitly reviewed stdio; ensure `/proc`, inherited socket, SCM_RIGHTS, ptrace, child/host signals, abstract UNIX and alternate IPC do not bypass intended boundary |
-| Provider authentication | Fake provider can perform *both* overwrite-in-place and atomic-rename token update in explicitly tested profiles | A single-file bind **must fail visibly** when rename is required; no actual user credential copy or home-wide bind to fake a positive |
-| Network/inference | A **separate, explicitly defined** fake inference exchange succeeds via a narrow egress design | A zero-network worker that cannot infer is not provider-compatible; no unrestricted host/session/network access or reused control socket masquerading as an inference channel |
-| Hooks/MCP/Git | Required policy and safe mock hook/extension workflow demonstrably work; bounded Git edit in test project | A model-provided hook, MCP executable or repo file is not a trusted capability; no arbitrary external exec/broker escape |
-| Resource accounting | Measured RSS, process tree, idle CPU, PTY latency and graceful cancellation on the target | No silent global cgroup edits, force-kill of real processes, host service restart, uncontrolled orphan/scope escape or resource-exhaustion tests outside synthetic fixture |
-| Reconnect/state | Synthetic host can report live vs detached vs dead honestly | Terminal emulator state and host persistence are **separate** from B1 and not proven by PTY-only synthetic success |
+| Area                    | Minimum positive functionality                                                                                                  | Required negative boundary                                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Host identity           | Process runs unprivileged on native CachyOS                                                                                     | No rootful Docker delegation, sudo, polkit, host container runtime or alternative privileged broker; no inherited FD to any of them                                                           |
+| Mount namespace         | Specific versioned native provider executable/library paths readable; synthetic project and required policy available           | `control.sock`, `control.sqlite3`/WAL/SHM/witness, host Docker socket, keyring, X11, user D-Bus, unintended `~/.config`, `~/.local`, `/run` or whole home not visible                         |
+| File policy             | One disposable project writable, mandatory policy read-only, dedicated **fake** auth capability scoped to provider refresh mode | Symlink/hardlink/ancestor swap cannot expose forbidden files; no global hooks edited, no arbitrary home/SSH secrets                                                                           |
+| Landlock ABI 7          | Further restrict new file accesses/selected process signalling as supported by actual kernel                                    | **Do not claim pathname UNIX socket protection** under ABI 7; socket-name isolation depends on mount visibility plus other verified controls; do not assume Landlock revokes preopened FDs    |
+| Process/FD              | PTY input/resize, useful dummy worker exits cleanly and all descendants are tracked                                             | Close ambient FDs except explicitly reviewed stdio; ensure `/proc`, inherited socket, SCM_RIGHTS, ptrace, child/host signals, abstract UNIX and alternate IPC do not bypass intended boundary |
+| Provider authentication | Fake provider can perform _both_ overwrite-in-place and atomic-rename token update in explicitly tested profiles                | A single-file bind **must fail visibly** when rename is required; no actual user credential copy or home-wide bind to fake a positive                                                         |
+| Network/inference       | A **separate, explicitly defined** fake inference exchange succeeds via a narrow egress design                                  | A zero-network worker that cannot infer is not provider-compatible; no unrestricted host/session/network access or reused control socket masquerading as an inference channel                 |
+| Hooks/MCP/Git           | Required policy and safe mock hook/extension workflow demonstrably work; bounded Git edit in test project                       | A model-provided hook, MCP executable or repo file is not a trusted capability; no arbitrary external exec/broker escape                                                                      |
+| Resource accounting     | Measured RSS, process tree, idle CPU, PTY latency and graceful cancellation on the target                                       | No silent global cgroup edits, force-kill of real processes, host service restart, uncontrolled orphan/scope escape or resource-exhaustion tests outside synthetic fixture                    |
+| Reconnect/state         | Synthetic host can report live vs detached vs dead honestly                                                                     | Terminal emulator state and host persistence are **separate** from B1 and not proven by PTY-only synthetic success                                                                            |
 
 ### 2.1 ABI and Docker facts (source-supported, not new local tests)
 
@@ -89,7 +90,7 @@ https://docs.docker.com/engine/security/rootless/
 **No daemon query, group change, rootless migration, service start or admin
 operation was performed in writing this contract.**
 
-## 3. Distinct synthetic provider fixtures — require *usefulness*, not only denial
+## 3. Distinct synthetic provider fixtures — require _usefulness_, not only denial
 
 The following are test designs to execute **only** from a real, safe native-CachyOS
 session authorized for L0/L1 with new isolated fixture directories and no
@@ -122,6 +123,7 @@ socket, and log `BLOCKED_UNSAFE` without attempting an access.
 ### FX-B1-B — token-refresh compatibility matrix
 
 Perform two provider-mock algorithms against **fake** credentials:
+
 - `overwrite_in_place`: open token for write/truncate and close;
 - `replace_atomically`: write `token.new`, fsync file, rename to `token`
   within a private dedicated directory, then verify new exact bytes.
@@ -138,7 +140,7 @@ must NOT be mounted or copied in this experiment.
 ### FX-B1-C — inference without exposing host authority
 
 An offline `--unshare-net` profile is expected to fail provider inference.
-Define and test a separate *mock-only* egress arrangement with an
+Define and test a separate _mock-only_ egress arrangement with an
 explicitly allowlisted address/channel and a fake inference response.
 Before testing, enumerate how that broker is authenticated, what
 socket/FD is exposed, whether its protocol can be misused as a proxy
@@ -153,7 +155,7 @@ Do not substitute a real API call.
 
 Use only synthetic project files and mock hook definitions.
 A step may write text that mimics an agent/system instruction and
-a fake `hooks/` or `.git/hooks/` directory. The downstream *mock*
+a fake `hooks/` or `.git/hooks/` directory. The downstream _mock_
 must identify and refuse untrusted instructions and not execute
 them. Flag a stale worktree/control digest before any native
 step is scheduled. This is not equivalent to actual provider
@@ -171,16 +173,16 @@ force a host logout/crash. Those tests stay `BLOCKED_UNSAFE`.
 
 ## 4. Fail-fast matrix and evidence levels
 
-| Future test family | Existing requirement | Acceptance | Minimum useful evidence | Current status |
-| --- | --- | --- | --- | --- |
-| FX-B1-A | FR-SEC-13 | TS-DOCKER-03 / AC-DOCKER-02 | Real CachyOS synthetic worker performs mock positive function **and** denies mock control/Docker/DBus paths | **NOT RUN as composed profile** |
-| FX-B1-B | FR-PRF-12 | TS-DOCKER-04 / AC-DOCKER-03 | Both fake refresh algorithms across file-vs-dir privileges, tested exactly | **PARTIAL synthetic observations**; no real provider compatibility |
-| FX-B1-C | FR-SEC-13 + future provider contract | TS-DOCKER-03 / AC-DOCKER-02 | Fake inference succeeds without authority/broker escape | **NOT RUN** |
-| FX-B1-D | FR-SEC-13, FR-ORC-04 | TS-SEC-OL3-02 / AC-IR-03 | Fake prompt/hook injection cannot promote authority | **NOT RUN** |
-| FX-B1-E | FR-REM-17 / FR-TERM-14 | TS-SEC-HOST-01 / AC-IR-07 | Truthful synthetic child/PTY generation and stop | **PARTIAL**: PTY tested; host lifecycle not proven |
-| A protected human approver | FR-SEC-12 | TS-DOCKER-02 / AC-DOCKER-01 | Legitimate/nonforgeable approval + protected verifier/state against actual declared admin-level attacker | **BLOCKED_ADMIN_DELEGATION** |
-| Admin-delegation change | Explicit owner-only environmental decision | TS-DOCKER-05 / AC-DOCKER-05 | Non-disruptive workload inventory, reversible rootless/on-demand privileged plan and **owner signoff** | **NOT AUTHORISED** to change Docker |
-| Real native providers | FR-PRF-12, DN-14/20/38 | TV-PROV-04 | Pinned provider versions and authorized nonsecret/independent auth lifecycle | **NOT AUTHORISED** to use real auth/config |
+| Future test family         | Existing requirement                       | Acceptance                  | Minimum useful evidence                                                                                     | Current status                                                     |
+| -------------------------- | ------------------------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| FX-B1-A                    | FR-SEC-13                                  | TS-DOCKER-03 / AC-DOCKER-02 | Real CachyOS synthetic worker performs mock positive function **and** denies mock control/Docker/DBus paths | **NOT RUN as composed profile**                                    |
+| FX-B1-B                    | FR-PRF-12                                  | TS-DOCKER-04 / AC-DOCKER-03 | Both fake refresh algorithms across file-vs-dir privileges, tested exactly                                  | **PARTIAL synthetic observations**; no real provider compatibility |
+| FX-B1-C                    | FR-SEC-13 + future provider contract       | TS-DOCKER-03 / AC-DOCKER-02 | Fake inference succeeds without authority/broker escape                                                     | **NOT RUN**                                                        |
+| FX-B1-D                    | FR-SEC-13, FR-ORC-04                       | TS-SEC-OL3-02 / AC-IR-03    | Fake prompt/hook injection cannot promote authority                                                         | **NOT RUN**                                                        |
+| FX-B1-E                    | FR-REM-17 / FR-TERM-14                     | TS-SEC-HOST-01 / AC-IR-07   | Truthful synthetic child/PTY generation and stop                                                            | **PARTIAL**: PTY tested; host lifecycle not proven                 |
+| A protected human approver | FR-SEC-12                                  | TS-DOCKER-02 / AC-DOCKER-01 | Legitimate/nonforgeable approval + protected verifier/state against actual declared admin-level attacker    | **BLOCKED_ADMIN_DELEGATION**                                       |
+| Admin-delegation change    | Explicit owner-only environmental decision | TS-DOCKER-05 / AC-DOCKER-05 | Non-disruptive workload inventory, reversible rootless/on-demand privileged plan and **owner signoff**      | **NOT AUTHORISED** to change Docker                                |
+| Real native providers      | FR-PRF-12, DN-14/20/38                     | TV-PROV-04                  | Pinned provider versions and authorized nonsecret/independent auth lifecycle                                | **NOT AUTHORISED** to use real auth/config                         |
 
 Do not replace `NOT RUN` with `PASS` because another fixture proved
 the isolated kernel primitive or because a test-case identifier is present.

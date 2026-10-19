@@ -23,6 +23,7 @@ export class TerminalController {
   private state: ViewState = 'starting';
   private stopped = false;
   private disposed = false;
+  private detached = false;
   private startTask?: Promise<void>;
   private closeTask?: Promise<void>;
   private disposeTask?: Promise<void>;
@@ -45,9 +46,26 @@ export class TerminalController {
     private readonly host: HTMLElement,
     private readonly renderer: TerminalRenderer,
     private readonly update: (state: TerminalViewState) => void,
+    /** A terminal the desktop already made (a native session's): read, not created. */
+    private readonly adopted?: TerminalInfo,
+    /** The name the host keeps for a terminal this controller makes. */
+    private readonly title?: string,
+    /** Where a shell this controller makes starts. */
+    private readonly cwd?: string,
   ) {}
 
-  setActive(active: boolean) {
+  /** Searches this terminal's text; see the renderer. */
+  search(query: string, options: { caseSensitive: boolean; step: 1 | -1 | 0 }) {
+    return this.renderer.search?.(query, options) ?? { total: 0, current: 0 };
+  }
+  clearSearch() {
+    this.renderer.clearSearch?.();
+  }
+  /**
+   * `active`: the terminal is shown and takes part in layout. `focus`: it is also the one the
+   * keyboard goes to. Panes of one tab are all shown, and only one has the focus.
+   */
+  setActive(active: boolean, focus = true) {
     this.active = active;
     this.renderer.setActive(active);
     if (!active) {
@@ -56,7 +74,7 @@ export class TerminalController {
       this.desiredSize = undefined;
       this.focusPending = false;
     } else if (!this.stopped) {
-      this.focusPending = true;
+      this.focusPending = focus;
       this.requestFit();
     }
   }
@@ -85,11 +103,18 @@ export class TerminalController {
         rows: 24,
         cols: 80,
       };
-      this.info = await desktop.createTerminal(size);
+      this.info =
+        this.adopted ??
+        (await desktop.createTerminal(
+          size,
+          this.cwd ?? null,
+          this.title ?? null,
+        ));
       this.id = this.info.terminal_id;
-      this.sentSize = size;
+      this.sentSize = this.adopted ? this.adopted.size : size;
       if (this.stopped) {
-        await this.closeOnce();
+        // A window that is leaving keeps the terminal; one that was closed does not.
+        if (!this.detached) await this.closeOnce();
         return;
       }
       this.state = 'running';
@@ -259,8 +284,22 @@ export class TerminalController {
         }
       }
     } catch (error) {
+      if (this.stopped) return;
+      // The desktop closed this terminal itself (Stop on a native session): the tab keeps
+      // what it showed and says it was closed, which is not a failure of the terminal.
+      if (
+        typeof error === 'object' &&
+        error &&
+        'code' in error &&
+        error.code === 'already_closed'
+      ) {
+        this.state = 'closed';
+        this.stopIO();
+        this.publish();
+        return;
+      }
       // Lost IPC replies/ACKs are ambiguous: do not blindly retransmit data.
-      if (!this.stopped) this.fail(error);
+      this.fail(error);
     }
   }
   private stopIO() {
@@ -299,6 +338,7 @@ export class TerminalController {
       'operation_timeout',
       'close_timeout',
       'input_limit',
+      'host_unavailable',
     ]);
     this.publish({ error: known.has(code) ? code : 'terminal_error' });
     void this.closeOnce().catch(() => undefined);
@@ -328,6 +368,21 @@ export class TerminalController {
       this.publish({ error: 'close_failed' });
     }
     this.renderer.dispose();
+  }
+  /**
+   * Stops reading and drawing and leaves the terminal as it is: the window is going away and
+   * the terminal belongs to a host that outlives it. Nothing is closed.
+   */
+  detach(): Promise<void> {
+    if (this.disposeTask) return this.disposeTask;
+    this.disposed = true;
+    this.detached = true;
+    this.disposeTask = (async () => {
+      this.stopIO();
+      await this.startTask?.catch(() => undefined);
+      this.renderer.dispose();
+    })();
+    return this.disposeTask;
   }
   dispose(): Promise<void> {
     if (this.disposeTask) return this.disposeTask;

@@ -535,6 +535,53 @@ mod tests {
             "allow-terminal-resize",
             "allow-close-terminal",
             "allow-terminal-status",
+            // The agents' configuration: two reads of what the backend already holds. No
+            // path goes in, no file is read by the call, nothing is written (F1).
+            "allow-configuration-inventory",
+            "allow-configuration-changes",
+            "allow-configuration-plan",
+            "allow-configuration-apply",
+            "allow-configuration-history",
+            "allow-configuration-undo",
+            "allow-configuration-records",
+            "allow-configuration-record-delete",
+            "allow-configuration-export",
+            "allow-configuration-import",
+            // Native agent sessions and session profiles (F3, ADR 0035): an agent of the
+            // closed catalogue, a project the native dialog returned, a session or a profile
+            // of the desktop's own registry. None takes a command, an argument list, an
+            // environment or a path.
+            "allow-native-launcher",
+            "allow-native-preview",
+            "allow-native-start",
+            "allow-native-sessions",
+            "allow-native-stop",
+            "allow-native-restart",
+            "allow-native-forget",
+            "allow-native-choose-project",
+            "allow-native-project-default",
+            "allow-native-profiles",
+            "allow-native-profile-create",
+            "allow-native-profile-save",
+            "allow-native-profile-delete",
+            "allow-native-profile-duplicate",
+            "allow-native-profile-restore",
+            "allow-native-profile-export",
+            "allow-native-profile-import",
+            // The host that holds the terminals past the window (F9).
+            "allow-host-terminals",
+            "allow-host-info",
+            "allow-terminal-redraw",
+            // The layout of tabs and panes (T2).
+            "allow-layout-read",
+            "allow-layout-write",
+            // API credentials (F14): a key goes in through a native window and never comes out.
+            "allow-credentials-list",
+            "allow-credential-add",
+            "allow-credential-replace",
+            "allow-credential-rename",
+            "allow-credential-delete",
+            "allow-credential-verify",
         ];
         assert_eq!(granted, expected);
         let manifest = include_str!("../../build.rs");

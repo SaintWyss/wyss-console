@@ -2,6 +2,166 @@
 
 ## Unreleased
 
+### API credentials (F14)
+
+- **A Credentials view keeps provider API keys sealed** (vault of ADR 0034): add, replace,
+  rename, delete (confirmed in a native window) and check. A key is typed in a native masked
+  window and is never shown, returned or written unsealed; only a name, the service and a short
+  checksum are listed. With no key store, nothing is kept. Using a key to start an agent is not
+  part of this. ADR 0038.
+
+### Panes, search, shortcuts and a saved layout (T1, T2)
+
+- **Split a tab into panes** (side by side or stacked, up to 16, drag the dividers); each pane
+  is its own terminal. **Search the scrollback** with Ctrl+Shift+F (case option, next and
+  previous). **Console shortcuts** are Ctrl+Shift+T/D/E/W/F, arrows, `.` `,`, PageUp/PageDown,
+  1 to 9; every other key goes to the terminal (legend behind the keyboard button).
+- **The layout comes back**: tabs, splits, ratios and focus are saved and laid over the host's
+  live terminals when the window opens; a shell that is gone is made again with its title and
+  folder, an agent never is. ADR 0037.
+
+### Sessions that outlive the window (F9)
+
+- **Terminals and native agent sessions are held by a host process** (`wyss-console
+--wyss-host`, started by the window when none answers). Close or kill the window: the
+  terminals and the agents keep running; open it again and every tab is back, with its
+  scrollback (512 KiB per terminal) and, for agents, its tag; the overview says Active with the
+  same process. A host that holds nothing exits after ten minutes; `--wyss-host-stop` stops it.
+- A private Unix socket (directory 0700, socket 0600, peer uid checked), one request per
+  connection, a closed list of operations. If no host can be started, the window runs one of its
+  own, as before, and says so. ADR 0036.
+- Plain terminals also lose the per-session variables of an agent session the Console was
+  started from.
+
+### Native agent workspace (F3a, F3b, F3c)
+
+- **Start Claude Code and Codex from the Console** (new Workspace view). Pick an agent, a
+  project folder (home, a folder chosen in the native dialog, or a known project) and a
+  profile; the installed CLI starts in a terminal tab through your own shell, so the
+  environment is the one you get when you type it. Words reach the agent as words: tested for
+  `sh`, `bash`, `zsh` and `fish`. A shell without a recipe falls back to a direct start, and
+  the session says so.
+- **A registry of native sessions** with provider, version, project, profile, process,
+  processor and memory (sampled only while the overview is shown), and the states Active,
+  Stopped, Failed, Restarting and Lost. Stop, restart (a new session), remove. After the
+  window is closed what was running is shown as **Lost**, never as exited. Sessions of one
+  folder are grouped and warned about.
+- **Session profiles** (new Profiles view): model, permissions, hooks off, skills off, notes;
+  inheritance, 20 versions each, four read-only templates, export and import in native
+  windows. A profile is applied when the session starts and changes no global file: shown
+  with the installed Claude Code (an overlay `--settings` file per session; hooks off for
+  that session only; the user's `settings.json` has the same SHA-256). A profile the agent
+  cannot apply (Codex hooks or skills) refuses to start and says why.
+- Seventeen new window commands; none takes a command, an argument list, an environment or a
+  path. ADR 0035.
+
+### Review of F2b and the ACL rule
+
+- **Codex skills checked against the installed Codex** through its own `skills/list`: switched
+  on and back on the real config, same bytes after the undo. The plan's wording says what is
+  checked and what (a running session) is not.
+- **One external review, defects fixed**: the named-accounts file is opened without following
+  links and read from the descriptor judged; a private group is confirmed through the name
+  service and refused when accounts are not local; an undo no longer overwrites an entry that
+  was changed after the switch.
+
+### Claude Code's folder with an ACL (F1/F2a trust)
+
+- **Changes to `~/.claude` work again on a machine where the owner gave another account
+  write access by ACL.** The Console now reads the folder's ACL: the owner's private group
+  does not count as a second writer, and an account the owner names in
+  `~/.local/state/wyss-console/configuration/trusted-writers` is accepted (the page says it
+  can also write the folder). World-writable folders, other ACL users and shared groups stay
+  read-only. No `chmod`, no ACL change; delete the file to go back to the strict rule.
+
+### Codex skills and MCP servers, with a way back (F2b)
+
+- **Codex's skills and MCP servers can be switched from the Configuration view**, in the
+  real `~/.codex/config.toml`: one `enabled` line is added or replaced and every comment,
+  blank line and key stays. Turning an MCP server on asks in the native window; the rest asks
+  in the page.
+- **Exact undo from one closed word.** The journal keeps what the key held (absent, enabled,
+  disabled); the undo puts the file back byte for byte. Shown on the real configuration with
+  an exact backup: the installed Codex listed the server as disabled, then enabled again, and
+  the file had the same SHA-256 and mode as before.
+- **A prediction, labelled as one**, of what the change does to managed Inference, held equal
+  to the authority's own rule by an exhaustive test. Codex hooks are not changeable: their
+  switch is not verified and enabling one is blocked.
+- The same writer, journal and recovery as F2a: every step of an apply to Codex's file is
+  tested failed and crashed, and the undo is exact after each.
+
+### Changing Claude Code's configuration, with a way back (F2a)
+
+- **Decision DN-01 is made (ADR 0034).** Something the Console keeps to put an entry back may
+  hold a secret if it is encrypted at rest: authenticated encryption, with a key held by the
+  system's Secret Service and nowhere else. Without that, an entry that may hold a secret is
+  not turned off one by one; there is no silent plaintext. ADR 0003 and 0028 are reconciled,
+  and a protected API Credentials section is recorded as a future requirement.
+- **Hooks and skills can be turned off and on from the Configuration view.** A plan shows
+  what would change and how it would be kept; risky changes ask in a native window; the file
+  changes by exactly the bytes of the change, is checked against the plan and read back; a
+  file changed meanwhile is not written. Turning a hook off and back on gives the file back
+  byte for byte.
+- **A journal, a history and undo.** Every apply writes its intent before and its outcome after;
+  an interrupted one is repaired at start. Kept hooks can be exported under a passphrase,
+  imported, and forgotten.
+- **Failure injection at every step**, and tests that no store, journal, plan or dialog holds a
+  seeded secret, or the key.
+
+### Reading the agents' configuration, first part (F1-PR1)
+
+- **The foundation of the configuration inventory exists in the desktop backend, and nothing
+  uses it yet.** `src-tauri/src/agentconfig/` holds the typed model, the closed list of
+  approved roots, a bounded read-only reader and redaction. It is part of the desktop
+  binary only: the authority binary does not contain it, and a test searches the built
+  binary to say so. Nothing in the window, the commands or the capability list changed, and
+  nothing is written anywhere.
+- **Reads stay inside what an adapter approved.** A path, or a link target, outside the
+  approved roots is refused without being opened; credential files and `.ssh`, `.gnupg`,
+  `.aws` and `secrets` folders under a root are never read; each directory is walked by
+  descriptor, so a swap for a link in the middle of a read is not followed. Group-writable
+  configuration (the owner's `~/.claude` is `0775`) is read and never marked writable.
+- **Secrets stay out, configuration stays in.** Quoted, escaped and multi-line secrets,
+  cookies, name/value pairs and numeric PINs are hidden; counts such as `max_tokens` and
+  helper commands such as `apiKeyHelper` are shown.
+- **Bounded.** File size, items, keys and values, nesting, link hops, listing length and
+  re-reads each have a limit and a hard ceiling; a hostile document is refused before it
+  is parsed.
+
+### Reading the agents' configuration, second part (F1-PR2)
+
+- **The Claude Code and Codex adapters read the real configuration into one inventory.**
+  Hooks, skills, MCP servers, rule files and model preferences of both providers, from
+  their user, project and system places, with the state each file declares (enabled,
+  disabled) and what cannot be verified said as such: nothing reads a running provider.
+  Still no window command uses it, and nothing is written anywhere.
+- **Honest about what a file cannot say.** Codex is static only: its items are
+  `not_verifiable`, the administrator's `features.hooks` pin beats the user's, a project's
+  own Codex configuration is read only for a project the user trusts, and the unproven
+  `[hooks.state]` table is skipped. Entries an adapter cannot place are counted, not guessed.
+- **Nothing private in the result.** Sources are named by a closed key, items by a hash of
+  where they were found, rule files by name and digest only; server environments, headers,
+  tokens in commands and the rest of `~/.claude.json` never appear. TOML is parsed with the
+  same bounds as JSON (the crate is the one tauri already builds).
+
+### Reading the agents' configuration, third part: service, commands and view (F1-PR3)
+
+- **The inventory is kept current and the window can ask for it.** A service holds the
+  latest reading with a revision and a bounded log of which sources changed. A watcher on
+  the providers' directories rescans after a burst of edits settles (200 ms quiet, 1 s at
+  most), after a lost event, and every 30 s for what no watch can see, so a file edited in
+  an editor shows within two seconds. The watcher only wakes the rescan; every read still
+  goes through the approved roots.
+- **Two new read commands, `configuration_inventory` and `configuration_changes`.** They
+  return what the service already holds, take no path and write nothing. The desktop
+  library only routes them: their code stays in the desktop binary, and the test that
+  searches the built authority binary still finds nothing of the engine in it.
+- **A Configuration view.** It lists hooks, skills, MCP servers, rule files and model
+  settings of both agents with filters by agent and kind, opens an item to say where it
+  was found, what the file says, what cannot be confirmed and why it cannot be changed,
+  and says what became of every place that was read. It has no control that changes
+  anything. It reads only while shown, asking whether the revision moved every 1.5 s.
+
 ### Sessions that can be told apart
 
 - **A session is named so that no other session shown with it has the same name.** Until

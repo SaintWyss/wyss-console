@@ -17,25 +17,25 @@ an owner decision. None of the paths below was installed or tested for this chan
   status, attach to a live terminal, obtain an exclusive input claim when privileged,
   type, resize, see output, approve managed operations, submit a bounded plan and
   reconnect after networks change.
-- The owner should not have to *manually configure or turn on a VPN each time*.
+- The owner should not have to _manually configure or turn on a VPN each time_.
   Automatic background overlay connection, a P2P library with built-in relay, and
-  direct LAN with fallback are all viable experience *candidates* until benchmarked.
+  direct LAN with fallback are all viable experience _candidates_ until benchmarked.
 - Out of scope: Sarmiento screen/video/control integration and public product launch.
-  Sarmiento may be researched as *optional* trusted inventory/discovery, but neither
+  Sarmiento may be researched as _optional_ trusted inventory/discovery, but neither
   its RustDesk server nor its MFA grants access to Wyss automatically.
 - Remote terminal input is explicitly full host-account power. Least-privilege
   watching/approval profiles must **not** implicitly receive full shell access.
 
 ## 2. Component responsibilities
 
-| Component | Holds | Must never do |
-| --- | --- | --- |
-| `wyss-host` | PTY ownership, child process groups, native session generations, bounded screen-state and scrollback, input ownership/resize contracts, local Unix socket | Hold `wyss-control` leases or remotely authenticate Internet clients itself |
-| `wyss-gateway` | Device identity, pairing/grants, anti-replay, fresh presence check, capability enforcement, remote audit and transport-independent protocol | Treat transport membership as authority, supply native dialog on the host, issue arbitrary provider commands |
-| `wyss-control` | Managed authority and its existing strict control of turn/tool approvals | Trust gateway claims as more than existing typed client intents; give remote terminals a managed lease |
-| Android client | Keystore-backed device identity, explicit input grant requests, local view state, connection retry and offline indicators | Store terminal output durably by default; assume device unlock is host confirmation |
-| Network adapter | Reachability and encrypted authenticated channel established on verified endpoint keys | Issue application grants, alter input sequence semantics, expose plaintext via relay |
-| `wyss-console` UI | Distinct config and terminal capabilities (DN-22=B), native confirmations when locally present, project workspace | Resurrect dead sessions or treat remote opt-in as native host confirmation |
+| Component         | Holds                                                                                                                                                     | Must never do                                                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `wyss-host`       | PTY ownership, child process groups, native session generations, bounded screen-state and scrollback, input ownership/resize contracts, local Unix socket | Hold `wyss-control` leases or remotely authenticate Internet clients itself                                  |
+| `wyss-gateway`    | Device identity, pairing/grants, anti-replay, fresh presence check, capability enforcement, remote audit and transport-independent protocol               | Treat transport membership as authority, supply native dialog on the host, issue arbitrary provider commands |
+| `wyss-control`    | Managed authority and its existing strict control of turn/tool approvals                                                                                  | Trust gateway claims as more than existing typed client intents; give remote terminals a managed lease       |
+| Android client    | Keystore-backed device identity, explicit input grant requests, local view state, connection retry and offline indicators                                 | Store terminal output durably by default; assume device unlock is host confirmation                          |
+| Network adapter   | Reachability and encrypted authenticated channel established on verified endpoint keys                                                                    | Issue application grants, alter input sequence semantics, expose plaintext via relay                         |
+| `wyss-console` UI | Distinct config and terminal capabilities (DN-22=B), native confirmations when locally present, project workspace                                         | Resurrect dead sessions or treat remote opt-in as native host confirmation                                   |
 
 **Required:** the process owning PTY masters must be separate from
 untrusted terminal output parsers. Each terminal's parser runs in
@@ -60,19 +60,20 @@ architecture choice and needs lifecycle/footprint evidence.
 
 ## 3. Reachability comparison: no selection yet (DN-05)
 
-| Candidate | User experience | Operating/maintenance trade-off | Hard questions |
-| --- | --- | --- | --- |
-| H1 automatic private overlay (e.g. user-configured Tailscale-like) + Wyss gateway | Apps reconnect through background overlay; traffic attempts direct P2P and uses relays | Third-party coordination/control plane and client integration; can be simplest operationally | Does Android VPN-style system integration match owner's UX and privacy requirements? Works with direct, relayed and roaming networks? |
-| H2 Rust P2P library such as iroh/QUIC, built-in NAT traversal and fallback relay + Wyss gateway | A single native app connection flow, no separate VPN UI | Library/runtime, relay availability, application discovery and versioned protocol owned by Wyss | Android integration, mobile background constraints, licence/SBOM, relay hosting/fees, idle CPU, security maturity |
-| H3 independent LAN-direct + P2P/relay framework + protocol bridge | Optimise LAN separately and traverse remote networks | Most connection modes; highest transport testing burden | Safe path switching, session migration without input replay, LAN discovery spoofing, endpoint pinning |
-| H4 SSH tunnel over existing trusted network or direct reachable SSH | Simple between desktops where SSH already available | Android UX and broad full shell rights do not provide a scoped gateway by default | How to avoid an SSH key being an unconditional full-account bypass? |
-| H5 integrate Sarmiento inventory with H1/H2 | Central device list for owner's computers | Coupled enrolment/availability; version and threat-boundary mismatch | What exact non-secret discovery facts can be shared; what happens when Sarmiento is down? |
-| H6 invent a public relay and signalling protocol from scratch | Tailored semantics but not required for personal product | Highest cost and permanent public service attack surface | Hard to justify against H1/H2; should require documented failure of existing choices |
+| Candidate                                                                                       | User experience                                                                        | Operating/maintenance trade-off                                                                 | Hard questions                                                                                                                        |
+| ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| H1 automatic private overlay (e.g. user-configured Tailscale-like) + Wyss gateway               | Apps reconnect through background overlay; traffic attempts direct P2P and uses relays | Third-party coordination/control plane and client integration; can be simplest operationally    | Does Android VPN-style system integration match owner's UX and privacy requirements? Works with direct, relayed and roaming networks? |
+| H2 Rust P2P library such as iroh/QUIC, built-in NAT traversal and fallback relay + Wyss gateway | A single native app connection flow, no separate VPN UI                                | Library/runtime, relay availability, application discovery and versioned protocol owned by Wyss | Android integration, mobile background constraints, licence/SBOM, relay hosting/fees, idle CPU, security maturity                     |
+| H3 independent LAN-direct + P2P/relay framework + protocol bridge                               | Optimise LAN separately and traverse remote networks                                   | Most connection modes; highest transport testing burden                                         | Safe path switching, session migration without input replay, LAN discovery spoofing, endpoint pinning                                 |
+| H4 SSH tunnel over existing trusted network or direct reachable SSH                             | Simple between desktops where SSH already available                                    | Android UX and broad full shell rights do not provide a scoped gateway by default               | How to avoid an SSH key being an unconditional full-account bypass?                                                                   |
+| H5 integrate Sarmiento inventory with H1/H2                                                     | Central device list for owner's computers                                              | Coupled enrolment/availability; version and threat-boundary mismatch                            | What exact non-secret discovery facts can be shared; what happens when Sarmiento is down?                                             |
+| H6 invent a public relay and signalling protocol from scratch                                   | Tailored semantics but not required for personal product                               | Highest cost and permanent public service attack surface                                        | Hard to justify against H1/H2; should require documented failure of existing choices                                                  |
 
 At this stage **H1/H2 are comparative finalists**, not H3/H6 implementation commitments.
 Use a transport-neutral gateway contract to avoid assuming the winning technology.
 
 External source references (2026-10-13 documentation research, **not tested locally**):
+
 - iroh crate docs, direct P2P QUIC with hole punching and relays:
   https://docs.rs/iroh/latest/iroh/
 - Tailscale on direct encrypted routes and DERP fallback:
@@ -126,9 +127,10 @@ the decision unresolved; do not fabricate a score.
 ## 5. Terminal state: fidelity without unbounded memory (DN-47+B / DN-40+C)
 
 Store separate types of **ephemeral** state:
+
 1. Current screen grid: bounded cells/attributes, active/alternate screen,
    cursor, modes, title and resize generation; one authoritative size.
-2. Scrollback history: per-terminal line/byte preference and *global*
+2. Scrollback history: per-terminal line/byte preference and _global_
    admission budget, with a user-visible memory status and explicit retention
    condition. Choosing DN-40=C means existing history is not quietly truncated
    merely when the budget is crossed; new terminals receive a lower quota.
@@ -202,20 +204,20 @@ paths or shell fragments. Compression must have bounded decompressed size.
 Proposed screens: Hosts, Pair host, Sessions, Terminal, Pipeline status, Managed
 approvals, Notifications, Devices/grants, Settings, Offline/reconnect.
 
-| Interaction | UX and security rule |
-| --- | --- |
-| First pair | Local host approval and two-device comparison (not just QR), bound device public key, explicit grants |
-| Reopen | Keystore-backed client identity; show actual host and connection type and last observation age |
-| Terminal attach | Read and write are separate privileges; show full-account warning before granting LP4 |
-| Begin input | Default-deny LP4 when authenticated key attestation unavailable. Verified per-use presence; brief exclusive claim TTL (candidate <=15 min, not a 7-day unattended input privilege); Ctrl/Esc/tab and paste guard; ownership indicator |
-| Change network | No raw input automatically retransmitted; checkpoint/resync with "reconnected" and generation |
-| Approve managed action | Present exact managed-authority approval summary and per-operation step-up; no native-dialog imitation |
-| Prepare config request | Submit a versioned *proposal*, display "waiting for confirmation on the host"; cannot apply remotely |
+| Interaction               | UX and security rule                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| First pair                | Local host approval and two-device comparison (not just QR), bound device public key, explicit grants                                                                                                                                                                                                                                                                            |
+| Reopen                    | Keystore-backed client identity; show actual host and connection type and last observation age                                                                                                                                                                                                                                                                                   |
+| Terminal attach           | Read and write are separate privileges; show full-account warning before granting LP4                                                                                                                                                                                                                                                                                            |
+| Begin input               | Default-deny LP4 when authenticated key attestation unavailable. Verified per-use presence; brief exclusive claim TTL (candidate <=15 min, not a 7-day unattended input privilege); Ctrl/Esc/tab and paste guard; ownership indicator                                                                                                                                            |
+| Change network            | No raw input automatically retransmitted; checkpoint/resync with "reconnected" and generation                                                                                                                                                                                                                                                                                    |
+| Approve managed action    | Present exact managed-authority approval summary and per-operation step-up; no native-dialog imitation                                                                                                                                                                                                                                                                           |
+| Prepare config request    | Submit a versioned _proposal_, display "waiting for confirmation on the host"; cannot apply remotely                                                                                                                                                                                                                                                                             |
 | Host locked or logged out | Read/watch under valid separate grants; **LP4 terminal.write/create/close denied as temporary safe default** until a distinct owner-approved, independently reviewed absent-host policy exists. An active local login by itself is not a trustworthy human-presence signal under the same UID. This interim restriction does not satisfy the owner's final anywhere-control goal |
-| Lost phone | Revoke future gateway grants from a trusted context; do not claim previously executed commands undone or host account clean. Inspect persistence, user services, SSH keys, hooks and accessible credentials |
-| Notification | No command, path, prompt, output or recoverable content in push payload; local client fetches details only after authenticated open |
-| Offline | Read-only last-known *metadata*, visibly stale; no local queue of arbitrary shell commands |
-| App background/suspend | Work continues on host; reconnect and re-attest as Android lifecycle allows; no promise of perpetual Android background socket |
+| Lost phone                | Revoke future gateway grants from a trusted context; do not claim previously executed commands undone or host account clean. Inspect persistence, user services, SSH keys, hooks and accessible credentials                                                                                                                                                                      |
+| Notification              | No command, path, prompt, output or recoverable content in push payload; local client fetches details only after authenticated open                                                                                                                                                                                                                                              |
+| Offline                   | Read-only last-known _metadata_, visibly stale; no local queue of arbitrary shell commands                                                                                                                                                                                                                                                                                       |
+| App background/suspend    | Work continues on host; reconnect and re-attest as Android lifecycle allows; no promise of perpetual Android background socket                                                                                                                                                                                                                                                   |
 
 Android TEE/StrongBox attestation varies. LP4 requires verified
 per-use authenticated key properties, not just possession. On
@@ -290,7 +292,7 @@ The owner needs remote terminal control from outside the
 house even when the Linux desktop GUI is not open.
 A permanently refused LP4-away capability does **not**
 satisfy DN-44. Until a technically reviewed solution
-exists, default-deny LP4 input on screen lock *and*
+exists, default-deny LP4 input on screen lock _and_
 logout; a mere "session logged in" check by a
 same-UID gateway is not an OS security boundary.
 The final design must either securely offer
@@ -311,7 +313,7 @@ rootful Docker daemon socket. An unrestricted
 Android/PC LP4 terminal inherits that user's
 Docker privileges and therefore may gain
 **root-level host control**, not simply access
-to files under its own UID. It is *not*
+to files under its own UID. It is _not_
 legitimate to label the remote account as
 an ordinary nonadministrative sandbox.
 No real Docker API call/exploit was run.
@@ -323,4 +325,3 @@ An isolated automated worker's mount view
 can conceal Docker sockets, but does not
 limit a separate unrestricted manually
 launched native process or LP4 shell.
-

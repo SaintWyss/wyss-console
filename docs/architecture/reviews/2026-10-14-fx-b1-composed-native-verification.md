@@ -5,13 +5,13 @@ prohibidos de FX-B1-A: un hardlink incluido deliberadamente en el proyecto permi
 el contenido del firmante ficticio. La funcionalidad positiva de A funcionó, pero eso no
 convierte su aislamiento en PASS. B, C, D y E cumplieron sus aserciones sintéticas específicas.
 
-| Experimento | Resultado | Alcance exacto |
-| --- | --- | --- |
-| FX-B1-A | **FAIL** | Mock útil, varias fronteras OS efectivas, pero lectura no autorizada del canario prohibido por hardlink |
-| FX-B1-B | **PASS** | Matriz ficticia in-place/rename: éxitos y denegación esperada, visible y sin fallback |
-| FX-B1-C | **PASS** | Inferencia ficticia por canal privado acotado; rechazos del broker y denegación OS de sockets externos sintéticos, con evidencias separadas |
-| FX-B1-D | **PASS** | Mock rechaza instrucciones/hook y digest stale; ataques directos a autoridad ficticia denegados por OS. El rechazo semántico es **política**, no aislamiento del modelo |
-| FX-B1-E | **PASS** | PTY propio con generación, detach/rejoin, stream interrumpido UNKNOWN y salida observada; sin servicios reales |
+| Experimento | Resultado | Alcance exacto                                                                                                                                                          |
+| ----------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FX-B1-A     | **FAIL**  | Mock útil, varias fronteras OS efectivas, pero lectura no autorizada del canario prohibido por hardlink                                                                 |
+| FX-B1-B     | **PASS**  | Matriz ficticia in-place/rename: éxitos y denegación esperada, visible y sin fallback                                                                                   |
+| FX-B1-C     | **PASS**  | Inferencia ficticia por canal privado acotado; rechazos del broker y denegación OS de sockets externos sintéticos, con evidencias separadas                             |
+| FX-B1-D     | **PASS**  | Mock rechaza instrucciones/hook y digest stale; ataques directos a autoridad ficticia denegados por OS. El rechazo semántico es **política**, no aislamiento del modelo |
+| FX-B1-E     | **PASS**  | PTY propio con generación, detach/rejoin, stream interrumpido UNKNOWN y salida observada; sin servicios reales                                                          |
 
 No se necesitó clasificar ninguno de estos cinco casos como BLOCKED_UNSAFE. Las variantes
 prohibidas de servicios/logout/privilegios no se ejecutaron ni se convirtieron en experimentos
@@ -34,11 +34,11 @@ No se actualizó la rama de referencia, `main` ni los tres contratos.
 
 SHA-256 de los contratos en esa base:
 
-| Documento | SHA-256 |
-| --- | --- |
-| 49 | `8eb7e6137b4fa98a0801da4367292bd76a19a62d28ba353b9f7d5d7011382f7b` |
-| 47 | `1b44b4770a761c971b76e91e8586e6056d2c73bf1b18ed42912123c9843a9061` |
-| 48 | `a5e5ecd63d06dfc73721b4b5836b69f7c7dfe5c357a40115beaa81dfc769f00a` |
+| Documento | SHA-256                                                            |
+| --------- | ------------------------------------------------------------------ |
+| 49        | `8eb7e6137b4fa98a0801da4367292bd76a19a62d28ba353b9f7d5d7011382f7b` |
+| 47        | `1b44b4770a761c971b76e91e8586e6056d2c73bf1b18ed42912123c9843a9061` |
+| 48        | `a5e5ecd63d06dfc73721b4b5836b69f7c7dfe5c357a40115beaa81dfc769f00a` |
 
 **Observado en esta pasada**, sin utilizar resultados anteriores como ejecuciones nuevas:
 
@@ -75,17 +75,17 @@ dependieron de que esos servidores estuvieran apagados.
 
 ### 2.1 Composición común
 
-| Componente | Configuración ensayada | Límite |
-| --- | --- | --- |
-| Bubblewrap | `--unshare-all --new-session --die-with-parent --cap-drop ALL --clearenv` | Namespaces privados; no elevación en el namespace inicial del host |
-| Runtime | Python 3.14, Git y 13 archivos loader/biblioteca RO, más árbol versionado de stdlib Python 3.14 RO; binarios/bibliotecas comprobados root-owned y no group/world-writable | Runtime confiado del fixture; no auditoría de toda su cadena ni perfil de proveedor real |
-| Datos visibles | Código de fixture, configuración y política RO; un proyecto RW; auth ficticia por archivo o directorio según celda | Ningún bind del home, `/run`, X11, session bus, Docker, keyring o sockets reales |
-| `/etc` | passwd/group/nsswitch **ficticios**, creados en el workspace | Git no necesitó consultar identidad o configuración personal |
-| Entorno | PATH/locale fijos; Python `-I -S -B`; Git con configuración system/global deshabilitada y templates/hooks controlados | Sin env de proveedores, tokens personales ni startup scripts del usuario |
-| FD | `close_fds=True`, sin pass_fds; solo stdio revisado | A dejó traps sintéticos inheritable en el padre para comprobar el cierre |
-| Landlock | ABI 7; handled FS `0xffff`, net `3`, scoped `3`; `PR_SET_NO_NEW_PRIVS=1`; restrict flags `5` | Secundario a mounts/FD: no se atribuye a ABI 7 bloqueo de pathname sockets |
-| Grants Landlock | Runtime RX; código/config/policy R; proyecto RW; auth por perfil; proc propio R; dispositivos PTY privados y null con derechos necesarios | Grant del proyecto no impidió el hardlink preexistente; resultado FAIL conservado |
-| Límites locales | CPU 4 s, AS 256 MiB, archivo 1 MiB, FD 64 por proceso; timeout del runner | No cuotas agregadas de cgroup, pruebas de OOM ni modificaciones del grupo real |
+| Componente      | Configuración ensayada                                                                                                                                                    | Límite                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Bubblewrap      | `--unshare-all --new-session --die-with-parent --cap-drop ALL --clearenv`                                                                                                 | Namespaces privados; no elevación en el namespace inicial del host                       |
+| Runtime         | Python 3.14, Git y 13 archivos loader/biblioteca RO, más árbol versionado de stdlib Python 3.14 RO; binarios/bibliotecas comprobados root-owned y no group/world-writable | Runtime confiado del fixture; no auditoría de toda su cadena ni perfil de proveedor real |
+| Datos visibles  | Código de fixture, configuración y política RO; un proyecto RW; auth ficticia por archivo o directorio según celda                                                        | Ningún bind del home, `/run`, X11, session bus, Docker, keyring o sockets reales         |
+| `/etc`          | passwd/group/nsswitch **ficticios**, creados en el workspace                                                                                                              | Git no necesitó consultar identidad o configuración personal                             |
+| Entorno         | PATH/locale fijos; Python `-I -S -B`; Git con configuración system/global deshabilitada y templates/hooks controlados                                                     | Sin env de proveedores, tokens personales ni startup scripts del usuario                 |
+| FD              | `close_fds=True`, sin pass_fds; solo stdio revisado                                                                                                                       | A dejó traps sintéticos inheritable en el padre para comprobar el cierre                 |
+| Landlock        | ABI 7; handled FS `0xffff`, net `3`, scoped `3`; `PR_SET_NO_NEW_PRIVS=1`; restrict flags `5`                                                                              | Secundario a mounts/FD: no se atribuye a ABI 7 bloqueo de pathname sockets               |
+| Grants Landlock | Runtime RX; código/config/policy R; proyecto RW; auth por perfil; proc propio R; dispositivos PTY privados y null con derechos necesarios                                 | Grant del proyecto no impidió el hardlink preexistente; resultado FAIL conservado        |
+| Límites locales | CPU 4 s, AS 256 MiB, archivo 1 MiB, FD 64 por proceso; timeout del runner                                                                                                 | No cuotas agregadas de cgroup, pruebas de OOM ni modificaciones del grupo real           |
 
 No se añadió filtro seccomp; los workers reportaron `Seccomp=0`. No se representa este
 perfil como una solución completa de hardening. Los mecanismos de seguridad se aplicaron
@@ -117,26 +117,26 @@ antes del intento desde el sandbox.
 bajo la composición común. Los resources y comandos exactos quedan registrados en los fuentes
 y manifests; no introducir rutas de producción como sustitutos de los canarios.
 
-| Operación | Observado | Clase de evidencia |
-| --- | --- | --- |
-| Política y config | `EXACT`, `PARSED_EXACT` | Función simulada |
-| Edición de proyecto | 23 bytes: `SYNTHETIC_PROJECT_EDIT` | Función simulada + escritura permitida por OS |
-| Token in-place | `FAKE_INITIAL` → `FAKE_A_REFRESH` | Función simulada |
-| Hook fijo RO | rc 0, `SAFE_HOOK_OK` | Función simulada; no hook del usuario |
-| Git init/add/diff | Tres rc 0; diff contiene solo el archivo ficticio | Función simulada; sin remote, identidad ni config personal |
-| PTY de child propio | 31×97, `PTY:PING`, wait status 0 | Función simulada y exit observado |
-| Modificar política RO | EROFS 30 | **Denegación OS**, no rechazo voluntario |
-| Cuatro sockets prohibidos de pathname | ENOENT 2 para control/docker/dbus/x11 | **OS: vista de mounts**; servidores sintéticos vivos, no acceso a sockets reales |
-| Signer, DB, denied-home por paths originales | ENOENT 2 | **OS: vista de mounts** |
-| Symlink al signer prohibido | ENOENT 2 | OS: target oculto |
-| **Hardlink del signer bajo proyecto** | **Éxito: `SYNTHETIC_FORBIDDEN_SIGNER`**; mismo inode 4384, confirmado por el padre | **Fallo real de la frontera del perfil ensayado** |
-| SIGUSR1 al canario propio | ESRCH 3; padre no recibió nueva señal, canario seguía vivo | OS: PID/scoping compuesto; no se atribuye una capa única sin ensayo adicional |
-| ptrace attach al mismo canario | rc -1, errno 3 | OS: target no visible; no prueba genérica de resistencia ptrace |
-| `/proc/<canario>/status` | ENOENT 2 | OS: PID/proc namespace |
-| `/proc/1/root` + path del DB ficticio | EACCES 13 | OS: restricción compuesta; no se intentó abrir ningún secreto host |
-| Socket abstract propio externo | ECONNREFUSED 111 | OS: namespace net/scoping; listener creado por el runner, no un servicio real |
-| Lectura de traps FD 11/14 | EBADF 9; inventario inicial worker solo FD 0/1/2 | OS/launcher: cierre efectivo de esos FD |
-| recvmsg/SCM_RIGHTS por trap cerrado | EBADF 9 | Sin canal heredado usable; no equivale a fuzz de todo SCM_RIGHTS |
+| Operación                                    | Observado                                                                          | Clase de evidencia                                                               |
+| -------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Política y config                            | `EXACT`, `PARSED_EXACT`                                                            | Función simulada                                                                 |
+| Edición de proyecto                          | 23 bytes: `SYNTHETIC_PROJECT_EDIT`                                                 | Función simulada + escritura permitida por OS                                    |
+| Token in-place                               | `FAKE_INITIAL` → `FAKE_A_REFRESH`                                                  | Función simulada                                                                 |
+| Hook fijo RO                                 | rc 0, `SAFE_HOOK_OK`                                                               | Función simulada; no hook del usuario                                            |
+| Git init/add/diff                            | Tres rc 0; diff contiene solo el archivo ficticio                                  | Función simulada; sin remote, identidad ni config personal                       |
+| PTY de child propio                          | 31×97, `PTY:PING`, wait status 0                                                   | Función simulada y exit observado                                                |
+| Modificar política RO                        | EROFS 30                                                                           | **Denegación OS**, no rechazo voluntario                                         |
+| Cuatro sockets prohibidos de pathname        | ENOENT 2 para control/docker/dbus/x11                                              | **OS: vista de mounts**; servidores sintéticos vivos, no acceso a sockets reales |
+| Signer, DB, denied-home por paths originales | ENOENT 2                                                                           | **OS: vista de mounts**                                                          |
+| Symlink al signer prohibido                  | ENOENT 2                                                                           | OS: target oculto                                                                |
+| **Hardlink del signer bajo proyecto**        | **Éxito: `SYNTHETIC_FORBIDDEN_SIGNER`**; mismo inode 4384, confirmado por el padre | **Fallo real de la frontera del perfil ensayado**                                |
+| SIGUSR1 al canario propio                    | ESRCH 3; padre no recibió nueva señal, canario seguía vivo                         | OS: PID/scoping compuesto; no se atribuye una capa única sin ensayo adicional    |
+| ptrace attach al mismo canario               | rc -1, errno 3                                                                     | OS: target no visible; no prueba genérica de resistencia ptrace                  |
+| `/proc/<canario>/status`                     | ENOENT 2                                                                           | OS: PID/proc namespace                                                           |
+| `/proc/1/root` + path del DB ficticio        | EACCES 13                                                                          | OS: restricción compuesta; no se intentó abrir ningún secreto host               |
+| Socket abstract propio externo               | ECONNREFUSED 111                                                                   | OS: namespace net/scoping; listener creado por el runner, no un servicio real    |
+| Lectura de traps FD 11/14                    | EBADF 9; inventario inicial worker solo FD 0/1/2                                   | OS/launcher: cierre efectivo de esos FD                                          |
+| recvmsg/SCM_RIGHTS por trap cerrado          | EBADF 9                                                                            | Sin canal heredado usable; no equivale a fuzz de todo SCM_RIGHTS                 |
 
 El worker y el launcher terminaron con rc 0; eso solo demuestra que el fixture registró
 correctamente los intentos. **El criterio de seguridad A falla** por la lectura del hardlink.
@@ -167,12 +167,12 @@ proveedor. Se verificaron bytes e inode desde dentro y desde el controlador prop
 **Reproducción:** bucle B de `run.py`; cuatro invocaciones `worker.py B <mode>` con algoritmo
 fijo. El algoritmo rename crea token.new, flush/fsync, os.replace y read-back.
 
-| Capacidad / algoritmo | Esperado | Observado | Inode / bytes finales |
-| --- | --- | --- | --- |
-| FILE / overwrite_in_place | Éxito | Éxito OS | 4425 → 4425; `FAKE_INPLACE` |
-| FILE / replace_atomically | Denegación visible | EACCES 13 al crear token.new; `UNSUPPORTED_REFRESH_NO_FALLBACK` | 4425 → 4425; `FAKE_INITIAL` intacto |
-| DIRECTORY / overwrite_in_place | Éxito | Éxito OS | 4425 → 4425; `FAKE_INPLACE` |
-| DIRECTORY / replace_atomically | Éxito | fsync/replace/read-back exitosos | 4425 → 4432; `FAKE_RENAMED` |
+| Capacidad / algoritmo          | Esperado           | Observado                                                       | Inode / bytes finales               |
+| ------------------------------ | ------------------ | --------------------------------------------------------------- | ----------------------------------- |
+| FILE / overwrite_in_place      | Éxito              | Éxito OS                                                        | 4425 → 4425; `FAKE_INPLACE`         |
+| FILE / replace_atomically      | Denegación visible | EACCES 13 al crear token.new; `UNSUPPORTED_REFRESH_NO_FALLBACK` | 4425 → 4425; `FAKE_INITIAL` intacto |
+| DIRECTORY / overwrite_in_place | Éxito              | Éxito OS                                                        | 4425 → 4425; `FAKE_INPLACE`         |
+| DIRECTORY / replace_atomically | Éxito              | fsync/replace/read-back exitosos                                | 4425 → 4432; `FAKE_RENAMED`         |
 
 La denegación de FILE fue **OS**, no un `if` voluntario que omitió la operación; el mock
 capturó el error real. Los perfiles son las dos celdas definidas de antemano por el contrato,
@@ -208,14 +208,14 @@ TS-DOCKER-03 / AC-DOCKER-02. **Resultado: PASS del canal mock definido, no de re
 **Reproducción:** bloque C del runner, que atiende los mensajes `RPC` por pipes y registra
 schema/op/resultado; el worker verifica respuestas y guarda el resultado ficticio en su proyecto.
 
-| Intento | Observado | Frontera real |
-| --- | --- | --- |
-| Inferencia directa al socket externo ficticio sin egress | ENOENT 2 | **OS: mount namespace**; perfil offline no alcanza ese servicio |
-| Inferencia por canal explícito permitido | `OK`, `FAKE_INFERENCE_RESPONSE`; archivo de resultado creado | **Función simulada** sobre un transporte kernel real limitado a endpoints propios |
-| Operación `proxy` hacia control ficticio | `DENIED_SCHEMA` | **Política del broker**, no una denegación OS |
-| Nonce ficticio incorrecto | `DENIED_NONCE` | **Política del broker**, no aprobación humana |
-| Request infer con campo extra `path` | `DENIED_SCHEMA` | **Política del broker**; nunca se abrió ese target |
-| Conexión directa al control ficticio | ENOENT 2 | **OS: mount namespace** |
+| Intento                                                  | Observado                                                    | Frontera real                                                                     |
+| -------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Inferencia directa al socket externo ficticio sin egress | ENOENT 2                                                     | **OS: mount namespace**; perfil offline no alcanza ese servicio                   |
+| Inferencia por canal explícito permitido                 | `OK`, `FAKE_INFERENCE_RESPONSE`; archivo de resultado creado | **Función simulada** sobre un transporte kernel real limitado a endpoints propios |
+| Operación `proxy` hacia control ficticio                 | `DENIED_SCHEMA`                                              | **Política del broker**, no una denegación OS                                     |
+| Nonce ficticio incorrecto                                | `DENIED_NONCE`                                               | **Política del broker**, no aprobación humana                                     |
+| Request infer con campo extra `path`                     | `DENIED_SCHEMA`                                              | **Política del broker**; nunca se abrió ese target                                |
+| Conexión directa al control ficticio                     | ENOENT 2                                                     | **OS: mount namespace**                                                           |
 
 Así se comprobó una vía útil de inferencia **ficticia** conservando el namespace sin red y
 sin convertir el broker en puente genérico. No se presenta como compatibilidad de egress
@@ -241,13 +241,13 @@ el hook. Todos los targets del ataque forzado posterior eran autoridad/socket fi
 digest después del handoff/hook:
 `b15a491307ed2a68d8ba1e7820949ee9f21f28d926a8bd2e56d045156ce983d4`.
 
-| Asserción | Observado | Evidencia |
-| --- | --- | --- |
-| Rechazo semántico de instrucciones | `UNTRUSTED_INSTRUCTIONS_REJECTED` | **Política del mock** sobre un corpus literal, no inmunidad de un LLM |
-| No scheduling con digest cambiado | `STALE_WORKTREE_NO_STEP_SCHEDULED` | **Lógica del mock**, no autoría ni firma de una aprobación real |
-| No ejecución del hook hostil | `UNTRUSTED_EXECUTED` ausente | **Función simulada**: downstream decidió no ejecutarlo |
-| Ataque directo a DB ficticio ignorando la política | ENOENT 2 | **Denegación OS** de ese pathname |
-| Conexión directa al socket control ficticio | ENOENT 2 | **Denegación OS** de ese pathname |
+| Asserción                                          | Observado                          | Evidencia                                                             |
+| -------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------- |
+| Rechazo semántico de instrucciones                 | `UNTRUSTED_INSTRUCTIONS_REJECTED`  | **Política del mock** sobre un corpus literal, no inmunidad de un LLM |
+| No scheduling con digest cambiado                  | `STALE_WORKTREE_NO_STEP_SCHEDULED` | **Lógica del mock**, no autoría ni firma de una aprobación real       |
+| No ejecución del hook hostil                       | `UNTRUSTED_EXECUTED` ausente       | **Función simulada**: downstream decidió no ejecutarlo                |
+| Ataque directo a DB ficticio ignorando la política | ENOENT 2                           | **Denegación OS** de ese pathname                                     |
+| Conexión directa al socket control ficticio        | ENOENT 2                           | **Denegación OS** de ese pathname                                     |
 
 El OS no fue probado como prohibiendo interpretar cualquier hook dentro del proyecto
 permitido. Esa afirmación no se desprende del rechazo voluntario del mock. D no corrige ni
@@ -268,13 +268,13 @@ unidad, linger o servicio. Tamaño PTY 29×91.
 exit, reabrir viewer por dup del mismo master, intercambiar PING/PONG, interrumpir el viewer
 propio, marcar stream UNKNOWN, reabrirlo y enviar STOP al mock; esperar salida real.
 
-| Evento | Observado |
-| --- | --- |
-| LIVE | `READY <misma generación>`; `poll=None` |
-| DETACHED | Viewer cerrado, master retenido, `poll=None` |
-| REJOINED | `PONG <misma generación>`; `poll=None`; RTT observado **0,048512 ms** |
-| Stream interrumpido | EBADF 9 sobre viewer propio cerrado; `UNKNOWN_OUTPUT_STREAM`, `child_exit_verified=false`, `poll=None` |
-| STOP propio / EXITED | `BYE <misma generación>`; `wait_returncode=0`, reaped, `automatic_respawn=false` |
+| Evento               | Observado                                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------------ |
+| LIVE                 | `READY <misma generación>`; `poll=None`                                                                |
+| DETACHED             | Viewer cerrado, master retenido, `poll=None`                                                           |
+| REJOINED             | `PONG <misma generación>`; `poll=None`; RTT observado **0,048512 ms**                                  |
+| Stream interrumpido  | EBADF 9 sobre viewer propio cerrado; `UNKNOWN_OUTPUT_STREAM`, `child_exit_verified=false`, `poll=None` |
+| STOP propio / EXITED | `BYE <misma generación>`; `wait_returncode=0`, reaped, `automatic_respawn=false`                       |
 
 El cierre de un viewer no se tomó como terminación del child. EXITED se declaró únicamente
 después de wait. Esta es evidencia funcional/observación de procesos propios, no persistencia
@@ -342,11 +342,11 @@ código/tests del producto al repositorio. Reproducción delimitada: crear un di
 `python3 -I -S -B <workspace>/run.py` en CachyOS x86_64/UID 1000 con las mismas herramientas.
 El runner verifica esas guardas; no reemplazar ninguna ruta ficticia por recursos existentes.
 
-| Artefacto temporal original | SHA-256 |
-| --- | --- |
-| run.py | `bb0f34e70686a315529c9c5800c527922062bcda77d5a8603067ccd60318ae8f` |
-| worker.py | `0da8d992d7c7395c93d0e9db5dfe8228a579cc3592325721f675db4c3809f446` |
-| evidence.json | `a00fd84eaa9ea04c25a7342168a2cc17ef7e3412b3d5cb35a46fa96577a1c375` |
+| Artefacto temporal original | SHA-256                                                            |
+| --------------------------- | ------------------------------------------------------------------ |
+| run.py                      | `bb0f34e70686a315529c9c5800c527922062bcda77d5a8603067ccd60318ae8f` |
+| worker.py                   | `0da8d992d7c7395c93d0e9db5dfe8228a579cc3592325721f675db4c3809f446` |
+| evidence.json               | `a00fd84eaa9ea04c25a7342168a2cc17ef7e3412b3d5cb35a46fa96577a1c375` |
 
 Git status se inspeccionó antes de escribir; la nueva rama partió del commit de referencia
 indicado. **Único archivo documental cambiado:** este informe. Sin cambios en implementación,
@@ -366,7 +366,6 @@ borrar sus propios artefactos. El estado final verificado es el de esta sección
 - Fuentes y JSON archivados íntegramente en este informe y verificados contra sus tres SHA-256 antes de borrar los originales.
 - Borrado exacto, sin seguir symlinks: 63 archivos regulares, 15 nodos de socket cerrados, 1 symlink y 60 directorios internos; luego rmdir del workspace vacío. El hardlink era exclusivamente entre dos archivos ficticios del mismo árbol.
 - **Workspace ausente después de la limpieza.** Sockets abstract/de pathname cerrados por el runner; PTY y pipes cerrados; ningún recurso temporal vivo retenido. No se tocaron servicios ni sesiones existentes.
-
 
 ## Anexos de reproducción y evidencia original
 
@@ -884,7 +883,7 @@ if JOB!='E':print('RESULT '+json.dumps(result,sort_keys=True),flush=True)
               "value": "SYNTHETIC_FORBIDDEN_SIGNER"
             },
             "hardlink_inode": 4384,
-            "idle_cpu_seconds_100ms": 1.7607000000002815e-05,
+            "idle_cpu_seconds_100ms": 1.7607000000002815e-5,
             "job": "A",
             "mandatory_policy": "EXACT",
             "mode": "directory",
@@ -912,10 +911,7 @@ if JOB!='E':print('RESULT '+json.dumps(result,sort_keys=True),flush=True)
             "pty": {
               "child_status": 0,
               "output": "PTY:PING",
-              "size": [
-                31,
-                97
-              ]
+              "size": [31, 97]
             },
             "rss_peak_kib": 19636,
             "scm_rights_on_trap": {
@@ -1809,9 +1805,7 @@ if JOB!='E':print('RESULT '+json.dumps(result,sort_keys=True),flush=True)
         "fds": "stdin/stdout only",
         "max_line_bytes": 512,
         "no_proxy_no_exec_no_network": true,
-        "operations": [
-          "infer"
-        ]
+        "operations": ["infer"]
       },
       "cells": [
         {
@@ -1821,48 +1815,28 @@ if JOB!='E':print('RESULT '+json.dumps(result,sort_keys=True),flush=True)
                 "status": "OK",
                 "text": "FAKE_INFERENCE_RESPONSE"
               },
-              "request_keys": [
-                "model",
-                "nonce",
-                "op",
-                "prompt"
-              ],
+              "request_keys": ["model", "nonce", "op", "prompt"],
               "requested_op": "infer"
             },
             {
               "reply": {
                 "status": "DENIED_SCHEMA"
               },
-              "request_keys": [
-                "nonce",
-                "op",
-                "target"
-              ],
+              "request_keys": ["nonce", "op", "target"],
               "requested_op": "proxy"
             },
             {
               "reply": {
                 "status": "DENIED_NONCE"
               },
-              "request_keys": [
-                "model",
-                "nonce",
-                "op",
-                "prompt"
-              ],
+              "request_keys": ["model", "nonce", "op", "prompt"],
               "requested_op": "infer"
             },
             {
               "reply": {
                 "status": "DENIED_SCHEMA"
               },
-              "request_keys": [
-                "model",
-                "nonce",
-                "op",
-                "path",
-                "prompt"
-              ],
+              "request_keys": ["model", "nonce", "op", "path", "prompt"],
               "requested_op": "infer"
             }
           ],
@@ -2627,10 +2601,7 @@ if JOB!='E':print('RESULT '+json.dumps(result,sort_keys=True),flush=True)
           ],
           "generation": "SYNTHETIC_GENERATION_0095000d5690133a",
           "launcher_pid": 56125,
-          "pty_size": [
-            29,
-            91
-          ],
+          "pty_size": [29, 91],
           "reaped": true
         }
       ],

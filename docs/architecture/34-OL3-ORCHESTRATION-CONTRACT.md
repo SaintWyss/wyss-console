@@ -53,7 +53,7 @@ extending itself after its bounds expire.
 - `Coordinator`: scheduling, bounded queue, dependency satisfaction, exclusive
   resource claims, stop/cancel, lease tracking, retries. This component is not the
   managed authority.
-- `RunJournal`: durable *metadata only* for the workflow, states, terminal IDs,
+- `RunJournal`: durable _metadata only_ for the workflow, states, terminal IDs,
   provider observation timestamps, outcome, digests and decision origins. No command
   content, provider output, context text, private paths or credentials.
 - `StepExecutor` adapters: typed requests to `wyss-control` managed plane and to
@@ -89,7 +89,7 @@ security/performance review, but must not expose a terminal
 escape parser's attack surface to the managed authority or couple
 the scheduler's life to the UI's. The coordinator's own
 crash/restart must restore bounded metadata, reconcile live step
-attempt IDs with host/authority and pause *ambiguous* work,
+attempt IDs with host/authority and pause _ambiguous_ work,
 not spawn replacements or replay shell input. Startup can be on
 demand, but no idle exit while any approved pipeline is active
 or waiting on an owner decision. systemd user lingering
@@ -119,19 +119,19 @@ DRAFT -> VALIDATING -> AWAITING_OWNER_APPROVAL -> READY -> RUNNING
 
 Allowed transitions have these guards:
 
-| Transition | Guard and authority | Failure behaviour |
-| --- | --- | --- |
-| DRAFT→VALIDATING | Complete bounded DAG, supported typed provider/profile, no cycle | Stay draft, report exact failing field |
-| VALIDATING→AWAITING_OWNER_APPROVAL | Current project identity, admission forecast and scope verified | NEEDS_REVISION; no step starts |
-| APPROVAL→READY | Local owner reviewed the exact plan revision/digest, limits, native full-account risk and selected approval mode | REFUSED/EXPIRED; no partial authority cached |
-| READY→RUNNING | Envelope not expired; resources and ownership leases obtained, first-step checks repeated | Wait bounded, then pause/fail safely |
-| RUNNING→PAUSING/PAUSED | Explicit pause or resource/approval demand | No *new* step starts; track already-running native processes separately |
-| RUNNING→CANCELLING | Owner stop, violated budget, revoked grant, deadline, unknown identity, safety failure | Revoke launch ability immediately, send permitted cancellation, then reconcile live children |
-| RUNNING→COMPLETED | Every required step succeeded and no live outstanding child remains | Partial success is not COMPLETED |
-| RUNNING→FAILED/NEEDS_REVIEW | Unrecoverable step failure, external modification, output ambiguity, context tampering | Fail closed for effects, preserve metadata |
-| PAUSED→RUNNING | Fresh valid envelope and remaining capacity; pending approvals resolved | No automatic re-authorisation of new scope |
+| Transition                         | Guard and authority                                                                                              | Failure behaviour                                                                            |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| DRAFT→VALIDATING                   | Complete bounded DAG, supported typed provider/profile, no cycle                                                 | Stay draft, report exact failing field                                                       |
+| VALIDATING→AWAITING_OWNER_APPROVAL | Current project identity, admission forecast and scope verified                                                  | NEEDS_REVISION; no step starts                                                               |
+| APPROVAL→READY                     | Local owner reviewed the exact plan revision/digest, limits, native full-account risk and selected approval mode | REFUSED/EXPIRED; no partial authority cached                                                 |
+| READY→RUNNING                      | Envelope not expired; resources and ownership leases obtained, first-step checks repeated                        | Wait bounded, then pause/fail safely                                                         |
+| RUNNING→PAUSING/PAUSED             | Explicit pause or resource/approval demand                                                                       | No _new_ step starts; track already-running native processes separately                      |
+| RUNNING→CANCELLING                 | Owner stop, violated budget, revoked grant, deadline, unknown identity, safety failure                           | Revoke launch ability immediately, send permitted cancellation, then reconcile live children |
+| RUNNING→COMPLETED                  | Every required step succeeded and no live outstanding child remains                                              | Partial success is not COMPLETED                                                             |
+| RUNNING→FAILED/NEEDS_REVIEW        | Unrecoverable step failure, external modification, output ambiguity, context tampering                           | Fail closed for effects, preserve metadata                                                   |
+| PAUSED→RUNNING                     | Fresh valid envelope and remaining capacity; pending approvals resolved                                          | No automatic re-authorisation of new scope                                                   |
 
-Cancel and shutdown distinguish *stop scheduling* from *terminate processes*.
+Cancel and shutdown distinguish _stop scheduling_ from _terminate processes_.
 Stopping new steps is immediate; terminating native agents may require escalation
 with visible confirmation, process-group isolation and bounded grace. Never claim
 "all stopped" until OS process exit is observed. Managed cancellation follows the
@@ -147,7 +147,7 @@ RUNNING -> AWAITING_HUMAN (cannot start dependent steps)
 VERIFYING -> FAILED | NEEDS_REVIEW
 ```
 
-A start is exactly-once in the *coordinator journal* but may fail between process
+A start is exactly-once in the _coordinator journal_ but may fail between process
 spawn and acknowledgement. Reconciliation must inspect an immutable attempt ID
 before retry; **never retry ambiguous effects automatically**. A retry creates a
 new attempt with new approval if authority/risk/profile/target scope differs.
@@ -157,6 +157,7 @@ cannot complete from missing output.
 ### 3.3 Human approvals
 
 Distinguish:
+
 1. Reviewing the overall DAG envelope (authorises scheduling of the named steps).
 2. Native agent launch (conveys host-account risk, profile and controls left out).
 3. Managed turn approval and tool approval by the existing authority.
@@ -165,7 +166,7 @@ Distinguish:
 5. Wyss Agent policy decision for effectful actions (DN-06=D).
 
 **Required product behaviour, NOT a proven local trust boundary:**
-approval of one layer does not *legitimately* grant another layer.
+approval of one layer does not _legitimately_ grant another layer.
 With same-UID Unix sockets, a compromised native/full-account process
 can impersonate callers and may request approvals directly. No
 component may claim per-layer approval authenticity until a
@@ -181,7 +182,7 @@ the same-UID impersonation path exists.
 `prepare(plan)`: validate schema, DAG, providers, project and estimates; output
 plan digest plus structured failure reasons. No process start.
 
-`submit(approved_plan_digest)`: a *candidate* scheduling
+`submit(approved_plan_digest)`: a _candidate_ scheduling
 request only; validates a finite DAG and current controls. The
 same-UID caller identity does not prove native presence or
 authorise a native child. Pending native steps remain
@@ -233,7 +234,7 @@ No raw native terminal output is parsed by the coordinator for authority decisio
   silently claims they were sandboxed.
 - Writes to the same workspace must either use a reviewed single-writer lock and
   conflict policy or run in isolated worktrees with explicit merge/review. A
-  per-project lock can *coordinate Console participants* but cannot stop an
+  per-project lock can _coordinate Console participants_ but cannot stop an
   external tool or the user editing files. Detect unexpected changes and pause.
 - Resource ceilings apply at scheduler admission and continuously during runs.
   Limit process groups, queue length, log metadata, simultaneous open sessions,
@@ -245,18 +246,18 @@ No raw native terminal output is parsed by the coordinator for authority decisio
 
 ## 5. Crash, reconnect and degraded behaviour
 
-| Failure | Required behaviour |
-| --- | --- |
-| Desktop UI closes/reloads | Coordinator/host do not depend on UI process; reconnect by run/session IDs, otherwise show UNKNOWN; never launch a duplicate |
-| Host user logs out | Runs continue *only* under owner-enabled lingering; native confirmations may wait for local login |
-| Coordinator crashes | Reconstruct metadata journal and query host/authority; ambiguous external step becomes NEEDS_REVIEW, not auto-run |
-| Host dies | Mark PTY LOST, but process tree **UNKNOWN / ORPHANS_POSSIBLE** until isolation/scope observation; no restart proposal capable of acting while descendants may still write; preserve journal |
-| Authority rejects managed action | Record the exact refusal; pipeline pauses or fails; no native fallback |
-| Provider/model unavailable | Queue boundedly or fail, never substitute another model without the plan's explicit substitution rule and confirmation |
-| User revokes device | Reject new requests from it, **pause unstarted pipeline work** whose approval originated from the device, mark prior decisions for review; existing native processes may continue with OS-user privileges and must not be reported as revoked/stopped |
-| Network drops | Running work on host may continue inside approved finite limits; no queued commands replayed without sequence ACK |
-| Clock drift / quota unknown | Enforce local monotonic time where suitable, fail closed on expiry; do not assert monetary caps without reliable counters |
-| Secrets in an agent handoff | Reject known prohibited channels; no content persisted in events/usage analytics; surface controlled handoff needs separate reviewed design |
+| Failure                          | Required behaviour                                                                                                                                                                                                                                    |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop UI closes/reloads        | Coordinator/host do not depend on UI process; reconnect by run/session IDs, otherwise show UNKNOWN; never launch a duplicate                                                                                                                          |
+| Host user logs out               | Runs continue _only_ under owner-enabled lingering; native confirmations may wait for local login                                                                                                                                                     |
+| Coordinator crashes              | Reconstruct metadata journal and query host/authority; ambiguous external step becomes NEEDS_REVIEW, not auto-run                                                                                                                                     |
+| Host dies                        | Mark PTY LOST, but process tree **UNKNOWN / ORPHANS_POSSIBLE** until isolation/scope observation; no restart proposal capable of acting while descendants may still write; preserve journal                                                           |
+| Authority rejects managed action | Record the exact refusal; pipeline pauses or fails; no native fallback                                                                                                                                                                                |
+| Provider/model unavailable       | Queue boundedly or fail, never substitute another model without the plan's explicit substitution rule and confirmation                                                                                                                                |
+| User revokes device              | Reject new requests from it, **pause unstarted pipeline work** whose approval originated from the device, mark prior decisions for review; existing native processes may continue with OS-user privileges and must not be reported as revoked/stopped |
+| Network drops                    | Running work on host may continue inside approved finite limits; no queued commands replayed without sequence ACK                                                                                                                                     |
+| Clock drift / quota unknown      | Enforce local monotonic time where suitable, fail closed on expiry; do not assert monetary caps without reliable counters                                                                                                                             |
+| Secrets in an agent handoff      | Reject known prohibited channels; no content persisted in events/usage analytics; surface controlled handoff needs separate reviewed design                                                                                                           |
 
 ## 6. Why OL3 is not OL4
 

@@ -1,5 +1,14 @@
 export type ViewId =
-  'console' | 'sessions' | 'agents' | 'approvals' | 'events' | 'settings';
+  | 'console'
+  | 'workspace'
+  | 'sessions'
+  | 'agents'
+  | 'approvals'
+  | 'events'
+  | 'configuration'
+  | 'profiles'
+  | 'credentials'
+  | 'settings';
 
 export interface NavItem {
   id: ViewId;
@@ -16,6 +25,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: 'Console',
     subtitle: 'Local terminal workspace',
     icon: 'M4 7l4 4-4 4M11 16h7',
+  },
+  {
+    id: 'workspace',
+    label: 'Workspace',
+    subtitle: 'Agents running in your terminals',
+    icon: 'M4 5h16v10H4zM8 19h8M12 15v4M8 9l2 2-2 2M12.5 13H16',
   },
   {
     id: 'sessions',
@@ -40,6 +55,24 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: 'Events',
     subtitle: 'What the authority recorded',
     icon: 'M3 12h4l2.5-6 4 12 2.5-6H21',
+  },
+  {
+    id: 'configuration',
+    label: 'Configuration',
+    subtitle: 'What the agents are set up with',
+    icon: 'M4 6h16M4 12h16M4 18h16M8 4v4M15 10v4M10 16v4',
+  },
+  {
+    id: 'profiles',
+    label: 'Profiles',
+    subtitle: 'What a session starts with',
+    icon: 'M12 4a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM5 20c0-3.3 3.1-6 7-6s7 2.7 7 6',
+  },
+  {
+    id: 'credentials',
+    label: 'Credentials',
+    subtitle: 'API keys, kept sealed',
+    icon: 'M15 8a4 4 0 1 0-3.5 4H20v3h-2v2h-3v-2h-3.5',
   },
   {
     id: 'settings',

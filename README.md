@@ -635,6 +635,90 @@ npm run desktop:run                        # Events
 
 See [ADR 0024](docs/adr/0024-events-history-ui.md).
 
+## Agent configuration in the window
+
+The Configuration view shows what Claude Code and Codex are set up with, read from their
+own files: hooks, skills, MCP servers, rule files and model settings, each with where it was
+found, what the file says about it, what cannot be confirmed without running the provider,
+and why nothing can be changed (everything is read-only in this phase). A second list says
+what became of every place that was looked at, with a closed reason when it could not be
+read, and never a path.
+
+- **What is read.** `~/.claude` (or `CLAUDE_CONFIG_DIR`), `~/.claude.json` (only the MCP
+  servers in it), `~/.codex` (or `CODEX_HOME`), `/etc/claude-code` and `/etc/codex`. Nothing
+  else, and never a credential file such as `auth.json` or `.credentials.json`. A project's
+  own files are read for a selected project, and Codex's only if the user trusts it.
+- **What is shown.** Commands, flags and names stay; environment values, headers, tokens and
+  anything named like a secret are replaced before anything leaves the backend. Rule files
+  are shown by name and fingerprint, never their text.
+- **How it stays current.** The backend watches the directories and rescans after an edit
+  settles, within two seconds; the window asks only whether the revision changed, and only
+  while the view is shown. A rescan every 30 seconds covers what no watch can see.
+- **Where the code is.** `src-tauri/src/agentconfig/` (reader, adapters, redaction, service)
+  and `src-tauri/src/configuration.rs` (the two commands) are in the desktop binary, not in
+  the library the authority links; `tests/authority_boundary.rs` searches the built
+  authority binary to prove it. The contract with the window is
+  `tests/fixtures/configuration-inventory-v1.json`, read by both sides' tests.
+- **Trying it on your own machine.** `cargo test -- --ignored real_machine --nocapture`
+  prints counts and outcomes of your real configuration, never a value, and writes nothing.
+
+## Terminals that outlive the window (the host)
+
+The first window starts a **host** (`wyss-console --wyss-host`, a separate process) that owns
+every terminal and native agent session; windows are its clients over
+`$XDG_RUNTIME_DIR/wyss-console/host.sock` (private: 0700 directory, 0600 socket, peer uid
+checked). Close the window and everything keeps running; open one and the tabs come back with
+their scrollback. A host with nothing to hold exits after ten minutes. `wyss-console
+--wyss-host-stop` stops it (closing its terminals). Without a reachable host the window runs one
+of its own and says that terminals then end with it. Decision record:
+`docs/adr/0036-host-process-for-terminals-and-native-sessions.md`.
+
+## Agents in the window (native sessions and profiles)
+
+The Workspace view starts the installed Claude Code or Codex in a terminal tab of the Console.
+They are **native** sessions: your own agents in your own shell, not mediated, contained or
+approved by the Console (the managed sessions of the Sessions view are another plane).
+
+- **How it starts.** The terminal runs your interactive shell with a command that replaces it
+  by the agent (`exec`), so your start-up files run and the process the terminal owns is the
+  agent. Recipes exist for `sh`, `bash`, `zsh` and `fish`; any other shell starts the agent
+  directly and the session says so. The window names an agent of a closed list, a project
+  folder (home, one chosen in the native dialog, or a known project) and a profile; it never
+  sends a command, arguments, an environment or a path.
+- **What it keeps.** `~/.local/state/wyss-console/native/` holds `registry.json` (metadata of
+  the sessions and projects; no process is kept) and `profiles/`. After the window closes,
+  what was running is shown as **Lost**: the Console did not see it end and its terminal went
+  with the window.
+- **Profiles.** A profile is applied when a session starts and changes no global file. For
+  Claude Code it becomes flags and a generated `--settings` overlay under
+  `native/sessions/<id>/` (removed when the session ends). For Codex it becomes flags
+  (`-m`, `-s`, `-a`). What the agent cannot do for one session (Codex hooks and skills) refuses
+  to start instead of being ignored.
+- **Code.** `src-tauri/src/native/` (desktop binary only) and `src/lib/features/native/`.
+  Decision record: `docs/adr/0035-native-launcher-registry-and-session-profiles.md`.
+
+## Changing Claude Code's configuration
+
+From the Configuration view the user can turn a Claude Code hook off and back on, turn every
+hook off, and turn a skill off and on, in the real settings file, with a way back. The full
+account is [docs/spec/configuration-changes.md](docs/spec/configuration-changes.md); in short:
+
+- **A plan first.** Choosing a change shows what would change, how the entry would be kept,
+  and what "applied" does and does not mean. Nothing is written until it is confirmed.
+- **A native window for anything risky.** Turning off a hook that can block an action, or
+  putting a hook back, asks in a window the page cannot draw on or answer for.
+- **Only the change's bytes change.** The rest of the file is the same bytes. A file that
+  changed since the plan is not written. Putting a hook back into an untouched file gives
+  the original file back, byte for byte.
+- **A hook that was turned off is kept encrypted.** It may hold a secret, so it is sealed
+  with authenticated encryption under a key in the system's Secret Service (ADR 0034). If
+  that is unavailable, an entry that may hold a secret is not turned off one by one, and the
+  app says why. Losing the key means the kept hooks cannot be put back from here.
+- **History and undo.** Every change is journaled without its content; an undo is a plan
+  like any other. A hook can be exported under a passphrase and imported on another computer.
+- **Interrupted writes are repaired at start**, and every step of an apply is tested with an
+  injected failure and an injected crash.
+
 ## Authority-owned Codex runtime
 
 `wyss-control` can supervise one shared, long-lived `codex app-server`, independently
@@ -845,7 +929,9 @@ so the authority also launches the final child with its own normalized model cat
 receives zero model-visible tools. A catalog that cannot be proven safe keeps the
 runtime from starting. config/read and hooks/list must verify the safety preconditions, including
 zero enabled executable external hooks. Restoring user/project/plugin/managed hooks
-or incompatible configuration makes inference unavailable; Wyss never edits them.
+or incompatible configuration makes inference unavailable; the authority never edits them.
+The desktop edits Claude Code's own settings only when the user plans and confirms a change
+in the Configuration view (see below), never Codex's, and never silently.
 Explicit resume verifies the stored thread/workspace, readOnly sandbox and never
 approval policy before publishing its transient attachment profile.
 

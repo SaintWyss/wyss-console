@@ -898,4 +898,3 @@ prove the same fidelity. A long-lived escape parser must not be added without
 a separate hardening/isolation review. DN-40=C does not furnish an absolute
 memory cap; process, screen, ring and backlog budgets need measured limits.
 No new terminal transport, PTY backend or other functionality is authorised.
-

@@ -583,61 +583,61 @@ nothing here authorises a service, a listener or a device now.
 **All tests below are proposed, none run**. Each must be made into reproducible
 unit/contract/integration/adversarial procedures with bounded fixtures and
 a clean throwaway environment. Provider experiments, real device tests,
-native production writes and code work require *separate* owner permission
+native production writes and code work require _separate_ owner permission
 (DN-16/DN-24). Passing a mocked contract never substitutes for reference
 hardware or an independent security review. References are in
 [34](34-OL3-ORCHESTRATION-CONTRACT.md) and
 [35](35-HOST-REMOTE-AND-MOBILE-DELTA.md).
 
-| Test ID | Acceptance ID | Deterministic pass/fail criterion (negative cases included) |
-| --- | --- | --- |
-| TS-ORC-01 | AC-FINAL-01 | Reject cyclic, unsupported, unbounded and unapproved delegation; assert zero process starts. |
-| TS-ORC-03 | AC-FINAL-02 | A builder→test→review DAG obeys dependencies and cannot continue after mandatory failure. |
-| TS-ORC-02 | AC-FINAL-03 | Modify any material plan field after approval; execute denied until fresh confirmation. |
-| TS-ORC-05 | AC-FINAL-04 | Inject tool-looking text and paths in handoff; no capability/command results. |
-| TS-ORC-07 | AC-FINAL-05 | Crash between start and ACK; reconcile by attempt ID and require review for ambiguous effects. |
-| TS-ORC-04 | AC-FINAL-06 (**FUTURE/BLOCKED until authority ADR**) | Under the accepted ADR 0012/0015 baseline a second active managed turn is rejected or queued, even if interactive sessions exist; only after an independently accepted multi-runtime/concurrency ADR may parallel sessions be tested for isolation of identities, leases and approvals. |
-| TS-ORC-09 | AC-FINAL-07 | Exceed finite wall-time/step/resource bounds; further dispatch blocked and explained. |
-| TS-ORC-13 | AC-FINAL-08 | Search event/history/notification/diagnostic fixtures; none contains protected content. |
-| TS-HYB-05 | AC-FINAL-09 | LP1–3 cannot write; explicitly opted-in LP4 states full host-account access. |
-| TS-HYB-01 | AC-FINAL-10 | Across LAN/mobile/relay configurations, connection follows authorised host key and same grants. |
-| TS-HYB-03 | AC-FINAL-11 (**protocol blocked**) | If terminal bytes were written but ACK lost, reject same or stale input after gateway restart/eviction with OUTCOME_UNKNOWN and **no automatic retransmit**. Include partial write, current-boot duplicate, host crash and independent restart cases. No exactly-once claim for arbitrary shell effects. |
-| TS-HYB-06 | AC-FINAL-12 | Compare logout with/without lingering; no unconsented enablement and truthful session state. |
-| TS-HYB-09 | AC-FINAL-13 | Reference full-screen programs survive detach/resize; mismatch and incomplete history reported. |
-| TS-HYB-11 | AC-FINAL-14 | Remote approval cannot apply pending config; stale plan revalidated or refused. |
-| TS-HYB-04 | AC-FINAL-15 | Replay/stolen key/revocation/key mismatch rejected; no grant widening by transport. |
-| TS-HYB-14 | AC-FINAL-16 | Distinguish crash, suspend, power-off, network drop and UI close; no phantom running sessions. |
-| TS-FINAL-01 | AC-FINAL-17 | Reach global budget; existing history unchanged, new quota lower and clearly signalled. |
-| TS-HYB-08 | AC-FINAL-18 | Fuzz ANSI/OSC/DCS/title/hyperlinks; no file/network effect or unbounded allocation. |
-| TS-FINAL-02 | AC-FINAL-19 | Surviving PTY uses same ID; ended agent never auto-spawns; batch restart requires approvals. |
-| TS-FINAL-03 | AC-FINAL-20 | Forced slow client/host load remains bounded or visibly rejects new work; no silent vault purge. |
-| TS-FINAL-04 | AC-FINAL-21 | Invalid catalogue selection and stale generation denied; provider effective choice unassumed. |
-| TS-FINAL-05 | AC-FINAL-22 | Requested != reported fixture never labelled actual; unknown remains unverified. |
-| TS-FINAL-06 | AC-FINAL-23 | Session and turn reroutes recorded at proper grain; malformed reroute fails closed. |
-| TS-FINAL-07 | AC-FINAL-24 | Unsupported agent shows limitation; no silent terminal injection/config file write. |
-| TS-FINAL-08 | AC-FINAL-25 | Missing counters unknown; distinct session/model attribution and no cross-plan monetary sum. |
-| TS-FINAL-09 | AC-FINAL-26 | Keyboard and mouse reach exact areas; Devices added only when applicable. |
-| TS-FINAL-10 | AC-FINAL-27 | Known unavailable action disabled with reason, never clickable; missing area not false advertised. |
-| TS-FINAL-11 | AC-FINAL-28 | Automated contrast matrix plus real screen/terminal colours meets documented thresholds. |
-| TS-FINAL-12 | AC-FINAL-29 | Default disabled; enable each category; payload inspection excludes paths and content. |
-| TS-FINAL-13 | AC-FINAL-30 | KDE/IME conflicts cause fallback or rebind; escape and terminal program keys arrive. |
-| TS-FINAL-14 | AC-FINAL-31 | Advance clock past 30/90 days; only warning metadata changes, kept byte content unchanged. |
-| TS-ORC-08 | AC-FINAL-32 | Modify global hook/provider version; old approval rejected and omissions correctly shown. |
-| TS-FINAL-15 | AC-FINAL-33 | Unsupported provider path denied; no credential copying or impersonated sign-in. |
-| TS-FINAL-16 | AC-FINAL-34 | Compromised config view fails to invoke arbitrary executable; host confirmation remains. |
-| TS-FINAL-17 | AC-FINAL-35 | Arbitrary command/argv rejected; provider update invalidates unverified operation. |
-| TS-FINAL-18 | AC-FINAL-36 | Compromised config view cannot invoke terminal commands; terminal retains full OS-user risk. |
-| TS-ORC-15 | AC-FINAL-37 | Hermes attempts direct tool use and policy bypass; hard OS boundary blocks effect. |
-| TS-FINAL-19 | AC-FINAL-38 | Product labels and interfaces are consistent; no undocumented CLI dependency. |
-| TS-FINAL-20 | AC-FINAL-39 | Retention/eviction/history fixtures exclude prompt, output, credentials and paths. |
-| TS-FINAL-21 | AC-FINAL-40 | Reference-machine offline install/upgrade/rollback dry run avoids unrelated data and public channels. |
+| Test ID     | Acceptance ID                                        | Deterministic pass/fail criterion (negative cases included)                                                                                                                                                                                                                                              |
+| ----------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TS-ORC-01   | AC-FINAL-01                                          | Reject cyclic, unsupported, unbounded and unapproved delegation; assert zero process starts.                                                                                                                                                                                                             |
+| TS-ORC-03   | AC-FINAL-02                                          | A builder→test→review DAG obeys dependencies and cannot continue after mandatory failure.                                                                                                                                                                                                                |
+| TS-ORC-02   | AC-FINAL-03                                          | Modify any material plan field after approval; execute denied until fresh confirmation.                                                                                                                                                                                                                  |
+| TS-ORC-05   | AC-FINAL-04                                          | Inject tool-looking text and paths in handoff; no capability/command results.                                                                                                                                                                                                                            |
+| TS-ORC-07   | AC-FINAL-05                                          | Crash between start and ACK; reconcile by attempt ID and require review for ambiguous effects.                                                                                                                                                                                                           |
+| TS-ORC-04   | AC-FINAL-06 (**FUTURE/BLOCKED until authority ADR**) | Under the accepted ADR 0012/0015 baseline a second active managed turn is rejected or queued, even if interactive sessions exist; only after an independently accepted multi-runtime/concurrency ADR may parallel sessions be tested for isolation of identities, leases and approvals.                  |
+| TS-ORC-09   | AC-FINAL-07                                          | Exceed finite wall-time/step/resource bounds; further dispatch blocked and explained.                                                                                                                                                                                                                    |
+| TS-ORC-13   | AC-FINAL-08                                          | Search event/history/notification/diagnostic fixtures; none contains protected content.                                                                                                                                                                                                                  |
+| TS-HYB-05   | AC-FINAL-09                                          | LP1–3 cannot write; explicitly opted-in LP4 states full host-account access.                                                                                                                                                                                                                             |
+| TS-HYB-01   | AC-FINAL-10                                          | Across LAN/mobile/relay configurations, connection follows authorised host key and same grants.                                                                                                                                                                                                          |
+| TS-HYB-03   | AC-FINAL-11 (**protocol blocked**)                   | If terminal bytes were written but ACK lost, reject same or stale input after gateway restart/eviction with OUTCOME_UNKNOWN and **no automatic retransmit**. Include partial write, current-boot duplicate, host crash and independent restart cases. No exactly-once claim for arbitrary shell effects. |
+| TS-HYB-06   | AC-FINAL-12                                          | Compare logout with/without lingering; no unconsented enablement and truthful session state.                                                                                                                                                                                                             |
+| TS-HYB-09   | AC-FINAL-13                                          | Reference full-screen programs survive detach/resize; mismatch and incomplete history reported.                                                                                                                                                                                                          |
+| TS-HYB-11   | AC-FINAL-14                                          | Remote approval cannot apply pending config; stale plan revalidated or refused.                                                                                                                                                                                                                          |
+| TS-HYB-04   | AC-FINAL-15                                          | Replay/stolen key/revocation/key mismatch rejected; no grant widening by transport.                                                                                                                                                                                                                      |
+| TS-HYB-14   | AC-FINAL-16                                          | Distinguish crash, suspend, power-off, network drop and UI close; no phantom running sessions.                                                                                                                                                                                                           |
+| TS-FINAL-01 | AC-FINAL-17                                          | Reach global budget; existing history unchanged, new quota lower and clearly signalled.                                                                                                                                                                                                                  |
+| TS-HYB-08   | AC-FINAL-18                                          | Fuzz ANSI/OSC/DCS/title/hyperlinks; no file/network effect or unbounded allocation.                                                                                                                                                                                                                      |
+| TS-FINAL-02 | AC-FINAL-19                                          | Surviving PTY uses same ID; ended agent never auto-spawns; batch restart requires approvals.                                                                                                                                                                                                             |
+| TS-FINAL-03 | AC-FINAL-20                                          | Forced slow client/host load remains bounded or visibly rejects new work; no silent vault purge.                                                                                                                                                                                                         |
+| TS-FINAL-04 | AC-FINAL-21                                          | Invalid catalogue selection and stale generation denied; provider effective choice unassumed.                                                                                                                                                                                                            |
+| TS-FINAL-05 | AC-FINAL-22                                          | Requested != reported fixture never labelled actual; unknown remains unverified.                                                                                                                                                                                                                         |
+| TS-FINAL-06 | AC-FINAL-23                                          | Session and turn reroutes recorded at proper grain; malformed reroute fails closed.                                                                                                                                                                                                                      |
+| TS-FINAL-07 | AC-FINAL-24                                          | Unsupported agent shows limitation; no silent terminal injection/config file write.                                                                                                                                                                                                                      |
+| TS-FINAL-08 | AC-FINAL-25                                          | Missing counters unknown; distinct session/model attribution and no cross-plan monetary sum.                                                                                                                                                                                                             |
+| TS-FINAL-09 | AC-FINAL-26                                          | Keyboard and mouse reach exact areas; Devices added only when applicable.                                                                                                                                                                                                                                |
+| TS-FINAL-10 | AC-FINAL-27                                          | Known unavailable action disabled with reason, never clickable; missing area not false advertised.                                                                                                                                                                                                       |
+| TS-FINAL-11 | AC-FINAL-28                                          | Automated contrast matrix plus real screen/terminal colours meets documented thresholds.                                                                                                                                                                                                                 |
+| TS-FINAL-12 | AC-FINAL-29                                          | Default disabled; enable each category; payload inspection excludes paths and content.                                                                                                                                                                                                                   |
+| TS-FINAL-13 | AC-FINAL-30                                          | KDE/IME conflicts cause fallback or rebind; escape and terminal program keys arrive.                                                                                                                                                                                                                     |
+| TS-FINAL-14 | AC-FINAL-31                                          | Advance clock past 30/90 days; only warning metadata changes, kept byte content unchanged.                                                                                                                                                                                                               |
+| TS-ORC-08   | AC-FINAL-32                                          | Modify global hook/provider version; old approval rejected and omissions correctly shown.                                                                                                                                                                                                                |
+| TS-FINAL-15 | AC-FINAL-33                                          | Unsupported provider path denied; no credential copying or impersonated sign-in.                                                                                                                                                                                                                         |
+| TS-FINAL-16 | AC-FINAL-34                                          | Compromised config view fails to invoke arbitrary executable; host confirmation remains.                                                                                                                                                                                                                 |
+| TS-FINAL-17 | AC-FINAL-35                                          | Arbitrary command/argv rejected; provider update invalidates unverified operation.                                                                                                                                                                                                                       |
+| TS-FINAL-18 | AC-FINAL-36                                          | Compromised config view cannot invoke terminal commands; terminal retains full OS-user risk.                                                                                                                                                                                                             |
+| TS-ORC-15   | AC-FINAL-37                                          | Hermes attempts direct tool use and policy bypass; hard OS boundary blocks effect.                                                                                                                                                                                                                       |
+| TS-FINAL-19 | AC-FINAL-38                                          | Product labels and interfaces are consistent; no undocumented CLI dependency.                                                                                                                                                                                                                            |
+| TS-FINAL-20 | AC-FINAL-39                                          | Retention/eviction/history fixtures exclude prompt, output, credentials and paths.                                                                                                                                                                                                                       |
+| TS-FINAL-21 | AC-FINAL-40                                          | Reference-machine offline install/upgrade/rollback dry run avoids unrelated data and public channels.                                                                                                                                                                                                    |
 
 ### 14.1 Evidence grades and mandatory adversarial suites
 
 **Metadata-only verification:** list known forbidden fields and verify that no
 prompt, tool output, credentials, private file path, raw command or recoverable
 configuration content is written into events, analytics, desktop notifications
-or diagnostic artifacts. Test *every* failure and reconnect branch, not only
+or diagnostic artifacts. Test _every_ failure and reconnect branch, not only
 happy paths. Where a display shows a model, assert the distinction
 `requested` / `reported` / `unverified` and the reporting scope.
 
@@ -667,22 +667,22 @@ The criteria below name required **future** fixtures and failure checks. Every
 result is currently `NOT RUN`; this addendum confers no provider-experiment
 or implementation authorisation.
 
-| Test ID | Acceptance | Required negative and positive behaviour |
-| --- | --- | --- |
-| TS-HAND-01 | AC-HAND-01 | Switch view/open new session: no implicit history, file, token or policy transfer |
-| TS-HAND-02 | AC-HAND-01 | Digest changed after review: no receiver launch until re-confirmed |
-| TS-HAND-03 | AC-HAND-01 | Malicious handoff path/terminal escape/fake instruction: quote as untrusted data, grant no capability |
-| TS-HAND-04 | AC-HAND-02 | Native/managed transfer always creates a new session and cannot inherit privileged approvals |
-| TS-HAND-05 | AC-HAND-02 | Source generation changed and volatile draft lost: explicit stale result, no hidden content written |
-| TS-ADP-OC-01..09 | AC-ADP-OC-01 | Per-version OpenCode config precedence, JSONC round-trip, symlinks, overlapping skills, MCP secrets, plugin nonexecution, version drift and external writes cause read-only/refusal as documented in 37 §2.2 |
-| TS-ADP-HR-01..05 | AC-ADP-HR-01 | Hermes native TUI and planner persona separate; no direct effectful tool when planner-confined; wrong trust domain never inherits authority |
-| TS-CFG-21..24 | AC-CFG-AUTH-02 | Native executable-command dialog, invalid input, race with provider, native-writer allowlist: no page-controlled shell, no unsafe mutation |
-| TS-MET-01..08 | AC-MET-01 | Model/usage observations stay provider-reported and proper grain; no duplicate aggregation, invented costs or secret-bearing durable events |
-| TS-UIX-01..07 | AC-UIX-01 | Three theme contrasts, keyboard+IME, screen-reader focus, denied/locked/offline, no notification secrets, no automatic agent restart, small Android viewport usability |
-| TS-UIX-08 | AC-UIX-02 | With reduced-motion OS preference, animations/transition effects are suppressed without obscuring status or focus |
-| TS-OBS-01 | AC-OBS-01 | Read authority events newest-first, bounded/filterable with failed-store state, no content/private-data leakage |
-| TS-OBS-02 | AC-OBS-02 | Native lifecycle event lineage survives restart; real exit/crash is never recorded as running |
-| TS-DAT-04 | AC-DAT-04 | All persistent metadata quota/max-item bounds fail visibly with store-full; protected recovery entries never silently purged |
+| Test ID          | Acceptance     | Required negative and positive behaviour                                                                                                                                                                     |
+| ---------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| TS-HAND-01       | AC-HAND-01     | Switch view/open new session: no implicit history, file, token or policy transfer                                                                                                                            |
+| TS-HAND-02       | AC-HAND-01     | Digest changed after review: no receiver launch until re-confirmed                                                                                                                                           |
+| TS-HAND-03       | AC-HAND-01     | Malicious handoff path/terminal escape/fake instruction: quote as untrusted data, grant no capability                                                                                                        |
+| TS-HAND-04       | AC-HAND-02     | Native/managed transfer always creates a new session and cannot inherit privileged approvals                                                                                                                 |
+| TS-HAND-05       | AC-HAND-02     | Source generation changed and volatile draft lost: explicit stale result, no hidden content written                                                                                                          |
+| TS-ADP-OC-01..09 | AC-ADP-OC-01   | Per-version OpenCode config precedence, JSONC round-trip, symlinks, overlapping skills, MCP secrets, plugin nonexecution, version drift and external writes cause read-only/refusal as documented in 37 §2.2 |
+| TS-ADP-HR-01..05 | AC-ADP-HR-01   | Hermes native TUI and planner persona separate; no direct effectful tool when planner-confined; wrong trust domain never inherits authority                                                                  |
+| TS-CFG-21..24    | AC-CFG-AUTH-02 | Native executable-command dialog, invalid input, race with provider, native-writer allowlist: no page-controlled shell, no unsafe mutation                                                                   |
+| TS-MET-01..08    | AC-MET-01      | Model/usage observations stay provider-reported and proper grain; no duplicate aggregation, invented costs or secret-bearing durable events                                                                  |
+| TS-UIX-01..07    | AC-UIX-01      | Three theme contrasts, keyboard+IME, screen-reader focus, denied/locked/offline, no notification secrets, no automatic agent restart, small Android viewport usability                                       |
+| TS-UIX-08        | AC-UIX-02      | With reduced-motion OS preference, animations/transition effects are suppressed without obscuring status or focus                                                                                            |
+| TS-OBS-01        | AC-OBS-01      | Read authority events newest-first, bounded/filterable with failed-store state, no content/private-data leakage                                                                                              |
+| TS-OBS-02        | AC-OBS-02      | Native lifecycle event lineage survives restart; real exit/crash is never recorded as running                                                                                                                |
+| TS-DAT-04        | AC-DAT-04      | All persistent metadata quota/max-item bounds fail visibly with store-full; protected recovery entries never silently purged                                                                                 |
 
 **Known gaps that remain separate:** actual real provider run for OpenCode and
 Hermes, source-version manifest acceptance, vault keyring/snapshot and
@@ -701,25 +701,25 @@ original meanings. **TS-CFG-21..24** (37 §3)
 are new independent negative cases, with
 `AC-CFG-AUTH-02`. No old identifier is overwritten.
 
-| ID | Acceptance | Required fail/pass assertion (NOT RUN) |
-| --- | --- | --- |
-| TS-SEC-OL3-01 | AC-IR-01 | A compromised native OL3 agent with same-UID rights can attempt `approvals.respond`, `submit`, `grant_step` and socket calls. Under current same-UID accepted ADR, **auto-native dispatch denied**; any proposed new OS boundary must deny all cross-layer calls |
-| TS-SEC-OL3-02 | AC-IR-03 | Whole-DAG approval + automatic malicious handoff may not launch any native/full-account step without verified OS isolation and per-attempt host-local confirmation of reviewed bytes |
-| TS-SEC-REM-01 | AC-IR-02 | Logged-out host rejects default LP4 input; only a *separately owner-approved and reviewed* absent-host grant could change this, with short TTL |
-| TS-SEC-REM-02 | AC-IR-02 | Revoked remote grant never labelled "host recovered" after malicious LP4 persistence; require explicit account integrity review |
-| TS-SEC-REM-03 | AC-IR-06 | Crash gateway after terminal effect before ACK: old claim epoch invalid; returns OUTCOME_UNKNOWN, never replays; managed intents dedup by authority receipts |
-| TS-SEC-HOST-01 | AC-IR-07 | Escape process scope/PTY and crash host; report ORPHANS_POSSIBLE, prohibit duplicate launch and record outstanding writers |
-| TS-SEC-HOST-02 | AC-IR-09 | Malicious terminal parser crash/OOM does not kill PTY supervisor or sibling terminal; show degraded screenshot |
-| TS-SEC-HOST-03 | AC-IR-08 | Waiting-approval OL3 causes coordinator keepalive, blocks host idle exit; manager restart exhaustion yields HOST_UNAVAILABLE |
-| TS-SEC-MOB-01 | AC-IR-10 | Missing/failing hardware key attestation and per-use authentication causes default LP4 denial; emulator result not hardware proof |
-| TS-SEC-ORC-01 | AC-IR-11 | Revoking authorising device pauses future dependent pipeline steps and reports already-running native work honestly |
-| TS-SEC-CFG-01 | AC-IR-12 | Vault locked without local login gives VAULT_LOCKED_NO_SESSION; config.request never auto-applies even on queued pending |
-| TS-SEC-AGT-01 | AC-IR-05 | Hermes-generated free shell, interpreters and encoded loaders blocked; only allowlisted typed Wyss operations admitted under policy |
-| TS-SEC-MAN-01 | AC-IR-04 | Existing ADR 0012+0015 forces one shared App Server and one active managed turn; second managed turn serializes or denies, never silently relaxes unique active index |
-| TS-CFG-21..24 | AC-CFG-AUTH-02 | Config page arbitrary executable refused, invalid paths rejected, concurrent-write conflict blocked, unverified writer args prohibited; TS-CFG-17..20 keep original undo semantics |
-| TS-SEC-TRACE-01 | AC-IR-13 | No reused test identifiers with differing definitions; TS-CFG-17..20 unchanged in §3.4, negative cases use 21..24 |
-| TS-SEC-TRACE-02 | AC-IR-14 | Android mockups MA-01..10 distinct from 16's MS-01..10, review collisions RC-01..16 distinct from 31's C1..C18 |
-| TS-SEC-EVID-01 | AC-IR-15 | Temporary `EXDEV` evidence in 41 never satisfies DN-31 or reference-host replica/snapshot gates; no PASS without proper evidence |
+| ID              | Acceptance     | Required fail/pass assertion (NOT RUN)                                                                                                                                                                                                                           |
+| --------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TS-SEC-OL3-01   | AC-IR-01       | A compromised native OL3 agent with same-UID rights can attempt `approvals.respond`, `submit`, `grant_step` and socket calls. Under current same-UID accepted ADR, **auto-native dispatch denied**; any proposed new OS boundary must deny all cross-layer calls |
+| TS-SEC-OL3-02   | AC-IR-03       | Whole-DAG approval + automatic malicious handoff may not launch any native/full-account step without verified OS isolation and per-attempt host-local confirmation of reviewed bytes                                                                             |
+| TS-SEC-REM-01   | AC-IR-02       | Logged-out host rejects default LP4 input; only a _separately owner-approved and reviewed_ absent-host grant could change this, with short TTL                                                                                                                   |
+| TS-SEC-REM-02   | AC-IR-02       | Revoked remote grant never labelled "host recovered" after malicious LP4 persistence; require explicit account integrity review                                                                                                                                  |
+| TS-SEC-REM-03   | AC-IR-06       | Crash gateway after terminal effect before ACK: old claim epoch invalid; returns OUTCOME_UNKNOWN, never replays; managed intents dedup by authority receipts                                                                                                     |
+| TS-SEC-HOST-01  | AC-IR-07       | Escape process scope/PTY and crash host; report ORPHANS_POSSIBLE, prohibit duplicate launch and record outstanding writers                                                                                                                                       |
+| TS-SEC-HOST-02  | AC-IR-09       | Malicious terminal parser crash/OOM does not kill PTY supervisor or sibling terminal; show degraded screenshot                                                                                                                                                   |
+| TS-SEC-HOST-03  | AC-IR-08       | Waiting-approval OL3 causes coordinator keepalive, blocks host idle exit; manager restart exhaustion yields HOST_UNAVAILABLE                                                                                                                                     |
+| TS-SEC-MOB-01   | AC-IR-10       | Missing/failing hardware key attestation and per-use authentication causes default LP4 denial; emulator result not hardware proof                                                                                                                                |
+| TS-SEC-ORC-01   | AC-IR-11       | Revoking authorising device pauses future dependent pipeline steps and reports already-running native work honestly                                                                                                                                              |
+| TS-SEC-CFG-01   | AC-IR-12       | Vault locked without local login gives VAULT_LOCKED_NO_SESSION; config.request never auto-applies even on queued pending                                                                                                                                         |
+| TS-SEC-AGT-01   | AC-IR-05       | Hermes-generated free shell, interpreters and encoded loaders blocked; only allowlisted typed Wyss operations admitted under policy                                                                                                                              |
+| TS-SEC-MAN-01   | AC-IR-04       | Existing ADR 0012+0015 forces one shared App Server and one active managed turn; second managed turn serializes or denies, never silently relaxes unique active index                                                                                            |
+| TS-CFG-21..24   | AC-CFG-AUTH-02 | Config page arbitrary executable refused, invalid paths rejected, concurrent-write conflict blocked, unverified writer args prohibited; TS-CFG-17..20 keep original undo semantics                                                                               |
+| TS-SEC-TRACE-01 | AC-IR-13       | No reused test identifiers with differing definitions; TS-CFG-17..20 unchanged in §3.4, negative cases use 21..24                                                                                                                                                |
+| TS-SEC-TRACE-02 | AC-IR-14       | Android mockups MA-01..10 distinct from 16's MS-01..10, review collisions RC-01..16 distinct from 31's C1..C18                                                                                                                                                   |
+| TS-SEC-EVID-01  | AC-IR-15       | Temporary `EXDEV` evidence in 41 never satisfies DN-31 or reference-host replica/snapshot gates; no PASS without proper evidence                                                                                                                                 |
 
 **No test execution, ADR acceptance or implementation authorisation is implied.**
 Acceptance requires controlled disposable host/device environments
@@ -733,14 +733,14 @@ All cases NOT RUN. Functional success can only be
 claimed once required filesystem, provider and vault
 evidence/ADR is accepted, not just by passing mocked IPC.
 
-| Test | AC-CFG-AUTH-01 positive + negative acceptance |
-| --- | --- |
-| TS-CFG-17 | A valid new hook is validated against the provider's version/event/matcher/timeout/executable rules; reject malformed config, executable injection, unknown provider version or unsupported scope without write. |
-| TS-CFG-18 | Before editing or deleting a hook, the user sees whether restoration/undo is available and what content/controls will be affected; deny when previously reviewed bytes or effective controls differ. |
+| Test      | AC-CFG-AUTH-01 positive + negative acceptance                                                                                                                                                                                                                                 |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TS-CFG-17 | A valid new hook is validated against the provider's version/event/matcher/timeout/executable rules; reject malformed config, executable injection, unknown provider version or unsupported scope without write.                                                              |
+| TS-CFG-18 | Before editing or deleting a hook, the user sees whether restoration/undo is available and what content/controls will be affected; deny when previously reviewed bytes or effective controls differ.                                                                          |
 | TS-CFG-19 | For an explicitly reversible mutation, undo restores exact original bytes **only from the separately approved authenticated/sealed vault record**; missing/tampered/locked keyring returns a distinct error and changes no provider file. Never fabricate a previous version. |
-| TS-CFG-20 | No command text typed in the untrusted configuration page reaches an effectful provider command or terminal; native host-owned authoring is mandatory and has an independent authentication gate not provided by same-UID page data alone. |
+| TS-CFG-20 | No command text typed in the untrusted configuration page reaches an effectful provider command or terminal; native host-owned authoring is mandatory and has an independent authentication gate not provided by same-UID page data alone.                                    |
 
-**AC-CFG-AUTH-01** = pass only when *all four* cases
+**AC-CFG-AUTH-01** = pass only when _all four_ cases
 and both affirmative + denial paths pass on pinned provider
 versions with correct rollback, native review, and no loss
 of user-owned hooks. TS-CFG-21..24 / AC-CFG-AUTH-02
@@ -776,16 +776,16 @@ and read-only/synthetic **observations**
 Test IDs here are **future procedures**, not results. The source report
 CE-01..09 does NOT count as a passed product security mechanism.
 
-| Test ID | Acceptance | Pass/fail condition |
-| --- | --- | --- |
-| TS-DOCKER-01 | AC-DOCKER-01 | An unrestricted native/LP4 process retains the real CachyOS user's Docker group capability in the declared threat model; no unproven other-UID protection guarantee while a rootful Docker API remains accessible |
-| TS-DOCKER-02 | AC-DOCKER-01 | Proposed trusted approver actually protects signer, binary, unit, DB/WAL/anchor and human consent against every applicable admin delegate; if not, fail closed rather than reporting the authority secure |
+| Test ID      | Acceptance   | Pass/fail condition                                                                                                                                                                                                                                         |
+| ------------ | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TS-DOCKER-01 | AC-DOCKER-01 | An unrestricted native/LP4 process retains the real CachyOS user's Docker group capability in the declared threat model; no unproven other-UID protection guarantee while a rootful Docker API remains accessible                                           |
+| TS-DOCKER-02 | AC-DOCKER-01 | Proposed trusted approver actually protects signer, binary, unit, DB/WAL/anchor and human consent against every applicable admin delegate; if not, fail closed rather than reporting the authority secure                                                   |
 | TS-DOCKER-03 | AC-DOCKER-02 | Restricted OL3 worker starts and performs positive fake provider operations but cannot find/connect control or Docker sockets (including read-only binds, inherited FDs, alternative IPC, D-Bus, X11), tamper with trusted state or cause forbidden signals |
-| TS-DOCKER-04 | AC-DOCKER-03 | Pinned provider-specific in-place and replace-refresh fixtures show expected permitted refresh and rejected unsupported mode; no credential copying or broad unreviewed bind |
-| TS-DOCKER-05 | AC-DOCKER-05 | Before any separately approved host Docker change, the rootless-vs-on-demand privilege plan preserves documented existing workloads or lists concrete regressions, migrations, rollback and re-login requirements; **not authorised to execute** |
-| TS-DOCKER-06 | AC-DOCKER-04 | Full LP4 grant display warns of possible Docker root-level access, precise scope/expiry and impossibility of undoing previous malicious effects by device revocation |
- 
-**AC-DOCKER-01:** no false *protected authority* claim in presence
+| TS-DOCKER-04 | AC-DOCKER-03 | Pinned provider-specific in-place and replace-refresh fixtures show expected permitted refresh and rejected unsupported mode; no credential copying or broad unreviewed bind                                                                                |
+| TS-DOCKER-05 | AC-DOCKER-05 | Before any separately approved host Docker change, the rootless-vs-on-demand privilege plan preserves documented existing workloads or lists concrete regressions, migrations, rollback and re-login requirements; **not authorised to execute**            |
+| TS-DOCKER-06 | AC-DOCKER-04 | Full LP4 grant display warns of possible Docker root-level access, precise scope/expiry and impossibility of undoing previous malicious effects by device revocation                                                                                        |
+
+**AC-DOCKER-01:** no false _protected authority_ claim in presence
 of root-level delegation; if protection from this attacker is a
 required functional guarantee, it remains BLOCKED until proven.
 **AC-DOCKER-02:** both useful restricted function and negative
@@ -799,7 +799,6 @@ planning (not a product runtime test).
 No Docker API call, privilege escalation or real provider launch
 is authorised by writing these test criteria.
 
-
 ### 17.1 Composed B1 verification is different from kernel-primitives PASS
 
 [49](49-CACHYOS-COMPOSED-WORKER-SECURITY-CONTRACT.md)
@@ -807,7 +806,7 @@ maps `FX-B1-A..E` to current
 `FR-SEC-13 / TS-DOCKER-03 / AC-DOCKER-02`,
 `FR-PRF-12 / TS-DOCKER-04 / AC-DOCKER-03`,
 and `FR-ORC-04 / TS-SEC-OL3-02 / AC-IR-03`.
-These tests demand *both* useful fake-provider actions
+These tests demand _both_ useful fake-provider actions
 and negative broker/IPC/FD checks. The prior
 CachyOS report checked individual primitives,
 not a full composed provider sandbox. Current result:

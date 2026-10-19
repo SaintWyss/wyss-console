@@ -605,4 +605,3 @@ configuration authoring (row 14), model usage storage
 UX (row 29). All remain **unreviewed and unverified**.
 The score in §2.2 remains historical and must not
 be modified by counting newly written paragraphs as test PASS.
-

@@ -1243,4 +1243,3 @@ The desktop config and terminal capabilities must be separated
 Acceptance tests are in [20 §14](20-VERIFICATION-AND-ACCEPTANCE.md).
 UI visual review, contrast measurements and real keyboard/IME tests
 remain unperformed. No production changes are authorised.
-

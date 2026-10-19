@@ -100,7 +100,7 @@ report or PR comment, with no self-certified PASS.
 ### HIGH: persistence and remote input
 
 - After KDE logout, service crash, host crash, power cycle,
-  network switch and Android unlock, is the process *really*
+  network switch and Android unlock, is the process _really_
   alive or merely a saved tab? Does any UI confuse them?
 - Can retransmission duplicate a shell keypress or race between
   two phone/desktop writers? Are stream/claim epochs host bound?
@@ -159,7 +159,7 @@ Write an independently authored report under
 `docs/architecture/reviews/` (or a PR review) containing:
 
 - Final **PASS / PASS-WITH-BLOCKERS / REJECT** verdict
-  on *paper readiness only*. Neither PASS variant authorises code.
+  on _paper readiness only_. Neither PASS variant authorises code.
 - Findings table: ID, severity (CRITICAL/HIGH/MEDIUM/LOW),
   affected requirement/ADR/contract, exact file and section,
   observed evidence vs inferred claim, security/user impact,
@@ -189,7 +189,6 @@ No request to run experiments, change credentials, install
 packages or merge code is included. Any later verification
 and final approval is a separate action by the owner.
 
-
 ## 7. Post-REJECT third-review assignment (2026-10-14)
 
 A first post-owner adversarial report is now at
@@ -209,7 +208,7 @@ existing Claude report is independent.
 
 Required response: independent PASS/REJECT **on paper
 only**, and for each IR-01..15 either:
-(a) verified mitigated in *specification only*, with
+(a) verified mitigated in _specification only_, with
 exact file/section and correct blocked implementation
 gate, (b) still defective, with counterexample,
 or (c) requiring technical evidence, explicitly NOT RUN.

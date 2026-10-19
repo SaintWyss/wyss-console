@@ -7,7 +7,7 @@ Evidence and review gates: [36](36-PLANNING-CLOSURE-AND-VERIFICATION-GATES.md).
 
 ## 1. Explicit handoff package, F11a (SM-HANDOFF)
 
-A handoff is a deliberate transfer of *selected context* to a **new** session.
+A handoff is a deliberate transfer of _selected context_ to a **new** session.
 The receiving session never inherits the sender's model-internal conversation,
 credential, tool set, project trust or policy approvals. The user's source
 session stays intact.
@@ -44,7 +44,7 @@ DRAFT -> REVIEWING -> CONFIRMED -> PREPARING_RECEIVER -> DELIVERED
   DELIVERED -> terminal; it does not mean the receiver succeeded
 ```
 
-The owner must see *exactly the bytes* selected for the receiving
+The owner must see _exactly the bytes_ selected for the receiving
 first input plus target identity/profile, current workspace and
 authority difference. Confirmation binds the immutable digest.
 The target starts under its normal native/managed launcher and
@@ -94,6 +94,7 @@ and an explicit reason. No direct write where DN-21/DN-31 are blocked.
 ### 2.2 OpenCode static sources to investigate
 
 Source docs read on 2026-10-13, NOT pinned to a matching installation:
+
 - https://docs.opencode.ai/docs/config/
 - https://docs.opencode.ai/docs/skills/
 - https://dev.opencode.ai/v2/docs/config/
@@ -106,7 +107,7 @@ be treated as one observed precedence rule. An adapter must discover
 catalogue, handle JSONC round trip and comments, and refuse to
 claim a global or effective state based on untested precedence.
 The skills also overlap with Claude-compatible directories:
-inventory must label their *provider and scope*, never treat one
+inventory must label their _provider and scope_, never treat one
 shared disk file as separately writable independent copies.
 
 **Read contract**: enumerate recognised files without following
@@ -179,10 +180,11 @@ no plaintext log/event or unencrypted backup. An action
 changing a hook while the provider holds open config files
 must handle L1/L2/L5, not promise atomic replacement.
 
-**Additional negative tests TS-CFG-21..24**, *not* redefining
+**Additional negative tests TS-CFG-21..24**, _not_ redefining
 the already specified TS-CFG-17..20 in 20 §3.4 (which
 retain create/validate, edit/delete undo disclosure, sealed
 vault undo and no executable from page):
+
 - 21: compromised config webview injects executable text into
   native authoring IPC -> backend rejects; native dialog cannot
   be confirmed by the page.
@@ -191,15 +193,15 @@ vault undo and no executable from page):
   no provider file change.
 - 23: concurrent external edit between review and recheck ->
   STALE/CONFLICT, no unreviewed overwrite; preserve previous
-  provider bytes according to the *approved* transaction if any.
+  provider bytes according to the _approved_ transaction if any.
 - 24: approved provider-native command closed-list check:
   unknown arguments or executable identity are rejected; an
   observed provider-version change invalidates evidence.
-These are contracts/test plans, not proofs of safe writes.
+  These are contracts/test plans, not proofs of safe writes.
 
 ## 4. Native Android UX: screen-state sketches
 
-These sketches declare *interaction hierarchy*, not pixel-perfect
+These sketches declare _interaction hierarchy_, not pixel-perfect
 visual design, brand identity or approved artwork.
 Only non-sensitive metadata is visible before unlock.
 
@@ -303,7 +305,7 @@ persistent analytics store or migration is authorised.
 
 S15 (agent actions), S16 (remote grants) and S17 (pairing)
 need mockups and error-state maps tied to 13 and 16.
-Use the Android MA-01..10 above (distinct from 16's MS-01..10) as *state coverage*, not
+Use the Android MA-01..10 above (distinct from 16's MS-01..10) as _state coverage_, not
 approved final visual art. Desktop wireframes must preserve
 two distinct capability surfaces (config vs terminal) and
 identify which plane an action affects.

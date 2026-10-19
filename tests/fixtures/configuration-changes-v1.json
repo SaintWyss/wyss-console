@@ -1,0 +1,252 @@
+{
+  "applied": {
+    "change": "00000000000000000000000000000001",
+    "outcome": "applied",
+    "revision": 0
+  },
+  "applied_refused": {
+    "change": "00000000000000000000000000000002",
+    "outcome": "refused_by_user",
+    "revision": 0
+  },
+  "applied_stop": {
+    "change": "00000000000000000000000000000003",
+    "outcome": "applied",
+    "revision": 0
+  },
+  "done": {
+    "done": true
+  },
+  "history": {
+    "changes": [
+      {
+        "at": 0,
+        "h0": "7f366447b1e6b44a882f693811d163154e0c62fc63a3ced4205b53f2cf92a868",
+        "h1": "01850b310c572cd490732f77e6da1e6896e10acfed59a7914077c48290e9e348",
+        "id": "00000000000000000000000000000003",
+        "item": "00000000000000000000000000000004",
+        "operation": "park_hook",
+        "outcome": "applied",
+        "prior": null,
+        "provider": "claude_code",
+        "record": "00000000000000000000000000000005",
+        "risk": "normal",
+        "source": "claude_user_settings",
+        "undoes": null
+      },
+      {
+        "at": 0,
+        "h0": "7f366447b1e6b44a882f693811d163154e0c62fc63a3ced4205b53f2cf92a868",
+        "h1": null,
+        "id": "00000000000000000000000000000002",
+        "item": "00000000000000000000000000000006",
+        "operation": "park_hook",
+        "outcome": "refused_by_user",
+        "prior": null,
+        "provider": "claude_code",
+        "record": null,
+        "risk": "weakens_security",
+        "source": "claude_user_settings",
+        "undoes": null
+      },
+      {
+        "at": 0,
+        "h0": "632d76ce0ef938de27b85006956cf943d78d065d2bd81a5b13b2ac4f86091f8c",
+        "h1": "7f366447b1e6b44a882f693811d163154e0c62fc63a3ced4205b53f2cf92a868",
+        "id": "00000000000000000000000000000001",
+        "item": "00000000000000000000000000000006",
+        "operation": "park_hook",
+        "outcome": "applied",
+        "prior": null,
+        "provider": "claude_code",
+        "record": "00000000000000000000000000000007",
+        "risk": "weakens_security",
+        "source": "claude_user_settings",
+        "undoes": null
+      }
+    ],
+    "next": null
+  },
+  "plan_all_hooks": {
+    "diff": [
+      {
+        "kind": "added",
+        "text": "\"disableAllHooks\": true"
+      }
+    ],
+    "effect": "hooks_new_sessions_checked",
+    "expires_in_seconds": 60,
+    "holds_hidden_values": false,
+    "id": "00000000000000000000000000000008",
+    "managed_effect": null,
+    "name": "All hooks",
+    "needs_native_dialog": true,
+    "operation": "disable_all_hooks",
+    "provider": "claude_code",
+    "risk": "weakens_security",
+    "scope": "global",
+    "shared_with_declared_writers": false,
+    "source": "claude_user_settings",
+    "storage": null,
+    "undoes": null
+  },
+  "plan_codex_mcp": {
+    "diff": [
+      {
+        "kind": "removed",
+        "text": "enabled: (not set, so on)"
+      },
+      {
+        "kind": "added",
+        "text": "enabled: false"
+      }
+    ],
+    "effect": "codex_mcp_checked",
+    "expires_in_seconds": 60,
+    "holds_hidden_values": false,
+    "id": "00000000000000000000000000000009",
+    "managed_effect": {
+      "after": "available",
+      "before": "available",
+      "predicted": true
+    },
+    "name": "wyss_session",
+    "needs_native_dialog": false,
+    "operation": "codex_mcp_off",
+    "provider": "codex",
+    "risk": "normal",
+    "scope": "global",
+    "shared_with_declared_writers": false,
+    "source": "codex_user_config",
+    "storage": null,
+    "undoes": null
+  },
+  "plan_codex_skill": {
+    "diff": [
+      {
+        "kind": "removed",
+        "text": "enabled: false"
+      },
+      {
+        "kind": "added",
+        "text": "enabled: true"
+      }
+    ],
+    "effect": "codex_skill_listed",
+    "expires_in_seconds": 60,
+    "holds_hidden_values": false,
+    "id": "0000000000000000000000000000000a",
+    "managed_effect": {
+      "after": "available",
+      "before": "available",
+      "predicted": true
+    },
+    "name": "alpha",
+    "needs_native_dialog": false,
+    "operation": "codex_skill_on",
+    "provider": "codex",
+    "risk": "normal",
+    "scope": "global",
+    "shared_with_declared_writers": false,
+    "source": "codex_user_config",
+    "storage": null,
+    "undoes": null
+  },
+  "plan_park_blocking": {
+    "diff": [
+      {
+        "kind": "removed",
+        "text": "command: guard.sh"
+      },
+      {
+        "kind": "removed",
+        "text": "type: command"
+      }
+    ],
+    "effect": "hooks_new_sessions_checked",
+    "expires_in_seconds": 60,
+    "holds_hidden_values": false,
+    "id": "0000000000000000000000000000000b",
+    "managed_effect": null,
+    "name": "PreToolUse · Bash",
+    "needs_native_dialog": true,
+    "operation": "park_hook",
+    "provider": "claude_code",
+    "risk": "weakens_security",
+    "scope": "global",
+    "shared_with_declared_writers": false,
+    "source": "claude_user_settings",
+    "storage": "sealed",
+    "undoes": null
+  },
+  "plan_restore": {
+    "diff": [
+      {
+        "kind": "added",
+        "text": "Stop[0].hooks[0].command: stop.sh"
+      },
+      {
+        "kind": "added",
+        "text": "Stop[0].hooks[0].type: command"
+      }
+    ],
+    "effect": "hooks_new_sessions_checked",
+    "expires_in_seconds": 60,
+    "holds_hidden_values": false,
+    "id": "0000000000000000000000000000000c",
+    "managed_effect": null,
+    "name": "Stop · *",
+    "needs_native_dialog": true,
+    "operation": "restore_hook",
+    "provider": "claude_code",
+    "risk": "executes_code",
+    "scope": "global",
+    "shared_with_declared_writers": false,
+    "source": "claude_user_settings",
+    "storage": null,
+    "undoes": null
+  },
+  "plan_skill": {
+    "diff": [
+      {
+        "kind": "added",
+        "text": "\"noisy\": \"off\""
+      }
+    ],
+    "effect": "skills_new_sessions_checked",
+    "expires_in_seconds": 60,
+    "holds_hidden_values": false,
+    "id": "0000000000000000000000000000000d",
+    "managed_effect": null,
+    "name": "noisy",
+    "needs_native_dialog": false,
+    "operation": "skill_off",
+    "provider": "claude_code",
+    "risk": "normal",
+    "scope": "global",
+    "shared_with_declared_writers": false,
+    "source": "claude_user_settings",
+    "storage": null,
+    "undoes": null
+  },
+  "records": [
+    {
+      "created": 0,
+      "id": "00000000000000000000000000000007",
+      "label": "PreToolUse · Bash",
+      "past_retention": false,
+      "protection": "sealed",
+      "secret_bearing": false,
+      "state": "parked"
+    },
+    {
+      "created": 0,
+      "id": "00000000000000000000000000000005",
+      "label": "Stop · *",
+      "past_retention": false,
+      "protection": "sealed",
+      "secret_bearing": false,
+      "state": "parked"
+    }
+  ]
+}

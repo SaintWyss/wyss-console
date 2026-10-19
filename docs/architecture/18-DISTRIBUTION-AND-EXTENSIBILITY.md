@@ -552,7 +552,7 @@ own Linux computers and separately selected native Android client.
 No public distribution, external support/SLA, repository publication,
 release servers or user-facing packaging ecosystem is authorised.
 ADR 0027 remains in force. All earlier public delivery designs in
-§3–§11 remain *conditional research for a different future scope*,
+§3–§11 remain _conditional research for a different future scope_,
 not current required implementation. DN-49/51 become not-applicable
 under current personal scope; DN-50 defaults to no network update check.
 
@@ -561,7 +561,7 @@ repeatable local install without damaging existing state; a supported
 update path, versioned migrations and verified rollback; private
 backups and key-loss handling; user-visible version, provenance
 and supported reference hardware; dependency/licence checks for any
-software actually shipped *even privately*. The scope cannot be used
+software actually shipped _even privately_. The scope cannot be used
 to skip security maintenance or protecting user secrets.
 The target is specified by FR-DIST-07 in
 [02 §4](02-REQUIREMENTS.md), TS-FINAL-21 and its acceptance in
@@ -570,4 +570,3 @@ The target is specified by FR-DIST-07 in
 Changing back to public distribution requires a separate owner
 scope decision, independent technical/legal/security review
 and reopening the conditional DN-49/51 choices.
-

@@ -22,5 +22,12 @@ pub mod turns;
 /// packaged with, in hex, or `None` for a build that was not packaged: only a packaged
 /// build installs and starts an authority of its own.
 pub fn run(authority_digest: Option<&'static str>) {
-    desktop::run(authority_digest);
+    desktop::run(authority_digest, None);
+}
+
+pub use desktop::Extension;
+
+/// `run` with commands the binary brings (see `Extension`).
+pub fn run_with(authority_digest: Option<&'static str>, extension: Extension) {
+    desktop::run(authority_digest, Some(extension));
 }

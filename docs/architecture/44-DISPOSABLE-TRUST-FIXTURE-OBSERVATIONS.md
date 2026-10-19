@@ -10,6 +10,7 @@ the test container, not extrapolations about running
 Claude Code/Codex/Hermes or the owner's computers.
 
 Context:
+
 - [43](43-AUTHORITY-ISOLATION-FEASIBILITY-MATRIX.md) —
   architectural A (protected authority) versus B (restricted workers)
 - [42](42-POST-REJECT-CORRECTIVE-PLAN.md) —
@@ -20,19 +21,19 @@ Context:
 
 ## 1. Fixture/environment details and rollback
 
-| Attribute | Actual setup |
-| --- | --- |
-| Kernel | Linux 6.18.44, isolated tool container |
-| Interpreter | Python 3.13.5; cryptography 46.0.4 for mock Ed25519 signatures |
-| Authority | Disposable Python AF_UNIX mock, real OS UID **1** (`daemon`); not wyss-control |
-| Owner/native attacker | Disposable Python client, real OS UID **65534** (`nobody`) |
-| Trusted signer | Another disposable Python signer, real OS UID **33** (`www-data`) |
-| Setup controller | Root **inside the isolated container only**, to set ownership/run test identities; not the owner's desktop |
-| Temporary data | Python `TemporaryDirectory` in `/tmp`, one random Ed25519 mock key, dummy authority state/binary/unit, dummy provider auth with literal `NO_REAL_SECRET` |
-| Security-sensitive real data | **NONE**. No provider login, home, keyring, source-code install, actual approval socket, application binary, network listener or remote device |
-| Cleanup | The test runner closed its mock server, removed the entire temporary directory and then deleted its own throwaway fixture script/output |
-| Permissions | Authority/signer/provider home directories `0700`, mock private files `0600`; mock proposal/approval socket `0666` in a separately controlled `0755` traversable directory |
-| Scope | One unprivileged same-user adversary versus genuinely distinct protected UIDs. The writable public socket was **intentionally open to everyone** so cryptographic verification, not connection denial, decides approvals |
+| Attribute                    | Actual setup                                                                                                                                                                                                             |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Kernel                       | Linux 6.18.44, isolated tool container                                                                                                                                                                                   |
+| Interpreter                  | Python 3.13.5; cryptography 46.0.4 for mock Ed25519 signatures                                                                                                                                                           |
+| Authority                    | Disposable Python AF_UNIX mock, real OS UID **1** (`daemon`); not wyss-control                                                                                                                                           |
+| Owner/native attacker        | Disposable Python client, real OS UID **65534** (`nobody`)                                                                                                                                                               |
+| Trusted signer               | Another disposable Python signer, real OS UID **33** (`www-data`)                                                                                                                                                        |
+| Setup controller             | Root **inside the isolated container only**, to set ownership/run test identities; not the owner's desktop                                                                                                               |
+| Temporary data               | Python `TemporaryDirectory` in `/tmp`, one random Ed25519 mock key, dummy authority state/binary/unit, dummy provider auth with literal `NO_REAL_SECRET`                                                                 |
+| Security-sensitive real data | **NONE**. No provider login, home, keyring, source-code install, actual approval socket, application binary, network listener or remote device                                                                           |
+| Cleanup                      | The test runner closed its mock server, removed the entire temporary directory and then deleted its own throwaway fixture script/output                                                                                  |
+| Permissions                  | Authority/signer/provider home directories `0700`, mock private files `0600`; mock proposal/approval socket `0666` in a separately controlled `0755` traversable directory                                               |
+| Scope                        | One unprivileged same-user adversary versus genuinely distinct protected UIDs. The writable public socket was **intentionally open to everyone** so cryptographic verification, not connection denial, decides approvals |
 
 The runner used `subprocess.Popen`/`subprocess.run` with explicit
 `setgroups([])`, `setgid(uid)`, `setuid(uid)` before executing
@@ -41,6 +42,7 @@ each mock component. It did not call the actual application.
 ## 2. Synthetic protected-authority approval contract
 
 The deliberately minimal server accepted two JSON request types:
+
 - `proposal`: always responds `PENDING_NO_EFFECT`; never writes state
   or signs an approval.
 - `approve`: checks a detached **Ed25519** signature over a
@@ -63,20 +65,20 @@ trusted executable or edit the authority state**.
 
 ## 3. Actual synthetic test results
 
-| Test | Expected | Observation | Narrow verdict |
-| --- | --- | --- | --- |
-| FT-01 untrusted `proposal` | No effect | `PENDING_NO_EFFECT` | PASS |
-| FT-02 approved exact payload from trusted mock signer | Single dummy update | `ACCEPTED`, `effects=1` | PASS |
-| FT-03 identical signed intent again | Reject repeat | `DUPLICATE_REFUSED` | PASS |
-| FT-04 attacker-submitted forged signature | Reject before effect | `DENIED` | PASS |
-| FT-05 modified signed action (`delete_any_file`) with original signature | Reject altered canonical bytes | `DENIED`, invalid signature | PASS |
-| FT-06 valid signature on expired action | Reject expired | `DENIED` | PASS |
-| FT-07 valid signature for wrong project | Reject scope mismatch | `DENIED` | PASS |
-| FT-08 different UID tries to read/write private state, binary, unit and signer key | OS permission refused | All eight read/write attempts returned `EACCES` (errno 13) | PASS |
-| FT-09 mock authority restarted; resend valid intent | No second dummy effect | `DUPLICATE_REFUSED`, dummy `effects=1` | PASS |
-| FT-10 same UID reads dummy provider auth | Works | `READ_OK NO_REAL_SECRET` | PASS |
-| FT-11 different UID reads owner-private dummy provider auth | Refused | `READ_DENIED 13` | PASS |
-| FT-12 rootless user namespace under original host UID | Does **not** restrict same user's files | `unshare -Ur` printed UID `0` inside namespace **and read `NO_REAL_SECRET`** from host-UID-owned file | PASS (negative security proof) |
+| Test                                                                               | Expected                                | Observation                                                                                           | Narrow verdict                 |
+| ---------------------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------ |
+| FT-01 untrusted `proposal`                                                         | No effect                               | `PENDING_NO_EFFECT`                                                                                   | PASS                           |
+| FT-02 approved exact payload from trusted mock signer                              | Single dummy update                     | `ACCEPTED`, `effects=1`                                                                               | PASS                           |
+| FT-03 identical signed intent again                                                | Reject repeat                           | `DUPLICATE_REFUSED`                                                                                   | PASS                           |
+| FT-04 attacker-submitted forged signature                                          | Reject before effect                    | `DENIED`                                                                                              | PASS                           |
+| FT-05 modified signed action (`delete_any_file`) with original signature           | Reject altered canonical bytes          | `DENIED`, invalid signature                                                                           | PASS                           |
+| FT-06 valid signature on expired action                                            | Reject expired                          | `DENIED`                                                                                              | PASS                           |
+| FT-07 valid signature for wrong project                                            | Reject scope mismatch                   | `DENIED`                                                                                              | PASS                           |
+| FT-08 different UID tries to read/write private state, binary, unit and signer key | OS permission refused                   | All eight read/write attempts returned `EACCES` (errno 13)                                            | PASS                           |
+| FT-09 mock authority restarted; resend valid intent                                | No second dummy effect                  | `DUPLICATE_REFUSED`, dummy `effects=1`                                                                | PASS                           |
+| FT-10 same UID reads dummy provider auth                                           | Works                                   | `READ_OK NO_REAL_SECRET`                                                                              | PASS                           |
+| FT-11 different UID reads owner-private dummy provider auth                        | Refused                                 | `READ_DENIED 13`                                                                                      | PASS                           |
+| FT-12 rootless user namespace under original host UID                              | Does **not** restrict same user's files | `unshare -Ur` printed UID `0` inside namespace **and read `NO_REAL_SECRET`** from host-UID-owned file | PASS (negative security proof) |
 
 ### Important exclusions from those PASS verdicts
 
@@ -92,7 +94,7 @@ trusted executable or edit the authority state**.
   If the real effect and ledger commit cannot be atomic,
   a crash may remain ambiguous: no automatic replay.
 - Ordinary OS UID separation protects only from the simulated
-  *unprivileged* different-UID attacker. It does not protect
+  _unprivileged_ different-UID attacker. It does not protect
   from root, capabilities, a compromised privileged process,
   mutable shared executable dependencies, credential leakage
   or an incorrect real service installation.
@@ -101,7 +103,7 @@ trusted executable or edit the authority state**.
   signed installation, actual Wyss control DB/lock/witness,
   runtime namespace or real user session was created or tested.
 - The rootless namespace observation shows that UID `0`
-  *inside* a user namespace does not automatically confer
+  _inside_ a user namespace does not automatically confer
   a distinct original-host security principal. A working
   B sandbox needs actual OS access rules, not just a
   remapped displayed UID.
@@ -123,10 +125,10 @@ Two new disposable directories were made:
 `work/src` (allowed) and `private` (denied destination),
 with a dummy file name `policy.txt`.
 
-| Test | Procedure | Actual outcome |
-| --- | --- | --- |
-| FT-13 path precheck then path-based write | Resolve/approve `work/src/policy.txt`; rename `src` aside; replace original `src` with a symlink to `private`; perform a `Path.write_text` on the formerly validated pathname | **REDIRECTED**: `private/policy.txt` contains dummy `MOCK_UNSAFE_WRITE` |
-| FT-14 anchored directory descriptor | Open the verified allowed directory with `O_DIRECTORY|O_NOFOLLOW`; rename directory; install the same symlink; create relative filename via `os.open(dir_fd=validated_fd, O_CREAT|O_EXCL|O_NOFOLLOW)` | **NOT_REDIRECTED**: dummy file created in moved `src-saved`; `private/anchored.txt` does not exist |
+| Test                                      | Procedure                                                                                                                                                                     | Actual outcome                                                                                                              |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| FT-13 path precheck then path-based write | Resolve/approve `work/src/policy.txt`; rename `src` aside; replace original `src` with a symlink to `private`; perform a `Path.write_text` on the formerly validated pathname | **REDIRECTED**: `private/policy.txt` contains dummy `MOCK_UNSAFE_WRITE`                                                     |
+| FT-14 anchored directory descriptor       | Open the verified allowed directory with `O_DIRECTORY                                                                                                                         | O_NOFOLLOW`; rename directory; install the same symlink; create relative filename via `os.open(dir_fd=validated_fd, O_CREAT | O_EXCL | O_NOFOLLOW)` | **NOT_REDIRECTED**: dummy file created in moved `src-saved`; `private/anchored.txt` does not exist |
 
 These demonstrate a **class** of validation/use race and a
 narrow descriptor-based mitigation. They do not prove that
@@ -155,7 +157,7 @@ the success of a descriptor-anchored name creation.
    [43](43-AUTHORITY-ISOLATION-FEASIBILITY-MATRIX.md),
    **not** a full security architecture.
 2. A separately protected mock signer can authorise
-   *specific immutable intent bytes* without giving the
+   _specific immutable intent bytes_ without giving the
    requester permission to sign. But the **real human
    approval channel** and trusted verifier ownership
    are still unproven.
@@ -192,7 +194,7 @@ real authority, a new proposed design must specify:
   observations of Codex managed runtime without receiving
   access to unrelated user credentials or weakening the
   accepted ADR 0018 token-refresh bound.
-- For *B*, a per-provider capability matrix verifying
+- For _B_, a per-provider capability matrix verifying
   auth refresh, profiles, hooks, MCP/subagents,
   project and writable paths, network, PTY and keyring
   in disposable mock environments before real sign-ins.
@@ -223,13 +225,13 @@ mode `0600`, and
 A separate `elsewhere/` directory was the canary.
 This did not execute original Wyss or modify owner files.
 
-| Test | Submitted relative path | Observed | Meaning (fixture only) |
-| --- | --- | --- | --- |
-| FT-15 valid nested file | `nested/ok.txt` | **CREATED** | Allowed open still usable |
-| FT-16 parent escape | `../elsewhere/bad.txt` | **REFUSED EXDEV** (errno 18) | Escape cannot resolve |
-| FT-17 symlink component to outside | `redir/escape.txt` | **REFUSED ELOOP** (errno 40) | Symlink ancestor rejected |
-| FT-18 absolute pathname | `/tmp/escape.txt` | **REFUSED EXDEV** (errno 18) | Absolute path cannot bypass root |
-| FT-19 canary outside | inspect `elsewhere/` | **UNCHANGED** | None of refused writes reached canary |
+| Test                               | Submitted relative path | Observed                     | Meaning (fixture only)                |
+| ---------------------------------- | ----------------------- | ---------------------------- | ------------------------------------- |
+| FT-15 valid nested file            | `nested/ok.txt`         | **CREATED**                  | Allowed open still usable             |
+| FT-16 parent escape                | `../elsewhere/bad.txt`  | **REFUSED EXDEV** (errno 18) | Escape cannot resolve                 |
+| FT-17 symlink component to outside | `redir/escape.txt`      | **REFUSED ELOOP** (errno 40) | Symlink ancestor rejected             |
+| FT-18 absolute pathname            | `/tmp/escape.txt`       | **REFUSED EXDEV** (errno 18) | Absolute path cannot bypass root      |
+| FT-19 canary outside               | inspect `elsewhere/`    | **UNCHANGED**                | None of refused writes reached canary |
 
 All fixture files were automatically removed. The Linux
 `openat2(2)` manual describes these resolution restrictions
@@ -238,7 +240,7 @@ and `EAGAIN` on races when the kernel cannot ensure
 https://man7.org/linux/man-pages/man2/openat2.2.html
 
 **What this does not prove:** an actual file adapter safely
-handles user-owned symlinks in *permitted* ancestors,
+handles user-owned symlinks in _permitted_ ancestors,
 hard links, shared/mutable mounts, Btrfs snapshots,
 concurrent providers with open descriptors, long-lived
 file locks, backups, rollbacks and exact loss-free
@@ -265,7 +267,7 @@ The next proposed B alternative was to test a Linux
 Landlock policy applied to a **single same-host-UID
 synthetic worker**, allowing a dedicated mock provider
 token but denying access to the mock authority. This
-would be an *additional* unprivileged filesystem
+would be an _additional_ unprivileged filesystem
 policy, **not** separate-UID protection or proof of
 complete isolation from same-UID IPC, shared session
 D-Bus, inherited file descriptors or process
@@ -296,7 +298,7 @@ No claim that a restriction succeeded or failed
 under a running Landlock policy can be made.
 
 Linux documentation identifies Landlock as an
-unprivileged, *stackable* LSM whose restrictions
+unprivileged, _stackable_ LSM whose restrictions
 are inherited by descendants and require the
 kernel feature enabled at boot. Other outside
 processes of the same user that were **never

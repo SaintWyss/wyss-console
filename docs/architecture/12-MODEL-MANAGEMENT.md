@@ -462,7 +462,7 @@ accepted.
 Target directions in [32](32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md)
 supersede the earlier **owner-choice assumptions**, not accepted ADRs:
 
-- **DN-09=C:** persist versioned *observed* session model and reroute events
+- **DN-09=C:** persist versioned _observed_ session model and reroute events
   where actually reported; ADR 0031 remains Proposed and its classifier
   extension unapproved.
 - **DN-10=C (new):** infer effective configuration statically, with optional
@@ -470,7 +470,7 @@ supersede the earlier **owner-choice assumptions**, not accepted ADRs:
 - **DN-38=D (new):** native visual model/effort selection via verified
   provider mechanism only; never silent terminal injection.
 - **DN-42=C:** managed model/effort selection at session and per-turn scope;
-  requires a *separate* authority/security ADR, an accepted catalogue
+  requires a _separate_ authority/security ADR, an accepted catalogue
   guard and independent security review.
 - **DN-43=D:** historical provider-reported usage/limit metadata, with a
   separately versioned, bounded privacy and retention contract; never
@@ -483,4 +483,3 @@ do not infer money from tokens. Contracts/tests:
 [33](33-CROSS-DOMAIN-RECONCILIATION.md), [02 §4](02-REQUIREMENTS.md)
 and [20 §14](20-VERIFICATION-AND-ACCEPTANCE.md). Source protocol
 behaviour is still not measured (OQ-50/OQ-51). No ADR is accepted.
-

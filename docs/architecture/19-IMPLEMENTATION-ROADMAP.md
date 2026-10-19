@@ -445,4 +445,3 @@ metric history store are in §2–§6 of that document. These
 are design prerequisites to F4a/F4b, F5, F6a, F10b and F11a,
 **not** approval to implement a phase. Their tests are specified
 in [20 §15](20-VERIFICATION-AND-ACCEPTANCE.md).
-

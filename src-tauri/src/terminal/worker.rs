@@ -45,7 +45,7 @@ impl Drop for ProcessGuard {
 }
 
 fn open(
-    shell: PathBuf,
+    launch: Launch,
     cwd: PathBuf,
     size: TerminalSize,
 ) -> Result<(IoHandles, ProcessGuard), TerminalError> {
@@ -76,10 +76,16 @@ fn open(
         .master
         .take_writer()
         .map_err(|error| TerminalError::context(ErrorCode::InternalPty, error))?;
-    let mut command = CommandBuilder::new(shell);
-    command.arg("-i");
+    let mut command = CommandBuilder::new(launch.program);
+    command.args(launch.args);
     command.cwd(cwd);
     command.env("TERM", "xterm-256color");
+    for name in launch.remove_env {
+        command.env_remove(name);
+    }
+    for (name, value) in launch.env {
+        command.env(name, value);
+    }
     let child = pair
         .slave
         .spawn_command(command)
@@ -228,7 +234,7 @@ fn signal_group(group: Option<i32>, signal: Signal) {
 }
 
 pub(crate) fn run(
-    shell: PathBuf,
+    launch: Launch,
     cwd: PathBuf,
     size: TerminalSize,
     shared: Arc<Shared>,
@@ -236,7 +242,7 @@ pub(crate) fn run(
     mut wake: UnixStream,
     boot: SyncSender<Result<TerminalInfo, TerminalError>>,
 ) {
-    let opened = open(shell, cwd, size);
+    let opened = open(launch, cwd, size);
     let (handles, mut process) = match opened {
         Ok(resources) => resources,
         Err(error) => {

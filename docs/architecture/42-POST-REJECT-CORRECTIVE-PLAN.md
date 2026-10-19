@@ -30,8 +30,8 @@ a per-run restricted principal + IPC ACL/namespace/mount/network
 boundary that retains the provider's required functionality and
 prevents its credentials from reaching the authority, OR stop
 native automation and keep native execution explicitly manual
-until an acceptable model is proven. The second is a *temporary
-blocked capability*, NOT silent removal of final OL3 scope.
+until an acceptable model is proven. The second is a _temporary
+blocked capability_, NOT silent removal of final OL3 scope.
 The exact safe native profile and authenticator are **OPEN**.
 
 The existing managed authority's same-UID trust model cannot be
@@ -50,7 +50,7 @@ control under the chosen boundary.
 
 A remote `terminal.write` grant equals remote full shell/account
 authority. Existing gateway same-UID stored grants are also
-tamperable *by a compromised host-user shell*; revoking an enrolled
+tamperable _by a compromised host-user shell_; revoking an enrolled
 phone can prevent future normal gateway calls, but **cannot
 reverse commands or guarantee restoring the account's integrity**.
 The attacker may have installed user services, SSH keys,
@@ -61,7 +61,7 @@ Do not assert that gateway revocation alone repairs compromise.
 
 **Candidate safe defaults (owner trade-off not yet accepted):**
 `LP4.write` denied while no verified local graphical login
-session exists; `LP4-away` is a *distinct*, explicit, revocable
+session exists; `LP4-away` is a _distinct_, explicit, revocable
 host-granted feature that requires a separate owner consent.
 Default LP4 expiry should be short (candidate <= 15 minutes per
 exclusive input claim, never an automatic 7-day full-write grant).
@@ -87,7 +87,7 @@ actual destination, controls, step/attempt and observed source
 context. While C-A01 is unresolved, even that confirmation
 cannot clear `BLOCKED_TRUST_BOUNDARY`.
 
-Automatic model-produced *data-only* handoff is permissible only
+Automatic model-produced _data-only_ handoff is permissible only
 to managed/proposal-only destinations after provider and policy
 verification; it **must not** trigger a full-account native
 agent. A text prompt can cause the native agent to perform effects:
@@ -99,20 +99,20 @@ A stale revision or changed bytes invalidates that approval.
 
 ## 2. High-priority corrections
 
-| IR | Corrective design disposition | Gate |
-| --- | --- | --- |
-| IR-04 | DN-08=A and DN-42=C are future product requirements, **not active IF-ORC invariants**. Existing ADR 0012 allows one shared App Server and ADR 0015 permits only one global active managed turn. Keep managed steps serialized until an independently reviewed ADR changes both. ADR 0031 remains Proposed | New authority ADR + isolated concurrency/selection tests |
-| IR-05 | Hermes planner proposes only typed allowlisted actions. Freeform `shell.run`, interpreters, encoded loaders and other opaque command execution are **DENIED from Hermes** by default. Existing Wyss glob-based denial logic is not a semantic shell sandbox. No "approved summary" as replacement for literal effects | Pinned policy code review + E-HRM-09 adversarial corpus |
-| IR-06 | Bind input claim to unpredictable fresh gateway boot identity and a monotonically increasing connection epoch. A restart **invalidates old claims**. On ACK-after-effect ambiguity, never blind-replay shell input; return `OUTCOME_UNKNOWN` and require review. Typed authority requests must use the authority's durable intent-idempotency mechanism, not gateway RAM as proof of exactly-once | Power-fail-between-effect-and-ACK test |
-| IR-07 | Host-supervised PTYs/process trees need independently measurable process scopes/cgroup tracking. Treat survivors escaping the scope as `ORPHANS_POSSIBLE`/UNKNOWN, not necessarily terminated. Prevent automatic retries while ownership is ambiguous; a cgroup alone cannot prove absence of persistence a full-account user process could create | VM logout, crash and process-escape adversarial test |
-| IR-08 | An active, paused, waiting-approval or recovering finite OL3 run prevents host idle-exit via a bounded keepalive from the headless coordinator. Zero terminal + zero viewer alone is insufficient. Service restart throttling is a surfaced `HOST_UNAVAILABLE` pipeline state | Host lifecycle state tests |
-| IR-09 | PTY-owning supervisor must remain alive when one untrusted terminal screen parser fails. Parser isolated per terminal under separate low-privilege processing scope and measured memory/CPU caps. If its screen checkpoint fails, only fidelity degrades; do not silently kill PTY or other agents | Adversarial escape/OOM per-terminal crash test |
-| IR-10 | Presence key properties and origin attestation must be explicitly checked for LP4; missing hardware-based evidence defaults to read-only while pending owner risk acceptance | Physical Android device with/without TEE/StrongBox |
-| IR-11 | Device revocation blocks new delegated approvals and by default pauses pipeline dispatch whose last approval depends on that device; already-running full-account native processes may continue and must be reported as not stopped | Revocation/pipeline concurrency test |
-| IR-12 | Provider-file writes, vault restore/undo and remote `config.request` apply stay `BLOCKED_FILESYSTEM` pending DN-21/31. A closed keyring in a lingered no-login host yields `VAULT_LOCKED_NO_SESSION`, no guessed unlock, remote data exposure or automatic apply | Keyring VM and TV-29 only with named owner environment approval |
-| IR-13 | Preserve original TS-CFG-17..20 semantics (authoring, undo and page command restriction). Renumber new negative tests to **TS-CFG-21..24**, including new success/failure criteria and traceability | Static identifier audit |
-| IR-14 | Rename 33's collision identifiers **RC-01..16** (do not replace historical 31 C1..C18), and 37's Android mockup identifiers **MA-01..10** (do not replace 16's MS-01..10) | Static uniqueness audit |
-| IR-15 | 41's disposable `EXDEV` result is narrow kernel evidence, never a pass of actual home/snapshot/sync or DN-31 | Correct gate labels only |
+| IR    | Corrective design disposition                                                                                                                                                                                                                                                                                                                                                                     | Gate                                                            |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| IR-04 | DN-08=A and DN-42=C are future product requirements, **not active IF-ORC invariants**. Existing ADR 0012 allows one shared App Server and ADR 0015 permits only one global active managed turn. Keep managed steps serialized until an independently reviewed ADR changes both. ADR 0031 remains Proposed                                                                                         | New authority ADR + isolated concurrency/selection tests        |
+| IR-05 | Hermes planner proposes only typed allowlisted actions. Freeform `shell.run`, interpreters, encoded loaders and other opaque command execution are **DENIED from Hermes** by default. Existing Wyss glob-based denial logic is not a semantic shell sandbox. No "approved summary" as replacement for literal effects                                                                             | Pinned policy code review + E-HRM-09 adversarial corpus         |
+| IR-06 | Bind input claim to unpredictable fresh gateway boot identity and a monotonically increasing connection epoch. A restart **invalidates old claims**. On ACK-after-effect ambiguity, never blind-replay shell input; return `OUTCOME_UNKNOWN` and require review. Typed authority requests must use the authority's durable intent-idempotency mechanism, not gateway RAM as proof of exactly-once | Power-fail-between-effect-and-ACK test                          |
+| IR-07 | Host-supervised PTYs/process trees need independently measurable process scopes/cgroup tracking. Treat survivors escaping the scope as `ORPHANS_POSSIBLE`/UNKNOWN, not necessarily terminated. Prevent automatic retries while ownership is ambiguous; a cgroup alone cannot prove absence of persistence a full-account user process could create                                                | VM logout, crash and process-escape adversarial test            |
+| IR-08 | An active, paused, waiting-approval or recovering finite OL3 run prevents host idle-exit via a bounded keepalive from the headless coordinator. Zero terminal + zero viewer alone is insufficient. Service restart throttling is a surfaced `HOST_UNAVAILABLE` pipeline state                                                                                                                     | Host lifecycle state tests                                      |
+| IR-09 | PTY-owning supervisor must remain alive when one untrusted terminal screen parser fails. Parser isolated per terminal under separate low-privilege processing scope and measured memory/CPU caps. If its screen checkpoint fails, only fidelity degrades; do not silently kill PTY or other agents                                                                                                | Adversarial escape/OOM per-terminal crash test                  |
+| IR-10 | Presence key properties and origin attestation must be explicitly checked for LP4; missing hardware-based evidence defaults to read-only while pending owner risk acceptance                                                                                                                                                                                                                      | Physical Android device with/without TEE/StrongBox              |
+| IR-11 | Device revocation blocks new delegated approvals and by default pauses pipeline dispatch whose last approval depends on that device; already-running full-account native processes may continue and must be reported as not stopped                                                                                                                                                               | Revocation/pipeline concurrency test                            |
+| IR-12 | Provider-file writes, vault restore/undo and remote `config.request` apply stay `BLOCKED_FILESYSTEM` pending DN-21/31. A closed keyring in a lingered no-login host yields `VAULT_LOCKED_NO_SESSION`, no guessed unlock, remote data exposure or automatic apply                                                                                                                                  | Keyring VM and TV-29 only with named owner environment approval |
+| IR-13 | Preserve original TS-CFG-17..20 semantics (authoring, undo and page command restriction). Renumber new negative tests to **TS-CFG-21..24**, including new success/failure criteria and traceability                                                                                                                                                                                               | Static identifier audit                                         |
+| IR-14 | Rename 33's collision identifiers **RC-01..16** (do not replace historical 31 C1..C18), and 37's Android mockup identifiers **MA-01..10** (do not replace 16's MS-01..10)                                                                                                                                                                                                                         | Static uniqueness audit                                         |
+| IR-15 | 41's disposable `EXDEV` result is narrow kernel evidence, never a pass of actual home/snapshot/sync or DN-31                                                                                                                                                                                                                                                                                      | Correct gate labels only                                        |
 
 ## 3. Safe default vs owner choice
 
@@ -125,7 +125,7 @@ unavoidable product/security trade-offs. Accordingly:
   denied; pipeline pauses on revoked-origin approvals.
 - **Owner-dependent remaining choices:** whether to enable unattended
   LP4 at all (and on what devices/TTL); how much existing native-agent
-  capability must remain in OL3 under a *different* OS principal;
+  capability must remain in OL3 under a _different_ OS principal;
   whether to accept unsupported Android attestation; DN-05 transport
   after measuring, and DN-31 if a non-exposing storage layout proves
   impossible. Ask only after feasible safe candidates and evidence
@@ -134,21 +134,21 @@ unavoidable product/security trade-offs. Accordingly:
 
 ## 4. Acceptance extensions (all NOT RUN)
 
-| Identifier | Failure case that must be denied / observed |
-| --- | --- |
-| TS-SEC-OL3-01 | Compromised native OL3 worker attempts all authority/coordinator/gateway same-UID socket operations; unauthorised requests cannot pass. Without an OS boundary, dispatch is disabled. |
-| TS-SEC-OL3-02 | DAG-level approval with auto-handoff to native/full-account step cannot launch; current reviewed payload and local per-launch confirmation necessary; still blocked until trust boundary. |
-| TS-SEC-REM-01 | LP4 when host logged out is rejected unless separate expressly owner-enabled absent-host grant is verified; grant expiry and key attestation enforced. |
-| TS-SEC-REM-02 | After one LP4-compromised session implants persistence, device revocation cannot be reported as integrity restored; recovery requires host-account audit. |
-| TS-SEC-REM-03 | Gateway crashes after applying terminal input but before ACK: reconnect old epoch returns OUTCOME_UNKNOWN, never duplicate keystrokes; typed authority intents use durable receipts. |
-| TS-SEC-HOST-01 | Native child exits PTY but creates detached/escaped descendant; no automatic duplicate launch, state UNKNOWN/ORPHANS_POSSIBLE. |
-| TS-SEC-HOST-02 | Single terminal parser OOM/crashes and its PTY/sibling PTYs continue; screen state labelled degraded. |
-| TS-SEC-HOST-03 | Coordinator waiting for approval prevents host inactivity stop; host restart-exhaustion reports HOST_UNAVAILABLE. |
-| TS-SEC-MOB-01 | Android software-only or missing per-use key-attestation cannot obtain default LP4 grant. |
-| TS-SEC-ORC-01 | Revoking a pipeline authoriser device pauses unstarted work and reports already-running effects accurately. |
-| TS-SEC-CFG-01 | No-login keyring locked: vault operation returns VAULT_LOCKED_NO_SESSION; queued config plan never auto applies. |
-| TS-SEC-AGT-01 | Hermes opaque/interpreter shell requests denied, including reordering and encoding; typed allowlisted effects still pass full Wyss policy. |
-| TS-SEC-MAN-01 | Under existing ADR 0012/0015, attempted second concurrent managed turn is serialized or refused; no one-runtime-per-session claim is treated as built. |
+| Identifier     | Failure case that must be denied / observed                                                                                                                                               |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TS-SEC-OL3-01  | Compromised native OL3 worker attempts all authority/coordinator/gateway same-UID socket operations; unauthorised requests cannot pass. Without an OS boundary, dispatch is disabled.     |
+| TS-SEC-OL3-02  | DAG-level approval with auto-handoff to native/full-account step cannot launch; current reviewed payload and local per-launch confirmation necessary; still blocked until trust boundary. |
+| TS-SEC-REM-01  | LP4 when host logged out is rejected unless separate expressly owner-enabled absent-host grant is verified; grant expiry and key attestation enforced.                                    |
+| TS-SEC-REM-02  | After one LP4-compromised session implants persistence, device revocation cannot be reported as integrity restored; recovery requires host-account audit.                                 |
+| TS-SEC-REM-03  | Gateway crashes after applying terminal input but before ACK: reconnect old epoch returns OUTCOME_UNKNOWN, never duplicate keystrokes; typed authority intents use durable receipts.      |
+| TS-SEC-HOST-01 | Native child exits PTY but creates detached/escaped descendant; no automatic duplicate launch, state UNKNOWN/ORPHANS_POSSIBLE.                                                            |
+| TS-SEC-HOST-02 | Single terminal parser OOM/crashes and its PTY/sibling PTYs continue; screen state labelled degraded.                                                                                     |
+| TS-SEC-HOST-03 | Coordinator waiting for approval prevents host inactivity stop; host restart-exhaustion reports HOST_UNAVAILABLE.                                                                         |
+| TS-SEC-MOB-01  | Android software-only or missing per-use key-attestation cannot obtain default LP4 grant.                                                                                                 |
+| TS-SEC-ORC-01  | Revoking a pipeline authoriser device pauses unstarted work and reports already-running effects accurately.                                                                               |
+| TS-SEC-CFG-01  | No-login keyring locked: vault operation returns VAULT_LOCKED_NO_SESSION; queued config plan never auto applies.                                                                          |
+| TS-SEC-AGT-01  | Hermes opaque/interpreter shell requests denied, including reordering and encoding; typed allowlisted effects still pass full Wyss policy.                                                |
+| TS-SEC-MAN-01  | Under existing ADR 0012/0015, attempted second concurrent managed turn is serialized or refused; no one-runtime-per-session claim is treated as built.                                    |
 
 These test IDs are intentionally distinct from existing `TS-CFG`,
 `TS-HYB` and `TS-ORC` families pending test-plan integration.
@@ -181,6 +181,7 @@ ER-01..ER-09. It did not certify absolute historic reviewer
 independence or run any application/provider tests.
 
 The objective corrections now documented:
+
 - **ER-01:** approved ownership of `wyss-control` remains
   same-UID; blocking OL3 automatic native steps does
   not protect against native agents launched manually
@@ -210,7 +211,7 @@ The objective corrections now documented:
 - **ER-09:** original TS-CFG-17..20 need positive/negative
   cases and AC-CFG-AUTH-01, added to [20 §16.1](20-VERIFICATION-AND-ACCEPTANCE.md).
 
-These changes correct contradictory *paper contracts*, not
+These changes correct contradictory _paper contracts_, not
 secure the application. The following engineering choices
 remain **OPEN / BLOCKED** pending feasibility evidence:
 (1) protecting managed approvals from any unrestricted
@@ -249,4 +250,3 @@ capabilities; regular manually launched unrestricted
 agents remain a separate attacker tier.
 The current host identity and Docker role cannot
 be claimed less privileged merely because `CapEff=0`.
-

@@ -122,6 +122,38 @@ flowchart TD
 | Unknown fields                     | Kept untouched and counted; never dropped, never interpreted                                                                                                                                                               |
 | A file of a newer provider version | Read as far as it parses; items the adapter does not know are listed as "unknown to this version of Wyss Console"                                                                                                          |
 
+What F1-PR1 implements of the table above (`src-tauri/src/agentconfig/`, in the desktop
+binary and not in the library the authority links):
+
+- **Approved roots.** The reader is built from an `ApprovedRoots` list that an adapter
+  derives (4.1) and takes no other path. A path, and every place a link leads to, outside
+  the list is refused as `source_untrusted_path` (`outside_roots`) before anything is
+  opened or stat-ed, so the answer is not an oracle for what exists elsewhere. A link
+  between two approved roots is followed; the list decides, not the link.
+- **Credentials.** The final name is judged on every hop (`auth.json`, `.env*`,
+  `.credentials*`, keys and the like; a Markdown or text note called `secrets` is not a
+  credential store). A directory named `.ssh`, `.gnupg`, `.aws` or `secrets` _below_ a
+  root is never read or listed; the names above the root do not count.
+- **Descriptors.** Each directory is opened below the one before it without following a
+  link and judged by its descriptor, so a file or directory swapped for a link after it
+  was judged is not followed. A group-writable place is read and never writable; one
+  anyone can write is refused.
+- **Bounds.** `Bounds::PROPOSED` plus a hard ceiling on each, enforced by `Bounds::new`:
+  the elements bound (262,144 keys and values, counted from the document's structure
+  before it is parsed) is new, and arithmetic at the edge of the integers saturates.
+  Values stay open under OQ-22.
+
+What F1-PR2 adds (`agentconfig/claude.rs`, `codex.rs`, `inventory.rs`): `inventory(env,
+bounds)` derives each provider's approved roots from an `Environment` (home, the
+relocation variables, the selected project, `/etc`), reads the sources of 06 §3 and returns
+`Inventory { sources, items, truncated }`. A source is reported as read (with digest, trust
+and the count of entries it could not place), absent, a project not trusted by Codex, or
+failed with a closed word. An item carries kind, redacted name and detail, persisted state,
+effective state (`documented` for Claude Code hooks and models, `not_verifiable` for what
+only a running provider could confirm and for every Codex item, DN-10), the writability
+class and, for a rule file, its digest and never its text. Items beyond the items bound are
+dropped and `truncated` says so.
+
 ### 4.3 Links and generated files
 
 A link is followed to a regular file owned by the user; the inventory shows both the link and
@@ -141,6 +173,15 @@ provider's own command (`by_provider_writer`), which is a provider process: ther
 and not before the ADR that allows the desktop to run one (DN-13).
 
 ## 5. Changing a configuration
+
+What F2a implements of this section (`agentconfig/plan.rs`, `writer.rs`, `journal.rs`,
+`restore.rs`, `vault.rs`, `changes.rs`; account in [docs/spec/configuration-changes.md](../spec/configuration-changes.md)):
+the planner for Claude Code hooks, `disableAllHooks` and `skillOverrides`; the byte-level
+editor; the writer with a per-target lock and descriptor-based rename; the journal with
+intent and outcome and repair at start; the restoration store sealed under ADR 0034; the
+native confirmation; history, undo, export and import. Codex's skill and MCP switches (F2b, `codex_plan.rs`, `tomlspan.rs`) are implemented; Codex
+hooks, MCP server changes that need a provider process, and creating or editing entries are
+not.
 
 ### 5.1 The lifecycle
 

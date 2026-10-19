@@ -9,15 +9,15 @@ current verified percentage, and not percentage of product implemented.
 
 ## 1. Gate hierarchy — never conflated
 
-| Gate | Required evidence | Current state |
-| --- | --- | --- |
-| G0 Owner target scope | Decisions marked owner-selected in 32; remaining genuinely owner-dependent trade-offs explicitly open | Broad product scope set; DN-05 and DN-31 open |
-| G1 Paper contracts | Requirement -> stable design/interface/state/failure modes -> phase -> test -> acceptance, with source and evidence label | Partial; expanded in 33–35, still needs cross-document reconciliation |
-| G2 Review of paper | Independent reviewer inspects the **entire post-REJECT** design, security claims, migration and product fit; every critical finding resolved or explicitly rejected by owner with evidence | **Not done**; earlier two independent reviews remain REJECT |
-| G3 Permission for restricted observations | Owner separately authorises exact experiment, target, data access and rollback; no broad standing permission | **Not granted**, DN-24 and DN-16 remain closed |
-| G4 Observed compatibility and safety | Per-version provider tests, filesystem/replication/snapshot behaviour, keyring, concurrency, Android, networking, performance on reference machines | **Not done** for this change; no measured resource bounds |
-| G5 Accepted ADRs and final plan | Every extension touching accepted authority/OS boundaries has independent security review, explicit ADR acceptance and final owner's plan approval | **Not done** |
-| G6 Implementation | Only after all applicable preceding gates, separate explicit user approval | **Prohibited** |
+| Gate                                      | Required evidence                                                                                                                                                                          | Current state                                                         |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| G0 Owner target scope                     | Decisions marked owner-selected in 32; remaining genuinely owner-dependent trade-offs explicitly open                                                                                      | Broad product scope set; DN-05 and DN-31 open                         |
+| G1 Paper contracts                        | Requirement -> stable design/interface/state/failure modes -> phase -> test -> acceptance, with source and evidence label                                                                  | Partial; expanded in 33–35, still needs cross-document reconciliation |
+| G2 Review of paper                        | Independent reviewer inspects the **entire post-REJECT** design, security claims, migration and product fit; every critical finding resolved or explicitly rejected by owner with evidence | **Not done**; earlier two independent reviews remain REJECT           |
+| G3 Permission for restricted observations | Owner separately authorises exact experiment, target, data access and rollback; no broad standing permission                                                                               | **Not granted**, DN-24 and DN-16 remain closed                        |
+| G4 Observed compatibility and safety      | Per-version provider tests, filesystem/replication/snapshot behaviour, keyring, concurrency, Android, networking, performance on reference machines                                        | **Not done** for this change; no measured resource bounds             |
+| G5 Accepted ADRs and final plan           | Every extension touching accepted authority/OS boundaries has independent security review, explicit ADR acceptance and final owner's plan approval                                         | **Not done**                                                          |
+| G6 Implementation                         | Only after all applicable preceding gates, separate explicit user approval                                                                                                                 | **Prohibited**                                                        |
 
 **Zero** of the new owner decisions in [32] are security ADR acceptances.
 A signed-off paper design is not observed software behaviour. This file
@@ -62,7 +62,7 @@ cannot be validated by reading schemas alone.
 
 ### B-P0-04: Wyss Agent effectful tools
 
-DN-06=D requires *demonstrated* OS-level containment of Hermes or a
+DN-06=D requires _demonstrated_ OS-level containment of Hermes or a
 well-evidenced alternative preventing any direct effectful call. Wyss
 Agent policy/execution must own every action; the Console's OL3
 coordinator does not grant tools to Hermes. The original source analysis
@@ -89,22 +89,22 @@ explicit owner approval and must not contradict mandatory safety rules.
 
 ## 3. P1 paper planning tasks that need no provider execution
 
-Each row is a *deliverable*, not a claim that it has been completed.
+Each row is a _deliverable_, not a claim that it has been completed.
 
-| Work item | Deliverable and acceptance | Primary documents |
-| --- | --- | --- |
-| P1-01 Owner trace | Each owner decision has an exact alternate/why, requirement and corresponding tests; delegated defaults clearly distinct | 32 -> 22, 02, 23 |
-| P1-02 Orchestration | Finite OL3 DAG, states/guards, budgets, cancellation/reconnect, safety boundaries and 15 named tests; define metadata-only state | 34 -> 02, 09, 10, 17, 19, 20, 23 |
-| P1-03 Remote host | Transport-neutral host/gateway/API, mobile UI states, security consent, screen snapshot and reconnect; 14 named tests | 35 -> 16, 05, 13, 19, 20, 23 |
-| P1-04 Model analytics | Selected != observed, reroute, token provenance, privacy, model/effort feature matrix and historical store contract | 12, ADR 0031, 32, 33 |
-| P1-05 Personal deployment | Reduce public-distribution requirements to an *explicit conditional branch*, add private local package/update/backup/recovery acceptance; no published repository | 18, 19, 02, 20, 23 |
-| P1-06 Terminal memory | Distinct quotas for screen/history/output queues/renderer, user-visible data-loss labels, OOM behaviour without deleting held data | 05, 15, 16, 35 |
-| P1-07 Configuration | User-command authoring through native dialog and validated provider-native writers; exact error/rollback states; no untested parser assumption | 07, 08, 11, 22, ADR 0030 |
-| P1-08 UX | Global nav, contextual disabled actions, 3 themes, opt-in desktop events, assisted layout recovery, Android mockup states, a11y | 13, 16, 32 |
-| P1-09 Test taxonomy | Test named, level, fixture and failure/assertion criteria; link every requirement, including negative security criteria | 20, 23 |
-| P1-10 Threat trace | Attack-by-surface inventory: config webview, terminal webview, PTY parser, gateway, phone, relay, coordinator, Hermes, vault, replicated files | 11, 14, 16, 17, 33 |
-| P1-11 Implementation roadmap | Phases with prerequisites and *stop gates*, including no side effects in read-only phases and no public release in personal scope | 19, 26, 29 |
-| P1-12 Audit redo | Regenerate 31's 29-row score from evidence, provide denominator/weight, never count owner choice as technical verification | 31 |
+| Work item                    | Deliverable and acceptance                                                                                                                                        | Primary documents                |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| P1-01 Owner trace            | Each owner decision has an exact alternate/why, requirement and corresponding tests; delegated defaults clearly distinct                                          | 32 -> 22, 02, 23                 |
+| P1-02 Orchestration          | Finite OL3 DAG, states/guards, budgets, cancellation/reconnect, safety boundaries and 15 named tests; define metadata-only state                                  | 34 -> 02, 09, 10, 17, 19, 20, 23 |
+| P1-03 Remote host            | Transport-neutral host/gateway/API, mobile UI states, security consent, screen snapshot and reconnect; 14 named tests                                             | 35 -> 16, 05, 13, 19, 20, 23     |
+| P1-04 Model analytics        | Selected != observed, reroute, token provenance, privacy, model/effort feature matrix and historical store contract                                               | 12, ADR 0031, 32, 33             |
+| P1-05 Personal deployment    | Reduce public-distribution requirements to an _explicit conditional branch_, add private local package/update/backup/recovery acceptance; no published repository | 18, 19, 02, 20, 23               |
+| P1-06 Terminal memory        | Distinct quotas for screen/history/output queues/renderer, user-visible data-loss labels, OOM behaviour without deleting held data                                | 05, 15, 16, 35                   |
+| P1-07 Configuration          | User-command authoring through native dialog and validated provider-native writers; exact error/rollback states; no untested parser assumption                    | 07, 08, 11, 22, ADR 0030         |
+| P1-08 UX                     | Global nav, contextual disabled actions, 3 themes, opt-in desktop events, assisted layout recovery, Android mockup states, a11y                                   | 13, 16, 32                       |
+| P1-09 Test taxonomy          | Test named, level, fixture and failure/assertion criteria; link every requirement, including negative security criteria                                           | 20, 23                           |
+| P1-10 Threat trace           | Attack-by-surface inventory: config webview, terminal webview, PTY parser, gateway, phone, relay, coordinator, Hermes, vault, replicated files                    | 11, 14, 16, 17, 33               |
+| P1-11 Implementation roadmap | Phases with prerequisites and _stop gates_, including no side effects in read-only phases and no public release in personal scope                                 | 19, 26, 29                       |
+| P1-12 Audit redo             | Regenerate 31's 29-row score from evidence, provide denominator/weight, never count owner choice as technical verification                                        | 31                               |
 
 A specification row is COMPLETE on paper only if a builder would not invent
 a requirement or fail-path decision. A row BLOCKED on evidence is still
@@ -112,16 +112,16 @@ BLOCKED even if every fixture to test it is written.
 
 ## 4. Conditional acceptance plan for the personal final product
 
-| Phase group | Non-negotiable acceptance |
-| --- | --- |
-| Terminal/workspaces (T1/T2/F3) | PTY fidelity against a real reference; keyboard/IME; layout restore; no automatic restart; bounded memory; screen reconnection |
-| Provider inventory/config (F1–F5) | Real provider data source labelled inferred vs observed; safe per-version adapter; no write where protocol not validated; disable/restore exact without data loss |
-| Profiles/model management (F3/F6) | Every profile omission verified before launch; native visual model change safe; managed selected/reported model and per-turn selection correctly separated; historical metadata privacy |
-| Multi-agent OL3 (F8/F11) | Independently isolated managed generations, finite user-approved DAG, cancellation, fairness, conflict detection and no forged approval; Hermes only on its own accepted boundary |
-| Host+remote+Android (F9/F10) | Survivable window/logout, truthful crash state, device enrolment and revocation, safe LP4 model, connection migration exactly-once input, no plaintext relay, fidelity on Android |
-| Vault/replication (F2v/F2h) | Keyring behaviour measured; export/import opt-in authenticated; no unintended disclosure by sync/snapshot/swap; old bytes safely restorable |
-| Personal delivery (re-scoped F13) | Installer/update on the owner's reference Linux without changes to unrelated state, verified rollback; no public repository, signing service or automatic update check required by default |
-| Observability/security (cross-cutting) | No secret-bearing durable history, logs, notification or usage; failure states explicit; independent security review accepted before code work is authorised |
+| Phase group                            | Non-negotiable acceptance                                                                                                                                                                  |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Terminal/workspaces (T1/T2/F3)         | PTY fidelity against a real reference; keyboard/IME; layout restore; no automatic restart; bounded memory; screen reconnection                                                             |
+| Provider inventory/config (F1–F5)      | Real provider data source labelled inferred vs observed; safe per-version adapter; no write where protocol not validated; disable/restore exact without data loss                          |
+| Profiles/model management (F3/F6)      | Every profile omission verified before launch; native visual model change safe; managed selected/reported model and per-turn selection correctly separated; historical metadata privacy    |
+| Multi-agent OL3 (F8/F11)               | Independently isolated managed generations, finite user-approved DAG, cancellation, fairness, conflict detection and no forged approval; Hermes only on its own accepted boundary          |
+| Host+remote+Android (F9/F10)           | Survivable window/logout, truthful crash state, device enrolment and revocation, safe LP4 model, connection migration exactly-once input, no plaintext relay, fidelity on Android          |
+| Vault/replication (F2v/F2h)            | Keyring behaviour measured; export/import opt-in authenticated; no unintended disclosure by sync/snapshot/swap; old bytes safely restorable                                                |
+| Personal delivery (re-scoped F13)      | Installer/update on the owner's reference Linux without changes to unrelated state, verified rollback; no public repository, signing service or automatic update check required by default |
+| Observability/security (cross-cutting) | No secret-bearing durable history, logs, notification or usage; failure states explicit; independent security review accepted before code work is authorised                               |
 
 Each is a target **acceptance obligation**, not a test result.
 Public distribution-specific acceptance criteria remain conditional and
@@ -144,13 +144,14 @@ to paper, not directly into a hotfix on `main`.
 ## 6. Definition of 'planning complete'
 
 Only report full planning completion when:
+
 1. All owner-relevant scope decisions are captured; DN-05 resolved from
    evidence and DN-31 either safely resolved or presented as a clear
    unavoidable scope trade-off to the owner.
 2. Every requirement in 02 (including new ORC/REM/UX/MOD cases) links to a
    concrete design, phase, test and pass/fail acceptance in 23.
 3. No contradictory guarantee is claimed across 05/07/09/10/11/12/13/15/16/17/18.
-4. All security assertions that *require observations* are explicitly
+4. All security assertions that _require observations_ are explicitly
    verified after authorisation, or are documented as unresolved and
    cannot be advertised as complete.
 5. Independent review of the entire amended design changes the
@@ -176,7 +177,6 @@ acceptance/crosswalk. They do **not** resolve actual
 provider compatibility, filesystem semantics, Android security,
 user-interface approval or the independent REJECT verdicts.
 
-
 ## 8. Independent-review package prepared, NOT performed
 
 The concrete brief is [38](38-INDEPENDENT-REVIEW-HANDOFF.md):
@@ -191,7 +191,7 @@ review, a PASS or an owner signoff. Previous REJECTs stand.
 The owner explicitly authorised advancing from documentation
 consolidation into **bounded technical verification on isolated
 disposable targets**, as well as an independent review.
-This is a *stage authorisation*, not a blanket permission
+This is a _stage authorisation_, not a blanket permission
 for provider-account access, real configuration edits, normal
 user OS services, Android phone settings, or code implementation.
 A limited disposable `renameat2(RENAME_EXCHANGE)` experiment
@@ -246,7 +246,6 @@ self-convert the new REJECT to PASS. No code,
 provider experiment or ADR acceptance follows
 from documenting these blocked states.
 
-
 ## 11. Feasibility gate after the two REJECT reviews (2026-10-14)
 
 [43](43-AUTHORITY-ISOLATION-FEASIBILITY-MATRIX.md)
@@ -265,7 +264,6 @@ are NOT RUN; TV-ISO-02 is PARTIAL synthetic only.
 A genuine independently reviewed S1/S2 architecture
 and an informed owner trade-off remain mandatory.
 
-
 ## 12. 2026-10-14 verification evidence scope update
 
 [44](44-DISPOSABLE-TRUST-FIXTURE-OBSERVATIONS.md)
@@ -283,7 +281,6 @@ user-service and filesystem snapshot tests remain
 claimed. An independent post-correction security
 review is still required. The A/B solution and
 DN-16 remain **BLOCKED**.
-
 
 ## 13. Explicit environment access blocker
 
@@ -304,7 +301,6 @@ identified, mark TV-ISO-03..10
 `BLOCKED_ENVIRONMENT`; a review must not
 relabel mocks as final-product evidence.
 
-
 ## 14. Evidence handoff for isolated guest runner
 
 The next specific step is
@@ -318,7 +314,6 @@ report location. The current tool container cannot
 execute those full VM tests; nothing in that
 handoff grants access to the owner's actual PC,
 provider tokens or host services.
-
 
 ## 15. Owner correction: native CachyOS first, no general VM requirement
 
@@ -347,8 +342,8 @@ Keep this P0 open and seek one concrete informed
 decision only after read-only workflow compatibility
 and a reversible plan have been prepared.
 No Docker socket/API interaction or provider tests
-are required to validate the *source-supported
-architectural conflict*.
+are required to validate the _source-supported
+architectural conflict_.
 
 ## 17. Provider-native feature preservation under restricted OL3
 
@@ -358,7 +353,7 @@ identifies different credential storage, refresh
 and effective-config contracts for Codex, Claude,
 OpenCode and Hermes. The pinned **managed Codex**
 behaviour in ADR 0018 cannot be promoted to
-unrestricted *native* Codex, nor extrapolated
+unrestricted _native_ Codex, nor extrapolated
 to Claude's Linux `.credentials.json` or
 OpenCode's `auth.json`. The current
 CachyOS synthetic case supports in-place
@@ -370,7 +365,6 @@ refresh style, hooks/MCP, inference network
 and safe access scope remain **NOT_PROVEN**.
 Do not disable real required functions or copy
 real credentials to manufacture a sandbox PASS.
-
 
 ## 16. Composed B1 proof required before an implementation decision
 
