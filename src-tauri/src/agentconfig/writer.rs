@@ -181,6 +181,11 @@ pub fn replace(
         RenameFlags::RENAME_EXCHANGE,
     ) {
         Ok(()) => {
+            // A disk cannot refuse a step that is already done; a death here is the case
+            // recovery is written for.
+            if step(Step::Exchanged) == Err(WriteError::Crashed) {
+                return Err(WriteError::Crashed);
+            }
             let displaced = fstatat(
                 Some(dirfd),
                 temporary.as_os_str(),
@@ -188,16 +193,40 @@ pub fn replace(
             )
             .map(|stat| identity(&stat));
             if displaced != Ok(expected) {
-                // Not the file that was read: undo the swap, so the other writer's version
-                // is the one in place, and say so.
-                let _ = renameat2(
+                // Not the file that was read: put it back, so the other writer's version
+                // is the one in place. The exchange undone first; if that cannot be done,
+                // the plain rename of the displaced file over the name does the same.
+                // Never `cleanup` here: the temporary name holds THEIR file until it is
+                // back, and deleting it would lose it.
+                let undone = step(Step::SwappedBack).is_ok()
+                    && renameat2(
+                        Some(dirfd),
+                        temporary.as_os_str(),
+                        Some(dirfd),
+                        parent.name.as_os_str(),
+                        RenameFlags::RENAME_EXCHANGE,
+                    )
+                    .is_ok();
+                if undone {
+                    // Ours is at the temporary name now.
+                    let _ = unlinkat(
+                        Some(dirfd),
+                        temporary.as_os_str(),
+                        UnlinkatFlags::NoRemoveDir,
+                    );
+                    return Err(WriteError::Replaced);
+                }
+                return match renameat(
                     Some(dirfd),
                     temporary.as_os_str(),
                     Some(dirfd),
                     parent.name.as_os_str(),
-                    RenameFlags::RENAME_EXCHANGE,
-                );
-                return Err(cleanup(WriteError::Replaced));
+                ) {
+                    Ok(()) => Err(WriteError::Replaced),
+                    // Neither worked: their file stays at the temporary name, which recovery
+                    // does not delete (it keeps what it cannot account for).
+                    Err(_) => Err(WriteError::Failed),
+                };
             }
             // What was there is now at the temporary name, and is removed.
             let _ = unlinkat(
@@ -259,35 +288,76 @@ pub fn lock_target(locks: &Path, target: &Path) -> Result<TargetLock, WriteError
     }
 }
 
-/// Removes leftovers of an interrupted write beside `name` in the directory: only files
-/// with the exact pattern of `replace`.
-pub fn remove_leftovers(parent: &Parent) -> usize {
+/// The temporary files an interrupted `replace` of this file can leave, by their exact
+/// pattern: `.<name>.<16 hex>.tmp`.
+pub fn leftovers(parent: &Parent) -> Vec<OsString> {
     let Ok(dir) = fs::read_dir(format!("/proc/self/fd/{}", parent.dir.as_raw_fd())) else {
-        return 0;
+        return Vec::new();
     };
     let prefix = format!(".{}.", parent.name.to_string_lossy());
-    let mut removed = 0;
-    for entry in dir.flatten() {
-        let name = entry.file_name();
-        let text = name.to_string_lossy();
-        let ours = text.starts_with(&prefix)
-            && text.ends_with(".tmp")
-            && text.len() == prefix.len() + 16 + 4
-            && text[prefix.len()..prefix.len() + 16]
-                .bytes()
-                .all(|b| b.is_ascii_hexdigit());
-        if ours
-            && unlinkat(
-                Some(parent.dir.as_raw_fd()),
-                name.as_os_str(),
-                UnlinkatFlags::NoRemoveDir,
-            )
-            .is_ok()
-        {
-            removed += 1;
-        }
+    dir.flatten()
+        .map(|entry| entry.file_name())
+        .filter(|name| {
+            let text = name.to_string_lossy();
+            text.starts_with(&prefix)
+                && text.ends_with(".tmp")
+                && text.len() == prefix.len() + 16 + 4
+                && text[prefix.len()..prefix.len() + 16]
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit())
+        })
+        .collect()
+}
+
+/// A leftover's bytes, read without following a link and never more than `limit`.
+pub fn read_leftover(parent: &Parent, name: &OsString, limit: usize) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let fd = openat(
+        Some(parent.dir.as_raw_fd()),
+        name.as_os_str(),
+        OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .ok()?;
+    // SAFETY: `openat` returned this descriptor just now and nothing else owns it.
+    let file = std::fs::File::from(unsafe { OwnedFd::from_raw_fd(fd) });
+    let mut bytes = Vec::new();
+    file.take(limit as u64 + 1).read_to_end(&mut bytes).ok()?;
+    (bytes.len() <= limit).then_some(bytes)
+}
+
+pub fn remove_leftover(parent: &Parent, name: &OsString) -> bool {
+    unlinkat(
+        Some(parent.dir.as_raw_fd()),
+        name.as_os_str(),
+        UnlinkatFlags::NoRemoveDir,
+    )
+    .is_ok()
+}
+
+/// Puts a leftover that holds somebody else's newer file back over the target, exchanging
+/// the two so that nothing is lost on the way; ours, now at the leftover's name, is removed.
+pub fn put_back(parent: &Parent, name: &OsString) -> bool {
+    let dirfd = parent.dir.as_raw_fd();
+    let swapped = renameat2(
+        Some(dirfd),
+        name.as_os_str(),
+        Some(dirfd),
+        parent.name.as_os_str(),
+        RenameFlags::RENAME_EXCHANGE,
+    )
+    .is_ok();
+    if swapped {
+        let _ = unlinkat(Some(dirfd), name.as_os_str(), UnlinkatFlags::NoRemoveDir);
     }
-    removed
+    swapped
+}
+
+/// Keeps what recovery cannot account for under a name no cleanup matches, beside the file.
+pub fn keep_leftover(parent: &Parent, name: &OsString, tag: &str) -> bool {
+    let dirfd = parent.dir.as_raw_fd();
+    let kept = OsString::from(format!("{}.recovered-{tag}", parent.name.to_string_lossy()));
+    renameat(Some(dirfd), name.as_os_str(), Some(dirfd), kept.as_os_str()).is_ok()
 }
 
 /// A seam for a test to be the provider writing in the instant between the last look and the

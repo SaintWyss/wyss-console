@@ -290,9 +290,10 @@ export const RISK_LABEL: Record<Risk, string> = {
 };
 
 export const EFFECT_LABEL: Record<Effect, string> = {
-  hooks_reload_documented:
-    'Claude Code documents that it picks this up while running. That has not been checked for your sessions.',
-  not_confirmed: 'What running sessions do about it is not known.',
+  hooks_new_sessions_checked:
+    'A new Claude Code session follows the file (checked). A session that is already running is documented to pick it up; that has not been checked.',
+  skills_new_sessions_checked:
+    'A new Claude Code session refuses to run a skill that is switched off (checked). Skills that come from a plugin are not affected. What a running session does is not known.',
 };
 
 export const STORAGE_LABEL: Record<Protection, string> = {
@@ -355,6 +356,10 @@ export const OUTCOME_LABEL: Record<
   recovered_not_applied: {
     tone: 'idle',
     text: 'Interrupted before it changed the file.',
+  },
+  recovered_provider_kept: {
+    tone: 'warn',
+    text: 'Interrupted while Claude Code was writing the same file. Its newer version was put back and nothing of ours was kept.',
   },
   recovered_unverified: {
     tone: 'warn',

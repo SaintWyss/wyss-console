@@ -730,7 +730,7 @@ fn a_plan_names_only_what_the_service_knows() {
 
 // ---- failure injection ------------------------------------------------------------------
 
-const STEPS: [Step; 10] = [
+const STEPS: [Step; 11] = [
     Step::IntentJournaled,
     Step::RecordSealed,
     Step::RecordWritten,
@@ -738,6 +738,7 @@ const STEPS: [Step; 10] = [
     Step::TemporaryWritten,
     Step::TemporaryFlushed,
     Step::Renamed,
+    Step::Exchanged,
     Step::DirectoryFlushed,
     Step::ReadBack,
     Step::OutcomeJournaled,
@@ -823,11 +824,11 @@ fn a_failure_at_any_step_leaves_the_file_whole_and_the_hook_recoverable() {
             | Step::Renamed => {
                 assert_eq!(outcome, Some(Outcome::WriteFailed), "{step:?}");
             }
-            Step::DirectoryFlushed | Step::OutcomeJournaled => {
+            Step::Exchanged | Step::DirectoryFlushed | Step::OutcomeJournaled => {
                 assert_eq!(outcome, Some(Outcome::Applied))
             }
             Step::ReadBack => assert_eq!(outcome, Some(Outcome::VerifyFailed)),
-            Step::RecordMarked => (),
+            Step::RecordMarked | Step::SwappedBack => (),
         }
         assert_eq!(
             removed,
@@ -1041,4 +1042,236 @@ fn a_provider_that_appends_in_place_in_that_instant_is_found_too() {
     assert_eq!(applied(&world, &plan), Outcome::ChangedOutside);
     assert_eq!(world.file(), theirs);
     assert!(world.service.records().is_empty());
+}
+
+// ---- against the installed Claude Code --------------------------------------------------
+
+/// Runs the installed `claude` once in `project` with `CLAUDE_CONFIG_DIR` pointed at the
+/// temporary configuration and no credentials of any kind (it answers "Not logged in"; hooks
+/// and skill checks happen before that). Returns what it printed.
+fn claude(world: &World, project: &Path, prompt: &str) -> String {
+    let output = std::process::Command::new("claude")
+        .args(["-p", prompt])
+        .current_dir(project)
+        .env_clear()
+        .envs(
+            ["PATH", "HOME"]
+                .iter()
+                .filter_map(|k| std::env::var_os(k).map(|v| (*k, v))),
+        )
+        .env("CLAUDE_CONFIG_DIR", world.home.join(".claude"))
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("claude is installed");
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
+/// Turning a hook off and back on, and a skill off and on, against the real program, in a
+/// temporary configuration: a hook runs or does not, a skill runs or is refused. By hand:
+/// `cargo test -- --ignored real_claude_code --nocapture`.
+#[test]
+#[ignore = "runs the installed Claude Code, in a temporary configuration"]
+fn real_claude_code_obeys_what_was_written() {
+    let marker = |name: &str| {
+        let base = std::env::temp_dir();
+        base.join(format!(
+            "wyss-marker-{name}-{}",
+            uuid::Uuid::new_v4().simple()
+        ))
+    };
+    let (session, prompt) = (marker("session"), marker("prompt"));
+    let settings = format!(
+        r#"{{
+  "hooks": {{
+    "SessionStart": [
+      {{ "hooks": [ {{ "type": "command", "command": "touch {session}" }} ] }}
+    ],
+    "UserPromptSubmit": [
+      {{ "hooks": [ {{ "type": "command", "command": "touch {prompt}" }} ] }}
+    ]
+  }}
+}}
+"#,
+        session = session.display(),
+        prompt = prompt.display()
+    );
+    let world = World::new(&settings);
+    let project = world.base.join("project");
+    fs::create_dir_all(&project).unwrap();
+    for name in ["useful", "noisy"] {
+        let dir = world.home.join(format!(".claude/skills/{name}"));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: test skill {name}\n---\nbody\n"),
+        )
+        .unwrap();
+    }
+    world.inventory.rescan();
+    let ran = |p: &Path| p.exists();
+    let reset = || {
+        let _ = fs::remove_file(&session);
+        let _ = fs::remove_file(&prompt);
+    };
+
+    // Baseline: both hooks run.
+    claude(&world, &project, "hello");
+    assert!(
+        ran(&session) && ran(&prompt),
+        "the fixture hooks must run to begin with"
+    );
+
+    // Turn both off through the service: neither runs.
+    for event in ["SessionStart", "UserPromptSubmit"] {
+        let plan = world.park(event, 0, 0);
+        assert_eq!(applied(&world, &plan), Outcome::Applied);
+    }
+    reset();
+    claude(&world, &project, "hello");
+    assert!(
+        !ran(&session) && !ran(&prompt),
+        "a hook that was turned off still ran"
+    );
+
+    // Put both back: the file is the original and both run again.
+    for record in world
+        .service
+        .records()
+        .into_iter()
+        .filter(|r| r.state == State::Parked)
+    {
+        let back = world
+            .service
+            .plan(Operation::RestoreHook, &record.id)
+            .unwrap();
+        assert_eq!(applied(&world, &back), Outcome::Applied);
+    }
+    assert_eq!(
+        world.file(),
+        settings,
+        "byte for byte, as Claude Code will read it"
+    );
+    reset();
+    claude(&world, &project, "hello");
+    assert!(
+        ran(&session) && ran(&prompt),
+        "a hook that was put back did not run"
+    );
+
+    // Skills: on, then refused after the switch, then on again.
+    let skill_id = |name: &str| {
+        world
+            .inventory
+            .snapshot()
+            .inventory
+            .items
+            .iter()
+            .find(|i| i.kind == ItemKind::Skill && i.name.as_str() == name)
+            .unwrap()
+            .id
+            .clone()
+    };
+    assert!(!claude(&world, &project, "/noisy").contains("disabled via skillOverrides"));
+    let off = world
+        .service
+        .plan(Operation::SkillOff, &skill_id("noisy"))
+        .unwrap();
+    assert_eq!(applied(&world, &off), Outcome::Applied);
+    assert!(claude(&world, &project, "/noisy").contains("disabled via skillOverrides"));
+    assert!(
+        !claude(&world, &project, "/useful").contains("disabled via skillOverrides"),
+        "only the skill that was switched off is refused"
+    );
+    let on = world
+        .service
+        .plan(Operation::SkillOn, &skill_id("noisy"))
+        .unwrap();
+    assert_eq!(applied(&world, &on), Outcome::Applied);
+    assert!(!claude(&world, &project, "/noisy").contains("disabled via skillOverrides"));
+    // The file Claude Code reads is valid to it: an unreadable settings file would say so.
+    assert!(!claude(&world, &project, "hello").contains("did not load"));
+}
+
+// ---- recovery never overwrites a newer provider version -----------------------------------
+
+/// The provider writes in the instant before the swap, and the process dies right after it:
+/// the provider's newer file is at the temporary name and ours is in place.
+#[test]
+fn a_crash_after_displacing_a_newer_provider_file_puts_that_file_back_at_start() {
+    let world = World::new(SETTINGS);
+    let plan = world.park("Stop", 0, 0);
+    let path = settings_path(&world.home);
+    let theirs = SETTINGS.replace("\"opus\"", "\"written-by-the-provider\"");
+    let (target, text) = (path.clone(), theirs.clone());
+    super::writer::seam::on_before_swap(move || {
+        let beside = target.with_extension("provider-tmp");
+        fs::write(&beside, &text).unwrap();
+        fs::set_permissions(&beside, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::rename(&beside, &target).unwrap();
+    });
+    world.faults.arm(Step::Exchanged, Fault::Crash);
+    assert!(world.service.apply(&plan.id).is_err());
+    // Dead here: ours is in place, theirs is at the temporary name.
+    assert!(!world.file().contains("stop.sh"));
+    assert_eq!(world.leftovers().len(), 1);
+
+    let again = world.restarted();
+    again.service.recover();
+    assert_eq!(
+        again.file(),
+        theirs,
+        "the provider's newer version must be the one in place"
+    );
+    assert!(again.leftovers().is_empty());
+    let (history, _) = again.service.history(None, 5);
+    assert_eq!(history[0].outcome, Some(Outcome::RecoveredProviderKept));
+    assert!(
+        again.service.records().is_empty(),
+        "no record for a hook that did not leave"
+    );
+}
+
+#[test]
+fn a_swap_that_cannot_be_undone_falls_back_to_the_plain_rename_and_loses_nothing() {
+    let world = World::new(SETTINGS);
+    let plan = world.park("Stop", 0, 0);
+    let path = settings_path(&world.home);
+    let theirs = format!("{SETTINGS}  ");
+    let (target, text) = (path.clone(), theirs.clone());
+    super::writer::seam::on_before_swap(move || fs::write(&target, &text).unwrap());
+    world.faults.arm(Step::SwappedBack, Fault::Fail);
+    assert_eq!(applied(&world, &plan), Outcome::ChangedOutside);
+    assert_eq!(world.file(), theirs);
+    assert!(world.leftovers().is_empty());
+}
+
+#[test]
+fn recovery_keeps_a_temporary_file_it_cannot_account_for() {
+    let world = World::new(SETTINGS);
+    // Something with the temporary pattern, and no intent that explains it.
+    let stray = world
+        .home
+        .join(".claude/.settings.json.0123456789abcdef.tmp");
+    fs::write(&stray, "somebody's work").unwrap();
+    let again = world.restarted();
+    again.service.recover();
+    assert!(!stray.exists());
+    let kept: Vec<_> = fs::read_dir(world.home.join(".claude"))
+        .unwrap()
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .contains("settings.json.recovered-")
+        })
+        .collect();
+    assert_eq!(kept.len(), 1, "it is renamed, not deleted");
+    assert_eq!(
+        fs::read_to_string(kept[0].path()).unwrap(),
+        "somebody's work"
+    );
 }

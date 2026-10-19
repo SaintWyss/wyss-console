@@ -200,7 +200,9 @@ describe('changing, in the view', () => {
       'encrypted, with a key held by your system’s credential store',
     );
     expect(text(plan)).toContain('cannot be put back from here');
-    expect(text(plan)).toContain('has not been checked for your sessions');
+    expect(text(plan)).toContain(
+      'A new Claude Code session follows the file (checked)',
+    );
     expect(text(plan)).toContain(
       'You will be asked to confirm in a separate window',
     );

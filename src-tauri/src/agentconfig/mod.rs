@@ -29,6 +29,9 @@ mod classify;
 mod classify_tests;
 mod claude;
 mod codex;
+pub mod codex_plan;
+#[cfg(test)]
+mod codex_plan_tests;
 mod fault;
 mod fsutil;
 mod inventory;
@@ -50,6 +53,9 @@ pub mod service;
 mod service_tests;
 #[cfg(test)]
 mod tests;
+mod tomlspan;
+#[cfg(test)]
+mod tomlspan_tests;
 pub mod vault;
 #[cfg(test)]
 mod vault_tests;

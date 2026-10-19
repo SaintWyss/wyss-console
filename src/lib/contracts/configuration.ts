@@ -235,7 +235,10 @@ export type Operation = (typeof OPERATIONS)[number];
 export const RISKS = ['normal', 'weakens_security', 'executes_code'] as const;
 export type Risk = (typeof RISKS)[number];
 
-export const EFFECTS = ['hooks_reload_documented', 'not_confirmed'] as const;
+export const EFFECTS = [
+  'hooks_new_sessions_checked',
+  'skills_new_sessions_checked',
+] as const;
 export type Effect = (typeof EFFECTS)[number];
 
 export const PROTECTIONS = ['sealed', 'plain_no_secret'] as const;
@@ -257,6 +260,7 @@ export const OUTCOMES = [
   'recovered_applied',
   'recovered_not_applied',
   'recovered_unverified',
+  'recovered_provider_kept',
 ] as const;
 export type Outcome = (typeof OUTCOMES)[number];
 

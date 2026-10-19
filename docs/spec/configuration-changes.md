@@ -96,9 +96,14 @@ passphrase (PBKDF2-HMAC-SHA256, 600,000 rounds, random salt).
   user-space design can see it.
 - "Applied" means the file holds the change. That Claude Code adopts it in running sessions
   is documented, not verified for the user's sessions (07 §6).
-- `skillOverrides` is not in Claude Code's published settings reference (checked 2026-10-19):
-  the key was seen in the owner's own file and `"off"` is what is written; what the provider
-  does with it is unverified (OQ-15), and the plan says the effect is not known.
+- `skillOverrides: { name: "off" }` was checked against Claude Code 2.1.303 with a real
+  `claude` in a temporary configuration: a user skill and a project skill (set in user,
+  project or project-local settings) are refused ("disabled via skillOverrides"); a **skill
+  that comes from a plugin is not affected** and is not offered for switching; the accepted
+  values are `on`, `name-only`, `user-invocable-only` and `off`, and any other value makes
+  Claude Code ignore the whole settings file, hooks included. Only `"off"` is ever written,
+  and an existing other value is left alone. What a session already running does is not
+  checked.
 - `enable_all_hooks` removes the key; an explicit `false` that was there before is not
   restored. `skill_on` removes the override; an override with another meaning is not touched.
 - A same-user process can ask the Secret Service for the key while it is unlocked. No

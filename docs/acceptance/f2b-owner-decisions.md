@@ -1,4 +1,4 @@
-# F2b (Codex mutations): decisions the owner has to make
+# F2b (Codex mutations): prepared, and the decisions left
 
 Nothing in F2b is implemented or authorised. Each item is a decision with a recommended
 default and what it costs; none is taken here. Source: roadmap 19 (F2b), doc 22.
@@ -19,3 +19,49 @@ default and what it costs; none is taken here. Source: roadmap 19 (F2b), doc 22.
 What is **not** a decision, because the owner already made it or the code already enforces
 it: the storage policy (ADR 0029), the native dialog for risky plans, byte-identical
 restoration, and the rule that no real provider file is changed without his explicit word.
+
+## Prepared (2026-10-19), not wired and not authorised to run
+
+The owner's proposed defaults were adopted for the preparation: user-scope skill and MCP
+switches only; no individual Codex hook mutation; byte-preserving TOML editing; predictions
+labelled as predictions; isolated fixtures and a complete inverse. What exists:
+
+- `tomlspan.rs`: a TOML scanner that places statements by byte; it refuses layouts it cannot
+  place (an inline-table definition, say).
+- `codex_plan.rs`: plans `SkillOff/On` and `McpOff/On` as an edit of one `enabled` key,
+  checked against the same edit on the parsed value; every comment and blank line survives
+  (tested on a corpus); the inverse edit restores the file byte for byte; names go through
+  redaction.
+- The managed-effect **prediction** (`Facts`, `Verdict`, `Prediction`), equal to the
+  authority's rule: `managed_inference_blocker` (a read-only wrapper in the library over
+  `zero_external_hooks` and `mcp_names`) is compared with the prediction on an exhaustive
+  grid in the desktop's tests (TS-CFG-15), including which cause is named.
+- Against the installed Codex 0.159.0 in a temporary `CODEX_HOME`: `codex mcp list` shows the
+  switch the planner wrote and the one the inverse restores (ignored test
+  `real_codex_reads_the_mcp_switch_the_planner_wrote`).
+- No command, capability, `Operation` or UI exists for it, and no real Codex file is read for
+  a plan. Turning F2b on is wiring.
+
+## The decisions that remain, exactly
+
+1. **Start F2b** (19: "a phase starts when the owner says so"). Recommended: yes, after the
+   hand checks of the acceptance report.
+2. **Where the exact inverse of a TOML change lives.** The planner returns it; F2a keeps no
+   content in the journal. Options: (a) the journal records a closed inverse (`remove the
+line` / `restore the word true|false`), no key names, no values beyond a boolean; (b) a
+   sealed record as for hooks; (c) undo is semantic (set the opposite) and exact only when the
+   file is as the change left it and the key was added by us. Recommended: (a), because the
+   inverse of these edits holds nothing but a boolean.
+3. **Skills of Codex.** `[[skills.config]] enabled` is what the files show and what the
+   planner writes; the effect on a running Codex was not verified (no command lists skills
+   headlessly). Options: verify by hand on a copy; or ship MCP switches first. Recommended:
+   MCP first (verified), skills after the owner has seen Codex follow the key.
+4. **Individual Codex hooks:** none (his default; confirmed here). They stay display-only until
+   OQ-01 and G-INF; nothing in F2b writes `[hooks.state]` or `hooks.json`.
+5. **Whether to show the prediction when it says "unavailable before and after".** The cause
+   is a hook the Console will not change. Recommended: show it, labelled "predicted", with the
+   cause named, and never block an MCP or skill switch because of it.
+6. **OQ-03** (does a running Codex apply a change): recommended "not confirmed" text, as the
+   defaults say; an experiment only if he wants the sentence stronger.
+7. **Project scope:** user scope only, as proposed; the trust logic for a project's
+   `.codex/config.toml` waits for its own decision.

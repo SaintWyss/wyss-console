@@ -71,7 +71,7 @@
         "text": "\"disableAllHooks\": true"
       }
     ],
-    "effect": "hooks_reload_documented",
+    "effect": "hooks_new_sessions_checked",
     "expires_in_seconds": 60,
     "holds_hidden_values": false,
     "id": "00000000000000000000000000000008",
@@ -96,7 +96,7 @@
         "text": "type: command"
       }
     ],
-    "effect": "hooks_reload_documented",
+    "effect": "hooks_new_sessions_checked",
     "expires_in_seconds": 60,
     "holds_hidden_values": false,
     "id": "00000000000000000000000000000009",
@@ -121,7 +121,7 @@
         "text": "Stop[0].hooks[0].type: command"
       }
     ],
-    "effect": "hooks_reload_documented",
+    "effect": "hooks_new_sessions_checked",
     "expires_in_seconds": 60,
     "holds_hidden_values": false,
     "id": "0000000000000000000000000000000a",
@@ -142,7 +142,7 @@
         "text": "\"noisy\": \"off\""
       }
     ],
-    "effect": "not_confirmed",
+    "effect": "skills_new_sessions_checked",
     "expires_in_seconds": 60,
     "holds_hidden_values": false,
     "id": "0000000000000000000000000000000b",

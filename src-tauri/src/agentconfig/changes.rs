@@ -25,8 +25,8 @@ use super::restore::{Protection, RestorationStore, RestoreError, Summary};
 use super::service::InventoryService;
 use super::vault::{EXPORT_ROUNDS, VaultError};
 use super::writer::{
-    TargetLock, WriteError, conflict_copy_beside, identity_of, lock_target, remove_leftovers,
-    replace,
+    TargetLock, WriteError, conflict_copy_beside, identity_of, keep_leftover, leftovers,
+    lock_target, put_back, read_leftover, remove_leftover, replace,
 };
 use serde::Serialize;
 use std::{
@@ -61,10 +61,12 @@ pub trait Confirm: Send + Sync {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Effect {
-    /// Claude Code documents that it reloads hooks; not verified for the user's sessions.
-    HooksReloadDocumented,
-    /// The file changed; nothing is known of running sessions.
-    NotConfirmed,
+    /// A new Claude Code session follows the file (checked against 2.1.303 with a real
+    /// `claude`); a session already running is documented to reload, and not checked.
+    HooksNewSessionsChecked,
+    /// A new session refuses a skill switched off (checked against 2.1.303); a running
+    /// session is not known, and a skill that comes from a plugin is not affected at all.
+    SkillsNewSessionsChecked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -186,8 +188,8 @@ fn writable(key: SourceKey) -> bool {
 
 fn effect_of(operation: Operation) -> Effect {
     match operation {
-        Operation::SkillOff | Operation::SkillOn => Effect::NotConfirmed,
-        _ => Effect::HooksReloadDocumented,
+        Operation::SkillOff | Operation::SkillOn => Effect::SkillsNewSessionsChecked,
+        _ => Effect::HooksNewSessionsChecked,
     }
 }
 
@@ -735,20 +737,89 @@ impl ChangeService {
     /// At start: finish what a crash left (14 §4). An apply with an intent and no outcome is
     /// found, the file's hash says how far it got, and the outcome is written.
     pub fn recover(&self) -> usize {
+        let unfinished = self.journal.unfinished();
+        let sources = [
+            SourceKey::ClaudeUserSettings,
+            SourceKey::ClaudeProjectSettings,
+            SourceKey::ClaudeProjectLocalSettings,
+        ];
+        // Temporary files of a write that was cut short, judged one by one. Nothing is
+        // deleted that cannot be accounted for: a file left at a temporary name may be the
+        // provider's newer version, displaced by the swap in the instant before the crash.
+        let mut put_back_for: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for key in sources {
+            let Some(parent) = self.path_of(key).and_then(|path| {
+                parent_for_write(self.reader.roots(), &path, self.bounds.link_hops).ok()
+            }) else {
+                continue;
+            };
+            let names = leftovers(&parent);
+            if names.is_empty() {
+                continue;
+            }
+            let target = self
+                .path_of(key)
+                .and_then(|path| self.reader.read_file(&path).ok())
+                .map(|file| hash(file.bytes()));
+            let intents: Vec<&Entry> = unfinished.iter().filter(|i| i.source == key).collect();
+            let swapped = intents
+                .iter()
+                .find(|i| target.is_some() && target.as_deref() == i.h1.as_deref());
+            let not_swapped = intents
+                .iter()
+                .any(|i| target.as_deref() == Some(i.h0.as_str()));
+            for name in names {
+                let found = read_leftover(&parent, &name, self.bounds.file_bytes as usize)
+                    .map(|bytes| hash(&bytes));
+                match (found.as_deref(), swapped) {
+                    // Our old file, displaced by our own swap: spare.
+                    (Some(found), Some(intent)) if found == intent.h0 => {
+                        remove_leftover(&parent, &name);
+                    }
+                    // Somebody else's newer file, displaced by our swap: it goes back.
+                    (Some(_), Some(intent)) => {
+                        if put_back(&parent, &name) {
+                            put_back_for.insert(intent.id.clone());
+                        } else {
+                            keep_leftover(&parent, &name, "unrestored");
+                        }
+                    }
+                    // The swap never happened: this is our own partial or whole temporary.
+                    _ if not_swapped => {
+                        remove_leftover(&parent, &name);
+                    }
+                    (Some(found), None) => {
+                        keep_leftover(&parent, &name, &found[..12.min(found.len())]);
+                    }
+                    (None, _) => {
+                        keep_leftover(&parent, &name, "unreadable");
+                    }
+                }
+            }
+        }
+
         let mut repaired = 0;
-        for intent in self.journal.unfinished() {
+        for intent in unfinished {
             let Some(path) = self.path_of(intent.source) else {
                 continue;
             };
             let current = self.reader.read_file(&path).ok().map(|f| hash(f.bytes()));
-            let outcome = match current.as_deref() {
-                Some(found) if Some(found) == intent.h1.as_deref() => Outcome::RecoveredApplied,
-                Some(found) if found == intent.h0 => Outcome::RecoveredNotApplied,
-                _ => Outcome::RecoveredUnverified,
+            let outcome = if put_back_for.contains(&intent.id) {
+                Outcome::RecoveredProviderKept
+            } else {
+                match current.as_deref() {
+                    Some(found) if Some(found) == intent.h1.as_deref() => Outcome::RecoveredApplied,
+                    Some(found) if found == intent.h0 => Outcome::RecoveredNotApplied,
+                    _ => Outcome::RecoveredUnverified,
+                }
             };
             match (outcome, intent.operation, &intent.record) {
                 // The file was not changed, so the entry is still in it: the record is spare.
-                (Outcome::RecoveredNotApplied, Operation::ParkHook, Some(record)) => {
+                (
+                    Outcome::RecoveredNotApplied | Outcome::RecoveredProviderKept,
+                    Operation::ParkHook,
+                    Some(record),
+                ) => {
                     let _ = self.store.delete(record);
                 }
                 (Outcome::RecoveredApplied, Operation::RestoreHook, Some(record)) => {
@@ -765,18 +836,6 @@ impl ChangeService {
             };
             if self.journal.append(&entry, Step::OutcomeJournaled).is_ok() {
                 repaired += 1;
-            }
-        }
-        // Temporary files of a write that was cut short, by their exact pattern.
-        for key in [
-            SourceKey::ClaudeUserSettings,
-            SourceKey::ClaudeProjectSettings,
-            SourceKey::ClaudeProjectLocalSettings,
-        ] {
-            if let Some(parent) = self.path_of(key).and_then(|path| {
-                parent_for_write(self.reader.roots(), &path, self.bounds.link_hops).ok()
-            }) {
-                remove_leftovers(&parent);
             }
         }
         let _ = self.journal.prune(now());

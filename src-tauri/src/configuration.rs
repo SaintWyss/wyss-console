@@ -550,4 +550,63 @@ mod tests {
         );
         let _ = fs::remove_dir_all(home);
     }
+
+    /// TS-CFG-15: the desktop's prediction of what a Codex configuration does to managed
+    /// Inference equals what the authority's own checks decide on the same definitions.
+    #[test]
+    fn the_managed_inference_prediction_equals_the_authoritys_rule() {
+        use crate::agentconfig::codex_plan::{Facts, Verdict};
+        use wyss_console::adapters::codex::managed_inference_blocker;
+        let names = |n: usize| (0..n).map(|i| format!("s{i}")).collect::<Vec<_>>();
+        let mut cases: Vec<(Vec<Vec<bool>>, Vec<String>)> = vec![
+            (vec![], vec![]),
+            (vec![vec![]], vec![]),
+            (vec![vec![false]], names(3)),
+            (vec![vec![true]], vec![]),
+            (vec![vec![false, true]], vec![]),
+            (vec![vec![false], vec![false]], names(64)),
+            (vec![vec![false]], names(65)),
+            (vec![vec![false; 256]], vec![]),
+            (vec![vec![false; 257]], vec![]),
+            (vec![vec![false]; 64], vec![]),
+            (vec![vec![false]; 65], vec![]),
+            (vec![], vec!["ok_name-1".into()]),
+            (vec![], vec!["bad name".into()]),
+            (vec![], vec!["x".repeat(65)]),
+            (vec![], vec!["x".repeat(64)]),
+            (vec![], vec![String::new()]),
+            (vec![vec![true]], vec!["bad name".into()]),
+        ];
+        // Every combination of a few hooks and a few names, exhaustively on a small grid.
+        for hooks in [vec![], vec![false], vec![true], vec![false, true]] {
+            for name in ["", "a", "a-b_c", "a b", "é"] {
+                cases.push((vec![hooks.clone()], vec![name.to_owned()]));
+            }
+        }
+        for (sources, servers) in cases {
+            let facts = Facts {
+                hook_sources: sources.iter().filter(|s| !s.is_empty()).cloned().collect(),
+                mcp_names: servers.clone(),
+            };
+            let authority = managed_inference_blocker(&facts.hook_sources, &servers);
+            let predicted = facts.verdict();
+            assert_eq!(
+                authority.is_none(),
+                predicted == Verdict::Available,
+                "{sources:?} {servers:?}: authority {authority:?}, predicted {predicted:?}"
+            );
+            // And the cause agrees, not only the yes or no.
+            match predicted {
+                Verdict::Available => assert_eq!(authority, None, "{sources:?} {servers:?}"),
+                Verdict::ExternalHooks => assert!(
+                    matches!(authority, Some("external_hooks_enabled" | "hook_bound")),
+                    "{authority:?}"
+                ),
+                Verdict::McpUnprovable => assert!(
+                    matches!(authority, Some("mcp_bound" | "mcp_clamp_unproven")),
+                    "{authority:?}"
+                ),
+            }
+        }
+    }
 }

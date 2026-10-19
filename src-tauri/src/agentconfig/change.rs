@@ -71,6 +71,9 @@ pub enum Outcome {
     RecoveredNotApplied,
     /// Found at start: it ended mid-write and the file holds neither.
     RecoveredUnverified,
+    /// Found at start: it ended mid-write and a newer version written by the provider in that
+    /// instant had been displaced; it was put back, and nothing of ours was kept.
+    RecoveredProviderKept,
 }
 
 impl Outcome {

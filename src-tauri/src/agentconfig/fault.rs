@@ -16,6 +16,10 @@ pub enum Step {
     TemporaryWritten,
     TemporaryFlushed,
     Renamed,
+    /// Right after the swap: the displaced file is at the temporary name and not yet judged.
+    Exchanged,
+    /// Before the swap is undone because the displaced file was not the one that was read.
+    SwappedBack,
     DirectoryFlushed,
     ReadBack,
     OutcomeJournaled,

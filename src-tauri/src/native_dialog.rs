@@ -56,10 +56,12 @@ fn risk_text(risk: Risk) -> &'static str {
 
 fn effect_text(effect: Effect) -> &'static str {
     match effect {
-        Effect::HooksReloadDocumented => {
-            "Claude Code documents that it picks this up while running. That has not been checked for your sessions."
+        Effect::HooksNewSessionsChecked => {
+            "A new Claude Code session follows the file (checked). A session that is already running is documented to pick it up; that has not been checked."
         }
-        Effect::NotConfirmed => "What running sessions do about it is not known.",
+        Effect::SkillsNewSessionsChecked => {
+            "A new Claude Code session refuses to run a skill that is switched off (checked). Skills that come from a plugin are not affected. What a running session does is not known."
+        }
     }
 }
 
