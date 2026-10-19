@@ -137,6 +137,22 @@ fn the_file_of_named_accounts_is_believed_only_when_only_the_owner_can_write_it(
     assert!(declared::load(&linked).is_empty());
     let big = state_with(Some((&"nobody\n".repeat(1000), 0o600)));
     assert!(declared::load(&big).is_empty());
+    // A folder that others can write, or that is itself a link, is not believed either.
+    let open_folder = state_with(Some((text, 0o600)));
+    fs::set_permissions(
+        open_folder.join("configuration"),
+        fs::Permissions::from_mode(0o777),
+    )
+    .unwrap();
+    assert!(declared::load(&open_folder).is_empty());
+    let behind_a_link = state_with(None);
+    fs::remove_dir(behind_a_link.join("configuration")).unwrap();
+    std::os::unix::fs::symlink(
+        good.join("configuration"),
+        behind_a_link.join("configuration"),
+    )
+    .unwrap();
+    assert!(declared::load(&behind_a_link).is_empty());
 }
 
 #[test]

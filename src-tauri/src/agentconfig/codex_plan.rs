@@ -303,6 +303,14 @@ pub fn draft(
     if already {
         return Err(CodexPlanError::AlreadyDone);
     }
+    // An undo only puts back what its change left: Off left `false`, On left `true`. Anything
+    // else means the entry was changed by somebody since, and it is not overwritten.
+    if restore.is_some() {
+        let left = !matches!(operation, CodexOperation::SkillOn | CodexOperation::McpOn);
+        if current != Some(left) {
+            return Err(CodexPlanError::EntryChanged);
+        }
+    }
     let prior = match current {
         None => Prior::Absent,
         Some(true) => Prior::Enabled,

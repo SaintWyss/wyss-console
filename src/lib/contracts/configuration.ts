@@ -243,7 +243,7 @@ export const EFFECTS = [
   'hooks_new_sessions_checked',
   'skills_new_sessions_checked',
   'codex_mcp_checked',
-  'codex_skill_unverified',
+  'codex_skill_listed',
 ] as const;
 export type Effect = (typeof EFFECTS)[number];
 

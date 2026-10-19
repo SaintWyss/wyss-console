@@ -132,7 +132,7 @@
         "text": "enabled: true"
       }
     ],
-    "effect": "codex_skill_unverified",
+    "effect": "codex_skill_listed",
     "expires_in_seconds": 60,
     "holds_hidden_values": false,
     "id": "0000000000000000000000000000000a",

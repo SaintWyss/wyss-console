@@ -66,8 +66,8 @@ fn effect_text(effect: Effect) -> &'static str {
         Effect::CodexMcpChecked => {
             "A new Codex process shows the server as the file says (checked). A Codex session that is already running is not known to follow it."
         }
-        Effect::CodexSkillUnverified => {
-            "The file says it; how a running Codex treats a skill's switch has not been verified."
+        Effect::CodexSkillListed => {
+            "A new Codex process lists the skill as the file says (checked, through its own skills/list). A Codex session that is already running is not known to follow it."
         }
         Effect::SkillsNewSessionsChecked => {
             "A new Claude Code session refuses to run a skill that is switched off (checked). Skills that come from a plugin are not affected. What a running session does is not known."

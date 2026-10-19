@@ -73,7 +73,7 @@ pub enum Effect {
     CodexMcpChecked,
     /// The key is what Codex's files show for a skill; how a running Codex treats it is not
     /// verified.
-    CodexSkillUnverified,
+    CodexSkillListed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -214,7 +214,7 @@ fn effect_of(operation: Operation) -> Effect {
     match operation {
         Operation::SkillOff | Operation::SkillOn => Effect::SkillsNewSessionsChecked,
         Operation::CodexMcpOff | Operation::CodexMcpOn => Effect::CodexMcpChecked,
-        Operation::CodexSkillOff | Operation::CodexSkillOn => Effect::CodexSkillUnverified,
+        Operation::CodexSkillOff | Operation::CodexSkillOn => Effect::CodexSkillListed,
         _ => Effect::HooksNewSessionsChecked,
     }
 }

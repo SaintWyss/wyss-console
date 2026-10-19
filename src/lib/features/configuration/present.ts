@@ -299,8 +299,8 @@ export const EFFECT_LABEL: Record<Effect, string> = {
     'A new Claude Code session follows the file (checked). A session that is already running is documented to pick it up; that has not been checked.',
   codex_mcp_checked:
     'A new Codex process shows the server as the file says (checked). A Codex session that is already running is not known to follow it.',
-  codex_skill_unverified:
-    'The file says it. How a running Codex treats a skill’s switch has not been verified.',
+  codex_skill_listed:
+    'A new Codex process lists the skill as the file says (checked, through its own skills/list). A Codex session that is already running is not known to follow it.',
   skills_new_sessions_checked:
     'A new Claude Code session refuses to run a skill that is switched off (checked). Skills that come from a plugin are not affected. What a running session does is not known.',
 };

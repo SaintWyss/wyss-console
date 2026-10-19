@@ -1465,6 +1465,30 @@ fn the_managed_inference_prediction_names_a_hook_cause_and_never_blocks_the_swit
 }
 
 #[test]
+fn an_undo_does_not_overwrite_an_entry_somebody_changed_after_the_switch() {
+    let world = World::new(SETTINGS);
+    world.codex(CODEX);
+    let id = world.codex_item(ItemKind::Skill, "beta");
+    let plan = world.service.plan(Operation::CodexSkillOff, &id).unwrap();
+    let change = world.service.apply(&plan.id).unwrap().change;
+    // Somebody sets it to something else by hand: the entry is no longer what the switch left.
+    let switched = world.codex_file();
+    let by_hand = switched.replacen("beta\"\nenabled = false", "beta\"\nenabled = true", 1);
+    assert_ne!(by_hand, switched);
+    world.codex(&by_hand);
+    assert_eq!(
+        world.service.undo(&change).unwrap_err(),
+        ChangeFailure::EntryChanged
+    );
+    // Or removes the line: the file already is what the undo would make.
+    world.codex(&switched.replacen("beta\"\nenabled = false\n", "beta\"\n", 1));
+    assert_eq!(
+        world.service.undo(&change).unwrap_err(),
+        ChangeFailure::AlreadyDone
+    );
+}
+
+#[test]
 fn what_codex_plans_refuse_is_refused_in_words() {
     let world = World::new(SETTINGS);
     world.codex(CODEX);
@@ -2057,6 +2081,156 @@ fn real_claude_config_one_switch_then_back() {
     );
     assert_eq!(acl(&dir), acl_before);
     println!("undone: the file equals the original byte for byte, mode and ACL unchanged");
+    drop(guard);
+    let _ = fs::remove_dir_all(&state);
+}
+
+/// The installed Codex's own answer, through its app-server: whether the skill whose file is
+/// `path` is enabled. Read-only (`skills/list`, nothing is written).
+fn codex_says_skill_enabled(path: &str) -> Option<bool> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("codex")
+        .args(["app-server", "--listen", "stdio://"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut ask = |id: u32, method: &str, params: serde_json::Value| {
+        let line = if id == 0 {
+            serde_json::json!({ "method": method })
+        } else {
+            serde_json::json!({ "id": id, "method": method, "params": params })
+        };
+        writeln!(input, "{line}").unwrap();
+        input.flush().unwrap();
+        if id == 0 {
+            return serde_json::Value::Null;
+        }
+        for reply in lines.by_ref() {
+            let value: serde_json::Value = serde_json::from_str(&reply.unwrap()).unwrap();
+            if value["id"] == id {
+                return value;
+            }
+        }
+        panic!("the app-server closed");
+    };
+    ask(
+        1,
+        "initialize",
+        serde_json::json!({ "clientInfo": { "name": "wyss-test", "version": "0" } }),
+    );
+    ask(0, "initialized", serde_json::Value::Null);
+    let listed = ask(2, "skills/list", serde_json::json!({ "forceReload": true }));
+    let _ = child.kill();
+    let _ = child.wait();
+    listed["result"]["data"]
+        .as_array()?
+        .iter()
+        .flat_map(|entry| entry["skills"].as_array().into_iter().flatten())
+        .find(|skill| skill["path"] == path)
+        .and_then(|skill| skill["enabled"].as_bool())
+}
+
+/// A Codex skill, on the real `~/.codex/config.toml`: switched on through the service, the
+/// installed Codex (app-server `skills/list`) must report it enabled; the undo must give the
+/// file back byte for byte and Codex must report it disabled again. Needs
+/// `WYSS_REAL_CODEX_SKILL` (the skill's name as the inventory shows it, currently switched
+/// off, in a folder of the same name under `~/.agents/skills`). By hand: `cargo test -- --ignored real_codex_skill --nocapture`.
+#[test]
+#[ignore = "changes the real ~/.codex/config.toml for a few seconds and puts it back"]
+fn real_codex_skill_one_switch_then_back() {
+    let skill = std::env::var("WYSS_REAL_CODEX_SKILL").expect("name the skill to switch");
+    let environment = Environment::from_process(None).unwrap();
+    let path = environment.codex_dir().join("config.toml");
+    let original = fs::read(&path).unwrap();
+    let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+
+    struct Guard<'a> {
+        path: &'a Path,
+        original: &'a [u8],
+        produced: std::cell::RefCell<Option<Vec<u8>>>,
+    }
+    impl Drop for Guard<'_> {
+        fn drop(&mut self) {
+            let now = fs::read(self.path).unwrap_or_default();
+            if now != self.original && self.produced.borrow().as_deref() == Some(now.as_slice()) {
+                let _ = fs::write(self.path, self.original);
+                eprintln!("the guard put the original bytes back");
+            }
+        }
+    }
+    let guard = Guard {
+        path: &path,
+        original: &original,
+        produced: std::cell::RefCell::new(None),
+    };
+
+    let state =
+        std::env::temp_dir().join(format!("wyss-real-state-{}", uuid::Uuid::new_v4().simple()));
+    fs::DirBuilder::new().mode(0o700).create(&state).unwrap();
+    let inventory = InventoryService::start(environment.clone(), Bounds::PROPOSED).unwrap();
+    let confirm = Arc::new(FakeConfirm::default());
+    confirm.accept.store(true, Ordering::SeqCst);
+    let service = ChangeService::for_providers(
+        environment,
+        inventory.clone(),
+        &state,
+        Vault::new(Box::new(MemoryStore::new())),
+        Box::new(confirm.clone()),
+        Faults::default(),
+    )
+    .unwrap();
+    let item = inventory
+        .snapshot()
+        .inventory
+        .items
+        .iter()
+        .find(|i| {
+            i.kind == ItemKind::Skill
+                && i.name.as_str() == skill
+                && i.source == SourceKey::CodexUserConfig
+        })
+        .expect("the skill is in the inventory")
+        .clone();
+    let skill_file = format!(
+        "{}/.agents/skills/{skill}/SKILL.md",
+        std::env::var("HOME").unwrap()
+    );
+    assert_eq!(
+        codex_says_skill_enabled(&skill_file),
+        Some(false),
+        "Codex says it is off to begin with"
+    );
+
+    let plan = service.plan(Operation::CodexSkillOn, &item.id).unwrap();
+    println!(
+        "plan: {} · risk {:?} · effect {:?}",
+        plan.name, plan.risk, plan.effect
+    );
+    let applied = service.apply(&plan.id).unwrap();
+    *guard.produced.borrow_mut() = fs::read(&path).ok();
+    assert_eq!(applied.outcome, Outcome::Applied);
+    let said = codex_says_skill_enabled(&skill_file);
+    println!("the installed Codex says, after the switch: enabled = {said:?}");
+    assert_eq!(said, Some(true));
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        mode
+    );
+
+    let undo = service.undo(&applied.change).unwrap();
+    assert_eq!(service.apply(&undo.id).unwrap().outcome, Outcome::Applied);
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        original,
+        "byte-identical to the original"
+    );
+    assert_eq!(codex_says_skill_enabled(&skill_file), Some(false));
+    println!("undone: same bytes, Codex says it is off again");
     drop(guard);
     let _ = fs::remove_dir_all(&state);
 }

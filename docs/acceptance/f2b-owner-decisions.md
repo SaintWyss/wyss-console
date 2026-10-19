@@ -89,9 +89,14 @@ line` / `restore the word true|false`), no key names, no values beyond a boolean
    Shown on the real `~/.claude`: one skill switched off, the installed Claude Code said
    "disabled via skillOverrides", the undo restored the exact bytes, and the directory's ACL
    and the file's mode did not change. To go back to the strict rule, delete that file.
-2. **Codex skills**: the effect of `[[skills.config]] enabled` on a running Codex is
-   unverified; the plan says so.
+2. **Codex skills — partly verified.** The installed Codex 0.159.0 reports a skill's switch
+   through its app-server (`skills/list`, read-only): shown on the real config, a skill went
+   off to on and back, the file had the same bytes after the undo. What a Codex session that is
+   already running does with it is still not known, and the plan says so.
 3. **Codex hooks** stay display-only until OQ-01 and G-INF.
-4. **The external review for F2b** (roadmap 4): not run; the writer and recovery it relies on
-   passed it in F2a, the TOML scanner and planner have not been reviewed by anyone but their
-   tests.
+4. **The external review for F2b** (roadmap 4): run once (codex-gsd-check, read-only).
+   Fixed: `trusted-writers` is opened without following a link and judged on the same
+   descriptor, its folder must be the owner's and closed; a private group is proved from the
+   name service too and refused when accounts are not local; an undo refuses when the entry is
+   no longer what the switch left. Not changed: a root-owned sticky directory is accepted only
+   as an _ancestor_ (`/tmp`-style); the folders written are `~/.claude` and `~/.codex`.

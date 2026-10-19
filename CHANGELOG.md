@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Review of F2b and the ACL rule
+
+- **Codex skills checked against the installed Codex** through its own `skills/list`: switched
+  on and back on the real config, same bytes after the undo. The plan's wording says what is
+  checked and what (a running session) is not.
+- **One external review, defects fixed**: the named-accounts file is opened without following
+  links and read from the descriptor judged; a private group is confirmed through the name
+  service and refused when accounts are not local; an undo no longer overwrites an entry that
+  was changed after the switch.
+
 ### Claude Code's folder with an ACL (F1/F2a trust)
 
 - **Changes to `~/.claude` work again on a machine where the owner gave another account

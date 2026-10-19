@@ -80,11 +80,33 @@ fn parse(bytes: &[u8]) -> Option<Vec<Entry>> {
     )
 }
 
+/// Whether the account databases are the local files only: a name service that reaches a
+/// network directory could list members the files do not show.
+fn accounts_are_local() -> bool {
+    let Ok(conf) = fs::read_to_string("/etc/nsswitch.conf") else {
+        return false;
+    };
+    ["passwd", "group"].iter().all(|database| {
+        conf.lines()
+            .map(|l| l.split('#').next().unwrap_or("").trim())
+            .find_map(|l| l.strip_prefix(&format!("{database}:")))
+            .is_some_and(|sources| {
+                sources
+                    .split_whitespace()
+                    .filter(|s| !s.starts_with('['))
+                    .all(|s| matches!(s, "files" | "compat" | "systemd"))
+            })
+    })
+}
+
 /// Whether `gid` is a group of which `me` is the only member: no other account lists it as a
-/// supplementary group and none has it as its primary one. Read from the local account files;
-/// an account that exists only in a network directory is not seen, which is why this is the
-/// one place that says so.
+/// supplementary group and none has it as its primary one. Read from the local account files
+/// and, for the members the system itself reports, from the name service; when the name
+/// service can reach anything but local files it cannot be proved, and the answer is no.
 pub(crate) fn group_is_private(gid: u32, me: u32) -> bool {
+    if !accounts_are_local() {
+        return false;
+    }
     let Ok(group) = fs::read_to_string("/etc/group") else {
         return false;
     };
@@ -111,7 +133,15 @@ pub(crate) fn group_is_private(gid: u32, me: u32) -> bool {
                     .any(|name| !name.is_empty() && Some(name) != my_name.as_deref())
             })
     });
-    !others_have_it_as_primary && !members_other_than_me
+    let system_reports_others = match nix::unistd::Group::from_gid(nix::unistd::Gid::from_raw(gid))
+    {
+        Ok(Some(entry)) => entry
+            .mem
+            .iter()
+            .any(|name| Some(name.as_str()) != my_name.as_deref()),
+        _ => true,
+    };
+    !others_have_it_as_primary && !members_other_than_me && !system_reports_others
 }
 
 /// Who can write the directory behind `fd` (whose mode is `mode` and group `gid`).
