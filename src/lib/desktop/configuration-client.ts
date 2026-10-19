@@ -113,10 +113,11 @@ export function editHook(item: string): Promise<Plan> {
 export function authorMcp(
   name: string,
   kind: 'local' | 'remote',
+  agent: 'opencode' | 'codex' = 'opencode',
 ): Promise<Plan> {
   return checked(
     'configuration_author_mcp',
-    { request: { name, kind } },
+    { request: { name, kind, agent } },
     parsePlan,
   );
 }

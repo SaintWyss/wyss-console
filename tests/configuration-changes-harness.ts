@@ -90,8 +90,12 @@ export class FakeChanges {
         this.check();
         return this.plan;
       },
-      authorMcp: async (name: string, kind: 'local' | 'remote') => {
-        this.calls.push(`author_mcp:${name}:${kind}`);
+      authorMcp: async (
+        name: string,
+        kind: 'local' | 'remote',
+        agent: 'opencode' | 'codex' = 'opencode',
+      ) => {
+        this.calls.push(`author_mcp:${name}:${kind}:${agent}`);
         this.check();
         return this.plan;
       },

@@ -34,7 +34,11 @@ export interface ChangesClient {
     timeout: number | null,
   ): Promise<Plan>;
   editHook(item: string): Promise<Plan>;
-  authorMcp(name: string, kind: 'local' | 'remote'): Promise<Plan>;
+  authorMcp(
+    name: string,
+    kind: 'local' | 'remote',
+    agent?: 'opencode' | 'codex',
+  ): Promise<Plan>;
   editMcp(item: string): Promise<Plan>;
   records(): Promise<ParkedRecord[]>;
   deleteRecord(record: string): Promise<boolean>;

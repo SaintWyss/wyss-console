@@ -3391,3 +3391,712 @@ fn replacing_a_server_that_held_a_token_never_leaves_it_in_the_clear() {
         ChangeFailure::KeyStoreUnavailable
     );
 }
+
+// ---- Codex authoring (F5) -----------------------------------------------------------------
+
+const CODEX_AUTHOR: &str = r##"# my codex configuration
+model = "gpt-6"
+
+[features]
+hooks = true   # keep
+
+# the docs server
+[mcp_servers.docs]
+command = "npx"
+args = ["-y", "docs-mcp"]   # pinned
+
+[mcp_servers.docs.env]
+DOCS_TOKEN = "SEKRET-docs-token"
+
+[mcp_servers.web]
+url = "https://web.invalid/mcp"
+enabled = false
+
+[projects."/home/u/p"]
+trust_level = "trusted"
+"##;
+
+fn codex_server(world: &World, name: &str) -> String {
+    world.codex_item(ItemKind::McpServer, name)
+}
+
+#[test]
+fn a_codex_server_is_written_as_a_new_table_and_comes_out_byte_for_byte() {
+    let world = World::new(SETTINGS);
+    world.codex(CODEX_AUTHOR);
+    let plan = world
+        .service
+        .plan_authored(Authoring::AddCodexMcp {
+            name: "fetcher".to_owned(),
+            spec: McpSpec::Local {
+                command: vec!["npx".into(), "-y".into(), "a b".into(), "$HOME;x".into()],
+            },
+        })
+        .unwrap();
+    assert_eq!(plan.risk, Risk::ExecutesCode);
+    assert_eq!(plan.effect, super::changes::Effect::CodexMcpChecked);
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    let after = world.codex_file();
+    assert!(after.starts_with(CODEX_AUTHOR));
+    assert!(after.ends_with(
+        "[mcp_servers.fetcher]\ncommand = \"npx\"\nargs = [\"-y\", \"a b\", \"$HOME;x\"]\n"
+    ));
+    let value: toml::Value = toml::from_str(&after).unwrap();
+    assert_eq!(
+        value["mcp_servers"]["fetcher"]["args"][2].as_str(),
+        Some("$HOME;x")
+    );
+    assert_eq!(
+        value["mcp_servers"]["docs"]["env"]["DOCS_TOKEN"].as_str(),
+        Some("SEKRET-docs-token")
+    );
+    let (history, _) = world.service.history(None, 1);
+    let undo = world.service.undo(&history[0].id).unwrap();
+    assert_eq!(applied(&world, &undo), Outcome::Applied);
+    assert_eq!(world.codex_file(), CODEX_AUTHOR);
+    world.assert_no_secret_outside_the_file();
+}
+
+#[test]
+fn a_codex_server_is_added_to_a_file_with_no_servers_or_no_final_newline() {
+    for original in ["", "model = \"x\"", "model = \"x\"\n", "a = 1\r\nb = 2\r\n"] {
+        let world = World::new(SETTINGS);
+        world.codex(original);
+        let plan = world
+            .service
+            .plan_authored(Authoring::AddCodexMcp {
+                name: "n".to_owned(),
+                spec: McpSpec::Remote {
+                    url: "https://h.invalid/x".to_owned(),
+                },
+            })
+            .unwrap();
+        assert_eq!(applied(&world, &plan), Outcome::Applied);
+        let after = world.codex_file();
+        assert!(after.starts_with(original), "{original:?} -> {after:?}");
+        let value: toml::Value = toml::from_str(&after).unwrap();
+        assert_eq!(
+            value["mcp_servers"]["n"]["url"].as_str(),
+            Some("https://h.invalid/x")
+        );
+        if original.contains("\r\n") {
+            assert!(
+                !after.replace("\r\n", "").contains('\n'),
+                "line endings kept: {after:?}"
+            );
+        }
+        let (history, _) = world.service.history(None, 1);
+        let undo = world.service.undo(&history[0].id).unwrap();
+        assert_eq!(applied(&world, &undo), Outcome::Applied);
+        assert_eq!(world.codex_file(), original);
+    }
+}
+
+#[test]
+fn a_codex_server_is_edited_in_place_and_every_other_byte_stays() {
+    let world = World::new(SETTINGS);
+    world.codex(CODEX_AUTHOR);
+    let id = codex_server(&world, "docs");
+    let current = world.service.mcp_current(&id).unwrap();
+    assert_eq!(
+        current,
+        McpSpec::Local {
+            command: vec!["npx".into(), "-y".into(), "docs-mcp".into()]
+        }
+    );
+    let plan = world
+        .service
+        .plan_authored(Authoring::EditCodexMcp {
+            item: id.clone(),
+            spec: McpSpec::Local {
+                command: vec!["node".into(), "server.js".into()],
+            },
+            expected: current.clone(),
+        })
+        .unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    assert_eq!(
+        world.codex_file(),
+        CODEX_AUTHOR
+            .replace("command = \"npx\"", "command = \"node\"")
+            .replace("args = [\"-y\", \"docs-mcp\"]", "args = [\"server.js\"]")
+    );
+    // The trailing comment and the env table are the same bytes; the token never moved.
+    assert!(
+        world.codex_file().contains("# pinned") && world.codex_file().contains("SEKRET-docs-token")
+    );
+    let (history, _) = world.service.history(None, 1);
+    let undo = world.service.undo(&history[0].id).unwrap();
+    assert_eq!(applied(&world, &undo), Outcome::Applied);
+    assert_eq!(world.codex_file(), CODEX_AUTHOR);
+    // A remote server changes its address; no arguments to add or drop.
+    let web = codex_server(&world, "web");
+    let cur = world.service.mcp_current(&web).unwrap();
+    let plan = world
+        .service
+        .plan_authored(Authoring::EditCodexMcp {
+            item: web,
+            spec: McpSpec::Remote {
+                url: "https://other.invalid/mcp".into(),
+            },
+            expected: cur,
+        })
+        .unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    assert_eq!(
+        world.codex_file(),
+        CODEX_AUTHOR.replace("https://web.invalid/mcp", "https://other.invalid/mcp")
+    );
+}
+
+#[test]
+fn a_codex_server_with_its_tables_is_taken_out_and_put_back_exactly() {
+    let world = World::new(SETTINGS);
+    world.codex(CODEX_AUTHOR);
+    let id = codex_server(&world, "docs");
+    let plan = world.service.plan(Operation::CodexParkMcp, &id).unwrap();
+    assert_eq!(plan.storage, Some(Protection::Sealed));
+    assert!(!format!("{plan:?}").contains("SEKRET"));
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    let out = world.codex_file();
+    assert!(!out.contains("docs-mcp") && !out.contains("SEKRET-docs-token"));
+    assert!(out.contains("# the docs server") && out.contains("[mcp_servers.web]"));
+    world.assert_no_secret_outside_the_file();
+    let record = world
+        .service
+        .records()
+        .into_iter()
+        .find(|r| r.state == State::Parked)
+        .unwrap();
+    let back = world
+        .service
+        .plan(Operation::RestoreHook, &record.id)
+        .unwrap();
+    assert_eq!(back.risk, Risk::ExecutesCode);
+    assert_eq!(applied(&world, &back), Outcome::Applied);
+    assert_eq!(world.codex_file(), CODEX_AUTHOR);
+    // And the undo of the removal, from the history.
+    let plan = world.service.plan(Operation::CodexParkMcp, &id).unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    let (history, _) = world.service.history(None, 1);
+    let undo = world.service.undo(&history[0].id).unwrap();
+    assert_eq!(applied(&world, &undo), Outcome::Applied);
+    assert_eq!(world.codex_file(), CODEX_AUTHOR);
+}
+
+#[test]
+fn a_codex_structure_the_scanner_cannot_place_is_refused_and_the_file_is_untouched() {
+    let world = World::new(SETTINGS);
+    for (what, text) in [
+        (
+            "dotted keys under another table",
+            "[mcp_servers]\ndocs.command = \"x\"\n",
+        ),
+        (
+            "an inline table",
+            "[mcp_servers]\ndocs = { command = \"x\" }\n",
+        ),
+        (
+            "tables of one server apart",
+            "[mcp_servers.docs]\ncommand = \"x\"\n[other]\na = 1\n[mcp_servers.docs.env]\nA = \"b\"\n",
+        ),
+    ] {
+        world.codex(text);
+        if let Ok(id) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            codex_server(&world, "docs")
+        })) {
+            assert_eq!(
+                world
+                    .service
+                    .plan(Operation::CodexParkMcp, &id)
+                    .unwrap_err(),
+                ChangeFailure::NotSupported,
+                "{what}"
+            );
+            let cur = world.service.mcp_current(&id).unwrap_or(McpSpec::Local {
+                command: vec!["x".into()],
+            });
+            assert!(
+                world
+                    .service
+                    .plan_authored(Authoring::EditCodexMcp {
+                        item: id,
+                        spec: McpSpec::Local {
+                            command: vec!["y".into()]
+                        },
+                        expected: cur,
+                    })
+                    .is_err(),
+                "{what}"
+            );
+        }
+        assert_eq!(world.codex_file(), text, "{what}");
+    }
+    // A server that exists cannot be added again, and a name must be plain.
+    world.codex(CODEX_AUTHOR);
+    for (name, spec) in [
+        (
+            "docs",
+            McpSpec::Local {
+                command: vec!["x".into()],
+            },
+        ),
+        (
+            "bad name",
+            McpSpec::Local {
+                command: vec!["x".into()],
+            },
+        ),
+        ("n", McpSpec::Local { command: vec![] }),
+        (
+            "n",
+            McpSpec::Remote {
+                url: "https://u:p@h.invalid".into(),
+            },
+        ),
+    ] {
+        assert!(
+            world
+                .service
+                .plan_authored(Authoring::AddCodexMcp {
+                    name: name.to_owned(),
+                    spec
+                })
+                .is_err(),
+            "{name}"
+        );
+    }
+    assert_eq!(world.codex_file(), CODEX_AUTHOR);
+}
+
+#[test]
+fn replacing_a_codex_server_that_held_a_token_never_leaves_it_in_the_clear() {
+    let world = World::new(SETTINGS);
+    world.codex(&CODEX_AUTHOR.replace(
+        "\"docs-mcp\"]   # pinned",
+        &format!("\"--token\", \"{MARKER}\"]"),
+    ));
+    world.keys.set_unavailable(true);
+    let id = codex_server(&world, "docs");
+    let cur = world.service.mcp_current(&id).unwrap();
+    assert_eq!(
+        world
+            .service
+            .plan_authored(Authoring::EditCodexMcp {
+                item: id,
+                spec: McpSpec::Local {
+                    command: vec!["npx".into()]
+                },
+                expected: cur,
+            })
+            .unwrap_err(),
+        ChangeFailure::KeyStoreUnavailable
+    );
+}
+
+#[test]
+fn a_failure_or_a_crash_at_any_step_of_a_codex_authored_change_is_repaired() {
+    let steps = [
+        Step::IntentJournaled,
+        Step::RecordSealed,
+        Step::RecordWritten,
+        Step::TemporaryCreated,
+        Step::TemporaryWritten,
+        Step::TemporaryFlushed,
+        Step::Renamed,
+        Step::Exchanged,
+        Step::DirectoryFlushed,
+        Step::ReadBack,
+        Step::OutcomeJournaled,
+    ];
+    for park in [false, true] {
+        for step in steps {
+            for fault in [Fault::Fail, Fault::Crash] {
+                let world = World::new(SETTINGS);
+                world.codex(CODEX_AUTHOR);
+                let plan = if park {
+                    let id = codex_server(&world, "web");
+                    world.service.plan(Operation::CodexParkMcp, &id).unwrap()
+                } else {
+                    world
+                        .service
+                        .plan_authored(Authoring::AddCodexMcp {
+                            name: "n".to_owned(),
+                            spec: McpSpec::Local {
+                                command: vec!["x".into()],
+                            },
+                        })
+                        .unwrap()
+                };
+                world.faults.arm(step, fault);
+                let result = world.service.apply(&plan.id);
+                if fault == Fault::Crash {
+                    assert!(
+                        result.is_err(),
+                        "{park} {step:?}: a crash is not an outcome"
+                    );
+                }
+                let again = world.restarted();
+                again.service.recover();
+                let file = again.codex_file();
+                toml::from_str::<toml::Value>(&file).unwrap();
+                let changed = file != CODEX_AUTHOR;
+                assert!(
+                    fs::read_dir(again.home.join(".codex"))
+                        .unwrap()
+                        .flatten()
+                        .all(|e| !e.file_name().to_string_lossy().ends_with(".tmp")),
+                    "{park} {step:?} {fault:?}: a temporary file was left"
+                );
+                let (history, _) = again.service.history(None, 5);
+                assert!(history.iter().all(|c| c.outcome.is_some()));
+                if changed {
+                    if park {
+                        let record = again
+                            .service
+                            .records()
+                            .into_iter()
+                            .find(|r| r.state == State::Parked)
+                            .unwrap_or_else(|| panic!("{step:?} {fault:?}: no record"));
+                        let back = again
+                            .service
+                            .plan(Operation::RestoreHook, &record.id)
+                            .unwrap();
+                        assert_eq!(applied(&again, &back), Outcome::Applied);
+                    } else {
+                        let change = history
+                            .iter()
+                            .find(|c| c.outcome.is_some_and(Outcome::changed_the_file))
+                            .unwrap();
+                        let undo = again.service.undo(&change.id).unwrap();
+                        assert_eq!(applied(&again, &undo), Outcome::Applied);
+                    }
+                    assert_eq!(
+                        again.codex_file(),
+                        CODEX_AUTHOR,
+                        "{park} {step:?} {fault:?}"
+                    );
+                }
+                again.assert_no_secret_outside_the_file();
+            }
+        }
+    }
+}
+
+/// The real `~/.codex/config.toml` and the installed Codex CLI, with the discipline the owner
+/// asked for: its mode and SHA-256 are noted and the exact bytes are kept in a private file;
+/// a server of a made-up name is added, changed, and taken back; a real server with its
+/// tables (`WYSS_REAL_CODEX_PARK`) is taken out and put back through its record; after each
+/// step `codex mcp list` is asked what it sees (it calls no model); and at the end the file
+/// must be the exact bytes it started as, with the same hash and mode. Nothing of the file is
+/// printed. If anything fails midway the original bytes are put back, but only if the file is
+/// still exactly what this test wrote.
+///
+/// By hand: `WYSS_REAL_CODEX_PARK=notebooklm cargo test -- --ignored real_codex_authoring --nocapture`.
+#[test]
+#[ignore = "changes the real ~/.codex/config.toml for a few seconds and puts it back"]
+fn real_codex_authoring_add_edit_park_and_back() {
+    use sha2::{Digest, Sha256};
+    use std::process::Command;
+    let park = std::env::var("WYSS_REAL_CODEX_PARK").expect("name a real server to take out");
+    let environment = Environment::from_process(None).unwrap();
+    let path = environment.codex_dir().join("config.toml");
+    let original = fs::read(&path).unwrap();
+    let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    let sha = |b: &[u8]| -> String {
+        Sha256::digest(b)
+            .iter()
+            .map(|x| format!("{x:02x}"))
+            .collect()
+    };
+    let backup = std::env::temp_dir().join(format!(
+        "wyss-codex-author-{}.bak",
+        uuid::Uuid::new_v4().simple()
+    ));
+    fs::write(&backup, &original).unwrap();
+    fs::set_permissions(&backup, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        sha(&fs::read(&backup).unwrap()),
+        sha(&original),
+        "the backup is exact"
+    );
+    println!(
+        "backup {} ({} bytes, mode {mode:o}, sha {})",
+        backup.display(),
+        original.len(),
+        &sha(&original)[..16]
+    );
+
+    let list = || -> String {
+        let out = Command::new("codex")
+            .args(["mcp", "list"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "codex mcp list failed");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let before_list = list();
+    let sees = |text: &str, name: &str| {
+        text.lines()
+            .any(|l| l.split_whitespace().next() == Some(name))
+    };
+    assert!(sees(&before_list, &park), "the real server must exist");
+
+    struct Guard<'a> {
+        path: &'a Path,
+        original: &'a [u8],
+        produced: std::cell::RefCell<Option<Vec<u8>>>,
+    }
+    impl Drop for Guard<'_> {
+        fn drop(&mut self) {
+            let now = fs::read(self.path).unwrap_or_default();
+            let ours = self.produced.borrow().clone();
+            if now != self.original && ours.as_deref() == Some(now.as_slice()) {
+                let _ = fs::write(self.path, self.original);
+                eprintln!("the guard put the original bytes back");
+            }
+        }
+    }
+    let guard = Guard {
+        path: &path,
+        original: &original,
+        produced: std::cell::RefCell::new(None),
+    };
+    let state =
+        std::env::temp_dir().join(format!("wyss-real-state-{}", uuid::Uuid::new_v4().simple()));
+    fs::DirBuilder::new().mode(0o700).create(&state).unwrap();
+    let inventory = InventoryService::start(environment.clone(), Bounds::PROPOSED).unwrap();
+    let confirm = Arc::new(FakeConfirm::default());
+    confirm.accept.store(true, Ordering::SeqCst);
+    let service = ChangeService::for_providers(
+        environment,
+        inventory.clone(),
+        &state,
+        Vault::new(Box::new(MemoryStore::new())),
+        Box::new(confirm.clone()),
+        Faults::default(),
+    )
+    .unwrap();
+    let apply = |plan: &super::changes::PlanView| {
+        let out = service.apply(&plan.id).unwrap();
+        *guard.produced.borrow_mut() = fs::read(&path).ok();
+        inventory.rescan();
+        assert_eq!(out.outcome, Outcome::Applied);
+    };
+    let item = |name: &str| {
+        inventory
+            .snapshot()
+            .inventory
+            .items
+            .iter()
+            .find(|i| {
+                i.kind == ItemKind::McpServer
+                    && i.name.as_str() == name
+                    && i.source == SourceKey::CodexUserConfig
+            })
+            .unwrap_or_else(|| panic!("no server {name}"))
+            .id
+            .clone()
+    };
+    let test = "wyss-f5-test";
+    assert!(!sees(&before_list, test));
+
+    // 1. Add: the real Codex sees it, and everything before it is the same bytes.
+    let plan = service
+        .plan_authored(Authoring::AddCodexMcp {
+            name: test.to_owned(),
+            spec: McpSpec::Local {
+                command: vec!["/bin/true".into(), "--wyss-f5-test".into()],
+            },
+        })
+        .unwrap();
+    apply(&plan);
+    let added = fs::read(&path).unwrap();
+    assert!(
+        added.starts_with(&original),
+        "the original is a prefix of the new file"
+    );
+    assert!(sees(&list(), test), "codex mcp list shows the new server");
+    println!("added: {} -> {} bytes", original.len(), added.len());
+
+    // 2. Edit its command in place; Codex sees the change.
+    let id = item(test);
+    let cur = service.mcp_current(&id).unwrap();
+    let plan = service
+        .plan_authored(Authoring::EditCodexMcp {
+            item: id,
+            spec: McpSpec::Local {
+                command: vec!["/bin/echo".into(), "wyss-f5-test".into()],
+            },
+            expected: cur,
+        })
+        .unwrap();
+    apply(&plan);
+    let listed = list();
+    assert!(
+        sees(&listed, test) && listed.contains("/bin/echo"),
+        "codex mcp list shows the edit"
+    );
+
+    // 3. Take the made-up server back with the history (exact, step by step).
+    let (history, _) = service.history(None, 5);
+    for change in history.iter().take(2) {
+        let undo = service.undo(&change.id).unwrap();
+        apply(&undo);
+    }
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        original,
+        "back to the original bytes"
+    );
+    assert!(!sees(&list(), test));
+
+    // 4. A real server, with its tables, out and back through its record.
+    let id = item(&park);
+    let plan = service.plan(Operation::CodexParkMcp, &id).unwrap();
+    assert_eq!(plan.storage, Some(Protection::Sealed));
+    apply(&plan);
+    let out_text = fs::read(&path).unwrap();
+    assert!(out_text.len() < original.len());
+    assert!(
+        !sees(&list(), &park),
+        "codex no longer sees the server while it is out"
+    );
+    let record = service
+        .records()
+        .into_iter()
+        .find(|r| r.state == State::Parked)
+        .unwrap();
+    let back = service.plan(Operation::RestoreHook, &record.id).unwrap();
+    assert!(back.needs_native_dialog);
+    apply(&back);
+    assert!(sees(&list(), &park), "codex sees it again");
+
+    let restored = fs::read(&path).unwrap();
+    println!(
+        "restored: {} bytes, sha {} (original {})",
+        restored.len(),
+        &sha(&restored)[..16],
+        &sha(&original)[..16]
+    );
+    assert_eq!(restored, original, "byte for byte");
+    assert_eq!(sha(&restored), sha(&original));
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        mode
+    );
+    assert_eq!(list(), before_list, "codex sees exactly what it saw before");
+    assert!(
+        fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .all(|e| !e.file_name().to_string_lossy().ends_with(".tmp")),
+        "no temporary file left"
+    );
+    drop(guard);
+    let _ = fs::remove_dir_all(&state);
+    // The backup stays until the owner removes it: it holds what the file holds.
+}
+
+// ---- findings of the review of Codex authoring --------------------------------------------
+
+#[test]
+fn the_only_codex_server_can_be_taken_out_and_put_back() {
+    let only = "model = \"x\"\n\n[mcp_servers.docs]\ncommand = \"npx\"\n";
+    let world = World::new(SETTINGS);
+    world.codex(only);
+    let id = codex_server(&world, "docs");
+    let plan = world.service.plan(Operation::CodexParkMcp, &id).unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    assert!(!world.codex_file().contains("docs"));
+    let record = world
+        .service
+        .records()
+        .into_iter()
+        .find(|r| r.state == State::Parked)
+        .unwrap();
+    let back = world
+        .service
+        .plan(Operation::RestoreHook, &record.id)
+        .unwrap();
+    assert_eq!(applied(&world, &back), Outcome::Applied);
+    assert_eq!(world.codex_file(), only);
+}
+
+#[test]
+fn a_codex_server_with_an_unusual_name_comes_back_too() {
+    let odd = "[mcp_servers.\"my.server\"]\ncommand = \"x\"\n\n[mcp_servers.b]\ncommand = \"y\"\n";
+    let world = World::new(SETTINGS);
+    world.codex(odd);
+    let id = codex_server(&world, "my.server");
+    let plan = world.service.plan(Operation::CodexParkMcp, &id).unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    let record = world
+        .service
+        .records()
+        .into_iter()
+        .find(|r| r.state == State::Parked)
+        .unwrap();
+    let back = world
+        .service
+        .plan(Operation::RestoreHook, &record.id)
+        .unwrap();
+    assert_eq!(applied(&world, &back), Outcome::Applied);
+    assert_eq!(world.codex_file(), odd);
+}
+
+#[test]
+fn a_take_back_may_change_the_server_it_names_and_no_other() {
+    use super::author::{draft_revert, inverse_of};
+    use super::model::ProviderId;
+    let before = "[mcp_servers.a]\ncommand = \"x\"\n\n[mcp_servers.b]\ncommand = \"y\"\n";
+    let after_ok = "[mcp_servers.a]\ncommand = \"x2\"\n\n[mcp_servers.b]\ncommand = \"y\"\n";
+    let mut body = inverse_of(
+        ProviderId::Codex,
+        SourceKey::CodexUserConfig,
+        before.as_bytes(),
+        after_ok.as_bytes(),
+    );
+    // A record that names `b` but whose bytes change `a`: refused.
+    body.matcher = Some("b".to_owned());
+    assert!(draft_revert(after_ok.as_bytes(), &"a".repeat(32), &body).is_err());
+    body.matcher = Some("a".to_owned());
+    let drafted = draft_revert(after_ok.as_bytes(), &"a".repeat(32), &body).unwrap();
+    assert!(
+        drafted.diff.iter().any(|l| l.text.contains("command")),
+        "{:?}",
+        drafted.diff
+    );
+    assert!(drafted.holds_hidden_values || !drafted.diff.is_empty());
+    assert_eq!(drafted.risk, Risk::ExecutesCode);
+}
+
+#[test]
+fn a_codex_server_with_arguments_is_sealed_and_an_args_line_with_a_hash_in_a_string_can_go() {
+    let world = World::new(SETTINGS);
+    world.codex("[mcp_servers.s]\ncommand = \"x\"\nargs = [\"--color=#fff\"]\n");
+    let plan = world
+        .service
+        .plan_authored(Authoring::AddCodexMcp {
+            name: "t".to_owned(),
+            spec: McpSpec::Local {
+                command: vec!["x".into(), "--k".into(), "v".into()],
+            },
+        })
+        .unwrap();
+    assert_eq!(plan.storage, Some(Protection::Sealed));
+    let id = codex_server(&world, "s");
+    let cur = world.service.mcp_current(&id).unwrap();
+    let edit = world
+        .service
+        .plan_authored(Authoring::EditCodexMcp {
+            item: id,
+            spec: McpSpec::Local {
+                command: vec!["x".into()],
+            },
+            expected: cur,
+        })
+        .unwrap();
+    assert_eq!(applied(&world, &edit), Outcome::Applied);
+    assert!(!world.codex_file().contains("args"));
+}

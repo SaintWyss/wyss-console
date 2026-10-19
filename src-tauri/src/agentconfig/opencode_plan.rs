@@ -678,17 +678,25 @@ fn authored(
     bounds: &Bounds,
     protection: impl Fn(bool) -> Result<Protection, RestoreError>,
 ) -> Result<Drafted, PlanError> {
-    let body = super::author::inverse_of(
+    let mut body = super::author::inverse_of(
         ProviderId::Opencode,
         SourceKey::OpencodeUserConfig,
         old,
         &new,
     );
+    // The record says which server it is about: a take-back may change that one and no other.
+    if let Logical::SetMcp { name, .. } | Logical::SetMcpField { name, .. } = &logical {
+        body.matcher = Some(name.clone());
+    }
     // A server's arguments and address are a plausible place for a token: what is written,
     // and anything it replaced (the record keeps both), is sealed when it may hold one. What
     // was replaced is judged as its text can be: any change that took something out seals.
-    let secret_bearing =
-        super::classify::may_hold_secret(shown, bounds) || !body.removed_text.is_empty();
+    // Arguments and addresses are where a token lives: any that are written are sealed.
+    let secret_bearing = super::classify::may_hold_secret(shown, bounds)
+        || !body.removed_text.is_empty()
+        || shown
+            .get("command")
+            .is_some_and(|c| c.as_array().is_some_and(|c| c.len() > 1));
     let protection = protection(secret_bearing).map_err(|e| match e {
         RestoreError::NoKeyStoreForSecret => PlanError::KeyStoreUnavailable,
         _ => PlanError::NotSupported,

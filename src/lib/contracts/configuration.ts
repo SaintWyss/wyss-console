@@ -249,6 +249,9 @@ export const OPERATIONS = [
   'edit_mcp',
   'park_mcp',
   'revert_authored',
+  'codex_add_mcp',
+  'codex_edit_mcp',
+  'codex_park_mcp',
 ] as const;
 export type Operation = (typeof OPERATIONS)[number];
 

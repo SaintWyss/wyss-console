@@ -46,6 +46,12 @@ pub enum Operation {
     ParkMcp,
     /// Puts back what an authored change replaced, exactly, while the file is as it left it.
     RevertAuthored,
+    /// Codex: a new MCP server, written by the user in a native window.
+    CodexAddMcp,
+    /// Codex: the program, arguments or address of a server, changed in a native window.
+    CodexEditMcp,
+    /// Codex: a server leaves the file and is kept (restored with `RestoreHook`).
+    CodexParkMcp,
 }
 
 /// What a switch's key held before a change made it: the one thing needed to put it back

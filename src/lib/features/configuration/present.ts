@@ -302,6 +302,9 @@ export const OPERATION_LABEL: Record<Operation, string> = {
   edit_mcp: 'Change this OpenCode MCP server',
   park_mcp: 'Delete this OpenCode MCP server (kept, so it can be put back)',
   revert_authored: 'Take back what you wrote',
+  codex_add_mcp: 'Add this Codex MCP server',
+  codex_edit_mcp: 'Change this Codex MCP server',
+  codex_park_mcp: 'Delete this Codex MCP server (kept, so it can be put back)',
 };
 
 export const RISK_LABEL: Record<Risk, string> = {
@@ -517,7 +520,10 @@ export const mcpNameOk = (name: string): boolean =>
 /** What the user can write for an item: change its command, or delete it. */
 export function authoringFor(
   item: ConfigItem,
-): { edit: 'hook' | 'mcp'; remove: 'park_mcp' | null } | null {
+): {
+  edit: 'hook' | 'mcp';
+  remove: 'park_mcp' | 'codex_park_mcp' | null;
+} | null {
   if (item.not_writable !== 'not_in_this_phase') return null;
   if (
     item.provider === 'claude_code' &&
@@ -531,6 +537,12 @@ export function authoringFor(
     item.source === 'opencode_user_config'
   )
     return { edit: 'mcp', remove: 'park_mcp' };
+  if (
+    item.provider === 'codex' &&
+    item.kind === 'mcp_server' &&
+    item.source === 'codex_user_config'
+  )
+    return { edit: 'mcp', remove: 'codex_park_mcp' };
   return null;
 }
 

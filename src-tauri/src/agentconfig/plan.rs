@@ -99,6 +99,8 @@ pub enum Logical {
     },
     /// A change to OpenCode's JSONC file: checked by `opencode_plan`.
     Opencode(super::opencode_plan::Logical),
+    /// An authored change to Codex's TOML file: checked by `codex_author`.
+    CodexAuthor(super::codex_author::Logical),
 }
 
 /// What `apply` has to do besides write the file.
@@ -176,7 +178,7 @@ pub fn apply_logical(before: &Value, edit: &Logical) -> Option<Value> {
     let root = value.as_object_mut()?;
     match edit {
         Logical::Nothing => (),
-        Logical::Toml(_) | Logical::Opencode(_) => return None,
+        Logical::Toml(_) | Logical::Opencode(_) | Logical::CodexAuthor(_) => return None,
         Logical::SetHookCommand {
             event,
             group,

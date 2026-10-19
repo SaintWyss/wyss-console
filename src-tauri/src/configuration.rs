@@ -281,6 +281,8 @@ pub struct AuthorMcp {
     name: String,
     /// `local` or `remote`.
     kind: String,
+    /// `opencode` or `codex`: whose configuration the server goes into.
+    agent: String,
 }
 
 fn cancelled() -> ConfigurationError {
@@ -451,16 +453,35 @@ async fn configuration_author_mcp(
             "remote" => true,
             _ => return Err(invalid()),
         };
+        let codex = match request.agent.as_str() {
+            "codex" => true,
+            "opencode" => false,
+            _ => return Err(invalid()),
+        };
         let intro = format!(
-            "OpenCode will {} for the server \"{}\". It is written into your own OpenCode configuration.",
-            if remote { "connect to the address you write" } else { "start the program you write" },
-            request.name
+            "{} will {} for the server \"{}\". It is written into your own {} configuration.",
+            if codex { "Codex" } else { "OpenCode" },
+            if remote {
+                "connect to the address you write"
+            } else {
+                "start the program you write"
+            },
+            request.name,
+            if codex { "Codex" } else { "OpenCode" }
         );
         let typed = text_form(&app, "Add an MCP server", &intro, mcp_fields(None, remote))
             .ok_or_else(cancelled)?;
-        Ok(changes.plan_authored(Authoring::AddMcp {
-            name: request.name,
-            spec: mcp_from(&typed, remote),
+        let spec = mcp_from(&typed, remote);
+        Ok(changes.plan_authored(if codex {
+            Authoring::AddCodexMcp {
+                name: request.name,
+                spec,
+            }
+        } else {
+            Authoring::AddMcp {
+                name: request.name,
+                spec,
+            }
         })?)
     })
     .await
@@ -480,19 +501,30 @@ async fn configuration_edit_mcp(
             .ok_or(ConfigurationError::Change(ChangeFailure::EntryGone))?;
         let remote = matches!(current, McpSpec::Remote { .. });
         let which = changes.item_label(&item).unwrap_or_default();
+        let codex = changes.item_provider(&item) == Some(crate::agentconfig::ProviderId::Codex);
+        let agent = if codex { "Codex" } else { "OpenCode" };
         let typed = text_form(
             &app,
             "Change an MCP server",
             &format!(
-                "What you write replaces what the OpenCode server \"{which}\" starts or connects to."
+                "What you write replaces what the {agent} server \"{which}\" starts or connects to."
             ),
             mcp_fields(Some(&current), remote),
         )
         .ok_or_else(cancelled)?;
-        Ok(changes.plan_authored(Authoring::EditMcp {
-            item,
-            spec: mcp_from(&typed, remote),
-            expected: current,
+        let spec = mcp_from(&typed, remote);
+        Ok(changes.plan_authored(if codex {
+            Authoring::EditCodexMcp {
+                item,
+                spec,
+                expected: current,
+            }
+        } else {
+            Authoring::EditMcp {
+                item,
+                spec,
+                expected: current,
+            }
         })?)
     })
     .await

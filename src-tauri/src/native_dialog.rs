@@ -51,6 +51,11 @@ fn operation_text(operation: Operation) -> &'static str {
         Operation::OpencodeMcpOn => "Turn on an OpenCode MCP server (it can start a program)",
         Operation::AddHook => "Add a hook that runs the command you wrote",
         Operation::EditHook => "Change the command of a hook",
+        Operation::CodexAddMcp => "Add a Codex MCP server that starts the program you wrote",
+        Operation::CodexEditMcp => "Change what a Codex MCP server starts or connects to",
+        Operation::CodexParkMcp => {
+            "Turn off a Codex MCP server (remove it from the file and keep it here)"
+        }
         Operation::AddMcp => "Add an OpenCode MCP server that starts the program you wrote",
         Operation::EditMcp => "Change what an OpenCode MCP server starts or connects to",
         Operation::ParkMcp => {

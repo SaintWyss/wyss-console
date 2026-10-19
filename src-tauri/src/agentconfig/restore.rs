@@ -54,7 +54,7 @@ pub enum Anchor {
 }
 
 /// What is sealed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordBody {
     pub provider: ProviderId,
@@ -77,6 +77,21 @@ pub struct RecordBody {
     /// The file before the removal, and after it.
     pub h0: String,
     pub h1: String,
+}
+
+/// A record holds the text that left a file, and what the user wrote: it is never printed.
+impl std::fmt::Debug for RecordBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RecordBody")
+            .field("provider", &self.provider)
+            .field("source", &self.source)
+            .field("event", &self.event)
+            .field(
+                "removed_text",
+                &format_args!("{} bytes", self.removed_text.len()),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

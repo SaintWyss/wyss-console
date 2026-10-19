@@ -403,13 +403,14 @@ pub fn draft_revert(bytes: &[u8], record: &str, body: &RecordBody) -> Result<Dra
     // A record is believed only for what it was made for: the two files differ in the one
     // place an authored change writes (`hooks` for Claude Code, `mcp` for OpenCode), and
     // nowhere else. A record that would reach `permissions` or anything else is refused.
-    let (Some(now), Some(then)) = (top_level(bytes), top_level(&restored)) else {
+    let toml = body.source == SourceKey::CodexUserConfig;
+    let (Some(now), Some(then)) = (top_level(bytes, toml), top_level(&restored, toml)) else {
         return Err(PlanError::Malformed);
     };
-    let home = if body.source == SourceKey::OpencodeUserConfig {
-        "mcp"
-    } else {
-        "hooks"
+    let home = match body.source {
+        SourceKey::OpencodeUserConfig => "mcp",
+        SourceKey::CodexUserConfig => "mcp_servers",
+        _ => "hooks",
     };
     if now
         .keys()
@@ -417,6 +418,36 @@ pub fn draft_revert(bytes: &[u8], record: &str, body: &RecordBody) -> Result<Dra
         .any(|k| now.get(k) != then.get(k) && k != home)
     {
         return Err(PlanError::RecordUnreadable);
+    }
+    // A record about a server may change that server and no other, and the plan shows what it
+    // takes out or puts back (cut and redacted), not only that the file goes back.
+    let mut diff = vec![super::plan::DiffLine {
+        kind: DiffKind::Note,
+        text: "the file goes back to exactly what it was".to_owned(),
+    }];
+    let mut hidden = false;
+    if let Some(name) = body.matcher.as_deref() {
+        let entries = |m: &serde_json::Map<String, Value>| {
+            m.get(home)
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default()
+        };
+        let (a, b) = (entries(&now), entries(&then));
+        if a.keys()
+            .chain(b.keys())
+            .any(|k| a.get(k) != b.get(k) && k != name)
+        {
+            return Err(PlanError::RecordUnreadable);
+        }
+        let (shown, kind) = match (b.get(name), a.get(name)) {
+            (Some(restored), _) => (restored.clone(), DiffKind::Added),
+            (None, Some(removed)) => (removed.clone(), DiffKind::Removed),
+            (None, None) => (Value::Null, DiffKind::Note),
+        };
+        let (lines, cut) = redact_lines(&brief(&shown).0, kind, &Bounds::PROPOSED);
+        diff.extend(lines);
+        hidden = cut || brief(&shown).1 || !a.is_empty();
     }
     Ok(Drafted {
         operation: Operation::RevertAuthored,
@@ -433,22 +464,25 @@ pub fn draft_revert(bytes: &[u8], record: &str, body: &RecordBody) -> Result<Dra
             record: record.to_owned(),
             already_present: false,
         },
-        diff: vec![super::plan::DiffLine {
-            kind: DiffKind::Note,
-            text: "the file goes back to exactly what it was".to_owned(),
-        }],
-        holds_hidden_values: false,
+        diff,
+        holds_hidden_values: hidden,
         prior: None,
         managed: None,
     })
 }
 
 /// The top-level members of a settings file, parsed as JSON or JSONC.
-fn top_level(bytes: &[u8]) -> Option<serde_json::Map<String, Value>> {
-    super::reader::parse_jsonc(bytes, &Bounds::PROPOSED)
-        .ok()??
-        .as_object()
-        .cloned()
+fn top_level(bytes: &[u8], toml: bool) -> Option<serde_json::Map<String, Value>> {
+    let parsed = if toml {
+        super::reader::parse_toml(bytes, &Bounds::PROPOSED)
+    } else {
+        super::reader::parse_jsonc(bytes, &Bounds::PROPOSED)
+    };
+    // An empty file is an empty table.
+    match parsed.ok()? {
+        None => Some(serde_json::Map::new()),
+        Some(value) => value.as_object().cloned(),
+    }
 }
 
 /// What the page is shown of something the user typed: each text cut short, and a flag that

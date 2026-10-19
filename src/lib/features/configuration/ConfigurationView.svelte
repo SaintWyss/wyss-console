@@ -91,6 +91,7 @@
   let hookMatcher = $state('');
   let mcpName = $state('');
   let mcpKind = $state<'local' | 'remote'>('local');
+  let mcpAgent = $state<'opencode' | 'codex'>('opencode');
   const busy = $derived(changes.planning || changes.applying);
   const problems = $derived(
     (reply?.inventory.sources ?? []).filter(
@@ -140,9 +141,9 @@
     This is what Claude Code and Codex are set up with, read from their own
     files. Nothing changes until you confirm a plan, and Claude Code hooks and
     skills, Codex skills and MCP servers, and OpenCode MCP servers and plugins
-    can be switched here. You can also write a Claude Code hook or an OpenCode
-    MCP server, in a separate window. Secrets in commands, environments and
-    headers are never shown.
+    can be switched here. You can also write a Claude Code hook or an MCP server
+    for Codex or OpenCode, in a separate window. Secrets in commands,
+    environments and headers are never shown.
   </p>
 
   {#if changes.plan}
@@ -307,7 +308,7 @@
           class="action chip"
           aria-pressed={writing === 'mcp'}
           onclick={() => (writing = writing === 'mcp' ? null : 'mcp')}
-          >Add an OpenCode server…</button
+          >Add an MCP server…</button
         >
       {/if}
       {#if allHooks && changes.panel === 'items'}
@@ -324,16 +325,17 @@
     {#if writing && changes.panel === 'items'}
       <form
         class="configuration-plan"
-        aria-label={writing === 'hook'
-          ? 'Add a hook'
-          : 'Add an OpenCode server'}
+        aria-label={writing === 'hook' ? 'Add a hook' : 'Add an MCP server'}
         onsubmit={(event) => {
           event.preventDefault();
           if (writing === 'hook')
             changesController.author((c) =>
               c.authorHook(hookEvent, hookMatcher.trim() || null, null),
             );
-          else changesController.author((c) => c.authorMcp(mcpName, mcpKind));
+          else
+            changesController.author((c) =>
+              c.authorMcp(mcpName, mcpKind, mcpAgent),
+            );
           writing = null;
         }}
       >
@@ -364,6 +366,13 @@
             Name the server and say what it is. What it starts or connects to is
             typed next, in a separate window.
           </p>
+          <label
+            >Agent
+            <select bind:value={mcpAgent}>
+              <option value="opencode">OpenCode</option>
+              <option value="codex">Codex</option>
+            </select>
+          </label>
           <label
             >Name
             <input
