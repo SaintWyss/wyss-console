@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Install, upgrade, roll back, diagnose (F13)
+
+- **`install.sh`** (also inside the package) installs for the current user only, after checking
+  every file's SHA-256; an upgrade is staged beside the old version, asks the host to stop, swaps
+  by rename and keeps the old one for **`rollback`**; **`uninstall`** keeps the Console's state
+  unless `--purge` and never touches `~/.claude` or `~/.codex`. `--host-service` writes an
+  optional `systemd --user` unit for the host.
+- **`wyss-console --diagnose`** prints versions, the host, the agents found, the Secret Service,
+  the state directory and the agents' folders' permissions: no values. ADR 0040.
+
 ### Handoff between agents (F11a)
 
 - **"Hand off…" on a session** prepares a brief to read and edit: the folder, the repository's

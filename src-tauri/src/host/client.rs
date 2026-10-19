@@ -165,6 +165,12 @@ impl HostLink {
         }
     }
 
+    /// What a running host says about itself, without starting one.
+    pub fn hello_only() -> Result<Value, HostError> {
+        let path = socket_path().ok_or_else(|| HostError::new("host_unavailable"))?;
+        Remote { path }.call("hello", Value::Null)
+    }
+
     /// Asks a running host to stop (it closes its terminals).
     pub fn stop_remote() -> Result<(), HostError> {
         let path = socket_path().ok_or_else(|| HostError::new("host_unavailable"))?;

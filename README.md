@@ -662,6 +662,17 @@ read, and never a path.
 - **Trying it on your own machine.** `cargo test -- --ignored real_machine --nocapture`
   prints counts and outcomes of your real configuration, never a value, and writes nothing.
 
+## Installing, upgrading, rolling back, diagnosing
+
+After `npm run desktop:package`, `scripts/install.sh install --package
+.artifacts/package/wyss-console-<version>-linux-<arch>` (or the copy inside the package,
+`share/wyss-console/install.sh install`) installs for the current user under
+`~/.local/opt/wyss-console` after verifying every digest. Installing again upgrades beside the old
+version, which is kept for `install.sh rollback`; `install.sh uninstall` removes the application
+(`--purge` also removes `~/.local/state/wyss-console`; the agents' configuration is never
+touched); `--host-service` writes an optional user unit for the host; `install.sh status` and
+`wyss-console --diagnose` say what is installed and what the machine offers. ADR 0040.
+
 ## Terminals that outlive the window (the host)
 
 The first window starts a **host** (`wyss-console --wyss-host`, a separate process) that owns

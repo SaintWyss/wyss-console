@@ -91,6 +91,16 @@ for (const [source, target] of files) {
   chmodSync(join(staging, target), 0o755);
 }
 mkdirSync(join(staging, 'share', 'wyss-console'), { recursive: true });
+// What `install.sh` needs beside the binaries: itself, and the icon of the launcher entry.
+copyFileSync(
+  join(root, 'scripts', 'install.sh'),
+  join(staging, 'share', 'wyss-console', 'install.sh'),
+);
+chmodSync(join(staging, 'share', 'wyss-console', 'install.sh'), 0o755);
+copyFileSync(
+  join(root, 'src-tauri', 'icons', '128x128.png'),
+  join(staging, 'share', 'wyss-console', 'icon.png'),
+);
 writeFileSync(
   join(staging, 'share', 'wyss-console', 'package.json'),
   `${JSON.stringify(

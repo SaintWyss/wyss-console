@@ -10,6 +10,8 @@ mod configuration;
 #[cfg(target_os = "linux")]
 mod credentials;
 #[cfg(target_os = "linux")]
+mod diagnose;
+#[cfg(target_os = "linux")]
 mod handoff;
 #[cfg(target_os = "linux")]
 mod host;
@@ -33,6 +35,13 @@ fn main() {
         .is_some_and(|a| a == "--wyss-host-stop")
     {
         std::process::exit(host::stop());
+    }
+    #[cfg(target_os = "linux")]
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|a| a == "--diagnose")
+    {
+        std::process::exit(diagnose::run());
     }
     // Set by the packaging command, which builds the authority first: a build made any
     // other way has no authority of its own to install.

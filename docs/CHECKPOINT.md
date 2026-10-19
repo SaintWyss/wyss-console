@@ -16,7 +16,7 @@ push, no release. Verify with `git log --oneline | head` and `git status`.
 
 ## Active
 
-Nothing in progress. Next: F6a/b models, F5 authoring, F4a OpenCode, F13 packaging.
+Nothing in progress. Next: F6a/b models, F5 authoring, F4a OpenCode; F10/F8/F12 and F1b/G-INF need the decisions listed below.
 
 ## Roadmap still open, in the order being taken
 
@@ -37,6 +37,9 @@ P1 (baselines) needs a reference terminal installed with consent: own-metric scr
    app with its own `XDG_STATE_HOME` and `XDG_RUNTIME_DIR`, real `HOME`. Stop a leftover host
    with `wyss-console --wyss-host-stop`.
 4. Never type into a tab without confirming which one is active.
+5. **Do not isolate `XDG_DATA_HOME` for a GUI run with the real HOME**: Claude Code's installer
+   moved `~/.local/bin/claude` to a copy under that directory (repaired once; the symlink must point
+   at `~/.local/share/claude/versions/<version>`). Isolate only `XDG_STATE_HOME` and `XDG_RUNTIME_DIR`.
 
 ## Commits of this stretch
 
