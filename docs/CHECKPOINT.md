@@ -7,16 +7,18 @@ push, no release. Verify with `git log --oneline | head` and `git status`.
 
 ## Done (and verified)
 
-| Phase                                       | State | Evidence                                                             |
-| ------------------------------------------- | ----- | -------------------------------------------------------------------- |
-| F1, F2a, F2b                                | done  | `docs/acceptance/f1-f2a-2026-10-19.md`, `f2b-owner-decisions.md`     |
-| Trust for a folder with an ACL              | done  | `agentconfig/acl.rs`, `declared.rs`; `trusted-writers` names `agent` |
-| F3a/b/c native launcher, registry, profiles | done  | `docs/acceptance/f3-2026-10-19.md`, ADR 0035                         |
-| F9 host process                             | done  | ADR 0036; killed-window test in the real GUI                         |
+| Phase                                       | State | Evidence                                                                                                          |
+| ------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------- |
+| F1, F2a, F2b                                | done  | `docs/acceptance/f1-f2a-2026-10-19.md`, `f2b-owner-decisions.md`                                                  |
+| Trust for a folder with an ACL              | done  | `agentconfig/acl.rs`, `declared.rs`; `trusted-writers` names `agent`                                              |
+| F3a/b/c native launcher, registry, profiles | done  | `docs/acceptance/f3-2026-10-19.md`, ADR 0035                                                                      |
+| F9 host process                             | done  | ADR 0036; killed-window test in the real GUI                                                                      |
+| F14 / F11a closing tests                    | done  | `docs/acceptance/f14-f11a-f13-closure-2026-10-19.md` (isolated Secret Service; real Claude Code to Codex handoff) |
+| F4a OpenCode inventory (read only)          | done  | ADR 0041, `adapter_tests.rs`                                                                                      |
 
 ## Active
 
-Nothing in progress. Next: F6a/b models, F5 authoring, F4a OpenCode; F10/F8/F12 and F1b/G-INF need the decisions listed below.
+F4a read side done (ADR 0041); its switches (JSONC span editor) are next, then F6a/b models, F5 authoring; F10/F8/F12 and F1b/G-INF need the decisions listed below.
 
 ## Roadmap still open, in the order being taken
 

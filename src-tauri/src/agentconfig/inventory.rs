@@ -9,7 +9,9 @@ use super::model::{
     Bounds, ContentHash, Effective, ItemKind, NotWritable, PathTrust, Persisted, ProviderId, Scope,
     SessionUse, SourceClass, SourceFailure, writability,
 };
-use super::reader::{ConfigReader, EntryKind, Listing, ReadFile, parse_json, parse_toml};
+use super::reader::{
+    ConfigReader, EntryKind, Listing, ReadFile, parse_json, parse_jsonc, parse_toml,
+};
 use super::redact::{self, Projection, Shown};
 use super::roots::InvalidRoot;
 use serde::Serialize;
@@ -59,6 +61,12 @@ impl Environment {
             .unwrap_or_else(|| self.home.join(".claude"))
     }
 
+    /// OpenCode's own directory under the XDG configuration home. `XDG_CONFIG_HOME` is not
+    /// read: a test points `home` elsewhere, and the default is where the installed one is.
+    pub(super) fn opencode_dir(&self) -> PathBuf {
+        self.home.join(".config/opencode")
+    }
+
     pub(super) fn codex_dir(&self) -> PathBuf {
         self.codex_home
             .clone()
@@ -89,6 +97,10 @@ pub enum SourceKey {
     CodexUserRules,
     CodexProjectConfig,
     CodexProjectRules,
+    OpencodeUserConfig,
+    OpencodeUserRules,
+    OpencodeProjectConfig,
+    OpencodeProjectRules,
 }
 
 impl SourceKey {
@@ -104,6 +116,10 @@ impl SourceKey {
             | Self::ClaudeProjectMcp
             | Self::ClaudeProjectSkills
             | Self::ClaudeProjectRules => ProviderId::ClaudeCode,
+            Self::OpencodeUserConfig
+            | Self::OpencodeUserRules
+            | Self::OpencodeProjectConfig
+            | Self::OpencodeProjectRules => ProviderId::Opencode,
             _ => ProviderId::Codex,
         }
     }
@@ -119,7 +135,9 @@ impl SourceKey {
             | Self::ClaudeProjectSkills
             | Self::ClaudeProjectRules
             | Self::CodexProjectConfig
-            | Self::CodexProjectRules => Scope::Project,
+            | Self::CodexProjectRules
+            | Self::OpencodeProjectConfig
+            | Self::OpencodeProjectRules => Scope::Project,
             _ => Scope::Global,
         }
     }
@@ -223,6 +241,9 @@ pub fn inventory(env: &Environment, bounds: Bounds) -> Result<Inventory, Invento
     let codex = ConfigReader::new(super::codex::roots(env)?, bounds)
         .map_err(|_| InventoryError::InvalidBounds)?;
     super::codex::read(&codex, env, &mut sink);
+    let opencode = ConfigReader::new(super::opencode::roots(env)?, bounds)
+        .map_err(|_| InventoryError::InvalidBounds)?;
+    super::opencode::read(&opencode, env, &mut sink);
     Ok(sink.finish())
 }
 
@@ -300,6 +321,7 @@ impl Sink {
         };
         let parsed = match format {
             Format::Json => parse_json(file.bytes(), self.bounds()),
+            Format::Jsonc => parse_jsonc(file.bytes(), self.bounds()),
             Format::Toml => parse_toml(file.bytes(), self.bounds()),
         };
         match parsed {
@@ -380,6 +402,7 @@ impl Sink {
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Format {
     Json,
+    Jsonc,
     Toml,
 }
 
@@ -475,6 +498,7 @@ fn provider_word(provider: ProviderId) -> &'static str {
     match provider {
         ProviderId::ClaudeCode => "claude_code",
         ProviderId::Codex => "codex",
+        ProviderId::Opencode => "opencode",
     }
 }
 
@@ -501,6 +525,10 @@ fn key_name(key: SourceKey) -> &'static str {
         SourceKey::CodexUserRules => "codex_user_rules",
         SourceKey::CodexProjectConfig => "codex_project_config",
         SourceKey::CodexProjectRules => "codex_project_rules",
+        SourceKey::OpencodeUserConfig => "opencode_user_config",
+        SourceKey::OpencodeUserRules => "opencode_user_rules",
+        SourceKey::OpencodeProjectConfig => "opencode_project_config",
+        SourceKey::OpencodeProjectRules => "opencode_project_rules",
     }
 }
 

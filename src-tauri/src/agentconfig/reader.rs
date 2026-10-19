@@ -295,6 +295,69 @@ pub fn parse_json(
         })
 }
 
+/// JSON with comments and trailing commas, as OpenCode reads its configuration. Comments
+/// and the commas before a closing bracket become spaces, so every byte keeps its line and
+/// column and a failure points where the user's file is, then it is read as strict JSON.
+pub fn parse_jsonc(
+    bytes: &[u8],
+    bounds: &Bounds,
+) -> Result<Option<serde_json::Value>, SourceFailure> {
+    parse_json(&strip_jsonc(bytes), bounds)
+}
+
+fn strip_jsonc(bytes: &[u8]) -> Vec<u8> {
+    let mut out = bytes.to_vec();
+    let (mut i, len) = (0, bytes.len());
+    // The last comma outside a string and not yet followed by a value.
+    let mut comma: Option<usize> = None;
+    while i < len {
+        match bytes[i] {
+            b'"' => {
+                comma = None;
+                i += 1;
+                while i < len && bytes[i] != b'"' {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                while i < len && bytes[i] != b'\n' {
+                    out[i] = b' ';
+                    i += 1;
+                }
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                let end = bytes[i + 2..]
+                    .windows(2)
+                    .position(|w| w == b"*/")
+                    .map_or(len, |at| i + 2 + at + 2);
+                for byte in &mut out[i..end] {
+                    if *byte != b'\n' {
+                        *byte = b' ';
+                    }
+                }
+                i = end;
+            }
+            b',' => {
+                comma = Some(i);
+                i += 1;
+            }
+            b']' | b'}' => {
+                if let Some(at) = comma.take() {
+                    out[at] = b' ';
+                }
+                i += 1;
+            }
+            byte if byte.is_ascii_whitespace() => i += 1,
+            _ => {
+                comma = None;
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
 /// Whether a parsed document is within the depth and element bounds, counted without
 /// recursion. Used for formats whose parser cannot be asked to stop early; the file size
 /// bound already limits what the parser has built.

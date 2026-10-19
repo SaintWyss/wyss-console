@@ -687,3 +687,125 @@ fn a_conflict_copy_beside_a_source_marks_that_source_and_only_it() {
     // The copy is not read as a source and does not add items of its own.
     assert_eq!(items(&found, ItemKind::ModelPreference).len(), 2);
 }
+
+const OPENCODE: &str = r#"// the user's own comment
+{
+  "$schema": "https://opencode.ai/config.json",
+  /* two plugins, one with options */
+  "plugin": ["file:///usr/lib/opencode/plugins/auth", ["rtk.ts", { "x": 1 }],],
+  "model": "google/gemini",
+  "disabled_providers": ["opencode", "deepseek"],
+  "provider": {
+    "google": { "options": { "apiKey": "SEKRET-google" } }, // trailing comma follows
+    "openrouter": { "options": { "apiKey": "SEKRET-router" } },
+  },
+  "mcp": {
+    "docs": { "type": "remote", "url": "https://u:SEKRET-url@host/x", "enabled": false },
+    "local": { "type": "local", "command": ["srv", "--token", "SEKRET-flag"] }
+  },
+}
+"#;
+
+#[test]
+fn opencode_with_comments_and_trailing_commas_is_read_and_shows_no_key() {
+    let home = Home::new();
+    home.put(".config/opencode/opencode.jsonc", OPENCODE);
+    home.put(".config/opencode/AGENTS.md", "# rules\n");
+    let inv = home.read();
+    assert!(matches!(
+        outcome(&inv, SourceKey::OpencodeUserConfig),
+        Outcome::Read { .. }
+    ));
+    let plugins = items(&inv, ItemKind::Plugin);
+    assert_eq!(plugins.len(), 2);
+    named(&inv, ItemKind::Plugin, "auth");
+    named(&inv, ItemKind::Plugin, "rtk");
+    named(&inv, ItemKind::ModelPreference, "model");
+    // Providers by name only; the switched-off ones are disabled even with no entry.
+    let google = named(&inv, ItemKind::ModelPreference, "provider google");
+    assert_eq!(google.persisted, Persisted::PresentEnabled);
+    assert!(google.detail.is_none());
+    assert_eq!(
+        named(&inv, ItemKind::ModelPreference, "provider deepseek").persisted,
+        Persisted::PresentDisabled
+    );
+    assert_eq!(
+        named(&inv, ItemKind::McpServer, "docs").persisted,
+        Persisted::PresentDisabled
+    );
+    assert_eq!(
+        named(&inv, ItemKind::McpServer, "local").persisted,
+        Persisted::PresentEnabled
+    );
+    assert_eq!(items(&inv, ItemKind::RuleFile).len(), 1);
+    assert!(inv.items.iter().all(|i| i.provider == ProviderId::Opencode
+        || i.provider == ProviderId::ClaudeCode
+        || i.provider == ProviderId::Codex));
+    assert!(!shown(&inv).contains("SEKRET"), "{}", shown(&inv));
+    assert!(
+        inv.items
+            .iter()
+            .filter(|i| i.provider == ProviderId::Opencode)
+            .all(|i| i.effective == Effective::NotVerifiable || i.kind == ItemKind::RuleFile)
+    );
+}
+
+#[test]
+fn a_broken_opencode_file_says_where_and_nothing_of_what_it_held() {
+    let home = Home::new();
+    home.put(
+        ".config/opencode/opencode.jsonc",
+        "{\n  // fine\n  \"model\": \"SEKRET-x\" \"oops\"\n}\n",
+    );
+    let inv = home.read();
+    let Outcome::Failed {
+        failure: SourceFailure::Malformed { line, .. },
+    } = outcome(&inv, SourceKey::OpencodeUserConfig)
+    else {
+        panic!("{:?}", outcome(&inv, SourceKey::OpencodeUserConfig));
+    };
+    assert_eq!(*line, 3, "comments keep their lines");
+    assert!(!shown(&inv).contains("SEKRET"));
+}
+
+#[test]
+fn comment_markers_inside_strings_are_kept_and_an_open_comment_is_refused() {
+    use super::reader::parse_jsonc;
+    let bounds = Bounds::PROPOSED;
+    let value = parse_jsonc(
+        br#"{ "url": "https://x/y", "note": "a /* b */ c, ]" , "n": [1,2,], }"#,
+        &bounds,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(value["url"], "https://x/y");
+    assert_eq!(value["note"], "a /* b */ c, ]");
+    assert_eq!(value["n"], serde_json::json!([1, 2]));
+    assert!(parse_jsonc(b"{ /* never closed \"a\": 1 }", &bounds).is_err());
+    assert_eq!(parse_jsonc(b" // only a comment\n", &bounds), Ok(None));
+}
+
+#[test]
+fn a_project_opencode_file_is_read_only_for_the_selected_project() {
+    let home = Home::new();
+    let project = home.dir("work/p");
+    home.put(
+        "work/p/opencode.json",
+        r#"{ "model": "a/b", "plugin": ["p1"] }"#,
+    );
+    let mut env = home.env();
+    env.project = Some(project);
+    let inv = inventory(&env, Bounds::PROPOSED).unwrap();
+    assert!(matches!(
+        outcome(&inv, SourceKey::OpencodeProjectConfig),
+        Outcome::Read { .. }
+    ));
+    named(&inv, ItemKind::Plugin, "p1");
+    let none = home.read();
+    assert!(
+        !none
+            .sources
+            .iter()
+            .any(|s| s.key == SourceKey::OpencodeProjectConfig)
+    );
+}

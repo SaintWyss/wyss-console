@@ -25,6 +25,7 @@ import type { RuntimeTone } from '../../shell/runtime';
 export const PROVIDER_LABEL: Record<Provider, string> = {
   claude_code: 'Claude Code',
   codex: 'Codex',
+  opencode: 'OpenCode',
 };
 
 export const KIND_LABEL: Record<ItemKind, string> = {
@@ -33,6 +34,7 @@ export const KIND_LABEL: Record<ItemKind, string> = {
   mcp_server: 'MCP servers',
   rule_file: 'Rule files',
   model_preference: 'Models',
+  plugin: 'Plugins',
 };
 export const KIND_ORDER: readonly ItemKind[] = [
   'hook',
@@ -40,6 +42,7 @@ export const KIND_ORDER: readonly ItemKind[] = [
   'mcp_server',
   'rule_file',
   'model_preference',
+  'plugin',
 ];
 const KIND_SINGULAR: Record<ItemKind, string> = {
   hook: 'Hook',
@@ -47,6 +50,7 @@ const KIND_SINGULAR: Record<ItemKind, string> = {
   mcp_server: 'MCP server',
   rule_file: 'Rule file',
   model_preference: 'Model setting',
+  plugin: 'Plugin',
 };
 export const kindName = (kind: ItemKind): string => KIND_SINGULAR[kind];
 
@@ -93,6 +97,10 @@ export const SOURCE_LABEL: Record<SourceKey, string> = {
   codex_user_rules: 'User instructions',
   codex_project_config: 'Project configuration',
   codex_project_rules: 'Project instructions',
+  opencode_user_config: 'User configuration',
+  opencode_user_rules: 'User instructions',
+  opencode_project_config: 'Project configuration',
+  opencode_project_rules: 'Project instructions',
 };
 
 /** Why nothing can be changed here. Every control that would change something is absent. */
@@ -190,6 +198,7 @@ export function kindCounts(
     mcp_server: 0,
     rule_file: 0,
     model_preference: 0,
+    plugin: 0,
   };
   for (const item of items) {
     if (provider !== 'all' && item.provider !== provider) continue;

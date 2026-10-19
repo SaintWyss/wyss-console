@@ -93,6 +93,7 @@ impl Confirm for GtkConfirm {
         let provider = match request.provider {
             ProviderId::ClaudeCode => "Claude Code",
             ProviderId::Codex => "Codex",
+            ProviderId::Opencode => "OpenCode",
         };
         let scope = match request.scope {
             Scope::System => "system",

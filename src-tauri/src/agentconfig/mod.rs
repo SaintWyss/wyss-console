@@ -46,6 +46,7 @@ mod inventory;
 pub mod journal;
 mod jsonspan;
 mod model;
+mod opencode;
 mod place;
 mod plan;
 #[cfg(test)]
@@ -92,7 +93,9 @@ pub use model::{
 };
 #[cfg(test)]
 #[allow(unused_imports)]
-pub use reader::{ConfigReader, Entry, EntryKind, Listing, ReadFile, parse_json, parse_toml};
+pub use reader::{
+    ConfigReader, Entry, EntryKind, Listing, ReadFile, parse_json, parse_jsonc, parse_toml,
+};
 #[cfg(test)]
 #[allow(unused_imports)]
 pub use roots::{ApprovedRoots, InvalidRoot};

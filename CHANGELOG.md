@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### OpenCode in the inventory (F4a, read only)
+
+- The Configuration view lists OpenCode's plugins, MCP servers, models, providers (by name only,
+  never what is inside) and instructions files, from `opencode.jsonc` with comments and trailing
+  commas. No switch yet. ADR 0041.
+
 ### Install, upgrade, roll back, diagnose (F13)
 
 - **`install.sh`** (also inside the package) installs for the current user only, after checking

@@ -5,12 +5,13 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// The agents whose configuration F1 reads. OpenCode and Hermes come with F4 (06 §3).
+/// The agents whose configuration is read. Hermes is not installed here, so it is not one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderId {
     ClaudeCode,
     Codex,
+    Opencode,
 }
 
 /// Who a source affects (07 §2). A session's configuration is a profile (F3) and is not
@@ -195,6 +196,7 @@ pub enum ItemKind {
     Skill,
     McpServer,
     ModelPreference,
+    Plugin,
 }
 
 /// What the file says (07 §3).

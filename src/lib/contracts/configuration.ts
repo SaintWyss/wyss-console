@@ -6,7 +6,7 @@
  * The window checks every answer against this shape and believes nothing that does not
  * fit; the desktop is the judge of what the files said.
  */
-export const PROVIDERS = ['claude_code', 'codex'] as const;
+export const PROVIDERS = ['claude_code', 'codex', 'opencode'] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
 export const SCOPES = ['system', 'global', 'project'] as const;
@@ -39,6 +39,10 @@ export const SOURCE_KEYS = [
   'codex_user_rules',
   'codex_project_config',
   'codex_project_rules',
+  'opencode_user_config',
+  'opencode_user_rules',
+  'opencode_project_config',
+  'opencode_project_rules',
 ] as const;
 export type SourceKey = (typeof SOURCE_KEYS)[number];
 
@@ -48,6 +52,7 @@ export const ITEM_KINDS = [
   'skill',
   'mcp_server',
   'model_preference',
+  'plugin',
 ] as const;
 export type ItemKind = (typeof ITEM_KINDS)[number];
 

@@ -39,7 +39,7 @@ describe('the inventory contract', () => {
       'a missing field on an item',
       (r: any) => delete r.inventory.items[0].hash,
     ],
-    ['an unknown kind', (r: any) => (r.inventory.items[0].kind = 'plugin')],
+    ['an unknown kind', (r: any) => (r.inventory.items[0].kind = 'extension')],
     ['an unknown provider', (r: any) => (r.inventory.items[0].provider = 'x')],
     ['an unknown source', (r: any) => (r.inventory.sources[0].key = 'home')],
     ['a negative revision', (r: any) => (r.revision = -1)],
