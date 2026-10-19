@@ -139,8 +139,10 @@
   <p class="configuration-note">
     This is what Claude Code and Codex are set up with, read from their own
     files. Nothing changes until you confirm a plan, and Claude Code hooks and
-    skills and Codex skills and MCP servers can be changed here. Secrets in
-    commands, environments and headers are never shown.
+    skills, Codex skills and MCP servers, and OpenCode MCP servers and plugins
+    can be switched here. You can also write a Claude Code hook or an OpenCode
+    MCP server, in a separate window. Secrets in commands, environments and
+    headers are never shown.
   </p>
 
   {#if changes.plan}

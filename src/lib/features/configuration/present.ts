@@ -309,7 +309,7 @@ export const RISK_LABEL: Record<Risk, string> = {
   weakens_security:
     'This can switch off something that stops an action. You will be asked to confirm in a separate window.',
   executes_code:
-    'This puts back something that runs programs. You will be asked to confirm in a separate window.',
+    'This writes, or puts back, something that runs programs. You will be asked to confirm in a separate window.',
 };
 
 export const EFFECT_LABEL: Record<Effect, string> = {
@@ -327,9 +327,9 @@ export const EFFECT_LABEL: Record<Effect, string> = {
 
 export const STORAGE_LABEL: Record<Protection, string> = {
   sealed:
-    'The hook is kept on this computer, encrypted, with a key held by your system’s credential store. If that store is reset or its key is lost, it cannot be put back from here.',
+    'What this keeps is stored on this computer, encrypted, with a key held by your system’s credential store. If that store is reset or its key is lost, it cannot be put back from here.',
   plain_no_secret:
-    'The hook is kept on this computer as a private file that is not encrypted: it holds no secret, and no credential store could be reached.',
+    'What this keeps is stored on this computer as a private file that is not encrypted: it holds no secret, and no credential store could be reached.',
 };
 
 export const OUTCOME_LABEL: Record<

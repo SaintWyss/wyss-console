@@ -67,7 +67,7 @@ fn risk_text(risk: Risk) -> &'static str {
     match risk {
         Risk::Normal => "",
         Risk::WeakensSecurity => "This can switch off something that stops an action.",
-        Risk::ExecutesCode => "This puts something back that runs programs.",
+        Risk::ExecutesCode => "This writes, or puts back, something that runs programs.",
     }
 }
 

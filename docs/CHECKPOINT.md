@@ -14,18 +14,21 @@ push, no release. Verify with `git log --oneline | head` and `git status`.
 | F3a/b/c native launcher, registry, profiles | done  | `docs/acceptance/f3-2026-10-19.md`, ADR 0035                                                                      |
 | F9 host process                             | done  | ADR 0036; killed-window test in the real GUI                                                                      |
 | F14 / F11a closing tests                    | done  | `docs/acceptance/f14-f11a-f13-closure-2026-10-19.md` (isolated Secret Service; real Claude Code to Codex handoff) |
-| F4a OpenCode inventory (read only)          | done  | ADR 0041, `adapter_tests.rs`                                                                                      |
+| F4a OpenCode inventory and switches         | done  | ADR 0041; real-file reversible test; `docs/acceptance/f4a-f5-f6-f1b-2026-10-19.md`                                |
+| F5 authoring (Claude hooks, OpenCode MCP)   | done  | ADR 0042; independent review; seen in the real window (same record)                                               |
+| F6a models (managed observed, native)       | done  | ADR 0043; managed choice not built                                                                                |
+| F1b research E1–E8                          | done  | `docs/research/inference-isolation-2026-10-19.md`: I4 recommended, not proven; G-INF not implemented              |
+| F14 / F11a in the real window               | done  | same record, "In the real window"                                                                                 |
 
 ## Active
 
-F4a read side done (ADR 0041); its switches (JSONC span editor) are next, then F6a/b models, F5 authoring; F10/F8/F12 and F1b/G-INF need the decisions listed below.
+Nothing in progress. F10/F8/F12 and F1b/G-INF need the decisions listed below.
 
-## Roadmap still open, in the order being taken
+## Roadmap still open
 
-F14 credentials · F11a handoff · F6a/b models ·
-F5 authoring · F4a OpenCode · F13 packaging · F10a/b remote · F8 multi-runtime · F12 decision ·
-F1b/G-INF (research, needs throwaway homes and the provider's behaviour).
-P1 (baselines) needs a reference terminal installed with consent: own-metric scripts only.
+What is left needs the owner: see `docs/acceptance/remaining-roadmap-2026-10-19.md` (credential path
+for F1b, reference terminal for P1, Hermes for F4b, network and authorisation for F10, DN-08 for
+F8/F11b, DN-06 for F12). Codex authoring (F5) is engineering and has no owner dependency.
 
 ## How to resume
 
@@ -45,6 +48,6 @@ P1 (baselines) needs a reference terminal installed with consent: own-metric scr
 
 ## Commits of this stretch
 
-F3 backend `277b8f8`, window `5969b8f`, capability `d10b9cb`, env scrub `eb36717`, F9 `ad6a985`, T1/T2 `5708c09` + follow-up.
+F4a `fc23270`..`0af736b`, F1b `a4a2ca7`, F5 `a5b1614` + `fb9dba2`, F6 `439c741`; F3 backend `277b8f8`, window `5969b8f`, capability `d10b9cb`, env scrub `eb36717`, F9 `ad6a985`, T1/T2 `5708c09` + follow-up.
 
 The still-open roadmap and what each part needs: `docs/acceptance/remaining-roadmap-2026-10-19.md`.

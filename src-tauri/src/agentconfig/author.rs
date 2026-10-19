@@ -272,7 +272,10 @@ pub fn draft_add_hook(
         bytes,
         new,
         logical,
-        &json!({ "command": spec.command, "timeout": spec.timeout }),
+        &match spec.timeout {
+            Some(timeout) => json!({ "command": spec.command, "timeout": timeout }),
+            None => json!({ "command": spec.command }),
+        },
         ProviderId::ClaudeCode,
         source,
         secret_bearing,

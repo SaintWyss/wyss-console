@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Writing configuration, models (F5, F6a)
+
+- **Add a hook** (Claude Code) and **add, change or delete an OpenCode MCP server** from the
+  Configuration view. The command is typed in a window of the desktop's own, never built from page
+  text; the native confirmation shows what will run; an edit is refused if the file moved on; every
+  authored change can be taken back to the exact bytes. ADR 0042.
+- A managed session shows the model its runtime **reported** (or that none was); a native session
+  shows what its profile asked for, what its files say and that the agent does not report the one in
+  use. ADR 0043.
+- `docs/research/inference-isolation-2026-10-19.md`: experiments E1–E8 for managed Inference
+  isolation, with a recommendation that is not yet proven.
+
 ### OpenCode in the inventory (F4a, read only)
 
 - The Configuration view lists OpenCode's plugins, MCP servers, models, providers (by name only,
