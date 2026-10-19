@@ -215,6 +215,8 @@ export const CHANGE_FAILURES = [
   'not_undoable',
   'import_invalid',
   'no_passphrase',
+  'invalid_entry',
+  'cancelled',
   'internal',
 ] as const;
 export type ChangeFailure = (typeof CHANGE_FAILURES)[number];
@@ -241,6 +243,12 @@ export const OPERATIONS = [
   'opencode_mcp_off',
   'opencode_mcp_on',
   'park_plugin',
+  'add_hook',
+  'edit_hook',
+  'add_mcp',
+  'edit_mcp',
+  'park_mcp',
+  'revert_authored',
 ] as const;
 export type Operation = (typeof OPERATIONS)[number];
 

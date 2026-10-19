@@ -49,6 +49,14 @@ fn operation_text(operation: Operation) -> &'static str {
         Operation::CodexMcpOn => "Turn on a Codex MCP server (it can start a program)",
         Operation::OpencodeMcpOff => "Turn off an OpenCode MCP server",
         Operation::OpencodeMcpOn => "Turn on an OpenCode MCP server (it can start a program)",
+        Operation::AddHook => "Add a hook that runs the command you wrote",
+        Operation::EditHook => "Change the command of a hook",
+        Operation::AddMcp => "Add an OpenCode MCP server that starts the program you wrote",
+        Operation::EditMcp => "Change what an OpenCode MCP server starts or connects to",
+        Operation::ParkMcp => {
+            "Turn off an OpenCode MCP server (remove it from the file and keep it here)"
+        }
+        Operation::RevertAuthored => "Take back a change you wrote",
         Operation::ParkPlugin => {
             "Turn off an OpenCode plugin (remove it from the list and keep it here)"
         }
@@ -273,6 +281,83 @@ pub fn secret_entry(
         entry.set_text("");
         dialog.close();
         (response == gtk::ResponseType::Accept && !typed.is_empty()).then(|| Zeroizing::new(typed))
+    })
+    .flatten()
+}
+
+/// One line or several, asked in a window of its own for what the user is writing. The
+/// window says what the text will become and where, and this is the only place the text is
+/// typed: the page chose none of it. Cancelling returns nothing.
+pub struct Field {
+    pub label: String,
+    pub initial: String,
+    pub multiline: bool,
+}
+
+pub fn text_form(
+    app: &AppHandle,
+    title: &str,
+    intro: &str,
+    fields: Vec<Field>,
+) -> Option<Vec<String>> {
+    use gtk::prelude::*;
+    let (title, intro) = (title.to_owned(), intro.to_owned());
+    on_gtk(app, move |parent| {
+        let dialog = gtk::Dialog::builder().modal(true).title(&title).build();
+        if let Some(parent) = &parent {
+            dialog.set_transient_for(Some(parent));
+        }
+        dialog.set_default_size(560, -1);
+        dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+        dialog.add_button("Write it", gtk::ResponseType::Accept);
+        let content = dialog.content_area();
+        content.set_spacing(8);
+        let heading = gtk::Label::new(Some(&intro));
+        heading.set_line_wrap(true);
+        heading.set_xalign(0.0);
+        content.add(&heading);
+        let mut entries: Vec<(Option<gtk::Entry>, Option<gtk::TextView>)> = Vec::new();
+        for field in &fields {
+            let label = gtk::Label::new(Some(&field.label));
+            label.set_xalign(0.0);
+            content.add(&label);
+            if field.multiline {
+                let view = gtk::TextView::new();
+                view.buffer().expect("a buffer").set_text(&field.initial);
+                let scroll = gtk::ScrolledWindow::builder()
+                    .min_content_height(110)
+                    .build();
+                scroll.add(&view);
+                content.add(&scroll);
+                entries.push((None, Some(view)));
+            } else {
+                let entry = gtk::Entry::new();
+                entry.set_text(&field.initial);
+                entry.set_activates_default(false);
+                content.add(&entry);
+                entries.push((Some(entry), None));
+            }
+        }
+        dialog.set_default_response(gtk::ResponseType::Cancel);
+        dialog.show_all();
+        let response = dialog.run();
+        let typed: Vec<String> = entries
+            .iter()
+            .map(|(entry, view)| match (entry, view) {
+                (Some(entry), _) => entry.text().to_string(),
+                (_, Some(view)) => {
+                    let buffer = view.buffer().expect("a buffer");
+                    let (start, end) = buffer.bounds();
+                    buffer
+                        .text(&start, &end, false)
+                        .map(|t| t.to_string())
+                        .unwrap_or_default()
+                }
+                _ => String::new(),
+            })
+            .collect();
+        dialog.close();
+        (response == gtk::ResponseType::Accept).then_some(typed)
     })
     .flatten()
 }

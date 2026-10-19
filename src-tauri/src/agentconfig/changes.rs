@@ -6,6 +6,7 @@
 //! already knows, never a path and never text, and gets back a redacted view; it applies a
 //! plan by its identifier. A plan that needs the native dialog is applied only if the user
 //! accepts there, in a window the page cannot draw on or answer for.
+use super::author::{self, HookSpec};
 use super::change::{Operation, Outcome, Prior, Risk};
 use super::codex_plan::{self, CodexOperation, CodexPlanError};
 use super::fault::{Faults, Injected, Step};
@@ -16,7 +17,7 @@ use super::model::{
     Bounds, ItemKind, NotWritable, PathTrust, ProviderId, Scope, SourceClass, SourceClass as Class,
     SourceFailure, writability,
 };
-use super::opencode_plan;
+use super::opencode_plan::{self, McpSpec};
 use super::place::{Parent, parent_for_write};
 use super::plan::{
     DiffLine, Drafted, PLAN_LIFETIME_SECONDS, PlanError, Prepared, draft_all_hooks, draft_park,
@@ -98,6 +99,10 @@ pub enum ChangeFailure {
     NotUndoable,
     ImportInvalid,
     NoPassphrase,
+    /// What the user wrote is not an entry that can be written.
+    InvalidEntry,
+    /// The user closed the window that asked for what they wanted to write.
+    Cancelled,
     Internal,
 }
 
@@ -112,6 +117,7 @@ impl From<PlanError> for ChangeFailure {
             PlanError::RestoreConflict => Self::RestoreConflict,
             PlanError::KeyStoreUnavailable => Self::KeyStoreUnavailable,
             PlanError::RecordUnreadable => Self::RecordUnreadable,
+            PlanError::Invalid => Self::InvalidEntry,
         }
     }
 }
@@ -214,8 +220,14 @@ fn writable(key: SourceKey) -> bool {
     ) && matches!(key.class(), SourceClass::User | SourceClass::Project)
 }
 
-fn effect_of(operation: Operation) -> Effect {
+fn effect_of(operation: Operation, source: SourceKey) -> Effect {
     match operation {
+        Operation::RevertAuthored | Operation::RestoreHook
+            if source == SourceKey::OpencodeUserConfig =>
+        {
+            Effect::OpencodeListed
+        }
+        Operation::AddMcp | Operation::EditMcp | Operation::ParkMcp => Effect::OpencodeListed,
         Operation::SkillOff | Operation::SkillOn => Effect::SkillsNewSessionsChecked,
         Operation::CodexMcpOff | Operation::CodexMcpOn => Effect::CodexMcpChecked,
         Operation::CodexSkillOff | Operation::CodexSkillOn => Effect::CodexSkillListed,
@@ -340,11 +352,13 @@ impl ChangeService {
             needs_native_dialog: drafted.risk.needs_native_dialog(),
             diff: drafted.diff.clone(),
             storage: match &drafted.prepared {
-                Prepared::Park { protection, .. } => Some(*protection),
+                Prepared::Park { protection, .. } | Prepared::Inverse { protection, .. } => {
+                    Some(*protection)
+                }
                 _ => None,
             },
             holds_hidden_values: drafted.holds_hidden_values,
-            effect: effect_of(drafted.operation),
+            effect: effect_of(drafted.operation, stored.source),
             managed_effect: drafted.managed.as_ref().map(|m| ManagedEffectView {
                 predicted: true,
                 before: m.before.clone(),
@@ -404,6 +418,114 @@ impl ChangeService {
     /// as the operation needs; the page has nothing else to name.
     pub fn plan(&self, operation: Operation, target: &str) -> Result<PlanView, ChangeFailure> {
         self.plan_with(operation, target, None, None)
+    }
+
+    /// The command of a hook as the file has it, for the window that lets the user change it.
+    /// It goes to that window and nowhere else: no page command returns it.
+    pub fn hook_command(&self, item: &str) -> Option<String> {
+        let found = self.item(item)?;
+        if found.kind != ItemKind::Hook || found.source != SourceKey::ClaudeUserSettings {
+            return None;
+        }
+        let (_, bytes) = self.read_target(found.source).ok()?;
+        let (root, value) = super::plan::parse(&bytes).ok()?;
+        let hook = super::plan::find_hook(&root, found.source, item)?;
+        value
+            .pointer(&format!(
+                "/hooks/{}/{}/hooks/{}/command",
+                hook.event.replace('~', "~0").replace('/', "~1"),
+                hook.group,
+                hook.index
+            ))?
+            .as_str()
+            .map(str::to_owned)
+    }
+
+    /// An OpenCode server's program and arguments, or its address, for the same purpose.
+    pub fn mcp_current(&self, item: &str) -> Option<McpSpec> {
+        let found = self.item(item)?;
+        if found.kind != ItemKind::McpServer || found.source != SourceKey::OpencodeUserConfig {
+            return None;
+        }
+        let (_, bytes) = self.read_target(found.source).ok()?;
+        let name = opencode_plan::resolve_server(&bytes, found.source, item).ok()?;
+        let value = super::reader::parse_jsonc(&bytes, &self.bounds).ok()??;
+        let entry = value.get("mcp")?.get(&name)?;
+        match entry.get("type")?.as_str()? {
+            "local" => Some(McpSpec::Local {
+                command: entry
+                    .get("command")?
+                    .as_array()?
+                    .iter()
+                    .map(|a| a.as_str().map(str::to_owned))
+                    .collect::<Option<Vec<_>>>()?,
+            }),
+            "remote" => Some(McpSpec::Remote {
+                url: entry.get("url")?.as_str()?.to_owned(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// Drafts a change the user wrote. What they wrote arrives as typed data, from a window of
+    /// the desktop's own (never from the page), and is validated here before anything is read.
+    pub fn plan_authored(&self, request: Authoring) -> Result<PlanView, ChangeFailure> {
+        let protection = |secret: bool| self.store.protection_for(secret);
+        let (source, drafted) = match request {
+            Authoring::AddHook(spec) => {
+                let source = SourceKey::ClaudeUserSettings;
+                let (_, bytes) = self.read_target(source)?;
+                (
+                    source,
+                    author::draft_add_hook(&bytes, source, &spec, &self.bounds, protection)?,
+                )
+            }
+            Authoring::EditHook { item, command } => {
+                let found = self.item(&item).ok_or(ChangeFailure::EntryGone)?;
+                if found.kind != ItemKind::Hook
+                    || found.provider != ProviderId::ClaudeCode
+                    || found.source != SourceKey::ClaudeUserSettings
+                {
+                    return Err(ChangeFailure::NotSupported);
+                }
+                let (_, bytes) = self.read_target(found.source)?;
+                (
+                    found.source,
+                    author::draft_edit_hook(
+                        &bytes,
+                        found.source,
+                        &item,
+                        &command,
+                        &self.bounds,
+                        protection,
+                    )?,
+                )
+            }
+            Authoring::AddMcp { name, spec } => {
+                let source = SourceKey::OpencodeUserConfig;
+                let (_, bytes) = self.read_target(source)?;
+                (
+                    source,
+                    opencode_plan::draft_add_mcp(&bytes, &name, &spec, &self.bounds, protection)?,
+                )
+            }
+            Authoring::EditMcp { item, spec } => {
+                let found = self.item(&item).ok_or(ChangeFailure::EntryGone)?;
+                if found.kind != ItemKind::McpServer
+                    || found.provider != ProviderId::Opencode
+                    || found.source != SourceKey::OpencodeUserConfig
+                {
+                    return Err(ChangeFailure::NotSupported);
+                }
+                let (_, bytes) = self.read_target(found.source)?;
+                let name = opencode_plan::resolve_server(&bytes, found.source, &item)?;
+                (
+                    found.source,
+                    opencode_plan::draft_edit_mcp(&bytes, &name, &spec, &self.bounds, protection)?,
+                )
+            }
+        };
+        Ok(self.keep(drafted, source, None))
     }
 
     fn plan_with(
@@ -548,6 +670,30 @@ impl ChangeService {
                     },
                 )
             }
+            // These carry text the user wrote, which only `plan_authored` accepts.
+            Operation::AddHook | Operation::EditHook | Operation::AddMcp | Operation::EditMcp => {
+                return Err(ChangeFailure::NotSupported);
+            }
+            Operation::ParkMcp => {
+                let item = self.item(target).ok_or(ChangeFailure::EntryGone)?;
+                if item.provider != ProviderId::Opencode
+                    || item.source != SourceKey::OpencodeUserConfig
+                    || item.kind != ItemKind::McpServer
+                {
+                    return Err(ChangeFailure::NotSupported);
+                }
+                let (_, bytes) = self.read_target(item.source)?;
+                let name = opencode_plan::resolve_server(&bytes, item.source, target)?;
+                let drafted = opencode_plan::draft_park_mcp(&bytes, &name, &self.bounds, |s| {
+                    self.store.protection_for(s)
+                })?;
+                (item.source, drafted)
+            }
+            Operation::RevertAuthored => {
+                let body = self.store.read(target)?;
+                let (_, bytes) = self.read_target(body.source)?;
+                (body.source, author::draft_revert(&bytes, target, &body)?)
+            }
             Operation::OpencodeMcpOff | Operation::OpencodeMcpOn => {
                 let item = self.item(target).ok_or(ChangeFailure::EntryGone)?;
                 if item.provider != ProviderId::Opencode
@@ -597,7 +743,9 @@ impl ChangeService {
                     .find(|s| s.id == target)
                     .is_some_and(|s| s.secret_bearing);
                 let (_, bytes) = self.read_target(body.source)?;
-                let drafted = if body.provider == ProviderId::Opencode {
+                let drafted = if body.provider == ProviderId::Opencode && body.event == "mcp" {
+                    opencode_plan::drafted_restore_mcp(&bytes, target, &body, &self.bounds)?
+                } else if body.provider == ProviderId::Opencode {
                     opencode_plan::drafted_restore(
                         &bytes,
                         target,
@@ -605,6 +753,8 @@ impl ChangeService {
                         secret_bearing,
                         &self.bounds,
                     )?
+                } else if body.event == "author" {
+                    return Err(ChangeFailure::NotSupported);
                 } else {
                     draft_restore(&bytes, target, &body, secret_bearing, &self.bounds)?
                 };
@@ -675,7 +825,7 @@ impl ChangeService {
                 name: drafted.name.clone(),
                 operation: drafted.operation,
                 risk: drafted.risk,
-                effect: effect_of(drafted.operation),
+                effect: effect_of(drafted.operation, source),
                 holds_hidden_values: drafted.holds_hidden_values,
             };
             if !self.confirm.ask(&request) {
@@ -734,7 +884,7 @@ impl ChangeService {
         // What an operation needs kept is decided before the intent, so the intent can
         // name it: a start after a crash finds the record by this identifier.
         let record_id = match &drafted.prepared {
-            Prepared::Park { .. } => Some(new_id()),
+            Prepared::Park { .. } | Prepared::Inverse { .. } => Some(new_id()),
             Prepared::Restore { record, .. } => Some(record.clone()),
             Prepared::Nothing => None,
         };
@@ -774,19 +924,40 @@ impl ChangeService {
 
         // A record is made before the file changes; it is removed again if the file does not.
         let mut made_record = false;
-        if let (
+        let to_keep = match &drafted.prepared {
             Prepared::Park {
                 body,
                 label,
                 secret_bearing,
                 protection,
-            },
-            Some(id),
-        ) = (&drafted.prepared, &record_id)
+            } => Some((
+                body,
+                label,
+                *secret_bearing,
+                *protection,
+                super::restore::State::Parked,
+            )),
+            // The way back from an authored change is kept, and not offered as turned off.
+            Prepared::Inverse {
+                body,
+                label,
+                secret_bearing,
+                protection,
+            } => Some((
+                body,
+                label,
+                *secret_bearing,
+                *protection,
+                super::restore::State::Used,
+            )),
+            _ => None,
+        };
+        if let (Some((body, label, secret_bearing, protection, state)), Some(id)) =
+            (to_keep, &record_id)
         {
             match self
                 .store
-                .park_as(id, label, *secret_bearing, *protection, body)
+                .keep_as(id, label, secret_bearing, protection, body, state)
             {
                 Ok(_) => made_record = true,
                 Err(RestoreError::Crashed) => return Err(ChangeFailure::Internal),
@@ -891,10 +1062,17 @@ impl ChangeService {
                 let record = change.record.ok_or(ChangeFailure::NotUndoable)?;
                 self.plan_with(Operation::RestoreHook, &record, undoes, None)
             }
-            Operation::ParkPlugin => {
+            Operation::ParkPlugin | Operation::ParkMcp => {
                 let record = change.record.ok_or(ChangeFailure::NotUndoable)?;
                 self.plan_with(Operation::RestoreHook, &record, undoes, None)
             }
+            // What the user wrote goes back to exactly what it replaced, while the file is as
+            // the change left it; after that, it is theirs to turn off.
+            Operation::AddHook | Operation::EditHook | Operation::AddMcp | Operation::EditMcp => {
+                let record = change.record.ok_or(ChangeFailure::NotUndoable)?;
+                self.plan_with(Operation::RevertAuthored, &record, undoes, None)
+            }
+            Operation::RevertAuthored => Err(ChangeFailure::NotUndoable),
             Operation::OpencodeMcpOff | Operation::OpencodeMcpOn => {
                 let prior = change.prior.ok_or(ChangeFailure::NotUndoable)?;
                 let inverse = if change.operation == Operation::OpencodeMcpOff {
@@ -907,6 +1085,11 @@ impl ChangeService {
             Operation::RestoreHook => {
                 let record = change.record.ok_or(ChangeFailure::NotUndoable)?;
                 let body = self.store.read(&record)?;
+                if body.provider == ProviderId::Opencode && body.event == "mcp" {
+                    let name = body.matcher.clone().ok_or(ChangeFailure::NotUndoable)?;
+                    let item = super::inventory::item_id_for(body.source, &[&name]);
+                    return self.plan_with(Operation::ParkMcp, &item, undoes, None);
+                }
                 if body.provider == ProviderId::Opencode {
                     let spec = serde_json::from_str::<serde_json::Value>(&body.unit_text)
                         .ok()
@@ -1073,7 +1256,13 @@ impl ChangeService {
                 // The file was not changed, so the entry is still in it: the record is spare.
                 (
                     Outcome::RecoveredNotApplied | Outcome::RecoveredProviderKept,
-                    Operation::ParkHook | Operation::ParkPlugin,
+                    Operation::ParkHook
+                    | Operation::ParkPlugin
+                    | Operation::ParkMcp
+                    | Operation::AddHook
+                    | Operation::EditHook
+                    | Operation::AddMcp
+                    | Operation::EditMcp,
                     Some(record),
                 ) => {
                     let _ = self.store.delete(record);
@@ -1119,3 +1308,12 @@ fn source_word(key: SourceKey) -> String {
 
 #[allow(unused)]
 fn _unused(_: Class) {}
+
+/// What the user wrote for a change, as typed data. It comes from the desktop's own window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Authoring {
+    AddHook(HookSpec),
+    EditHook { item: String, command: String },
+    AddMcp { name: String, spec: McpSpec },
+    EditMcp { item: String, spec: McpSpec },
+}

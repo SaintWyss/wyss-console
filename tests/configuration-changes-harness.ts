@@ -36,7 +36,9 @@ export class FakeChanges {
   applied: Applied = fixture.applied();
   history: History = fixture.history();
   records: ParkedRecord[] = fixture.records();
-  failNext: 'entry_gone' | 'key_store_unavailable' | 'internal' | null = null;
+  failNext:
+    'entry_gone' | 'key_store_unavailable' | 'cancelled' | 'internal' | null =
+    null;
   /** Held applies: each waits for `release`. */
   hold: (() => void)[] | null = null;
   exported = true;
@@ -71,6 +73,30 @@ export class FakeChanges {
       },
       undo: async (change: string) => {
         this.calls.push(`undo:${change}`);
+        this.check();
+        return this.plan;
+      },
+      authorHook: async (
+        event: string,
+        matcher: string | null,
+        timeout: number | null,
+      ) => {
+        this.calls.push(`author_hook:${event}:${matcher}:${timeout}`);
+        this.check();
+        return this.plan;
+      },
+      editHook: async (item: string) => {
+        this.calls.push(`edit_hook:${item}`);
+        this.check();
+        return this.plan;
+      },
+      authorMcp: async (name: string, kind: 'local' | 'remote') => {
+        this.calls.push(`author_mcp:${name}:${kind}`);
+        this.check();
+        return this.plan;
+      },
+      editMcp: async (item: string) => {
+        this.calls.push(`edit_mcp:${item}`);
         this.check();
         return this.plan;
       },

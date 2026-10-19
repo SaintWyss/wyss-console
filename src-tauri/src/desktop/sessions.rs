@@ -547,6 +547,12 @@ mod tests {
             "allow-configuration-record-delete",
             "allow-configuration-export",
             "allow-configuration-import",
+            // Authoring (F5): the page names a kind and a place; the text that will run is
+            // typed in a window of the desktop's own.
+            "allow-configuration-author-hook",
+            "allow-configuration-edit-hook",
+            "allow-configuration-author-mcp",
+            "allow-configuration-edit-mcp",
             // Native agent sessions and session profiles (F3, ADR 0035): an agent of the
             // closed catalogue, a project the native dialog returned, a session or a profile
             // of the desktop's own registry. None takes a command, an argument list, an

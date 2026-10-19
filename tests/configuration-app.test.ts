@@ -116,7 +116,7 @@ it('is a view of its own that reads configuration only while it is shown', async
   );
   expect(ipc.count('configuration_inventory')).toBe(1);
   expect(text(view().querySelector('.sessions-count'))).toBe(
-    '13 items from 17 places',
+    '13 items from 21 places',
   );
 
   nav('Console').click();

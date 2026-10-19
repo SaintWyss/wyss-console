@@ -91,6 +91,38 @@ export function planChange(
     parsePlan,
   );
 }
+/**
+ * Writing: the page names a kind of thing and where it goes, and nothing that runs. The
+ * desktop opens a window of its own for the text, so no command is ever built from text
+ * the page chose (DN-12).
+ */
+export function authorHook(
+  event: string,
+  matcher: string | null,
+  timeout: number | null,
+): Promise<Plan> {
+  return checked(
+    'configuration_author_hook',
+    { request: { event, matcher, timeout } },
+    parsePlan,
+  );
+}
+export function editHook(item: string): Promise<Plan> {
+  return checked('configuration_edit_hook', { request: { item } }, parsePlan);
+}
+export function authorMcp(
+  name: string,
+  kind: 'local' | 'remote',
+): Promise<Plan> {
+  return checked(
+    'configuration_author_mcp',
+    { request: { name, kind } },
+    parsePlan,
+  );
+}
+export function editMcp(item: string): Promise<Plan> {
+  return checked('configuration_edit_mcp', { request: { item } }, parsePlan);
+}
 export function applyPlan(plan: string): Promise<Applied> {
   return checked('configuration_apply', { request: { plan } }, parseApplied);
 }

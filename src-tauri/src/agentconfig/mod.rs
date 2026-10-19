@@ -21,6 +21,7 @@
 mod acl;
 #[cfg(test)]
 mod acl_tests;
+pub mod author;
 #[cfg(test)]
 pub(crate) use acl::{
     ACL_GROUP, ACL_GROUP_OBJ, ACL_MASK, ACL_OTHER, ACL_USER_OBJ, set_acl_for_test,

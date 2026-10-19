@@ -15,8 +15,11 @@
     RISK_LABEL,
     STORAGE_LABEL,
     VERDICT_LABEL,
+    HOOK_EVENTS,
     allHooksSwitch,
+    authoringFor,
     changeFor,
+    mcpNameOk,
     EFFECTIVE_LABEL,
     NOT_WRITABLE_LABEL,
     PERSISTED_LABEL,
@@ -79,6 +82,16 @@
   );
   const lines = $derived(selected ? detailLines(selected.detail) : []);
   const selectedChange = $derived(selected ? changeFor(selected) : null);
+  const selectedAuthoring = $derived(selected ? authoringFor(selected) : null);
+
+  // What the user is about to write: a kind and a place. The text itself is typed in a
+  // window of the desktop's own, never here.
+  let writing = $state<'hook' | 'mcp' | null>(null);
+  let hookEvent = $state<string>('PreToolUse');
+  let hookMatcher = $state('');
+  let mcpName = $state('');
+  let mcpKind = $state<'local' | 'remote'>('local');
+  const busy = $derived(changes.planning || changes.applying);
   const problems = $derived(
     (reply?.inventory.sources ?? []).filter(
       (source) =>
@@ -279,6 +292,22 @@
         aria-pressed={changes.panel === 'history'}
         onclick={() => changesController.show('history')}>History</button
       >
+      {#if changes.panel === 'items'}
+        <button
+          type="button"
+          class="action chip"
+          aria-pressed={writing === 'hook'}
+          onclick={() => (writing = writing === 'hook' ? null : 'hook')}
+          >Add a hook…</button
+        >
+        <button
+          type="button"
+          class="action chip"
+          aria-pressed={writing === 'mcp'}
+          onclick={() => (writing = writing === 'mcp' ? null : 'mcp')}
+          >Add an OpenCode server…</button
+        >
+      {/if}
       {#if allHooks && changes.panel === 'items'}
         <button
           type="button"
@@ -290,6 +319,79 @@
         >
       {/if}
     </div>
+    {#if writing && changes.panel === 'items'}
+      <form
+        class="configuration-plan"
+        aria-label={writing === 'hook'
+          ? 'Add a hook'
+          : 'Add an OpenCode server'}
+        onsubmit={(event) => {
+          event.preventDefault();
+          if (writing === 'hook')
+            changesController.author((c) =>
+              c.authorHook(hookEvent, hookMatcher.trim() || null, null),
+            );
+          else changesController.author((c) => c.authorMcp(mcpName, mcpKind));
+          writing = null;
+        }}
+      >
+        {#if writing === 'hook'}
+          <p class="event-meta">
+            Choose when it runs. The command is typed next, in a separate
+            window.
+          </p>
+          <label
+            >Event
+            <select bind:value={hookEvent}>
+              {#each HOOK_EVENTS as name (name)}<option value={name}
+                  >{name}</option
+                >{/each}
+            </select>
+          </label>
+          <label
+            >Matcher (optional)
+            <input
+              type="text"
+              bind:value={hookMatcher}
+              maxlength="256"
+              placeholder="Bash"
+            />
+          </label>
+        {:else}
+          <p class="event-meta">
+            Name the server and say what it is. What it starts or connects to is
+            typed next, in a separate window.
+          </p>
+          <label
+            >Name
+            <input
+              type="text"
+              bind:value={mcpName}
+              maxlength="64"
+              placeholder="docs"
+            />
+          </label>
+          <label
+            >Kind
+            <select bind:value={mcpKind}>
+              <option value="local">Starts a program</option>
+              <option value="remote">Connects to an address</option>
+            </select>
+          </label>
+        {/if}
+        <div class="configuration-plan-actions">
+          <button
+            type="submit"
+            class="action primary"
+            disabled={busy || (writing === 'mcp' && !mcpNameOk(mcpName))}
+            >Continue…</button
+          >
+          <button type="button" class="action" onclick={() => (writing = null)}
+            >Cancel</button
+          >
+        </div>
+      </form>
+    {/if}
     {#if changes.panel === 'history'}
       <div class="configuration-main">
         {#if changes.history === null}
@@ -497,6 +599,32 @@
                       selected.id,
                     )}>{selectedChange.label}…</button
                 >
+              </div>
+            {/if}
+            {#if selectedAuthoring}
+              <div class="configuration-plan-actions">
+                <button
+                  type="button"
+                  class="action"
+                  disabled={busy}
+                  onclick={() =>
+                    selectedAuthoring.edit === 'hook'
+                      ? changesController.author((c) => c.editHook(selected.id))
+                      : changesController.author((c) => c.editMcp(selected.id))}
+                  >Change it…</button
+                >
+                {#if selectedAuthoring.remove}
+                  <button
+                    type="button"
+                    class="action"
+                    disabled={busy}
+                    onclick={() =>
+                      changesController.draft(
+                        selectedAuthoring.remove ?? 'park_mcp',
+                        selected.id,
+                      )}>Delete…</button
+                  >
+                {/if}
               </div>
             {/if}
             {#if lines.length > 0}

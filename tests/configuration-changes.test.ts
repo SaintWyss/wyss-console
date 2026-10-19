@@ -14,8 +14,11 @@ import {
 import {
   CHANGE_FAILURE_TEXT,
   OUTCOME_LABEL,
+  HOOK_EVENTS,
   allHooksSwitch,
+  authoringFor,
   changeFor,
+  mcpNameOk,
 } from '../src/lib/features/configuration/present';
 import { parseInventoryReply } from '../src/lib/contracts/configuration';
 import { CHANGE_FAILURES, OUTCOMES } from '../src/lib/contracts/configuration';
@@ -24,6 +27,53 @@ import changes from './fixtures/configuration-changes-v1.json';
 import { FakeChanges, fixture } from './configuration-changes-harness';
 
 const damaged = (value: unknown) => structuredClone(value) as any;
+
+describe('what the user can write', () => {
+  const item = (over: Record<string, unknown>) =>
+    ({
+      id: 'a'.repeat(32),
+      provider: 'claude_code',
+      source: 'claude_user_settings',
+      scope: 'global',
+      kind: 'hook',
+      name: 'x',
+      persisted: 'present_enabled',
+      effective: 'not_verifiable',
+      session_use: 'unknown',
+      not_writable: 'not_in_this_phase',
+      detail: null,
+      hash: null,
+      ...over,
+    }) as never;
+  it('offers a change to a hook of the user’s own settings and a change or a deletion to an OpenCode server, and nothing else', () => {
+    expect(authoringFor(item({}))).toEqual({ edit: 'hook', remove: null });
+    expect(
+      authoringFor(
+        item({
+          provider: 'opencode',
+          source: 'opencode_user_config',
+          kind: 'mcp_server',
+        }),
+      ),
+    ).toEqual({ edit: 'mcp', remove: 'park_mcp' });
+    expect(
+      authoringFor(item({ source: 'claude_project_settings' })),
+    ).toBeNull();
+    expect(
+      authoringFor(item({ provider: 'codex', kind: 'mcp_server' })),
+    ).toBeNull();
+    expect(authoringFor(item({ not_writable: 'shared_path' }))).toBeNull();
+    expect(authoringFor(item({ kind: 'skill' }))).toBeNull();
+  });
+  it('names events and servers as the desktop checks them', () => {
+    expect(HOOK_EVENTS).toContain('PreToolUse');
+    expect(HOOK_EVENTS).not.toContain('rm -rf');
+    for (const ok of ['docs', 'a_b-1', 'x'.repeat(64)])
+      expect(mcpNameOk(ok)).toBe(true);
+    for (const bad of ['', 'a b', 'a/b', 'x'.repeat(65), 'a;b', '../x'])
+      expect(mcpNameOk(bad)).toBe(false);
+  });
+});
 
 describe('the change contract', () => {
   it('accepts exactly what the desktop sends', () => {
@@ -188,6 +238,32 @@ describe('the changes controller', () => {
   afterEach(() => {
     controller.dispose();
     vi.useRealTimers();
+  });
+
+  it('asks the desktop to write what the user chose and holds the plan it answers with', async () => {
+    controller.author((c) => c.authorHook('Stop', 'Bash', null));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.calls).toEqual(['author_hook:Stop:Bash:null']);
+    expect(states.at(-1)?.plan).not.toBeNull();
+    // Nothing was applied by asking.
+    expect(fake.calls.some((c) => c.startsWith('apply'))).toBe(false);
+    controller.cancel();
+    controller.author((c) => c.authorMcp('docs', 'local'));
+    controller.cancel();
+  });
+
+  it('treats closing the desktop’s writing window as a cancel, not a failure', async () => {
+    fake.failNext = 'cancelled';
+    controller.author((c) => c.editHook('a'.repeat(32)));
+    await vi.advanceTimersByTimeAsync(0);
+    const last = states.at(-1)!;
+    expect(last.failure).toBeNull();
+    expect(last.notice).toBe('not_done');
+    expect(last.plan).toBeNull();
+    fake.failNext = 'entry_gone';
+    controller.author((c) => c.editMcp('a'.repeat(32)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)?.failure).toBe('entry_gone');
   });
 
   it('holds a plan and writes nothing until it is confirmed', async () => {

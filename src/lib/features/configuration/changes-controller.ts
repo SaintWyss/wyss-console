@@ -10,6 +10,10 @@ import type {
 import {
   ConfigurationCallError,
   applyPlan,
+  authorHook,
+  authorMcp,
+  editHook,
+  editMcp,
   deleteRecord,
   exportRecord,
   importRecord,
@@ -24,6 +28,14 @@ export interface ChangesClient {
   apply(plan: string): Promise<Applied>;
   history(cursor: string | null): Promise<History>;
   undo(change: string): Promise<Plan>;
+  authorHook(
+    event: string,
+    matcher: string | null,
+    timeout: number | null,
+  ): Promise<Plan>;
+  editHook(item: string): Promise<Plan>;
+  authorMcp(name: string, kind: 'local' | 'remote'): Promise<Plan>;
+  editMcp(item: string): Promise<Plan>;
   records(): Promise<ParkedRecord[]>;
   deleteRecord(record: string): Promise<boolean>;
   exportRecord(record: string): Promise<boolean>;
@@ -34,6 +46,10 @@ const desktopClient: ChangesClient = {
   apply: applyPlan,
   history: readHistory,
   undo: planUndo,
+  authorHook,
+  editHook,
+  authorMcp,
+  editMcp,
   records: readRecords,
   deleteRecord,
   exportRecord,
@@ -130,6 +146,29 @@ export class ChangesController {
       (error: unknown) => {
         this.planning = false;
         this.failure = this.fail(error);
+        this.emit();
+      },
+    );
+  }
+
+  /**
+   * Something the user writes. The window asks for the text in a window of the desktop's own
+   * and answers with the plan; closing that window is a cancel, not a failure.
+   */
+  author(make: (client: ChangesClient) => Promise<Plan>) {
+    if (this.disposed || this.planning || this.applying) return;
+    this.planning = true;
+    this.failure = null;
+    this.result = null;
+    this.notice = null;
+    this.emit();
+    void make(this.client).then(
+      (plan) => this.hold(plan),
+      (error: unknown) => {
+        this.planning = false;
+        const failure = this.fail(error);
+        if (failure === 'cancelled') this.notice = 'not_done';
+        else this.failure = failure;
         this.emit();
       },
     );

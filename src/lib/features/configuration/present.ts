@@ -296,6 +296,12 @@ export const OPERATION_LABEL: Record<Operation, string> = {
   opencode_mcp_off: 'Turn off this OpenCode MCP server',
   opencode_mcp_on: 'Turn on this OpenCode MCP server',
   park_plugin: 'Turn off this OpenCode plugin',
+  add_hook: 'Add this hook',
+  edit_hook: 'Change this hook’s command',
+  add_mcp: 'Add this OpenCode MCP server',
+  edit_mcp: 'Change this OpenCode MCP server',
+  park_mcp: 'Delete this OpenCode MCP server (kept, so it can be put back)',
+  revert_authored: 'Take back what you wrote',
 };
 
 export const RISK_LABEL: Record<Risk, string> = {
@@ -415,6 +421,9 @@ export const CHANGE_FAILURE_TEXT: Record<ConfigurationFailure, string> = {
   not_undoable: 'That cannot be undone from here.',
   import_invalid: 'That file is not a kept entry, or the passphrase is wrong.',
   no_passphrase: 'A passphrase is needed.',
+  invalid_entry:
+    'That is not something that can be written: an event this app does not know, an empty or multi-line command, an unusable name or address.',
+  cancelled: 'Cancelled. Nothing was changed.',
 };
 
 export const VERDICT_LABEL: Record<Verdict, string> = {
@@ -482,6 +491,46 @@ export function changeFor(
     if (item.persisted === 'present_disabled')
       return { operation: 'skill_on', label: 'Turn on' };
   }
+  return null;
+}
+
+/** The events a new hook may name: the same closed list the desktop checks. */
+export const HOOK_EVENTS = [
+  'PreToolUse',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'UserPromptSubmit',
+  'Notification',
+  'Stop',
+  'SubagentStop',
+  'PreCompact',
+  'SessionStart',
+  'SessionEnd',
+  'PermissionRequest',
+  'SubagentStart',
+] as const;
+
+/** A name OpenCode may key an MCP server by, as the desktop checks it. */
+export const mcpNameOk = (name: string): boolean =>
+  /^[A-Za-z0-9_-]{1,64}$/.test(name);
+
+/** What the user can write for an item: change its command, or delete it. */
+export function authoringFor(
+  item: ConfigItem,
+): { edit: 'hook' | 'mcp'; remove: 'park_mcp' | null } | null {
+  if (item.not_writable !== 'not_in_this_phase') return null;
+  if (
+    item.provider === 'claude_code' &&
+    item.kind === 'hook' &&
+    item.source === 'claude_user_settings'
+  )
+    return { edit: 'hook', remove: null };
+  if (
+    item.provider === 'opencode' &&
+    item.kind === 'mcp_server' &&
+    item.source === 'opencode_user_config'
+  )
+    return { edit: 'mcp', remove: 'park_mcp' };
   return null;
 }
 

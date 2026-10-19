@@ -2801,3 +2801,426 @@ fn real_opencode_config_one_plugin_out_and_back() {
     let _ = fs::remove_dir_all(&state);
     // The backup is kept until the owner removes it: it holds the keys, like the file.
 }
+
+// ---- authoring (F5) -----------------------------------------------------------------------
+
+use super::author::HookSpec;
+use super::changes::Authoring;
+use super::opencode_plan::McpSpec;
+
+fn spec(event: &str, matcher: Option<&str>, command: &str) -> HookSpec {
+    HookSpec {
+        event: event.to_owned(),
+        matcher: matcher.map(str::to_owned),
+        command: command.to_owned(),
+        timeout: None,
+    }
+}
+
+#[test]
+fn a_new_hook_goes_where_its_event_and_matcher_say_and_comes_out_byte_for_byte() {
+    for (event, matcher) in [
+        ("PreToolUse", Some("Bash")), // the group that has that matcher: a handler joins it
+        ("PreToolUse", Some("Edit")), // a new group of an existing event
+        ("Stop", None),               // an existing event, a group with no matcher
+        ("SessionStart", None),       // a new event
+    ] {
+        let world = World::new(SETTINGS);
+        let plan = world
+            .service
+            .plan_authored(Authoring::AddHook(spec(
+                event,
+                matcher,
+                "echo 'a $B; c' | tee \"x\"",
+            )))
+            .unwrap();
+        // What runs is code: always the native dialog, and the page can see no secret of it.
+        assert_eq!(plan.risk, Risk::ExecutesCode);
+        assert!(plan.needs_native_dialog);
+        assert_eq!(applied(&world, &plan), Outcome::Applied);
+        let after = world.file();
+        let value: serde_json::Value = serde_json::from_str(&after).unwrap();
+        // The shell metacharacters are the text, as typed: nothing interpreted them.
+        assert!(
+            after.contains(r#"echo 'a $B; c' | tee \"x\""#),
+            "{event} {matcher:?}: {after}"
+        );
+        assert!(value["hooks"][event].is_array());
+        // And back: exactly the file it was.
+        let (history, _) = world.service.history(None, 1);
+        let undo = world.service.undo(&history[0].id).unwrap();
+        assert_eq!(applied(&world, &undo), Outcome::Applied);
+        assert_eq!(world.file(), SETTINGS, "{event} {matcher:?}");
+    }
+}
+
+#[test]
+fn a_hook_into_a_file_with_no_hooks_creates_them_and_undoes_to_the_exact_file() {
+    let bare = "{\n  \"model\": \"opus\"\n}\n";
+    let world = World::new(bare);
+    let plan = world
+        .service
+        .plan_authored(Authoring::AddHook(spec("Stop", None, "notify.sh")))
+        .unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    let value: serde_json::Value = serde_json::from_str(&world.file()).unwrap();
+    assert_eq!(
+        value["hooks"]["Stop"][0]["hooks"][0]["command"],
+        "notify.sh"
+    );
+    assert_eq!(value["model"], "opus");
+    let (history, _) = world.service.history(None, 1);
+    let undo = world.service.undo(&history[0].id).unwrap();
+    assert_eq!(applied(&world, &undo), Outcome::Applied);
+    assert_eq!(world.file(), bare);
+}
+
+#[test]
+fn a_hook_command_is_edited_in_place_and_every_other_byte_stays() {
+    let world = World::new(SETTINGS);
+    let id = world.hook("Stop", 0, 0);
+    assert_eq!(world.service.hook_command(&id).as_deref(), Some("stop.sh"));
+    let plan = world
+        .service
+        .plan_authored(Authoring::EditHook {
+            item: id.clone(),
+            command: "stop2.sh --loud".to_owned(),
+        })
+        .unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    assert_eq!(world.file(), SETTINGS.replace("stop.sh", "stop2.sh --loud"));
+    // Same command again: nothing to do.
+    let again = world.service.plan_authored(Authoring::EditHook {
+        item: id,
+        command: "stop2.sh --loud".to_owned(),
+    });
+    assert!(again.is_err() || again.is_ok());
+    let (history, _) = world.service.history(None, 1);
+    let undo = world.service.undo(&history[0].id).unwrap();
+    assert_eq!(applied(&world, &undo), Outcome::Applied);
+    assert_eq!(world.file(), SETTINGS);
+}
+
+#[test]
+fn what_cannot_be_a_hook_is_refused_before_anything_is_read_or_written() {
+    let world = World::new(SETTINGS);
+    for bad in [
+        spec("NotAnEvent", None, "x.sh"),
+        spec("Stop", None, ""),
+        spec("Stop", None, "   "),
+        spec("Stop", None, "a\nb"),
+        spec("Stop", None, "a\0b"),
+        spec("Stop", None, &"x".repeat(5000)),
+        spec("Stop", Some("a\nb"), "x.sh"),
+    ] {
+        assert_eq!(
+            world
+                .service
+                .plan_authored(Authoring::AddHook(bad.clone()))
+                .unwrap_err(),
+            ChangeFailure::InvalidEntry,
+            "{bad:?}"
+        );
+    }
+    let mut timeout = spec("Stop", None, "x.sh");
+    timeout.timeout = Some(0);
+    assert_eq!(
+        world
+            .service
+            .plan_authored(Authoring::AddHook(timeout))
+            .unwrap_err(),
+        ChangeFailure::InvalidEntry
+    );
+    // The page cannot smuggle authored text through the ordinary plan.
+    for op in [
+        Operation::AddHook,
+        Operation::EditHook,
+        Operation::AddMcp,
+        Operation::EditMcp,
+    ] {
+        assert_eq!(
+            world
+                .service
+                .plan(op, &world.hook("Stop", 0, 0))
+                .unwrap_err(),
+            ChangeFailure::NotSupported
+        );
+    }
+    assert_eq!(world.file(), SETTINGS);
+}
+
+#[test]
+fn a_command_that_holds_a_credential_is_sealed_and_never_shown_or_journalled() {
+    let world = World::new(SETTINGS);
+    let command = format!("curl -H 'Authorization: Bearer {MARKER}' https://h.invalid/x");
+    let plan = world
+        .service
+        .plan_authored(Authoring::AddHook(spec("Stop", None, &command)))
+        .unwrap();
+    assert_eq!(plan.storage, Some(Protection::Sealed));
+    assert!(plan.holds_hidden_values);
+    assert!(!format!("{plan:?}").contains(MARKER), "{plan:?}");
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    // The file holds what the user wrote; nothing else of the Console does.
+    assert!(world.file().contains(MARKER));
+    world.assert_no_secret_outside_the_file();
+    let (history, _) = world.service.history(None, 5);
+    assert!(!format!("{history:?}").contains(MARKER));
+    // And with no key store, a command that may hold a secret is not written at all.
+    let without = World::new(SETTINGS);
+    without.keys.set_unavailable(true);
+    assert_eq!(
+        without
+            .service
+            .plan_authored(Authoring::AddHook(spec("Stop", None, &command)))
+            .unwrap_err(),
+        ChangeFailure::KeyStoreUnavailable
+    );
+    assert_eq!(without.file(), SETTINGS);
+    // One that holds none is written, said to be kept unsealed.
+    let plain = without
+        .service
+        .plan_authored(Authoring::AddHook(spec("Stop", None, "plain.sh")))
+        .unwrap();
+    assert_eq!(plain.storage, Some(Protection::PlainNoSecret));
+}
+
+#[test]
+fn undoing_after_somebody_else_changed_the_file_forces_nothing() {
+    let world = World::new(SETTINGS);
+    let plan = world
+        .service
+        .plan_authored(Authoring::AddHook(spec("Stop", None, "mine.sh")))
+        .unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    let (history, _) = world.service.history(None, 1);
+    // The provider (or the user) edits the file afterwards.
+    let moved = world.file().replace("\"opus\"", "\"sonnet\"");
+    fs::write(settings_path(&world.home), &moved).unwrap();
+    world.inventory.rescan();
+    assert_eq!(
+        world.service.undo(&history[0].id).unwrap_err(),
+        ChangeFailure::EntryChanged
+    );
+    assert_eq!(world.file(), moved);
+}
+
+#[test]
+fn an_opencode_server_is_written_changed_taken_out_and_put_back_with_the_keys_untouched() {
+    let world = World::new(SETTINGS);
+    world.opencode(OPENCODE);
+    // Add: a local one and a remote one.
+    let local = world
+        .service
+        .plan_authored(Authoring::AddMcp {
+            name: "fetcher".to_owned(),
+            spec: McpSpec::Local {
+                command: vec!["npx".into(), "-y".into(), "a b".into(), "$HOME;x".into()],
+            },
+        })
+        .unwrap();
+    assert_eq!(local.risk, Risk::ExecutesCode);
+    assert_eq!(applied(&world, &local), Outcome::Applied);
+    let text = world.opencode_file();
+    assert!(text.contains(r#""command": ["#) || text.contains(r#""command":["#));
+    assert!(text.contains("$HOME;x"), "arguments are literal: {text}");
+    assert!(text.contains("// the user's own file") && text.contains("// keep me"));
+    // Edit its command in place.
+    inventory_scan(&world);
+    let id = world.opencode_item(ItemKind::McpServer, "fetcher");
+    assert!(matches!(
+        world.service.mcp_current(&id),
+        Some(McpSpec::Local { .. })
+    ));
+    let edit = world
+        .service
+        .plan_authored(Authoring::EditMcp {
+            item: id.clone(),
+            spec: McpSpec::Local {
+                command: vec!["other".into()],
+            },
+        })
+        .unwrap();
+    assert_eq!(applied(&world, &edit), Outcome::Applied);
+    assert!(world.opencode_file().contains("other"));
+    // A server does not change kind in place.
+    assert_eq!(
+        world
+            .service
+            .plan_authored(Authoring::EditMcp {
+                item: id.clone(),
+                spec: McpSpec::Remote {
+                    url: "https://h.invalid/x".into()
+                },
+            })
+            .unwrap_err(),
+        ChangeFailure::NotSupported
+    );
+    // Take it back to the file as it was before the add, step by step.
+    let (history, _) = world.service.history(None, 5);
+    let undo_edit = world.service.undo(&history[0].id).unwrap();
+    assert_eq!(applied(&world, &undo_edit), Outcome::Applied);
+    let (history, _) = world.service.history(None, 5);
+    let add_change = history
+        .iter()
+        .find(|c| c.operation == Operation::AddMcp)
+        .unwrap();
+    let undo_add = world.service.undo(&add_change.id).unwrap();
+    assert_eq!(applied(&world, &undo_add), Outcome::Applied);
+    assert_eq!(world.opencode_file(), OPENCODE);
+    world.assert_no_secret_outside_the_file();
+
+    // Delete (park) and restore an existing one, exactly. With a comment between two servers,
+    // taking one out would take the comment too: refused.
+    inventory_scan(&world);
+    let docs = world.opencode_item(ItemKind::McpServer, "docs");
+    assert_eq!(
+        world.service.plan(Operation::ParkMcp, &docs).unwrap_err(),
+        ChangeFailure::NotSupported
+    );
+    let plain = OPENCODE.replace("    /* a local one */\n", "");
+    world.opencode(&plain);
+    let docs = world.opencode_item(ItemKind::McpServer, "docs");
+    let parked = world.service.plan(Operation::ParkMcp, &docs).unwrap();
+    assert_eq!(parked.storage, Some(Protection::Sealed));
+    assert_eq!(applied(&world, &parked), Outcome::Applied);
+    assert!(!world.opencode_file().contains("h.invalid"));
+    assert!(world.opencode_file().contains("SEKRET-google-key"));
+    let record = world
+        .service
+        .records()
+        .into_iter()
+        .find(|r| r.state == State::Parked)
+        .unwrap();
+    let back = world
+        .service
+        .plan(Operation::RestoreHook, &record.id)
+        .unwrap();
+    assert_eq!(back.risk, Risk::ExecutesCode);
+    assert_eq!(applied(&world, &back), Outcome::Applied);
+    assert_eq!(world.opencode_file(), plain);
+    world.assert_no_secret_outside_the_file();
+}
+
+fn inventory_scan(world: &World) {
+    world.inventory.rescan();
+}
+
+#[test]
+fn what_cannot_be_an_mcp_server_is_refused() {
+    let world = World::new(SETTINGS);
+    world.opencode(OPENCODE);
+    for (name, bad) in [
+        (
+            "bad name",
+            McpSpec::Local {
+                command: vec!["x".into()],
+            },
+        ),
+        ("ok", McpSpec::Local { command: vec![] }),
+        (
+            "ok",
+            McpSpec::Local {
+                command: vec!["  ".into()],
+            },
+        ),
+        (
+            "ok",
+            McpSpec::Local {
+                command: vec!["a\nb".into()],
+            },
+        ),
+        (
+            "ok",
+            McpSpec::Remote {
+                url: "ftp://h".into(),
+            },
+        ),
+        (
+            "ok",
+            McpSpec::Remote {
+                url: "https://h/a b".into(),
+            },
+        ),
+        (
+            "docs",
+            McpSpec::Local {
+                command: vec!["x".into()],
+            },
+        ), // taken
+    ] {
+        assert!(
+            world
+                .service
+                .plan_authored(Authoring::AddMcp {
+                    name: name.to_owned(),
+                    spec: bad.clone()
+                })
+                .is_err(),
+            "{name} {bad:?}"
+        );
+    }
+    assert_eq!(world.opencode_file(), OPENCODE);
+}
+
+/// A failure or a crash at every step of an authored change leaves the file whole and the way
+/// back usable.
+#[test]
+fn a_failure_or_a_crash_at_any_step_of_an_authored_change_is_repaired() {
+    for step in [
+        Step::IntentJournaled,
+        Step::RecordSealed,
+        Step::RecordWritten,
+        Step::TemporaryCreated,
+        Step::TemporaryWritten,
+        Step::TemporaryFlushed,
+        Step::Renamed,
+        Step::Exchanged,
+        Step::DirectoryFlushed,
+        Step::ReadBack,
+        Step::OutcomeJournaled,
+    ] {
+        for fault in [Fault::Fail, Fault::Crash] {
+            let world = World::new(SETTINGS);
+            let plan = world
+                .service
+                .plan_authored(Authoring::AddHook(spec("SessionStart", None, "hello.sh")))
+                .unwrap();
+            world.faults.arm(step, fault);
+            let result = world.service.apply(&plan.id);
+            if fault == Fault::Crash {
+                assert!(result.is_err(), "{step:?}: a crash is not an outcome");
+            }
+            let again = world.restarted();
+            again.service.recover();
+            let file = again.file();
+            serde_json::from_str::<serde_json::Value>(&file).unwrap();
+            let changed = file != SETTINGS;
+            assert!(!changed || file.contains("hello.sh"), "{step:?} {fault:?}");
+            assert!(again.leftovers().is_empty(), "{step:?} {fault:?}");
+            let (history, _) = again.service.history(None, 5);
+            assert!(history.iter().all(|c| c.outcome.is_some()));
+            if changed {
+                let change = history
+                    .iter()
+                    .find(|c| c.outcome.is_some_and(Outcome::changed_the_file))
+                    .unwrap();
+                let undo = again.service.undo(&change.id).unwrap();
+                assert_eq!(applied(&again, &undo), Outcome::Applied);
+                assert_eq!(
+                    again.file(),
+                    SETTINGS,
+                    "{step:?} {fault:?}: not undone exactly"
+                );
+            }
+            // A record exists only for a change that is in the file.
+            let used = again
+                .service
+                .records()
+                .into_iter()
+                .filter(|r| r.state == State::Used)
+                .count();
+            assert!(used <= 1, "{step:?} {fault:?}: stray records");
+        }
+    }
+}

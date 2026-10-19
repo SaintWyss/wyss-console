@@ -218,6 +218,10 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-configuration-record-delete',
     'allow-configuration-export',
     'allow-configuration-import',
+    'allow-configuration-author-hook',
+    'allow-configuration-edit-hook',
+    'allow-configuration-author-mcp',
+    'allow-configuration-edit-mcp',
     // Native agent sessions (F3): the closed catalogue, a start that names an agent, a
     // project the user chose and a profile, the registry, and the profiles. None takes a
     // command, an argument list, an environment or a path.

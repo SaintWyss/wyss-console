@@ -216,6 +216,20 @@ impl RestorationStore {
         protection: Protection,
         body: &RecordBody,
     ) -> Result<String, RestoreError> {
+        self.keep_as(id, label, secret_bearing, protection, body, State::Parked)
+    }
+
+    /// As `park_as`, in a state of the caller's choosing: the inverse of an authored change is
+    /// kept as `Used`, so that it is not offered as something turned off.
+    pub fn keep_as(
+        &self,
+        id: &str,
+        label: &str,
+        secret_bearing: bool,
+        protection: Protection,
+        body: &RecordBody,
+        state: State,
+    ) -> Result<String, RestoreError> {
         if !valid_id(id) {
             return Err(RestoreError::Malformed);
         }
@@ -228,7 +242,7 @@ impl RestorationStore {
             v: VERSION,
             id: id.clone(),
             created: now(),
-            state: State::Parked,
+            state,
             label: label.to_owned(),
             secret_bearing,
             protection,

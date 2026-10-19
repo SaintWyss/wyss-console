@@ -34,6 +34,18 @@ pub enum Operation {
     /// OpenCode has no per-plugin switch: the entry leaves the `plugin` list and is kept. It is
     /// put back with `RestoreHook`, which restores whatever a record holds.
     ParkPlugin,
+    /// A hook of the user's own, written by the user in a native dialog.
+    AddHook,
+    /// The command of a hook, changed by the user in a native dialog.
+    EditHook,
+    /// OpenCode: a new MCP server, written by the user in a native dialog.
+    AddMcp,
+    /// OpenCode: the command or address of a server, changed in a native dialog.
+    EditMcp,
+    /// OpenCode: a server leaves the file and is kept (restored with `RestoreHook`).
+    ParkMcp,
+    /// Puts back what an authored change replaced, exactly, while the file is as it left it.
+    RevertAuthored,
 }
 
 /// What a switch's key held before a change made it: the one thing needed to put it back

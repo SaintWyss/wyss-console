@@ -1,12 +1,15 @@
 //! The two window commands of the inventory (F1-09). Both are reads of what the service
 //! already holds: neither reads a file, takes a path, or starts anything, so a window that
 //! asks as often as it likes costs the providers' files nothing.
+use crate::agentconfig::author::HookSpec;
+use crate::agentconfig::changes::Authoring;
 use crate::agentconfig::changes::{Applied, ChangeFailure, ChangeService, PlanView};
+use crate::agentconfig::opencode_plan::{McpSpec, mcp_name_ok};
 use crate::agentconfig::{
     Bounds, Change, Changes, Environment, Faults, Inventory, InventoryService, Operation,
     SecretToolStore, Summary, Vault,
 };
-use crate::native_dialog::{GtkConfirm, choose_file, passphrase};
+use crate::native_dialog::{Field, GtkConfirm, choose_file, passphrase, text_form};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 use tauri::AppHandle;
@@ -253,6 +256,239 @@ async fn configuration_undo(
     blocking(move || Ok(changes.undo(checked(&request.change)?)?)).await
 }
 
+// ---- authoring (F5) ------------------------------------------------------------------------
+//
+// The page names what kind of thing the user wants to write and where (an event, a name), and
+// nothing else. The text that will run is typed in a window the desktop draws, which says what
+// it will become, and only what that window returns reaches the planner. A plan made from it
+// still asks again, natively, before anything is written.
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorHook {
+    event: String,
+    matcher: Option<String>,
+    timeout: Option<u32>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ItemId {
+    item: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorMcp {
+    name: String,
+    /// `local` or `remote`.
+    kind: String,
+}
+
+fn cancelled() -> ConfigurationError {
+    ConfigurationError::Change(ChangeFailure::Cancelled)
+}
+fn invalid() -> ConfigurationError {
+    ConfigurationError::Change(ChangeFailure::InvalidEntry)
+}
+
+/// A program and its arguments as the window shows them: the program, then one argument per
+/// line. Nothing is split on spaces and nothing goes through a shell.
+fn mcp_fields(current: Option<&McpSpec>, kind_remote: bool) -> Vec<Field> {
+    match (current, kind_remote) {
+        (Some(McpSpec::Local { command }), _) => vec![
+            Field {
+                label: "Program".to_owned(),
+                initial: command.first().cloned().unwrap_or_default(),
+                multiline: false,
+            },
+            Field {
+                label: "Arguments, one per line".to_owned(),
+                initial: command
+                    .iter()
+                    .skip(1)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                multiline: true,
+            },
+        ],
+        (Some(McpSpec::Remote { url }), _) => vec![Field {
+            label: "Address (https://…)".to_owned(),
+            initial: url.clone(),
+            multiline: false,
+        }],
+        (None, true) => vec![Field {
+            label: "Address (https://…)".to_owned(),
+            initial: String::new(),
+            multiline: false,
+        }],
+        (None, false) => vec![
+            Field {
+                label: "Program".to_owned(),
+                initial: String::new(),
+                multiline: false,
+            },
+            Field {
+                label: "Arguments, one per line".to_owned(),
+                initial: String::new(),
+                multiline: true,
+            },
+        ],
+    }
+}
+
+fn mcp_from(typed: &[String], remote: bool) -> McpSpec {
+    if remote {
+        McpSpec::Remote {
+            url: typed.first().cloned().unwrap_or_default().trim().to_owned(),
+        }
+    } else {
+        let mut command = vec![typed.first().cloned().unwrap_or_default().trim().to_owned()];
+        command.extend(
+            typed
+                .get(1)
+                .map(|a| {
+                    a.lines()
+                        .map(str::to_owned)
+                        .filter(|l| !l.is_empty())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+        );
+        McpSpec::Local { command }
+    }
+}
+
+#[tauri::command]
+async fn configuration_author_hook(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: AuthorHook,
+) -> Result<PlanView, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let mut spec = HookSpec {
+            event: request.event,
+            matcher: request.matcher,
+            command: "x".to_owned(),
+            timeout: request.timeout,
+        };
+        // What the page named is judged before a window is drawn for it.
+        spec.check().map_err(|_| invalid())?;
+        let where_ = format!(
+            "This command will run on every {} event{} of every Claude Code session you start. \
+             It is written into your own Claude Code settings.",
+            spec.event,
+            spec.matcher
+                .as_deref()
+                .map_or(String::new(), |m| format!(" for \"{m}\""))
+        );
+        let typed = text_form(
+            &app,
+            "Add a hook",
+            &where_,
+            vec![Field {
+                label: "Command".to_owned(),
+                initial: String::new(),
+                multiline: false,
+            }],
+        )
+        .ok_or_else(cancelled)?;
+        spec.command = typed[0].trim().to_owned();
+        Ok(changes.plan_authored(Authoring::AddHook(spec))?)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn configuration_edit_hook(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: ItemId,
+) -> Result<PlanView, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let item = checked(&request.item)?.to_owned();
+        let current = changes
+            .hook_command(&item)
+            .ok_or(ConfigurationError::Change(ChangeFailure::EntryGone))?;
+        let typed = text_form(
+            &app,
+            "Change a hook",
+            "This is the command that runs for this hook. What you write replaces it in your own Claude Code settings.",
+            vec![Field {
+                label: "Command".to_owned(),
+                initial: current,
+                multiline: false,
+            }],
+        )
+        .ok_or_else(cancelled)?;
+        Ok(changes.plan_authored(Authoring::EditHook {
+            item,
+            command: typed[0].trim().to_owned(),
+        })?)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn configuration_author_mcp(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: AuthorMcp,
+) -> Result<PlanView, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        if !mcp_name_ok(&request.name) {
+            return Err(invalid());
+        }
+        let remote = match request.kind.as_str() {
+            "local" => false,
+            "remote" => true,
+            _ => return Err(invalid()),
+        };
+        let intro = format!(
+            "OpenCode will {} for the server \"{}\". It is written into your own OpenCode configuration.",
+            if remote { "connect to the address you write" } else { "start the program you write" },
+            request.name
+        );
+        let typed = text_form(&app, "Add an MCP server", &intro, mcp_fields(None, remote))
+            .ok_or_else(cancelled)?;
+        Ok(changes.plan_authored(Authoring::AddMcp {
+            name: request.name,
+            spec: mcp_from(&typed, remote),
+        })?)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn configuration_edit_mcp(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: ItemId,
+) -> Result<PlanView, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let item = checked(&request.item)?.to_owned();
+        let current = changes
+            .mcp_current(&item)
+            .ok_or(ConfigurationError::Change(ChangeFailure::EntryGone))?;
+        let remote = matches!(current, McpSpec::Remote { .. });
+        let typed = text_form(
+            &app,
+            "Change an MCP server",
+            "What you write replaces what this OpenCode server starts or connects to.",
+            mcp_fields(Some(&current), remote),
+        )
+        .ok_or_else(cancelled)?;
+        Ok(changes.plan_authored(Authoring::EditMcp {
+            item,
+            spec: mcp_from(&typed, remote),
+        })?)
+    })
+    .await
+}
+
 #[tauri::command]
 async fn configuration_records(
     app: AppHandle,
@@ -381,7 +617,11 @@ pub fn extension() -> wyss_console::Extension {
             configuration_records,
             configuration_record_delete,
             configuration_export,
-            configuration_import
+            configuration_import,
+            configuration_author_hook,
+            configuration_edit_hook,
+            configuration_author_mcp,
+            configuration_edit_mcp
         ]),
         install: Box::new(|builder| builder.manage(Configuration::start())),
         on_exit: None,

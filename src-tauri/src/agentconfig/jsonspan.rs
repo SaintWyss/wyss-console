@@ -499,7 +499,7 @@ pub fn append_child_lenient(bytes: &[u8], container: &Node, text: &str) -> Optio
 }
 
 /// Whether a `//` or `/*` opens anywhere in `span` outside a string.
-fn has_comment(bytes: &[u8], span: Span) -> bool {
+pub fn has_comment(bytes: &[u8], span: Span) -> bool {
     let (mut i, end) = (span.start, span.end);
     while i < end {
         match bytes[i] {

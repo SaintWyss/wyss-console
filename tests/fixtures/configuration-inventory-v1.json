@@ -534,6 +534,38 @@
         "outcome": "absent",
         "provider": "codex",
         "scope": "project"
+      },
+      {
+        "class": "user",
+        "key": "opencode_user_config",
+        "not_writable": "not_in_this_phase",
+        "outcome": "absent",
+        "provider": "opencode",
+        "scope": "global"
+      },
+      {
+        "class": "user",
+        "key": "opencode_user_rules",
+        "not_writable": "not_in_this_phase",
+        "outcome": "absent",
+        "provider": "opencode",
+        "scope": "global"
+      },
+      {
+        "class": "project",
+        "key": "opencode_project_config",
+        "not_writable": "not_in_this_phase",
+        "outcome": "absent",
+        "provider": "opencode",
+        "scope": "project"
+      },
+      {
+        "class": "project",
+        "key": "opencode_project_rules",
+        "not_writable": "not_in_this_phase",
+        "outcome": "absent",
+        "provider": "opencode",
+        "scope": "project"
       }
     ],
     "truncated": false

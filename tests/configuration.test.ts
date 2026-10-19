@@ -22,7 +22,7 @@ describe('the inventory contract', () => {
     const parsed = parseInventoryReply(fixture);
     expect(parsed.revision).toBe(1);
     expect(parsed.inventory.items).toHaveLength(13);
-    expect(parsed.inventory.sources).toHaveLength(17);
+    expect(parsed.inventory.sources).toHaveLength(21);
     // Every variant of an outcome is in the fixture, and every one is believed.
     expect(new Set(parsed.inventory.sources.map((s) => s.outcome))).toEqual(
       new Set(['read', 'absent', 'failed', 'project_not_trusted']),

@@ -39,6 +39,20 @@ pub enum Logical {
     CreatePlugins {
         unit: Value,
     },
+    /// `mcp.<name>` becomes this entry (new, or put back); `mcp` itself may be new.
+    SetMcp {
+        name: String,
+        value: Value,
+    },
+    RemoveMcp {
+        name: String,
+    },
+    /// One field (`command` or `url`) of `mcp.<name>`, replaced.
+    SetMcpField {
+        name: String,
+        field: String,
+        value: Value,
+    },
     Nothing,
 }
 
@@ -53,6 +67,9 @@ impl std::fmt::Debug for Logical {
             Self::InsertPlugin { index, .. } => write!(f, "InsertPlugin({index}, ..)"),
             Self::AppendPlugin { .. } => write!(f, "AppendPlugin(..)"),
             Self::CreatePlugins { .. } => write!(f, "CreatePlugins(..)"),
+            Self::SetMcp { name, .. } => write!(f, "SetMcp({} chars, ..)", name.len()),
+            Self::RemoveMcp { name } => write!(f, "RemoveMcp({} chars)", name.len()),
+            Self::SetMcpField { field, .. } => write!(f, "SetMcpField({field}, ..)"),
             Self::Nothing => write!(f, "Nothing"),
         }
     }
@@ -89,6 +106,26 @@ pub fn apply_logical(before: &Value, edit: &Logical) -> Option<Value> {
         }
         Logical::AppendPlugin { unit } => {
             root.get_mut("plugin")?.as_array_mut()?.push(unit.clone());
+        }
+        Logical::SetMcp { name, value } => {
+            let map = root.as_object_mut()?;
+            let mcp = map
+                .entry("mcp".to_owned())
+                .or_insert_with(|| Value::Object(serde_json::Map::new()))
+                .as_object_mut()?;
+            if mcp.contains_key(name) {
+                return None;
+            }
+            mcp.insert(name.clone(), value.clone());
+        }
+        Logical::RemoveMcp { name } => {
+            root.get_mut("mcp")?.as_object_mut()?.remove(name)?;
+        }
+        Logical::SetMcpField { name, field, value } => {
+            root.get_mut("mcp")?
+                .get_mut(name)?
+                .as_object_mut()?
+                .insert(field.clone(), value.clone());
         }
         Logical::CreatePlugins { unit } => {
             let map = root.as_object_mut()?;
@@ -560,4 +597,396 @@ pub fn plugin_label(spec: &str) -> String {
         .or_else(|| last.strip_suffix(".js"))
         .unwrap_or(last)
         .to_owned()
+}
+
+// ---- authoring: an MCP server of the user's own (F5) -------------------------------------
+
+/// What the user writes for a server: a program and its arguments, or an address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpSpec {
+    Local { command: Vec<String> },
+    Remote { url: String },
+}
+
+const MOST_ARGS: usize = 32;
+const MOST_ARG: usize = 1024;
+
+impl McpSpec {
+    pub fn check(&self) -> Result<(), PlanError> {
+        let ok = match self {
+            Self::Local { command } => {
+                !command.is_empty()
+                    && command.len() <= MOST_ARGS
+                    && command[0].chars().any(|c| !c.is_whitespace())
+                    && command.iter().all(|a| {
+                        a.len() <= MOST_ARG && a.chars().all(|c| !c.is_control() || c == '\t')
+                    })
+            }
+            Self::Remote { url } => {
+                url.len() <= 2048
+                    && (url.starts_with("https://") || url.starts_with("http://"))
+                    && url.chars().all(|c| c.is_ascii_graphic())
+            }
+        };
+        ok.then_some(()).ok_or(PlanError::Invalid)
+    }
+    fn field(&self) -> (&'static str, Value) {
+        match self {
+            Self::Local { command } => ("command", serde_json::json!(command)),
+            Self::Remote { url } => ("url", serde_json::json!(url)),
+        }
+    }
+    fn entry(&self) -> Value {
+        let (field, value) = self.field();
+        let kind = if matches!(self, Self::Local { .. }) {
+            "local"
+        } else {
+            "remote"
+        };
+        serde_json::json!({ "type": kind, field: value })
+    }
+}
+
+/// A server name as OpenCode keys it: short, and plain enough to be a key anywhere.
+pub fn mcp_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+#[allow(clippy::too_many_arguments)]
+fn authored(
+    operation: Operation,
+    item: &str,
+    name: &str,
+    old: &[u8],
+    new: Vec<u8>,
+    logical: Logical,
+    shown: &Value,
+    bounds: &Bounds,
+    protection: impl Fn(bool) -> Result<Protection, RestoreError>,
+) -> Result<Drafted, PlanError> {
+    // A server's arguments and address are a plausible place for a token.
+    let secret_bearing = super::classify::may_hold_secret(shown, bounds)
+        || shown.to_string().contains("://") && shown.to_string().contains('@');
+    let protection = protection(secret_bearing).map_err(|e| match e {
+        RestoreError::NoKeyStoreForSecret => PlanError::KeyStoreUnavailable,
+        _ => PlanError::NotSupported,
+    })?;
+    let body = super::author::inverse_of(
+        ProviderId::Opencode,
+        SourceKey::OpencodeUserConfig,
+        old,
+        &new,
+    );
+    let (diff, hidden) = redact_lines(shown, DiffKind::Added, bounds);
+    Ok(Drafted {
+        operation,
+        item: item.to_owned(),
+        name: label(name),
+        risk: Risk::ExecutesCode,
+        h0: hash(old),
+        h1: hash(&new),
+        new_bytes: new,
+        logical: PlanLogical::Opencode(logical),
+        prepared: Prepared::Inverse {
+            body: Box::new(body),
+            label: label(name),
+            secret_bearing,
+            protection,
+        },
+        diff,
+        holds_hidden_values: hidden || secret_bearing,
+        prior: None,
+        managed: None,
+    })
+}
+
+/// A new server in `mcp` (the object is made if there is none).
+pub fn draft_add_mcp(
+    bytes: &[u8],
+    name: &str,
+    spec: &McpSpec,
+    bounds: &Bounds,
+    protection: impl Fn(bool) -> Result<Protection, RestoreError>,
+) -> Result<Drafted, PlanError> {
+    if !mcp_name_ok(name) {
+        return Err(PlanError::Invalid);
+    }
+    spec.check()?;
+    let (root, before) = parse(bytes)?;
+    let entry = spec.entry();
+    let logical = Logical::SetMcp {
+        name: name.to_owned(),
+        value: entry.clone(),
+    };
+    let edit = match root.member("mcp") {
+        Some(member) if member.value.members().is_some() => {
+            if member.value.member(name).is_some() {
+                return Err(PlanError::AlreadyDone);
+            }
+            jsonspan::append_child_lenient(
+                bytes,
+                &member.value,
+                &jsonspan::member_text(name, &entry.to_string()),
+            )
+        }
+        Some(_) => return Err(PlanError::NotSupported),
+        None => jsonspan::append_child_lenient(
+            bytes,
+            &root,
+            &jsonspan::member_text("mcp", &serde_json::json!({ name: entry }).to_string()),
+        ),
+    }
+    .ok_or(PlanError::NotSupported)?;
+    let new = edit.apply(bytes);
+    if !is_exactly(bytes, &new, &logical) || apply_logical(&before, &logical).is_none() {
+        return Err(PlanError::Malformed);
+    }
+    let item = item_id_for(SourceKey::OpencodeUserConfig, &[name]);
+    authored(
+        Operation::AddMcp,
+        &item,
+        &format!("add MCP server · {name}"),
+        bytes,
+        new,
+        logical,
+        &entry,
+        bounds,
+        protection,
+    )
+}
+
+/// The `command` or the `url` of a server, replaced in place. A server cannot change kind
+/// here: that is a deletion and a new server.
+pub fn draft_edit_mcp(
+    bytes: &[u8],
+    name: &str,
+    spec: &McpSpec,
+    bounds: &Bounds,
+    protection: impl Fn(bool) -> Result<Protection, RestoreError>,
+) -> Result<Drafted, PlanError> {
+    spec.check()?;
+    let (root, before) = parse(bytes)?;
+    let entry = root
+        .member("mcp")
+        .and_then(|m| m.value.member(name))
+        .map(|m| &m.value)
+        .filter(|n| n.members().is_some())
+        .ok_or(PlanError::EntryGone)?;
+    let (field, value) = spec.field();
+    let kind = before
+        .pointer(&format!("/mcp/{}/type", pointer_key(name)))
+        .and_then(Value::as_str);
+    if kind
+        != Some(if field == "command" {
+            "local"
+        } else {
+            "remote"
+        })
+    {
+        return Err(PlanError::NotSupported);
+    }
+    let member = entry.member(field).ok_or(PlanError::EntryGone)?;
+    let span = member.value.span();
+    if jsonspan::has_comment(bytes, span) {
+        return Err(PlanError::NotSupported);
+    }
+    let edit = jsonspan::replace_value(&member.value, &value.to_string());
+    let new = edit.apply(bytes);
+    let logical = Logical::SetMcpField {
+        name: name.to_owned(),
+        field: field.to_owned(),
+        value: value.clone(),
+    };
+    if before.pointer(&format!("/mcp/{}/{field}", pointer_key(name))) == Some(&value) {
+        return Err(PlanError::AlreadyDone);
+    }
+    if !is_exactly(bytes, &new, &logical) || apply_logical(&before, &logical).is_none() {
+        return Err(PlanError::Malformed);
+    }
+    let item = item_id_for(SourceKey::OpencodeUserConfig, &[name]);
+    authored(
+        Operation::EditMcp,
+        &item,
+        &format!("edit MCP server · {name}"),
+        bytes,
+        new,
+        logical,
+        &serde_json::json!({ field: value }),
+        bounds,
+        protection,
+    )
+}
+
+fn pointer_key(name: &str) -> String {
+    name.replace('~', "~0").replace('/', "~1")
+}
+
+/// A server taken out of `mcp` and kept; `RestoreHook` puts it back.
+pub fn draft_park_mcp(
+    bytes: &[u8],
+    name: &str,
+    bounds: &Bounds,
+    protection: impl Fn(bool) -> Result<Protection, RestoreError>,
+) -> Result<Drafted, PlanError> {
+    let (root, before) = parse(bytes)?;
+    let mcp = root
+        .member("mcp")
+        .map(|m| &m.value)
+        .filter(|n| n.members().is_some())
+        .ok_or(PlanError::EntryGone)?;
+    let index = mcp
+        .members()
+        .and_then(|m| m.iter().position(|x| x.key == name))
+        .ok_or(PlanError::EntryGone)?;
+    let removal =
+        jsonspan::remove_child_checked(bytes, mcp, index).ok_or(PlanError::NotSupported)?;
+    let new = removal.edit.apply(bytes);
+    let logical = Logical::RemoveMcp {
+        name: name.to_owned(),
+    };
+    if !is_exactly(bytes, &new, &logical) || apply_logical(&before, &logical).is_none() {
+        return Err(PlanError::Malformed);
+    }
+    let unit: Value = serde_json::from_str(&format!("{{{}}}", removal.unit))
+        .ok()
+        .and_then(|v: Value| v.get(name).cloned())
+        .ok_or(PlanError::Malformed)?;
+    // Always sealed: a server's arguments and environment are where a token lives.
+    let protection = protection(true).map_err(|e| match e {
+        RestoreError::NoKeyStoreForSecret => PlanError::KeyStoreUnavailable,
+        _ => PlanError::NotSupported,
+    })?;
+    let body = RecordBody {
+        provider: ProviderId::Opencode,
+        source: SourceKey::OpencodeUserConfig,
+        event: "mcp".to_owned(),
+        matcher: Some(name.to_owned()),
+        group: 0,
+        index,
+        level: Level::Handler,
+        anchor: removal.anchor,
+        removed_text: removal.removed,
+        removed_at: removal.edit.at,
+        unit_text: removal.unit,
+        handler_text: String::new(),
+        h0: hash(bytes),
+        h1: hash(&new),
+    };
+    let shown = label(&format!("MCP server · {name}"));
+    let (diff, hidden) = redact_lines(&unit, DiffKind::Removed, bounds);
+    Ok(Drafted {
+        operation: Operation::ParkMcp,
+        item: item_id_for(SourceKey::OpencodeUserConfig, &[name]),
+        name: shown.clone(),
+        risk: Risk::Normal,
+        h0: body.h0.clone(),
+        h1: body.h1.clone(),
+        new_bytes: new,
+        logical: PlanLogical::Opencode(logical),
+        prepared: Prepared::Park {
+            body: Box::new(body),
+            label: shown,
+            secret_bearing: true,
+            protection,
+        },
+        diff,
+        holds_hidden_values: hidden || true,
+        prior: None,
+        managed: None,
+    })
+}
+
+/// A parked server put back: exactly where it was when the file is as the removal left it,
+/// otherwise at the end of `mcp`, refused when the name is taken. A server is a program that
+/// starts: the native dialog.
+pub fn drafted_restore_mcp(
+    bytes: &[u8],
+    record: &str,
+    body: &RecordBody,
+    bounds: &Bounds,
+) -> Result<Drafted, PlanError> {
+    if body.source != SourceKey::OpencodeUserConfig || body.event != "mcp" {
+        return Err(PlanError::RecordUnreadable);
+    }
+    let name = body.matcher.as_deref().ok_or(PlanError::RecordUnreadable)?;
+    if !mcp_name_ok(name) {
+        return Err(PlanError::RecordUnreadable);
+    }
+    let (root, before) = parse(bytes)?;
+    let unit: Value = serde_json::from_str(&format!("{{{}}}", body.unit_text))
+        .ok()
+        .and_then(|v: Value| v.get(name).cloned())
+        .ok_or(PlanError::RecordUnreadable)?;
+    if before.get("mcp").and_then(|m| m.get(name)).is_some() {
+        return Err(if before["mcp"][name] == unit {
+            PlanError::AlreadyDone
+        } else {
+            PlanError::RestoreConflict
+        });
+    }
+    let logical = Logical::SetMcp {
+        name: name.to_owned(),
+        value: unit.clone(),
+    };
+    let clean = body
+        .removed_text
+        .trim_matches(&[' ', '\t', '\r', '\n', ','][..])
+        == body.unit_text;
+    let mut new = None;
+    if clean && hash(bytes) == body.h1 && body.removed_at <= bytes.len() {
+        let edit = Edit {
+            at: body.removed_at,
+            remove: 0,
+            insert: body.removed_text.clone(),
+        };
+        let restored = edit.apply(bytes);
+        if hash(&restored) == body.h0 && is_exactly(bytes, &restored, &logical) {
+            new = Some(restored);
+        }
+    }
+    let new = match new {
+        Some(bytes) => bytes,
+        None => {
+            let edit = match root.member("mcp") {
+                Some(member) if member.value.members().is_some() => {
+                    jsonspan::append_child_lenient(bytes, &member.value, &body.unit_text)
+                }
+                Some(_) => return Err(PlanError::RestoreConflict),
+                None => jsonspan::append_child_lenient(
+                    bytes,
+                    &root,
+                    &jsonspan::member_text("mcp", &format!("{{{}}}", body.unit_text)),
+                ),
+            }
+            .ok_or(PlanError::RestoreConflict)?;
+            let restored = edit.apply(bytes);
+            if !is_exactly(bytes, &restored, &logical) {
+                return Err(PlanError::RestoreConflict);
+            }
+            restored
+        }
+    };
+    let (diff, hidden) = redact_lines(&unit, DiffKind::Added, bounds);
+    Ok(Drafted {
+        operation: Operation::RestoreHook,
+        item: record.to_owned(),
+        name: label(&format!("MCP server · {name}")),
+        risk: Risk::ExecutesCode,
+        h0: hash(bytes),
+        h1: hash(&new),
+        new_bytes: new,
+        logical: PlanLogical::Opencode(logical),
+        prepared: Prepared::Restore {
+            record: record.to_owned(),
+            already_present: false,
+        },
+        diff,
+        holds_hidden_values: hidden || true,
+        prior: None,
+        managed: None,
+    })
 }

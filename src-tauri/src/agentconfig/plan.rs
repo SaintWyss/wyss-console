@@ -36,6 +36,8 @@ pub enum PlanError {
     /// The entry may hold a secret and the key store is unavailable (ADR 0034).
     KeyStoreUnavailable,
     RecordUnreadable,
+    /// What the user wrote is not an entry this editor accepts.
+    Invalid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -88,6 +90,13 @@ pub enum Logical {
     Nothing,
     /// A change to a TOML file (Codex): checked by `codex_plan` against the parsed value.
     Toml(super::codex_plan::Logical),
+    /// The `command` of one hook handler, replaced.
+    SetHookCommand {
+        event: String,
+        group: usize,
+        index: usize,
+        command: String,
+    },
     /// A change to OpenCode's JSONC file: checked by `opencode_plan`.
     Opencode(super::opencode_plan::Logical),
 }
@@ -98,6 +107,14 @@ pub enum Prepared {
     Nothing,
     /// Keep this entry before it leaves the file.
     Park {
+        body: Box<RecordBody>,
+        label: String,
+        secret_bearing: bool,
+        protection: Protection,
+    },
+    /// Keep how to take this change back (an authored change), as a record that is not offered
+    /// as something turned off.
+    Inverse {
         body: Box<RecordBody>,
         label: String,
         secret_bearing: bool,
@@ -147,7 +164,7 @@ pub fn hash(bytes: &[u8]) -> String {
     ContentHash::of(bytes).hex()
 }
 
-fn parse(bytes: &[u8]) -> Result<(Node, Value), PlanError> {
+pub(super) fn parse(bytes: &[u8]) -> Result<(Node, Value), PlanError> {
     let node = jsonspan::parse(bytes).map_err(|_: SpanError| PlanError::Malformed)?;
     let value = serde_json::from_slice(bytes).map_err(|_| PlanError::Malformed)?;
     Ok((node, value))
@@ -160,6 +177,21 @@ pub fn apply_logical(before: &Value, edit: &Logical) -> Option<Value> {
     match edit {
         Logical::Nothing => (),
         Logical::Toml(_) | Logical::Opencode(_) => return None,
+        Logical::SetHookCommand {
+            event,
+            group,
+            index,
+            command,
+        } => {
+            let handler = root
+                .get_mut("hooks")?
+                .get_mut(event)?
+                .get_mut(*group)?
+                .get_mut("hooks")?
+                .get_mut(*index)?
+                .as_object_mut()?;
+            handler.insert("command".to_owned(), Value::String(command.clone()));
+        }
         Logical::SetRoot { key, value } => {
             root.insert(key.clone(), value.clone());
         }
@@ -323,18 +355,18 @@ pub(super) fn redact_lines(unit: &Value, kind: DiffKind, bounds: &Bounds) -> (Ve
 }
 
 /// One hook handler as found in a file.
-struct Found<'a> {
-    event_index: usize,
-    event: String,
-    group: usize,
-    index: usize,
-    hooks: &'a Node,
-    groups: &'a Node,
-    handlers: &'a Node,
-    handler: &'a Node,
+pub(super) struct Found<'a> {
+    pub(super) event_index: usize,
+    pub(super) event: String,
+    pub(super) group: usize,
+    pub(super) index: usize,
+    pub(super) hooks: &'a Node,
+    pub(super) groups: &'a Node,
+    pub(super) handlers: &'a Node,
+    pub(super) handler: &'a Node,
 }
 
-fn find_hook<'a>(root: &'a Node, source: SourceKey, item: &str) -> Option<Found<'a>> {
+pub(super) fn find_hook<'a>(root: &'a Node, source: SourceKey, item: &str) -> Option<Found<'a>> {
     let hooks = &root.member("hooks")?.value;
     for (event_index, event) in hooks.members()?.iter().enumerate() {
         let Some(groups) = event.value.items() else {
@@ -369,7 +401,7 @@ fn text_at(bytes: &[u8], node: &Node) -> String {
     String::from_utf8_lossy(&bytes[span.start..span.end]).into_owned()
 }
 
-fn matcher_of(bytes: &[u8], group: &Node) -> Option<String> {
+pub(super) fn matcher_of(bytes: &[u8], group: &Node) -> Option<String> {
     let node = &group.member("matcher")?.value;
     serde_json::from_slice::<String>(text_at(bytes, node).as_bytes()).ok()
 }

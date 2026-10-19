@@ -47,7 +47,7 @@ describe('the configuration view', () => {
     await shown();
     const root = document.querySelector('.configuration-feature')!;
     expect(text(root.querySelector('.sessions-count'))).toBe(
-      '13 items from 17 places',
+      '13 items from 21 places',
     );
     expect(text(root)).toContain('Nothing changes until you confirm a plan');
     expect(
