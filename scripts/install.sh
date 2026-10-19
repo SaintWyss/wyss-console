@@ -47,9 +47,12 @@ say() { printf 'install: %s\n' "$*"; }
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
 
 stop_host() {
-  # A running host holds terminals: it is asked to stop (it closes them), never killed.
-  if [ -x "$prefix/bin/wyss-console" ]; then
-    "$prefix/bin/wyss-console" --wyss-host-stop >/dev/null 2>&1 || true
+  # A running host holds terminals: it is asked to stop (it closes them), never killed. The
+  # request is made with the binary being installed, because an installed version from before
+  # the host existed does not know the flag and would open its window instead; it is bounded.
+  local binary="${1:-$prefix/bin/wyss-console}"
+  if [ -x "$binary" ]; then
+    timeout 15 "$binary" --wyss-host-stop >/dev/null 2>&1 || true
   fi
 }
 
@@ -106,11 +109,13 @@ cmd_install() {
   local version
   version="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$package/share/wyss-console/package.json" | head -1)"
   local staging="$prefix.new.$$"
+  # What an interrupted earlier install left beside the prefix is ours and is not kept.
+  for stale in "$prefix".new.*; do [ -d "$stale" ] && rm -rf "$stale"; done
   rm -rf "$staging"
   mkdir -p "$(dirname "$prefix")"
   cp -a "$package" "$staging"
   chmod -R go-w "$staging"
-  stop_host
+  stop_host "$staging/bin/wyss-console"
   if [ -d "$prefix" ]; then
     rm -rf "$previous"
     mv "$prefix" "$previous"
