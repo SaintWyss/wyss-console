@@ -176,15 +176,29 @@ pub fn passphrase(app: &AppHandle, again: bool) -> Option<Zeroizing<String>> {
 
 /// A file chosen to write (`save`) or to read, in GTK's own chooser.
 pub fn choose_file(app: &AppHandle, save: bool, name: &str) -> Option<PathBuf> {
+    choose_file_titled(
+        app,
+        save,
+        name,
+        if save {
+            "Export record"
+        } else {
+            "Import record"
+        },
+    )
+}
+
+pub fn choose_file_titled(
+    app: &AppHandle,
+    save: bool,
+    name: &str,
+    title: &'static str,
+) -> Option<PathBuf> {
     use gtk::prelude::*;
     let name = name.to_owned();
     on_gtk(app, move |parent| {
         let chooser = gtk::FileChooserNative::new(
-            Some(if save {
-                "Export record"
-            } else {
-                "Import record"
-            }),
+            Some(title),
             parent.as_ref(),
             if save {
                 gtk::FileChooserAction::Save
@@ -199,6 +213,24 @@ pub fn choose_file(app: &AppHandle, save: bool, name: &str) -> Option<PathBuf> {
             chooser.set_current_name(&name);
             chooser.set_do_overwrite_confirmation(true);
         }
+        let accepted = chooser.run() == gtk::ResponseType::Accept;
+        accepted.then(|| chooser.filename()).flatten()
+    })
+    .flatten()
+}
+
+/// A folder chosen in GTK's own chooser: the only way the window gets to name a project.
+pub fn choose_folder(app: &AppHandle) -> Option<PathBuf> {
+    use gtk::prelude::*;
+    on_gtk(app, move |parent| {
+        let chooser = gtk::FileChooserNative::new(
+            Some("Select project folder"),
+            parent.as_ref(),
+            gtk::FileChooserAction::SelectFolder,
+            Some("Select"),
+            Some("Cancel"),
+        );
+        chooser.set_modal(true);
         let accepted = chooser.run() == gtk::ResponseType::Accept;
         accepted.then(|| chooser.filename()).flatten()
     })

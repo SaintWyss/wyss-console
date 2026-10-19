@@ -64,6 +64,32 @@ pub struct Extension {
     pub install: Box<dyn FnOnce(tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry>>,
 }
 
+impl Extension {
+    /// Two extensions as one: a command goes to the extension that names it.
+    pub fn merge(self, other: Self) -> Self {
+        let commands: Vec<&'static str> = self
+            .commands
+            .iter()
+            .chain(other.commands.iter())
+            .copied()
+            .collect();
+        let first = self.commands;
+        let (first_handler, second_handler) = (self.handler, other.handler);
+        let (first_install, second_install) = (self.install, other.install);
+        Self {
+            commands: Box::leak(commands.into_boxed_slice()),
+            handler: Box::new(move |invoke| {
+                if first.contains(&invoke.message.command()) {
+                    first_handler(invoke)
+                } else {
+                    second_handler(invoke)
+                }
+            }),
+            install: Box::new(move |builder| second_install(first_install(builder))),
+        }
+    }
+}
+
 pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>) {
     let stopping = Arc::new(AtomicBool::new(false));
     let managed_sessions = sessions::SessionService::from_environment();

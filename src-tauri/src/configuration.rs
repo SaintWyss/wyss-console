@@ -324,7 +324,7 @@ async fn configuration_import(
 }
 
 /// A file the user named in the native chooser, made 0600 and not followed through a link.
-fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), ()> {
+pub(crate) fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), ()> {
     use std::{io::Write, os::unix::fs::OpenOptionsExt};
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -339,7 +339,7 @@ fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), ()> {
         .map_err(|_| ())
 }
 
-fn read_small_file(path: &std::path::Path) -> Result<Vec<u8>, ()> {
+pub(crate) fn read_small_file(path: &std::path::Path) -> Result<Vec<u8>, ()> {
     use std::{io::Read, os::unix::fs::OpenOptionsExt};
     let file = std::fs::OpenOptions::new()
         .read(true)

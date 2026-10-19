@@ -139,6 +139,36 @@ impl TerminalService {
         shell: PathBuf,
         home: PathBuf,
     ) -> Result<TerminalInfo, TerminalError> {
+        let launch = Launch {
+            program: shell,
+            args: vec!["-i".to_owned()],
+            env: Vec::new(),
+        };
+        self.spawn(request, launch, home)
+    }
+
+    /// A terminal that runs `launch` instead of a bare shell (F3a). `request.cwd` must name
+    /// a directory; the desktop binary has already validated it.
+    pub fn create_launch(
+        &self,
+        request: CreateTerminal,
+        launch: Launch,
+    ) -> Result<TerminalInfo, TerminalError> {
+        let (_, home) = shell_and_home()?;
+        self.spawn(request, launch, home)
+    }
+
+    /// The user's login shell, as a bare terminal would start it.
+    pub fn user_shell() -> Result<PathBuf, TerminalError> {
+        Ok(shell_and_home()?.0)
+    }
+
+    fn spawn(
+        &self,
+        request: CreateTerminal,
+        launch: Launch,
+        home: PathBuf,
+    ) -> Result<TerminalInfo, TerminalError> {
         let size = request.size.validate()?;
         let cwd = request.cwd.map(PathBuf::from).unwrap_or(home);
         let cwd = cwd
@@ -151,7 +181,7 @@ impl TerminalService {
             .map_err(|error| TerminalError::context(ErrorCode::InternalPty, error))?;
         let info = TerminalInfo {
             terminal_id: id.clone(),
-            shell: shell.to_string_lossy().into_owned(),
+            shell: launch.program.to_string_lossy().into_owned(),
             cwd: cwd.to_string_lossy().into_owned(),
             observed_pid: None,
             size,
@@ -213,7 +243,7 @@ impl TerminalService {
         }
         let worker = thread::Builder::new()
             .name(format!("wyss-pty-{}", id.as_str()))
-            .spawn(move || worker::run(shell, cwd, size, shared, receiver, wake_reader, boot));
+            .spawn(move || worker::run(launch, cwd, size, shared, receiver, wake_reader, boot));
         match worker {
             Ok(handle) => *lock(&runtime.worker) = Some(handle),
             Err(error) => {
