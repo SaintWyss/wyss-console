@@ -134,20 +134,24 @@ it('maps the terminal workspace to one honest runtime status', () => {
 it('lists every view, and every one of them exists', () => {
   expect(NAV_ITEMS.map((item) => item.label)).toEqual([
     'Console',
+    'Workspace',
     'Sessions',
     'Agents',
     'Approvals',
     'Events',
     'Configuration',
+    'Profiles',
     'Settings',
   ]);
   expect(NAV_ITEMS.map((item) => item.id)).toEqual([
     'console',
+    'workspace',
     'sessions',
     'agents',
     'approvals',
     'events',
     'configuration',
+    'profiles',
     'settings',
   ]);
   // Nothing is a placeholder any more: no item is disabled or marked as coming.
@@ -162,16 +166,18 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
   const nav = Array.from(
     document.querySelectorAll<HTMLButtonElement>('.sidebar .nav-item'),
   );
-  expect(nav).toHaveLength(7);
+  expect(nav).toHaveLength(9);
   expect(nav[0].getAttribute('aria-current')).toBe('page');
   expect(nav.every((b) => !b.disabled)).toBe(true);
   expect(nav.map((b) => b.textContent?.trim())).toEqual([
     'Console',
+    'Workspace',
     'Sessions',
     'Agents',
     'Approvals',
     'Events',
     'Configuration',
+    'Profiles',
     'Settings',
   ]);
   // No item is a placeholder.

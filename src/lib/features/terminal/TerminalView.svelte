@@ -6,12 +6,16 @@
     TerminalSessionManager,
   } from './session-manager';
   import type { ConsoleSessionId } from '../../contracts/identities';
+  import { registerWorkspace } from '../native/bridge';
   import TerminalPanel from './TerminalPanel.svelte';
   let {
     onworkspace,
+    onagents,
     visible = true,
   }: {
     onworkspace?: (state: WorkspaceState) => void;
+    /** Opens the place where an agent is started. */
+    onagents?: () => void;
     /** False while another view is shown. The terminals keep running. */
     visible?: boolean;
   } = $props();
@@ -48,7 +52,9 @@
       onworkspace?.(state);
     });
     manager = lease.manager;
+    const unregister = registerWorkspace(lease.manager);
     return () => {
+      unregister();
       observer.disconnect();
       void lease.dispose();
     };
@@ -98,7 +104,9 @@
             onclick={() => manager?.activate(session.id)}
             onkeydown={(event) => tabKey(event, session.id)}
           >
-            {session.title}{#if session.view.state !== 'running'}
+            {#if session.native}<span class="tab-agent" aria-hidden="true"
+                >◆</span
+              >{/if}{session.title}{#if session.view.state !== 'running'}
               · {session.view.state}{/if}
           </button>
           <button
@@ -110,6 +118,11 @@
         </div>
       {/each}
     </div>
+    {#if onagents}
+      <button class="new-terminal" onclick={() => onagents?.()}
+        >Start agent…</button
+      >
+    {/if}
     <button
       class="new-terminal"
       disabled={workspace.creating}

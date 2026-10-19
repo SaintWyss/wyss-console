@@ -11,8 +11,12 @@
   import { ChangesController } from './lib/features/configuration/changes-controller';
   import { ConfigurationController } from './lib/features/configuration/controller';
   import { EventsController } from './lib/features/events/controller';
+  import { NativeController } from './lib/features/native/controller';
+  import ProfilesView from './lib/features/native/ProfilesView.svelte';
+  import WorkspaceView from './lib/features/native/WorkspaceView.svelte';
   import { SettingsController } from './lib/features/settings/controller';
   import SettingsView from './lib/features/settings/SettingsView.svelte';
+  import { currentWorkspace } from './lib/features/native/bridge';
   import { setAppearance } from './lib/features/terminal/appearance';
   import EventsView from './lib/features/events/EventsView.svelte';
   import { SessionsController } from './lib/features/sessions/controller';
@@ -90,6 +94,18 @@
     () => configurationController.refresh(),
   );
   let changes = $state(changesController.state());
+  // Agents started in terminals and the profiles they start with. An agent that was started
+  // opens as a tab of the Console, which is shown.
+  const nativeController = new NativeController(
+    (next) => {
+      native = next;
+    },
+    (reply) => {
+      currentWorkspace()?.createNative(reply);
+      go('console');
+    },
+  );
+  let native = $state(nativeController.state());
   // The desktop's own preferences: read once, written only when the user changes one.
   const settingsController = new SettingsController((next) => {
     settings = next;
@@ -120,6 +136,13 @@
   });
   $effect(() => {
     configurationController.setVisible(activeView === 'configuration');
+  });
+  // The overview reads the registry (with resources) while it is shown, and the profiles
+  // are read once when either of their views first is.
+  $effect(() => {
+    nativeController.setVisible(
+      activeView === 'workspace' || activeView === 'profiles',
+    );
   });
 
   // The window opens on the view the preferences name, unless the user has already
@@ -175,6 +198,7 @@
       eventsController.dispose();
       configurationController.dispose();
       changesController.dispose();
+      nativeController.dispose();
       settingsController.dispose();
     };
   });
@@ -267,6 +291,13 @@
     <TerminalView
       visible={activeView === 'console'}
       onworkspace={observeWorkspace}
+      onagents={() => go('workspace')}
+    />
+    <WorkspaceView
+      visible={activeView === 'workspace'}
+      {native}
+      controller={nativeController}
+      onconsole={() => go('console')}
     />
     <SessionsView
       visible={activeView === 'sessions'}
@@ -309,6 +340,11 @@
       controller={configurationController}
       {changes}
       {changesController}
+    />
+    <ProfilesView
+      visible={activeView === 'profiles'}
+      {native}
+      controller={nativeController}
     />
     <SettingsView
       visible={activeView === 'settings'}

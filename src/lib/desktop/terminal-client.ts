@@ -24,6 +24,10 @@ export async function createTerminal(
   streams.set(info.terminal_id, { ack: null });
   return info;
 }
+/** A terminal the desktop created for a native session: reading it is registered here. */
+export function adoptTerminal(info: TerminalInfo): void {
+  streams.set(info.terminal_id, { ack: null });
+}
 export function writeTerminal(
   terminal_id: TerminalId,
   data: Uint8Array,

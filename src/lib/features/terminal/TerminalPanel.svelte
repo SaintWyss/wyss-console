@@ -30,10 +30,26 @@
 >
   <div class="terminal-toolbar">
     <p role="status" aria-live={active ? 'polite' : 'off'}>
-      {#if session.view.state === 'starting'}Starting terminal…
-      {:else if session.view.state === 'running'}{session.view.info?.shell} · Running
-      {:else if session.view.state === 'exited'}Shell exited{session.view.info
-          ?.exit
+      {#if session.native}
+        <span
+          class="pill compact"
+          data-tone="idle"
+          title="Started by the Console in your shell. Not mediated, contained or approved by the Console."
+          ><span class="dot" aria-hidden="true"></span>Native</span
+        >
+        {session.native.agent}{session.native.profile
+          ? ` · ${session.native.profile}`
+          : ''} ·
+      {/if}
+      {#if session.view.state === 'starting'}Starting {session.native
+          ? 'agent'
+          : 'terminal'}…
+      {:else if session.view.state === 'running'}{session.native
+          ? 'Running'
+          : `${session.view.info?.shell} · Running`}
+      {:else if session.view.state === 'exited'}{session.native
+          ? 'Agent'
+          : 'Shell'} exited{session.view.info?.exit
           ? ` (${session.view.info.exit.code})`
           : ''}
       {:else if session.view.state === 'closing'}Closing terminal…

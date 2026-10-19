@@ -1,0 +1,155 @@
+import { invoke } from '@tauri-apps/api/core';
+import {
+  parseFailure,
+  parseLauncher,
+  parsePreview,
+  parseProfiles,
+  parseSessions,
+  parseStartReply,
+  type AgentId,
+  type Launcher,
+  type NativeFailure,
+  type NativeSession,
+  type Preview,
+  type Profile,
+  type ProfileBody,
+  type StartReply,
+} from '../contracts/native';
+import type { TerminalSize } from '../contracts/terminal';
+import { adoptTerminal } from './terminal-client';
+
+export class NativeCallError extends Error {
+  constructor(readonly failure: NativeFailure) {
+    super(`native: ${failure.code}`);
+  }
+}
+
+async function call(
+  command: string,
+  args: Record<string, unknown> = {},
+): Promise<unknown> {
+  try {
+    return await invoke<unknown>(command, args);
+  } catch (error) {
+    throw new NativeCallError(parseFailure(error));
+  }
+}
+function checked<T>(answer: unknown, parse: (v: unknown) => T): T {
+  try {
+    return parse(answer);
+  } catch {
+    // The desktop answered something that does not fit: nothing is believed.
+    throw new NativeCallError({ code: 'internal', reasons: [] });
+  }
+}
+
+export async function readLauncher(): Promise<Launcher> {
+  return checked(await call('native_launcher'), parseLauncher);
+}
+export async function previewProfile(
+  agent_id: AgentId,
+  profile_id: string | null,
+): Promise<Preview> {
+  return checked(
+    await call('native_preview', { request: { agent_id, profile_id } }),
+    parsePreview,
+  );
+}
+/** Starts an agent in a terminal. The terminal it runs in is adopted for reading. */
+export async function startNative(
+  agent_id: AgentId,
+  project: string,
+  profile_id: string | null,
+  size: TerminalSize,
+): Promise<StartReply> {
+  const reply = checked(
+    await call('native_start', {
+      request: { agent_id, project, profile_id, size },
+    }),
+    parseStartReply,
+  );
+  adoptTerminal(reply.terminal);
+  return reply;
+}
+export async function restartNative(
+  id: string,
+  size: TerminalSize,
+): Promise<StartReply> {
+  const reply = checked(
+    await call('native_restart', { request: { id, size } }),
+    parseStartReply,
+  );
+  adoptTerminal(reply.terminal);
+  return reply;
+}
+export async function readNativeSessions(
+  sample: boolean,
+): Promise<NativeSession[]> {
+  return checked(
+    await call('native_sessions', { request: { sample } }),
+    parseSessions,
+  );
+}
+export async function stopNative(id: string): Promise<void> {
+  await call('native_stop', { request: { id } });
+}
+export async function forgetNative(id: string): Promise<void> {
+  await call('native_forget', { request: { id } });
+}
+/** The native folder dialog; `null` when it was dismissed. */
+export async function chooseProject(): Promise<string | null> {
+  const answer = await call('native_choose_project');
+  return checked(answer, (v) => {
+    const path = (v as { path?: unknown }).path;
+    if (path === null) return null;
+    if (typeof path !== 'string') throw new Error('path');
+    return path;
+  });
+}
+export async function setProjectDefault(
+  project: string,
+  profile_id: string | null,
+): Promise<void> {
+  await call('native_project_default', { request: { project, profile_id } });
+}
+
+export async function readProfiles(): Promise<Profile[]> {
+  return checked(await call('native_profiles'), parseProfiles);
+}
+const created = (v: unknown): string => {
+  const id = (v as { id?: unknown }).id;
+  if (typeof id !== 'string') throw new Error('id');
+  return id;
+};
+export async function createProfile(body: ProfileBody): Promise<string> {
+  return checked(await call('native_profile_create', { body }), created);
+}
+export async function saveProfile(
+  id: string,
+  body: ProfileBody,
+): Promise<void> {
+  await call('native_profile_save', { request: { id, body } });
+}
+export async function deleteProfile(id: string): Promise<void> {
+  await call('native_profile_delete', { request: { id } });
+}
+export async function duplicateProfile(id: string): Promise<string> {
+  return checked(
+    await call('native_profile_duplicate', { request: { id } }),
+    created,
+  );
+}
+export async function restoreProfile(
+  id: string,
+  version: number,
+): Promise<void> {
+  await call('native_profile_restore', { request: { id, version } });
+}
+export async function exportProfile(id: string): Promise<boolean> {
+  const answer = await call('native_profile_export', { request: { id } });
+  return (answer as { done?: unknown }).done === true;
+}
+export async function importProfile(): Promise<string | null> {
+  const answer = await call('native_profile_import');
+  return answer === null ? null : checked(answer, created);
+}

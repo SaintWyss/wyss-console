@@ -45,6 +45,8 @@ export class TerminalController {
     private readonly host: HTMLElement,
     private readonly renderer: TerminalRenderer,
     private readonly update: (state: TerminalViewState) => void,
+    /** A terminal the desktop already made (a native session's): read, not created. */
+    private readonly adopted?: TerminalInfo,
   ) {}
 
   setActive(active: boolean) {
@@ -85,9 +87,9 @@ export class TerminalController {
         rows: 24,
         cols: 80,
       };
-      this.info = await desktop.createTerminal(size);
+      this.info = this.adopted ?? (await desktop.createTerminal(size));
       this.id = this.info.terminal_id;
-      this.sentSize = size;
+      this.sentSize = this.adopted ? this.adopted.size : size;
       if (this.stopped) {
         await this.closeOnce();
         return;
