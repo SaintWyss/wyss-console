@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Panes, search, shortcuts and a saved layout (T1, T2)
+
+- **Split a tab into panes** (side by side or stacked, up to 16, drag the dividers); each pane
+  is its own terminal. **Search the scrollback** with Ctrl+Shift+F (case option, next and
+  previous). **Console shortcuts** are Ctrl+Shift+T/D/E/W/F, arrows, `.` `,`, PageUp/PageDown,
+  1 to 9; every other key goes to the terminal (legend behind the keyboard button).
+- **The layout comes back**: tabs, splits, ratios and focus are saved and laid over the host's
+  live terminals when the window opens; a shell that is gone is made again with its title and
+  folder, an agent never is. ADR 0032.
+
 ### Sessions that outlive the window (F9)
 
 - **Terminals and native agent sessions are held by a host process** (`wyss-console

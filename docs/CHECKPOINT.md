@@ -16,13 +16,7 @@ push, no merge, no release. Verify with `git log --oneline | head` and `git stat
 
 ## Active
 
-T1/T2 (panes, search, key map, layout restore) is implemented and unit-tested but **not yet
-verified in the real GUI** and not yet committed as accepted: `layout.ts`, `keymap.ts`,
-`session-manager.ts` (tabs of panes), `TerminalView/Panel.svelte`, renderer `search`, Rust
-`layout_read/layout_write`. Remaining: a renderer search test (tests/terminal-renderer.test.ts
-pattern), a GUI walkthrough (split, drag a divider, Ctrl+Shift chords, search, close the window
-and reopen to see the layout), ADR 0032 for T1/T2 (own search instead of the xterm add-on, to add
-no dependency), CHANGELOG/README entries. Next executable action: run full validation, then GUI.
+Nothing in progress. Next: F14 credentials, then F11a handoff, F6a/b models.
 
 ## Roadmap still open, in the order being taken
 
@@ -46,4 +40,4 @@ P1 (baselines) needs a reference terminal installed with consent: own-metric scr
 
 ## Commits of this stretch
 
-F3 backend `277b8f8`, window `5969b8f`, capability `d10b9cb`, env scrub `eb36717`, F9 `ad6a985`.
+F3 backend `277b8f8`, window `5969b8f`, capability `d10b9cb`, env scrub `eb36717`, F9 `ad6a985`, T1/T2 `5708c09` + follow-up.
