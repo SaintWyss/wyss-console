@@ -14,7 +14,7 @@ import {
 } from '../src/lib/features/sessions/controller';
 import type { AuthorityObservation } from '../src/lib/shell/authority';
 import views from './fixtures/authority-view-v1.json';
-import pages from './fixtures/session-page-v3.json';
+import pages from './fixtures/session-page-v4.json';
 
 export const loaded = parseSessionPage(pages.loaded);
 export const empty = parseSessionPage(pages.empty);

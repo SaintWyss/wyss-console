@@ -83,6 +83,8 @@ pub(crate) enum Observation {
     Conversation {
         operation_id: WireUuid,
         result: std::result::Result<CodexThreadId, ConversationFailure>,
+        /// The model the runtime reported with the thread, when it did.
+        model: Option<crate::contracts::binding::ObservedModel>,
         methods: RuntimeMethods,
     },
     TurnResult {
@@ -887,6 +889,10 @@ fn run(
                             cancel,
                             &names,
                         );
+                        let (result, model) = match result {
+                            Ok((thread, model)) => (Ok(thread), model),
+                            Err(failure) => (Err(failure), None),
+                        };
                         let unknown = result
                             .as_ref()
                             .is_err_and(|e| matches!(e, ConversationFailure::Unknown));
@@ -894,6 +900,7 @@ fn run(
                         io.emit(Observation::Conversation {
                             operation_id: c.operation_id,
                             result,
+                            model,
                             methods,
                         });
                         unknown.then_some(ProbeError::Protocol)
@@ -1008,7 +1015,13 @@ fn conversation(
     report: &mut CodexLiveProbeReportV1,
     cancel: &AtomicBool,
     names: &BTreeSet<String>,
-) -> std::result::Result<CodexThreadId, ConversationFailure> {
+) -> std::result::Result<
+    (
+        CodexThreadId,
+        Option<crate::contracts::binding::ObservedModel>,
+    ),
+    ConversationFailure,
+> {
     let valid = c.admission.load(Ordering::Acquire)
         && crate::contracts::control::timestamp(&c.expires_at)
             .is_ok_and(|t| time::OffsetDateTime::now_utc() < t)
@@ -1058,6 +1071,14 @@ fn conversation(
     };
     let result = exchange(io, message, op, deadline, correlation, report)?;
     let thread = validate_conversation(&result, c)?;
+    let model = crate::contracts::binding::ObservedModel::from_thread_answer(
+        &result,
+        if c.thread_id.is_some() {
+            crate::contracts::binding::ObservedModelSource::ThreadResume
+        } else {
+            crate::contracts::binding::ObservedModelSource::ThreadStart
+        },
+    );
     if io.local.is_some() {
         safety::verify_local_tools_thread(&result).map_err(|_| ConversationFailure::Unknown)?;
     }
@@ -1065,7 +1086,7 @@ fn conversation(
         if io.local.is_none() {
             safety::verify_resume(&result).map_err(|_| ConversationFailure::Unknown)?;
         }
-        return Ok(thread);
+        return Ok((thread, model));
     }
     checkpoint(
         io,
@@ -1110,7 +1131,7 @@ fn conversation(
         }
         checkpoint(io, c, &thread, stage, cancel, deadline)?;
     }
-    Ok(thread)
+    Ok((thread, model))
 }
 fn validate_conversation(
     r: &serde_json::Value,

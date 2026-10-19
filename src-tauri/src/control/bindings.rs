@@ -75,6 +75,7 @@ impl Store {
             binding,
             runtime_instance_id: None,
             attachment_profile: None,
+            observed_model: None,
             operation_id: pending
                 .map(|(id, _)| WireUuid::try_from(id).map_err(invalid))
                 .transpose()?,

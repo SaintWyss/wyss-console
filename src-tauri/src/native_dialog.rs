@@ -122,6 +122,9 @@ impl Confirm for GtkConfirm {
             effect_text(request.effect),
             risk_text(request.risk),
         );
+        if let Some(detail) = &request.detail {
+            body.push_str(&format!("\n\n{detail}"));
+        }
         if request.holds_hidden_values {
             body.push_str("\nThe entry holds values that are not shown here.");
         }

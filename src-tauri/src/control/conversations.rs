@@ -8,6 +8,7 @@ use super::{
     },
 };
 use crate::contracts::{
+    binding::ObservedModel,
     control::*,
     identities::{AgentRuntimeInstanceId, ManagedSessionId},
 };
@@ -29,7 +30,13 @@ struct Pending {
 #[derive(Default)]
 pub(super) struct Conversations {
     pending: Option<Pending>,
-    attachments: BTreeMap<String, AgentRuntimeInstanceId>,
+    attachments: BTreeMap<String, Attached>,
+}
+/// A session attached to a generation, and the model that generation reported for it. Both
+/// are transient: they are gone with the attachment (ADR 0031, option A).
+struct Attached {
+    instance: AgentRuntimeInstanceId,
+    model: Option<ObservedModel>,
 }
 #[cfg(test)]
 impl Conversations {
@@ -39,8 +46,28 @@ impl Conversations {
         session: &ManagedSessionId,
         id: &AgentRuntimeInstanceId,
     ) {
-        self.attachments
-            .insert(session.as_str().to_ascii_lowercase(), id.clone());
+        self.attachments.insert(
+            session.as_str().to_ascii_lowercase(),
+            Attached {
+                instance: id.clone(),
+                model: None,
+            },
+        );
+    }
+    #[allow(dead_code)]
+    pub(super) fn attach_with_model_for_test(
+        &mut self,
+        session: &ManagedSessionId,
+        id: &AgentRuntimeInstanceId,
+        model: ObservedModel,
+    ) {
+        self.attachments.insert(
+            session.as_str().to_ascii_lowercase(),
+            Attached {
+                instance: id.clone(),
+                model: Some(model),
+            },
+        );
     }
     pub(super) fn detach_for_test(&mut self) {
         self.attachments.clear();
@@ -92,8 +119,12 @@ impl Conversations {
             && store.gate_session(id)?.control_state == ControlState::Prepared
             && let Some(live) = runtime.status().runtime_instance_id
             && runtime.status().actual_state == ActualState::Ready
-            && self.attachments.get(&id.as_str().to_ascii_lowercase()) == Some(&live)
+            && let Some(attached) = self
+                .attachments
+                .get(&id.as_str().to_ascii_lowercase())
+                .filter(|a| a.instance == live)
         {
+            s.observed_model = attached.model.clone();
             s.state = BindingState::BoundAttached;
             s.runtime_instance_id = Some(live);
             s.attachment_profile = Some(
@@ -177,7 +208,7 @@ impl Conversations {
         let status = runtime.status();
         // Discard stale attachment metadata; detached sessions have no background polling.
         self.attachments
-            .retain(|_, id| status.runtime_instance_id.as_ref() == Some(id));
+            .retain(|_, a| status.runtime_instance_id.as_ref() == Some(&a.instance));
         if !self
             .attachments
             .contains_key(&session.as_str().to_ascii_lowercase())
@@ -266,6 +297,7 @@ impl Conversations {
         id: &AgentRuntimeInstanceId,
         operation: &crate::contracts::WireUuid,
         result: Result<super::runtime::ThreadId, ConversationFailure>,
+        model: Option<ObservedModel>,
     ) {
         if !self
             .pending
@@ -287,7 +319,10 @@ impl Conversations {
                     {
                         self.attachments.insert(
                             p.reservation.session_id.as_str().to_ascii_lowercase(),
-                            id.clone(),
+                            Attached {
+                                instance: id.clone(),
+                                model,
+                            },
                         );
                     }
                     Ok(ResultValue::Binding(b))
@@ -329,6 +364,7 @@ impl Conversations {
                 id,
                 &operation,
                 Err(ConversationFailure::NotDispatched),
+                None,
             );
         }
         self.attachments.clear();

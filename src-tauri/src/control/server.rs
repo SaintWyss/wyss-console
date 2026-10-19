@@ -453,6 +453,7 @@ pub fn run_from_environment() -> ControlResult<()> {
                         Observation::Conversation {
                             ref operation_id,
                             ref result,
+                            ref model,
                             ..
                         } => conversations.complete(
                             &mut store,
@@ -460,6 +461,7 @@ pub fn run_from_environment() -> ControlResult<()> {
                             &id,
                             operation_id,
                             result.clone(),
+                            model.clone(),
                         ),
                         Observation::Exited { .. } => conversations.detach(&mut store),
                         _ => (),

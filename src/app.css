@@ -808,6 +808,7 @@ button:focus-visible {
 }
 .composer-note,
 .session-hint,
+.session-model,
 .sessions-pager p {
   font-size: 12px;
   color: var(--muted);

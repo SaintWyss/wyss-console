@@ -5,7 +5,7 @@ import App from '../src/App.svelte';
 import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import { parseTerminalId } from '../src/lib/contracts/identities';
 import views from './fixtures/authority-view-v1.json';
-import pages from './fixtures/session-page-v3.json';
+import pages from './fixtures/session-page-v4.json';
 
 const fakes = vi.hoisted(() => ({ factory: vi.fn() }));
 vi.mock('../src/lib/features/terminal/renderer', () => ({

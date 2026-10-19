@@ -16,6 +16,7 @@
     composeImpact,
     modeImpact,
     modeLabel,
+    observedModelLine,
     modeOffers,
     outcomeUnknown,
     pendingMessage,
@@ -508,6 +509,9 @@
                 >Close</button
               >
             </div>
+            <p class="session-model" data-testid="observed-model">
+              {observedModelLine(selected)}
+            </p>
             {#if selected.mode === 'inference'}
               <p class="session-hint">
                 This session runs in Inference: Codex is offered no tool. Local

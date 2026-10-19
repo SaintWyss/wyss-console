@@ -9,7 +9,7 @@ use crate::contracts::{
 };
 use serde::{Deserialize, Serialize};
 
-pub(super) const PAGE_SCHEMA_VERSION: u8 = 3;
+pub(super) const PAGE_SCHEMA_VERSION: u8 = 4;
 
 /// What a managed session can do, as a product choice. It is one of exactly these two:
 /// which runtime profile each one means is decided on this side, and whether that
@@ -114,6 +114,10 @@ pub struct SessionSummary {
     pub activatable: bool,
     /// Prepared, with an attempt whose outcome the authority could not confirm.
     pub recoverable: bool,
+    /// The model the managed runtime itself reported for this session, only while it is
+    /// attached. `None` means "not reported", never "the default": nothing here is inferred
+    /// from a catalogue, a configuration or a mode.
+    pub observed_model: Option<crate::contracts::binding::ObservedModel>,
 }
 impl SessionSummary {
     pub(super) fn of(session: ManagedSessionRecord, binding: BindingStatus) -> Self {
@@ -127,6 +131,10 @@ impl SessionSummary {
             updated_at: session.updated_at,
             position: session.created_sequence,
             mode: SessionMode::of(&binding),
+            observed_model: binding
+                .observed_model
+                .clone()
+                .filter(|_| binding.state == BindingState::BoundAttached),
             binding: binding.state,
             workspace: binding.binding.map(|b| b.workspace_root),
             resumable: prepared && binding.state == BindingState::BoundDetached,

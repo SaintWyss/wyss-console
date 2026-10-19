@@ -411,13 +411,17 @@ async fn configuration_edit_hook(
         let current = changes
             .hook_command(&item)
             .ok_or(ConfigurationError::Change(ChangeFailure::EntryGone))?;
+        // The window names which hook it is: the backend's own name for it, not the page's.
+        let which = changes.item_label(&item).unwrap_or_default();
         let typed = text_form(
             &app,
             "Change a hook",
-            "This is the command that runs for this hook. What you write replaces it in your own Claude Code settings.",
+            &format!(
+                "This is the command that runs for the hook \"{which}\". What you write replaces it in your own Claude Code settings."
+            ),
             vec![Field {
                 label: "Command".to_owned(),
-                initial: current,
+                initial: current.clone(),
                 multiline: false,
             }],
         )
@@ -425,6 +429,7 @@ async fn configuration_edit_hook(
         Ok(changes.plan_authored(Authoring::EditHook {
             item,
             command: typed[0].trim().to_owned(),
+            expected: current,
         })?)
     })
     .await
@@ -474,16 +479,20 @@ async fn configuration_edit_mcp(
             .mcp_current(&item)
             .ok_or(ConfigurationError::Change(ChangeFailure::EntryGone))?;
         let remote = matches!(current, McpSpec::Remote { .. });
+        let which = changes.item_label(&item).unwrap_or_default();
         let typed = text_form(
             &app,
             "Change an MCP server",
-            "What you write replaces what this OpenCode server starts or connects to.",
+            &format!(
+                "What you write replaces what the OpenCode server \"{which}\" starts or connects to."
+            ),
             mcp_fields(Some(&current), remote),
         )
         .ok_or_else(cancelled)?;
         Ok(changes.plan_authored(Authoring::EditMcp {
             item,
             spec: mcp_from(&typed, remote),
+            expected: current,
         })?)
     })
     .await
@@ -600,6 +609,10 @@ const COMMANDS: &[&str] = &[
     "configuration_record_delete",
     "configuration_export",
     "configuration_import",
+    "configuration_author_hook",
+    "configuration_edit_hook",
+    "configuration_author_mcp",
+    "configuration_edit_mcp",
 ];
 
 /// What the desktop binary hands to the library: the commands, the state they read, and

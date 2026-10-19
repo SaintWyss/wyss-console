@@ -9,7 +9,7 @@ import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import { listing } from './agent-harness';
 import approvals from './fixtures/approval-list-v1.json';
 import views from './fixtures/authority-view-v1.json';
-import pages from './fixtures/session-page-v3.json';
+import pages from './fixtures/session-page-v4.json';
 import { lifecycle } from './lifecycle-harness';
 import { rawPage } from './events-harness';
 import { FakeDesktopSettings } from './settings-harness';

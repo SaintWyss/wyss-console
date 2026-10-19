@@ -34,14 +34,42 @@ pub const HOOK_EVENTS: [&str; 12] = [
     "SubagentStart",
 ];
 const MOST_COMMAND: usize = 4096;
-const MOST_MATCHER: usize = 256;
+const MOST_MATCHER: usize = 128;
 const MOST_TIMEOUT: u32 = 3600;
 
-/// A line of text with no control character but a tab: what a command or matcher may be.
-fn line_ok(text: &str, most: usize) -> bool {
+/// A character that can disguise what is written when it is shown: a line or paragraph
+/// separator, a bidirectional control, a zero-width or invisible format character.
+pub fn disguises(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{061C}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{2028}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+    )
+}
+
+/// A line of text with no control character but a tab, and nothing that disguises it.
+pub fn line_ok(text: &str, most: usize) -> bool {
     !text.trim().is_empty()
         && text.len() <= most
-        && text.chars().all(|c| !c.is_control() || c == '\t')
+        && text
+            .chars()
+            .all(|c| (!c.is_control() || c == '\t') && !disguises(c))
+}
+
+/// A matcher is a tool-name pattern, chosen in the page and shown in a native window: plain
+/// printable ASCII, no quote or backslash, so it can say nothing but a pattern.
+fn matcher_ok(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= MOST_MATCHER
+        && text
+            .bytes()
+            .all(|b| (b == b' ' || b.is_ascii_graphic()) && b != b'"' && b != b'\\')
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,10 +84,7 @@ impl HookSpec {
     pub fn check(&self) -> Result<(), PlanError> {
         let ok = HOOK_EVENTS.contains(&self.event.as_str())
             && line_ok(&self.command, MOST_COMMAND)
-            && self
-                .matcher
-                .as_deref()
-                .is_none_or(|m| line_ok(m, MOST_MATCHER))
+            && self.matcher.as_deref().is_none_or(matcher_ok)
             && self.timeout.is_none_or(|t| (1..=MOST_TIMEOUT).contains(&t));
         ok.then_some(()).ok_or(PlanError::Invalid)
     }
@@ -76,13 +101,21 @@ impl HookSpec {
 /// where. A change is one stretch of the file, so the common head and tail of the two files
 /// are all that is not in it.
 pub fn inverse_of(provider: ProviderId, source: SourceKey, old: &[u8], new: &[u8]) -> RecordBody {
-    let head = old.iter().zip(new).take_while(|(a, b)| a == b).count();
-    let tail = old[head..]
+    // A byte that continues a multibyte character is never where the change starts or ends.
+    let inside = |bytes: &[u8], at: usize| at < bytes.len() && (bytes[at] & 0xC0) == 0x80;
+    let mut head = old.iter().zip(new).take_while(|(a, b)| a == b).count();
+    while head > 0 && (inside(old, head) || inside(new, head)) {
+        head -= 1;
+    }
+    let mut tail = old[head..]
         .iter()
         .rev()
         .zip(new[head..].iter().rev())
         .take_while(|(a, b)| a == b)
         .count();
+    while tail > 0 && (inside(old, old.len() - tail) || inside(new, new.len() - tail)) {
+        tail -= 1;
+    }
     let text =
         |bytes: &[u8]| String::from_utf8_lossy(&bytes[head..bytes.len() - tail]).into_owned();
     RecordBody {
@@ -123,7 +156,8 @@ fn inverse_drafted(
         _ => PlanError::NotSupported,
     })?;
     let body = inverse_of(provider, source, old, &new);
-    let (diff, hidden) = redact_lines(shown, DiffKind::Added, bounds);
+    let (diff, hidden) = redact_lines(&brief(shown).0, DiffKind::Added, bounds);
+    let hidden = hidden || brief(shown).1;
     Ok(Drafted {
         operation,
         item: item.to_owned(),
@@ -199,8 +233,25 @@ pub fn draft_add_hook(
         };
         let drafted = draft_restore(bytes, &"0".repeat(32), &body, secret_bearing, bounds)
             .map_err(|e| match e {
-                // The same command already runs on that event.
-                PlanError::RestoreConflict => PlanError::AlreadyDone,
+                // Only when the same command does run on that event is it "already done":
+                // any other conflict is said as one.
+                PlanError::RestoreConflict
+                    if before
+                        .pointer(&format!("/hooks/{}", spec.event))
+                        .and_then(Value::as_array)
+                        .is_some_and(|groups| {
+                            groups.iter().any(|g| {
+                                g.get("hooks").and_then(Value::as_array).is_some_and(|hs| {
+                                    hs.iter().any(|h| {
+                                        h.get("command").and_then(Value::as_str)
+                                            == Some(spec.command.as_str())
+                                    })
+                                })
+                            })
+                        }) =>
+                {
+                    PlanError::AlreadyDone
+                }
                 other => other,
             })?;
         if matches!(drafted.logical, Logical::Nothing) {
@@ -244,7 +295,13 @@ fn new_hook_item(bytes: &[u8], source: SourceKey, spec: &HookSpec) -> Option<Str
     let groups = value.get("hooks")?.get(&spec.event)?.as_array()?;
     let mut found = None;
     for (g, group) in groups.iter().enumerate() {
-        for (i, handler) in group.get("hooks")?.as_array()?.iter().enumerate() {
+        if group.get("matcher").and_then(Value::as_str) != spec.matcher.as_deref() {
+            continue;
+        }
+        let Some(handlers) = group.get("hooks").and_then(Value::as_array) else {
+            continue;
+        };
+        for (i, handler) in handlers.iter().enumerate() {
             if handler.get("command").and_then(Value::as_str) == Some(&spec.command) {
                 found = Some(super::inventory::item_id_for(
                     source,
@@ -326,7 +383,8 @@ pub fn draft_revert(bytes: &[u8], record: &str, body: &RecordBody) -> Result<Dra
         return Err(PlanError::RecordUnreadable);
     }
     let (at, new_len) = (body.removed_at, body.handler_text.len());
-    if hash(bytes) != body.h1 || bytes.get(at..at + new_len) != Some(body.handler_text.as_bytes()) {
+    let end = at.checked_add(new_len).ok_or(PlanError::RecordUnreadable)?;
+    if hash(bytes) != body.h1 || bytes.get(at..end) != Some(body.handler_text.as_bytes()) {
         // The file moved on since: nothing is forced over what somebody changed.
         return Err(PlanError::EntryChanged);
     }
@@ -339,17 +397,30 @@ pub fn draft_revert(bytes: &[u8], record: &str, body: &RecordBody) -> Result<Dra
     if hash(&restored) != body.h0 {
         return Err(PlanError::RecordUnreadable);
     }
-    let puts_back = !body.removed_text.is_empty();
+    // A record is believed only for what it was made for: the two files differ in the one
+    // place an authored change writes (`hooks` for Claude Code, `mcp` for OpenCode), and
+    // nowhere else. A record that would reach `permissions` or anything else is refused.
+    let (Some(now), Some(then)) = (top_level(bytes), top_level(&restored)) else {
+        return Err(PlanError::Malformed);
+    };
+    let home = if body.source == SourceKey::OpencodeUserConfig {
+        "mcp"
+    } else {
+        "hooks"
+    };
+    if now
+        .keys()
+        .chain(then.keys())
+        .any(|k| now.get(k) != then.get(k) && k != home)
+    {
+        return Err(PlanError::RecordUnreadable);
+    }
     Ok(Drafted {
         operation: Operation::RevertAuthored,
         item: record.to_owned(),
         name: "take back an authored change".to_owned(),
-        // Putting back text that was there before runs it again.
-        risk: if puts_back {
-            Risk::ExecutesCode
-        } else {
-            Risk::Normal
-        },
+        // Taking back is a change to something that runs: the native dialog, always.
+        risk: Risk::ExecutesCode,
         h0: hash(bytes),
         h1: hash(&restored),
         new_bytes: restored,
@@ -367,4 +438,49 @@ pub fn draft_revert(bytes: &[u8], record: &str, body: &RecordBody) -> Result<Dra
         prior: None,
         managed: None,
     })
+}
+
+/// The top-level members of a settings file, parsed as JSON or JSONC.
+fn top_level(bytes: &[u8]) -> Option<serde_json::Map<String, Value>> {
+    super::reader::parse_jsonc(bytes, &Bounds::PROPOSED)
+        .ok()??
+        .as_object()
+        .cloned()
+}
+
+/// What the page is shown of something the user typed: each text cut short, and a flag that
+/// something was left out. The whole text is in the native window that asked for it.
+pub fn brief(value: &Value) -> (Value, bool) {
+    const MOST: usize = 60;
+    match value {
+        Value::String(text) if text.chars().count() > MOST => {
+            let cut: String = text.chars().take(MOST).collect();
+            (Value::String(format!("{cut}…")), true)
+        }
+        Value::Array(items) => {
+            let mut cut = false;
+            let items = items
+                .iter()
+                .map(|v| {
+                    let (v, c) = brief(v);
+                    cut |= c;
+                    v
+                })
+                .collect();
+            (Value::Array(items), cut)
+        }
+        Value::Object(map) => {
+            let mut cut = false;
+            let map = map
+                .iter()
+                .map(|(k, v)| {
+                    let (v, c) = brief(v);
+                    cut |= c;
+                    (k.clone(), v)
+                })
+                .collect();
+            (Value::Object(map), cut)
+        }
+        other => (other.clone(), false),
+    }
 }

@@ -1,4 +1,5 @@
-import { expect, it, vi } from 'vitest';
+/* eslint-disable @typescript-eslint/no-explicit-any -- a page is damaged on purpose */
+import { describe, expect, it, vi } from 'vitest';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { parseAuthorityView } from '../src/lib/contracts/authority';
 import { parseManagedSessionId } from '../src/lib/contracts/identities';
@@ -31,10 +32,11 @@ import {
   readFailureMessage,
   resumeHint,
   sessionLabel,
+  observedModelLine,
 } from '../src/lib/features/sessions/present';
 import type { AuthorityObservation } from '../src/lib/shell/authority';
 import views from './fixtures/authority-view-v1.json';
-import pages from './fixtures/session-page-v3.json';
+import pages from './fixtures/session-page-v4.json';
 import {
   at,
   bound,
@@ -62,7 +64,7 @@ it('accepts exactly the pages the desktop serializes', () => {
   expect(parseSessionPage(older).older).toBe('1');
 });
 
-it('rejects anything that is not a v3 page', () => {
+it('rejects anything that is not a v4 page', () => {
   const page = pages.loaded;
   const [first, second, third] = page.sessions;
   const session = (over: Record<string, unknown>) => ({
@@ -74,7 +76,7 @@ it('rejects anything that is not a v3 page', () => {
     [],
     'page',
     { ...page, schema_version: 2 },
-    { ...page, schema_version: 4 },
+    { ...page, schema_version: 3 },
     // The runtime every session shares is part of the page: a mode it has no name
     // for, a profile of the authority, or a workspace without local tools is not.
     { ...page, runtime: undefined },
@@ -765,4 +767,87 @@ it('words sessions, hints and failures without protocol text', () => {
   expect(failureMessage('resume', 'rejected')).toBe(
     'The session was not resumed. Codex refused to resume this session. A session resumes only in the mode it was created in: if Codex runs in the other one now, change the mode for this session instead.',
   );
+});
+
+describe('the model of a managed session', () => {
+  const attached = () => {
+    const page = structuredClone(pages.loaded) as Record<string, any>;
+    const s = page.sessions[1];
+    s.binding = 'bound_attached';
+    s.mode = 'inference';
+    return { page, s };
+  };
+  it('is what the runtime reported while attached, and nothing otherwise', () => {
+    const { page, s } = attached();
+    s.observed_model = {
+      model_id: 'gpt-x',
+      provider_id: 'openai',
+      reasoning_effort: 'high',
+      source: 'thread_resume',
+    };
+    const parsed = parseSessionPage(page);
+    expect(parsed.sessions[1].observed_model?.model_id).toBe('gpt-x');
+    expect(observedModelLine(parsed.sessions[1])).toContain('gpt-x');
+    expect(observedModelLine(parsed.sessions[1])).toContain(
+      'reported by the runtime',
+    );
+    // Attached with no report: "not reported", never a default.
+    s.observed_model = null;
+    expect(observedModelLine(parseSessionPage(page).sessions[1])).toBe(
+      'Model in use: not reported by the runtime',
+    );
+    // Detached: not known.
+    const detached = parseSessionPage(structuredClone(pages.loaded));
+    expect(observedModelLine(detached.sessions[1])).toContain(
+      'not known while detached',
+    );
+  });
+  it('is refused when it does not fit or when the session is not attached', () => {
+    const { page, s } = attached();
+    for (const bad of [
+      {
+        model_id: '',
+        provider_id: null,
+        reasoning_effort: null,
+        source: 'thread_start',
+      },
+      {
+        model_id: 'x'.repeat(257),
+        provider_id: null,
+        reasoning_effort: null,
+        source: 'thread_start',
+      },
+      {
+        model_id: 'a b',
+        provider_id: null,
+        reasoning_effort: null,
+        source: 'thread_start',
+      },
+      {
+        model_id: 'ok',
+        provider_id: null,
+        reasoning_effort: null,
+        source: 'guess',
+      },
+      {
+        model_id: 'ok',
+        provider_id: null,
+        reasoning_effort: null,
+        source: 'thread_start',
+        x: 1,
+      },
+      'gpt-x',
+    ]) {
+      s.observed_model = bad;
+      expect(() => parseSessionPage(page)).toThrow();
+    }
+    const detached = structuredClone(pages.loaded) as Record<string, any>;
+    detached.sessions[1].observed_model = {
+      model_id: 'ok',
+      provider_id: null,
+      reasoning_effort: null,
+      source: 'thread_start',
+    };
+    expect(() => parseSessionPage(detached)).toThrow();
+  });
 });

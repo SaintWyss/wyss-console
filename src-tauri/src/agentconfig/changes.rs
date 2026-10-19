@@ -53,6 +53,9 @@ pub struct ConfirmRequest {
     pub risk: Risk,
     pub effect: Effect,
     pub holds_hidden_values: bool,
+    /// For something the user wrote: what will run, as the backend renders it (cut and plain),
+    /// so that the confirmation shows the thing and not only its name.
+    pub detail: Option<String>,
 }
 
 /// The native confirmation. It has no "do not ask again".
@@ -187,6 +190,8 @@ struct Stored {
     source: SourceKey,
     undoes: Option<String>,
     shared_with_declared_writers: bool,
+    /// What the native confirmation shows beside the name, for authored plans.
+    detail: Option<String>,
     at: Instant,
 }
 
@@ -371,11 +376,22 @@ impl ChangeService {
     }
 
     fn keep(&self, drafted: Drafted, source: SourceKey, undoes: Option<String>) -> PlanView {
+        self.keep_with(drafted, source, undoes, None)
+    }
+
+    fn keep_with(
+        &self,
+        drafted: Drafted,
+        source: SourceKey,
+        undoes: Option<String>,
+        detail: Option<String>,
+    ) -> PlanView {
         let stored = Stored {
             id: new_id(),
             drafted,
             source,
             undoes,
+            detail,
             shared_with_declared_writers: self
                 .path_of(source)
                 .and_then(|path| {
@@ -441,6 +457,11 @@ impl ChangeService {
             .map(str::to_owned)
     }
 
+    /// The backend's own name for an item (redacted), for a window that says which one it is.
+    pub fn item_label(&self, item: &str) -> Option<String> {
+        self.item(item).map(|i| i.name.as_str().to_owned())
+    }
+
     /// An OpenCode server's program and arguments, or its address, for the same purpose.
     pub fn mcp_current(&self, item: &str) -> Option<McpSpec> {
         let found = self.item(item)?;
@@ -471,8 +492,10 @@ impl ChangeService {
     /// the desktop's own (never from the page), and is validated here before anything is read.
     pub fn plan_authored(&self, request: Authoring) -> Result<PlanView, ChangeFailure> {
         let protection = |secret: bool| self.store.protection_for(secret);
+        let detail;
         let (source, drafted) = match request {
             Authoring::AddHook(spec) => {
+                detail = Some(plain_detail("command", &spec.command));
                 let source = SourceKey::ClaudeUserSettings;
                 let (_, bytes) = self.read_target(source)?;
                 (
@@ -480,7 +503,15 @@ impl ChangeService {
                     author::draft_add_hook(&bytes, source, &spec, &self.bounds, protection)?,
                 )
             }
-            Authoring::EditHook { item, command } => {
+            Authoring::EditHook {
+                item,
+                command,
+                expected,
+            } => {
+                detail = Some(plain_detail("new command", &command));
+                if self.hook_command(&item).as_deref() != Some(expected.as_str()) {
+                    return Err(ChangeFailure::EntryChanged);
+                }
                 let found = self.item(&item).ok_or(ChangeFailure::EntryGone)?;
                 if found.kind != ItemKind::Hook
                     || found.provider != ProviderId::ClaudeCode
@@ -502,6 +533,7 @@ impl ChangeService {
                 )
             }
             Authoring::AddMcp { name, spec } => {
+                detail = Some(plain_mcp(&spec));
                 let source = SourceKey::OpencodeUserConfig;
                 let (_, bytes) = self.read_target(source)?;
                 (
@@ -509,7 +541,15 @@ impl ChangeService {
                     opencode_plan::draft_add_mcp(&bytes, &name, &spec, &self.bounds, protection)?,
                 )
             }
-            Authoring::EditMcp { item, spec } => {
+            Authoring::EditMcp {
+                item,
+                spec,
+                expected,
+            } => {
+                detail = Some(plain_mcp(&spec));
+                if self.mcp_current(&item).as_ref() != Some(&expected) {
+                    return Err(ChangeFailure::EntryChanged);
+                }
                 let found = self.item(&item).ok_or(ChangeFailure::EntryGone)?;
                 if found.kind != ItemKind::McpServer
                     || found.provider != ProviderId::Opencode
@@ -525,7 +565,7 @@ impl ChangeService {
                 )
             }
         };
-        Ok(self.keep(drafted, source, None))
+        Ok(self.keep_with(drafted, source, None, detail))
     }
 
     fn plan_with(
@@ -827,6 +867,7 @@ impl ChangeService {
                 risk: drafted.risk,
                 effect: effect_of(drafted.operation, source),
                 holds_hidden_values: drafted.holds_hidden_values,
+                detail: stored.detail.clone(),
             };
             if !self.confirm.ask(&request) {
                 // Recorded: what was refused, where, and how risky. No content.
@@ -1313,7 +1354,42 @@ fn _unused(_: Class) {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Authoring {
     AddHook(HookSpec),
-    EditHook { item: String, command: String },
-    AddMcp { name: String, spec: McpSpec },
-    EditMcp { item: String, spec: McpSpec },
+    /// `expected` is the command the user was shown when they started: if the file holds
+    /// another by the time the plan is made, nothing is replaced.
+    EditHook {
+        item: String,
+        command: String,
+        expected: String,
+    },
+    AddMcp {
+        name: String,
+        spec: McpSpec,
+    },
+    EditMcp {
+        item: String,
+        spec: McpSpec,
+        expected: McpSpec,
+    },
+}
+
+/// A command or address as a confirmation shows it: printable, on one line, cut.
+fn plain_detail(label: &str, text: &str) -> String {
+    const MOST: usize = 400;
+    let mut shown: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .filter(|c| !author::disguises(*c))
+        .take(MOST)
+        .collect();
+    if text.chars().count() > MOST {
+        shown.push('…');
+    }
+    format!("{label}: {shown}")
+}
+
+fn plain_mcp(spec: &McpSpec) -> String {
+    match spec {
+        McpSpec::Local { command } => plain_detail("starts", &command.join(" ")),
+        McpSpec::Remote { url } => plain_detail("connects to", url),
+    }
 }

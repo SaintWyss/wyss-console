@@ -16,7 +16,7 @@ import {
 } from './events-harness';
 import approvals from './fixtures/approval-list-v1.json';
 import views from './fixtures/authority-view-v1.json';
-import pages from './fixtures/session-page-v3.json';
+import pages from './fixtures/session-page-v4.json';
 
 const fakes = vi.hoisted(() => ({ factory: vi.fn() }));
 vi.mock('../src/lib/features/terminal/renderer', () => ({

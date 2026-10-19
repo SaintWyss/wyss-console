@@ -194,6 +194,25 @@ export const AGENT_MODE: Record<AgentMode, { label: string; detail: string }> =
         'Codex may propose commands and file changes in this folder. Each one waits for your approval.',
     },
   };
+/**
+ * The model of a managed session as the runtime reported it. Said as what it is: a report,
+ * not a setting, a default or an entitlement. Nothing is reported while the session is not
+ * attached, and then the line says so instead of showing a guess.
+ */
+export function observedModelLine(
+  session: Pick<SessionSummary, 'binding' | 'observed_model'>,
+): string {
+  const model = session.observed_model;
+  if (model === null)
+    return session.binding === 'bound_attached'
+      ? 'Model in use: not reported by the runtime'
+      : 'Model in use: not known while detached';
+  const effort = model.reasoning_effort
+    ? `, effort ${model.reasoning_effort}`
+    : '';
+  return `Model in use: ${model.model_id}${effort} (reported by the runtime when the session was ${model.source === 'thread_resume' ? 'resumed' : 'started'})`;
+}
+
 export function modeLabel(mode: SessionMode): string {
   return mode === 'unknown' ? 'Not attached' : AGENT_MODE[mode].label;
 }

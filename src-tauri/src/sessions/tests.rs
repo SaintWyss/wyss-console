@@ -836,7 +836,7 @@ fn every_authority_error_has_one_product_meaning() {
 }
 
 #[test]
-fn the_page_projection_serializes_exactly_the_v3_fields() {
+fn the_page_projection_serializes_exactly_the_v4_fields() {
     let session = session_id();
     let (kept, target) = (record(&session, 9), session.clone());
     let peer = Peer::canonical(move |op| {
@@ -861,7 +861,7 @@ fn the_page_projection_serializes_exactly_the_v3_fields() {
     assert_eq!(
         page,
         json!({
-            "schema_version": 3, "head": "41", "older": null, "truncated": false,
+            "schema_version": 4, "head": "41", "older": null, "truncated": false,
             // No runtime is up: there is no mode to report for it.
             "runtime": {"mode": null, "workspace": null},
             "sessions": [{
@@ -872,12 +872,13 @@ fn the_page_projection_serializes_exactly_the_v3_fields() {
                 "mode": "unknown",
                 "resumable": true, "closable": true,
                 "activatable": false, "recoverable": false,
+                "observed_model": null,
             }],
         })
     );
     // The window's own fixture is this shape.
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../../../tests/fixtures/session-page-v3.json")).unwrap();
+        serde_json::from_str(include_str!("../../../tests/fixtures/session-page-v4.json")).unwrap();
     let keys = |v: &serde_json::Value| -> Vec<String> {
         let mut keys: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
         keys.sort();

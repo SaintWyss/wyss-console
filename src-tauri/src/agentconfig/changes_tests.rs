@@ -2885,6 +2885,7 @@ fn a_hook_command_is_edited_in_place_and_every_other_byte_stays() {
         .plan_authored(Authoring::EditHook {
             item: id.clone(),
             command: "stop2.sh --loud".to_owned(),
+            expected: "stop.sh".to_owned(),
         })
         .unwrap();
     assert_eq!(applied(&world, &plan), Outcome::Applied);
@@ -2893,6 +2894,7 @@ fn a_hook_command_is_edited_in_place_and_every_other_byte_stays() {
     let again = world.service.plan_authored(Authoring::EditHook {
         item: id,
         command: "stop2.sh --loud".to_owned(),
+        expected: "stop2.sh --loud".to_owned(),
     });
     assert!(again.is_err() || again.is_ok());
     let (history, _) = world.service.history(None, 1);
@@ -3039,6 +3041,9 @@ fn an_opencode_server_is_written_changed_taken_out_and_put_back_with_the_keys_un
             spec: McpSpec::Local {
                 command: vec!["other".into()],
             },
+            expected: McpSpec::Local {
+                command: vec!["npx".into(), "-y".into(), "a b".into(), "$HOME;x".into()],
+            },
         })
         .unwrap();
     assert_eq!(applied(&world, &edit), Outcome::Applied);
@@ -3051,6 +3056,9 @@ fn an_opencode_server_is_written_changed_taken_out_and_put_back_with_the_keys_un
                 item: id.clone(),
                 spec: McpSpec::Remote {
                     url: "https://h.invalid/x".into()
+                },
+                expected: McpSpec::Local {
+                    command: vec!["other".into()]
                 },
             })
             .unwrap_err(),
@@ -3223,4 +3231,163 @@ fn a_failure_or_a_crash_at_any_step_of_an_authored_change_is_repaired() {
             assert!(used <= 1, "{step:?} {fault:?}: stray records");
         }
     }
+}
+
+#[test]
+fn the_native_confirmation_shows_what_will_run_and_the_page_is_shown_only_a_cut_of_it() {
+    let world = World::new(SETTINGS);
+    let long = format!("run-this-thing.sh {}", "x".repeat(300));
+    let plan = world
+        .service
+        .plan_authored(Authoring::AddHook(spec("Stop", None, &long)))
+        .unwrap();
+    // The page's diff is cut and says something is left out.
+    assert!(
+        plan.diff.iter().all(|l| l.text.len() < 200),
+        "{:?}",
+        plan.diff
+    );
+    assert!(plan.holds_hidden_values);
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    let asked = world.confirm.asked.lock().unwrap();
+    let detail = asked[0].detail.clone().unwrap();
+    assert!(detail.starts_with("command: run-this-thing.sh"), "{detail}");
+    assert!(detail.len() < 460);
+}
+
+#[test]
+fn an_edit_is_refused_when_the_entry_is_no_longer_what_the_user_was_shown() {
+    let world = World::new(SETTINGS);
+    let id = world.hook("Stop", 0, 0);
+    assert_eq!(
+        world
+            .service
+            .plan_authored(Authoring::EditHook {
+                item: id,
+                command: "new.sh".to_owned(),
+                expected: "something-else.sh".to_owned(),
+            })
+            .unwrap_err(),
+        ChangeFailure::EntryChanged
+    );
+    assert_eq!(world.file(), SETTINGS);
+}
+
+#[test]
+fn text_that_could_disguise_what_is_written_is_refused() {
+    let world = World::new(SETTINGS);
+    for bad in [
+        spec("Stop", Some("Bash\"\u{2028}Safe read-only logger"), "x.sh"),
+        spec("Stop", Some("a\\b"), "x.sh"),
+        spec("Stop", None, "ls \u{202e}gnp.sh"),
+        spec("Stop", None, "ls\u{2028}rm -rf /"),
+        spec("Stop", None, "zero\u{200b}width"),
+    ] {
+        assert_eq!(
+            world
+                .service
+                .plan_authored(Authoring::AddHook(bad.clone()))
+                .unwrap_err(),
+            ChangeFailure::InvalidEntry,
+            "{bad:?}"
+        );
+    }
+    world.opencode(OPENCODE);
+    for url in [
+        "https://u:p@h.invalid/x",
+        "https:///x",
+        "http://",
+        "https://@h",
+    ] {
+        assert!(
+            world
+                .service
+                .plan_authored(Authoring::AddMcp {
+                    name: "n".to_owned(),
+                    spec: McpSpec::Remote {
+                        url: url.to_owned()
+                    },
+                })
+                .is_err(),
+            "{url}"
+        );
+    }
+}
+
+#[test]
+fn a_change_in_the_middle_of_a_multibyte_character_still_comes_back_exactly() {
+    let bare = "{\n  \"hooks\": {\"Stop\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"echo ñ\"}]}]}\n}\n";
+    let world = World::new(bare);
+    let id = world.hook("Stop", 0, 0);
+    let plan = world
+        .service
+        .plan_authored(Authoring::EditHook {
+            item: id,
+            command: "echo ű".to_owned(),
+            expected: "echo ñ".to_owned(),
+        })
+        .unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    let (history, _) = world.service.history(None, 1);
+    let undo = world.service.undo(&history[0].id).unwrap();
+    assert_eq!(applied(&world, &undo), Outcome::Applied);
+    assert_eq!(world.file(), bare);
+}
+
+#[test]
+fn a_forged_record_cannot_take_anything_but_the_hooks_or_the_servers_out_of_a_file() {
+    use super::author::{draft_revert, inverse_of};
+    use super::model::ProviderId;
+    let file = r#"{ "permissions": { "deny": ["Bash(rm:*)"] }, "hooks": {} }"#;
+    let forged_new = file.to_owned();
+    let forged_old = file.replace(r#""permissions": { "deny": ["Bash(rm:*)"] }, "#, "");
+    // The "authored change" that would remove the deny list: old = without, new = with.
+    let body = inverse_of(
+        ProviderId::ClaudeCode,
+        SourceKey::ClaudeUserSettings,
+        forged_old.as_bytes(),
+        forged_new.as_bytes(),
+    );
+    assert!(draft_revert(forged_new.as_bytes(), &"a".repeat(32), &body).is_err());
+    // And the length cannot overflow.
+    let mut huge = body.clone();
+    huge.removed_at = usize::MAX;
+    assert!(draft_revert(forged_new.as_bytes(), &"a".repeat(32), &huge).is_err());
+    // A genuine take-back always asks natively.
+    let ok_old = r#"{ "hooks": {} }"#;
+    let ok_new = r#"{ "hooks": {"Stop": []} }"#;
+    let real = inverse_of(
+        ProviderId::ClaudeCode,
+        SourceKey::ClaudeUserSettings,
+        ok_old.as_bytes(),
+        ok_new.as_bytes(),
+    );
+    let drafted = draft_revert(ok_new.as_bytes(), &"a".repeat(32), &real).unwrap();
+    assert_eq!(drafted.risk, Risk::ExecutesCode);
+}
+
+#[test]
+fn replacing_a_server_that_held_a_token_never_leaves_it_in_the_clear() {
+    let world = World::new(SETTINGS);
+    world.opencode(&OPENCODE.replace(
+        r#""command": ["srv"]"#,
+        &format!(r#""command": ["srv", "--token", "{MARKER}"]"#),
+    ));
+    world.keys.set_unavailable(true);
+    let id = world.opencode_item(ItemKind::McpServer, "local");
+    let current = world.service.mcp_current(&id).unwrap();
+    // No key store: the old value would have to be kept unsealed, so nothing is written.
+    assert_eq!(
+        world
+            .service
+            .plan_authored(Authoring::EditMcp {
+                item: id,
+                spec: McpSpec::Local {
+                    command: vec!["srv".into()]
+                },
+                expected: current,
+            })
+            .unwrap_err(),
+        ChangeFailure::KeyStoreUnavailable
+    );
 }

@@ -122,6 +122,7 @@ impl Fixture {
             runtime_instance_id: Some(self.runtime.clone()),
             operation_id: None,
             attachment_profile: Some(AttachmentProfile::InferenceOnlyV1),
+            observed_model: None,
         }
     }
 }

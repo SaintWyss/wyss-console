@@ -619,13 +619,23 @@ impl McpSpec {
                     && command.len() <= MOST_ARGS
                     && command[0].chars().any(|c| !c.is_whitespace())
                     && command.iter().all(|a| {
-                        a.len() <= MOST_ARG && a.chars().all(|c| !c.is_control() || c == '\t')
+                        a.len() <= MOST_ARG
+                            && a.chars().all(|c| {
+                                (!c.is_control() || c == '\t') && !super::author::disguises(c)
+                            })
                     })
             }
             Self::Remote { url } => {
+                // A host, no credentials in the address, plain printable ASCII.
+                let rest = url
+                    .strip_prefix("https://")
+                    .or_else(|| url.strip_prefix("http://"));
                 url.len() <= 2048
-                    && (url.starts_with("https://") || url.starts_with("http://"))
                     && url.chars().all(|c| c.is_ascii_graphic())
+                    && rest.is_some_and(|r| {
+                        let host = r.split(['/', '?', '#']).next().unwrap_or("");
+                        !host.is_empty() && !host.contains('@') && !host.starts_with(':')
+                    })
             }
         };
         ok.then_some(()).ok_or(PlanError::Invalid)
@@ -668,20 +678,23 @@ fn authored(
     bounds: &Bounds,
     protection: impl Fn(bool) -> Result<Protection, RestoreError>,
 ) -> Result<Drafted, PlanError> {
-    // A server's arguments and address are a plausible place for a token.
-    let secret_bearing = super::classify::may_hold_secret(shown, bounds)
-        || shown.to_string().contains("://") && shown.to_string().contains('@');
-    let protection = protection(secret_bearing).map_err(|e| match e {
-        RestoreError::NoKeyStoreForSecret => PlanError::KeyStoreUnavailable,
-        _ => PlanError::NotSupported,
-    })?;
     let body = super::author::inverse_of(
         ProviderId::Opencode,
         SourceKey::OpencodeUserConfig,
         old,
         &new,
     );
-    let (diff, hidden) = redact_lines(shown, DiffKind::Added, bounds);
+    // A server's arguments and address are a plausible place for a token: what is written,
+    // and anything it replaced (the record keeps both), is sealed when it may hold one. What
+    // was replaced is judged as its text can be: any change that took something out seals.
+    let secret_bearing =
+        super::classify::may_hold_secret(shown, bounds) || !body.removed_text.is_empty();
+    let protection = protection(secret_bearing).map_err(|e| match e {
+        RestoreError::NoKeyStoreForSecret => PlanError::KeyStoreUnavailable,
+        _ => PlanError::NotSupported,
+    })?;
+    let (diff, hidden) = redact_lines(&super::author::brief(shown).0, DiffKind::Added, bounds);
+    let hidden = hidden || super::author::brief(shown).1;
     Ok(Drafted {
         operation,
         item: item.to_owned(),

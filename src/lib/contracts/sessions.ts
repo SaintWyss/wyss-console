@@ -48,9 +48,14 @@ export interface SessionSummary {
   activatable: boolean;
   /** Prepared, with an attempt whose outcome the authority could not confirm. */
   recoverable: boolean;
+  /**
+   * The model the managed runtime itself reported for this session, only while it is attached.
+   * Null means "not reported": it is never the default, a catalogue entry or a configured value.
+   */
+  observed_model: ObservedModel | null;
 }
 export interface SessionPage {
-  schema_version: 3;
+  schema_version: 4;
   /** The durable head the page was read at; null before the first committed event. */
   head: string | null;
   runtime: RuntimeFacts;
@@ -195,6 +200,43 @@ function parseRuntime(value: unknown): RuntimeFacts {
   return { mode, workspace: folder };
 }
 
+export interface ObservedModel {
+  model_id: string;
+  provider_id: string | null;
+  reasoning_effort: string | null;
+  source: 'thread_start' | 'thread_resume';
+}
+const WORD = /^[\x21-\x7e]+$/;
+function parseObservedModel(value: unknown): ObservedModel | null {
+  if (value === null) return null;
+  const v = record(
+    value,
+    ['model_id', 'provider_id', 'reasoning_effort', 'source'],
+    'observed_model',
+  );
+  const word = (x: unknown, most: number): string | null => {
+    if (x === null) return null;
+    if (
+      typeof x !== 'string' ||
+      x.length === 0 ||
+      x.length > most ||
+      !WORD.test(x)
+    )
+      throw invalid('observed_model');
+    return x;
+  };
+  const model = word(v.model_id, 256);
+  if (model === null) throw invalid('observed_model');
+  if (v.source !== 'thread_start' && v.source !== 'thread_resume')
+    throw invalid('observed_model');
+  return {
+    model_id: model,
+    provider_id: word(v.provider_id, 64),
+    reasoning_effort: word(v.reasoning_effort, 64),
+    source: v.source,
+  };
+}
+
 function parseSummary(value: unknown): SessionSummary {
   const v = record(
     value,
@@ -213,6 +255,7 @@ function parseSummary(value: unknown): SessionSummary {
       'closable',
       'activatable',
       'recoverable',
+      'observed_model',
     ],
     'session',
   );
@@ -251,6 +294,10 @@ function parseSummary(value: unknown): SessionSummary {
     (state === 'closed' && binding === 'bound_attached')
   )
     throw invalid('hints');
+  const observed = parseObservedModel(v.observed_model);
+  // A report belongs to an attachment: a session that is not attached has none.
+  if (observed !== null && binding !== 'bound_attached')
+    throw invalid('observed_model');
   return {
     id,
     adapter: v.adapter,
@@ -266,6 +313,7 @@ function parseSummary(value: unknown): SessionSummary {
     closable,
     activatable,
     recoverable,
+    observed_model: observed,
   };
 }
 
@@ -276,7 +324,7 @@ export function parseSessionPage(value: unknown): SessionPage {
     ['schema_version', 'head', 'runtime', 'sessions', 'older', 'truncated'],
     'page',
   );
-  if (v.schema_version !== 3) throw invalid('schema_version');
+  if (v.schema_version !== 4) throw invalid('schema_version');
   if (!Array.isArray(v.sessions) || v.sessions.length > SESSION_PAGE_LIMIT)
     throw invalid('sessions');
   const sessions = v.sessions.map(parseSummary);
@@ -293,7 +341,7 @@ export function parseSessionPage(value: unknown): SessionPage {
   if (older !== null && older !== sessions.at(-1)?.position)
     throw invalid('older');
   return {
-    schema_version: 3,
+    schema_version: 4,
     head,
     runtime: parseRuntime(v.runtime),
     sessions,
