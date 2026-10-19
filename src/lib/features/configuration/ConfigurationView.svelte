@@ -85,8 +85,11 @@
     ).length,
   );
 
+  // The details open above the list: the view goes back to the top so they are seen.
+  let main = $state<HTMLElement | null>(null);
   function toggle(item: ConfigItem) {
     controller.select(configuration.selected === item.id ? null : item.id);
+    if (main) main.scrollTop = 0;
   }
 </script>
 
@@ -435,52 +438,7 @@
         {/each}
       </div>
 
-      <div class="configuration-main">
-        {#if items.length === 0}
-          <div class="sessions-empty">
-            <p class="empty-title">Nothing to show</p>
-            <p>
-              {#if reply.inventory.items.length === 0}
-                No hooks, skills, servers, rules or model settings were found in
-                the places that were read.
-              {:else}
-                Nothing matches this filter.
-              {/if}
-            </p>
-          </div>
-        {:else}
-          <ul class="events-list" aria-label="Configuration items">
-            {#each items as item (item.id)}
-              <li>
-                <button
-                  type="button"
-                  class="event-row configuration-row"
-                  aria-pressed={configuration.selected === item.id}
-                  onclick={() => toggle(item)}
-                >
-                  <span class="configuration-provider"
-                    >{PROVIDER_LABEL[item.provider]}</span
-                  >
-                  <span class="event-title">{item.name}</span>
-                  <span
-                    class="pill compact"
-                    data-tone={PERSISTED_LABEL[item.persisted].tone}
-                  >
-                    <span class="dot" aria-hidden="true"></span>
-                    {PERSISTED_LABEL[item.persisted].label}
-                  </span>
-                  <span class="event-meta">
-                    {kindName(item.kind)} · {SCOPE_LABEL[item.scope]}
-                    {#if mayHoldSecret(item.detail)}
-                      · values hidden
-                    {/if}
-                  </span>
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-
+      <div class="configuration-main" bind:this={main}>
         {#if selected}
           <aside class="configuration-detail" aria-label="Details">
             <h3>{selected.name}</h3>
@@ -538,6 +496,50 @@
               </ul>
             {/if}
           </aside>
+        {/if}
+        {#if items.length === 0}
+          <div class="sessions-empty">
+            <p class="empty-title">Nothing to show</p>
+            <p>
+              {#if reply.inventory.items.length === 0}
+                No hooks, skills, servers, rules or model settings were found in
+                the places that were read.
+              {:else}
+                Nothing matches this filter.
+              {/if}
+            </p>
+          </div>
+        {:else}
+          <ul class="events-list" aria-label="Configuration items">
+            {#each items as item (item.id)}
+              <li>
+                <button
+                  type="button"
+                  class="event-row configuration-row"
+                  aria-pressed={configuration.selected === item.id}
+                  onclick={() => toggle(item)}
+                >
+                  <span class="configuration-provider"
+                    >{PROVIDER_LABEL[item.provider]}</span
+                  >
+                  <span class="event-title">{item.name}</span>
+                  <span
+                    class="pill compact"
+                    data-tone={PERSISTED_LABEL[item.persisted].tone}
+                  >
+                    <span class="dot" aria-hidden="true"></span>
+                    {PERSISTED_LABEL[item.persisted].label}
+                  </span>
+                  <span class="event-meta">
+                    {kindName(item.kind)} · {SCOPE_LABEL[item.scope]}
+                    {#if mayHoldSecret(item.detail)}
+                      · values hidden
+                    {/if}
+                  </span>
+                </button>
+              </li>
+            {/each}
+          </ul>
         {/if}
 
         <details class="configuration-sources">

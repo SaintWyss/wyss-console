@@ -74,6 +74,19 @@ describe('the inventory contract', () => {
     );
   });
 
+  it('says a source has a conflict copy beside it, and refuses a reading that omits it', () => {
+    const parsed = parseInventoryReply(fixture).inventory;
+    const read = parsed.sources.find((s) => s.outcome === 'read')!;
+    expect(
+      outcomeText({ ...read, conflict_copy: true } as typeof read),
+    ).toContain('A conflict copy of this file sits beside it');
+    expect(outcomeText(read)).not.toContain('conflict copy');
+    const damaged = reply();
+    delete damaged.inventory.sources.find((s: any) => s.outcome === 'read')
+      .conflict_copy;
+    expect(() => parseInventoryReply(damaged)).toThrow();
+  });
+
   it('refuses a projection nested deeper than any the desktop sends', () => {
     let deep: unknown = { kind: 'null' };
     for (let i = 0; i < 60; i++) deep = { kind: 'list', value: [deep] };

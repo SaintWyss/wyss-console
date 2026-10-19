@@ -398,7 +398,7 @@ impl SecretToolStore {
         &self,
         arguments: &[&str],
         input: Option<&str>,
-    ) -> Result<(Option<i32>, Zeroizing<String>), KeyStoreError> {
+    ) -> Result<(Option<i32>, Zeroizing<String>, bool), KeyStoreError> {
         if !Path::new(self.program).is_file() {
             return Err(KeyStoreError::Unavailable);
         }
@@ -408,7 +408,7 @@ impl SecretToolStore {
             .env_clear()
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
         for name in [
             "DBUS_SESSION_BUS_ADDRESS",
             "XDG_RUNTIME_DIR",
@@ -429,6 +429,15 @@ impl SecretToolStore {
                 .map_err(|_| KeyStoreError::Unavailable)?;
         }
         let mut stdout = child.stdout.take().ok_or(KeyStoreError::Unavailable)?;
+        // `secret-tool` says nothing when an item is simply not there, and says why when
+        // the service cannot be reached: the two share an exit status, and only this tells
+        // them apart. What it says is read to know that it said something, and dropped.
+        let mut stderr = child.stderr.take().ok_or(KeyStoreError::Unavailable)?;
+        let complaint = std::thread::spawn(move || {
+            let mut said = Vec::new();
+            let _ = stderr.by_ref().take(4096).read_to_end(&mut said);
+            !said.iter().all(u8::is_ascii_whitespace)
+        });
         let reader = std::thread::spawn(move || {
             let mut out = Zeroizing::new(String::new());
             // A key is 64 characters; anything longer is not read.
@@ -451,7 +460,8 @@ impl SecretToolStore {
             }
         };
         let out = reader.join().map_err(|_| KeyStoreError::Unavailable)?;
-        Ok((status.code(), out))
+        let complained = complaint.join().map_err(|_| KeyStoreError::Unavailable)?;
+        Ok((status.code(), out, complained))
     }
 
     fn attributes(&self) -> [&str; 4] {
@@ -468,10 +478,11 @@ impl Default for SecretToolStore {
 impl KeyStore for SecretToolStore {
     fn load(&self) -> Result<Option<Key>, KeyStoreError> {
         let [a, b, c, d] = self.attributes();
-        let (code, out) = self.run(&["lookup", a, b, c, d], None)?;
+        let (code, out, complained) = self.run(&["lookup", a, b, c, d], None)?;
         match (code, out.trim().is_empty()) {
-            // `secret-tool` exits 1 with nothing printed when there is no such item.
-            (Some(1), true) => Ok(None),
+            // Exit 1, nothing printed and nothing said: there is no such item. The same
+            // exit with a complaint is a service that could not be reached.
+            (Some(1), true) if !complained => Ok(None),
             (Some(0), false) => Key::from_hex(&out)
                 .map(Some)
                 .ok_or(KeyStoreError::Malformed),
@@ -482,7 +493,7 @@ impl KeyStore for SecretToolStore {
     fn store(&self, key: &Key) -> Result<(), KeyStoreError> {
         let [a, b, c, d] = self.attributes();
         let hex = key.to_hex();
-        let (code, _) = self.run(
+        let (code, _, _) = self.run(
             &[
                 "store",
                 "--label",
@@ -503,7 +514,7 @@ impl KeyStore for SecretToolStore {
 
     fn forget(&self) -> Result<(), KeyStoreError> {
         let [a, b, c, d] = self.attributes();
-        let (code, _) = self.run(&["clear", a, b, c, d], None)?;
+        let (code, _, _) = self.run(&["clear", a, b, c, d], None)?;
         if code == Some(0) {
             Ok(())
         } else {

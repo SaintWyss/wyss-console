@@ -347,6 +347,7 @@
       },
       {
         "class": "user",
+        "conflict_copy": false,
         "followed_links": 0,
         "hash": "5f2af9ad85dfce5f1c14b0280c08ca7d5c0dd15f09b290cc3506cd61e459f617",
         "key": "claude_user_settings",
@@ -361,6 +362,7 @@
       },
       {
         "class": "provider_owned",
+        "conflict_copy": false,
         "followed_links": 0,
         "hash": "1a3fccb77eec6de7bbd1c1baea155e71ef0054b9e460f0e20ae6f30afb0c9410",
         "key": "claude_user_state",
@@ -375,6 +377,7 @@
       },
       {
         "class": "user",
+        "conflict_copy": false,
         "followed_links": 0,
         "hash": "4ccb976b6d54904b4411dcfe968102940777ef6b3a5e1a881e842c7856e0e0d6",
         "key": "claude_user_skills",
@@ -389,6 +392,7 @@
       },
       {
         "class": "user",
+        "conflict_copy": false,
         "followed_links": 0,
         "hash": "6c088fb16b75a5ee91dc03f77852c42157cbedfc6963f9a42173c7a169e0d7f7",
         "key": "claude_user_rules",
@@ -403,6 +407,7 @@
       },
       {
         "class": "project",
+        "conflict_copy": false,
         "followed_links": 0,
         "hash": "5f2af9ad85dfce5f1c14b0280c08ca7d5c0dd15f09b290cc3506cd61e459f617",
         "key": "claude_project_settings",
@@ -433,6 +438,7 @@
       },
       {
         "class": "project",
+        "conflict_copy": false,
         "followed_links": 0,
         "hash": "4ccb976b6d54904b4411dcfe968102940777ef6b3a5e1a881e842c7856e0e0d6",
         "key": "claude_project_skills",
@@ -447,6 +453,7 @@
       },
       {
         "class": "project",
+        "conflict_copy": false,
         "followed_links": 0,
         "hash": "6c088fb16b75a5ee91dc03f77852c42157cbedfc6963f9a42173c7a169e0d7f7",
         "key": "claude_project_rules",
@@ -477,6 +484,7 @@
       },
       {
         "class": "user",
+        "conflict_copy": false,
         "followed_links": 0,
         "hash": "5750d5963c54229bb7c4ed854f88d4465cf1ba0233163a2e631ffd953f3ac6b7",
         "key": "codex_user_config",

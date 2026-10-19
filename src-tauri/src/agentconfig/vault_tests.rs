@@ -234,3 +234,43 @@ fn the_real_secret_service_keeps_and_forgets_a_key() {
         VaultError::KeyLost
     );
 }
+
+/// With no session bus there is no Secret Service: `secret-tool` exits 1 as it does for "no
+/// such item", but says why. That must read as unavailable, or a plan would promise sealing
+/// that cannot happen. Needs the program; it touches no wallet.
+#[test]
+fn a_missing_secret_service_is_unavailable_and_not_an_empty_store() {
+    if !std::path::Path::new("/usr/bin/secret-tool").is_file() {
+        return;
+    }
+    // The test process may have a session bus; the store under test gets none, because it
+    // runs `secret-tool` with a minimal environment that names no bus.
+    let saved: Vec<_> = [
+        "DBUS_SESSION_BUS_ADDRESS",
+        "XDG_RUNTIME_DIR",
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+    ]
+    .iter()
+    .map(|name| (*name, std::env::var_os(name)))
+    .collect();
+    // SAFETY: tests in this module that read the environment run in this one thread.
+    unsafe {
+        for (name, _) in &saved {
+            std::env::remove_var(name);
+        }
+    }
+    let vault = Vault::new(Box::new(SecretToolStore::with_account("test-no-bus")));
+    let available = vault.available();
+    unsafe {
+        for (name, value) in saved {
+            if let Some(value) = value {
+                std::env::set_var(name, value);
+            }
+        }
+    }
+    assert!(
+        !available,
+        "an unreachable Secret Service must not look empty"
+    );
+}

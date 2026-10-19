@@ -134,6 +134,8 @@ export type SourceOutcome =
       followed_links: number;
       /** Entries the adapter could not place; they stay in the file untouched. */
       unrecognised: number;
+      /** A `.sync-conflict-` copy is beside it; a change to it is refused until it is gone. */
+      conflict_copy: boolean;
     }
   | { outcome: 'absent' }
   | { outcome: 'project_not_trusted' }
@@ -446,7 +448,7 @@ function parseSource(value: unknown): SourceReport {
     'source',
   );
   const extra: Record<typeof outcome, string[]> = {
-    read: ['hash', 'trust', 'followed_links', 'unrecognised'],
+    read: ['hash', 'trust', 'followed_links', 'unrecognised', 'conflict_copy'],
     absent: [],
     project_not_trusted: [],
     failed: ['failure'],
@@ -472,6 +474,7 @@ function parseSource(value: unknown): SourceReport {
         trust: parseTrust(source.trust),
         followed_links: count(source.followed_links, 'source'),
         unrecognised: count(source.unrecognised, 'source'),
+        conflict_copy: flag(source.conflict_copy, 'source'),
       };
     case 'failed':
       return { ...common, outcome, failure: parseFailure(source.failure) };

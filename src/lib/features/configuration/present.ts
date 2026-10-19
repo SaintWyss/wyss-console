@@ -141,6 +141,8 @@ export function failureText(failure: SourceFailure): string {
 export function outcomeText(source: SourceReport): string {
   switch (source.outcome) {
     case 'read':
+      if (source.conflict_copy)
+        return 'Read. A conflict copy of this file sits beside it, so it cannot be changed from here until that copy is dealt with.';
       return source.unrecognised > 0
         ? `Read. ${source.unrecognised} ${source.unrecognised === 1 ? 'entry was' : 'entries were'} not recognised and left untouched.`
         : 'Read.';
@@ -155,7 +157,7 @@ export function outcomeText(source: SourceReport): string {
 export function outcomeTone(source: SourceReport): RuntimeTone {
   switch (source.outcome) {
     case 'read':
-      return source.unrecognised > 0 ? 'warn' : 'ok';
+      return source.unrecognised > 0 || source.conflict_copy ? 'warn' : 'ok';
     case 'failed':
       return source.failure.failure === 'missing' ? 'idle' : 'error';
     default:

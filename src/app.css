@@ -2009,6 +2009,7 @@ html[data-glass='transparent'] .shell {
   grid-area: 2 / 2 / auto / -1;
 }
 .configuration-detail {
+  flex-shrink: 0;
   padding: 12px 14px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);

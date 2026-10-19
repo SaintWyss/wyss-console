@@ -143,6 +143,9 @@ pub enum Outcome {
         trust: PathTrust,
         followed_links: usize,
         unrecognised: u32,
+        /// A `<name>.sync-conflict-…` copy sits beside the file: a replication tool kept two
+        /// versions. A change to this file is refused until the copy is gone (07 §5.5).
+        conflict_copy: bool,
     },
     /// There is nothing at that place. Not an error: most sources are optional.
     Absent,
@@ -302,6 +305,7 @@ impl Sink {
                 hash: file.hash(),
                 followed_links: file.links().len(),
                 value: value.unwrap_or(Value::Object(serde_json::Map::new())),
+                conflict_copy: conflict_copy_beside(reader, path),
             }),
             Err(failure) => {
                 self.failed(key, failure);
@@ -320,6 +324,7 @@ impl Sink {
                 trust: document.trust,
                 followed_links: document.followed_links,
                 unrecognised,
+                conflict_copy: document.conflict_copy,
             },
         );
     }
@@ -374,6 +379,20 @@ pub(super) enum Format {
     Toml,
 }
 
+/// Whether a conflict copy of the file is beside it. Looked for only where the folder is one
+/// the reader may list (a provider's own directory): a file in the home is not judged by a
+/// listing of the whole home.
+fn conflict_copy_beside(reader: &ConfigReader, path: &Path) -> bool {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return false;
+    };
+    let Ok(listing) = reader.list_directory(parent) else {
+        return false;
+    };
+    let names: Vec<_> = listing.entries.iter().map(|e| e.name.clone()).collect();
+    super::writer::conflict_copy_beside(&names, &name.to_os_string())
+}
+
 /// A parsed source, kept until its adapter has read what it names.
 pub(super) struct Document {
     pub key: SourceKey,
@@ -381,6 +400,7 @@ pub(super) struct Document {
     pub hash: ContentHash,
     pub followed_links: usize,
     pub value: Value,
+    pub conflict_copy: bool,
 }
 
 /// A stable identifier for an item: a hash of where it was found, not of what it says, so
@@ -612,6 +632,7 @@ pub(super) fn report_listing(
             trust: listing.trust,
             followed_links: listing.links.len(),
             unrecognised,
+            conflict_copy: false,
         },
     );
 }
@@ -655,6 +676,7 @@ pub(super) fn rule_files(
                 trust,
                 followed_links: 0,
                 unrecognised: 0,
+                conflict_copy: false,
             },
         );
     } else {

@@ -666,3 +666,23 @@ fn real_machine_counts() {
         text.contains(env.home.to_str().unwrap())
     );
 }
+
+#[test]
+fn a_conflict_copy_beside_a_source_marks_that_source_and_only_it() {
+    let home = Home::new();
+    home.put(".claude/settings.json", r#"{ "model": "opus" }"#);
+    home.put(
+        ".claude/settings.sync-conflict-20261018-120000-ABCDEFG.json",
+        "{}",
+    );
+    home.put(".codex/config.toml", "model = \"gpt\"\n");
+    let found = home.read();
+    let flag = |key| match outcome(&found, key) {
+        Outcome::Read { conflict_copy, .. } => *conflict_copy,
+        other => panic!("not read: {other:?}"),
+    };
+    assert!(flag(SourceKey::ClaudeUserSettings));
+    assert!(!flag(SourceKey::CodexUserConfig));
+    // The copy is not read as a source and does not add items of its own.
+    assert_eq!(items(&found, ItemKind::ModelPreference).len(), 2);
+}
