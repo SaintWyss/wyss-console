@@ -3,6 +3,7 @@
   import HandoffPanel from './HandoffPanel.svelte';
   import { hostIsRemote } from '../../desktop/terminal-client';
   import type { AgentId, NativeSession, Preview } from '../../contracts/native';
+  import type { ConfigItem } from '../../contracts/configuration';
   import type { NativeController, NativeState } from './controller';
   import {
     AGENT_LABEL,
@@ -11,6 +12,7 @@
     folderName,
     formatBytes,
     groupByProject,
+    modelFacts,
     profilesFor,
     restorable,
     sharedFolders,
@@ -23,12 +25,15 @@
     controller,
     visible,
     onconsole,
+    configItems = null,
   }: {
     native: NativeState;
     controller: NativeController;
     visible: boolean;
     /** Shows the terminals. */
     onconsole: () => void;
+    /** What the agents' files hold, once Configuration has been read; else null. */
+    configItems?: readonly ConfigItem[] | null;
   } = $props();
 
   let agent = $state<AgentId | null>(null);
@@ -392,6 +397,20 @@
                           : ''}
                       {/if}
                     </span>
+                    {#if session.state === 'running' || session.state === 'requested'}
+                      {@const facts = modelFacts(
+                        session,
+                        native.profiles,
+                        configItems,
+                      )}
+                      <span
+                        class="event-meta native-facts"
+                        data-testid="models"
+                      >
+                        Model: asked for {facts.requested} · set in its files {facts.configured}
+                        · in use: {facts.inUse}
+                      </span>
+                    {/if}
                     {#if session.state === 'lost'}
                       <span class="event-meta native-note"
                         >{STATE_NOTE.lost}</span

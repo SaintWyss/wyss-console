@@ -11,10 +11,18 @@ import {
   folderName,
   formatBytes,
   groupByProject,
+  modelFacts,
   sharedFolders,
   stateLabel,
 } from '../src/lib/features/native/present';
-import { fakeClient, launcher, reply, session } from './native-harness';
+import {
+  fakeClient,
+  launcher,
+  profiles,
+  reply,
+  session,
+} from './native-harness';
+import type { ConfigItem } from '../src/lib/contracts/configuration';
 
 const settle = async () => {
   for (let i = 0; i < 30; i++) await Promise.resolve();
@@ -322,5 +330,61 @@ describe('the controller', () => {
 
   it('uses the launcher fixture shape', () => {
     expect(launcher().projects[0]!.home).toBe(true);
+  });
+});
+
+describe('the model of a native session', () => {
+  const saved = () => {
+    const p = structuredClone(profiles()[0]);
+    p.id = 'p'.repeat(32);
+    p.template = false;
+    p.current = 3;
+    p.body.model = 'sonnet';
+    return p;
+  };
+  const modelItem = (text: string, provider = 'claude_code'): ConfigItem =>
+    ({
+      id: 'b'.repeat(32),
+      provider,
+      source: 'claude_user_settings',
+      scope: 'global',
+      kind: 'model_preference',
+      name: 'model',
+      persisted: 'present_enabled',
+      effective: 'documented',
+      session_use: 'unknown',
+      not_writable: 'not_in_this_phase',
+      detail: { kind: 'text', value: { text, found: [] } },
+      hash: null,
+    }) as ConfigItem;
+
+  it('keeps what was asked for, what the files say and what is in use as three facts', () => {
+    const p = saved();
+    const s = session({ profile: { id: p.id, name: 'x', version: 3 } });
+    const facts = modelFacts(s, [p], [modelItem('opus')]);
+    expect(facts.requested).toBe('sonnet');
+    expect(facts.configured).toBe('opus');
+    // Never filled from either of the other two.
+    expect(facts.inUse).toBe('not reported by the agent');
+    expect(facts.inUse).not.toContain('sonnet');
+    expect(facts.inUse).not.toContain('opus');
+  });
+
+  it('says so when nothing was asked, when the profile moved on or is gone, and when nothing was read', () => {
+    const p = saved();
+    expect(modelFacts(session(), [p], null).requested).toContain('own choice');
+    expect(modelFacts(session(), [p], null).configured).toContain(
+      'not read yet',
+    );
+    const moved = session({ profile: { id: p.id, name: 'x', version: 2 } });
+    expect(modelFacts(moved, [p], []).requested).toContain('changed since');
+    expect(modelFacts(moved, [], []).requested).toContain('no longer exists');
+    expect(modelFacts(session(), [], []).configured).toBe(
+      'not set in its files',
+    );
+    // Another agent's setting is not this agent's.
+    expect(
+      modelFacts(session(), [], [modelItem('gpt-6', 'codex')]).configured,
+    ).toBe('not set in its files');
   });
 });

@@ -309,6 +309,7 @@
       {native}
       controller={nativeController}
       onconsole={() => go('console')}
+      configItems={configuration.reply?.inventory.items ?? null}
     />
     <SessionsView
       visible={activeView === 'sessions'}

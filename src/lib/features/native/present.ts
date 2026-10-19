@@ -7,6 +7,7 @@ import type {
   ProfileBody,
   SessionState,
 } from '../../contracts/native';
+import type { ConfigItem } from '../../contracts/configuration';
 
 export type Tone = 'ok' | 'pending' | 'warn' | 'error' | 'idle';
 
@@ -135,6 +136,50 @@ export function emptyBody(): ProfileBody {
 }
 
 /** Profiles that can be chosen to start `agent`: written for it. */
+/**
+ * The three things said about the model of a native session, kept apart because they are
+ * different facts: what the session's profile asked for, what the agent's own files are set
+ * to, and what is in use. The last is never filled from the other two: neither agent reports
+ * the model it runs without a hook or a read of the terminal, and this app adds neither.
+ */
+export interface ModelFacts {
+  requested: string;
+  configured: string;
+  inUse: string;
+}
+export function modelFacts(
+  session: NativeSession,
+  profiles: Profile[],
+  config: readonly ConfigItem[] | null,
+): ModelFacts {
+  let requested = 'none (the agent’s own choice)';
+  if (session.profile) {
+    const profile = profiles.find((p) => p.id === session.profile?.id);
+    if (!profile) requested = 'the profile no longer exists';
+    else if (profile.current !== session.profile.version)
+      requested = 'the profile has changed since this session started';
+    else if (profile.body.model) requested = profile.body.model;
+  }
+  let configured = 'not read yet (open Configuration)';
+  if (config !== null) {
+    const provider =
+      session.agent_id === 'claude_code' ? 'claude_code' : 'codex';
+    const item = config.find(
+      (i) =>
+        i.provider === provider &&
+        i.kind === 'model_preference' &&
+        i.name === 'model' &&
+        i.scope === 'global' &&
+        i.detail?.kind === 'text',
+    );
+    configured =
+      item?.detail?.kind === 'text'
+        ? item.detail.value.text
+        : 'not set in its files';
+  }
+  return { requested, configured, inUse: 'not reported by the agent' };
+}
+
 export function profilesFor(profiles: Profile[], agent: AgentId): Profile[] {
   return profiles.filter((p) => p.body.applies_to.includes(agent));
 }
