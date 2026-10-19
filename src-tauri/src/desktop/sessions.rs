@@ -539,6 +539,14 @@ mod tests {
             // path goes in, no file is read by the call, nothing is written (F1).
             "allow-configuration-inventory",
             "allow-configuration-changes",
+            "allow-configuration-plan",
+            "allow-configuration-apply",
+            "allow-configuration-history",
+            "allow-configuration-undo",
+            "allow-configuration-records",
+            "allow-configuration-record-delete",
+            "allow-configuration-export",
+            "allow-configuration-import",
         ];
         assert_eq!(granted, expected);
         let manifest = include_str!("../../build.rs");

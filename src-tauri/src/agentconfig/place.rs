@@ -336,6 +336,68 @@ pub(crate) fn open(
     }
 }
 
+/// The directory a file is in, opened by descriptor, for a write that renames beside it.
+#[derive(Debug)]
+pub(crate) struct Parent {
+    pub dir: OwnedFd,
+    pub name: OsString,
+    /// Where the file really is, after the links that led to it.
+    pub path: PathBuf,
+    /// The weakest judgement of every place on the way and of the file and its directory.
+    pub trust: PathTrust,
+}
+
+/// Resolves `path` as `open` does, then opens the directory its final file is in, walking
+/// from the root one descriptor at a time and judging each. A write goes to the file the
+/// links lead to and never replaces a link (07 §4.3).
+pub(crate) fn parent_for_write(
+    roots: &ApprovedRoots,
+    path: &Path,
+    link_hops: usize,
+) -> Result<Parent, SourceFailure> {
+    let (fd, mut trust, links) = open(roots, path, Want::File, link_hops)?;
+    drop(fd);
+    // The place the links lead to: the last hop's target, or the path itself.
+    let mut current = path.to_owned();
+    for _ in 0..=links.len() {
+        match reach(&current, Want::File)? {
+            Reached::Node(..) => break,
+            Reached::Link(target, _) => current = link_target(&current, &target)?,
+        }
+    }
+    let me = geteuid().as_raw();
+    let all = names(&current)?;
+    let Some((last, ancestors)) = all.split_last() else {
+        return Err(SourceFailure::Unsupported {
+            reason: UnsupportedReason::NotRegularFile,
+        });
+    };
+    let untrusted = |reason| SourceFailure::UntrustedPath { reason };
+    let directory = OFlag::O_RDONLY | OFlag::O_DIRECTORY;
+    let mut dir = open_below(None, OsStr::new("/"), directory).map_err(open_failure)?;
+    trust = weaker(trust, judge_directory(facts(&dir)?, me).map_err(untrusted)?);
+    for name in ancestors {
+        let next = match open_below(Some(&dir), name, directory) {
+            Ok(next) => next,
+            Err(Errno::ELOOP | Errno::ENOTDIR) => {
+                return Err(untrusted(UntrustedReason::AncestorLink));
+            }
+            Err(errno) => return Err(open_failure(errno)),
+        };
+        trust = weaker(
+            trust,
+            judge_directory(facts(&next)?, me).map_err(untrusted)?,
+        );
+        dir = next;
+    }
+    Ok(Parent {
+        dir,
+        name: (*last).to_owned(),
+        path: current,
+        trust,
+    })
+}
+
 /// A seam for tests to put something between the check of a place and the open of it.
 #[cfg(test)]
 pub(crate) mod hook {

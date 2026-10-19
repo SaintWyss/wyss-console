@@ -63,7 +63,9 @@ impl Environment {
 }
 
 /// The closed list of places an adapter reads. It is what the page is told a source is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceKey {
     ClaudeManagedSettings,
@@ -393,6 +395,13 @@ pub(super) fn item_id(parts: &[&str]) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+/// The identifier an item found at `identity` in `key` has: how a plan finds it again.
+pub(super) fn item_id_for(key: SourceKey, identity: &[&str]) -> String {
+    let mut parts = vec![provider_word(key.provider()), source_word(key)];
+    parts.extend_from_slice(identity);
+    item_id(&parts)
 }
 
 /// What an adapter knows about the place an item is found in.

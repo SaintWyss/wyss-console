@@ -7,6 +7,8 @@ mod agentconfig;
 // The window commands of the above: the one place that names both it and the toolkit.
 #[cfg(target_os = "linux")]
 mod configuration;
+#[cfg(target_os = "linux")]
+mod native_dialog;
 
 fn main() {
     // Set by the packaging command, which builds the authority first: a build made any

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Local application information, one read of the authority projection, one read and six intents for managed sessions, one native folder dialog, three reads and two intents for managed turns, two reads and two decisions for their approvals, one read, one update and one reset of the desktop's own preferences, two reads of the agents' configuration inventory, and narrow human-terminal operations for the main window.",
+  "description": "Local application information, one read of the authority projection, one read and six intents for managed sessions, one native folder dialog, three reads and two intents for managed turns, two reads and two decisions for their approvals, one read, one update and one reset of the desktop's own preferences, two reads of the agents' configuration inventory and eight operations to change it with a way back, and narrow human-terminal operations for the main window.",
   "windows": ["main"],
   "permissions": [
     "allow-get-app-info",
@@ -37,6 +37,14 @@
     "allow-close-terminal",
     "allow-terminal-status",
     "allow-configuration-inventory",
-    "allow-configuration-changes"
+    "allow-configuration-changes",
+    "allow-configuration-plan",
+    "allow-configuration-apply",
+    "allow-configuration-history",
+    "allow-configuration-undo",
+    "allow-configuration-records",
+    "allow-configuration-record-delete",
+    "allow-configuration-export",
+    "allow-configuration-import"
   ]
 }

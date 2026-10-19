@@ -112,6 +112,14 @@ fn main() {
             "terminal_status",
             "configuration_inventory",
             "configuration_changes",
+            "configuration_plan",
+            "configuration_apply",
+            "configuration_history",
+            "configuration_undo",
+            "configuration_records",
+            "configuration_record_delete",
+            "configuration_export",
+            "configuration_import",
         ]),
     ))
     .expect("failed to build Wyss Console metadata");

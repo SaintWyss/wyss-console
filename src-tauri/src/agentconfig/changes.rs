@@ -1,0 +1,787 @@
+//! Changing the configuration (F2a): plan, confirm, apply, journal, undo.
+//!
+//! The service holds no secret and no content: a plan keeps the bytes it would write in
+//! memory for at most a minute, a record is sealed by the vault, the journal is closed
+//! words and hashes. The page asks for a plan by naming an item or a record the service
+//! already knows, never a path and never text, and gets back a redacted view; it applies a
+//! plan by its identifier. A plan that needs the native dialog is applied only if the user
+//! accepts there, in a window the page cannot draw on or answer for.
+use super::change::{Operation, Outcome, Risk};
+use super::fault::{Faults, Injected, Step};
+use super::fsutil::private_dir;
+use super::inventory::{Environment, SourceKey};
+use super::journal::{Change, Entry, Journal, JournalError, Phase, new_id, now};
+use super::model::{
+    Bounds, ItemKind, NotWritable, PathTrust, ProviderId, Scope, SourceClass, SourceClass as Class,
+    SourceFailure, writability,
+};
+use super::place::{Parent, parent_for_write};
+use super::plan::{
+    DiffLine, Drafted, PLAN_LIFETIME_SECONDS, PlanError, Prepared, draft_all_hooks, draft_park,
+    draft_restore, draft_skill, hash, is_exactly,
+};
+use super::reader::ConfigReader;
+use super::restore::{Protection, RestorationStore, RestoreError, Summary};
+use super::service::InventoryService;
+use super::vault::{EXPORT_ROUNDS, VaultError};
+use super::writer::{
+    TargetLock, WriteError, conflict_copy_beside, identity_of, lock_target, remove_leftovers,
+    replace,
+};
+use serde::Serialize;
+use std::{
+    path::PathBuf,
+    sync::{Mutex, PoisonError},
+    time::{Duration, Instant},
+};
+
+/// 07 §8: at most eight plans drafted at once.
+const MOST_PLANS: usize = 8;
+
+/// What the user is asked in the native dialog. No value of any entry is in it: the entry
+/// is named by the same redacted label the plan shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmRequest {
+    pub provider: ProviderId,
+    pub scope: Scope,
+    pub source: SourceKey,
+    pub name: String,
+    pub operation: Operation,
+    pub risk: Risk,
+    pub effect: Effect,
+    pub holds_hidden_values: bool,
+}
+
+/// The native confirmation. It has no "do not ask again".
+pub trait Confirm: Send + Sync {
+    fn ask(&self, request: &ConfirmRequest) -> bool;
+}
+
+/// What "applied" means for a running provider (07 §6): said as it is known, never more.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Effect {
+    /// Claude Code documents that it reloads hooks; not verified for the user's sessions.
+    HooksReloadDocumented,
+    /// The file changed; nothing is known of running sessions.
+    NotConfirmed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeFailure {
+    NotSupported,
+    NotWritable,
+    SourceMissing,
+    SourceUnreadable,
+    SourceMalformed,
+    EntryGone,
+    EntryChanged,
+    AlreadyDone,
+    RestoreConflict,
+    KeyStoreUnavailable,
+    RecordUnreadable,
+    KeyLost,
+    PlanUnknown,
+    NotUndoable,
+    ImportInvalid,
+    NoPassphrase,
+    Internal,
+}
+
+impl From<PlanError> for ChangeFailure {
+    fn from(error: PlanError) -> Self {
+        match error {
+            PlanError::NotSupported => Self::NotSupported,
+            PlanError::Malformed => Self::SourceMalformed,
+            PlanError::EntryGone => Self::EntryGone,
+            PlanError::EntryChanged => Self::EntryChanged,
+            PlanError::AlreadyDone => Self::AlreadyDone,
+            PlanError::RestoreConflict => Self::RestoreConflict,
+            PlanError::KeyStoreUnavailable => Self::KeyStoreUnavailable,
+            PlanError::RecordUnreadable => Self::RecordUnreadable,
+        }
+    }
+}
+
+impl From<RestoreError> for ChangeFailure {
+    fn from(error: RestoreError) -> Self {
+        match error {
+            RestoreError::Vault(VaultError::KeyLost) => Self::KeyLost,
+            RestoreError::Vault(VaultError::KeyStoreUnavailable)
+            | RestoreError::NoKeyStoreForSecret => Self::KeyStoreUnavailable,
+            RestoreError::Vault(VaultError::NoPassphrase) => Self::NoPassphrase,
+            RestoreError::Vault(VaultError::Tampered | VaultError::Malformed)
+            | RestoreError::Malformed => Self::RecordUnreadable,
+            RestoreError::Missing => Self::PlanUnknown,
+            RestoreError::ImportInvalid => Self::ImportInvalid,
+            _ => Self::Internal,
+        }
+    }
+}
+
+/// A drafted plan as the page sees it: redacted, with no bytes of the file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PlanView {
+    pub id: String,
+    pub operation: Operation,
+    pub provider: ProviderId,
+    pub source: SourceKey,
+    pub scope: Scope,
+    pub name: String,
+    pub risk: Risk,
+    pub needs_native_dialog: bool,
+    pub diff: Vec<DiffLine>,
+    /// How an entry that leaves the file would be kept; `None` when nothing is kept.
+    pub storage: Option<Protection>,
+    pub holds_hidden_values: bool,
+    pub effect: Effect,
+    pub expires_in_seconds: u64,
+    pub undoes: Option<String>,
+}
+
+/// How an apply ended, and the journal entry that says so.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Applied {
+    pub change: String,
+    pub outcome: Outcome,
+    /// What the file holds now, when the apply wrote it and read it back.
+    pub revision: u64,
+}
+
+struct Stored {
+    id: String,
+    drafted: Drafted,
+    source: SourceKey,
+    undoes: Option<String>,
+    at: Instant,
+}
+
+pub struct ChangeService {
+    reader: ConfigReader,
+    environment: Mutex<Environment>,
+    inventory: InventoryService,
+    journal: Journal,
+    store: RestorationStore,
+    faults: Faults,
+    locks: PathBuf,
+    confirm: Box<dyn Confirm>,
+    plans: Mutex<Vec<Stored>>,
+    bounds: Bounds,
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The sources a change may be made to: this user's Claude Code settings files.
+fn writable(key: SourceKey) -> bool {
+    matches!(
+        key,
+        SourceKey::ClaudeUserSettings
+            | SourceKey::ClaudeProjectSettings
+            | SourceKey::ClaudeProjectLocalSettings
+    ) && matches!(key.class(), SourceClass::User | SourceClass::Project)
+}
+
+fn effect_of(operation: Operation) -> Effect {
+    match operation {
+        Operation::SkillOff | Operation::SkillOn => Effect::NotConfirmed,
+        _ => Effect::HooksReloadDocumented,
+    }
+}
+
+impl ChangeService {
+    pub fn new(
+        reader: ConfigReader,
+        environment: Environment,
+        inventory: InventoryService,
+        state: &std::path::Path,
+        store: RestorationStore,
+        confirm: Box<dyn Confirm>,
+        faults: Faults,
+    ) -> Result<Self, super::fsutil::StoreError> {
+        let bounds = *reader.bounds();
+        Ok(Self {
+            journal: Journal::open(state, faults.clone())?,
+            locks: private_dir(&state.join("locks"))?,
+            reader,
+            environment: Mutex::new(environment),
+            inventory,
+            store,
+            faults,
+            confirm,
+            plans: Mutex::new(Vec::new()),
+            bounds,
+        })
+    }
+
+    /// A service over the Claude Code sources of `environment`, as the desktop builds it.
+    pub fn for_claude(
+        environment: Environment,
+        inventory: InventoryService,
+        state: &std::path::Path,
+        vault: super::vault::Vault,
+        confirm: Box<dyn Confirm>,
+        faults: Faults,
+    ) -> Result<Self, ChangeFailure> {
+        let roots = super::claude::roots(&environment).map_err(|_| ChangeFailure::Internal)?;
+        let reader =
+            ConfigReader::new(roots, Bounds::PROPOSED).map_err(|_| ChangeFailure::Internal)?;
+        let store = RestorationStore::open(state, vault, faults.clone())?;
+        Self::new(
+            reader,
+            environment,
+            inventory,
+            state,
+            store,
+            confirm,
+            faults,
+        )
+        .map_err(|_| ChangeFailure::Internal)
+    }
+
+    /// Makes the drafted plans older, for the test of their expiry.
+    #[cfg(test)]
+    pub fn age_plans(&self, by: Duration) {
+        for plan in lock(&self.plans).iter_mut() {
+            if let Some(older) = plan.at.checked_sub(by) {
+                plan.at = older;
+            }
+        }
+    }
+
+    fn path_of(&self, key: SourceKey) -> Option<PathBuf> {
+        let environment = lock(&self.environment);
+        let project = environment.project.as_ref();
+        match key {
+            SourceKey::ClaudeUserSettings => Some(environment.claude_dir().join("settings.json")),
+            SourceKey::ClaudeProjectSettings => Some(project?.join(".claude/settings.json")),
+            SourceKey::ClaudeProjectLocalSettings => {
+                Some(project?.join(".claude/settings.local.json"))
+            }
+            _ => None,
+        }
+    }
+
+    /// The file a plan is made on: read through the approved roots, and writable only if it
+    /// is this user's, in a place nobody else can change.
+    fn read_target(&self, key: SourceKey) -> Result<(PathBuf, Vec<u8>), ChangeFailure> {
+        if !writable(key) {
+            return Err(ChangeFailure::NotWritable);
+        }
+        let path = self.path_of(key).ok_or(ChangeFailure::SourceMissing)?;
+        let file = self
+            .reader
+            .read_file(&path)
+            .map_err(|failure| match failure {
+                SourceFailure::Missing => ChangeFailure::SourceMissing,
+                _ => ChangeFailure::SourceUnreadable,
+            })?;
+        if writability(key.class(), file.trust()) != NotWritable::NotInThisPhase {
+            return Err(ChangeFailure::NotWritable);
+        }
+        Ok((path, file.bytes().to_vec()))
+    }
+
+    fn view(&self, stored: &Stored) -> PlanView {
+        let drafted = &stored.drafted;
+        PlanView {
+            id: stored.id.clone(),
+            operation: drafted.operation,
+            provider: stored.source.provider(),
+            source: stored.source,
+            scope: stored.source.scope(),
+            name: drafted.name.clone(),
+            risk: drafted.risk,
+            needs_native_dialog: drafted.risk.needs_native_dialog(),
+            diff: drafted.diff.clone(),
+            storage: match &drafted.prepared {
+                Prepared::Park { protection, .. } => Some(*protection),
+                _ => None,
+            },
+            holds_hidden_values: drafted.holds_hidden_values,
+            effect: effect_of(drafted.operation),
+            expires_in_seconds: PLAN_LIFETIME_SECONDS.saturating_sub(stored.at.elapsed().as_secs()),
+            undoes: stored.undoes.clone(),
+        }
+    }
+
+    fn keep(&self, drafted: Drafted, source: SourceKey, undoes: Option<String>) -> PlanView {
+        let stored = Stored {
+            id: new_id(),
+            drafted,
+            source,
+            undoes,
+            at: Instant::now(),
+        };
+        let view = self.view(&stored);
+        let mut plans = lock(&self.plans);
+        plans.retain(|p| p.at.elapsed() < Duration::from_secs(PLAN_LIFETIME_SECONDS));
+        while plans.len() >= MOST_PLANS {
+            plans.remove(0);
+        }
+        plans.push(stored);
+        view
+    }
+
+    fn item(&self, id: &str) -> Option<super::inventory::Item> {
+        self.inventory
+            .snapshot()
+            .inventory
+            .items
+            .iter()
+            .find(|item| item.id == id)
+            .cloned()
+    }
+
+    /// Drafts a change. `target` is an item's identifier, a record's, or a source's word,
+    /// as the operation needs; the page has nothing else to name.
+    pub fn plan(&self, operation: Operation, target: &str) -> Result<PlanView, ChangeFailure> {
+        self.plan_with(operation, target, None)
+    }
+
+    fn plan_with(
+        &self,
+        operation: Operation,
+        target: &str,
+        undoes: Option<String>,
+    ) -> Result<PlanView, ChangeFailure> {
+        let (source, drafted) = match operation {
+            Operation::ParkHook => {
+                let item = self.item(target).ok_or(ChangeFailure::EntryGone)?;
+                if item.kind != ItemKind::Hook || item.provider != ProviderId::ClaudeCode {
+                    return Err(ChangeFailure::NotSupported);
+                }
+                let (_, bytes) = self.read_target(item.source)?;
+                let drafted = draft_park(&bytes, item.source, target, &self.bounds, |secret| {
+                    self.store.protection_for(secret)
+                })?;
+                (item.source, drafted)
+            }
+            Operation::SkillOff | Operation::SkillOn => {
+                let item = self.item(target).ok_or(ChangeFailure::EntryGone)?;
+                if item.kind != ItemKind::Skill || item.provider != ProviderId::ClaudeCode {
+                    return Err(ChangeFailure::NotSupported);
+                }
+                let source = match item.source {
+                    SourceKey::ClaudeUserSkills => SourceKey::ClaudeUserSettings,
+                    SourceKey::ClaudeProjectSkills => SourceKey::ClaudeProjectSettings,
+                    _ => return Err(ChangeFailure::NotSupported),
+                };
+                let name = item.name.as_str();
+                // A name that redaction changed is not a name the file has.
+                if name.contains(super::redact::MASK) {
+                    return Err(ChangeFailure::NotSupported);
+                }
+                let (_, bytes) = self.read_target(source)?;
+                let drafted = draft_skill(&bytes, target, name, operation == Operation::SkillOff)?;
+                (source, drafted)
+            }
+            Operation::DisableAllHooks | Operation::EnableAllHooks => {
+                let source: SourceKey =
+                    serde_json::from_value(serde_json::Value::String(target.to_owned()))
+                        .map_err(|_| ChangeFailure::NotSupported)?;
+                let (_, bytes) = self.read_target(source)?;
+                (
+                    source,
+                    draft_all_hooks(&bytes, source, operation == Operation::DisableAllHooks)?,
+                )
+            }
+            Operation::RestoreHook => {
+                let body = self.store.read(target)?;
+                let secret_bearing = self
+                    .store
+                    .list()
+                    .iter()
+                    .find(|s| s.id == target)
+                    .is_some_and(|s| s.secret_bearing);
+                let (_, bytes) = self.read_target(body.source)?;
+                (
+                    body.source,
+                    draft_restore(&bytes, target, &body, secret_bearing, &self.bounds)?,
+                )
+            }
+        };
+        Ok(self.keep(drafted, source, undoes))
+    }
+
+    fn journal_entry(
+        &self,
+        id: &str,
+        phase: Phase,
+        stored: &Stored,
+        record: Option<String>,
+        h1: Option<String>,
+        outcome: Option<Outcome>,
+    ) -> Entry {
+        Entry {
+            v: 1,
+            id: id.to_owned(),
+            at: now(),
+            phase,
+            provider: stored.source.provider(),
+            source: stored.source,
+            operation: stored.drafted.operation,
+            item: stored.drafted.item.clone(),
+            risk: stored.drafted.risk,
+            h0: stored.drafted.h0.clone(),
+            h1,
+            outcome,
+            record,
+            undoes: stored.undoes.clone(),
+        }
+    }
+
+    /// Carries a plan out. The page's call is the user's confirmation in the page; a risk
+    /// above `normal` also needs the native dialog, which only the desktop can show.
+    pub fn apply(&self, plan: &str) -> Result<Applied, ChangeFailure> {
+        let stored = {
+            let mut plans = lock(&self.plans);
+            let index = plans
+                .iter()
+                .position(|p| p.id == plan)
+                .ok_or(ChangeFailure::PlanUnknown)?;
+            // Single use: whatever happens next, this plan is gone.
+            plans.remove(index)
+        };
+        let change = new_id();
+        let applied = |outcome: Outcome| Applied {
+            change: change.clone(),
+            outcome,
+            revision: self.inventory.snapshot().revision,
+        };
+        if stored.at.elapsed() >= Duration::from_secs(PLAN_LIFETIME_SECONDS) {
+            return Ok(applied(Outcome::Expired));
+        }
+        let source = stored.source;
+        let drafted = &stored.drafted;
+
+        // The native dialog, before anything is written or recorded as done.
+        if drafted.risk.needs_native_dialog() {
+            let request = ConfirmRequest {
+                provider: source.provider(),
+                scope: source.scope(),
+                source,
+                name: drafted.name.clone(),
+                operation: drafted.operation,
+                risk: drafted.risk,
+                effect: effect_of(drafted.operation),
+                holds_hidden_values: drafted.holds_hidden_values,
+            };
+            if !self.confirm.ask(&request) {
+                // Recorded: what was refused, where, and how risky. No content.
+                let intent = self.journal_entry(&change, Phase::Intent, &stored, None, None, None);
+                let outcome = self.journal_entry(
+                    &change,
+                    Phase::Outcome,
+                    &stored,
+                    None,
+                    None,
+                    Some(Outcome::RefusedByUser),
+                );
+                let _ = self.journal.append(&intent, Step::IntentJournaled);
+                let _ = self.journal.append(&outcome, Step::OutcomeJournaled);
+                return Ok(applied(Outcome::RefusedByUser));
+            }
+        }
+
+        let Some(path) = self.path_of(source) else {
+            return Ok(applied(Outcome::ChangedOutside));
+        };
+        let Ok(_target_lock): Result<TargetLock, _> = lock_target(&self.locks, &path) else {
+            return Ok(applied(Outcome::WriteFailed));
+        };
+
+        // Read again under the lock: the plan was made on these bytes or on nothing.
+        let parent: Parent =
+            match parent_for_write(self.reader.roots(), &path, self.bounds.link_hops) {
+                Ok(parent) if parent.trust == PathTrust::Trusted => parent,
+                Ok(_) | Err(_) => return Ok(applied(Outcome::WriteFailed)),
+            };
+        let Ok(before) = identity_of(&parent) else {
+            return Ok(applied(Outcome::ChangedOutside));
+        };
+        let current = match self.reader.read_file(&path) {
+            Ok(file) if file.trust() == PathTrust::Trusted => file,
+            Ok(_) => return Ok(applied(Outcome::WriteFailed)),
+            Err(SourceFailure::Missing) => return Ok(applied(Outcome::ChangedOutside)),
+            Err(_) => return Ok(applied(Outcome::WriteFailed)),
+        };
+        let after = identity_of(&parent).ok();
+        if after != Some(before) || hash(current.bytes()) != drafted.h0 {
+            return Ok(applied(Outcome::ChangedOutside));
+        }
+        if let Ok(listing) = self
+            .reader
+            .list_directory(parent.path.parent().unwrap_or(&parent.path))
+        {
+            let names: Vec<_> = listing.entries.iter().map(|e| e.name.clone()).collect();
+            if conflict_copy_beside(&names, &parent.name) {
+                return Ok(applied(Outcome::ConflictCopyPresent));
+            }
+        }
+
+        // What an operation needs kept is decided before the intent, so the intent can
+        // name it: a start after a crash finds the record by this identifier.
+        let record_id = match &drafted.prepared {
+            Prepared::Park { .. } => Some(new_id()),
+            Prepared::Restore { record, .. } => Some(record.clone()),
+            Prepared::Nothing => None,
+        };
+        let intent = self.journal_entry(
+            &change,
+            Phase::Intent,
+            &stored,
+            record_id.clone(),
+            Some(drafted.h1.clone()),
+            None,
+        );
+        if let Err(error) = self.journal.append(&intent, Step::IntentJournaled) {
+            return match error {
+                JournalError::Crashed => Err(ChangeFailure::Internal),
+                JournalError::NotRecorded => Ok(applied(Outcome::NotRecorded)),
+            };
+        }
+        let finish = |outcome: Outcome, h1: Option<String>| -> Result<Applied, ChangeFailure> {
+            let entry = self.journal_entry(
+                &change,
+                Phase::Outcome,
+                &stored,
+                record_id.clone(),
+                h1,
+                Some(outcome),
+            );
+            match self.journal.append(&entry, Step::OutcomeJournaled) {
+                Err(JournalError::Crashed) => Err(ChangeFailure::Internal),
+                _ => {
+                    if outcome.changed_the_file() {
+                        self.inventory.rescan();
+                    }
+                    Ok(applied(outcome))
+                }
+            }
+        };
+
+        // A record is made before the file changes; it is removed again if the file does not.
+        let mut made_record = false;
+        if let (
+            Prepared::Park {
+                body,
+                label,
+                secret_bearing,
+                protection,
+            },
+            Some(id),
+        ) = (&drafted.prepared, &record_id)
+        {
+            match self
+                .store
+                .park_as(id, label, *secret_bearing, *protection, body)
+            {
+                Ok(_) => made_record = true,
+                Err(RestoreError::Crashed) => return Err(ChangeFailure::Internal),
+                Err(error) => {
+                    let outcome = match error {
+                        RestoreError::NoKeyStoreForSecret
+                        | RestoreError::Vault(VaultError::KeyStoreUnavailable) => {
+                            Outcome::KeyStoreUnavailable
+                        }
+                        _ => Outcome::WriteFailed,
+                    };
+                    return finish(outcome, None);
+                }
+            }
+        }
+        let undo_record = || {
+            if let (true, Some(id)) = (made_record, &record_id) {
+                let _ = self.store.delete(id);
+            }
+        };
+
+        // A restoration whose entry is already in the file writes nothing.
+        let writes_the_file = drafted.new_bytes != current.bytes();
+        if writes_the_file {
+            match replace(&parent, &drafted.new_bytes, before, &self.faults) {
+                // In place either way; the read-back below says what is there.
+                Ok(()) | Err(WriteError::AfterRename) => (),
+                Err(WriteError::Crashed) => return Err(ChangeFailure::Internal),
+                Err(WriteError::Replaced) => {
+                    undo_record();
+                    return finish(Outcome::ChangedOutside, None);
+                }
+                Err(WriteError::Failed | WriteError::NotOwner) => {
+                    undo_record();
+                    return finish(Outcome::WriteFailed, None);
+                }
+            }
+        }
+
+        // Read back: the file holds what was planned, or the user is told it does not.
+        let read_back = match self.faults.check(Step::ReadBack) {
+            Err(Injected::Crashed) => return Err(ChangeFailure::Internal),
+            Err(Injected::Failed) => Err(SourceFailure::Unreadable),
+            Ok(()) => self.reader.read_file(&path),
+        };
+        let (verified, found) = match &read_back {
+            Ok(file) => {
+                let actual = hash(file.bytes());
+                let same = actual == drafted.h1
+                    && (drafted.logical == super::plan::Logical::Nothing
+                        || is_exactly(current.bytes(), file.bytes(), &drafted.logical));
+                (same, Some(actual))
+            }
+            Err(_) => (false, None),
+        };
+        if !verified {
+            return finish(Outcome::VerifyFailed, found);
+        }
+        if let Prepared::Restore { record, .. } = &drafted.prepared
+            && let Err(RestoreError::Crashed) = self.store.mark(record, super::restore::State::Used)
+        {
+            return Err(ChangeFailure::Internal);
+        }
+        finish(Outcome::Applied, found)
+    }
+
+    /// A page of changes, newest first.
+    pub fn history(&self, cursor: Option<&str>, limit: usize) -> (Vec<Change>, Option<String>) {
+        self.journal.history(cursor, limit)
+    }
+
+    /// The change that undoes `change`, as a plan: exact when the file is as that change
+    /// left it, otherwise planned against the file as it is.
+    pub fn undo(&self, change_id: &str) -> Result<PlanView, ChangeFailure> {
+        let change = self
+            .journal
+            .change(change_id)
+            .ok_or(ChangeFailure::NotUndoable)?;
+        if !matches!(
+            change.outcome,
+            Some(Outcome::Applied | Outcome::RecoveredApplied)
+        ) || change.undoes.is_some()
+        {
+            return Err(ChangeFailure::NotUndoable);
+        }
+        // Already undone: a later change names this one.
+        if self.journal.changes().iter().any(|later| {
+            later.undoes.as_deref() == Some(change_id)
+                && matches!(
+                    later.outcome,
+                    Some(Outcome::Applied | Outcome::RecoveredApplied)
+                )
+        }) {
+            return Err(ChangeFailure::NotUndoable);
+        }
+        let undoes = Some(change.id.clone());
+        match change.operation {
+            Operation::ParkHook => {
+                let record = change.record.ok_or(ChangeFailure::NotUndoable)?;
+                self.plan_with(Operation::RestoreHook, &record, undoes)
+            }
+            Operation::RestoreHook => {
+                let record = change.record.ok_or(ChangeFailure::NotUndoable)?;
+                let body = self.store.read(&record)?;
+                let item = super::inventory::item_id_for(
+                    body.source,
+                    &[
+                        &body.event,
+                        &body.group.to_string(),
+                        &body.index.to_string(),
+                    ],
+                );
+                self.plan_with(Operation::ParkHook, &item, undoes)
+            }
+            Operation::DisableAllHooks => self.plan_with(
+                Operation::EnableAllHooks,
+                &source_word(change.source),
+                undoes,
+            ),
+            Operation::EnableAllHooks => self.plan_with(
+                Operation::DisableAllHooks,
+                &source_word(change.source),
+                undoes,
+            ),
+            Operation::SkillOff => self.plan_with(Operation::SkillOn, &change.item, undoes),
+            Operation::SkillOn => self.plan_with(Operation::SkillOff, &change.item, undoes),
+        }
+    }
+
+    pub fn records(&self) -> Vec<Summary> {
+        self.store.list()
+    }
+
+    pub fn delete_record(&self, id: &str) -> Result<(), ChangeFailure> {
+        Ok(self.store.delete(id)?)
+    }
+
+    pub fn export_record(&self, id: &str, passphrase: &str) -> Result<Vec<u8>, ChangeFailure> {
+        Ok(self.store.export(id, passphrase, EXPORT_ROUNDS)?)
+    }
+
+    pub fn import_record(&self, bytes: &[u8], passphrase: &str) -> Result<String, ChangeFailure> {
+        Ok(self.store.import(bytes, passphrase)?)
+    }
+
+    /// At start: finish what a crash left (14 §4). An apply with an intent and no outcome is
+    /// found, the file's hash says how far it got, and the outcome is written.
+    pub fn recover(&self) -> usize {
+        let mut repaired = 0;
+        for intent in self.journal.unfinished() {
+            let Some(path) = self.path_of(intent.source) else {
+                continue;
+            };
+            let current = self.reader.read_file(&path).ok().map(|f| hash(f.bytes()));
+            let outcome = match current.as_deref() {
+                Some(found) if Some(found) == intent.h1.as_deref() => Outcome::RecoveredApplied,
+                Some(found) if found == intent.h0 => Outcome::RecoveredNotApplied,
+                _ => Outcome::RecoveredUnverified,
+            };
+            match (outcome, intent.operation, &intent.record) {
+                // The file was not changed, so the entry is still in it: the record is spare.
+                (Outcome::RecoveredNotApplied, Operation::ParkHook, Some(record)) => {
+                    let _ = self.store.delete(record);
+                }
+                (Outcome::RecoveredApplied, Operation::RestoreHook, Some(record)) => {
+                    let _ = self.store.mark(record, super::restore::State::Used);
+                }
+                _ => (),
+            }
+            let entry = Entry {
+                phase: Phase::Outcome,
+                at: now(),
+                h1: current,
+                outcome: Some(outcome),
+                ..intent
+            };
+            if self.journal.append(&entry, Step::OutcomeJournaled).is_ok() {
+                repaired += 1;
+            }
+        }
+        // Temporary files of a write that was cut short, by their exact pattern.
+        for key in [
+            SourceKey::ClaudeUserSettings,
+            SourceKey::ClaudeProjectSettings,
+            SourceKey::ClaudeProjectLocalSettings,
+        ] {
+            if let Some(parent) = self.path_of(key).and_then(|path| {
+                parent_for_write(self.reader.roots(), &path, self.bounds.link_hops).ok()
+            }) {
+                remove_leftovers(&parent);
+            }
+        }
+        let _ = self.journal.prune(now());
+        let _ = self.store.prune();
+        repaired
+    }
+}
+
+fn source_word(key: SourceKey) -> String {
+    serde_json::to_value(key)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+#[allow(unused)]
+fn _unused(_: Class) {}

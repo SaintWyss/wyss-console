@@ -1,24 +1,78 @@
 //! The two window commands of the inventory (F1-09). Both are reads of what the service
 //! already holds: neither reads a file, takes a path, or starts anything, so a window that
 //! asks as often as it likes costs the providers' files nothing.
-use crate::agentconfig::{Bounds, Changes, Environment, Inventory, InventoryService};
-use serde::Serialize;
+use crate::agentconfig::changes::{Applied, ChangeFailure, ChangeService, PlanView};
+use crate::agentconfig::{
+    Bounds, Change, Changes, Environment, Faults, Inventory, InventoryService, Operation,
+    SecretToolStore, Summary, Vault,
+};
+use crate::native_dialog::{GtkConfirm, choose_file, passphrase};
+use serde::{Deserialize, Serialize};
+use std::sync::{Arc, OnceLock};
+use tauri::AppHandle;
 
 /// The service as the desktop holds it. `None` when there is no home to read from, which
 /// the window is told rather than shown an empty inventory (an empty one would say the
 /// user has no configuration).
-pub struct Configuration(Option<InventoryService>);
+pub struct Configuration {
+    inventory: Option<InventoryService>,
+    /// Changes: present when the private state directory could be made safely. Without it
+    /// the inventory still works and every change command says it is unavailable.
+    changes: Option<Arc<ChangeService>>,
+    app: Arc<OnceLock<AppHandle>>,
+}
+
+/// Where the Console keeps what it owns about configuration changes (14 §3).
+fn state_directory() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/state"))
+        })?;
+    Some(base.join("wyss-console").join("configuration"))
+}
 
 impl Configuration {
     pub fn start() -> Self {
-        Self(
-            Environment::from_process(None)
-                .and_then(|environment| InventoryService::start(environment, Bounds::PROPOSED)),
-        )
+        let app = Arc::new(OnceLock::new());
+        let environment = Environment::from_process(None);
+        let inventory = environment
+            .clone()
+            .and_then(|environment| InventoryService::start(environment, Bounds::PROPOSED));
+        let changes = environment
+            .zip(inventory.clone())
+            .zip(state_directory())
+            .and_then(|((environment, inventory), state)| {
+                let changes = ChangeService::for_claude(
+                    environment,
+                    inventory,
+                    &state,
+                    Vault::new(Box::new(SecretToolStore::new())),
+                    Box::new(GtkConfirm::new(app.clone())),
+                    Faults::default(),
+                )
+                .ok()?;
+                // What a crash left is finished before anything new is planned.
+                changes.recover();
+                Some(Arc::new(changes))
+            });
+        Self {
+            inventory,
+            changes,
+            app,
+        }
     }
 
     fn service(&self) -> Result<&InventoryService, ConfigurationError> {
-        self.0.as_ref().ok_or(ConfigurationError::Unavailable)
+        self.inventory
+            .as_ref()
+            .ok_or(ConfigurationError::Unavailable)
+    }
+
+    fn changes(&self, app: &AppHandle) -> Result<Arc<ChangeService>, ConfigurationError> {
+        let _ = self.app.set(app.clone());
+        self.changes.clone().ok_or(ConfigurationError::Unavailable)
     }
 }
 
@@ -26,6 +80,16 @@ impl Configuration {
 #[serde(rename_all = "snake_case")]
 pub enum ConfigurationError {
     Unavailable,
+    /// The request is not one the desktop accepts; it names something it does not know.
+    Invalid,
+    /// The change commands answer with the reason, a closed word.
+    Change(ChangeFailure),
+}
+
+impl From<ChangeFailure> for ConfigurationError {
+    fn from(failure: ChangeFailure) -> Self {
+        Self::Change(failure)
+    }
 }
 
 /// The whole inventory at a revision.
@@ -67,7 +131,234 @@ fn configuration_changes(
     changes_reply(&configuration, since)
 }
 
-const COMMANDS: &[&str] = &["configuration_inventory", "configuration_changes"];
+// ---- changing (F2a) ---------------------------------------------------------------------
+//
+// Every request names something the desktop already holds: an item, a record, a plan, a
+// change, a source's closed word. None carries a path, text of an entry, or a command.
+
+/// Identifiers are lowercase hex; a source's word is lowercase letters and underscores.
+fn well_formed(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= 64
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanRequest {
+    operation: Operation,
+    target: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanId {
+    plan: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeId {
+    change: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordId {
+    record: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HistoryRequest {
+    cursor: Option<String>,
+    limit: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HistoryReply {
+    changes: Vec<Change>,
+    next: Option<String>,
+}
+#[derive(Debug, Serialize)]
+pub struct Done {
+    done: bool,
+}
+
+fn checked(text: &str) -> Result<&str, ConfigurationError> {
+    well_formed(text)
+        .then_some(text)
+        .ok_or(ConfigurationError::Invalid)
+}
+
+/// Runs `work` off the main thread: an apply waits for a dialog that the main thread draws.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, ConfigurationError> + Send + 'static,
+) -> Result<T, ConfigurationError> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|_| ConfigurationError::Change(ChangeFailure::Internal))?
+}
+
+#[tauri::command]
+async fn configuration_plan(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: PlanRequest,
+) -> Result<PlanView, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let target = checked(&request.target)?.to_owned();
+        Ok(changes.plan(request.operation, &target)?)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn configuration_apply(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: PlanId,
+) -> Result<Applied, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || Ok(changes.apply(checked(&request.plan)?)?)).await
+}
+
+#[tauri::command]
+async fn configuration_history(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: HistoryRequest,
+) -> Result<HistoryReply, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let cursor = request.cursor.as_deref().map(checked).transpose()?;
+        let (changes, next) = changes.history(cursor, request.limit.min(50) as usize);
+        Ok(HistoryReply { changes, next })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn configuration_undo(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: ChangeId,
+) -> Result<PlanView, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || Ok(changes.undo(checked(&request.change)?)?)).await
+}
+
+#[tauri::command]
+async fn configuration_records(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+) -> Result<Vec<Summary>, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || Ok(changes.records())).await
+}
+
+#[tauri::command]
+async fn configuration_record_delete(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: RecordId,
+) -> Result<Done, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        changes.delete_record(checked(&request.record)?)?;
+        Ok(Done { done: true })
+    })
+    .await
+}
+
+/// A record written to a file the user chooses, sealed under a passphrase typed in a native
+/// window. Cancelling anywhere writes nothing.
+#[tauri::command]
+async fn configuration_export(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: RecordId,
+) -> Result<Done, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let record = checked(&request.record)?.to_owned();
+        let Some(secret) = passphrase(&app, true) else {
+            return Ok(Done { done: false });
+        };
+        let bytes = changes.export_record(&record, &secret)?;
+        let Some(path) = choose_file(&app, true, "wyss-restoration.export") else {
+            return Ok(Done { done: false });
+        };
+        write_private_file(&path, &bytes)
+            .map_err(|()| ConfigurationError::Change(ChangeFailure::Internal))?;
+        Ok(Done { done: true })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn configuration_import(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+) -> Result<Done, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let Some(path) = choose_file(&app, false, "") else {
+            return Ok(Done { done: false });
+        };
+        // A record is a few kilobytes; a file far larger than that is not one.
+        let bytes = read_small_file(&path)
+            .map_err(|()| ConfigurationError::Change(ChangeFailure::ImportInvalid))?;
+        let Some(secret) = passphrase(&app, false) else {
+            return Ok(Done { done: false });
+        };
+        changes.import_record(&bytes, &secret)?;
+        Ok(Done { done: true })
+    })
+    .await
+}
+
+/// A file the user named in the native chooser, made 0600 and not followed through a link.
+fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), ()> {
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .custom_flags(nix::libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|_| ())?;
+    file.write_all(bytes)
+        .and_then(|()| file.sync_all())
+        .map_err(|_| ())
+}
+
+fn read_small_file(path: &std::path::Path) -> Result<Vec<u8>, ()> {
+    use std::{io::Read, os::unix::fs::OpenOptionsExt};
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|_| ())?;
+    let mut bytes = Vec::new();
+    file.take(512 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| ())?;
+    (bytes.len() <= 512 * 1024).then_some(bytes).ok_or(())
+}
+
+const COMMANDS: &[&str] = &[
+    "configuration_inventory",
+    "configuration_changes",
+    "configuration_plan",
+    "configuration_apply",
+    "configuration_history",
+    "configuration_undo",
+    "configuration_records",
+    "configuration_record_delete",
+    "configuration_export",
+    "configuration_import",
+];
 
 /// What the desktop binary hands to the library: the commands, the state they read, and
 /// nothing else.
@@ -76,7 +367,15 @@ pub fn extension() -> wyss_console::Extension {
         commands: COMMANDS,
         handler: Box::new(tauri::generate_handler![
             configuration_inventory,
-            configuration_changes
+            configuration_changes,
+            configuration_plan,
+            configuration_apply,
+            configuration_history,
+            configuration_undo,
+            configuration_records,
+            configuration_record_delete,
+            configuration_export,
+            configuration_import
         ]),
         install: Box::new(|builder| builder.manage(Configuration::start())),
     }
@@ -104,7 +403,14 @@ mod tests {
             system: home.join("etc"),
         };
         let service = InventoryService::start(environment, Bounds::PROPOSED).unwrap();
-        (Configuration(Some(service)), home)
+        (
+            Configuration {
+                inventory: Some(service),
+                changes: None,
+                app: Arc::new(OnceLock::new()),
+            },
+            home,
+        )
     }
 
     #[test]
@@ -152,7 +458,11 @@ mod tests {
 
     #[test]
     fn without_a_service_both_commands_say_unavailable_and_serialize_so() {
-        let none = Configuration(None);
+        let none = Configuration {
+            inventory: None,
+            changes: None,
+            app: Arc::new(OnceLock::new()),
+        };
         assert_eq!(
             inventory_reply(&none).unwrap_err(),
             ConfigurationError::Unavailable

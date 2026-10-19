@@ -145,6 +145,14 @@ pub struct ConfigReader {
 }
 
 impl ConfigReader {
+    pub fn bounds(&self) -> &Bounds {
+        &self.bounds
+    }
+
+    pub(super) fn roots(&self) -> &ApprovedRoots {
+        &self.roots
+    }
+
     pub fn new(roots: ApprovedRoots, bounds: Bounds) -> Result<Self, InvalidBounds> {
         Ok(Self {
             roots,

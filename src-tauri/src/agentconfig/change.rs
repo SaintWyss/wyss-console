@@ -1,0 +1,84 @@
+//! The closed vocabulary of changing a configuration: what can be done, how risky it is,
+//! how it ended. These words are what the journal records and the window is shown; none of
+//! them carries content.
+use serde::{Deserialize, Serialize};
+
+/// What a plan does. Each is one the adapter declares for the provider it is planned on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Operation {
+    /// Claude Code has no per-hook switch: the handler leaves the file and is kept.
+    ParkHook,
+    /// Puts a parked handler back where it was.
+    RestoreHook,
+    /// `disableAllHooks: true`.
+    DisableAllHooks,
+    /// Removes `disableAllHooks`, as it was before.
+    EnableAllHooks,
+    /// `skillOverrides.<name>: "off"`.
+    SkillOff,
+    /// Puts the skill's override as it was before it was switched off.
+    SkillOn,
+}
+
+/// What a plan can do to the user's safety, decided by the backend from what the plan does
+/// (11 §4). `forbidden` is not a class a plan has: a forbidden plan does not exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Risk {
+    Normal,
+    WeakensSecurity,
+    ExecutesCode,
+}
+
+impl Risk {
+    /// Whether the user must confirm in a native dialog the page cannot draw on.
+    pub const fn needs_native_dialog(self) -> bool {
+        !matches!(self, Self::Normal)
+    }
+}
+
+/// How an `apply` ended. The first group wrote nothing to the provider's file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Outcome {
+    Applied,
+    /// The user refused in the native dialog, or closed it.
+    RefusedByUser,
+    /// The file is not what the plan was made on.
+    ChangedOutside,
+    /// The entry the plan names is no longer there.
+    EntryGone,
+    /// The entry is there but is not the one that was planned.
+    EntryChanged,
+    /// A `*.sync-conflict-*` copy sits beside the file.
+    ConflictCopyPresent,
+    /// The plan was drafted too long ago, or its source changed.
+    Expired,
+    /// The key store is unavailable and the entry may hold a secret (ADR 0029).
+    KeyStoreUnavailable,
+    /// The restoration record cannot be read: its key is gone, or it was altered.
+    RecordUnreadable,
+    /// The file could not be written; it is as it was.
+    WriteFailed,
+    /// Written, and what the file holds now is not what was planned.
+    VerifyFailed,
+    /// The journal could not record the intent, so nothing was done.
+    NotRecorded,
+    /// Found at start: the application ended mid-write and the file holds the new content.
+    RecoveredApplied,
+    /// Found at start: it ended mid-write and the file is as it was.
+    RecoveredNotApplied,
+    /// Found at start: it ended mid-write and the file holds neither.
+    RecoveredUnverified,
+}
+
+impl Outcome {
+    /// Whether the provider's file now holds the change.
+    pub const fn changed_the_file(self) -> bool {
+        matches!(
+            self,
+            Self::Applied | Self::VerifyFailed | Self::RecoveredApplied | Self::RecoveredUnverified
+        )
+    }
+}
