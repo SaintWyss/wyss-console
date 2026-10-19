@@ -142,6 +142,17 @@ binary and not in the library the authority links):
   before it is parsed) is new, and arithmetic at the edge of the integers saturates.
   Values stay open under OQ-22.
 
+What F1-PR2 adds (`agentconfig/claude.rs`, `codex.rs`, `inventory.rs`): `inventory(env,
+bounds)` derives each provider's approved roots from an `Environment` (home, the
+relocation variables, the selected project, `/etc`), reads the sources of 06 §3 and returns
+`Inventory { sources, items, truncated }`. A source is reported as read (with digest, trust
+and the count of entries it could not place), absent, a project not trusted by Codex, or
+failed with a closed word. An item carries kind, redacted name and detail, persisted state,
+effective state (`documented` for Claude Code hooks and models, `not_verifiable` for what
+only a running provider could confirm and for every Codex item, DN-10), the writability
+class and, for a rule file, its digest and never its text. Items beyond the items bound are
+dropped and `truncated` says so.
+
 ### 4.3 Links and generated files
 
 A link is followed to a regular file owned by the user; the inventory shows both the link and

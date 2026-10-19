@@ -291,6 +291,85 @@ pub fn parse_json(
         })
 }
 
+/// Whether a parsed document is within the depth and element bounds, counted without
+/// recursion. Used for formats whose parser cannot be asked to stop early; the file size
+/// bound already limits what the parser has built.
+fn value_within(value: &serde_json::Value, bounds: &Bounds) -> Result<(), SourceFailure> {
+    use serde_json::Value;
+    let mut elements = 0_usize;
+    let mut pending = vec![(value, 1_usize)];
+    while let Some((value, depth)) = pending.pop() {
+        elements = elements.saturating_add(1);
+        match value {
+            Value::Array(items) => {
+                if depth >= bounds.depth {
+                    return Err(SourceFailure::TooLarge {
+                        bound: TooLarge::Depth,
+                    });
+                }
+                pending.extend(items.iter().map(|item| (item, depth + 1)));
+            }
+            Value::Object(entries) => {
+                if depth >= bounds.depth {
+                    return Err(SourceFailure::TooLarge {
+                        bound: TooLarge::Depth,
+                    });
+                }
+                // A key is an element too, as in the JSON pre-scan.
+                elements = elements.saturating_add(entries.len());
+                pending.extend(entries.values().map(|item| (item, depth + 1)));
+            }
+            _ => (),
+        }
+        if elements > bounds.elements {
+            return Err(SourceFailure::TooLarge {
+                bound: TooLarge::Elements,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Parses a TOML source into the same value tree JSON gives, so one projection and one
+/// redaction serve both. Dates become their text; a repeated key is malformed, as TOML
+/// says. An empty file is `None`. A malformed one reports where parsing stopped and
+/// nothing of what was there.
+pub fn parse_toml(
+    bytes: &[u8],
+    bounds: &Bounds,
+) -> Result<Option<serde_json::Value>, SourceFailure> {
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
+    }
+    let text = std::str::from_utf8(bytes).map_err(|error| {
+        let before = &bytes[..error.valid_up_to()];
+        position(before)
+    })?;
+    let value: serde_json::Value = toml::from_str(text).map_err(|error| {
+        error
+            .span()
+            .map_or(SourceFailure::Malformed { line: 1, column: 1 }, |span| {
+                position(&bytes[..span.start.min(bytes.len())])
+            })
+    })?;
+    value_within(&value, bounds)?;
+    Ok(Some(value))
+}
+
+/// Where a position falls, as the line and column of the text before it.
+fn position(before: &[u8]) -> SourceFailure {
+    let line = before.iter().filter(|&&byte| byte == b'\n').count();
+    let column = before
+        .iter()
+        .rev()
+        .take_while(|&&byte| byte != b'\n')
+        .count();
+    SourceFailure::Malformed {
+        line: u32::try_from(line + 1).unwrap_or(u32::MAX),
+        column: u32::try_from(column + 1).unwrap_or(u32::MAX),
+    }
+}
+
 /// The read loop on its own, for the test that gives it the largest bound there is.
 #[cfg(test)]
 pub(crate) fn read_bytes_for_test(file: &File, limit: u64) -> Vec<u8> {

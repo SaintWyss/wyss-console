@@ -12,6 +12,11 @@
 //! Nothing here is used, and nothing is re-exported to a user, until the adapters of
 //! F1-PR2 consume it, hence the allowance.
 #![allow(dead_code, unused_imports)]
+#[cfg(test)]
+mod adapter_tests;
+mod claude;
+mod codex;
+mod inventory;
 mod model;
 mod place;
 mod reader;
@@ -22,10 +27,13 @@ mod roots;
 #[cfg(test)]
 mod tests;
 
+pub use inventory::{
+    Environment, Inventory, InventoryError, Item, Outcome, SourceKey, SourceReport, inventory,
+};
 pub use model::{
     Bounds, ContentHash, Effective, InvalidBounds, ItemBudget, ItemKind, NotWritable, PathTrust,
     Persisted, ProviderId, ReadOnlyReason, Scope, SessionUse, SourceClass, SourceFailure, TooLarge,
     UnsupportedReason, UntrustedReason, writability,
 };
-pub use reader::{ConfigReader, Entry, EntryKind, Listing, ReadFile, parse_json};
+pub use reader::{ConfigReader, Entry, EntryKind, Listing, ReadFile, parse_json, parse_toml};
 pub use roots::{ApprovedRoots, InvalidRoot};

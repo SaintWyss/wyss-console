@@ -22,6 +22,22 @@
   re-reads each have a limit and a hard ceiling; a hostile document is refused before it
   is parsed.
 
+### Reading the agents' configuration, second part (F1-PR2)
+
+- **The Claude Code and Codex adapters read the real configuration into one inventory.**
+  Hooks, skills, MCP servers, rule files and model preferences of both providers, from
+  their user, project and system places, with the state each file declares (enabled,
+  disabled) and what cannot be verified said as such: nothing reads a running provider.
+  Still no window command uses it, and nothing is written anywhere.
+- **Honest about what a file cannot say.** Codex is static only: its items are
+  `not_verifiable`, the administrator's `features.hooks` pin beats the user's, a project's
+  own Codex configuration is read only for a project the user trusts, and the unproven
+  `[hooks.state]` table is skipped. Entries an adapter cannot place are counted, not guessed.
+- **Nothing private in the result.** Sources are named by a closed key, items by a hash of
+  where they were found, rule files by name and digest only; server environments, headers,
+  tokens in commands and the rest of `~/.claude.json` never appear. TOML is parsed with the
+  same bounds as JSON (the crate is the one tauri already builds).
+
 ### Sessions that can be told apart
 
 - **A session is named so that no other session shown with it has the same name.** Until

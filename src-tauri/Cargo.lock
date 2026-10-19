@@ -4416,6 +4416,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "time",
+ "toml 1.1.6+spec-1.1.0",
  "uuid",
 ]
 
