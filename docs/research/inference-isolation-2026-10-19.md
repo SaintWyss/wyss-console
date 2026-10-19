@@ -1,5 +1,13 @@
 # F1b: can managed Inference be isolated from the user's hooks? (experiments E1 to E8)
 
+> Current execution policy (Santiago, 2026-10-19): the eligible remaining roadmap is
+> authorised. Real development/acceptance uses the owner's normal computer and environment;
+> no disposable HOME, private keyring/bus, VM, container or artificial user installation.
+> Older isolated procedures/results below are historical and must not be repeated.
+> Unit fixtures and intrinsic production Managed security isolation remain valid.
+> Current implementation, acceptance evidence and accepted ADRs take precedence over
+> historical planning statuses. See `../CHECKPOINT.md` (from architecture/acceptance/research).
+
 Run 2026-10-19 on `saint-acer` with the installed Codex 0.159.0 (`codex app-server`, JSON-RPC over
 stdio), in disposable homes under `/tmp` (`HOME` and `CODEX_HOME` both set; the session bus and
 `XDG_RUNTIME_DIR` removed so nothing could reach a real wallet). The owner's real `~/.codex` was

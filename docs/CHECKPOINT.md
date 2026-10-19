@@ -2,8 +2,8 @@
 
 Written so a new session can resume without re-planning. Keep it current at every milestone.
 
-**Branch** `main` (worktree `~/Github_repos/wyss-console-rama-4`; `f1-f2a-configuration` and the two documentation branches were merged into it on 2026-10-19), local only: no
-push, no release. Verify with `git log --oneline | head` and `git status`.
+**Branch** `main` (worktree `~/Github_repos/wyss-console-rama-4`; `f1-f2a-configuration` and the two documentation branches were merged into it on 2026-10-19), local and private origin/main verified at `6daefa5` on 2026-10-19. No public release.
+Recheck both heads and `git status` before writing or pushing.
 
 ## Done (and verified)
 
@@ -22,29 +22,36 @@ push, no release. Verify with `git log --oneline | head` and `git status`.
 
 ## Active
 
-Nothing in progress. F10/F8/F12 and F1b/G-INF need the decisions listed below.
+Product completion authorised by Santiago on 2026-10-19. F5 skills/rule-file authoring is
+in progress. Preserve the accepted provider writers and Managed authority guarantees.
+See `docs/acceptance/remaining-roadmap-2026-10-19.md` for the remaining scope.
 
-## Roadmap still open
+## Current testing policy (owner directive, 2026-10-19)
 
-What is left needs the owner: see `docs/acceptance/remaining-roadmap-2026-10-19.md` (credential path
-for F1b, reference terminal for P1, Hermes for F4b, network and authorisation for F10, DN-08 for
-F8/F11b, DN-06 for F12). Codex authoring (F5) is engineering and has no owner dependency.
+Development and real acceptance use the owner's normal computer, HOME, XDG directories,
+session bus, wallet and installation. No disposable HOME, private keyring/bus, VM,
+container or artificial user installation. Ordinary unit fixtures remain permitted;
+they are not real integration evidence. Production Managed isolation stays intact.
+Historical isolated runs in acceptance records are historical evidence only, never a recipe.
+
+Before a real configuration change: identify the exact path, owner and permissions;
+make a verified backup; record its checksum without content; make the smallest reversible
+change; check the real provider; restore when appropriate and verify exact bytes and
+permissions. Never print credentials. Inspect exact process identities and active native
+sessions before changing the installed binary or stopping a host; retain rollback.
 
 ## How to resume
 
-1. `git log --oneline | head -5`; `git status --short`.
-2. Validation: `cd src-tauri && CARGO_HOME=$PWD/../.cache/cargo cargo fmt --check && cargo clippy
---offline --all-targets -- -D warnings && cargo test --offline`; then at the root (with
-   `ln -s ~/Github_repos/wyss-console/node_modules node_modules`, removed before committing)
-   `npx prettier --check . && npx eslint . && npx svelte-check && npx vitest run`.
-3. GUI: `npm run desktop:build`, then a nested KWin + Xwayland (`/tmp/claude-1000/f3/nest-up.sh`
-   in the previous session; the recipe is in the memory file `reference_display_anidado_kwin`),
-   app with its own `XDG_STATE_HOME` and `XDG_RUNTIME_DIR`, real `HOME`. Stop a leftover host
-   with `wyss-console --wyss-host-stop`.
-4. Never type into a tab without confirming which one is active.
-5. **Do not isolate `XDG_DATA_HOME` for a GUI run with the real HOME**: Claude Code's installer
-   moved `~/.local/bin/claude` to a copy under that directory (repaired once; the symlink must point
-   at `~/.local/share/claude/versions/<version>`). Isolate only `XDG_STATE_HOME` and `XDG_RUNTIME_DIR`.
+1. Check local/remote Git state and recent commits; do not overwrite another session's work.
+2. Use `npm run check` and `npm run check:rust`. `rust:test` runs library, binary and
+   authority-boundary tests. Do not run blanket `cargo test`: the inherited
+   `lifecycle_process` suite creates a disposable user HOME/private systemd installation,
+   prohibited by the current owner policy. Its previous run was interrupted; it is not
+   current real-environment acceptance evidence.
+3. Exercise the native GUI in the normal desktop session and real environment. Never stop
+   an unknown host or terminal. Confirm the active pane before typing.
+4. Keep Codex hooks blocked until G-INF; no paid credentials, third-party installs or
+   network exposure without the specific owner authorisation.
 
 ## Commits of this stretch
 

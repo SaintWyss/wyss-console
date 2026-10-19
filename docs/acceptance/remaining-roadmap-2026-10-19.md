@@ -9,7 +9,7 @@ F1 inventory · F2a Claude Code hooks and skills · F2b Codex skills and MCP ser
 rule · F3a/b/c native launcher, registry, profiles · F9 host that outlives the window ·
 T1/T2 panes, search, keys, saved layout · F14 sealed API keys · F11a handoff brief ·
 F13 install, upgrade, rollback, diagnose · F4a OpenCode (inventory and switches) · F5 authoring of
-hooks and OpenCode servers · F6a models (managed observed, native three facts) · F1b research
+hooks and OpenCode and Codex servers · F6a models (managed observed, native three facts) · F1b research
 (recommendation I4, not proven).
 
 ## Not built, and why
@@ -29,7 +29,9 @@ hooks and OpenCode servers · F6a models (managed observed, native three facts) 
 
 ## Next
 
-Everything that can be built without a decision of the owner's is built. What follows is the
-owner's: a credential path for F1b, consent for a reference terminal (P1) or for Hermes (F4b), the
-overlay network and the OK to expose a service (F10), DN-08 (F8, F11b) and DN-06 (F12). The one piece of engineering left
-is authoring of skills and rule files, which nothing blocks.
+Santiago authorised completion of the remaining eligible roadmap on 2026-10-19.
+Start with F5 skills, rules and templates, then F6 native catalogue/selection and P1 own
+metrics. F10 local gateway development and F8 foundations may proceed without exposing a
+listener or replacing the approved authority contract. Network exposure/device enrolment,
+Ghostty/Hermes installation and paid credential use still need specific owner consent.
+All real acceptance uses the normal owner environment (see `../CHECKPOINT.md`).

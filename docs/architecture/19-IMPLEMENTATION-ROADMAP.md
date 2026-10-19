@@ -1,5 +1,13 @@
 # 19 — Implementation roadmap
 
+> Current execution policy (Santiago, 2026-10-19): the eligible remaining roadmap is
+> authorised. Real development/acceptance uses the owner's normal computer and environment;
+> no disposable HOME, private keyring/bus, VM, container or artificial user installation.
+> Older isolated procedures/results below are historical and must not be repeated.
+> Unit fixtures and intrinsic production Managed security isolation remain valid.
+> Current implementation, acceptance evidence and accepted ADRs take precedence over
+> historical planning statuses. See `../CHECKPOINT.md` (from architecture/acceptance/research).
+
 The whole product, broken into independently reviewable phases. **Nothing here is authorised
 by being written.** A phase starts when the owner says so. Today: F0 is closed; F1 is
 authorised and not started `[O]`; nothing else is authorised.

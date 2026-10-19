@@ -10,18 +10,8 @@ const env = {
   ...process.env,
   CARGO_HOME: join(cache, 'cargo'),
   CARGO_TARGET_DIR: join(root, 'src-tauri', 'target'),
-  XDG_CACHE_HOME: join(cache, 'xdg-cache'),
-  XDG_CONFIG_HOME: join(cache, 'xdg-config'),
-  XDG_DATA_HOME: join(cache, 'xdg-data'),
 };
-for (const directory of [
-  env.CARGO_HOME,
-  env.XDG_CACHE_HOME,
-  env.XDG_CONFIG_HOME,
-  env.XDG_DATA_HOME,
-]) {
-  mkdirSync(directory, { recursive: true });
-}
+mkdirSync(env.CARGO_HOME, { recursive: true });
 
 /** @type {string} */
 let command;

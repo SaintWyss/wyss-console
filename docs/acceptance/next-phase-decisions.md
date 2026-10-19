@@ -1,5 +1,13 @@
 # What the owner has to decide before the next phase
 
+> Current execution policy (Santiago, 2026-10-19): the eligible remaining roadmap is
+> authorised. Real development/acceptance uses the owner's normal computer and environment;
+> no disposable HOME, private keyring/bus, VM, container or artificial user installation.
+> Older isolated procedures/results below are historical and must not be repeated.
+> Unit fixtures and intrinsic production Managed security isolation remain valid.
+> Current implementation, acceptance evidence and accepted ADRs take precedence over
+> historical planning statuses. See `../CHECKPOINT.md` (from architecture/acceptance/research).
+
 Written 2026-10-19 after F2b. Nothing here is approved: each item is a decision for the owner,
 with the recommendation of the architecture documents. Finished work (F1, F2a, F2b) is not
 reopened.

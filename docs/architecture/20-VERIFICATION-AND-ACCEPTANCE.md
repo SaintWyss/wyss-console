@@ -1,5 +1,13 @@
 # 20 — Verification and acceptance
 
+> Current execution policy (Santiago, 2026-10-19): the eligible remaining roadmap is
+> authorised. Real development/acceptance uses the owner's normal computer and environment;
+> no disposable HOME, private keyring/bus, VM, container or artificial user installation.
+> Older isolated procedures/results below are historical and must not be repeated.
+> Unit fixtures and intrinsic production Managed security isolation remain valid.
+> Current implementation, acceptance evidence and accepted ADRs take precedence over
+> historical planning statuses. See `../CHECKPOINT.md` (from architecture/acceptance/research).
+
 The master test plan. **No test was run to write it**, and none of the tests specified here
 exists unless marked `[R]`. Each specification names what it holds, at which level, in which
 phase it is written, and what would make it fail.
