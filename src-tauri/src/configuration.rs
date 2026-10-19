@@ -36,7 +36,13 @@ fn state_directory() -> Option<std::path::PathBuf> {
 impl Configuration {
     pub fn start() -> Self {
         let app = Arc::new(OnceLock::new());
-        let environment = Environment::from_process(None);
+        let mut environment = Environment::from_process(None);
+        // The accounts the owner named as allowed to write a provider's directory (file only
+        // he can write, under the state directory; see `agentconfig::declared`).
+        if let (Some(environment), Some(state)) = (environment.as_mut(), state_directory()) {
+            environment.declared_writers =
+                crate::agentconfig::declared::load(state.parent().unwrap_or(&state));
+        }
         let inventory = environment
             .clone()
             .and_then(|environment| InventoryService::start(environment, Bounds::PROPOSED));
@@ -401,6 +407,7 @@ mod tests {
             codex_home: None,
             project: None,
             system: home.join("etc"),
+            declared_writers: Vec::new(),
         };
         let service = InventoryService::start(environment, Bounds::PROPOSED).unwrap();
         (
@@ -500,7 +507,6 @@ mod tests {
     /// write it again after a deliberate change, then run Prettier on it.
     #[test]
     fn the_inventory_reply_is_exactly_the_shared_fixture() {
-        use std::os::unix::fs::PermissionsExt;
         let (configuration, home) = configuration_over(&[
             (
                 ".claude/settings.json",
@@ -524,7 +530,22 @@ mod tests {
             (".codex/hooks.json", "{ not json"),
         ]);
         // A provider directory a group can write: read, and never writable.
-        fs::set_permissions(home.join(".codex"), fs::Permissions::from_mode(0o775)).unwrap();
+        // A provider directory a group with others in it can write (root's group, which is
+        // never private): read, and never writable. An ACL, so that the answer does not
+        // depend on which groups this machine has.
+        use crate::agentconfig::{
+            ACL_GROUP, ACL_GROUP_OBJ, ACL_MASK, ACL_OTHER, ACL_USER_OBJ, set_acl_for_test,
+        };
+        assert!(set_acl_for_test(
+            &home.join(".codex"),
+            &[
+                (ACL_USER_OBJ, 7, 0),
+                (ACL_GROUP_OBJ, 5, 0),
+                (ACL_GROUP, 7, 0),
+                (ACL_MASK, 7, 0),
+                (ACL_OTHER, 5, 0),
+            ]
+        ));
         configuration
             .service()
             .unwrap()

@@ -153,6 +153,12 @@
           {/each}
         </ul>
       {/if}
+      {#if plan.shared_with_declared_writers}
+        <p class="event-meta">
+          Another account you named in <span class="mono">trusted-writers</span> can
+          also write this file’s folder. It is accepted because you named it.
+        </p>
+      {/if}
       {#if plan.holds_hidden_values}
         <p class="configuration-warning">
           This entry holds values that are not shown here.

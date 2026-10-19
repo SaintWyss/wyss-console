@@ -35,6 +35,7 @@ impl Home {
             codex_home: None,
             project: None,
             system: self.0.join("etc"),
+            declared_writers: Vec::new(),
         }
     }
     fn service(&self) -> InventoryService {

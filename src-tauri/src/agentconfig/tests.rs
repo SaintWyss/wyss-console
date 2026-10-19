@@ -415,7 +415,8 @@ fn a_link_on_the_way_or_a_file_on_the_way_is_refused() {
 #[test]
 fn a_shared_directory_is_read_and_never_writable() {
     let root = Root::new();
-    root.dir("dot-claude", 0o775);
+    root.dir("dot-claude", 0o755);
+    super::acl::share_with_a_group_for_test(&root.path("dot-claude"));
     let path = root.file("dot-claude/settings.json", b"{}");
     let read = reader(&root).read_file(&path).unwrap();
     assert_eq!(
@@ -946,7 +947,8 @@ fn a_directory_swapped_for_a_link_after_it_was_opened_is_not_followed() {
 #[test]
 fn group_writable_configuration_is_read_but_never_writable_and_world_writable_is_refused() {
     let root = Root::new();
-    root.dir("shared", 0o775);
+    root.dir("shared", 0o755);
+    super::acl::share_with_a_group_for_test(&root.path("shared"));
     let file = root.file("shared/settings.json", b"{}");
     fs::set_permissions(&file, fs::Permissions::from_mode(0o664)).unwrap();
     let read = reader(&root).read_file(&file).unwrap();

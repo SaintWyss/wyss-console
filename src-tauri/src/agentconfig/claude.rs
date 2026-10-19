@@ -27,6 +27,7 @@ pub(super) fn roots(env: &Environment) -> Result<ApprovedRoots, InvalidRoot> {
         roots.push(project.join("CLAUDE.md"));
     }
     ApprovedRoots::new(roots)
+        .map(|roots| roots.with_declared_writers(super::declared::uids(&env.declared_writers)))
 }
 
 /// `~/.claude.json`, or the file of the same name inside a relocated configuration

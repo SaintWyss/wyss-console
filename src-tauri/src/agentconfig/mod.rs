@@ -18,6 +18,13 @@
 //! inventory the service keeps current; the others plan, confirm, apply, journal and undo
 //! changes to Claude Code's settings (F2a, ADR 0029).
 #![cfg_attr(not(test), allow(dead_code))]
+mod acl;
+#[cfg(test)]
+mod acl_tests;
+#[cfg(test)]
+pub(crate) use acl::{
+    ACL_GROUP, ACL_GROUP_OBJ, ACL_MASK, ACL_OTHER, ACL_USER_OBJ, set_acl_for_test,
+};
 #[cfg(test)]
 mod adapter_tests;
 mod change;
@@ -32,6 +39,7 @@ mod codex;
 pub mod codex_plan;
 #[cfg(test)]
 mod codex_plan_tests;
+pub mod declared;
 mod fault;
 mod fsutil;
 mod inventory;

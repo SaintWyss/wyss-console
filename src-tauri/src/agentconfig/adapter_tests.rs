@@ -42,6 +42,7 @@ impl Home {
             project: None,
             // No `/etc/codex` here: the owner's machine has one, a test must not.
             system: self.0.join("etc"),
+            declared_writers: Vec::new(),
         }
     }
     fn read(&self) -> Inventory {
@@ -482,7 +483,7 @@ fn a_settings_link_to_outside_the_roots_is_refused_without_reading_it() {
 fn a_group_writable_provider_directory_is_read_and_never_writable() {
     let home = Home::new();
     home.put(".claude/settings.json", r#"{ "model": "opus" }"#);
-    fs::set_permissions(home.0.join(".claude"), fs::Permissions::from_mode(0o775)).unwrap();
+    super::acl::share_with_a_group_for_test(&home.0.join(".claude"));
     let found = home.read();
     let source = found
         .sources

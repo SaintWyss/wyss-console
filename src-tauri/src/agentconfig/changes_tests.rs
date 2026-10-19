@@ -19,6 +19,11 @@ use std::{
     },
 };
 
+thread_local! {
+    /// Accounts the next worlds of this thread declare as co-writers (a test sets and clears it).
+    static DECLARED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 const MARKER: &str = "SEKRET-0f3a9c-marker";
 
 const SETTINGS: &str = r#"{
@@ -98,6 +103,7 @@ impl World {
             codex_home: None,
             project: None,
             system: base.join("etc"),
+            declared_writers: DECLARED.with(|d| d.borrow().clone()),
         };
         let inventory = InventoryService::start(environment.clone(), Bounds::PROPOSED).unwrap();
         let confirm = Arc::new(FakeConfirm::default());
@@ -613,11 +619,7 @@ fn what_is_not_this_users_settings_is_never_planned() {
         );
     }
     // A group-writable provider directory is read and never written.
-    fs::set_permissions(
-        world.home.join(".claude"),
-        fs::Permissions::from_mode(0o775),
-    )
-    .unwrap();
+    super::acl::share_with_a_group_for_test(&world.home.join(".claude"));
     assert_eq!(
         world
             .service
@@ -1490,7 +1492,7 @@ fn what_codex_plans_refuse_is_refused_in_words() {
         ChangeFailure::NotSupported
     );
     // A shared provider directory is read and never written.
-    fs::set_permissions(world.home.join(".codex"), fs::Permissions::from_mode(0o775)).unwrap();
+    super::acl::share_with_a_group_for_test(&world.home.join(".codex"));
     let beta = world.codex_item(ItemKind::Skill, "beta");
     assert_eq!(
         world
@@ -1776,4 +1778,285 @@ fn real_codex_config_one_switch_then_back() {
     drop(guard);
     let _ = fs::remove_dir_all(&state);
     let _ = fs::remove_file(&backup);
+}
+
+// ---- a provider directory a second account can write (the real ~/.claude) ----------------
+
+/// An account that exists on any machine and is not the one running the tests.
+const OTHER_NAME: &str = "nobody";
+const OTHER_UID: u32 = 65534;
+
+fn give_the_other_account_write_access(dir: &Path) -> bool {
+    use super::acl::{
+        ACL_GROUP_OBJ, ACL_MASK, ACL_OTHER, ACL_USER, ACL_USER_OBJ, set_acl_for_test,
+    };
+    // user::rwx, user:nobody:rwx, group::r-x, mask::rwx, other::r-x: the shape of the real one.
+    set_acl_for_test(
+        dir,
+        &[
+            (ACL_USER_OBJ, 7, 0),
+            (ACL_USER, 7, OTHER_UID),
+            (ACL_GROUP_OBJ, 5, 0),
+            (ACL_MASK, 7, 0),
+            (ACL_OTHER, 5, 0),
+        ],
+    )
+}
+
+#[test]
+fn a_directory_a_second_account_can_write_is_read_only_until_the_owner_names_that_account() {
+    let world = World::new(SETTINGS);
+    if !give_the_other_account_write_access(&world.home.join(".claude")) {
+        eprintln!("ACLs are not available here; skipped");
+        return;
+    }
+    // Not named: read, and never written.
+    assert_eq!(
+        world
+            .service
+            .plan(Operation::ParkHook, &world.hook("Stop", 0, 0))
+            .unwrap_err(),
+        ChangeFailure::NotWritable
+    );
+    // The inventory still reads it.
+    world.inventory.rescan();
+    assert!(!world.inventory.snapshot().inventory.items.is_empty());
+    // Named by the owner: accepted, said in the plan, written atomically as always.
+    DECLARED.with(|d| *d.borrow_mut() = vec![OTHER_NAME.to_owned()]);
+    let named = world.restarted();
+    DECLARED.with(|d| d.borrow_mut().clear());
+    let plan = named
+        .service
+        .plan(Operation::ParkHook, &named.hook("Stop", 0, 0))
+        .unwrap();
+    assert!(plan.shared_with_declared_writers);
+    assert_eq!(applied(&named, &plan), Outcome::Applied);
+    assert!(!named.file().contains("stop.sh"));
+    // The directory's ACL is exactly what it was: nothing about permissions was touched.
+    let record = named.service.records().remove(0);
+    let back = named
+        .service
+        .plan(Operation::RestoreHook, &record.id)
+        .unwrap();
+    assert_eq!(applied(&named, &back), Outcome::Applied);
+    assert_eq!(named.file(), SETTINGS);
+}
+
+#[test]
+fn a_second_writer_that_is_not_the_one_named_keeps_the_directory_read_only() {
+    let world = World::new(SETTINGS);
+    if !give_the_other_account_write_access(&world.home.join(".claude")) {
+        return;
+    }
+    // The owner named another account, not this one.
+    DECLARED.with(|d| *d.borrow_mut() = vec!["root".to_owned()]);
+    let other = world.restarted();
+    DECLARED.with(|d| d.borrow_mut().clear());
+    assert_eq!(
+        other
+            .service
+            .plan(Operation::ParkHook, &other.hook("Stop", 0, 0))
+            .unwrap_err(),
+        ChangeFailure::NotWritable
+    );
+}
+
+#[test]
+fn a_named_account_never_makes_a_directory_anyone_can_write_acceptable() {
+    let world = World::new(SETTINGS);
+    fs::set_permissions(
+        world.home.join(".claude"),
+        fs::Permissions::from_mode(0o777),
+    )
+    .unwrap();
+    DECLARED.with(|d| *d.borrow_mut() = vec![OTHER_NAME.to_owned()]);
+    let named = world.restarted();
+    DECLARED.with(|d| d.borrow_mut().clear());
+    assert!(
+        named
+            .service
+            .plan(Operation::ParkHook, &named.hook("Stop", 0, 0))
+            .is_err()
+    );
+}
+
+#[test]
+fn the_owners_own_private_group_is_nobody_else_but_a_shared_group_is() {
+    // The directory is the owner's, 0775, in the group it was made in. If that group has
+    // nobody else in it, the extra write bit changes nothing; if it does, the directory is
+    // read only. Either way the answer is the machine's, never a guess.
+    let world = World::new(SETTINGS);
+    fs::set_permissions(
+        world.home.join(".claude"),
+        fs::Permissions::from_mode(0o775),
+    )
+    .unwrap();
+    let gid = nix::unistd::getegid().as_raw();
+    let me = nix::unistd::geteuid().as_raw();
+    let private = super::acl::group_is_private(gid, me);
+    let result = world
+        .service
+        .plan(Operation::ParkHook, &world.hook("Stop", 0, 0));
+    assert_eq!(result.is_ok(), private, "private={private}: {result:?}");
+    // And a group that certainly has others in it (root's) is never private.
+    assert!(!super::acl::group_is_private(0, me));
+}
+
+/// The real `~/.claude`, which a second account (`agent`) can write by an ACL the owner put
+/// there on purpose: with that account named in `trusted-writers`, one skill is switched off
+/// through the service, the installed Claude Code is asked, the change is undone, and the file
+/// must be the bytes it started as, with the directory's ACL and the file's mode untouched.
+/// Needs `WYSS_REAL_CLAUDE_SKILL`. By hand: `cargo test -- --ignored real_claude_config
+/// --nocapture`.
+#[test]
+#[ignore = "changes the real ~/.claude/settings.json for a few seconds and puts it back"]
+fn real_claude_config_one_switch_then_back() {
+    use std::process::Command;
+    let skill = std::env::var("WYSS_REAL_CLAUDE_SKILL").expect("name the skill to switch");
+    let mut environment = Environment::from_process(None).unwrap();
+    let state_root =
+        PathBuf::from(std::env::var_os("HOME").unwrap()).join(".local/state/wyss-console");
+    environment.declared_writers = super::declared::load(&state_root);
+    println!("declared writers: {:?}", environment.declared_writers);
+    let dir = environment.claude_dir();
+    let path = dir.join("settings.json");
+    let original = fs::read(&path).unwrap();
+    let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    let acl = |p: &Path| {
+        String::from_utf8(
+            Command::new("getfacl")
+                .arg("-p")
+                .arg(p)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+    };
+    let acl_before = acl(&dir);
+    println!(
+        "{} bytes, mode {mode:o}; directory ACL:\n{acl_before}",
+        original.len()
+    );
+
+    let claude = |prompt: &str| {
+        let out = Command::new("claude")
+            .args(["-p", prompt])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+    };
+
+    struct Guard<'a> {
+        path: &'a Path,
+        original: &'a [u8],
+        produced: std::cell::RefCell<Option<Vec<u8>>>,
+    }
+    impl Drop for Guard<'_> {
+        fn drop(&mut self) {
+            let now = fs::read(self.path).unwrap_or_default();
+            if now != self.original && self.produced.borrow().as_deref() == Some(now.as_slice()) {
+                let _ = fs::write(self.path, self.original);
+                eprintln!("the guard put the original bytes back");
+            }
+        }
+    }
+    let guard = Guard {
+        path: &path,
+        original: &original,
+        produced: std::cell::RefCell::new(None),
+    };
+
+    let state =
+        std::env::temp_dir().join(format!("wyss-real-state-{}", uuid::Uuid::new_v4().simple()));
+    fs::DirBuilder::new().mode(0o700).create(&state).unwrap();
+    let inventory = InventoryService::start(environment.clone(), Bounds::PROPOSED).unwrap();
+    let confirm = Arc::new(FakeConfirm::default());
+    confirm.accept.store(true, Ordering::SeqCst);
+    let service = ChangeService::for_providers(
+        environment,
+        inventory.clone(),
+        &state,
+        Vault::new(Box::new(MemoryStore::new())),
+        Box::new(confirm.clone()),
+        Faults::default(),
+    )
+    .unwrap();
+    let id = inventory
+        .snapshot()
+        .inventory
+        .items
+        .iter()
+        .find(|i| {
+            i.kind == ItemKind::Skill
+                && i.name.as_str() == skill
+                && i.source == SourceKey::ClaudeUserSkills
+        })
+        .expect("the skill is in the inventory")
+        .id
+        .clone();
+    let plan = service.plan(Operation::SkillOff, &id).unwrap();
+    println!(
+        "plan: {} risk {:?}, shared with a declared writer: {}",
+        plan.name, plan.risk, plan.shared_with_declared_writers
+    );
+    assert!(
+        plan.shared_with_declared_writers,
+        "the real directory is shared with the declared account"
+    );
+    let changed_by = service.apply(&plan.id).unwrap();
+    *guard.produced.borrow_mut() = fs::read(&path).ok();
+    assert_eq!(changed_by.outcome, Outcome::Applied);
+
+    let after = fs::read_to_string(&path).unwrap();
+    let before = String::from_utf8(original.clone()).unwrap();
+    let new_lines: Vec<&str> = after.lines().collect();
+    let old_lines: Vec<&str> = before.lines().collect();
+    println!("lines before {} after {}", old_lines.len(), new_lines.len());
+    serde_json::from_str::<serde_json::Value>(&after).unwrap();
+    assert!(after.contains(&format!("\"{skill}\": \"off\"")));
+    // Everything that was in the file is still in it, in order.
+    let mut rest = new_lines.iter();
+    for line in &old_lines {
+        assert!(
+            rest.any(|l| l.trim_end_matches(',') == line.trim_end_matches(',')),
+            "lost {line:?}"
+        );
+    }
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        mode
+    );
+    assert_eq!(
+        acl(&dir),
+        acl_before,
+        "the directory's ACL must be untouched"
+    );
+    let said = claude(&format!("/{skill}"));
+    println!(
+        "the installed Claude Code says: {}",
+        said.lines().next().unwrap_or("")
+    );
+    assert!(said.contains("disabled via skillOverrides"));
+
+    let undo = service.undo(&changed_by.change).unwrap();
+    assert_eq!(service.apply(&undo.id).unwrap().outcome, Outcome::Applied);
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        original,
+        "byte-identical to the original"
+    );
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        mode
+    );
+    assert_eq!(acl(&dir), acl_before);
+    println!("undone: the file equals the original byte for byte, mode and ACL unchanged");
+    drop(guard);
+    let _ = fs::remove_dir_all(&state);
 }

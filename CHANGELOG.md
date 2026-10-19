@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Claude Code's folder with an ACL (F1/F2a trust)
+
+- **Changes to `~/.claude` work again on a machine where the owner gave another account
+  write access by ACL.** The Console now reads the folder's ACL: the owner's private group
+  does not count as a second writer, and an account the owner names in
+  `~/.local/state/wyss-console/configuration/trusted-writers` is accepted (the page says it
+  can also write the folder). World-writable folders, other ACL users and shared groups stay
+  read-only. No `chmod`, no ACL change; delete the file to go back to the strict rule.
+
 ### Codex skills and MCP servers, with a way back (F2b)
 
 - **Codex's skills and MCP servers can be switched from the Configuration view**, in the

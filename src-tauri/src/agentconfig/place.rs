@@ -51,6 +51,38 @@ pub(crate) fn judge_directory(facts: Facts, me: u32) -> Result<PathTrust, Untrus
     Ok(PathTrust::Trusted)
 }
 
+/// A directory on the way to a source, judged with who can really write it (`acl.rs`): the
+/// owner's private group is nobody else, an account the owner has named (`declared`, uids) is
+/// accepted and reported, and any other group or named user makes it read only. The second
+/// value says whether a declared account can write it, for the plan to say so.
+pub(crate) fn judge_dir(
+    fd: &OwnedFd,
+    me: u32,
+    declared: &[u32],
+) -> Result<(PathTrust, bool), SourceFailure> {
+    let stat = fstat(fd.as_raw_fd()).map_err(|_| SourceFailure::Unreadable)?;
+    let facts = Facts {
+        uid: stat.st_uid,
+        mode: stat.st_mode,
+        nlink: stat.st_nlink,
+    };
+    let untrusted = |reason| SourceFailure::UntrustedPath { reason };
+    if facts.uid != 0 && facts.uid != me {
+        return Err(untrusted(UntrustedReason::ForeignOwner));
+    }
+    if facts.uid == 0 && facts.mode & 0o1000 != 0 {
+        return Ok((PathTrust::Trusted, false));
+    }
+    let who = super::acl::writers(fd, facts.mode, stat.st_gid, me);
+    if who.everyone {
+        return Err(untrusted(UntrustedReason::WritableByOthers));
+    }
+    if who.group_shared || who.named.iter().any(|uid| !declared.contains(uid)) {
+        return Ok((PathTrust::ReadOnly(ReadOnlyReason::GroupWritable), false));
+    }
+    Ok((PathTrust::Trusted, !who.named.is_empty()))
+}
+
 /// The file itself: this user's or root's, not writable by everyone. A file with a second
 /// name could be changed through it, so it is read and never written.
 pub(crate) fn judge_file(facts: Facts, me: u32) -> Result<PathTrust, UntrustedReason> {
@@ -229,7 +261,7 @@ fn open_failure(errno: Errno) -> SourceFailure {
 /// Walks `path` from the root, one directory descriptor at a time, and opens what is at
 /// its end without following a final link. A credential file is refused by its name
 /// before anything is opened.
-pub(crate) fn reach(path: &Path, want: Want) -> Result<Reached, SourceFailure> {
+pub(crate) fn reach(path: &Path, want: Want, declared: &[u32]) -> Result<Reached, SourceFailure> {
     let me = geteuid().as_raw();
     let names = names(path)?;
     let Some((last, ancestors)) = names.split_last() else {
@@ -243,7 +275,7 @@ pub(crate) fn reach(path: &Path, want: Want) -> Result<Reached, SourceFailure> {
     let untrusted = |reason| SourceFailure::UntrustedPath { reason };
     let directory = OFlag::O_RDONLY | OFlag::O_DIRECTORY;
     let mut dir = open_below(None, OsStr::new("/"), directory).map_err(open_failure)?;
-    let mut trust = judge_directory(facts(&dir)?, me).map_err(untrusted)?;
+    let mut trust = judge_dir(&dir, me, declared)?.0;
     for name in ancestors {
         let next = match open_below(Some(&dir), name, directory) {
             Ok(next) => next,
@@ -253,10 +285,7 @@ pub(crate) fn reach(path: &Path, want: Want) -> Result<Reached, SourceFailure> {
             Err(Errno::ENOTDIR) => return Err(untrusted(UntrustedReason::AncestorNotDirectory)),
             Err(errno) => return Err(open_failure(errno)),
         };
-        trust = weaker(
-            trust,
-            judge_directory(facts(&next)?, me).map_err(untrusted)?,
-        );
+        trust = weaker(trust, judge_dir(&next, me, declared)?.0);
         dir = next;
     }
     #[cfg(test)]
@@ -289,10 +318,10 @@ pub(crate) fn reach(path: &Path, want: Want) -> Result<Reached, SourceFailure> {
         });
     }
     let own = match want {
-        Want::File => judge_file(facts(&node)?, me),
-        Want::Directory => judge_directory(facts(&node)?, me),
+        Want::File => judge_file(facts(&node)?, me).map_err(untrusted),
+        Want::Directory => judge_dir(&node, me, declared).map(|(trust, _)| trust),
     };
-    Ok(Reached::Node(node, weaker(trust, own.map_err(untrusted)?)))
+    Ok(Reached::Node(node, weaker(trust, own?)))
 }
 
 /// Opens `path`, following a final link one hop at a time up to the bound; every hop is
@@ -320,7 +349,7 @@ pub(crate) fn open(
         if roots.in_credential_directory(&current, want == Want::Directory) {
             return Err(SourceFailure::CredentialFile);
         }
-        match reach(&current, want)? {
+        match reach(&current, want, roots.declared())? {
             Reached::Node(fd, own) => return Ok((fd, weaker(trust, own), links)),
             Reached::Link(target, own) => {
                 if links.len() >= link_hops {
@@ -345,6 +374,9 @@ pub(crate) struct Parent {
     pub path: PathBuf,
     /// The weakest judgement of every place on the way and of the file and its directory.
     pub trust: PathTrust,
+    /// An account the owner named can also write this directory (it was accepted because he
+    /// named it); the plan says so.
+    pub shared_with_declared: bool,
 }
 
 /// Resolves `path` as `open` does, then opens the directory its final file is in, walking
@@ -360,7 +392,7 @@ pub(crate) fn parent_for_write(
     // The place the links lead to: the last hop's target, or the path itself.
     let mut current = path.to_owned();
     for _ in 0..=links.len() {
-        match reach(&current, Want::File)? {
+        match reach(&current, Want::File, roots.declared())? {
             Reached::Node(..) => break,
             Reached::Link(target, _) => current = link_target(&current, &target)?,
         }
@@ -375,7 +407,8 @@ pub(crate) fn parent_for_write(
     let untrusted = |reason| SourceFailure::UntrustedPath { reason };
     let directory = OFlag::O_RDONLY | OFlag::O_DIRECTORY;
     let mut dir = open_below(None, OsStr::new("/"), directory).map_err(open_failure)?;
-    trust = weaker(trust, judge_directory(facts(&dir)?, me).map_err(untrusted)?);
+    let (first, mut shared_with_declared) = judge_dir(&dir, me, roots.declared())?;
+    trust = weaker(trust, first);
     for name in ancestors {
         let next = match open_below(Some(&dir), name, directory) {
             Ok(next) => next,
@@ -384,10 +417,9 @@ pub(crate) fn parent_for_write(
             }
             Err(errno) => return Err(open_failure(errno)),
         };
-        trust = weaker(
-            trust,
-            judge_directory(facts(&next)?, me).map_err(untrusted)?,
-        );
+        let (judged, declared_here) = judge_dir(&next, me, roots.declared())?;
+        trust = weaker(trust, judged);
+        shared_with_declared |= declared_here;
         dir = next;
     }
     Ok(Parent {
@@ -395,6 +427,7 @@ pub(crate) fn parent_for_write(
         name: (*last).to_owned(),
         path: current,
         trust,
+        shared_with_declared,
     })
 }
 

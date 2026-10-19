@@ -30,6 +30,9 @@ pub struct Environment {
     pub project: Option<PathBuf>,
     /// Where the systems' policy lives, `/etc`.
     pub system: PathBuf,
+    /// Accounts (by name) the owner has declared may write a provider's directory besides him
+    /// (`declared.rs`). Empty unless he said otherwise.
+    pub declared_writers: Vec<String>,
 }
 
 impl Environment {
@@ -46,6 +49,7 @@ impl Environment {
             codex_home: absolute("CODEX_HOME"),
             project,
             system: PathBuf::from("/etc"),
+            declared_writers: Vec::new(),
         })
     }
 

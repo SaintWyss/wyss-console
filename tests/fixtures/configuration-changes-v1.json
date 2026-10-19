@@ -85,6 +85,7 @@
     "provider": "claude_code",
     "risk": "weakens_security",
     "scope": "global",
+    "shared_with_declared_writers": false,
     "source": "claude_user_settings",
     "storage": null,
     "undoes": null
@@ -115,6 +116,7 @@
     "provider": "codex",
     "risk": "normal",
     "scope": "global",
+    "shared_with_declared_writers": false,
     "source": "codex_user_config",
     "storage": null,
     "undoes": null
@@ -145,6 +147,7 @@
     "provider": "codex",
     "risk": "normal",
     "scope": "global",
+    "shared_with_declared_writers": false,
     "source": "codex_user_config",
     "storage": null,
     "undoes": null
@@ -171,6 +174,7 @@
     "provider": "claude_code",
     "risk": "weakens_security",
     "scope": "global",
+    "shared_with_declared_writers": false,
     "source": "claude_user_settings",
     "storage": "sealed",
     "undoes": null
@@ -197,6 +201,7 @@
     "provider": "claude_code",
     "risk": "executes_code",
     "scope": "global",
+    "shared_with_declared_writers": false,
     "source": "claude_user_settings",
     "storage": null,
     "undoes": null
@@ -219,6 +224,7 @@
     "provider": "claude_code",
     "risk": "normal",
     "scope": "global",
+    "shared_with_declared_writers": false,
     "source": "claude_user_settings",
     "storage": null,
     "undoes": null

@@ -80,13 +80,15 @@ line` / `restore the word true|false`), no key names, no values beyond a boolean
 
 ## What actually remains after F2b
 
-1. **`~/.claude` is `0775` with an ACL, so every Claude Code change is refused** on the
-   owner's real machine ("its folder can be written by a group: read, never changed", the
-   rule of 07 §4.2). Codex's `~/.codex` is `0755` and works. Options: (a) leave the rule and
-   have the owner run `chmod g-w ~/.claude` (it may interact with the `agent` user's ACL, which
-   must not be touched without his word); (b) relax the rule for a directory whose group is
-   the owner's private group with no other member and no extra ACL entry. Recommended: (a) by
-   hand after checking the ACL, because (b) weakens a security rule that exists for a reason.
+1. **`~/.claude` is `0775` with an ACL for the sandboxed `agent` account — resolved without
+   touching it.** The rule of 07 §4.2 stays: a folder another account can write is read-only.
+   What changed is how "can write" is judged: the ACL is read, a group whose only member is
+   the owner does not count, and an account the owner NAMES in
+   `~/.local/state/wyss-console/configuration/trusted-writers` is accepted as a co-writer (the
+   page says so). World-writable, any other ACL user and any shared group are still refused.
+   Shown on the real `~/.claude`: one skill switched off, the installed Claude Code said
+   "disabled via skillOverrides", the undo restored the exact bytes, and the directory's ACL
+   and the file's mode did not change. To go back to the strict rule, delete that file.
 2. **Codex skills**: the effect of `[[skills.config]] enabled` on a running Codex is
    unverified; the plan says so.
 3. **Codex hooks** stay display-only until OQ-01 and G-INF.

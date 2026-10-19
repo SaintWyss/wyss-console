@@ -35,7 +35,7 @@ impl fmt::Display for InvalidRoot {
 impl std::error::Error for InvalidRoot {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApprovedRoots(Vec<PathBuf>);
+pub struct ApprovedRoots(Vec<PathBuf>, Vec<u32>);
 
 impl ApprovedRoots {
     /// The roots of one adapter. Each is an absolute path with no `..`, no control
@@ -57,12 +57,29 @@ impl ApprovedRoots {
                 return Err(InvalidRoot);
             }
         }
-        Ok(Self(approved))
+        Ok(Self(approved, Vec::new()))
+    }
+
+    /// The accounts the owner has named as allowed to write a provider's directory besides
+    /// him (uids). A directory only they can write is accepted; any other writer is not.
+    #[must_use]
+    pub fn with_declared_writers(mut self, uids: Vec<u32>) -> Self {
+        self.1 = uids;
+        self
+    }
+
+    pub(crate) fn declared(&self) -> &[u32] {
+        &self.1
     }
 
     /// The roots of two adapters, as one list.
     pub fn union(&self, other: &Self) -> Result<Self, InvalidRoot> {
+        let mut declared = self.1.clone();
+        declared.extend(&other.1);
+        declared.sort_unstable();
+        declared.dedup();
         Self::new(self.0.iter().chain(&other.0).cloned())
+            .map(|roots| roots.with_declared_writers(declared))
     }
 
     /// The approved root that holds `path`, if any.

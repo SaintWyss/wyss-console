@@ -150,6 +150,9 @@ pub struct PlanView {
     pub managed_effect: Option<ManagedEffectView>,
     pub expires_in_seconds: u64,
     pub undoes: Option<String>,
+    /// An account the owner has named can also write the folder of this file, which is why it
+    /// is accepted at all (`declared.rs`): the page says so.
+    pub shared_with_declared_writers: bool,
 }
 
 /// A prediction, said as one.
@@ -174,6 +177,7 @@ struct Stored {
     drafted: Drafted,
     source: SourceKey,
     undoes: Option<String>,
+    shared_with_declared_writers: bool,
     at: Instant,
 }
 
@@ -337,6 +341,7 @@ impl ChangeService {
             }),
             expires_in_seconds: PLAN_LIFETIME_SECONDS.saturating_sub(stored.at.elapsed().as_secs()),
             undoes: stored.undoes.clone(),
+            shared_with_declared_writers: stored.shared_with_declared_writers,
         }
     }
 
@@ -346,6 +351,12 @@ impl ChangeService {
             drafted,
             source,
             undoes,
+            shared_with_declared_writers: self
+                .path_of(source)
+                .and_then(|path| {
+                    parent_for_write(self.reader.roots(), &path, self.bounds.link_hops).ok()
+                })
+                .is_some_and(|parent| parent.shared_with_declared),
             at: Instant::now(),
         };
         let view = self.view(&stored);

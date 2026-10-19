@@ -23,6 +23,7 @@ pub(super) fn roots(env: &Environment) -> Result<ApprovedRoots, InvalidRoot> {
         roots.push(project.join("AGENTS.md"));
     }
     ApprovedRoots::new(roots)
+        .map(|roots| roots.with_declared_writers(super::declared::uids(&env.declared_writers)))
 }
 
 pub(super) fn read(reader: &ConfigReader, env: &Environment, sink: &mut Sink) {

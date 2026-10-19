@@ -305,6 +305,8 @@ export interface Plan {
   managed_effect: ManagedEffect | null;
   expires_in_seconds: number;
   undoes: string | null;
+  /** An account the owner named can also write the folder of this file. */
+  shared_with_declared_writers: boolean;
 }
 
 export interface Applied {
@@ -685,6 +687,7 @@ export function parsePlan(value: unknown): Plan {
       'managed_effect',
       'expires_in_seconds',
       'undoes',
+      'shared_with_declared_writers',
     ],
     'plan',
   );
@@ -718,6 +721,7 @@ export function parsePlan(value: unknown): Plan {
     }),
     expires_in_seconds: count(p.expires_in_seconds, 'plan'),
     undoes: opt(p.undoes, (v) => ident(v, 'plan')),
+    shared_with_declared_writers: flag(p.shared_with_declared_writers, 'plan'),
   };
 }
 
