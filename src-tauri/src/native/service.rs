@@ -32,6 +32,31 @@ use wyss_console::{
 };
 
 const FOUND_FOR: Duration = Duration::from_secs(30);
+
+/// Variables that belong to *one running agent session*, not to the user: if the Console was
+/// itself started from inside Claude Code or Codex it has them, and an agent started from it
+/// must not take them for its own (it would think it is a child of that session, and would
+/// hold its messaging token). The user's own configuration variables (`CLAUDE_CONFIG_DIR`,
+/// `ANTHROPIC_API_KEY`, `CODEX_HOME`, `CLAUDE_CODE_USE_*`…) are not in this list.
+pub const SESSION_MARKERS: [&str; 17] = [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_VERSION",
+    "CLAUDE_EFFORT",
+    "CLAUDE_PID",
+    "CLAUDE_PLUGIN_DATA",
+    "CLAUDE_PLUGIN_ROOT",
+    "CODEX_COMPANION_SESSION_ID",
+    "CODEX_THREAD_ID",
+    "CODEX_SESSION_ID",
+    "WYSS_NATIVE_SESSION_ID",
+];
 /// Words of an error the window can show; never a path or a command.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct NativeError {
@@ -151,6 +176,8 @@ struct Inner {
     extra_env: Vec<(String, String)>,
     /// A shell standing in for the user's. Never set outside tests.
     shell: Option<PathBuf>,
+    /// Names removed from the environment an agent inherits.
+    scrub: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -200,6 +227,7 @@ impl NativeService {
                 starting: AtomicBool::new(false),
                 extra_env: Vec::new(),
                 shell: None,
+                scrub: SESSION_MARKERS.iter().map(|n| (*n).to_owned()).collect(),
             }),
         })
     }
@@ -489,6 +517,7 @@ impl NativeService {
                 env: std::iter::once(("WYSS_NATIVE_SESSION_ID".to_owned(), id.clone()))
                     .chain(self.inner.extra_env.iter().cloned())
                     .collect(),
+                remove_env: self.inner.scrub.clone(),
             },
         );
         let info = match launched {
@@ -754,6 +783,7 @@ impl NativeService {
         let mut inner = Arc::try_unwrap(service.inner).ok()?;
         inner.extra_env = extra_env;
         inner.shell = Some(shell);
+        inner.scrub.push("WYSS_SCRUB_TEST_MARKER".to_owned());
         Some(Self {
             inner: Arc::new(inner),
         })

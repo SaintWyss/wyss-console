@@ -143,6 +143,7 @@ impl TerminalService {
             program: shell,
             args: vec!["-i".to_owned()],
             env: Vec::new(),
+            remove_env: Vec::new(),
         };
         self.spawn(request, launch, home)
     }

@@ -47,6 +47,8 @@ pub struct Launch {
     pub program: std::path::PathBuf,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// Variables of the Console's own environment the program must not inherit.
+    pub remove_env: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

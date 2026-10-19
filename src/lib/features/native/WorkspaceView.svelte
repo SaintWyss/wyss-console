@@ -288,6 +288,14 @@
                 : `${toRestore.length} lost sessions`} again</button
             >
           {/if}
+          {#if native.sessions.some((s) => s.state !== 'running' && s.state !== 'requested')}
+            <button
+              type="button"
+              class="action"
+              onclick={() => controller.forgetFinished()}
+              >Remove finished</button
+            >
+          {/if}
         </h3>
         {#if native.sessions.length === 0}
           <div class="sessions-empty">

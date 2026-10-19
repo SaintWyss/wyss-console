@@ -37,9 +37,13 @@ library the authority links.
 4. **Projects.** A start names a folder that is (a) the home folder, (b) a folder the native
    folder dialog returned in this run, or (c) a project the registry already knows. Anything
    else is `project_invalid`.
-5. **Environment additions** are one closed variable, `WYSS_NATIVE_SESSION_ID`, so a hook of
-   the agent can tell which session it belongs to. Nothing else is added; `TERM` is the
-   terminal's own.
+5. **Environment.** One closed variable is added, `WYSS_NATIVE_SESSION_ID`, so a hook of the
+   agent can tell which session it belongs to; `TERM` is the terminal's own. A closed list of
+   variables that belong to _one running agent session_ (`CLAUDECODE`,
+   `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CODEX_THREAD_ID`…) is removed from
+   what the agent inherits: found when the Console was started from inside Claude Code, whose
+   child it took itself for (transcript saving was off) and whose messaging token it held. The
+   user's own configuration variables are not in the list and are inherited as typed.
 6. **Registry.** One private file (`<state>/wyss-console/native/registry.json`, 0600, written
    atomically) with the sessions' metadata (agent, version, project, profile and its version,
    times, exit code or signal, restart link) and the known projects. A process id is observed

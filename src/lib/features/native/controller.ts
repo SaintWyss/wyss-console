@@ -79,6 +79,21 @@ const desktopClient: NativeClient = {
   importProfile,
 };
 
+/** The sessions as they are drawn: usage rounded to a whole percent and a megabyte. */
+function shownKey(sessions: NativeSession[]): string {
+  return JSON.stringify(
+    sessions.map((s) => ({
+      ...s,
+      usage: s.usage && {
+        cpu:
+          s.usage.cpu_percent === null ? null : Math.round(s.usage.cpu_percent),
+        mb: Math.round(s.usage.rss_bytes / 1048576),
+        n: s.usage.processes,
+      },
+    })),
+  );
+}
+
 /** How often the registry is read while the overview is shown, and while something runs. */
 export const OVERVIEW_MS = 2000;
 export const BACKGROUND_MS = 4000;
@@ -115,6 +130,7 @@ export class NativeController {
   private disposed = false;
   private reading = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private lastShown = '';
 
   constructor(
     private readonly publish: (state: NativeState) => void,
@@ -216,8 +232,14 @@ export class NativeController {
       (sessions) => {
         this.reading = false;
         if (this.disposed) return;
-        this.sessions = sessions;
-        this.emit();
+        // What is drawn is rounded (a percent, a megabyte): a read that would draw the same
+        // page changes nothing, so the window does no work for it.
+        const shown = shownKey(sessions);
+        if (shown !== this.lastShown) {
+          this.lastShown = shown;
+          this.sessions = sessions;
+          this.emit();
+        }
         this.schedule();
       },
       () => {
@@ -292,6 +314,7 @@ export class NativeController {
       ...this.sessions.filter((s) => s.id !== reply.session.id),
       reply.session,
     ];
+    this.lastShown = shownKey(this.sessions);
     this.onstarted(reply);
     this.refreshSessions();
   }
@@ -322,6 +345,19 @@ export class NativeController {
       started += 1;
     }
     return started;
+  }
+  /** Removes the records of every session that is not running. */
+  async forgetFinished() {
+    for (const session of this.sessions.filter(
+      (s) => s.state !== 'running' && s.state !== 'requested',
+    ))
+      try {
+        await this.client.forget(session.id);
+      } catch (error) {
+        this.fail(error);
+        break;
+      }
+    this.refreshSessions();
   }
   async stop(id: string) {
     try {

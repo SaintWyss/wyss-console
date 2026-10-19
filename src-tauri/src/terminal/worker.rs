@@ -80,6 +80,9 @@ fn open(
     command.args(launch.args);
     command.cwd(cwd);
     command.env("TERM", "xterm-256color");
+    for name in launch.remove_env {
+        command.env_remove(name);
+    }
     for (name, value) in launch.env {
         command.env(name, value);
     }

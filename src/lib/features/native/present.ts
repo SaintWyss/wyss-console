@@ -25,12 +25,10 @@ export function stateLabel(s: NativeSession): { text: string; tone: Tone } {
     case 'running':
       return { text: 'Active', tone: 'ok' };
     case 'exited':
+      if (s.exit_signal) return { text: 'Ended by a signal', tone: 'error' };
       return s.exit_code === 0
         ? { text: 'Exited (0)', tone: 'idle' }
-        : {
-            text: `Failed (${s.exit_signal ?? s.exit_code ?? '?'})`,
-            tone: 'error',
-          };
+        : { text: `Failed (${s.exit_code ?? '?'})`, tone: 'error' };
     case 'stopped':
       return { text: 'Stopped', tone: 'warn' };
     case 'failed_start':

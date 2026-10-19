@@ -74,6 +74,11 @@ describe('what the overview says', () => {
     expect(stateLabel(session({ state: 'exited', exit_code: 3 })).text).toBe(
       'Failed (3)',
     );
+    expect(
+      stateLabel(
+        session({ state: 'exited', exit_code: 1, exit_signal: 'Killed' }),
+      ).text,
+    ).toBe('Ended by a signal');
     expect(stateLabel(session({ state: 'stopped' })).text).toBe('Stopped');
     // After a crash of the window a session is lost, never "exited".
     expect(stateLabel(session({ state: 'lost' })).text).toBe('Lost');
@@ -154,6 +159,39 @@ describe('restoring a workspace', () => {
     expect(await controller.restoreLost()).toBe(1);
     expect(client.restart).toHaveBeenCalledTimes(2);
     expect(vi.mocked(client.restart).mock.calls[0]![0]).toBe('1'.repeat(32));
+    controller.dispose();
+    vi.useRealTimers();
+  });
+});
+
+describe('tidying the registry', () => {
+  it('removes the records of what is not running and nothing else', async () => {
+    vi.useFakeTimers();
+    const sessions = [
+      session({ id: '1'.repeat(32), state: 'running' }),
+      session({
+        id: '2'.repeat(32),
+        state: 'lost',
+        terminal_id: null,
+        pid: null,
+      }),
+      session({
+        id: '3'.repeat(32),
+        state: 'exited',
+        exit_code: 0,
+        terminal_id: null,
+        pid: null,
+      }),
+    ];
+    const client = fakeClient({ sessions: vi.fn(async () => sessions) });
+    const controller = new NativeController(() => undefined, undefined, client);
+    controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+    await controller.forgetFinished();
+    expect(vi.mocked(client.forget).mock.calls.map((c) => c[0])).toEqual([
+      '2'.repeat(32),
+      '3'.repeat(32),
+    ]);
     controller.dispose();
     vi.useRealTimers();
   });
