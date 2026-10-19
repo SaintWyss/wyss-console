@@ -193,6 +193,9 @@ not. A hook removed on one computer disappears on the other, which has no parked
   file is copied: the old file stays in place until the new one is renamed over it, so a
   write needs no copy to be safe. Values of environment variables, credentials and any field
   an adapter classifies as secret are never kept.
+- **Update 2026-10-19 ([ADR 0029](0029-encrypted-restoration-store-and-secret-bearing-entries.md)):**
+  values and secrets may be kept in restoration data, sealed with authenticated encryption under
+  a key held by the OS credential store; the previous bullet's "never kept" no longer applies.
 - **What is kept may still hold a secret** (a command with a token written into it) and is
   treated so: a private directory of this user, files readable by him alone, a bounded number
   kept, never copied into the history and never placed where it would be replicated.

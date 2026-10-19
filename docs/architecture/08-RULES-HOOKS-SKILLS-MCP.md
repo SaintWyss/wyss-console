@@ -78,15 +78,15 @@ action (`PreToolUse`, `PermissionRequest`, `UserPromptSubmit` and their equivale
 user has marked it as a security control; otherwise `normal`. The classification is the
 backend's (11 §4).
 
-| Failure                                   | Result                                                                                                                                                                              |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The file changed since the plan           | Nothing written; new plan offered                                                                                                                                                   |
-| The entry is no longer there              | `entry_gone`; the inventory refreshes                                                                                                                                               |
-| The entry is there but differs            | `entry_changed`; the user is shown the current one and must plan again                                                                                                              |
-| Storage policy refuses to keep this entry | Not offered; "this hook holds what looks like a credential; disabling it individually is not available. You can switch all hooks off, or edit the file yourself" (subject to DN-01) |
-| Native dialog refused                     | Nothing written to the file; the journal records the refusal (item, operation, risk class; no content)                                                                              |
-| Write failed                              | Old file intact; record removed; error shown                                                                                                                                        |
-| Read-back differs                         | Journal `unverified`; the user is shown what the file holds now                                                                                                                     |
+| Failure                                                                 | Result                                                                                                                                                                              |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The file changed since the plan                                         | Nothing written; new plan offered                                                                                                                                                   |
+| The entry is no longer there                                            | `entry_gone`; the inventory refreshes                                                                                                                                               |
+| The entry is there but differs                                          | `entry_changed`; the user is shown the current one and must plan again                                                                                                              |
+| The key store is unavailable and the entry may hold a secret (ADR 0029) | Not offered; "this hook holds what looks like a credential; disabling it individually is not available. You can switch all hooks off, or edit the file yourself" (subject to DN-01) |
+| Native dialog refused                                                   | Nothing written to the file; the journal records the refusal (item, operation, risk class; no content)                                                                              |
+| Write failed                                                            | Old file intact; record removed; error shown                                                                                                                                        |
+| Read-back differs                                                       | Journal `unverified`; the user is shown what the file holds now                                                                                                                     |
 
 ### 3.3 Enable and restore
 

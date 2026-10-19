@@ -124,8 +124,9 @@ can hold a secret: a token written into a command line, a header of an `http` ha
 ADR 0003 says "Secrets and credentials never enter durable storage" (`0003:69-72`) `[R]`.
 ADR 0028 records a supersession of that sentence for restoration data, on the basis of
 decision D5 `[R]`. The owner has since asked that this not be taken as permission to keep
-secrets, and that the options be compared before anything is built. **This section does that;
-the choice is DN-01 and is open.** Until it is made, ADR 0003 is to be read at full strength:
+secrets, and that the options be compared before anything is built. **This section does that.
+DN-01 was decided on 2026-10-19 for strategy B by [ADR 0029](../adr/0029-encrypted-restoration-store-and-secret-bearing-entries.md);
+§5.4 below is kept as the comparison it was written as, and no longer binds.** Until it is made, ADR 0003 is to be read at full strength:
 nothing that may hold a secret is persisted by the Console.
 
 ### 5.2 Threat model specific to reversible changes

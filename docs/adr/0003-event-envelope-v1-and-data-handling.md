@@ -66,7 +66,9 @@ default. Prompt events may record identity, state and explicitly authorized
 references without storing prompt text. Content capture is a separate future
 decision; this ADR does not authorize it.
 
-Secrets and credentials never enter durable storage. Minimization and redaction
+Secrets and credentials never enter durable storage. (Amended for restoration data only by
+[ADR 0029](0029-encrypted-restoration-store-and-secret-bearing-entries.md): there, and only
+there, they may be kept sealed with authenticated encryption.) Minimization and redaction
 happen before persistence. Sensitivity/redaction labels do not replace content
 validation or authorize storage. Events labelled `secret` cannot be persisted.
 References must not provide an implicit route to secret or unauthorized content.
