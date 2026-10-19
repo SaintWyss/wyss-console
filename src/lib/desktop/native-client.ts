@@ -61,10 +61,11 @@ export async function startNative(
   project: string,
   profile_id: string | null,
   size: TerminalSize,
+  brief: string | null = null,
 ): Promise<StartReply> {
   const reply = checked(
     await call('native_start', {
-      request: { agent_id, project, profile_id, size },
+      request: { agent_id, project, profile_id, size, brief },
     }),
     parseStartReply,
   );
@@ -152,4 +153,37 @@ export async function exportProfile(id: string): Promise<boolean> {
 export async function importProfile(): Promise<string | null> {
   const answer = await call('native_profile_import');
   return answer === null ? null : checked(answer, created);
+}
+
+export interface HandoffBrief {
+  text: string;
+  agent_id: AgentId;
+  project: string;
+  screen_included: boolean;
+}
+/** The brief for handing a session's work to another agent, to be reviewed. Starts nothing. */
+export async function prepareHandoff(id: string): Promise<HandoffBrief> {
+  return checked(
+    await call('native_handoff_prepare', { request: { id } }),
+    (v) => {
+      const o = v as Record<string, unknown>;
+      if (
+        typeof o.text !== 'string' ||
+        typeof o.project !== 'string' ||
+        typeof o.screen_included !== 'boolean' ||
+        (o.agent_id !== 'claude_code' && o.agent_id !== 'codex')
+      )
+        throw new Error('handoff');
+      return {
+        text: o.text,
+        agent_id: o.agent_id,
+        project: o.project,
+        screen_included: o.screen_included,
+      };
+    },
+  );
+}
+export async function saveHandoff(text: string): Promise<boolean> {
+  const answer = await call('native_handoff_save', { request: { text } });
+  return (answer as { done?: unknown }).done === true;
 }

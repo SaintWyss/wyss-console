@@ -215,7 +215,12 @@ describe('the controller', () => {
     );
     expect(await first).toBe(true);
     expect(client.start).toHaveBeenCalledTimes(1);
-    expect(client.start).toHaveBeenCalledWith('claude_code', '/home/u', null);
+    expect(client.start).toHaveBeenCalledWith(
+      'claude_code',
+      '/home/u',
+      null,
+      null,
+    );
     expect(started).toHaveBeenCalledWith(
       expect.objectContaining({ session: expect.anything() }),
     );

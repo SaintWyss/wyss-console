@@ -18,7 +18,10 @@ import {
   forgetNative,
   importProfile,
   previewProfile,
+  prepareHandoff,
   readLauncher,
+  saveHandoff,
+  type HandoffBrief,
   readNativeSessions,
   readProfiles,
   restartNative,
@@ -40,7 +43,10 @@ export interface NativeClient {
     agent: AgentId,
     project: string,
     profile: string | null,
+    brief?: string | null,
   ): Promise<StartReply>;
+  prepareHandoff(id: string): Promise<HandoffBrief>;
+  saveHandoff(text: string): Promise<boolean>;
   restart(id: string): Promise<StartReply>;
   stop(id: string): Promise<void>;
   forget(id: string): Promise<void>;
@@ -63,8 +69,10 @@ const desktopClient: NativeClient = {
   sessions: readNativeSessions,
   profiles: readProfiles,
   preview: previewProfile,
-  start: (agent, project, profile) =>
-    startNative(agent, project, profile, FIRST_SIZE),
+  start: (agent, project, profile, brief = null) =>
+    startNative(agent, project, profile, FIRST_SIZE, brief),
+  prepareHandoff,
+  saveHandoff,
   restart: (id) => restartNative(id, FIRST_SIZE),
   stop: stopNative,
   forget: forgetNative,
@@ -292,13 +300,14 @@ export class NativeController {
     agent: AgentId,
     project: string,
     profile: string | null,
+    brief: string | null = null,
   ): Promise<boolean> {
     if (this.starting || this.disposed) return false;
     this.starting = true;
     this.failure = null;
     this.emit();
     try {
-      const reply = await this.client.start(agent, project, profile);
+      const reply = await this.client.start(agent, project, profile, brief);
       this.afterStart(reply);
       return true;
     } catch (error) {
@@ -358,6 +367,23 @@ export class NativeController {
         break;
       }
     this.refreshSessions();
+  }
+  /** The brief for handing a session's work to another agent; the user reviews it. */
+  async handoff(id: string): Promise<HandoffBrief | null> {
+    try {
+      return await this.client.prepareHandoff(id);
+    } catch (error) {
+      this.fail(error);
+      return null;
+    }
+  }
+  async saveBrief(text: string): Promise<boolean> {
+    try {
+      return await this.client.saveHandoff(text);
+    } catch (error) {
+      this.fail(error);
+      return false;
+    }
   }
   async stop(id: string) {
     try {

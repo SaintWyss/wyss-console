@@ -85,6 +85,7 @@ pub async fn native_start(link: State<'_, HostLink>, request: StartRequest) -> A
                 "project": request.project,
                 "profile_id": request.profile_id,
                 "size": request.size,
+                "brief": request.brief,
             }),
         )
     })
@@ -320,6 +321,40 @@ pub async fn native_profile_import(app: AppHandle, link: State<'_, HostLink>) ->
     .await
 }
 
+/// The brief for handing a session's work to another agent, to be reviewed. Starts nothing.
+#[tauri::command]
+pub async fn native_handoff_prepare(link: State<'_, HostLink>, request: SessionRequest) -> Answer {
+    well_formed(&request.id)?;
+    let link = link.inner().clone();
+    blocking(move || link.call("handoff_prepare", json!({"id": request.id}))).await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SaveBriefRequest {
+    text: String,
+}
+
+/// The reviewed brief written to a file the user names in the native chooser.
+#[tauri::command]
+pub async fn native_handoff_save(
+    app: AppHandle,
+    request: SaveBriefRequest,
+) -> Result<Done, HostError> {
+    if request.text.len() > super::service::MAX_BRIEF {
+        return Err(HostError::new("brief_invalid"));
+    }
+    blocking(move || {
+        let Some(path) = choose_file_titled(&app, true, "handoff.md", "Save handoff brief") else {
+            return Ok(Done { done: false });
+        };
+        crate::configuration::write_private_file(&path, request.text.as_bytes())
+            .map_err(|()| HostError::new("export_failed"))?;
+        Ok(Done { done: true })
+    })
+    .await
+}
+
 const COMMANDS: &[&str] = &[
     "native_launcher",
     "native_preview",
@@ -338,6 +373,8 @@ const COMMANDS: &[&str] = &[
     "native_profile_restore",
     "native_profile_export",
     "native_profile_import",
+    "native_handoff_prepare",
+    "native_handoff_save",
 ];
 
 pub fn extension() -> wyss_console::Extension {
@@ -360,7 +397,9 @@ pub fn extension() -> wyss_console::Extension {
             native_profile_duplicate,
             native_profile_restore,
             native_profile_export,
-            native_profile_import
+            native_profile_import,
+            native_handoff_prepare,
+            native_handoff_save
         ]),
         // The state they use is the host link, made by the terminal commands' extension.
         install: Box::new(|builder| builder),

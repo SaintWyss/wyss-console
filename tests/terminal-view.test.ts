@@ -253,6 +253,9 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-credential-rename',
     'allow-credential-delete',
     'allow-credential-verify',
+    // A handoff brief (F11a): prepared for review, and saved to a chosen file.
+    'allow-native-handoff-prepare',
+    'allow-native-handoff-save',
   ]);
   // Every permission is one of this application's own commands: none belongs to a
   // plugin (`fs:`, `shell:`, `dialog:`) or to the framework's core (`core:`).

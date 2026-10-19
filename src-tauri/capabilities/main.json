@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Local application information, one read of the authority projection, one read and six intents for managed sessions, one native folder dialog, three reads and two intents for managed turns, two reads and two decisions for their approvals, one read, one update and one reset of the desktop's own preferences, two reads of the agents' configuration inventory and eight operations to change it with a way back, seventeen operations for native agent sessions and session profiles (none takes a command, an argument list, an environment or a path), three operations for the host that holds the terminals past the window (list what it holds, say whether it is a host process, redraw a program's screen), a read and a bounded write of the saved layout of tabs and panes, six operations for API credentials (a key is typed in a native window and never returned), and narrow human-terminal operations for the main window.",
+  "description": "Local application information, one read of the authority projection, one read and six intents for managed sessions, one native folder dialog, three reads and two intents for managed turns, two reads and two decisions for their approvals, one read, one update and one reset of the desktop's own preferences, two reads of the agents' configuration inventory and eight operations to change it with a way back, seventeen operations for native agent sessions and session profiles (none takes a command, an argument list, an environment or a path), three operations for the host that holds the terminals past the window (list what it holds, say whether it is a host process, redraw a program's screen), a read and a bounded write of the saved layout of tabs and panes, six operations for API credentials (a key is typed in a native window and never returned), a handoff brief to review and to save, and narrow human-terminal operations for the main window.",
   "windows": ["main"],
   "permissions": [
     "allow-get-app-info",
@@ -73,6 +73,8 @@
     "allow-credential-replace",
     "allow-credential-rename",
     "allow-credential-delete",
-    "allow-credential-verify"
+    "allow-credential-verify",
+    "allow-native-handoff-prepare",
+    "allow-native-handoff-save"
   ]
 }

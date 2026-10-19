@@ -347,3 +347,54 @@ fn profiles_travel_as_text_through_the_host() {
     );
     let _ = Path::new("/");
 }
+
+#[test]
+fn a_handoff_brief_is_prepared_from_a_running_session_and_starts_nothing() {
+    let host = Host::start(Duration::from_secs(600));
+    let client = host.client();
+    let home = host.dirs.1.to_string_lossy().into_owned();
+    let reply = client
+        .call(
+            "native_start",
+            json!({"agent_id": "claude_code", "project": home, "profile_id": null, "size": size(), "brief": null}),
+        )
+        .unwrap();
+    let terminal = reply["terminal"]["terminal_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let session = reply["session"]["id"].as_str().unwrap().to_owned();
+    read_until(&client, &terminal, "SESSION=");
+    let before = client
+        .call("native_sessions", json!({"sample": false}))
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .len();
+    let prepared = client
+        .call("handoff_prepare", json!({"id": session}))
+        .unwrap();
+    let text = prepared["text"].as_str().unwrap();
+    assert!(text.starts_with("# Handoff from Claude Code"));
+    assert!(
+        text.contains("FAKE-CLAUDE"),
+        "the end of the screen is in it: {text}"
+    );
+    assert_eq!(prepared["screen_included"], true);
+    assert_eq!(
+        client
+            .call("native_sessions", json!({"sample": false}))
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        before
+    );
+    assert_eq!(
+        client
+            .call("handoff_prepare", json!({"id": "f".repeat(32)}))
+            .unwrap_err()
+            .code,
+        "session_unknown"
+    );
+}

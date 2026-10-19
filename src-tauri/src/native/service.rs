@@ -31,6 +31,8 @@ use wyss_console::{
     },
 };
 
+/// Most bytes of a handoff brief.
+pub const MAX_BRIEF: usize = 16 * 1024;
 const FOUND_FOR: Duration = Duration::from_secs(30);
 
 /// Variables that belong to *one running agent session*, not to the user: if the Console was
@@ -136,6 +138,10 @@ pub struct StartRequest {
     pub project: String,
     pub profile_id: Option<String>,
     pub size: TerminalSize,
+    /// A reviewed handoff brief (F11a): the agent's first message. At most 16 KiB, starts with
+    /// `# `, no NUL: it travels as one word of the command line, never as text a shell reads.
+    #[serde(default)]
+    pub brief: Option<String>,
 }
 
 /// A session as the window sees it: the registry's record plus what is observed now.
@@ -486,6 +492,12 @@ impl NativeService {
                 }
             }
         }
+        if let Some(brief) = &request.brief {
+            if brief.len() > MAX_BRIEF || !brief.starts_with("# ") || brief.contains('\0') {
+                return Err(NativeError::new("brief_invalid"));
+            }
+            words.push(brief.clone());
+        }
         if let Some(overlay) = &plan.overlay {
             let write = || -> std::io::Result<()> {
                 store::private_dir(&dir)?;
@@ -652,6 +664,7 @@ impl NativeService {
                 project: old.project.clone(),
                 profile_id: old.profile.map(|p| p.id),
                 size,
+                brief: None,
             },
             Some((id, old.restarts + 1)),
         )
@@ -706,6 +719,22 @@ impl NativeService {
             profile: session.profile.as_ref().map(|p| p.name.clone()),
             through_shell: session.through_shell,
         })
+    }
+
+    /// The terminal of a running native session, and its record.
+    pub fn running_terminal(&self, session_id: &str) -> Option<(String, Session)> {
+        let terminal = lock(&self.inner.live)
+            .get(session_id)?
+            .terminal
+            .as_str()
+            .to_owned();
+        let session = lock(&self.inner.registry).session(session_id)?.clone();
+        Some((terminal, session))
+    }
+
+    /// A finished or running session's record.
+    pub fn session_record(&self, session_id: &str) -> Option<Session> {
+        lock(&self.inner.registry).session(session_id).cloned()
     }
 
     /// Whether any native session is running or being started.

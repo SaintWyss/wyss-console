@@ -160,6 +160,13 @@ export function fakeClient(over: Partial<NativeClient> = {}) {
       through_shell: true,
     })),
     start: vi.fn(async () => reply()),
+    prepareHandoff: vi.fn(async () => ({
+      text: '# Handoff from Claude Code\n\nbody\n',
+      agent_id: 'claude_code' as const,
+      project: '/home/u',
+      screen_included: true,
+    })),
+    saveHandoff: vi.fn(async () => true),
     restart: vi.fn(async () =>
       reply({ id: 'c'.repeat(32), restart_of: 'a'.repeat(32), restarts: 1 }),
     ),

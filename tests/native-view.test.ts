@@ -68,6 +68,7 @@ describe('the launcher', () => {
       'claude_code',
       '/home/u/work/app',
       'template-review',
+      null,
     );
     expect(started).toHaveBeenCalledTimes(1);
     expect(onconsole).toHaveBeenCalledTimes(1);
@@ -331,5 +332,97 @@ describe('the profiles view', () => {
     expect(text(document.querySelector('[role="alert"]'))).toContain(
       'never holds one',
     );
+  });
+});
+
+describe('a handoff', () => {
+  it('prepares a brief to review, starts the other agent in the same folder with the edited text, and says it is not a transfer', async () => {
+    const c = fakeClient({
+      sessions: vi.fn(async () => [
+        session({ id: '1'.repeat(32), project: '/home/u/app' }),
+      ]),
+      launcher: vi.fn(async () =>
+        launcher({
+          agents: [
+            {
+              agent_id: 'claude_code',
+              name: 'Claude Code',
+              executable: 'claude',
+              installed: true,
+              path: '/x',
+              version: '1',
+            },
+            {
+              agent_id: 'codex',
+              name: 'Codex',
+              executable: 'codex',
+              installed: true,
+              path: '/y',
+              version: '2',
+            },
+          ],
+        }),
+      ),
+    });
+    const onconsole = vi.fn();
+    await shown(c, { onconsole });
+    button('Hand off…').click();
+    await settle();
+    expect(c.prepareHandoff).toHaveBeenCalledWith('1'.repeat(32));
+    expect(text(document.querySelector('.native-handoff'))).toContain(
+      'not a transfer',
+    );
+    const area = document.querySelector<HTMLTextAreaElement>('#handoff-text')!;
+    expect(area.value.startsWith('# Handoff')).toBe(true);
+    // The other agent is chosen by default.
+    expect(
+      document.querySelector<HTMLSelectElement>('#handoff-target')!.value,
+    ).toBe('codex');
+    area.value = '# Handoff from Claude Code\n\nFinish the parser.';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    button('Start Codex with this brief').click();
+    await settle();
+    expect(c.start).toHaveBeenCalledWith(
+      'codex',
+      '/home/u/app',
+      null,
+      '# Handoff from Claude Code\n\nFinish the parser.',
+    );
+    expect(onconsole).toHaveBeenCalled();
+  });
+
+  it('will not start from a brief that lost its heading, and can save it to a file instead', async () => {
+    const c = fakeClient({
+      sessions: vi.fn(async () => [session()]),
+      launcher: vi.fn(async () =>
+        launcher({
+          agents: [
+            {
+              agent_id: 'codex',
+              name: 'Codex',
+              executable: 'codex',
+              installed: true,
+              path: '/y',
+              version: '2',
+            },
+          ],
+        }),
+      ),
+    });
+    await shown(c);
+    button('Hand off…').click();
+    await settle();
+    const area = document.querySelector<HTMLTextAreaElement>('#handoff-text')!;
+    area.value = 'no heading';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(button('Start Codex with this brief').disabled).toBe(true);
+    area.value = '# ok';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    button('Save to a file…').click();
+    await settle();
+    expect(c.saveHandoff).toHaveBeenCalledWith('# ok');
   });
 });

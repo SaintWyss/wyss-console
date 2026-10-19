@@ -53,6 +53,8 @@ export const FAILURE_TEXT: Record<string, string> = {
     'That folder cannot be used. Choose a folder with the folder button.',
   profile_not_applicable: 'This profile cannot be applied to that agent.',
   profile_unknown: 'That profile no longer exists.',
+  brief_invalid:
+    'The brief must start with a “# ” heading, hold no NUL and be at most 16 KiB.',
   limit_reached:
     'The terminal limit (16) is reached. Close one to start another.',
   spawn_failed: 'The agent could not be started.',

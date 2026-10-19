@@ -582,6 +582,9 @@ mod tests {
             "allow-credential-rename",
             "allow-credential-delete",
             "allow-credential-verify",
+            // A handoff brief (F11a): prepared for review, and saved to a chosen file.
+            "allow-native-handoff-prepare",
+            "allow-native-handoff-save",
         ];
         assert_eq!(granted, expected);
         let manifest = include_str!("../../build.rs");

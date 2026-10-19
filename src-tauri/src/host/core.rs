@@ -440,6 +440,10 @@ impl HostCore {
                     .map_err(|e| native_error(&e))?;
                 Ok(Value::Null)
             }
+            "handoff_prepare" => {
+                let request: Id = params(value)?;
+                to_value(self.handoff_prepare(&request.id)?)
+            }
             "native_remember_project" => {
                 let request: Path = params(value)?;
                 if !request.path.starts_with('/') || request.path.len() > 4096 {
@@ -521,6 +525,41 @@ impl HostCore {
             }
             _ => Err(HostError::new("unknown_op")),
         }
+    }
+
+    /// The brief for handing a session's work to another agent: the folder, the repository's
+    /// state and the end of the screen, redacted. Nothing is started.
+    fn handoff_prepare(&self, session: &str) -> Result<Value, HostError> {
+        let native = self.native()?;
+        let record = native
+            .session_record(session)
+            .ok_or_else(|| HostError::new("session_unknown"))?;
+        // The screen is available while the session's terminal is still held.
+        let screen = native
+            .running_terminal(session)
+            .and_then(|(terminal, _)| self.entry(&terminal).ok())
+            .map(|entry| {
+                let inner = lock(&entry.inner);
+                let all = inner.ring.read(0, ring::CAPACITY);
+                crate::handoff::plain_text(&all.data)
+            })
+            .unwrap_or_default();
+        let project = std::path::PathBuf::from(&record.project);
+        let text = crate::handoff::brief(
+            &crate::handoff::Source {
+                agent: &record.agent_name,
+                project: &project,
+                started_at: record.started_at,
+                profile: record.profile.as_ref().map(|p| p.name.as_str()),
+            },
+            &screen,
+        );
+        Ok(json!({
+            "text": text,
+            "agent_id": record.agent_id,
+            "project": record.project,
+            "screen_included": !screen.is_empty(),
+        }))
     }
 
     /// An agent's terminal is kept like any other, titled by what it runs.

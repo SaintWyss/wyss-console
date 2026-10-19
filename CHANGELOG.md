@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Handoff between agents (F11a)
+
+- **"Hand off…" on a session** prepares a brief to read and edit: the folder, the repository's
+  state and the end of the agent's screen, with secrets removed. Starting the other agent opens a
+  **new** session with it as the first message; nothing is moved, and the screen says it is not a
+  transfer. It can also be saved to a file. ADR 0039.
+
 ### API credentials (F14)
 
 - **A Credentials view keeps provider API keys sealed** (vault of ADR 0034): add, replace,

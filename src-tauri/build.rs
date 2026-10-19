@@ -148,6 +148,8 @@ fn main() {
             "credential_rename",
             "credential_delete",
             "credential_verify",
+            "native_handoff_prepare",
+            "native_handoff_save",
         ]),
     ))
     .expect("failed to build Wyss Console metadata");

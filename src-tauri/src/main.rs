@@ -10,6 +10,8 @@ mod configuration;
 #[cfg(target_os = "linux")]
 mod credentials;
 #[cfg(target_os = "linux")]
+mod handoff;
+#[cfg(target_os = "linux")]
 mod host;
 #[cfg(target_os = "linux")]
 mod native;

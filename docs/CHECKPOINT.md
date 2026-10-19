@@ -2,8 +2,8 @@
 
 Written so a new session can resume without re-planning. Keep it current at every milestone.
 
-**Branch** `f1-f2a-configuration` (worktree `~/Github_repos/wyss-console-rama-4`), local only: no
-push, no merge, no release. Verify with `git log --oneline | head` and `git status`.
+**Branch** `main` (worktree `~/Github_repos/wyss-console-rama-4`; `f1-f2a-configuration` and the two documentation branches were merged into it on 2026-10-19), local only: no
+push, no release. Verify with `git log --oneline | head` and `git status`.
 
 ## Done (and verified)
 
@@ -16,7 +16,7 @@ push, no merge, no release. Verify with `git log --oneline | head` and `git stat
 
 ## Active
 
-Nothing in progress. Next: F11a handoff, then F6a/b models, F5 authoring.
+Nothing in progress. Next: F6a/b models, F5 authoring, F4a OpenCode, F13 packaging.
 
 ## Roadmap still open, in the order being taken
 

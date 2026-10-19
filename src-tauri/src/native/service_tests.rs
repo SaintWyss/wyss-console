@@ -105,6 +105,7 @@ impl World {
                 project: self.home.to_string_lossy().into_owned(),
                 profile_id: profile.map(str::to_owned),
                 size: SIZE,
+                brief: None,
             },
         )
     }
@@ -261,6 +262,7 @@ fn only_a_folder_the_user_chose_or_a_known_project_can_be_a_project() {
         project: path.to_string_lossy().into_owned(),
         profile_id: None,
         size: SIZE,
+        brief: None,
     };
     assert_eq!(
         world
@@ -558,6 +560,7 @@ fn real_agents_start_in_native_terminals_and_stop() {
                     project: project.to_string_lossy().into_owned(),
                     profile_id: None,
                     size: SIZE,
+                    brief: None,
                 },
             )
             .unwrap();
@@ -625,4 +628,39 @@ fn real_agents_start_in_native_terminals_and_stop() {
     }
     let _ = terminal.shutdown();
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_reviewed_brief_is_the_agents_first_message_as_one_word_and_a_bad_one_is_refused() {
+    let world = World::new();
+    let start = |brief: Option<&str>| {
+        world.service.start(
+            &world.terminal,
+            StartRequest {
+                agent_id: AgentId::ClaudeCode,
+                project: world.home.to_string_lossy().into_owned(),
+                profile_id: None,
+                size: SIZE,
+                brief: brief.map(str::to_owned),
+            },
+        )
+    };
+    let brief = "# Handoff from Codex\n\n$(touch /tmp/wyss-brief-injected); `x` \"quoted\" -n\n";
+    let reply = start(Some(brief)).unwrap();
+    let out = world.output_until(&reply.terminal.terminal_id, "SESSION=");
+    assert!(out.contains("argc=1"), "{out:?}");
+    assert!(out.contains("[# Handoff from Codex"), "{out:?}");
+    assert!(!Path::new("/tmp/wyss-brief-injected").exists());
+    for bad in [
+        "- not a heading",
+        "no heading",
+        "# nul\0",
+        &format!("# {}", "x".repeat(20_000)),
+    ] {
+        assert_eq!(
+            start(Some(bad)).unwrap_err().code,
+            "brief_invalid",
+            "{bad:.12}"
+        );
+    }
 }

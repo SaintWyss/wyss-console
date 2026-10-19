@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import HandoffPanel from './HandoffPanel.svelte';
   import { hostIsRemote } from '../../desktop/terminal-client';
   import type { AgentId, NativeSession, Preview } from '../../contracts/native';
   import type { NativeController, NativeState } from './controller';
@@ -35,6 +36,10 @@
   let profile = $state<string | null>(null);
   let preview = $state<Preview | null>(null);
   let now = $state(Date.now());
+  let handingOff = $state<string | null>(null);
+  const handoffSession = $derived(
+    native.sessions.find((s) => s.id === handingOff) ?? null,
+  );
 
   const launcher = $derived(native.launcher);
   const entries = $derived(launcher?.agents ?? []);
@@ -168,6 +173,20 @@
     </div>
   {:else}
     <div class="native-main">
+      {#if handoffSession}
+        {#key handoffSession.id}
+          <HandoffPanel
+            session={handoffSession}
+            {native}
+            {controller}
+            onclose={() => (handingOff = null)}
+            onstarted={() => {
+              handingOff = null;
+              onconsole();
+            }}
+          />
+        {/key}
+      {/if}
       <section class="native-card native-launch" aria-label="Start an agent">
         <h3>Start an agent</h3>
         <div class="native-agents" role="radiogroup" aria-label="Agent">
@@ -421,6 +440,13 @@
                           >Remove</button
                         >
                       {/if}
+                      <button
+                        type="button"
+                        class="action"
+                        disabled={native.starting}
+                        onclick={() => (handingOff = session.id)}
+                        >Hand off…</button
+                      >
                     </span>
                   </li>
                 {/each}
