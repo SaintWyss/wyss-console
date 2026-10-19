@@ -25,7 +25,7 @@ pub(super) fn roots(env: &Environment) -> Result<ApprovedRoots, InvalidRoot> {
 }
 
 /// `opencode.jsonc` when there is one, else `opencode.json`.
-fn config_in(dir: &Path) -> PathBuf {
+pub(super) fn config_in(dir: &Path) -> PathBuf {
     let jsonc = dir.join("opencode.jsonc");
     if jsonc.symlink_metadata().is_ok() {
         jsonc

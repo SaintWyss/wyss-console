@@ -238,6 +238,9 @@ export const OPERATIONS = [
   'codex_skill_on',
   'codex_mcp_off',
   'codex_mcp_on',
+  'opencode_mcp_off',
+  'opencode_mcp_on',
+  'park_plugin',
 ] as const;
 export type Operation = (typeof OPERATIONS)[number];
 
@@ -249,6 +252,7 @@ export const EFFECTS = [
   'skills_new_sessions_checked',
   'codex_mcp_checked',
   'codex_skill_listed',
+  'opencode_listed',
 ] as const;
 export type Effect = (typeof EFFECTS)[number];
 

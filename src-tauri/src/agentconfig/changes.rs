@@ -16,6 +16,7 @@ use super::model::{
     Bounds, ItemKind, NotWritable, PathTrust, ProviderId, Scope, SourceClass, SourceClass as Class,
     SourceFailure, writability,
 };
+use super::opencode_plan;
 use super::place::{Parent, parent_for_write};
 use super::plan::{
     DiffLine, Drafted, PLAN_LIFETIME_SECONDS, PlanError, Prepared, draft_all_hooks, draft_park,
@@ -74,6 +75,8 @@ pub enum Effect {
     /// The key is what Codex's files show for a skill; how a running Codex treats it is not
     /// verified.
     CodexSkillListed,
+    /// What OpenCode's file says; how a running OpenCode treats it is not verified.
+    OpencodeListed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -207,6 +210,7 @@ fn writable(key: SourceKey) -> bool {
             | SourceKey::ClaudeProjectSettings
             | SourceKey::ClaudeProjectLocalSettings
             | SourceKey::CodexUserConfig
+            | SourceKey::OpencodeUserConfig
     ) && matches!(key.class(), SourceClass::User | SourceClass::Project)
 }
 
@@ -215,6 +219,9 @@ fn effect_of(operation: Operation) -> Effect {
         Operation::SkillOff | Operation::SkillOn => Effect::SkillsNewSessionsChecked,
         Operation::CodexMcpOff | Operation::CodexMcpOn => Effect::CodexMcpChecked,
         Operation::CodexSkillOff | Operation::CodexSkillOn => Effect::CodexSkillListed,
+        Operation::OpencodeMcpOff | Operation::OpencodeMcpOn | Operation::ParkPlugin => {
+            Effect::OpencodeListed
+        }
         _ => Effect::HooksNewSessionsChecked,
     }
 }
@@ -256,6 +263,7 @@ impl ChangeService {
     ) -> Result<Self, ChangeFailure> {
         let roots = super::claude::roots(&environment)
             .and_then(|claude| claude.union(&super::codex::roots(&environment)?))
+            .and_then(|roots| roots.union(&super::opencode::roots(&environment)?))
             .map_err(|_| ChangeFailure::Internal)?;
         let reader =
             ConfigReader::new(roots, Bounds::PROPOSED).map_err(|_| ChangeFailure::Internal)?;
@@ -292,6 +300,9 @@ impl ChangeService {
                 Some(project?.join(".claude/settings.local.json"))
             }
             SourceKey::CodexUserConfig => Some(environment.codex_dir().join("config.toml")),
+            SourceKey::OpencodeUserConfig => {
+                Some(super::opencode::config_in(&environment.opencode_dir()))
+            }
             _ => None,
         }
     }
@@ -537,6 +548,46 @@ impl ChangeService {
                     },
                 )
             }
+            Operation::OpencodeMcpOff | Operation::OpencodeMcpOn => {
+                let item = self.item(target).ok_or(ChangeFailure::EntryGone)?;
+                if item.provider != ProviderId::Opencode
+                    || item.source != SourceKey::OpencodeUserConfig
+                    || item.kind != ItemKind::McpServer
+                {
+                    return Err(ChangeFailure::NotSupported);
+                }
+                let (_, bytes) = self.read_target(item.source)?;
+                let name = opencode_plan::resolve_server(&bytes, item.source, target)?;
+                let drafted = opencode_plan::drafted_mcp(
+                    &bytes,
+                    target,
+                    &name,
+                    item.name.as_str(),
+                    operation == Operation::OpencodeMcpOn,
+                    restore,
+                )?;
+                (item.source, drafted)
+            }
+            Operation::ParkPlugin => {
+                let item = self.item(target).ok_or(ChangeFailure::EntryGone)?;
+                if item.provider != ProviderId::Opencode
+                    || item.source != SourceKey::OpencodeUserConfig
+                    || item.kind != ItemKind::Plugin
+                {
+                    return Err(ChangeFailure::NotSupported);
+                }
+                let (_, bytes) = self.read_target(item.source)?;
+                let (index, _) = opencode_plan::resolve_plugin(&bytes, item.source, target)?;
+                let drafted = opencode_plan::drafted_park(
+                    &bytes,
+                    item.source,
+                    target,
+                    index,
+                    &self.bounds,
+                    |secret| self.store.protection_for(secret),
+                )?;
+                (item.source, drafted)
+            }
             Operation::RestoreHook => {
                 let body = self.store.read(target)?;
                 let secret_bearing = self
@@ -546,10 +597,18 @@ impl ChangeService {
                     .find(|s| s.id == target)
                     .is_some_and(|s| s.secret_bearing);
                 let (_, bytes) = self.read_target(body.source)?;
-                (
-                    body.source,
-                    draft_restore(&bytes, target, &body, secret_bearing, &self.bounds)?,
-                )
+                let drafted = if body.provider == ProviderId::Opencode {
+                    opencode_plan::drafted_restore(
+                        &bytes,
+                        target,
+                        &body,
+                        secret_bearing,
+                        &self.bounds,
+                    )?
+                } else {
+                    draft_restore(&bytes, target, &body, secret_bearing, &self.bounds)?
+                };
+                (body.source, drafted)
             }
         };
         Ok(self.keep(drafted, source, undoes))
@@ -782,6 +841,9 @@ impl ChangeService {
                         super::plan::Logical::Toml(edit) => {
                             super::codex_plan::is_exactly(current.bytes(), file.bytes(), edit)
                         }
+                        super::plan::Logical::Opencode(edit) => {
+                            opencode_plan::is_exactly(current.bytes(), file.bytes(), edit)
+                        }
                         other => is_exactly(current.bytes(), file.bytes(), other),
                     };
                 (same, Some(actual))
@@ -829,9 +891,36 @@ impl ChangeService {
                 let record = change.record.ok_or(ChangeFailure::NotUndoable)?;
                 self.plan_with(Operation::RestoreHook, &record, undoes, None)
             }
+            Operation::ParkPlugin => {
+                let record = change.record.ok_or(ChangeFailure::NotUndoable)?;
+                self.plan_with(Operation::RestoreHook, &record, undoes, None)
+            }
+            Operation::OpencodeMcpOff | Operation::OpencodeMcpOn => {
+                let prior = change.prior.ok_or(ChangeFailure::NotUndoable)?;
+                let inverse = if change.operation == Operation::OpencodeMcpOff {
+                    Operation::OpencodeMcpOn
+                } else {
+                    Operation::OpencodeMcpOff
+                };
+                self.plan_with(inverse, &change.item, undoes, Some(prior))
+            }
             Operation::RestoreHook => {
                 let record = change.record.ok_or(ChangeFailure::NotUndoable)?;
                 let body = self.store.read(&record)?;
+                if body.provider == ProviderId::Opencode {
+                    let spec = serde_json::from_str::<serde_json::Value>(&body.unit_text)
+                        .ok()
+                        .and_then(|v| match v {
+                            serde_json::Value::String(s) => Some(s),
+                            serde_json::Value::Array(a) => {
+                                a.first().and_then(|s| s.as_str()).map(str::to_owned)
+                            }
+                            _ => None,
+                        })
+                        .ok_or(ChangeFailure::NotUndoable)?;
+                    let item = super::inventory::item_id_for(body.source, &[&spec]);
+                    return self.plan_with(Operation::ParkPlugin, &item, undoes, None);
+                }
                 let item = super::inventory::item_id_for(
                     body.source,
                     &[
@@ -908,6 +997,7 @@ impl ChangeService {
             SourceKey::ClaudeProjectSettings,
             SourceKey::ClaudeProjectLocalSettings,
             SourceKey::CodexUserConfig,
+            SourceKey::OpencodeUserConfig,
         ];
         // Temporary files of a write that was cut short, judged one by one. Nothing is
         // deleted that cannot be accounted for: a file left at a temporary name may be the
@@ -983,7 +1073,7 @@ impl ChangeService {
                 // The file was not changed, so the entry is still in it: the record is spare.
                 (
                     Outcome::RecoveredNotApplied | Outcome::RecoveredProviderKept,
-                    Operation::ParkHook,
+                    Operation::ParkHook | Operation::ParkPlugin,
                     Some(record),
                 ) => {
                     let _ = self.store.delete(record);

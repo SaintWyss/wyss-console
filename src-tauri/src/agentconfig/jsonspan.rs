@@ -87,10 +87,26 @@ impl Node {
 struct Reader<'a> {
     bytes: &'a [u8],
     at: usize,
+    /// JSONC: comments count as blanks and a comma may precede a closing bracket.
+    lenient: bool,
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Node, SpanError> {
-    let mut reader = Reader { bytes, at: 0 };
+    read(bytes, false)
+}
+
+/// The same, for JSON with comments and trailing commas (OpenCode's `opencode.jsonc`). Spans
+/// are of the file's own bytes, so an edit made from them changes those bytes and no others.
+pub fn parse_jsonc(bytes: &[u8]) -> Result<Node, SpanError> {
+    read(bytes, true)
+}
+
+fn read(bytes: &[u8], lenient: bool) -> Result<Node, SpanError> {
+    let mut reader = Reader {
+        bytes,
+        at: 0,
+        lenient,
+    };
     reader.blanks();
     let node = reader.value(0)?;
     reader.blanks();
@@ -102,8 +118,28 @@ pub fn parse(bytes: &[u8]) -> Result<Node, SpanError> {
 
 impl Reader<'_> {
     fn blanks(&mut self) {
-        while matches!(self.bytes.get(self.at), Some(b' ' | b'\t' | b'\n' | b'\r')) {
-            self.at += 1;
+        loop {
+            while matches!(self.bytes.get(self.at), Some(b' ' | b'\t' | b'\n' | b'\r')) {
+                self.at += 1;
+            }
+            if !self.lenient || self.peek() != Some(b'/') {
+                return;
+            }
+            match self.bytes.get(self.at + 1) {
+                Some(b'/') => {
+                    while !matches!(self.peek(), None | Some(b'\n')) {
+                        self.at += 1;
+                    }
+                }
+                Some(b'*') => {
+                    // An unterminated comment runs to the end, and the parse then fails.
+                    self.at = self.bytes[self.at + 2..]
+                        .windows(2)
+                        .position(|w| w == b"*/")
+                        .map_or(self.bytes.len(), |end| self.at + 2 + end + 2);
+                }
+                _ => return,
+            }
         }
     }
     fn peek(&self) -> Option<u8> {
@@ -170,7 +206,14 @@ impl Reader<'_> {
                 items.push(self.value(depth + 1)?);
                 self.blanks();
                 match self.peek().ok_or(SpanError::Invalid)? {
-                    b',' => self.at += 1,
+                    b',' => {
+                        self.at += 1;
+                        self.blanks();
+                        if self.lenient && self.peek() == Some(b']') {
+                            self.at += 1;
+                            break;
+                        }
+                    }
                     b']' => {
                         self.at += 1;
                         break;
@@ -220,7 +263,14 @@ impl Reader<'_> {
                 });
                 self.blanks();
                 match self.peek().ok_or(SpanError::Invalid)? {
-                    b',' => self.at += 1,
+                    b',' => {
+                        self.at += 1;
+                        self.blanks();
+                        if self.lenient && self.peek() == Some(b'}') {
+                            self.at += 1;
+                            break;
+                        }
+                    }
                     b'}' => {
                         self.at += 1;
                         break;
@@ -362,5 +412,75 @@ pub fn replace_value(node: &Node, text: &str) -> Edit {
         at: span.start,
         remove: span.end - span.start,
         insert: text.to_owned(),
+    }
+}
+
+/// Whether `bytes[from..to]` is only blanks and commas: nothing the user wrote (a comment)
+/// sits in a stretch that is about to be removed or measured.
+fn only_blanks_and_commas(bytes: &[u8], from: usize, to: usize) -> bool {
+    bytes[from..to]
+        .iter()
+        .all(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b','))
+}
+
+/// `remove_child` for a document that may have comments: refused (`None`) when anything but
+/// the child, a separator and blanks is in the stretch that would go, so a comment is never
+/// taken with an entry it was not part of.
+pub fn remove_child_checked(bytes: &[u8], container: &Node, index: usize) -> Option<Removal> {
+    let removal = remove_child(bytes, container, index)?;
+    let (at, end) = (removal.edit.at, removal.edit.at + removal.edit.remove);
+    let child = *container.child_spans().get(index)?;
+    // The stretch is the child plus its separator and blanks: outside the child, only those.
+    let clean = if end <= child.start || at >= child.end {
+        only_blanks_and_commas(bytes, at, end)
+    } else {
+        only_blanks_and_commas(bytes, at, child.start.max(at))
+            && only_blanks_and_commas(bytes, child.end.min(end), end)
+    };
+    clean.then_some(removal)
+}
+
+/// `append_child` for a document that may have comments or a trailing comma. A comment
+/// anywhere an empty container's insides would be replaced is refused (`None`).
+pub fn append_child_lenient(bytes: &[u8], container: &Node, text: &str) -> Option<Edit> {
+    let children = container.child_spans();
+    let span = container.span();
+    let Some(last) = children.last() else {
+        return only_blanks_and_commas(bytes, span.start + 1, span.end - 1)
+            .then(|| append_child(bytes, container, text));
+    };
+    let base = indentation(bytes, span.start);
+    let multiline = bytes[span.start..span.end].contains(&b'\n');
+    let unit = if base.contains('\t') { "\t" } else { "  " };
+    let lead = if multiline {
+        let own = indentation(bytes, last.start);
+        format!(
+            "\n{}",
+            if own.is_empty() {
+                format!("{base}{unit}")
+            } else {
+                own
+            }
+        )
+    } else {
+        " ".to_owned()
+    };
+    // A comma already follows the last child: the new one goes after it, and keeps the style.
+    let mut after = last.end;
+    while bytes.get(after).is_some_and(u8::is_ascii_whitespace) {
+        after += 1;
+    }
+    if bytes.get(after) == Some(&b',') {
+        Some(Edit {
+            at: after + 1,
+            remove: 0,
+            insert: format!("{lead}{text},"),
+        })
+    } else {
+        Some(Edit {
+            at: last.end,
+            remove: 0,
+            insert: format!(",{lead}{text}"),
+        })
     }
 }

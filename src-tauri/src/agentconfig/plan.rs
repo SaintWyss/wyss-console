@@ -88,6 +88,8 @@ pub enum Logical {
     Nothing,
     /// A change to a TOML file (Codex): checked by `codex_plan` against the parsed value.
     Toml(super::codex_plan::Logical),
+    /// A change to OpenCode's JSONC file: checked by `opencode_plan`.
+    Opencode(super::opencode_plan::Logical),
 }
 
 /// What `apply` has to do besides write the file.
@@ -143,7 +145,7 @@ pub fn apply_logical(before: &Value, edit: &Logical) -> Option<Value> {
     let root = value.as_object_mut()?;
     match edit {
         Logical::Nothing => (),
-        Logical::Toml(_) => return None,
+        Logical::Toml(_) | Logical::Opencode(_) => return None,
         Logical::SetRoot { key, value } => {
             root.insert(key.clone(), value.clone());
         }
@@ -254,7 +256,7 @@ pub fn is_exactly(before: &[u8], after: &[u8], edit: &Logical) -> bool {
 /// The lines a plan shows for an entry: its parsed value through the redaction that
 /// protects the page, one line per leaf. The file's own text is never what is shown: a
 /// secret inside a quoted string is only recognised once the string has been read.
-fn redact_lines(unit: &Value, kind: DiffKind, bounds: &Bounds) -> (Vec<DiffLine>, bool) {
+pub(super) fn redact_lines(unit: &Value, kind: DiffKind, bounds: &Bounds) -> (Vec<DiffLine>, bool) {
     use super::redact::{Projection, project};
     fn walk(value: &Projection, name: &str, out: &mut Vec<(String, bool)>) {
         match value {

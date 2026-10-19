@@ -47,6 +47,9 @@ pub mod journal;
 mod jsonspan;
 mod model;
 mod opencode;
+pub mod opencode_plan;
+#[cfg(test)]
+mod opencode_plan_tests;
 mod place;
 mod plan;
 #[cfg(test)]

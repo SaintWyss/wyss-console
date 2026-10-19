@@ -293,6 +293,9 @@ export const OPERATION_LABEL: Record<Operation, string> = {
   codex_skill_on: 'Turn on this Codex skill',
   codex_mcp_off: 'Turn off this Codex MCP server',
   codex_mcp_on: 'Turn on this Codex MCP server',
+  opencode_mcp_off: 'Turn off this OpenCode MCP server',
+  opencode_mcp_on: 'Turn on this OpenCode MCP server',
+  park_plugin: 'Turn off this OpenCode plugin',
 };
 
 export const RISK_LABEL: Record<Risk, string> = {
@@ -308,6 +311,8 @@ export const EFFECT_LABEL: Record<Effect, string> = {
     'A new Claude Code session follows the file (checked). A session that is already running is documented to pick it up; that has not been checked.',
   codex_mcp_checked:
     'A new Codex process shows the server as the file says (checked). A Codex session that is already running is not known to follow it.',
+  opencode_listed:
+    'A new OpenCode process reads the file. That a running OpenCode follows it has not been checked.',
   codex_skill_listed:
     'A new Codex process lists the skill as the file says (checked, through its own skills/list). A Codex session that is already running is not known to follow it.',
   skills_new_sessions_checked:
@@ -450,6 +455,19 @@ export function changeFor(
       return on
         ? { operation: 'codex_mcp_off', label: 'Turn off' }
         : { operation: 'codex_mcp_on', label: 'Turn on' };
+    return null;
+  }
+  if (item.provider === 'opencode') {
+    // OpenCode: an MCP server or a plugin of the user's own file. Never what is under `provider`.
+    if (item.source !== 'opencode_user_config') return null;
+    const on = item.persisted === 'present_enabled';
+    const off = item.persisted === 'present_disabled';
+    if (item.kind === 'mcp_server' && (on || off))
+      return on
+        ? { operation: 'opencode_mcp_off', label: 'Turn off' }
+        : { operation: 'opencode_mcp_on', label: 'Turn on' };
+    if (item.kind === 'plugin' && on)
+      return { operation: 'park_plugin', label: 'Turn off' };
     return null;
   }
   if (

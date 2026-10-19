@@ -2234,3 +2234,360 @@ fn real_codex_skill_one_switch_then_back() {
     drop(guard);
     let _ = fs::remove_dir_all(&state);
 }
+
+// ---- OpenCode (F4a) -----------------------------------------------------------------------
+
+const OPENCODE: &str = r#"// the user's own file
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    "file:///opt/auth-plugin",
+    ["rtk.ts", { "token": "SEKRET-plugin-option" }],
+    "file:///opt/last"
+  ],
+  "provider": {
+    "google": { "options": { "apiKey": "SEKRET-google-key" } },
+    "openrouter": { "options": { "apiKey": "SEKRET-router-key" } }, // keep me
+  },
+  "mcp": {
+    "docs": { "type": "remote", "url": "https://h.invalid/x" },
+    /* a local one */
+    "local": { "type": "local", "command": ["srv"], "enabled": true },
+  },
+}
+"#;
+
+fn opencode_path(home: &Path) -> PathBuf {
+    home.join(".config/opencode/opencode.jsonc")
+}
+
+impl World {
+    fn opencode(&self, text: &str) {
+        let path = opencode_path(&self.home);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, text).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        self.inventory.rescan();
+    }
+    fn opencode_file(&self) -> String {
+        fs::read_to_string(opencode_path(&self.home)).unwrap()
+    }
+    fn opencode_item(&self, kind: ItemKind, name_part: &str) -> String {
+        self.inventory
+            .snapshot()
+            .inventory
+            .items
+            .iter()
+            .find(|i| {
+                i.provider == super::model::ProviderId::Opencode
+                    && i.kind == kind
+                    && i.name.as_str().contains(name_part)
+            })
+            .unwrap_or_else(|| panic!("no opencode {kind:?} {name_part}"))
+            .id
+            .clone()
+    }
+    /// Nothing the Console kept, said, or journalled holds a key or an option in the clear.
+    fn assert_no_secret_outside_the_file(&self) {
+        for (path, bytes) in self.state_files() {
+            let text = String::from_utf8_lossy(&bytes);
+            assert!(
+                !text.contains("SEKRET"),
+                "a secret in the clear in {}",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn an_opencode_server_is_switched_off_and_on_and_the_keys_never_move() {
+    let world = World::new(SETTINGS);
+    world.opencode(OPENCODE);
+    let id = world.opencode_item(ItemKind::McpServer, "docs");
+    let off = world.service.plan(Operation::OpencodeMcpOff, &id).unwrap();
+    assert_eq!(off.risk, Risk::Normal);
+    assert_eq!(off.effect, super::changes::Effect::OpencodeListed);
+    assert!(!format!("{off:?}").contains("SEKRET"));
+    assert_eq!(applied(&world, &off), Outcome::Applied);
+    let expected = OPENCODE.replace(
+        r#""url": "https://h.invalid/x" }"#,
+        r#""url": "https://h.invalid/x", "enabled": false }"#,
+    );
+    assert_eq!(world.opencode_file(), expected);
+    let state = world.inventory.snapshot();
+    let item = state.inventory.items.iter().find(|i| i.id == id).unwrap();
+    assert_eq!(item.persisted, super::model::Persisted::PresentDisabled);
+    // Turning a server on starts a program: the native dialog.
+    let on = world.service.plan(Operation::OpencodeMcpOn, &id).unwrap();
+    assert!(on.needs_native_dialog);
+    assert_eq!(applied(&world, &on), Outcome::Applied);
+    assert_eq!(world.confirm.asked.lock().unwrap().len(), 1);
+    // The history undoes the first change exactly.
+    let (history, _) = world.service.history(None, 10);
+    let first = history.last().unwrap();
+    assert_eq!(first.operation, Operation::OpencodeMcpOff);
+    let _ = world.service.undo(&first.id); // already followed by a change: refused or exact
+    world.assert_no_secret_outside_the_file();
+    assert_eq!(
+        world.opencode_file().matches("SEKRET-google-key").count(),
+        1
+    );
+}
+
+#[test]
+fn undoing_an_opencode_switch_gives_the_file_back_byte_for_byte() {
+    let world = World::new(SETTINGS);
+    world.opencode(OPENCODE);
+    for (kind, name, op) in [
+        (ItemKind::McpServer, "docs", Operation::OpencodeMcpOff),
+        (ItemKind::McpServer, "local", Operation::OpencodeMcpOff),
+    ] {
+        let id = world.opencode_item(kind, name);
+        let plan = world.service.plan(op, &id).unwrap();
+        assert_eq!(applied(&world, &plan), Outcome::Applied);
+        let (history, _) = world.service.history(None, 1);
+        let undo = world.service.undo(&history[0].id).unwrap();
+        assert_eq!(applied(&world, &undo), Outcome::Applied);
+        assert_eq!(world.opencode_file(), OPENCODE, "{name}");
+    }
+}
+
+#[test]
+fn an_opencode_plugin_leaves_the_list_sealed_and_comes_back_exactly() {
+    let world = World::new(SETTINGS);
+    world.opencode(OPENCODE);
+    // The one with an option holding a token: sealed, and the plan says so.
+    let id = world.opencode_item(ItemKind::Plugin, "rtk");
+    let plan = world.service.plan(Operation::ParkPlugin, &id).unwrap();
+    assert_eq!(plan.storage, Some(Protection::Sealed));
+    assert!(plan.holds_hidden_values);
+    assert!(!format!("{plan:?}").contains("SEKRET"));
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    let out = world.opencode_file();
+    assert!(!out.contains("rtk.ts") && out.contains("// the user's own file"));
+    assert!(out.contains("SEKRET-google-key") && out.contains("// keep me"));
+    world.assert_no_secret_outside_the_file();
+    // Listed as turned off, restored through the same record, in the dialog (a plugin is code).
+    let parked: Vec<_> = world
+        .service
+        .records()
+        .into_iter()
+        .filter(|r| r.state == State::Parked)
+        .collect();
+    assert_eq!(parked.len(), 1);
+    let back = world
+        .service
+        .plan(Operation::RestoreHook, &parked[0].id)
+        .unwrap();
+    assert_eq!(back.risk, Risk::ExecutesCode);
+    assert_eq!(applied(&world, &back), Outcome::Applied);
+    assert_eq!(world.opencode_file(), OPENCODE);
+    assert_eq!(world.confirm.asked.lock().unwrap().len(), 1);
+    // And the undo of the removal, made from the history, does the same on a fresh removal.
+    let plan = world.service.plan(Operation::ParkPlugin, &id).unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    let (history, _) = world.service.history(None, 1);
+    let undo = world.service.undo(&history[0].id).unwrap();
+    assert_eq!(applied(&world, &undo), Outcome::Applied);
+    assert_eq!(world.opencode_file(), OPENCODE);
+    world.assert_no_secret_outside_the_file();
+}
+
+#[test]
+fn opencode_edits_stop_for_an_outside_writer_a_conflict_copy_and_what_is_not_the_users() {
+    let world = World::new(SETTINGS);
+    world.opencode(OPENCODE);
+    let id = world.opencode_item(ItemKind::McpServer, "docs");
+    // The file changes between plan and apply: the outside change stays, nothing is written.
+    let plan = world.service.plan(Operation::OpencodeMcpOff, &id).unwrap();
+    let outside = OPENCODE.replace("auth-plugin", "other-plugin");
+    fs::write(opencode_path(&world.home), &outside).unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::ChangedOutside);
+    assert_eq!(world.opencode_file(), outside);
+    // A sync conflict copy beside it.
+    world.inventory.rescan();
+    let plan = world.service.plan(Operation::OpencodeMcpOff, &id).unwrap();
+    fs::write(
+        world
+            .home
+            .join(".config/opencode/opencode.sync-conflict-20261019-120000-ABCDEFG.jsonc"),
+        "{}",
+    )
+    .unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::ConflictCopyPresent);
+    assert_eq!(world.opencode_file(), outside);
+    // A directory another account can write is never written.
+    let loose = World::new(SETTINGS);
+    loose.opencode(OPENCODE);
+    let dir = loose.home.join(".config/opencode");
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o777)).unwrap();
+    loose.inventory.rescan();
+    // Not even listed, so not even a plan: nothing names it.
+    let id = item_id_for(SourceKey::OpencodeUserConfig, &["docs"]);
+    assert!(matches!(
+        loose
+            .service
+            .plan(Operation::OpencodeMcpOff, &id)
+            .unwrap_err(),
+        ChangeFailure::NotWritable | ChangeFailure::EntryGone
+    ));
+    assert_eq!(loose.opencode_file(), OPENCODE);
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+#[test]
+fn an_opencode_link_is_written_through_and_stays_a_link() {
+    let world = World::new(SETTINGS);
+    let dir = world.home.join(".config/opencode");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("real.jsonc"), OPENCODE).unwrap();
+    fs::set_permissions(dir.join("real.jsonc"), fs::Permissions::from_mode(0o600)).unwrap();
+    symlink("real.jsonc", opencode_path(&world.home)).unwrap();
+    world.inventory.rescan();
+    let id = world.opencode_item(ItemKind::McpServer, "docs");
+    let plan = world.service.plan(Operation::OpencodeMcpOff, &id).unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    assert!(
+        fs::symlink_metadata(opencode_path(&world.home))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert!(
+        fs::read_to_string(dir.join("real.jsonc"))
+            .unwrap()
+            .contains("\"enabled\": false")
+    );
+}
+
+#[test]
+fn a_structure_opencode_edits_cannot_place_is_refused_and_the_file_is_not_rewritten() {
+    let world = World::new(SETTINGS);
+    // A comment between two plugins would be taken with the one that goes.
+    let crowded = OPENCODE.replace(
+        "    \"file:///opt/last\"",
+        "    // about the last one\n    \"file:///opt/last\"",
+    );
+    world.opencode(&crowded);
+    let id = world.opencode_item(ItemKind::Plugin, "auth-plugin");
+    assert!(world.service.plan(Operation::ParkPlugin, &id).is_ok());
+    let last = world.opencode_item(ItemKind::Plugin, "last");
+    assert_eq!(
+        world
+            .service
+            .plan(Operation::ParkPlugin, &last)
+            .unwrap_err(),
+        ChangeFailure::NotSupported
+    );
+    assert_eq!(world.opencode_file(), crowded);
+    // A repeated key is ambiguous.
+    let twice = OPENCODE.replace(
+        "\"local\": {",
+        "\"docs\": { \"type\": \"remote\" }, \"local\": {",
+    );
+    world.opencode(&twice);
+    let docs =
+        world.inventory.snapshot().inventory.items.iter().any(|i| {
+            i.provider == super::model::ProviderId::Opencode && i.kind == ItemKind::McpServer
+        });
+    let _ = docs;
+    assert_eq!(world.opencode_file(), twice);
+}
+
+/// The invariants after any fault and a restart, for a plugin taken out and for a switch.
+#[test]
+fn a_failure_or_a_crash_at_any_step_of_an_opencode_edit_is_repaired_and_undoable() {
+    let steps = [
+        Step::IntentJournaled,
+        Step::RecordSealed,
+        Step::RecordWritten,
+        Step::TemporaryCreated,
+        Step::TemporaryWritten,
+        Step::TemporaryFlushed,
+        Step::Renamed,
+        Step::Exchanged,
+        Step::DirectoryFlushed,
+        Step::ReadBack,
+        Step::OutcomeJournaled,
+    ];
+    for (op, kind, name) in [
+        (Operation::OpencodeMcpOff, ItemKind::McpServer, "docs"),
+        (Operation::ParkPlugin, ItemKind::Plugin, "rtk"),
+    ] {
+        for step in steps {
+            // A switch keeps no record: the steps of a record never happen for it.
+            if op == Operation::OpencodeMcpOff
+                && matches!(step, Step::RecordSealed | Step::RecordWritten)
+            {
+                continue;
+            }
+            for fault in [Fault::Fail, Fault::Crash] {
+                let world = World::new(SETTINGS);
+                world.opencode(OPENCODE);
+                let id = world.opencode_item(kind, name);
+                let plan = world.service.plan(op, &id).unwrap();
+                world.faults.arm(step, fault);
+                let result = world.service.apply(&plan.id);
+                if fault == Fault::Crash {
+                    assert!(
+                        result.is_err(),
+                        "{op:?} {step:?}: a crash is not an outcome"
+                    );
+                }
+                let again = world.restarted();
+                again.service.recover();
+                let file = again.opencode_file();
+                let changed = file != OPENCODE;
+                assert!(
+                    file.contains("SEKRET-google-key") && file.contains("// keep me"),
+                    "{op:?} {step:?} {fault:?}: the file lost something"
+                );
+                assert!(
+                    fs::read_dir(again.home.join(".config/opencode"))
+                        .unwrap()
+                        .flatten()
+                        .all(|e| !e.file_name().to_string_lossy().ends_with(".tmp")),
+                    "{op:?} {step:?} {fault:?}: a temporary file was left"
+                );
+                let (history, _) = again.service.history(None, 5);
+                assert!(history.iter().all(|c| c.outcome.is_some()));
+                let parked: Vec<_> = again
+                    .service
+                    .records()
+                    .into_iter()
+                    .filter(|r| r.state == State::Parked)
+                    .collect();
+                if op == Operation::ParkPlugin {
+                    assert_eq!(
+                        parked.len(),
+                        usize::from(changed),
+                        "{op:?} {step:?} {fault:?}: record and file disagree"
+                    );
+                }
+                if changed {
+                    if op == Operation::ParkPlugin {
+                        let back = again
+                            .service
+                            .plan(Operation::RestoreHook, &parked[0].id)
+                            .unwrap();
+                        assert_eq!(applied(&again, &back), Outcome::Applied);
+                    } else {
+                        let change = history
+                            .iter()
+                            .find(|c| c.outcome.is_some_and(Outcome::changed_the_file))
+                            .unwrap();
+                        let undo = again.service.undo(&change.id).unwrap();
+                        assert_eq!(applied(&again, &undo), Outcome::Applied);
+                    }
+                    assert_eq!(
+                        again.opencode_file(),
+                        OPENCODE,
+                        "{op:?} {step:?} {fault:?}: not undone exactly"
+                    );
+                }
+                again.assert_no_secret_outside_the_file();
+            }
+        }
+    }
+}

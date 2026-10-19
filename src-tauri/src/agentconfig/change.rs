@@ -27,6 +27,13 @@ pub enum Operation {
     CodexMcpOff,
     /// Codex: that server's `enabled` as it was, or `true`.
     CodexMcpOn,
+    /// OpenCode: `enabled: false` on an MCP server.
+    OpencodeMcpOff,
+    /// OpenCode: that server's `enabled` as it was, or `true`.
+    OpencodeMcpOn,
+    /// OpenCode has no per-plugin switch: the entry leaves the `plugin` list and is kept. It is
+    /// put back with `RestoreHook`, which restores whatever a record holds.
+    ParkPlugin,
 }
 
 /// What a switch's key held before a change made it: the one thing needed to put it back
