@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Codex skills and MCP servers, with a way back (F2b)
+
+- **Codex's skills and MCP servers can be switched from the Configuration view**, in the
+  real `~/.codex/config.toml`: one `enabled` line is added or replaced and every comment,
+  blank line and key stays. Turning an MCP server on asks in the native window; the rest asks
+  in the page.
+- **Exact undo from one closed word.** The journal keeps what the key held (absent, enabled,
+  disabled); the undo puts the file back byte for byte. Shown on the real configuration with
+  an exact backup: the installed Codex listed the server as disabled, then enabled again, and
+  the file had the same SHA-256 and mode as before.
+- **A prediction, labelled as one**, of what the change does to managed Inference, held equal
+  to the authority's own rule by an exhaustive test. Codex hooks are not changeable: their
+  switch is not verified and enabling one is blocked.
+- The same writer, journal and recovery as F2a: every step of an apply to Codex's file is
+  tested failed and crashed, and the undo is exact after each.
+
 ### Changing Claude Code's configuration, with a way back (F2a)
 
 - **Decision DN-01 is made (ADR 0029).** Something the Console keeps to put an entry back may

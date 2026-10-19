@@ -8,6 +8,8 @@
 //! made on working, tested pieces, and so that turning F2b on is wiring and not design.
 //! Individual Codex hooks are not here at all: where Codex keeps their switch is unverified
 //! (OQ-01), and enabling one is blocked until G-INF.
+use super::change::Prior;
+use super::inventory::{SourceKey, item_id_for};
 use super::jsonspan::Edit;
 use super::tomlspan::{self, Document, SpanError, Table};
 use serde_json::Value;
@@ -40,10 +42,14 @@ pub enum Part {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Logical {
     Set { path: Vec<Part>, value: Value },
+    Remove { path: Vec<Part> },
 }
 
 pub fn apply_logical(before: &Value, edit: &Logical) -> Option<Value> {
-    let Logical::Set { path, value } = edit;
+    let (path, value) = match edit {
+        Logical::Set { path, value } => (path, Some(value)),
+        Logical::Remove { path } => (path, None),
+    };
     let mut root = before.clone();
     let mut at = &mut root;
     let (last, rest) = path.split_last()?;
@@ -53,18 +59,22 @@ pub fn apply_logical(before: &Value, edit: &Logical) -> Option<Value> {
             Part::Index(index) => at.get_mut(*index)?,
         };
     }
-    match last {
-        Part::Key(key) => {
+    match (last, value) {
+        (Part::Key(key), Some(value)) => {
             at.as_object_mut()?.insert(key.clone(), value.clone());
         }
-        Part::Index(_) => return None,
+        (Part::Key(key), None) => {
+            at.as_object_mut()?.remove(key)?;
+        }
+        (Part::Index(_), _) => return None,
     }
     Some(root)
 }
 
 /// What the verdict of managed Inference is on a configuration, as the authority decides it
 /// on the definitions (`zero_external_hooks`, `mcp_names`): not on a running Codex.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Verdict {
     Available,
     /// A hook definition is enabled (or its enablement is unknown, which counts the same),
@@ -154,7 +164,9 @@ pub struct CodexDrafted {
     pub new_bytes: Vec<u8>,
     pub logical: Logical,
     pub prediction: Prediction,
-    /// The edit that puts the file back exactly, valid while the file is the one produced.
+    /// What the key held before: all that an undo needs to put the file back exactly.
+    pub prior: Prior,
+    /// The edit that puts the file back, valid while the file is the one produced (tests).
     pub inverse: Edit,
 }
 
@@ -222,18 +234,49 @@ fn locate<'a>(
     }
 }
 
+/// The skill's configured path or the server's name that an inventory item stands for.
+pub fn resolve(
+    config: &str,
+    source: SourceKey,
+    skill: bool,
+    item: &str,
+) -> Result<String, CodexPlanError> {
+    let (_, value) = parse(config)?;
+    if skill {
+        value
+            .pointer("/skills/config")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.get("path").and_then(Value::as_str))
+            .find(|path| item_id_for(source, &[path]) == item)
+            .map(str::to_owned)
+            .ok_or(CodexPlanError::EntryGone)
+    } else {
+        value
+            .get("mcp_servers")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flat_map(|servers| servers.keys())
+            .find(|name| item_id_for(source, &[name]) == item)
+            .cloned()
+            .ok_or(CodexPlanError::EntryGone)
+    }
+}
+
 /// Plans one switch. `name` is a skill's configured path or an MCP server's name; `config`
-/// is `config.toml` as text, `hooks_json` the parsed `hooks.json` if there is one.
+/// is `config.toml` as text, `hooks_json` the parsed `hooks.json` if there is one. With
+/// `restore`, the key is put to what it held before a change (an undo): absent removes its
+/// line, a boolean sets it.
 pub fn draft(
     config: &str,
     hooks_json: Option<&Value>,
     operation: CodexOperation,
     name: &str,
+    restore: Option<Prior>,
 ) -> Result<CodexDrafted, CodexPlanError> {
     let (document, before) = parse(config)?;
     let (table, path) = locate(&document, &before, operation, name)?;
-    let off = matches!(operation, CodexOperation::SkillOff | CodexOperation::McpOff);
-    let wanted = !off;
     let key_path: Vec<String> = table
         .path
         .iter()
@@ -244,23 +287,55 @@ pub fn draft(
         .pointer(&pointer(&path))
         .map(|v| v.as_bool().ok_or(CodexPlanError::EntryChanged))
         .transpose()?;
-    let effective = current.unwrap_or(true);
-    if effective == wanted {
+    let wanted: Option<bool> = match restore {
+        Some(Prior::Absent) => None,
+        Some(Prior::Enabled) => Some(true),
+        Some(Prior::Disabled) => Some(false),
+        None => Some(matches!(
+            operation,
+            CodexOperation::SkillOn | CodexOperation::McpOn
+        )),
+    };
+    let already = match restore {
+        Some(_) => current == wanted,
+        None => current.unwrap_or(true) == wanted.unwrap_or(true),
+    };
+    if already {
         return Err(CodexPlanError::AlreadyDone);
     }
-    let literal = if wanted { "true" } else { "false" };
-    let (edit, inverse) = match table.entry(&key_path) {
-        Some(entry) => {
-            let old = config[entry.value.0..entry.value.1].to_owned();
-            let edit = tomlspan::replace_value(entry, literal);
-            let inverse = Edit {
-                at: entry.value.0,
-                remove: literal.len(),
-                insert: old,
-            };
-            (edit, inverse)
+    let prior = match current {
+        None => Prior::Absent,
+        Some(true) => Prior::Enabled,
+        Some(false) => Prior::Disabled,
+    };
+    let entry = table.entry(&key_path);
+    let (edit, inverse) = match (wanted, entry) {
+        (None, Some(entry)) => {
+            let old = config[entry.line.0..entry.line.1].to_owned();
+            (
+                tomlspan::remove_statement(entry),
+                Edit {
+                    at: entry.line.0,
+                    remove: 0,
+                    insert: old,
+                },
+            )
         }
-        None => {
+        (None, None) => return Err(CodexPlanError::AlreadyDone),
+        (Some(on), Some(entry)) => {
+            let literal = if on { "true" } else { "false" };
+            let old = config[entry.value.0..entry.value.1].to_owned();
+            (
+                tomlspan::replace_value(entry, literal),
+                Edit {
+                    at: entry.value.0,
+                    remove: literal.len(),
+                    insert: old,
+                },
+            )
+        }
+        (Some(on), None) => {
+            let literal = if on { "true" } else { "false" };
             let edit = tomlspan::insert_statement(config, table, "enabled", literal);
             let inverse = Edit {
                 at: edit.at,
@@ -272,9 +347,12 @@ pub fn draft(
     };
     let new_text =
         String::from_utf8(edit.apply(config.as_bytes())).map_err(|_| CodexPlanError::Malformed)?;
-    let logical = Logical::Set {
-        path,
-        value: Value::Bool(wanted),
+    let logical = match wanted {
+        Some(on) => Logical::Set {
+            path,
+            value: Value::Bool(on),
+        },
+        None => Logical::Remove { path },
     };
     // The edit must be exactly the logical one, and the result must still parse.
     let (_, after) = parse(&new_text).map_err(|_| CodexPlanError::Malformed)?;
@@ -291,8 +369,21 @@ pub fn draft(
         new_bytes: new_text.into_bytes(),
         logical,
         prediction,
+        prior,
         inverse,
     })
+}
+
+/// Whether `after` is `before` with `edit` made to it and nothing else, both read as TOML.
+pub fn is_exactly(before: &[u8], after: &[u8], edit: &Logical) -> bool {
+    let bounds = super::model::Bounds::PROPOSED;
+    let (Ok(Some(before)), Ok(Some(after))) = (
+        super::reader::parse_toml(before, &bounds),
+        super::reader::parse_toml(after, &bounds),
+    ) else {
+        return false;
+    };
+    apply_logical(&before, edit).is_some_and(|expected| expected == after)
 }
 
 /// A JSON pointer for a value path.

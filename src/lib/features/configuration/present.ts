@@ -12,6 +12,7 @@ import type {
   Protection,
   Provider,
   Risk,
+  Verdict,
   SecretClass,
   SourceFailure,
   SourceKey,
@@ -279,6 +280,10 @@ export const OPERATION_LABEL: Record<Operation, string> = {
   enable_all_hooks: 'Allow hooks again',
   skill_off: 'Turn off this skill',
   skill_on: 'Turn on this skill',
+  codex_skill_off: 'Turn off this Codex skill',
+  codex_skill_on: 'Turn on this Codex skill',
+  codex_mcp_off: 'Turn off this Codex MCP server',
+  codex_mcp_on: 'Turn on this Codex MCP server',
 };
 
 export const RISK_LABEL: Record<Risk, string> = {
@@ -292,6 +297,10 @@ export const RISK_LABEL: Record<Risk, string> = {
 export const EFFECT_LABEL: Record<Effect, string> = {
   hooks_new_sessions_checked:
     'A new Claude Code session follows the file (checked). A session that is already running is documented to pick it up; that has not been checked.',
+  codex_mcp_checked:
+    'A new Codex process shows the server as the file says (checked). A Codex session that is already running is not known to follow it.',
+  codex_skill_unverified:
+    'The file says it. How a running Codex treats a skill’s switch has not been verified.',
   skills_new_sessions_checked:
     'A new Claude Code session refuses to run a skill that is switched off (checked). Skills that come from a plugin are not affected. What a running session does is not known.',
 };
@@ -394,6 +403,13 @@ export const CHANGE_FAILURE_TEXT: Record<ConfigurationFailure, string> = {
   no_passphrase: 'A passphrase is needed.',
 };
 
+export const VERDICT_LABEL: Record<Verdict, string> = {
+  available: 'can start',
+  external_hooks: 'cannot start: a hook is enabled in Codex’s files',
+  mcp_unprovable:
+    'cannot start: an MCP server’s name or count cannot be proved',
+};
+
 export const NOTICE_LABEL = {
   exported: 'Exported. Keep the file and the passphrase safe.',
   imported: 'Imported. It is listed under Turned off.',
@@ -411,11 +427,22 @@ const SETTINGS_SOURCES: readonly SourceKey[] = [
 export function changeFor(
   item: ConfigItem,
 ): { operation: Operation; label: string } | null {
-  if (
-    item.provider !== 'claude_code' ||
-    item.not_writable !== 'not_in_this_phase'
-  )
+  if (item.not_writable !== 'not_in_this_phase') return null;
+  if (item.provider === 'codex') {
+    // Codex: a skill or an MCP server of the user's own configuration. Never a hook.
+    if (item.source !== 'codex_user_config') return null;
+    const on = item.persisted === 'present_enabled';
+    const off = item.persisted === 'present_disabled';
+    if (item.kind === 'skill' && (on || off))
+      return on
+        ? { operation: 'codex_skill_off', label: 'Turn off' }
+        : { operation: 'codex_skill_on', label: 'Turn on' };
+    if (item.kind === 'mcp_server' && (on || off))
+      return on
+        ? { operation: 'codex_mcp_off', label: 'Turn off' }
+        : { operation: 'codex_mcp_on', label: 'Turn on' };
     return null;
+  }
   if (
     item.kind === 'hook' &&
     SETTINGS_SOURCES.includes(item.source) &&

@@ -6,7 +6,7 @@
 //! to the parsed value, as a `Logical` edit. The plan is offered only if the two agree, and
 //! the writer checks them again on what it read back. The first protects the user's layout
 //! and every byte that is not the change; the second protects against a mistake in the first.
-use super::change::{Operation, Risk};
+use super::change::{Operation, Prior, Risk};
 use super::classify::may_hold_secret;
 use super::inventory::{SourceKey, item_id_for};
 use super::jsonspan::{self, Edit, Node, Removal, SpanError};
@@ -86,6 +86,8 @@ pub enum Logical {
     },
     /// Nothing changes (a restoration whose entry is already there).
     Nothing,
+    /// A change to a TOML file (Codex): checked by `codex_plan` against the parsed value.
+    Toml(super::codex_plan::Logical),
 }
 
 /// What `apply` has to do besides write the file.
@@ -119,6 +121,10 @@ pub struct Drafted {
     pub prepared: Prepared,
     pub diff: Vec<DiffLine>,
     pub holds_hidden_values: bool,
+    /// What a switch's key held before this change (Codex), for an exact undo.
+    pub prior: Option<Prior>,
+    /// What this change does to managed Inference, as a prediction (Codex).
+    pub managed: Option<super::codex_plan::Prediction>,
 }
 
 pub fn hash(bytes: &[u8]) -> String {
@@ -137,6 +143,7 @@ pub fn apply_logical(before: &Value, edit: &Logical) -> Option<Value> {
     let root = value.as_object_mut()?;
     match edit {
         Logical::Nothing => (),
+        Logical::Toml(_) => return None,
         Logical::SetRoot { key, value } => {
             root.insert(key.clone(), value.clone());
         }
@@ -450,6 +457,8 @@ pub fn draft_park(
         },
         diff,
         holds_hidden_values: hidden || secret_bearing,
+        prior: None,
+        managed: None,
     })
 }
 
@@ -515,6 +524,8 @@ pub fn draft_restore(
             },
             diff: diff.clone(),
             holds_hidden_values: hidden || secret_bearing,
+            prior: None,
+            managed: None,
         }
     };
 
@@ -813,6 +824,8 @@ pub fn draft_all_hooks(bytes: &[u8], source: SourceKey, on: bool) -> Result<Draf
         prepared: Prepared::Nothing,
         diff,
         holds_hidden_values: false,
+        prior: None,
+        managed: None,
     })
 }
 
@@ -922,6 +935,8 @@ pub fn draft_skill(bytes: &[u8], item: &str, name: &str, off: bool) -> Result<Dr
         prepared: Prepared::Nothing,
         diff,
         holds_hidden_values: false,
+        prior: None,
+        managed: None,
     })
 }
 

@@ -6,7 +6,8 @@
 //! already knows, never a path and never text, and gets back a redacted view; it applies a
 //! plan by its identifier. A plan that needs the native dialog is applied only if the user
 //! accepts there, in a window the page cannot draw on or answer for.
-use super::change::{Operation, Outcome, Risk};
+use super::change::{Operation, Outcome, Prior, Risk};
+use super::codex_plan::{self, CodexOperation, CodexPlanError};
 use super::fault::{Faults, Injected, Step};
 use super::fsutil::private_dir;
 use super::inventory::{Environment, SourceKey};
@@ -67,6 +68,12 @@ pub enum Effect {
     /// A new session refuses a skill switched off (checked against 2.1.303); a running
     /// session is not known, and a skill that comes from a plugin is not affected at all.
     SkillsNewSessionsChecked,
+    /// `codex mcp list` shows the switch in a new Codex process (checked against 0.159.0); a
+    /// running session is not known.
+    CodexMcpChecked,
+    /// The key is what Codex's files show for a skill; how a running Codex treats it is not
+    /// verified.
+    CodexSkillUnverified,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -138,8 +145,19 @@ pub struct PlanView {
     pub storage: Option<Protection>,
     pub holds_hidden_values: bool,
     pub effect: Effect,
+    /// What the change does to managed Inference, **predicted** from the files and the
+    /// authority's rule, never read from a running Codex. Codex plans only.
+    pub managed_effect: Option<ManagedEffectView>,
     pub expires_in_seconds: u64,
     pub undoes: Option<String>,
+}
+
+/// A prediction, said as one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ManagedEffectView {
+    pub predicted: bool,
+    pub before: super::codex_plan::Verdict,
+    pub after: super::codex_plan::Verdict,
 }
 
 /// How an apply ended, and the journal entry that says so.
@@ -176,19 +194,23 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The sources a change may be made to: this user's Claude Code settings files.
+/// The sources a change may be made to: this user's Claude Code settings files and Codex's
+/// user configuration.
 fn writable(key: SourceKey) -> bool {
     matches!(
         key,
         SourceKey::ClaudeUserSettings
             | SourceKey::ClaudeProjectSettings
             | SourceKey::ClaudeProjectLocalSettings
+            | SourceKey::CodexUserConfig
     ) && matches!(key.class(), SourceClass::User | SourceClass::Project)
 }
 
 fn effect_of(operation: Operation) -> Effect {
     match operation {
         Operation::SkillOff | Operation::SkillOn => Effect::SkillsNewSessionsChecked,
+        Operation::CodexMcpOff | Operation::CodexMcpOn => Effect::CodexMcpChecked,
+        Operation::CodexSkillOff | Operation::CodexSkillOn => Effect::CodexSkillUnverified,
         _ => Effect::HooksNewSessionsChecked,
     }
 }
@@ -218,8 +240,9 @@ impl ChangeService {
         })
     }
 
-    /// A service over the Claude Code sources of `environment`, as the desktop builds it.
-    pub fn for_claude(
+    /// A service over the sources a change may be made to: Claude Code's settings files and
+    /// Codex's user configuration, as the desktop builds it.
+    pub fn for_providers(
         environment: Environment,
         inventory: InventoryService,
         state: &std::path::Path,
@@ -227,7 +250,9 @@ impl ChangeService {
         confirm: Box<dyn Confirm>,
         faults: Faults,
     ) -> Result<Self, ChangeFailure> {
-        let roots = super::claude::roots(&environment).map_err(|_| ChangeFailure::Internal)?;
+        let roots = super::claude::roots(&environment)
+            .and_then(|claude| claude.union(&super::codex::roots(&environment)?))
+            .map_err(|_| ChangeFailure::Internal)?;
         let reader =
             ConfigReader::new(roots, Bounds::PROPOSED).map_err(|_| ChangeFailure::Internal)?;
         let store = RestorationStore::open(state, vault, faults.clone())?;
@@ -262,6 +287,7 @@ impl ChangeService {
             SourceKey::ClaudeProjectLocalSettings => {
                 Some(project?.join(".claude/settings.local.json"))
             }
+            SourceKey::CodexUserConfig => Some(environment.codex_dir().join("config.toml")),
             _ => None,
         }
     }
@@ -304,6 +330,11 @@ impl ChangeService {
             },
             holds_hidden_values: drafted.holds_hidden_values,
             effect: effect_of(drafted.operation),
+            managed_effect: drafted.managed.as_ref().map(|m| ManagedEffectView {
+                predicted: true,
+                before: m.before.clone(),
+                after: m.after.clone(),
+            }),
             expires_in_seconds: PLAN_LIFETIME_SECONDS.saturating_sub(stored.at.elapsed().as_secs()),
             undoes: stored.undoes.clone(),
         }
@@ -327,6 +358,16 @@ impl ChangeService {
         view
     }
 
+    /// `~/.codex/hooks.json`, if there is one and it reads: part of what decides managed
+    /// Inference, so part of the prediction.
+    fn codex_hooks_json(&self) -> Option<serde_json::Value> {
+        let path = lock(&self.environment).codex_dir().join("hooks.json");
+        let file = self.reader.read_file(&path).ok()?;
+        super::reader::parse_json(file.bytes(), &self.bounds)
+            .ok()
+            .flatten()
+    }
+
     fn item(&self, id: &str) -> Option<super::inventory::Item> {
         self.inventory
             .snapshot()
@@ -340,7 +381,7 @@ impl ChangeService {
     /// Drafts a change. `target` is an item's identifier, a record's, or a source's word,
     /// as the operation needs; the page has nothing else to name.
     pub fn plan(&self, operation: Operation, target: &str) -> Result<PlanView, ChangeFailure> {
-        self.plan_with(operation, target, None)
+        self.plan_with(operation, target, None, None)
     }
 
     fn plan_with(
@@ -348,6 +389,7 @@ impl ChangeService {
         operation: Operation,
         target: &str,
         undoes: Option<String>,
+        restore: Option<Prior>,
     ) -> Result<PlanView, ChangeFailure> {
         let (source, drafted) = match operation {
             Operation::ParkHook => {
@@ -388,6 +430,100 @@ impl ChangeService {
                 (
                     source,
                     draft_all_hooks(&bytes, source, operation == Operation::DisableAllHooks)?,
+                )
+            }
+            Operation::CodexSkillOff
+            | Operation::CodexSkillOn
+            | Operation::CodexMcpOff
+            | Operation::CodexMcpOn => {
+                let skill = matches!(
+                    operation,
+                    Operation::CodexSkillOff | Operation::CodexSkillOn
+                );
+                let item = self.item(target).ok_or(ChangeFailure::EntryGone)?;
+                let right_kind = if skill {
+                    ItemKind::Skill
+                } else {
+                    ItemKind::McpServer
+                };
+                if item.provider != ProviderId::Codex
+                    || item.source != SourceKey::CodexUserConfig
+                    || item.kind != right_kind
+                {
+                    return Err(ChangeFailure::NotSupported);
+                }
+                let (_, bytes) = self.read_target(item.source)?;
+                let text =
+                    std::str::from_utf8(&bytes).map_err(|_| ChangeFailure::SourceMalformed)?;
+                let name =
+                    codex_plan::resolve(text, item.source, skill, target).map_err(codex_failure)?;
+                let hooks_json = self.codex_hooks_json();
+                let cop = match operation {
+                    Operation::CodexSkillOff => CodexOperation::SkillOff,
+                    Operation::CodexSkillOn => CodexOperation::SkillOn,
+                    Operation::CodexMcpOff => CodexOperation::McpOff,
+                    _ => CodexOperation::McpOn,
+                };
+                let planned = codex_plan::draft(text, hooks_json.as_ref(), cop, &name, restore)
+                    .map_err(codex_failure)?;
+                // On for a server starts a program: the native dialog, as for a hook put
+                // back (11 §4). Everything else Codex-side is a switch off, or a skill.
+                let risk = if operation == Operation::CodexMcpOn {
+                    Risk::ExecutesCode
+                } else {
+                    Risk::Normal
+                };
+                let word = |on: bool| if on { "true" } else { "false" };
+                let diff = match planned.logical {
+                    codex_plan::Logical::Set {
+                        value: serde_json::Value::Bool(on),
+                        ..
+                    } => vec![
+                        DiffLine {
+                            kind: super::plan::DiffKind::Removed,
+                            text: format!(
+                                "enabled: {}",
+                                match planned.prior {
+                                    Prior::Absent => "(not set, so on)",
+                                    Prior::Enabled => "true",
+                                    Prior::Disabled => "false",
+                                }
+                            ),
+                        },
+                        DiffLine {
+                            kind: super::plan::DiffKind::Added,
+                            text: format!("enabled: {}", word(on)),
+                        },
+                    ],
+                    _ => vec![DiffLine {
+                        kind: super::plan::DiffKind::Removed,
+                        text: format!(
+                            "enabled: {} (the line is removed)",
+                            if planned.prior == Prior::Disabled {
+                                "false"
+                            } else {
+                                "true"
+                            }
+                        ),
+                    }],
+                };
+                (
+                    item.source,
+                    Drafted {
+                        operation,
+                        item: target.to_owned(),
+                        name: item.name.as_str().to_owned(),
+                        risk,
+                        h0: hash(&bytes),
+                        h1: hash(&planned.new_bytes),
+                        new_bytes: planned.new_bytes,
+                        logical: super::plan::Logical::Toml(planned.logical),
+                        prepared: Prepared::Nothing,
+                        diff,
+                        holds_hidden_values: false,
+                        prior: Some(planned.prior),
+                        managed: Some(planned.prediction),
+                    },
                 )
             }
             Operation::RestoreHook => {
@@ -432,6 +568,7 @@ impl ChangeService {
             outcome,
             record,
             undoes: stored.undoes.clone(),
+            prior: stored.drafted.prior,
         }
     }
 
@@ -629,8 +766,13 @@ impl ChangeService {
             Ok(file) => {
                 let actual = hash(file.bytes());
                 let same = actual == drafted.h1
-                    && (drafted.logical == super::plan::Logical::Nothing
-                        || is_exactly(current.bytes(), file.bytes(), &drafted.logical));
+                    && match &drafted.logical {
+                        super::plan::Logical::Nothing => true,
+                        super::plan::Logical::Toml(edit) => {
+                            super::codex_plan::is_exactly(current.bytes(), file.bytes(), edit)
+                        }
+                        other => is_exactly(current.bytes(), file.bytes(), other),
+                    };
                 (same, Some(actual))
             }
             Err(_) => (false, None),
@@ -658,20 +800,15 @@ impl ChangeService {
             .journal
             .change(change_id)
             .ok_or(ChangeFailure::NotUndoable)?;
-        if !matches!(
-            change.outcome,
-            Some(Outcome::Applied | Outcome::RecoveredApplied)
-        ) || change.undoes.is_some()
-        {
+        // Anything that changed the file can be undone, verified or not: the undo is a plan
+        // made against the file as it is, and refused if it does not fit.
+        if !change.outcome.is_some_and(Outcome::changed_the_file) || change.undoes.is_some() {
             return Err(ChangeFailure::NotUndoable);
         }
         // Already undone: a later change names this one.
         if self.journal.changes().iter().any(|later| {
             later.undoes.as_deref() == Some(change_id)
-                && matches!(
-                    later.outcome,
-                    Some(Outcome::Applied | Outcome::RecoveredApplied)
-                )
+                && later.outcome.is_some_and(Outcome::changed_the_file)
         }) {
             return Err(ChangeFailure::NotUndoable);
         }
@@ -679,7 +816,7 @@ impl ChangeService {
         match change.operation {
             Operation::ParkHook => {
                 let record = change.record.ok_or(ChangeFailure::NotUndoable)?;
-                self.plan_with(Operation::RestoreHook, &record, undoes)
+                self.plan_with(Operation::RestoreHook, &record, undoes, None)
             }
             Operation::RestoreHook => {
                 let record = change.record.ok_or(ChangeFailure::NotUndoable)?;
@@ -692,20 +829,37 @@ impl ChangeService {
                         &body.index.to_string(),
                     ],
                 );
-                self.plan_with(Operation::ParkHook, &item, undoes)
+                self.plan_with(Operation::ParkHook, &item, undoes, None)
             }
             Operation::DisableAllHooks => self.plan_with(
                 Operation::EnableAllHooks,
                 &source_word(change.source),
                 undoes,
+                None,
             ),
             Operation::EnableAllHooks => self.plan_with(
                 Operation::DisableAllHooks,
                 &source_word(change.source),
                 undoes,
+                None,
             ),
-            Operation::SkillOff => self.plan_with(Operation::SkillOn, &change.item, undoes),
-            Operation::SkillOn => self.plan_with(Operation::SkillOff, &change.item, undoes),
+            Operation::SkillOff => self.plan_with(Operation::SkillOn, &change.item, undoes, None),
+            Operation::SkillOn => self.plan_with(Operation::SkillOff, &change.item, undoes, None),
+            // A Codex switch is put back to what its key held: exact, and needing nothing
+            // but the closed word the journal kept.
+            Operation::CodexSkillOff
+            | Operation::CodexSkillOn
+            | Operation::CodexMcpOff
+            | Operation::CodexMcpOn => {
+                let prior = change.prior.ok_or(ChangeFailure::NotUndoable)?;
+                let inverse = match change.operation {
+                    Operation::CodexSkillOff => Operation::CodexSkillOn,
+                    Operation::CodexSkillOn => Operation::CodexSkillOff,
+                    Operation::CodexMcpOff => Operation::CodexMcpOn,
+                    _ => Operation::CodexMcpOff,
+                };
+                self.plan_with(inverse, &change.item, undoes, Some(prior))
+            }
         }
     }
 
@@ -742,6 +896,7 @@ impl ChangeService {
             SourceKey::ClaudeUserSettings,
             SourceKey::ClaudeProjectSettings,
             SourceKey::ClaudeProjectLocalSettings,
+            SourceKey::CodexUserConfig,
         ];
         // Temporary files of a write that was cut short, judged one by one. Nothing is
         // deleted that cannot be accounted for: a file left at a temporary name may be the
@@ -841,6 +996,16 @@ impl ChangeService {
         let _ = self.journal.prune(now());
         let _ = self.store.prune();
         repaired
+    }
+}
+
+fn codex_failure(error: CodexPlanError) -> ChangeFailure {
+    match error {
+        CodexPlanError::Malformed => ChangeFailure::SourceMalformed,
+        CodexPlanError::Unsupported => ChangeFailure::NotSupported,
+        CodexPlanError::EntryGone => ChangeFailure::EntryGone,
+        CodexPlanError::EntryChanged => ChangeFailure::EntryChanged,
+        CodexPlanError::AlreadyDone => ChangeFailure::AlreadyDone,
     }
 }
 

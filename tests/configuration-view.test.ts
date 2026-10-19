@@ -325,3 +325,24 @@ describe('changing, in the view', () => {
     );
   });
 });
+
+describe('a Codex plan, in the view', () => {
+  it('shows the managed-Inference effect as a prediction and what was and was not checked', async () => {
+    const changes = new FakeChanges();
+    changes.plan = changesFixture.codexMcpPlan();
+    await shown(undefined, changes);
+    await click(row('PreToolUse'));
+    await click(
+      button('Turn off…', document.querySelector('.configuration-detail')!),
+    );
+    const plan = document.querySelector('.configuration-plan')!;
+    expect(text(plan)).toContain('Turn off this Codex MCP server');
+    expect(text(plan)).toContain('Prediction, not a reading');
+    expect(text(plan)).toContain('managed Inference can start now');
+    expect(text(plan)).toContain('this change does not alter that');
+    expect(text(plan)).toContain('A new Codex process shows the server');
+    expect(text(plan.querySelector('.configuration-diff'))).toContain(
+      'enabled: false',
+    );
+  });
+});

@@ -39,7 +39,7 @@ fn text(d: &super::codex_plan::CodexDrafted) -> String {
 
 #[test]
 fn a_skill_is_switched_by_its_enabled_key_alone() {
-    let on = draft(CONFIG, None, CodexOperation::SkillOn, ALPHA).unwrap();
+    let on = draft(CONFIG, None, CodexOperation::SkillOn, ALPHA, None).unwrap();
     assert_eq!(
         text(&on),
         CONFIG.replace(
@@ -47,7 +47,7 @@ fn a_skill_is_switched_by_its_enabled_key_alone() {
             "enabled = true   # parked for now"
         )
     );
-    let off = draft(CONFIG, None, CodexOperation::SkillOff, BETA).unwrap();
+    let off = draft(CONFIG, None, CodexOperation::SkillOff, BETA, None).unwrap();
     assert_eq!(
         text(&off),
         CONFIG.replace(
@@ -59,7 +59,7 @@ fn a_skill_is_switched_by_its_enabled_key_alone() {
 
 #[test]
 fn an_mcp_server_is_switched_by_its_enabled_key_alone() {
-    let off = draft(CONFIG, None, CodexOperation::McpOff, "wyss_session").unwrap();
+    let off = draft(CONFIG, None, CodexOperation::McpOff, "wyss_session", None).unwrap();
     assert_eq!(
         text(&off),
         CONFIG.replace(
@@ -67,7 +67,7 @@ fn an_mcp_server_is_switched_by_its_enabled_key_alone() {
             "  \"serve\",   # comment inside\n]\nenabled = false\n"
         )
     );
-    let on = draft(CONFIG, None, CodexOperation::McpOn, "web").unwrap();
+    let on = draft(CONFIG, None, CodexOperation::McpOn, "web", None).unwrap();
     assert_eq!(
         text(&on),
         CONFIG.replace("enabled = false\n", "enabled = true\n")
@@ -82,7 +82,7 @@ fn every_comment_and_blank_line_survives_and_the_inverse_gives_the_file_back() {
         (CodexOperation::McpOff, "wyss_session"),
         (CodexOperation::McpOn, "web"),
     ] {
-        let drafted = draft(CONFIG, None, op, name).unwrap();
+        let drafted = draft(CONFIG, None, op, name, None).unwrap();
         let after = text(&drafted);
         for line in CONFIG
             .lines()
@@ -101,32 +101,32 @@ fn every_comment_and_blank_line_survives_and_the_inverse_gives_the_file_back() {
 #[test]
 fn what_is_already_so_or_not_there_or_not_a_boolean_is_refused() {
     assert_eq!(
-        draft(CONFIG, None, CodexOperation::SkillOff, ALPHA).unwrap_err(),
+        draft(CONFIG, None, CodexOperation::SkillOff, ALPHA, None).unwrap_err(),
         CodexPlanError::AlreadyDone
     );
     assert_eq!(
-        draft(CONFIG, None, CodexOperation::SkillOn, BETA).unwrap_err(),
+        draft(CONFIG, None, CodexOperation::SkillOn, BETA, None).unwrap_err(),
         CodexPlanError::AlreadyDone
     );
     assert_eq!(
-        draft(CONFIG, None, CodexOperation::McpOff, "web").unwrap_err(),
+        draft(CONFIG, None, CodexOperation::McpOff, "web", None).unwrap_err(),
         CodexPlanError::AlreadyDone
     );
     assert_eq!(
-        draft(CONFIG, None, CodexOperation::SkillOff, "/nope").unwrap_err(),
+        draft(CONFIG, None, CodexOperation::SkillOff, "/nope", None).unwrap_err(),
         CodexPlanError::EntryGone
     );
     assert_eq!(
-        draft(CONFIG, None, CodexOperation::McpOn, "nope").unwrap_err(),
+        draft(CONFIG, None, CodexOperation::McpOn, "nope", None).unwrap_err(),
         CodexPlanError::EntryGone
     );
     let odd = CONFIG.replace("enabled = false\n", "enabled = \"no\"\n");
     assert_eq!(
-        draft(&odd, None, CodexOperation::McpOn, "web").unwrap_err(),
+        draft(&odd, None, CodexOperation::McpOn, "web", None).unwrap_err(),
         CodexPlanError::EntryChanged
     );
     assert_eq!(
-        draft("not toml [", None, CodexOperation::McpOn, "web").unwrap_err(),
+        draft("not toml [", None, CodexOperation::McpOn, "web", None).unwrap_err(),
         CodexPlanError::Unsupported
     );
 }
@@ -136,12 +136,12 @@ fn a_layout_the_editor_cannot_place_is_left_alone() {
     // The servers are defined through an inline table: a plan would have to guess.
     let inline = "mcp_servers = { web = { url = \"x\", enabled = false } }\n";
     assert_eq!(
-        draft(inline, None, CodexOperation::McpOn, "web").unwrap_err(),
+        draft(inline, None, CodexOperation::McpOn, "web", None).unwrap_err(),
         CodexPlanError::Unsupported
     );
     let inline_skills = "skills.config = [ { path = \"/a\", enabled = false } ]\n";
     assert_eq!(
-        draft(inline_skills, None, CodexOperation::SkillOn, "/a").unwrap_err(),
+        draft(inline_skills, None, CodexOperation::SkillOn, "/a", None).unwrap_err(),
         CodexPlanError::Unsupported
     );
 }
@@ -154,7 +154,7 @@ fn the_name_of_what_is_planned_goes_through_redaction() {
         "-abcdefghijklmnopqrstuvwxyz012345"
     );
     let config = format!("[[skills.config]]\npath = \"{secret}\"\n");
-    let drafted = draft(&config, None, CodexOperation::SkillOff, secret).unwrap();
+    let drafted = draft(&config, None, CodexOperation::SkillOff, secret, None).unwrap();
     assert!(
         !drafted.name.contains("abcdefghijklmnop"),
         "{}",
@@ -166,7 +166,7 @@ fn the_name_of_what_is_planned_goes_through_redaction() {
 fn the_prediction_is_computed_on_the_resulting_definitions() {
     // The owner's case: the engine pinned on and no hook defined. Switching a skill or an
     // MCP server changes nothing about managed Inference.
-    let drafted = draft(CONFIG, None, CodexOperation::SkillOn, ALPHA).unwrap();
+    let drafted = draft(CONFIG, None, CodexOperation::SkillOn, ALPHA, None).unwrap();
     assert_eq!(drafted.prediction.before, Verdict::Available);
     assert!(!drafted.prediction.changes_anything());
 
@@ -175,14 +175,14 @@ fn the_prediction_is_computed_on_the_resulting_definitions() {
     let with_hook = format!(
         "{CONFIG}\n[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"x\"\n"
     );
-    let drafted = draft(&with_hook, None, CodexOperation::SkillOn, ALPHA).unwrap();
+    let drafted = draft(&with_hook, None, CodexOperation::SkillOn, ALPHA, None).unwrap();
     assert_eq!(drafted.prediction.before, Verdict::ExternalHooks);
     assert_eq!(drafted.prediction.after, Verdict::ExternalHooks);
 
     // A server whose name Inference cannot turn off by name makes the profile unprovable,
     // whatever is switched.
     let bad = format!("{CONFIG}\n[mcp_servers.\"bad name!\"]\nurl = \"x\"\n");
-    let drafted = draft(&bad, None, CodexOperation::SkillOn, ALPHA).unwrap();
+    let drafted = draft(&bad, None, CodexOperation::SkillOn, ALPHA, None).unwrap();
     assert_eq!(drafted.prediction.after, Verdict::McpUnprovable);
 }
 
@@ -234,14 +234,14 @@ fn real_codex_reads_the_mcp_switch_the_planner_wrote() {
     assert_eq!(status(&list(), "alpha"), Some(true));
     assert_eq!(status(&list(), "beta"), Some(false));
 
-    let off = draft(config, None, CodexOperation::McpOff, "alpha").unwrap();
+    let off = draft(config, None, CodexOperation::McpOff, "alpha", None).unwrap();
     std::fs::write(home.join("config.toml"), &off.new_bytes).unwrap();
     assert_eq!(
         status(&list(), "alpha"),
         Some(false),
         "Codex must see the switch that was written"
     );
-    let on = draft(config, None, CodexOperation::McpOn, "beta").unwrap();
+    let on = draft(config, None, CodexOperation::McpOn, "beta", None).unwrap();
     std::fs::write(home.join("config.toml"), &on.new_bytes).unwrap();
     assert_eq!(status(&list(), "beta"), Some(true));
 

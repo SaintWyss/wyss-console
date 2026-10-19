@@ -229,6 +229,10 @@ export const OPERATIONS = [
   'enable_all_hooks',
   'skill_off',
   'skill_on',
+  'codex_skill_off',
+  'codex_skill_on',
+  'codex_mcp_off',
+  'codex_mcp_on',
 ] as const;
 export type Operation = (typeof OPERATIONS)[number];
 
@@ -238,6 +242,8 @@ export type Risk = (typeof RISKS)[number];
 export const EFFECTS = [
   'hooks_new_sessions_checked',
   'skills_new_sessions_checked',
+  'codex_mcp_checked',
+  'codex_skill_unverified',
 ] as const;
 export type Effect = (typeof EFFECTS)[number];
 
@@ -270,6 +276,18 @@ export interface DiffLine {
 }
 
 /** A change the desktop has drafted and not applied: redacted, with no bytes of the file. */
+export const VERDICTS = [
+  'available',
+  'external_hooks',
+  'mcp_unprovable',
+] as const;
+export type Verdict = (typeof VERDICTS)[number];
+export interface ManagedEffect {
+  predicted: true;
+  before: Verdict;
+  after: Verdict;
+}
+
 export interface Plan {
   id: string;
   operation: Operation;
@@ -283,6 +301,8 @@ export interface Plan {
   storage: Protection | null;
   holds_hidden_values: boolean;
   effect: Effect;
+  /** What the change would do to managed Inference: a prediction, never a reading. */
+  managed_effect: ManagedEffect | null;
   expires_in_seconds: number;
   undoes: string | null;
 }
@@ -307,6 +327,8 @@ export interface HistoryChange {
   outcome: Outcome | null;
   record: string | null;
   undoes: string | null;
+  /** For a switch: what its key held before, so an undo is exact. */
+  prior: 'absent' | 'enabled' | 'disabled' | null;
 }
 
 export interface History {
@@ -660,6 +682,7 @@ export function parsePlan(value: unknown): Plan {
       'storage',
       'holds_hidden_values',
       'effect',
+      'managed_effect',
       'expires_in_seconds',
       'undoes',
     ],
@@ -684,6 +707,15 @@ export function parsePlan(value: unknown): Plan {
     storage: opt(p.storage, (v) => member(v, PROTECTIONS, 'plan')),
     holds_hidden_values: flag(p.holds_hidden_values, 'plan'),
     effect: member(p.effect, EFFECTS, 'plan'),
+    managed_effect: opt(p.managed_effect, (v) => {
+      const m = record(v, ['predicted', 'before', 'after'], 'plan');
+      if (m.predicted !== true) throw invalid('plan');
+      return {
+        predicted: true as const,
+        before: member(m.before, VERDICTS, 'plan'),
+        after: member(m.after, VERDICTS, 'plan'),
+      };
+    }),
     expires_in_seconds: count(p.expires_in_seconds, 'plan'),
     undoes: opt(p.undoes, (v) => ident(v, 'plan')),
   };
@@ -717,6 +749,7 @@ export function parseHistory(value: unknown): History {
           'outcome',
           'record',
           'undoes',
+          'prior',
         ],
         'history',
       );
@@ -733,6 +766,9 @@ export function parseHistory(value: unknown): History {
         outcome: opt(c.outcome, (v) => member(v, OUTCOMES, 'history')),
         record: opt(c.record, (v) => ident(v, 'history')),
         undoes: opt(c.undoes, (v) => ident(v, 'history')),
+        prior: opt(c.prior, (v) =>
+          member(v, ['absent', 'enabled', 'disabled'] as const, 'history'),
+        ),
       };
     }),
     next: opt(h.next, (v) => ident(v, 'history')),

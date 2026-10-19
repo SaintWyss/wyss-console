@@ -60,6 +60,11 @@ impl ApprovedRoots {
         Ok(Self(approved))
     }
 
+    /// The roots of two adapters, as one list.
+    pub fn union(&self, other: &Self) -> Result<Self, InvalidRoot> {
+        Self::new(self.0.iter().chain(&other.0).cloned())
+    }
+
     /// The approved root that holds `path`, if any.
     pub(crate) fn holding(&self, path: &Path) -> Option<&Path> {
         self.0

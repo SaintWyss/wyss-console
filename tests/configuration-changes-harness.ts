@@ -18,6 +18,9 @@ export const fixture = {
   parkPlan: (): Plan => parsePlan(structuredClone(changes.plan_park_blocking)),
   allHooksPlan: (): Plan => parsePlan(structuredClone(changes.plan_all_hooks)),
   skillPlan: (): Plan => parsePlan(structuredClone(changes.plan_skill)),
+  codexMcpPlan: (): Plan => parsePlan(structuredClone(changes.plan_codex_mcp)),
+  codexSkillPlan: (): Plan =>
+    parsePlan(structuredClone(changes.plan_codex_skill)),
   restorePlan: (): Plan => parsePlan(structuredClone(changes.plan_restore)),
   applied: (): Applied => parseApplied(structuredClone(changes.applied)),
   refused: (): Applied =>

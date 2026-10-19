@@ -19,6 +19,25 @@ pub enum Operation {
     SkillOff,
     /// Puts the skill's override as it was before it was switched off.
     SkillOn,
+    /// Codex: `enabled = false` on a `[[skills.config]]` entry.
+    CodexSkillOff,
+    /// Codex: that entry's `enabled` as it was, or `true`.
+    CodexSkillOn,
+    /// Codex: `enabled = false` on an MCP server.
+    CodexMcpOff,
+    /// Codex: that server's `enabled` as it was, or `true`.
+    CodexMcpOn,
+}
+
+/// What a switch's key held before a change made it: the one thing needed to put it back
+/// exactly. A closed word, never content (11 §5.5): absent (the line was added by the change
+/// and is removed by the undo), or the boolean that was there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Prior {
+    Absent,
+    Enabled,
+    Disabled,
 }
 
 /// What a plan can do to the user's safety, decided by the backend from what the plan does

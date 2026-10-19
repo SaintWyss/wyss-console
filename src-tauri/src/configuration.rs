@@ -44,7 +44,7 @@ impl Configuration {
             .zip(inventory.clone())
             .zip(state_directory())
             .and_then(|((environment, inventory), state)| {
-                let changes = ChangeService::for_claude(
+                let changes = ChangeService::for_providers(
                     environment,
                     inventory,
                     &state,

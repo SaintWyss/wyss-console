@@ -27,6 +27,7 @@
         "item": "00000000000000000000000000000004",
         "operation": "park_hook",
         "outcome": "applied",
+        "prior": null,
         "provider": "claude_code",
         "record": "00000000000000000000000000000005",
         "risk": "normal",
@@ -41,6 +42,7 @@
         "item": "00000000000000000000000000000006",
         "operation": "park_hook",
         "outcome": "refused_by_user",
+        "prior": null,
         "provider": "claude_code",
         "record": null,
         "risk": "weakens_security",
@@ -55,6 +57,7 @@
         "item": "00000000000000000000000000000006",
         "operation": "park_hook",
         "outcome": "applied",
+        "prior": null,
         "provider": "claude_code",
         "record": "00000000000000000000000000000007",
         "risk": "weakens_security",
@@ -75,6 +78,7 @@
     "expires_in_seconds": 60,
     "holds_hidden_values": false,
     "id": "00000000000000000000000000000008",
+    "managed_effect": null,
     "name": "All hooks",
     "needs_native_dialog": true,
     "operation": "disable_all_hooks",
@@ -82,6 +86,66 @@
     "risk": "weakens_security",
     "scope": "global",
     "source": "claude_user_settings",
+    "storage": null,
+    "undoes": null
+  },
+  "plan_codex_mcp": {
+    "diff": [
+      {
+        "kind": "removed",
+        "text": "enabled: (not set, so on)"
+      },
+      {
+        "kind": "added",
+        "text": "enabled: false"
+      }
+    ],
+    "effect": "codex_mcp_checked",
+    "expires_in_seconds": 60,
+    "holds_hidden_values": false,
+    "id": "00000000000000000000000000000009",
+    "managed_effect": {
+      "after": "available",
+      "before": "available",
+      "predicted": true
+    },
+    "name": "wyss_session",
+    "needs_native_dialog": false,
+    "operation": "codex_mcp_off",
+    "provider": "codex",
+    "risk": "normal",
+    "scope": "global",
+    "source": "codex_user_config",
+    "storage": null,
+    "undoes": null
+  },
+  "plan_codex_skill": {
+    "diff": [
+      {
+        "kind": "removed",
+        "text": "enabled: false"
+      },
+      {
+        "kind": "added",
+        "text": "enabled: true"
+      }
+    ],
+    "effect": "codex_skill_unverified",
+    "expires_in_seconds": 60,
+    "holds_hidden_values": false,
+    "id": "0000000000000000000000000000000a",
+    "managed_effect": {
+      "after": "available",
+      "before": "available",
+      "predicted": true
+    },
+    "name": "alpha",
+    "needs_native_dialog": false,
+    "operation": "codex_skill_on",
+    "provider": "codex",
+    "risk": "normal",
+    "scope": "global",
+    "source": "codex_user_config",
     "storage": null,
     "undoes": null
   },
@@ -99,7 +163,8 @@
     "effect": "hooks_new_sessions_checked",
     "expires_in_seconds": 60,
     "holds_hidden_values": false,
-    "id": "00000000000000000000000000000009",
+    "id": "0000000000000000000000000000000b",
+    "managed_effect": null,
     "name": "PreToolUse · Bash",
     "needs_native_dialog": true,
     "operation": "park_hook",
@@ -124,7 +189,8 @@
     "effect": "hooks_new_sessions_checked",
     "expires_in_seconds": 60,
     "holds_hidden_values": false,
-    "id": "0000000000000000000000000000000a",
+    "id": "0000000000000000000000000000000c",
+    "managed_effect": null,
     "name": "Stop · *",
     "needs_native_dialog": true,
     "operation": "restore_hook",
@@ -145,7 +211,8 @@
     "effect": "skills_new_sessions_checked",
     "expires_in_seconds": 60,
     "holds_hidden_values": false,
-    "id": "0000000000000000000000000000000b",
+    "id": "0000000000000000000000000000000d",
+    "managed_effect": null,
     "name": "noisy",
     "needs_native_dialog": false,
     "operation": "skill_off",

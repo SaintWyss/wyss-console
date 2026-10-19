@@ -33,6 +33,16 @@ describe('the change contract', () => {
     expect(fixture.allHooksPlan().operation).toBe('disable_all_hooks');
     expect(fixture.skillPlan().storage).toBeNull();
     expect(fixture.restorePlan().risk).toBe('executes_code');
+    const codex = fixture.codexMcpPlan();
+    expect(codex.operation).toBe('codex_mcp_off');
+    expect(codex.managed_effect).toEqual({
+      predicted: true,
+      before: 'available',
+      after: 'available',
+    });
+    expect(codex.storage).toBeNull();
+    expect(fixture.codexSkillPlan().operation).toBe('codex_skill_on');
+    expect(fixture.parkPlan().managed_effect).toBeNull();
     expect(fixture.applied().outcome).toBe('applied');
     expect(fixture.refused().outcome).toBe('refused_by_user');
     expect(fixture.history().changes.length).toBeGreaterThan(1);
@@ -104,6 +114,42 @@ describe('the change contract', () => {
     ).toBe('skill_on');
     const server = items.find((i) => i.kind === 'mcp_server')!;
     expect(changeFor(server)).toBeNull();
+    // Codex: a skill or an MCP server of the user's own configuration, never a hook.
+    const codex = (
+      kind: 'skill' | 'mcp_server' | 'hook',
+      persisted: 'present_enabled' | 'present_disabled',
+    ) => ({
+      ...hook,
+      provider: 'codex' as const,
+      source: 'codex_user_config' as const,
+      kind,
+      persisted,
+    });
+    expect(changeFor(codex('mcp_server', 'present_enabled'))?.operation).toBe(
+      'codex_mcp_off',
+    );
+    expect(changeFor(codex('mcp_server', 'present_disabled'))?.operation).toBe(
+      'codex_mcp_on',
+    );
+    expect(changeFor(codex('skill', 'present_enabled'))?.operation).toBe(
+      'codex_skill_off',
+    );
+    expect(changeFor(codex('skill', 'present_disabled'))?.operation).toBe(
+      'codex_skill_on',
+    );
+    expect(changeFor(codex('hook', 'present_enabled'))).toBeNull();
+    expect(
+      changeFor({
+        ...codex('skill', 'present_enabled'),
+        not_writable: 'shared_path',
+      }),
+    ).toBeNull();
+    expect(
+      changeFor({
+        ...codex('skill', 'present_enabled'),
+        source: 'codex_user_hooks',
+      }),
+    ).toBeNull();
     expect(changeFor(items.find((i) => i.kind === 'rule_file')!)).toBeNull();
     expect(allHooksSwitch(items)?.operation).toBe('disable_all_hooks');
     expect(

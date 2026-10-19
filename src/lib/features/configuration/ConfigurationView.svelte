@@ -14,6 +14,7 @@
     OUTCOME_LABEL,
     RISK_LABEL,
     STORAGE_LABEL,
+    VERDICT_LABEL,
     allHooksSwitch,
     changeFor,
     EFFECTIVE_LABEL,
@@ -124,9 +125,9 @@
 
   <p class="configuration-note">
     This is what Claude Code and Codex are set up with, read from their own
-    files. Nothing changes until you confirm a plan, and only Claude Code hooks
-    and skills can be changed here for now. Secrets in commands, environments
-    and headers are never shown.
+    files. Nothing changes until you confirm a plan, and Claude Code hooks and
+    skills and Codex skills and MCP servers can be changed here. Secrets in
+    commands, environments and headers are never shown.
   </p>
 
   {#if changes.plan}
@@ -161,6 +162,18 @@
         <p class="event-meta">{STORAGE_LABEL[plan.storage]}</p>
       {/if}
       <p class="event-meta">{EFFECT_LABEL[plan.effect]}</p>
+      {#if plan.managed_effect}
+        <p class="event-meta">
+          Prediction, not a reading: managed Inference {VERDICT_LABEL[
+            plan.managed_effect.before
+          ]} now
+          {#if plan.managed_effect.before === plan.managed_effect.after}
+            and this change does not alter that.
+          {:else}
+            and would {VERDICT_LABEL[plan.managed_effect.after]} after it.
+          {/if}
+        </p>
+      {/if}
       {#if RISK_LABEL[plan.risk]}
         <p class="configuration-warning">{RISK_LABEL[plan.risk]}</p>
       {/if}

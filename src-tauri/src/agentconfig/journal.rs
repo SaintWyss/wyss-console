@@ -5,7 +5,7 @@
 //! An apply writes an `intent` before it touches the provider's file and an `outcome`
 //! after. If the intent cannot be written, nothing is done: a privileged operation fails
 //! closed when its auditable record cannot be made (ADR 0003).
-use super::change::{Operation, Outcome, Risk};
+use super::change::{Operation, Outcome, Prior, Risk};
 use super::fault::{Faults, Injected, Step};
 use super::fsutil::{StoreError, private_dir};
 use super::inventory::SourceKey;
@@ -54,6 +54,9 @@ pub struct Entry {
     pub record: Option<String>,
     /// The entry this one undoes, if it is an undo.
     pub undoes: Option<String>,
+    /// For a switch: what its key held before, so the undo is exact. A closed word.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior: Option<Prior>,
 }
 
 /// An apply as the History view shows it: both lines folded into one.
@@ -72,6 +75,7 @@ pub struct Change {
     pub outcome: Option<Outcome>,
     pub record: Option<String>,
     pub undoes: Option<String>,
+    pub prior: Option<Prior>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,6 +257,7 @@ fn fold(entries: &[Entry]) -> Vec<Change> {
                 outcome: entry.outcome,
                 record: entry.record.clone(),
                 undoes: entry.undoes.clone(),
+                prior: entry.prior,
             }),
         }
     }

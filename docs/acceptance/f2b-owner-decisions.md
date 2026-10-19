@@ -42,6 +42,18 @@ labelled as predictions; isolated fixtures and a complete inverse. What exists:
 - No command, capability, `Operation` or UI exists for it, and no real Codex file is read for
   a plan. Turning F2b on is wiring.
 
+## F2b was then implemented (2026-10-19)
+
+The owner changed the strategy (develop in the real environment, finish F2b) and adopted the
+proposed defaults, which settles decisions 1, 4, 6 and 7 above. Resolved here, as engineering
+choices: the inverse of a TOML change is a closed `prior` word in the journal (option a of
+decision 2); MCP and skills both shipped, skills labelled unverified (decision 3); the
+prediction is shown with its cause and never blocks (decision 5); project scope stays out.
+Demonstrated on the real `~/.codex/config.toml` with an exact backup, one line added,
+`codex mcp list` showing the server disabled, and the undo byte-identical (same SHA-256 and
+mode), through the service and through the GUI with the native confirmation. See the
+acceptance report. The list below is what the code could not settle.
+
 ## The decisions that remain, exactly
 
 1. **Start F2b** (19: "a phase starts when the owner says so"). Recommended: yes, after the
@@ -65,3 +77,19 @@ line` / `restore the word true|false`), no key names, no values beyond a boolean
    defaults say; an experiment only if he wants the sentence stronger.
 7. **Project scope:** user scope only, as proposed; the trust logic for a project's
    `.codex/config.toml` waits for its own decision.
+
+## What actually remains after F2b
+
+1. **`~/.claude` is `0775` with an ACL, so every Claude Code change is refused** on the
+   owner's real machine ("its folder can be written by a group: read, never changed", the
+   rule of 07 §4.2). Codex's `~/.codex` is `0755` and works. Options: (a) leave the rule and
+   have the owner run `chmod g-w ~/.claude` (it may interact with the `agent` user's ACL, which
+   must not be touched without his word); (b) relax the rule for a directory whose group is
+   the owner's private group with no other member and no extra ACL entry. Recommended: (a) by
+   hand after checking the ACL, because (b) weakens a security rule that exists for a reason.
+2. **Codex skills**: the effect of `[[skills.config]] enabled` on a running Codex is
+   unverified; the plan says so.
+3. **Codex hooks** stay display-only until OQ-01 and G-INF.
+4. **The external review for F2b** (roadmap 4): not run; the writer and recovery it relies on
+   passed it in F2a, the TOML scanner and planner have not been reviewed by anyone but their
+   tests.

@@ -178,8 +178,9 @@ What F2a implements of this section (`agentconfig/plan.rs`, `writer.rs`, `journa
 the planner for Claude Code hooks, `disableAllHooks` and `skillOverrides`; the byte-level
 editor; the writer with a per-target lock and descriptor-based rename; the journal with
 intent and outcome and repair at start; the restoration store sealed under ADR 0029; the
-native confirmation; history, undo, export and import. Codex (F2b), MCP and creating or
-editing entries are not implemented.
+native confirmation; history, undo, export and import. Codex's skill and MCP switches (F2b, `codex_plan.rs`, `tomlspan.rs`) are implemented; Codex
+hooks, MCP server changes that need a provider process, and creating or editing entries are
+not.
 
 ### 5.1 The lifecycle
 

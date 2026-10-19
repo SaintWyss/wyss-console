@@ -21,6 +21,43 @@ a selected project `.claude/settings.json` and `.claude/settings.local.json`.
 Nothing else is changed: not Codex, not MCP servers (they need a provider process), not a
 provider-owned file, not a system source, not a file in a directory a group can write.
 
+## Codex (F2b)
+
+Skills (`[[skills.config]] enabled`) and MCP servers (`[mcp_servers.<name>] enabled`) in
+the user's `~/.codex/config.toml`, and nothing else of Codex: no hook (where Codex keeps a
+hook's switch is unverified, OQ-01, and enabling one is blocked until G-INF), no trust
+record, no system or project file.
+
+| Operation                          | Effect on the file                         | Risk                                                 |
+| ---------------------------------- | ------------------------------------------ | ---------------------------------------------------- |
+| `codex_mcp_off`, `codex_skill_off` | `enabled = false` set on the entry's table | `normal`                                             |
+| `codex_skill_on`                   | `enabled` set to `true`                    | `normal`                                             |
+| `codex_mcp_on`                     | `enabled` set to `true`                    | `executes_code` (native dialog): it starts a program |
+
+The TOML is edited by bytes (`tomlspan.rs`): one `enabled` line is added to the entry's
+table or its value replaced; comments, blank lines, key order and quoting are the user's. A
+layout the scanner cannot place (a table defined through an inline table) is refused. Each
+plan carries the edit made twice, to the bytes and to the parsed value, and is offered only
+if they agree.
+
+**Undo is exact and needs one word.** The journal keeps `prior`: `absent`, `enabled` or
+`disabled`, what the key held before. The undo removes the line the change added, or puts the
+old word back: the file is the original byte for byte (the real `~/.codex/config.toml`,
+18,067 bytes, was switched and put back with the same SHA-256 and mode). Neither a key name,
+a path nor a value is journaled.
+
+**Managed-effect prediction.** Every Codex plan says what the change does to managed
+Inference, **labelled a prediction**: it is computed from the resulting definitions with the
+authority's own rule (`zero_external_hooks`, `mcp_names`), held equal to it by an exhaustive
+test, and never read from a running Codex. A switch of a skill or an MCP server does not
+change the verdict; if a hook already makes Inference unavailable, the plan names that cause
+and does not block.
+
+What was checked against the installed Codex 0.159.0: `codex mcp list` shows the server
+`disabled` after the change and `enabled` after the undo, on the real configuration. What was
+not: how a Codex session already running treats it, and a skill's switch (there is no
+command that lists skills headlessly).
+
 ## How a file is edited
 
 The file is read with a JSON reader that remembers where everything is. A change removes or

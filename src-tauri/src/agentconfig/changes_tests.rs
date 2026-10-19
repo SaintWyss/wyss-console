@@ -102,7 +102,7 @@ impl World {
         let inventory = InventoryService::start(environment.clone(), Bounds::PROPOSED).unwrap();
         let confirm = Arc::new(FakeConfirm::default());
         confirm.accept.store(true, Ordering::SeqCst);
-        let service = ChangeService::for_claude(
+        let service = ChangeService::for_providers(
             environment,
             inventory.clone(),
             &state,
@@ -972,6 +972,21 @@ fn the_change_replies_are_exactly_the_shared_fixture() {
         .service
         .plan(Operation::RestoreHook, &stop_record.id)
         .unwrap();
+    world.codex(CODEX);
+    let codex_plan = world
+        .service
+        .plan(
+            Operation::CodexMcpOff,
+            &world.codex_item(ItemKind::McpServer, "wyss_session"),
+        )
+        .unwrap();
+    let codex_skill_plan = world
+        .service
+        .plan(
+            Operation::CodexSkillOn,
+            &world.codex_item(ItemKind::Skill, "alpha"),
+        )
+        .unwrap();
     let mut records = world.service.records();
     records.sort_by(|a, b| a.label.cmp(&b.label));
     let mut value = serde_json::json!({
@@ -982,6 +997,8 @@ fn the_change_replies_are_exactly_the_shared_fixture() {
         "plan_all_hooks": all,
         "plan_skill": skill_plan,
         "plan_restore": restore,
+        "plan_codex_mcp": codex_plan,
+        "plan_codex_skill": codex_skill_plan,
         "history": { "changes": changes, "next": next },
         "records": records,
         "done": { "done": true },
@@ -1274,4 +1291,489 @@ fn recovery_keeps_a_temporary_file_it_cannot_account_for() {
         fs::read_to_string(kept[0].path()).unwrap(),
         "somebody's work"
     );
+}
+
+// ---- F2b: Codex skill and MCP switches ----------------------------------------------------
+
+const CODEX: &str = r#"# Codex configuration — hand written
+model = "gpt-6"   # keep
+
+[features]
+hooks = true   # pinned by policy too
+
+# Skills the owner switched
+[[skills.config]]
+path = "/home/u/.codex/skills/alpha/SKILL.md"
+enabled = false   # parked for now
+
+[[skills.config]]
+path = "/home/u/.codex/skills/beta"
+
+[mcp_servers.wyss_session]
+command = "wyss"
+args = [
+  "serve",   # comment inside
+]
+
+[mcp_servers.web]
+url = "https://example.invalid"
+enabled = false
+"#;
+
+fn codex_path(home: &Path) -> PathBuf {
+    home.join(".codex/config.toml")
+}
+
+impl World {
+    fn codex(&self, text: &str) {
+        let path = codex_path(&self.home);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, text).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        self.inventory.rescan();
+    }
+    fn codex_file(&self) -> String {
+        fs::read_to_string(codex_path(&self.home)).unwrap()
+    }
+    fn codex_item(&self, kind: ItemKind, name_part: &str) -> String {
+        self.inventory
+            .snapshot()
+            .inventory
+            .items
+            .iter()
+            .find(|i| {
+                i.provider == super::model::ProviderId::Codex
+                    && i.kind == kind
+                    && i.name.as_str().contains(name_part)
+            })
+            .unwrap_or_else(|| panic!("no codex {kind:?} {name_part}"))
+            .id
+            .clone()
+    }
+}
+
+#[test]
+fn a_codex_mcp_server_is_switched_off_and_on_by_its_enabled_key_alone() {
+    let world = World::new(SETTINGS);
+    world.codex(CODEX);
+    let id = world.codex_item(ItemKind::McpServer, "wyss_session");
+    let plan = world.service.plan(Operation::CodexMcpOff, &id).unwrap();
+    assert_eq!(plan.risk, Risk::Normal);
+    assert!(!plan.needs_native_dialog);
+    assert_eq!(plan.effect, super::changes::Effect::CodexMcpChecked);
+    // The prediction is labelled as one, and says managed Inference is unaffected.
+    let managed = plan.managed_effect.clone().unwrap();
+    assert!(managed.predicted);
+    assert_eq!(managed.before, managed.after);
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    assert_eq!(
+        world.codex_file(),
+        CODEX.replace(
+            "  \"serve\",   # comment inside\n]\n",
+            "  \"serve\",   # comment inside\n]\nenabled = false\n"
+        )
+    );
+    // Seen by the inventory as off.
+    let state = world.inventory.snapshot();
+    let item = state.inventory.items.iter().find(|i| i.id == id).unwrap();
+    assert_eq!(item.persisted, super::model::Persisted::PresentDisabled);
+    // Putting it back to on starts a program: the native dialog.
+    let on = world.service.plan(Operation::CodexMcpOn, &id).unwrap();
+    assert_eq!(on.risk, Risk::ExecutesCode);
+    assert!(on.needs_native_dialog);
+    assert_eq!(applied(&world, &on), Outcome::Applied);
+    assert!(world.codex_file().contains("enabled = true"));
+    assert_eq!(world.confirm.asked.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_codex_skill_is_switched_and_every_comment_survives() {
+    let world = World::new(SETTINGS);
+    world.codex(CODEX);
+    let alpha = world.codex_item(ItemKind::Skill, "alpha");
+    let beta = world.codex_item(ItemKind::Skill, "beta");
+    let on = world.service.plan(Operation::CodexSkillOn, &alpha).unwrap();
+    assert_eq!(on.risk, Risk::Normal);
+    assert_eq!(applied(&world, &on), Outcome::Applied);
+    let off = world.service.plan(Operation::CodexSkillOff, &beta).unwrap();
+    assert_eq!(applied(&world, &off), Outcome::Applied);
+    let after = world.codex_file();
+    for line in CODEX
+        .lines()
+        .filter(|l| l.trim_start().starts_with('#') || l.is_empty())
+    {
+        assert!(after.lines().any(|l| l == line), "lost {line:?}");
+    }
+    assert!(after.contains("enabled = true   # parked for now"));
+    assert!(after.contains("path = \"/home/u/.codex/skills/beta\"\nenabled = false\n"));
+}
+
+#[test]
+fn undoing_a_codex_switch_gives_the_file_back_byte_for_byte_whether_the_line_was_added_or_replaced()
+{
+    let world = World::new(SETTINGS);
+    world.codex(CODEX);
+    for (op, kind, part) in [
+        (Operation::CodexMcpOff, ItemKind::McpServer, "wyss_session"), // a line is added
+        (Operation::CodexSkillOn, ItemKind::Skill, "alpha"),           // a value is replaced
+        (Operation::CodexSkillOff, ItemKind::Skill, "beta"),           // a line is added
+    ] {
+        let id = world.codex_item(kind, part);
+        let plan = world.service.plan(op, &id).unwrap();
+        let change = world.service.apply(&plan.id).unwrap().change;
+        assert_ne!(world.codex_file(), CODEX);
+        let undo = world.service.undo(&change).unwrap();
+        assert_eq!(undo.undoes.as_deref(), Some(change.as_str()));
+        assert_eq!(applied(&world, &undo), Outcome::Applied);
+        assert_eq!(world.codex_file(), CODEX, "{op:?}");
+        // Not twice.
+        assert_eq!(
+            world.service.undo(&change).unwrap_err(),
+            ChangeFailure::NotUndoable
+        );
+    }
+    // The journal kept a closed word for each, and no key, path or value.
+    let journal = String::from_utf8(
+        world
+            .state_files()
+            .into_iter()
+            .find(|(p, _)| p.ends_with("journal.jsonl"))
+            .unwrap()
+            .1,
+    )
+    .unwrap();
+    assert!(journal.contains("\"prior\":\"absent\"") && journal.contains("\"prior\":\"disabled\""));
+    for content in ["wyss_session", "alpha", "beta", "skills", "example.invalid"] {
+        assert!(!journal.contains(content), "the journal holds {content}");
+    }
+}
+
+#[test]
+fn the_managed_inference_prediction_names_a_hook_cause_and_never_blocks_the_switch() {
+    let world = World::new(SETTINGS);
+    world.codex(&format!(
+        "{CODEX}\n[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"x\"\n"
+    ));
+    let id = world.codex_item(ItemKind::McpServer, "wyss_session");
+    let plan = world.service.plan(Operation::CodexMcpOff, &id).unwrap();
+    let managed = plan.managed_effect.unwrap();
+    assert_eq!(managed.before, super::codex_plan::Verdict::ExternalHooks);
+    assert_eq!(managed.after, super::codex_plan::Verdict::ExternalHooks);
+    assert!(managed.predicted);
+}
+
+#[test]
+fn what_codex_plans_refuse_is_refused_in_words() {
+    let world = World::new(SETTINGS);
+    world.codex(CODEX);
+    let id = world.codex_item(ItemKind::McpServer, "web");
+    // Already off.
+    assert_eq!(
+        world.service.plan(Operation::CodexMcpOff, &id).unwrap_err(),
+        ChangeFailure::AlreadyDone
+    );
+    // A skill id is not a server's.
+    let skill = world.codex_item(ItemKind::Skill, "beta");
+    assert_eq!(
+        world
+            .service
+            .plan(Operation::CodexMcpOff, &skill)
+            .unwrap_err(),
+        ChangeFailure::NotSupported
+    );
+    // A Claude hook is not a Codex switch.
+    assert_eq!(
+        world
+            .service
+            .plan(Operation::CodexSkillOff, &world.hook("Stop", 0, 0))
+            .unwrap_err(),
+        ChangeFailure::NotSupported
+    );
+    // A shared provider directory is read and never written.
+    fs::set_permissions(world.home.join(".codex"), fs::Permissions::from_mode(0o775)).unwrap();
+    let beta = world.codex_item(ItemKind::Skill, "beta");
+    assert_eq!(
+        world
+            .service
+            .plan(Operation::CodexSkillOff, &beta)
+            .unwrap_err(),
+        ChangeFailure::NotWritable
+    );
+}
+
+#[test]
+fn codex_rewriting_its_own_file_in_the_instant_before_the_swap_is_never_overwritten() {
+    let world = World::new(SETTINGS);
+    world.codex(CODEX);
+    let id = world.codex_item(ItemKind::McpServer, "wyss_session");
+    let plan = world.service.plan(Operation::CodexMcpOff, &id).unwrap();
+    let path = codex_path(&world.home);
+    let theirs = format!("{CODEX}\n[projects.\"/x\"]\ntrust_level = \"trusted\"\n");
+    let (target, text) = (path.clone(), theirs.clone());
+    super::writer::seam::on_before_swap(move || {
+        let beside = target.with_extension("codex-tmp");
+        fs::write(&beside, &text).unwrap();
+        fs::set_permissions(&beside, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::rename(&beside, &target).unwrap();
+    });
+    assert_eq!(applied(&world, &plan), Outcome::ChangedOutside);
+    assert_eq!(world.codex_file(), theirs);
+}
+
+/// Every step of an apply to Codex's file, failed and crashed: the file is the original or the
+/// plan, whole; nothing is left half done; the switch can be undone to the exact original.
+#[test]
+fn a_failure_or_a_crash_at_any_step_of_a_codex_switch_is_repaired_and_undoable() {
+    let steps = [
+        Step::IntentJournaled,
+        Step::TemporaryCreated,
+        Step::TemporaryWritten,
+        Step::TemporaryFlushed,
+        Step::Renamed,
+        Step::Exchanged,
+        Step::DirectoryFlushed,
+        Step::ReadBack,
+        Step::OutcomeJournaled,
+    ];
+    for step in steps {
+        for fault in [Fault::Fail, Fault::Crash] {
+            let world = World::new(SETTINGS);
+            world.codex(CODEX);
+            let id = world.codex_item(ItemKind::McpServer, "wyss_session");
+            let plan = world.service.plan(Operation::CodexMcpOff, &id).unwrap();
+            world.faults.arm(step, fault);
+            let result = world.service.apply(&plan.id);
+            if fault == Fault::Crash {
+                assert!(result.is_err(), "{step:?}: a crash is not an outcome");
+            }
+            let again = world.restarted();
+            again.service.recover();
+            let file = again.codex_file();
+            let changed = file != CODEX;
+            serde_json::to_value(toml::from_str::<toml::Value>(&file).unwrap()).unwrap();
+            assert!(
+                !changed || file.contains("enabled = false"),
+                "{step:?} {fault:?}: the file is neither version: {file}"
+            );
+            assert!(
+                fs::read_dir(again.home.join(".codex"))
+                    .unwrap()
+                    .flatten()
+                    .all(|e| !e.file_name().to_string_lossy().ends_with(".tmp")),
+                "{step:?} {fault:?}: a temporary file was left"
+            );
+            let (history, _) = again.service.history(None, 5);
+            assert!(
+                history.iter().all(|c| c.outcome.is_some()),
+                "{step:?} {fault:?}: unfinished"
+            );
+            if changed {
+                let applied_change = history
+                    .iter()
+                    .find(|c| c.outcome.is_some_and(Outcome::changed_the_file))
+                    .unwrap_or_else(|| {
+                        panic!("{step:?} {fault:?}: changed with no change recorded")
+                    });
+                let undo = again.service.undo(&applied_change.id).unwrap();
+                assert_eq!(applied(&again, &undo), Outcome::Applied);
+                assert_eq!(
+                    again.codex_file(),
+                    CODEX,
+                    "{step:?} {fault:?}: not undone exactly"
+                );
+            }
+        }
+    }
+}
+
+/// The real thing, on the real machine, with the discipline the owner asked for: the exact
+/// bytes of `~/.codex/config.toml` are kept first; one MCP server (named by
+/// `WYSS_REAL_CODEX_MCP`) is switched off through the service, the installed Codex is asked
+/// what it sees, the change is undone, and the file must be the bytes it started as. If
+/// anything fails midway the original bytes are put back, but only if the file is still
+/// exactly what this test wrote: an unrelated change by somebody else is never overwritten.
+///
+/// By hand: `WYSS_REAL_CODEX_MCP=context7 cargo test -- --ignored real_codex_config --nocapture`.
+#[test]
+#[ignore = "changes the real ~/.codex/config.toml for a few seconds and puts it back"]
+fn real_codex_config_one_switch_then_back() {
+    use std::process::Command;
+    let server = std::env::var("WYSS_REAL_CODEX_MCP").expect("name the server to switch");
+    let environment = Environment::from_process(None).unwrap();
+    let path = environment.codex_dir().join("config.toml");
+    let original = fs::read(&path).unwrap();
+    let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    let backup = std::env::temp_dir().join(format!(
+        "wyss-codex-config-{}.bak",
+        uuid::Uuid::new_v4().simple()
+    ));
+    fs::write(&backup, &original).unwrap();
+    fs::set_permissions(&backup, fs::Permissions::from_mode(0o600)).unwrap();
+    println!(
+        "backup of the exact bytes: {} ({} bytes)",
+        backup.display(),
+        original.len()
+    );
+
+    let status = |name: &str| -> Option<bool> {
+        let out = Command::new("codex")
+            .args(["mcp", "list"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .find(|l| l.split_whitespace().next() == Some(name))
+            .map(|l| l.split_whitespace().any(|w| w == "enabled"))
+    };
+    // What Codex says before.
+    assert_eq!(
+        status(&server),
+        Some(true),
+        "the server must exist and be on to begin with"
+    );
+
+    struct Guard<'a> {
+        path: &'a Path,
+        original: &'a [u8],
+        produced: std::cell::RefCell<Option<Vec<u8>>>,
+    }
+    impl Drop for Guard<'_> {
+        fn drop(&mut self) {
+            let now = fs::read(self.path).unwrap_or_default();
+            let ours = self.produced.borrow().clone();
+            // Only if the file is exactly what this test wrote.
+            if now != self.original && ours.as_deref() == Some(now.as_slice()) {
+                let _ = fs::write(self.path, self.original);
+                eprintln!("the guard put the original bytes back");
+            }
+        }
+    }
+    let guard = Guard {
+        path: &path,
+        original: &original,
+        produced: std::cell::RefCell::new(None),
+    };
+
+    let state =
+        std::env::temp_dir().join(format!("wyss-real-state-{}", uuid::Uuid::new_v4().simple()));
+    fs::DirBuilder::new().mode(0o700).create(&state).unwrap();
+    let inventory = InventoryService::start(environment.clone(), Bounds::PROPOSED).unwrap();
+    let confirm = Arc::new(FakeConfirm::default());
+    confirm.accept.store(true, Ordering::SeqCst);
+    let service = ChangeService::for_providers(
+        environment,
+        inventory.clone(),
+        &state,
+        Vault::new(Box::new(MemoryStore::new())),
+        Box::new(confirm.clone()),
+        Faults::default(),
+    )
+    .unwrap();
+
+    let id = inventory
+        .snapshot()
+        .inventory
+        .items
+        .iter()
+        .find(|i| {
+            i.kind == ItemKind::McpServer
+                && i.name.as_str() == server
+                && i.source == SourceKey::CodexUserConfig
+        })
+        .expect("the server is in the inventory")
+        .id
+        .clone();
+    let plan = service.plan(Operation::CodexMcpOff, &id).unwrap();
+    println!(
+        "plan: {} · risk {:?} · managed effect {:?}",
+        plan.name, plan.risk, plan.managed_effect
+    );
+    for line in &plan.diff {
+        println!("  diff {:?}: {}", line.kind, line.text);
+    }
+    let applied_change = service.apply(&plan.id).unwrap();
+    *guard.produced.borrow_mut() = fs::read(&path).ok();
+    assert_eq!(applied_change.outcome, Outcome::Applied);
+
+    let changed = fs::read(&path).unwrap();
+    let before = String::from_utf8(original.clone()).unwrap();
+    let after = String::from_utf8(changed.clone()).unwrap();
+    // Exactly one line was added, and it is `enabled = false` inside that server's table:
+    // removing it from the new file gives the old file back, line for line.
+    let old_lines: Vec<&str> = before.lines().collect();
+    let new_lines: Vec<&str> = after.lines().collect();
+    assert_eq!(
+        new_lines.len(),
+        old_lines.len() + 1,
+        "exactly one line is added"
+    );
+    let at = (0..new_lines.len())
+        .find(|&i| {
+            let mut rest = new_lines.clone();
+            rest.remove(i);
+            rest == old_lines && new_lines[i] == "enabled = false"
+        })
+        .expect("the one added line is `enabled = false` and nothing else moved");
+    let header = new_lines[..at]
+        .iter()
+        .rev()
+        .find(|l| l.starts_with('['))
+        .unwrap();
+    assert_eq!(
+        *header,
+        format!("[mcp_servers.{server}]"),
+        "inside the server's own table"
+    );
+    println!(
+        "one line added at line {}: `enabled = false` under {header}",
+        at + 1
+    );
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        mode,
+        "mode kept"
+    );
+    let comments = before
+        .lines()
+        .filter(|l| l.trim_start().starts_with('#'))
+        .count();
+    assert_eq!(
+        comments,
+        after
+            .lines()
+            .filter(|l| l.trim_start().starts_with('#'))
+            .count()
+    );
+    assert_eq!(
+        status(&server),
+        Some(false),
+        "the installed Codex must see the server off"
+    );
+    println!("Codex now lists {server} as disabled");
+
+    let undo = service.undo(&applied_change.change).unwrap();
+    let undone = service.apply(&undo.id).unwrap();
+    assert_eq!(undone.outcome, Outcome::Applied);
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        original,
+        "byte-identical to the backup"
+    );
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        mode
+    );
+    assert_eq!(status(&server), Some(true), "Codex sees it on again");
+    println!("undone: the file equals the backup byte for byte; Codex lists {server} as enabled");
+    let (history, _) = service.history(None, 5);
+    println!(
+        "history: {:?}",
+        history
+            .iter()
+            .map(|c| (c.operation, c.outcome, c.prior))
+            .collect::<Vec<_>>()
+    );
+    drop(guard);
+    let _ = fs::remove_dir_all(&state);
+    let _ = fs::remove_file(&backup);
 }
