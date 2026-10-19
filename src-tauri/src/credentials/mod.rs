@@ -364,4 +364,41 @@ mod tests {
         );
         assert_eq!(store.verify("../etc"), Err(CredentialError::Unknown));
     }
+
+    /// Against a real Secret Service. Run it only through `scripts/isolated-secret-service.sh`,
+    /// which starts a private bus and a throw-away keyring: a fictitious key, never the
+    /// owner's wallet.
+    #[test]
+    #[ignore = "needs the private Secret Service of scripts/isolated-secret-service.sh"]
+    fn a_key_goes_through_a_real_secret_service_and_is_lost_with_its_key() {
+        use crate::agentconfig::vault::{KeyStore, SecretToolStore};
+        assert!(
+            std::env::var_os("WYSS_ISOLATED_SECRET_SERVICE").is_some(),
+            "refusing to touch a wallet that is not the throw-away one"
+        );
+        let dir = fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("wyss-cred-real-{}", uuid::Uuid::new_v4().simple()));
+        let account = format!("test-cred-{}", uuid::Uuid::new_v4().simple());
+        let keys = SecretToolStore::with_account(&account);
+        let vault = Vault::new(Box::new(SecretToolStore::with_account(&account)));
+        let store = CredentialStore::open(dir.join("c"), vault).unwrap();
+        let meta = store
+            .add("Fictitious", Provider::Anthropic, &secret(KEY))
+            .unwrap();
+        assert_eq!(store.verify(&meta.id), Ok(true));
+        let file = fs::read_to_string(dir.join("c").join(format!("{}.json", meta.id))).unwrap();
+        assert!(!file.contains("ABCDEFGH"));
+        let again = store
+            .replace(&meta.id, &secret(&format!("{KEY}2")))
+            .unwrap();
+        assert_ne!(again.fingerprint, meta.fingerprint);
+        assert_eq!(store.verify(&meta.id), Ok(true));
+        // The wallet forgets its key: the file stays, and says the key is lost.
+        keys.forget().unwrap();
+        assert_eq!(store.verify(&meta.id), Err(CredentialError::KeyLost));
+        store.delete(&meta.id).unwrap();
+        assert!(store.list().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

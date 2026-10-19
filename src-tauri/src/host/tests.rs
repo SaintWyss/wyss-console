@@ -398,3 +398,173 @@ fn a_handoff_brief_is_prepared_from_a_running_session_and_starts_nothing() {
         "session_unknown"
     );
 }
+
+/// F11a against the installed agents: Claude Code runs in a folder with harmless test files,
+/// its handoff brief is prepared (redacted, nothing started), a bad brief is refused and
+/// leaves nothing behind, and the reviewed brief starts Codex as ONE argv word. No model is
+/// called: both stop at their own first screen. By hand:
+/// `cargo test -- --ignored real_handoff --nocapture`.
+#[test]
+#[ignore = "starts the installed Claude Code and Codex"]
+fn real_handoff_between_two_installed_agents() {
+    let root = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!(
+            "wyss-real-handoff-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+    let (state, project) = (root.join("state"), root.join("project"));
+    fs::create_dir_all(&project).unwrap();
+    let git = |args: &[&str]| {
+        assert!(
+            std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .current_dir(&project)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    };
+    git(&["init", "-q"]);
+    fs::write(project.join("notes.txt"), "one\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "first"]);
+    // Uncommitted work, with a fictitious key where a brief could leak one.
+    fs::write(project.join("notes.txt"), "one\ntwo\n").unwrap();
+    let fake = concat!("sk-ant-", "api03-HANDOFFTESTFICTITIOUS0123456789");
+    fs::write(project.join(format!("{fake}.txt")), "x").unwrap();
+    let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+    let service =
+        crate::native::service::NativeService::open(state, home, std::env::var_os("PATH")).unwrap();
+    service.remember_chosen(project.to_string_lossy().into_owned());
+    let core = HostCore::new(Some(service));
+    let dir = root.join("sock");
+    let socket = dir.join("host.sock");
+    let listener = server::bind(&socket).ok().expect("bind");
+    let c = core.clone();
+    let thread = std::thread::spawn(move || server::run(listener, c, Duration::from_secs(600)));
+    let client = Remote::at(socket);
+    let folder = project.to_string_lossy().into_owned();
+    let start = |agent: &str, brief: Value| {
+        client.call(
+            "native_start",
+            json!({"agent_id": agent, "project": folder, "profile_id": null, "size": size(), "brief": brief}),
+        )
+    };
+
+    let first = start("claude_code", Value::Null).unwrap();
+    let (t1, s1) = (
+        first["terminal"]["terminal_id"]
+            .as_str()
+            .unwrap()
+            .to_owned(),
+        first["session"]["id"].as_str().unwrap().to_owned(),
+    );
+    let mut screen = String::new();
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let mut from = 0u64;
+    while Instant::now() < deadline && !screen.contains("Accessing") {
+        let out = client
+            .call(
+                "term_read",
+                json!({"terminal_id": t1, "from": from, "wait_ms": 300}),
+            )
+            .unwrap();
+        from = out["next"].as_u64().unwrap();
+        screen.push_str(&text(&out));
+    }
+    assert!(
+        screen.contains("Accessing"),
+        "Claude Code's own screen: {screen:.200}"
+    );
+
+    // Prepare: redacted, from the real folder, and it starts nothing.
+    let sessions = || {
+        client
+            .call("native_sessions", json!({"sample": false}))
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    let before = sessions();
+    let prepared = client.call("handoff_prepare", json!({"id": s1})).unwrap();
+    let brief = prepared["text"].as_str().unwrap().to_owned();
+    assert!(brief.starts_with("# Handoff from Claude Code"));
+    assert!(brief.contains(&folder) && brief.contains("notes.txt"));
+    assert!(
+        !brief.contains("HANDOFFTESTFICTITIOUS"),
+        "a key leaked: {brief}"
+    );
+    assert_eq!(sessions(), before, "preparing started something");
+
+    // Cancellation = never calling start; failure = a brief that cannot be one word.
+    let bad = start("codex", json!("# x\0y")).unwrap_err();
+    println!("bad brief refused with: {}", bad.code);
+    assert_eq!(sessions(), before, "a refused brief left a session behind");
+
+    // The reviewed brief starts the second, real agent.
+    let edited = brief.replace("(Write it here before starting.)", "Say hello and stop.");
+    let second = start("codex", json!(edited)).unwrap();
+    let t2 = second["terminal"]["terminal_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let s2 = second["session"]["id"].as_str().unwrap().to_owned();
+    let pid = second["terminal"]["observed_pid"].as_u64().unwrap();
+    // The shell execs the agent a moment after the terminal exists: wait for its own argv.
+    let mut cmdline = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline {
+        cmdline = fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+        if String::from_utf8_lossy(&cmdline).contains("# Handoff from") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let words: Vec<&[u8]> = cmdline
+        .split(|b| *b == 0)
+        .filter(|w| !w.is_empty())
+        .collect();
+    let carried = words
+        .iter()
+        .filter(|w| String::from_utf8_lossy(w).starts_with("# Handoff from Claude Code"))
+        .count();
+    assert_eq!(
+        carried,
+        1,
+        "the brief is one argv word of the new agent: {:.200}",
+        String::from_utf8_lossy(&cmdline).replace('\0', " | ")
+    );
+    assert!(String::from_utf8_lossy(&cmdline).contains("Say hello and stop."));
+    let mut seen = String::new();
+    let mut from = 0u64;
+    let deadline = Instant::now() + Duration::from_secs(40);
+    while Instant::now() < deadline
+        && !(seen.contains("Folder") || seen.contains("Background server"))
+    {
+        let out = client
+            .call(
+                "term_read",
+                json!({"terminal_id": t2, "from": from, "wait_ms": 300}),
+            )
+            .unwrap();
+        from = out["next"].as_u64().unwrap();
+        seen.push_str(&text(&out));
+    }
+    assert!(
+        seen.contains("Folder") || seen.contains("Background server"),
+        "Codex's own screen: {seen:.200}"
+    );
+    println!(
+        "handoff ok: Codex pid {pid} carries the brief ({} bytes)",
+        edited.len()
+    );
+    client.call("native_stop", json!({"id": s2})).unwrap();
+    client.call("native_stop", json!({"id": s1})).unwrap();
+    let _ = client.call("shutdown", Value::Null);
+    let _ = thread.join();
+    let _ = fs::remove_dir_all(root);
+}
