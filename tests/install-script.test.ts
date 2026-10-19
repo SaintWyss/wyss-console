@@ -153,6 +153,23 @@ it('upgrades beside the old version, asks the host to stop first, and can roll b
   expect(run('status').stdout).toContain('fake 1.0.0');
 });
 
+it('can install a compatible GUI update while keeping the running host and terminals', () => {
+  expect(
+    run('install', '--package', makePackage('1.0.0'), '--keep-host').status,
+  ).toBe(0);
+  expect(existsSync(join(root, 'stops'))).toBe(false);
+  const result = run(
+    'install',
+    '--package',
+    makePackage('2.0.0'),
+    '--keep-host',
+  );
+  expect(result.status, result.stderr).toBe(0);
+  expect(result.stdout).toContain('keeping the current host');
+  expect(existsSync(join(root, 'stops'))).toBe(false);
+  expect(existsSync(`${prefix()}.previous/bin/wyss-console`)).toBe(true);
+});
+
 it('removes the application and keeps the Console’s state unless asked, and never touches the agents’ own configuration', () => {
   expect(
     run('install', '--package', makePackage('1.0.0'), '--host-service').status,

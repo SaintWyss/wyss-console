@@ -670,7 +670,10 @@ After `npm run desktop:package`, `scripts/install.sh install --package
 `~/.local/opt/wyss-console` after verifying every digest. Installing again upgrades beside the old
 version, which is kept for `install.sh rollback`; `install.sh uninstall` removes the application
 (`--purge` also removes `~/.local/state/wyss-console`; the agents' configuration is never
-touched); `--host-service` writes an optional user unit for the host; `install.sh status` and
+touched). For a GUI-only update with an unchanged host protocol, `install --keep-host`
+keeps the current host and every terminal running; that host continues using its old binary
+until it exits. The default install, rollback and uninstall stop the host and its terminals.
+`--host-service` writes an optional user unit for the host; `install.sh status` and
 `wyss-console --diagnose` say what is installed and what the machine offers. ADR 0040.
 
 ## Terminals that outlive the window (the host)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs, upgrades, rolls back and removes a Wyss Console package for the current user (F13).
 #
-#   install.sh install   [--package DIR] [--prefix DIR] [--host-service]
+#   install.sh install   [--package DIR] [--prefix DIR] [--host-service] [--keep-host]
 #   install.sh rollback  [--prefix DIR]
 #   install.sh uninstall [--prefix DIR] [--purge]
 #   install.sh status    [--prefix DIR]
@@ -22,12 +22,14 @@ package=""
 prefix="$home/.local/opt/wyss-console"
 purge=0
 service=0
+keep_host=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --package) package="${2:?--package needs a directory}"; shift 2 ;;
     --prefix) prefix="${2:?--prefix needs a directory}"; shift 2 ;;
     --purge) purge=1; shift ;;
     --host-service) service=1; shift ;;
+    --keep-host) keep_host=1; shift ;;
     *) echo "install: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -115,7 +117,11 @@ cmd_install() {
   mkdir -p "$(dirname "$prefix")"
   cp -a "$package" "$staging"
   chmod -R go-w "$staging"
-  stop_host "$staging/bin/wyss-console"
+  if [ "$keep_host" -eq 0 ]; then
+    stop_host "$staging/bin/wyss-console"
+  else
+    say "keeping the current host and its terminals; it continues with its running version until it exits"
+  fi
   if [ -d "$prefix" ]; then
     rm -rf "$previous"
     mv "$prefix" "$previous"
