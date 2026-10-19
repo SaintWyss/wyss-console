@@ -8,6 +8,8 @@ mod agentconfig;
 #[cfg(target_os = "linux")]
 mod configuration;
 #[cfg(target_os = "linux")]
+mod credentials;
+#[cfg(target_os = "linux")]
 mod host;
 #[cfg(target_os = "linux")]
 mod native;
@@ -38,7 +40,8 @@ fn main() {
         digest,
         configuration::extension()
             .merge(host::commands::extension())
-            .merge(native::extension()),
+            .merge(native::extension())
+            .merge(credentials::commands::extension()),
     );
     #[cfg(not(target_os = "linux"))]
     wyss_console::run(digest);

@@ -575,6 +575,13 @@ mod tests {
             // The layout of tabs and panes (T2).
             "allow-layout-read",
             "allow-layout-write",
+            // API credentials (F14): a key goes in through a native window and never comes out.
+            "allow-credentials-list",
+            "allow-credential-add",
+            "allow-credential-replace",
+            "allow-credential-rename",
+            "allow-credential-delete",
+            "allow-credential-verify",
         ];
         assert_eq!(granted, expected);
         let manifest = include_str!("../../build.rs");

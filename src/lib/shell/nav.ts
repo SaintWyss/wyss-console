@@ -7,6 +7,7 @@ export type ViewId =
   | 'events'
   | 'configuration'
   | 'profiles'
+  | 'credentials'
   | 'settings';
 
 export interface NavItem {
@@ -66,6 +67,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: 'Profiles',
     subtitle: 'What a session starts with',
     icon: 'M12 4a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM5 20c0-3.3 3.1-6 7-6s7 2.7 7 6',
+  },
+  {
+    id: 'credentials',
+    label: 'Credentials',
+    subtitle: 'API keys, kept sealed',
+    icon: 'M15 8a4 4 0 1 0-3.5 4H20v3h-2v2h-3v-2h-3.5',
   },
   {
     id: 'settings',

@@ -41,6 +41,8 @@ pub enum RecordKind {
     Restoration,
     /// A restoration record sealed again under a passphrase, to move to another computer.
     Export,
+    /// A provider's API key kept by the Console (F14).
+    Credential,
 }
 
 impl RecordKind {
@@ -48,6 +50,7 @@ impl RecordKind {
         match self {
             Self::Restoration => "restoration",
             Self::Export => "export",
+            Self::Credential => "credential",
         }
     }
 }

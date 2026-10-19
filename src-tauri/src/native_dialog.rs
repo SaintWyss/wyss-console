@@ -236,3 +236,58 @@ pub fn choose_folder(app: &AppHandle) -> Option<PathBuf> {
     })
     .flatten()
 }
+
+/// A secret typed in a window of its own, masked, asked once. The page never sees it.
+pub fn secret_entry(
+    app: &AppHandle,
+    title: &'static str,
+    label: &'static str,
+) -> Option<Zeroizing<String>> {
+    use gtk::prelude::*;
+    on_gtk(app, move |parent| {
+        let dialog = gtk::Dialog::builder().modal(true).title(title).build();
+        if let Some(parent) = &parent {
+            dialog.set_transient_for(Some(parent));
+        }
+        dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+        dialog.add_button("Keep", gtk::ResponseType::Accept);
+        let content = dialog.content_area();
+        content.add(&gtk::Label::new(Some(label)));
+        let entry = gtk::Entry::new();
+        entry.set_visibility(false);
+        entry.set_activates_default(true);
+        content.add(&entry);
+        dialog.set_default_response(gtk::ResponseType::Accept);
+        dialog.show_all();
+        let response = dialog.run();
+        let typed = entry.text().to_string();
+        entry.set_text("");
+        dialog.close();
+        (response == gtk::ResponseType::Accept && !typed.is_empty()).then(|| Zeroizing::new(typed))
+    })
+    .flatten()
+}
+
+/// A yes or no in a window of its own. A dialog that could not be shown is a no.
+pub fn confirm_text(app: &AppHandle, heading: &str, body: &str) -> bool {
+    use gtk::prelude::*;
+    let (heading, body) = (heading.to_owned(), body.to_owned());
+    on_gtk(app, move |parent| {
+        let dialog = gtk::MessageDialog::builder()
+            .modal(true)
+            .message_type(gtk::MessageType::Warning)
+            .text(heading)
+            .secondary_text(body)
+            .build();
+        if let Some(parent) = &parent {
+            dialog.set_transient_for(Some(parent));
+        }
+        dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+        dialog.add_button("Delete", gtk::ResponseType::Accept);
+        dialog.set_default_response(gtk::ResponseType::Cancel);
+        let accepted = dialog.run() == gtk::ResponseType::Accept;
+        dialog.close();
+        accepted
+    })
+    .unwrap_or(false)
+}

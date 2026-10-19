@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### API credentials (F14)
+
+- **A Credentials view keeps provider API keys sealed** (vault of ADR 0029): add, replace,
+  rename, delete (confirmed in a native window) and check. A key is typed in a native masked
+  window and is never shown, returned or written unsealed; only a name, the service and a short
+  checksum are listed. With no key store, nothing is kept. Using a key to start an agent is not
+  part of this. ADR 0033.
+
 ### Panes, search, shortcuts and a saved layout (T1, T2)
 
 - **Split a tab into panes** (side by side or stacked, up to 16, drag the dividers); each pane

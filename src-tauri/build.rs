@@ -142,6 +142,12 @@ fn main() {
             "terminal_redraw",
             "layout_read",
             "layout_write",
+            "credentials_list",
+            "credential_add",
+            "credential_replace",
+            "credential_rename",
+            "credential_delete",
+            "credential_verify",
         ]),
     ))
     .expect("failed to build Wyss Console metadata");

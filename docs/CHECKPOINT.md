@@ -16,7 +16,7 @@ push, no merge, no release. Verify with `git log --oneline | head` and `git stat
 
 ## Active
 
-Nothing in progress. Next: F14 credentials, then F11a handoff, F6a/b models.
+Nothing in progress. Next: F11a handoff, then F6a/b models, F5 authoring.
 
 ## Roadmap still open, in the order being taken
 

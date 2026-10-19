@@ -246,6 +246,13 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     // The layout of tabs and panes (T2): one read, one bounded write of a JSON object.
     'allow-layout-read',
     'allow-layout-write',
+    // API credentials (F14): a key is typed in a native window and never returned.
+    'allow-credentials-list',
+    'allow-credential-add',
+    'allow-credential-replace',
+    'allow-credential-rename',
+    'allow-credential-delete',
+    'allow-credential-verify',
   ]);
   // Every permission is one of this application's own commands: none belongs to a
   // plugin (`fs:`, `shell:`, `dialog:`) or to the framework's core (`core:`).

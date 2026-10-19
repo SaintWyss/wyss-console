@@ -10,6 +10,8 @@
   import ConfigurationView from './lib/features/configuration/ConfigurationView.svelte';
   import { ChangesController } from './lib/features/configuration/changes-controller';
   import { ConfigurationController } from './lib/features/configuration/controller';
+  import { CredentialsController } from './lib/features/credentials/controller';
+  import CredentialsView from './lib/features/credentials/CredentialsView.svelte';
   import { EventsController } from './lib/features/events/controller';
   import { NativeController } from './lib/features/native/controller';
   import ProfilesView from './lib/features/native/ProfilesView.svelte';
@@ -106,6 +108,11 @@
     },
   );
   let native = $state(nativeController.state());
+  // API keys: listed by name while their view is shown; a key never reaches the window.
+  const credentialsController = new CredentialsController((next) => {
+    credentials = next;
+  });
+  let credentials = $state(credentialsController.state());
   // The desktop's own preferences: read once, written only when the user changes one.
   const settingsController = new SettingsController((next) => {
     settings = next;
@@ -136,6 +143,9 @@
   });
   $effect(() => {
     configurationController.setVisible(activeView === 'configuration');
+  });
+  $effect(() => {
+    credentialsController.setVisible(activeView === 'credentials');
   });
   // The overview reads the registry (with resources) while it is shown, and the profiles
   // are read once when either of their views first is.
@@ -199,6 +209,7 @@
       configurationController.dispose();
       changesController.dispose();
       nativeController.dispose();
+      credentialsController.dispose();
       settingsController.dispose();
     };
   });
@@ -345,6 +356,11 @@
       visible={activeView === 'profiles'}
       {native}
       controller={nativeController}
+    />
+    <CredentialsView
+      visible={activeView === 'credentials'}
+      {credentials}
+      controller={credentialsController}
     />
     <SettingsView
       visible={activeView === 'settings'}
