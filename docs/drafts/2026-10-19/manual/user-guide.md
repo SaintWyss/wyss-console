@@ -67,15 +67,15 @@ Until verified, use the GUI's visible controls and keep independent provider pro
 
 ## 8. Errors and safe responses
 
-| Situation | What it means | Safe action |
-| --- | --- | --- |
-| Provider missing | CLI not found or unsupported | Install/sign in via provider; refresh detection |
-| Configuration read-only | Directory/source trust rule failed | Inspect trust and owner policy; do not apply blind chmod |
-| Wallet locked | Encrypted restore data unavailable | Unlock OS key store; never seek plaintext fallback |
-| Conflict on undo | Provider file changed since mutation | Review newest source; do not force old bytes |
-| Lost session | Connection, host or original process state changed | Review host status; explicitly restart if desired |
-| No real in-use model evidence | Only configured/selected value known | Use provider's own runtime display |
-| Managed safety unavailable | Required authority checks failed | Do not bypass using native work for the same managed operation |
+| Situation                     | What it means                                      | Safe action                                                    |
+| ----------------------------- | -------------------------------------------------- | -------------------------------------------------------------- |
+| Provider missing              | CLI not found or unsupported                       | Install/sign in via provider; refresh detection                |
+| Configuration read-only       | Directory/source trust rule failed                 | Inspect trust and owner policy; do not apply blind chmod       |
+| Wallet locked                 | Encrypted restore data unavailable                 | Unlock OS key store; never seek plaintext fallback             |
+| Conflict on undo              | Provider file changed since mutation               | Review newest source; do not force old bytes                   |
+| Lost session                  | Connection, host or original process state changed | Review host status; explicitly restart if desired              |
+| No real in-use model evidence | Only configured/selected value known               | Use provider's own runtime display                             |
+| Managed safety unavailable    | Required authority checks failed                   | Do not bypass using native work for the same managed operation |
 
 ## 9. Privacy expectations
 

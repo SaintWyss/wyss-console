@@ -11,7 +11,7 @@ Host-owned terminals and agent sessions survive GUI closing; within the UI tabs 
 - Horizontal/vertical splits must not create duplicate PTYs unless explicitly requested.
 - Each split tree has valid unique leaf/pane identities; removing a pane collapses branches without orphan references.
 - Active pane/focus, resize handles and minimum size are accessible with pointer and keyboard.
-- Search operates on bounded *rendered scrollback* with documented ANSI/Unicode semantics, result counts and next/previous matches. It must not log query terms, prompts or terminal content.
+- Search operates on bounded _rendered scrollback_ with documented ANSI/Unicode semantics, result counts and next/previous matches. It must not log query terms, prompts or terminal content.
 - Ctrl+Shift shortcuts are interceptable Console commands only; don't swallow necessary provider keys. Show actual mappings and conflicts.
 - Full keyboard access, visible focus, pane titles/state not conveyed by color alone.
 
@@ -34,20 +34,20 @@ Host-owned terminals and agent sessions survive GUI closing; within the UI tabs 
 
 ## Immediate GUI acceptance checklist
 
-| Check | Action | Expected |
-| --- | --- | --- |
-| TERM-UI-01 | Shell tab: vertical then horizontal split | Three panes, correct ownership |
-| TERM-UI-02 | Drag dividers, resize, focus by keyboard | Stable PTY sizes and visible focus |
-| TERM-UI-03 | Search a harmless marker in scrolled output | Match highlight/count; no prompt mutation |
+| Check      | Action                                      | Expected                                          |
+| ---------- | ------------------------------------------- | ------------------------------------------------- |
+| TERM-UI-01 | Shell tab: vertical then horizontal split   | Three panes, correct ownership                    |
+| TERM-UI-02 | Drag dividers, resize, focus by keyboard    | Stable PTY sizes and visible focus                |
+| TERM-UI-03 | Search a harmless marker in scrolled output | Match highlight/count; no prompt mutation         |
 | TERM-UI-04 | Keyboard shortcuts in Claude/Codex terminal | Console actions and pass-through behave correctly |
-| TERM-UI-05 | Close pane, tab, reorder if supported | No dangling tree, orphan or unintended process |
-| TERM-UI-06 | Close GUI and reopen with host running | Same sessions/scrollback/split layout |
-| TERM-UI-07 | Kill GUI only; relaunch | Host sessions survive |
-| TERM-UI-08 | Kill test host/stale socket | Honest Lost/fallback and recovery |
-| TERM-UI-09 | Corrupt disposable layout record | Safe default, no crash or session deletion |
-| TERM-UI-10 | Narrow width, scale, long titles | Usable responsive layout/focus |
-| TERM-UI-11 | Large ANSI/Unicode scrollback search | Bounded execution, accurate renderer |
-| TERM-UI-12 | Visit Config/Profiles while PTYs live | No keyboard/resource regression |
+| TERM-UI-05 | Close pane, tab, reorder if supported       | No dangling tree, orphan or unintended process    |
+| TERM-UI-06 | Close GUI and reopen with host running      | Same sessions/scrollback/split layout             |
+| TERM-UI-07 | Kill GUI only; relaunch                     | Host sessions survive                             |
+| TERM-UI-08 | Kill test host/stale socket                 | Honest Lost/fallback and recovery                 |
+| TERM-UI-09 | Corrupt disposable layout record            | Safe default, no crash or session deletion        |
+| TERM-UI-10 | Narrow width, scale, long titles            | Usable responsive layout/focus                    |
+| TERM-UI-11 | Large ANSI/Unicode scrollback search        | Bounded execution, accurate renderer              |
+| TERM-UI-12 | Visit Config/Profiles while PTYs live       | No keyboard/resource regression                   |
 
 IDs TERM-UI-* are proposals; align with canonical TS-TERM/TS-HOST/AC IDs rather than changing the canonical numbering.
 

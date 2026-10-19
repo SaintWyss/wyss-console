@@ -13,27 +13,27 @@
 
 ## Threat-to-control matrix
 
-| Threat | Trust boundary | Mandatory defense | Negative verification |
-| --- | --- | --- | --- |
-| Symlink/TOCTOU file replacement | Config engine → provider-owned FS | Descriptor-based trust, nofollow, revision check, atomic/exchange semantics | Swap target/source during apply; no untrusted write |
-| Trusted `agent` co-writer abused | User ACL exception | Named, local, owner-controlled trusted list with restrictive ownership; warn that co-writer has genuine write power | Unknown user/shared group/world-writable denied |
-| Secret cached in undo | Provider settings → Console journal | AEAD at rest with OS wallet, AAD and private modes; refuse unsafe store | Search logs/records and lock wallet; zero leaks |
-| Unsafe profile overlay | Profiles → provider CLI | Verified provider argument grammar, native confirmation for security-control reduction | Imported profile cannot grant code execution |
-| Shell injection via launcher | Webview → native process | Structured argv, closed executable catalogue and escaped shell replacement contract | Metacharacters remain inert UI data |
-| Forged Native/Managed status | Host UI → authority | Explicit plane/source plus attested managed identity | Tampered source can't show Managed badge |
-| Managed hook bypass | Provider config → Managed runtime | Maintain SG requirements, test isolated Inference under canonical E1–E8 | Failed isolation cannot fall back to user home |
-| Cross-runtime attestation reuse | F8/authority | Per-generation process/policy/lease binding | A response from runtime A rejected in B |
-| Cross-session/handoff prompt injection | Untrusted transcripts/artifacts → destination | Bounded reviewed package, quoted content inert and no grant transfer | Malicious instruction not executed by Console |
-| Token exposure from parent environment | Launcher → provider child | Strip unrelated inherited secrets and only inject reviewed provider-specific values | Marker token absent from child/proc/log |
-| Credential stolen from GUI | KWallet → webview | Opaque handles, no raw secret in generic IPC, native sensitive actions | API metadata never includes secret |
-| Credentials sent via remote gateway | Wallet → device | No remote secret export by default, explicit permissions | Read-only grant cannot access secret |
-| Remote replay/impersonation | Device → gateway | Authenticated encrypted transport, device-bound keys, nonce/request IDs, host ID and expiry | Expired/other-host/malformed request denied |
-| Remote revocation gap | Gateway → host sessions | Revocation on each mutating request and active stream teardown | Revoked device immediately loses input/output |
-| Terminal output DoS | Provider PTY → host/network/page | Bounded queues/scrollback, backpressure, fair client consumption | Runaway producer doesn't exhaust memory |
-| Privilege confusion during update | Installer → authority binaries | User-only trusted executable paths, artifact provenance and safe service migration | Group-writable binary path rejected |
-| False terminal liveness | Host registry → GUI | Host generation, stable session ID and process evidence | Killed host/session never shown Active |
-| Sensitive diagnostics | Error/log exporter → disk/user | Closed codes, user-previewed redacted export | Seed credentials not in logs/report |
-| Dependency supply chain | Build → installed package | Lockfile, license/SBOM audit, signed/provenance release | Tampered bundle rejected |
+| Threat                                 | Trust boundary                                | Mandatory defense                                                                                                   | Negative verification                               |
+| -------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Symlink/TOCTOU file replacement        | Config engine → provider-owned FS             | Descriptor-based trust, nofollow, revision check, atomic/exchange semantics                                         | Swap target/source during apply; no untrusted write |
+| Trusted `agent` co-writer abused       | User ACL exception                            | Named, local, owner-controlled trusted list with restrictive ownership; warn that co-writer has genuine write power | Unknown user/shared group/world-writable denied     |
+| Secret cached in undo                  | Provider settings → Console journal           | AEAD at rest with OS wallet, AAD and private modes; refuse unsafe store                                             | Search logs/records and lock wallet; zero leaks     |
+| Unsafe profile overlay                 | Profiles → provider CLI                       | Verified provider argument grammar, native confirmation for security-control reduction                              | Imported profile cannot grant code execution        |
+| Shell injection via launcher           | Webview → native process                      | Structured argv, closed executable catalogue and escaped shell replacement contract                                 | Metacharacters remain inert UI data                 |
+| Forged Native/Managed status           | Host UI → authority                           | Explicit plane/source plus attested managed identity                                                                | Tampered source can't show Managed badge            |
+| Managed hook bypass                    | Provider config → Managed runtime             | Maintain SG requirements, test isolated Inference under canonical E1–E8                                             | Failed isolation cannot fall back to user home      |
+| Cross-runtime attestation reuse        | F8/authority                                  | Per-generation process/policy/lease binding                                                                         | A response from runtime A rejected in B             |
+| Cross-session/handoff prompt injection | Untrusted transcripts/artifacts → destination | Bounded reviewed package, quoted content inert and no grant transfer                                                | Malicious instruction not executed by Console       |
+| Token exposure from parent environment | Launcher → provider child                     | Strip unrelated inherited secrets and only inject reviewed provider-specific values                                 | Marker token absent from child/proc/log             |
+| Credential stolen from GUI             | KWallet → webview                             | Opaque handles, no raw secret in generic IPC, native sensitive actions                                              | API metadata never includes secret                  |
+| Credentials sent via remote gateway    | Wallet → device                               | No remote secret export by default, explicit permissions                                                            | Read-only grant cannot access secret                |
+| Remote replay/impersonation            | Device → gateway                              | Authenticated encrypted transport, device-bound keys, nonce/request IDs, host ID and expiry                         | Expired/other-host/malformed request denied         |
+| Remote revocation gap                  | Gateway → host sessions                       | Revocation on each mutating request and active stream teardown                                                      | Revoked device immediately loses input/output       |
+| Terminal output DoS                    | Provider PTY → host/network/page              | Bounded queues/scrollback, backpressure, fair client consumption                                                    | Runaway producer doesn't exhaust memory             |
+| Privilege confusion during update      | Installer → authority binaries                | User-only trusted executable paths, artifact provenance and safe service migration                                  | Group-writable binary path rejected                 |
+| False terminal liveness                | Host registry → GUI                           | Host generation, stable session ID and process evidence                                                             | Killed host/session never shown Active              |
+| Sensitive diagnostics                  | Error/log exporter → disk/user                | Closed codes, user-previewed redacted export                                                                        | Seed credentials not in logs/report                 |
+| Dependency supply chain                | Build → installed package                     | Lockfile, license/SBOM audit, signed/provenance release                                                             | Tampered bundle rejected                            |
 
 ## Independent review criteria
 

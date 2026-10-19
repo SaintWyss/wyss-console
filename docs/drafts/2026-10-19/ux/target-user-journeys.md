@@ -8,19 +8,19 @@ The console is **terminal-first**. A native or managed badge is text, never colo
 
 ### Main navigation (target)
 
-| View | Primary action | Important failure or empty state |
-| --- | --- | --- |
-| Console / Workspace | Launch Claude/Codex; attach, split, search PTYs | No provider installed; host fallback |
-| Sessions | See real processes, resource use, stop/restart/remove | Lost != exited; disconnected != failed |
-| Configuration | Inspect scope, toggle verified hook/skill/MCP | Trust/ACL failure; unsupported provider |
-| Profiles | Version, clone, import/export launch profiles | Risky overlay confirmation; incompatible profile |
-| Models | Distinguish installed/configured/selected/observed | Catalogue is not entitlement; in-use unknown |
-| Handoff | Review bounded context sent to another agent | Untrusted text, cancellation, stale source |
-| Credentials | Secure API key references | Wallet locked; provider supports OAuth only |
-| Remote/Devices | See hosts, pair/revoke devices and grants | Gateway disabled; revoked; offline |
-| Agents/Approvals | Inspect managed turns under authority | Safety blocked; no native fallback |
-| History/Diagnostics | Safe audit, errors and resource metrics | Privacy-safe export, missing events |
-| Settings/Help | Keymap, terminal/privacy preferences, user guidance | No unsupported capability offered |
+| View                | Primary action                                        | Important failure or empty state                 |
+| ------------------- | ----------------------------------------------------- | ------------------------------------------------ |
+| Console / Workspace | Launch Claude/Codex; attach, split, search PTYs       | No provider installed; host fallback             |
+| Sessions            | See real processes, resource use, stop/restart/remove | Lost != exited; disconnected != failed           |
+| Configuration       | Inspect scope, toggle verified hook/skill/MCP         | Trust/ACL failure; unsupported provider          |
+| Profiles            | Version, clone, import/export launch profiles         | Risky overlay confirmation; incompatible profile |
+| Models              | Distinguish installed/configured/selected/observed    | Catalogue is not entitlement; in-use unknown     |
+| Handoff             | Review bounded context sent to another agent          | Untrusted text, cancellation, stale source       |
+| Credentials         | Secure API key references                             | Wallet locked; provider supports OAuth only      |
+| Remote/Devices      | See hosts, pair/revoke devices and grants             | Gateway disabled; revoked; offline               |
+| Agents/Approvals    | Inspect managed turns under authority                 | Safety blocked; no native fallback               |
+| History/Diagnostics | Safe audit, errors and resource metrics               | Privacy-safe export, missing events              |
+| Settings/Help       | Keymap, terminal/privacy preferences, user guidance   | No unsupported capability offered                |
 
 Screens are shown only when actually implemented. Future menu items must be hidden or explicitly disabled with a reason, not decorative clickable controls.
 
@@ -69,16 +69,16 @@ Screens are shown only when actually implemented. Future menu items must be hidd
 
 ## Consistent error copy
 
-| Safe code | User text pattern |
-| --- | --- |
-| `provider_not_found` | "The selected agent is not installed on this host." |
-| `profile_not_applicable` | "This provider cannot apply that setting per session. Nothing started." |
-| `source_conflict` | "Configuration changed outside Wyss Console. Review the latest version before retrying." |
-| `wallet_locked` | "The credential store is locked. No credential was written." |
-| `host_disconnected` | "Connection to the terminal host was lost; the agent's process state is unknown." |
-| `grant_revoked` | "This device no longer has access to that host." |
-| `safety_unproven` | "Managed operation is unavailable because the required safety checks could not be verified." |
-| `observed_model_unknown` | "Configured model is known; model in use was not reported." |
+| Safe code                | User text pattern                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------------------- |
+| `provider_not_found`     | "The selected agent is not installed on this host."                                          |
+| `profile_not_applicable` | "This provider cannot apply that setting per session. Nothing started."                      |
+| `source_conflict`        | "Configuration changed outside Wyss Console. Review the latest version before retrying."     |
+| `wallet_locked`          | "The credential store is locked. No credential was written."                                 |
+| `host_disconnected`      | "Connection to the terminal host was lost; the agent's process state is unknown."            |
+| `grant_revoked`          | "This device no longer has access to that host."                                             |
+| `safety_unproven`        | "Managed operation is unavailable because the required safety checks could not be verified." |
+| `observed_model_unknown` | "Configured model is known; model in use was not reported."                                  |
 
 These are wording candidates; exact error keys must follow existing Rust error vocabulary. Never expose `stderr`, raw JWT/token, stack trace or filesystem secret in a toast.
 

@@ -7,6 +7,7 @@
 Measure the actual Console, host-owned PTYs, rendering and provider startup on each supported reference machine. Before optimization, collect a reproducible baseline and a comparable reference terminal (selected with owner consent).
 
 At minimum:
+
 - Cold application startup, first interactive terminal and first painted frame.
 - Time from Start Agent click to actual provider process and first usable terminal.
 - Input-to-render latency with a calibrated method (OQ-27).
@@ -27,6 +28,7 @@ For each measurement record hardware, kernel, GPU/render mode, compositor, monit
 Run warm-up trials then enough repeated samples for median and p95; record raw numbers, failure counts, variance and test fixture. Distinguish cold from warm runs. Never compare a software-rendered nested-display screenshot benchmark with a hardware-accelerated reference without a warning.
 
 P1 questions:
+
 - OQ-26: whether a timestamp probe may ship. Candidate: debug-only instrumented builds, absent in release.
 - OQ-27: external input latency method. Candidate: controlled camera/tester vs internal instrumentation, both labelled.
 - The reference terminal must be selected/installed with consent.
@@ -38,6 +40,7 @@ Propose revised budgets based on measured distributions; only the owner accepts 
 Dependency: product accepted by its first user; DN-07 (license/platform/format/channel/update/security support). Existing local build artifacts are not public releases.
 
 Delivery should include:
+
 1. A reproducible, pinned build and license/dependency review (including bundled code).
 2. Installable package and verified per-user systemd units, host and authority lifecycle. No writable-by-group executable lookup paths.
 3. Supported platform/distro list with actual tests. macOS/Windows require separate equivalents to Unix sockets, peer credentials, systemd, namespaces, inotify and GTK/WebKitGTK.
@@ -52,18 +55,18 @@ No telemetry or Internet listener by default.
 
 ## 4. Proposed distribution acceptance (map to canonical TS-DIST-01–06)
 
-| Case | Assertion |
-| --- | --- |
-| DIST-A01 | Fresh install without Claude/Codex: terminal works, files unchanged |
-| DIST-A02 | Provider detection accurately reports absent/unsupported versions |
-| DIST-A03 | Correct packaged binaries, services and authenticated IPC |
+| Case     | Assertion                                                                |
+| -------- | ------------------------------------------------------------------------ |
+| DIST-A01 | Fresh install without Claude/Codex: terminal works, files unchanged      |
+| DIST-A02 | Provider detection accurately reports absent/unsupported versions        |
+| DIST-A03 | Correct packaged binaries, services and authenticated IPC                |
 | DIST-A04 | Upgrade preserves/restores profiles, journal, host and encrypted entries |
-| DIST-A05 | Unsupported schema fails safely, no silent rewrite |
-| DIST-A06 | Uninstall explains and follows data/key retention choice |
-| DIST-A07 | Exported diagnostics secret-free, previewable |
-| DIST-A08 | Package provenance and non-writable executable paths verified |
-| DIST-A09 | Keyboard, font scaling, dialogs and accessibility pass |
-| DIST-A10 | No unsolicited telemetry, listener or auto-update |
+| DIST-A05 | Unsupported schema fails safely, no silent rewrite                       |
+| DIST-A06 | Uninstall explains and follows data/key retention choice                 |
+| DIST-A07 | Exported diagnostics secret-free, previewable                            |
+| DIST-A08 | Package provenance and non-writable executable paths verified            |
+| DIST-A09 | Keyboard, font scaling, dialogs and accessibility pass                   |
+| DIST-A10 | No unsolicited telemetry, listener or auto-update                        |
 
 F13 needs a genuinely fresh supported user environment, a repeatable install/update/uninstall demonstration and owner acceptance — passing `npm run desktop:package` alone is insufficient.
 

@@ -33,18 +33,18 @@ This copies only documentation paths. It does **not** merge older `main` or over
 
 ## One-time reconciliation matrix
 
-| Topic | Must read locally | Accepted vs draft handling |
-| --- | --- | --- |
-| Restorable encrypted mutations / ACL | ADR 0029, F2a/F2b writer, `trusted-writers` behavior | Preserve security model and accurately describe named writer risk |
-| Native launcher/profiles | ADR 0030, F3 test evidence | Update user guide/versions, leave provider-auth in providers |
-| Host/session persistence | ADR 0031 and F9 implementation | Schema + state/process owner/upgrade behavior from code, not proposal |
-| Terminal T1/T2 | `docs/CHECKPOINT.md`, tests, GUI | Complete renderer search test, GUI walkthrough, ADR/README/CHANGELOG |
-| Managed hooks/Inference | Architecture 10; current authority hooks | E1–E8 research and security ADR before unlocking |
-| Model projection | Authority API/schema and architecture 12 | No guess of actual model, DN-09 before projection |
-| Remote service | Architecture 16, accepted DN-05 parts | No graphical desktop, gateway only if new remote ADR and owner network scope |
-| Secure credentials | ADR 0029 and key-store code | F14 vault is independent new security feature |
-| Original Wyss/Hermes | Architecture 17 plus live provider/source evidence | Don't mark F12 strategy selected without DN-06 |
-| Distribution | ADR 0027, actual package scripts and services | No release or updater until DN-07 and user acceptance |
+| Topic                                | Must read locally                                    | Accepted vs draft handling                                                   |
+| ------------------------------------ | ---------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Restorable encrypted mutations / ACL | ADR 0029, F2a/F2b writer, `trusted-writers` behavior | Preserve security model and accurately describe named writer risk            |
+| Native launcher/profiles             | ADR 0030, F3 test evidence                           | Update user guide/versions, leave provider-auth in providers                 |
+| Host/session persistence             | ADR 0031 and F9 implementation                       | Schema + state/process owner/upgrade behavior from code, not proposal        |
+| Terminal T1/T2                       | `docs/CHECKPOINT.md`, tests, GUI                     | Complete renderer search test, GUI walkthrough, ADR/README/CHANGELOG         |
+| Managed hooks/Inference              | Architecture 10; current authority hooks             | E1–E8 research and security ADR before unlocking                             |
+| Model projection                     | Authority API/schema and architecture 12             | No guess of actual model, DN-09 before projection                            |
+| Remote service                       | Architecture 16, accepted DN-05 parts                | No graphical desktop, gateway only if new remote ADR and owner network scope |
+| Secure credentials                   | ADR 0029 and key-store code                          | F14 vault is independent new security feature                                |
+| Original Wyss/Hermes                 | Architecture 17 plus live provider/source evidence   | Don't mark F12 strategy selected without DN-06                               |
+| Distribution                         | ADR 0027, actual package scripts and services        | No release or updater until DN-07 and user acceptance                        |
 
 ## Resolve vs leave open
 

@@ -21,19 +21,19 @@ Do not run tests against real provider settings that create or delete entries wi
 
 ## 3. Failure diagnosis matrix
 
-| Symptom | First check | Safe recovery | Avoid |
-| --- | --- | --- | --- |
-| GUI cannot attach host | Host process, private socket owner/mode, generation | Relaunch GUI/approved host; explain fallback | Reusing stale socket as proof of life |
-| GUI closed but agent still active | Expected F9 ownership | Reopen and reattach | Killing host to "close" the UI |
-| Provider terminal is Lost | Host generation/process liveness | Confirm actual state, explicit restart | Claiming agent was stopped |
-| Output gap on reattach | Host scrollback bound/stream offset | Show gap; resume live stream | Replaying fabricated missing bytes |
-| Profile refuses launch | Provider capability and overlay risk | Edit profile; launch supported variant | Silently omitting unsupported controls |
-| Config file read-only | Owner, ancestor perms, ACL named writers, symlink | Fix trust only with owner decision | Blind `chmod g-w ~/.claude` |
-| Undo conflicts | Provider revision differs from snapshot | Preserve new bytes; review/apply new plan | Force overwrite |
-| KWallet unavailable | OS key service state; key identity | Unlock/restore backed-up key | Plaintext fallback |
-| Managed execution unavailable | Authority lease/attestation/policy errors | Follow accepted authority runbook | Native silent fallback or zero-hook bypass |
-| Device revoked | Gateway grant state | Pair again only by host approval | Restoring old grant from backup |
-| High idle CPU | Host/webview/provider process split, X11/render mode | Measure against P1 baseline | Confusing provider CPU with UI |
+| Symptom                           | First check                                          | Safe recovery                                | Avoid                                      |
+| --------------------------------- | ---------------------------------------------------- | -------------------------------------------- | ------------------------------------------ |
+| GUI cannot attach host            | Host process, private socket owner/mode, generation  | Relaunch GUI/approved host; explain fallback | Reusing stale socket as proof of life      |
+| GUI closed but agent still active | Expected F9 ownership                                | Reopen and reattach                          | Killing host to "close" the UI             |
+| Provider terminal is Lost         | Host generation/process liveness                     | Confirm actual state, explicit restart       | Claiming agent was stopped                 |
+| Output gap on reattach            | Host scrollback bound/stream offset                  | Show gap; resume live stream                 | Replaying fabricated missing bytes         |
+| Profile refuses launch            | Provider capability and overlay risk                 | Edit profile; launch supported variant       | Silently omitting unsupported controls     |
+| Config file read-only             | Owner, ancestor perms, ACL named writers, symlink    | Fix trust only with owner decision           | Blind `chmod g-w ~/.claude`                |
+| Undo conflicts                    | Provider revision differs from snapshot              | Preserve new bytes; review/apply new plan    | Force overwrite                            |
+| KWallet unavailable               | OS key service state; key identity                   | Unlock/restore backed-up key                 | Plaintext fallback                         |
+| Managed execution unavailable     | Authority lease/attestation/policy errors            | Follow accepted authority runbook            | Native silent fallback or zero-hook bypass |
+| Device revoked                    | Gateway grant state                                  | Pair again only by host approval             | Restoring old grant from backup            |
+| High idle CPU                     | Host/webview/provider process split, X11/render mode | Measure against P1 baseline                  | Confusing provider CPU with UI             |
 
 ## 4. Controlled restart and recovery
 

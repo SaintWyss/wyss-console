@@ -13,13 +13,13 @@ This branch contains a cohesive, implementation-oriented supplement to the exist
 
 ## Read in this order
 
-| Audience | Start with |
-| --- | --- |
-| Sonnet merging documentation | [Integration playbook](INTEGRATION-PLAYBOOK.md), [Execution plan](planning/remaining-execution-plan.md), [Acceptance matrix](acceptance/product-completion-matrix.md) |
-| Architect | [Decision closure pack](architecture/decision-closure-pack.md), [Interface contracts](architecture/cross-phase-interface-contracts.md), [State and recovery](architecture/state-recovery-and-migrations.md) |
-| Security reviewer | [Threat-control matrix](architecture/security-assurance-matrix.md), [E2E test runbook](acceptance/end-to-end-test-runbook.md) |
-| Product/UI engineer | [Journeys](ux/target-user-journeys.md), [User guide](manual/user-guide.md) |
-| Operations/release | [Recovery handbook](manual/operator-recovery-handbook.md), [Release guide](manual/installation-release-support.md) |
+| Audience                     | Start with                                                                                                                                                                                                  |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sonnet merging documentation | [Integration playbook](INTEGRATION-PLAYBOOK.md), [Execution plan](planning/remaining-execution-plan.md), [Acceptance matrix](acceptance/product-completion-matrix.md)                                       |
+| Architect                    | [Decision closure pack](architecture/decision-closure-pack.md), [Interface contracts](architecture/cross-phase-interface-contracts.md), [State and recovery](architecture/state-recovery-and-migrations.md) |
+| Security reviewer            | [Threat-control matrix](architecture/security-assurance-matrix.md), [E2E test runbook](acceptance/end-to-end-test-runbook.md)                                                                               |
+| Product/UI engineer          | [Journeys](ux/target-user-journeys.md), [User guide](manual/user-guide.md)                                                                                                                                  |
+| Operations/release           | [Recovery handbook](manual/operator-recovery-handbook.md), [Release guide](manual/installation-release-support.md)                                                                                          |
 
 ## File index
 

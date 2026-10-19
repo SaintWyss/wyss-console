@@ -4,19 +4,19 @@
 
 ## Ownership by data class
 
-| State | Sole writer | Readers | Durable? | Sensitive? | Recovery |
-| --- | --- | --- | --- | --- | --- |
-| Managed approvals, leases, events, attestations | Managed authority | Authorized local control view | As authority contracts | Yes: audit metadata | Authority's existing recovery only |
-| Native session registry, live PTYs, bounded scrollback | F9 host | Local/authorized clients | Registry yes; process/PTY volatile | Terminal output may contain secrets | Attach if same generation; otherwise Lost |
-| Window layout, focus, pane tree and UI preferences | Desktop UI store | Desktop | Yes | Metadata; sanitized titles/path refs | Safe default, never spawn unknown process |
-| Config inventory cache/last-seen fingerprints | Configuration engine | Desktop | Metadata only by default | Paths may be sensitive | Rescan; no automatic outside restore |
-| Reversible config mutations, encrypted undo | Configuration engine | Owner via confirmation | Yes within retention | Possibly secrets | Journal replay + wallet key, fail closed |
-| Provider settings/hooks/skills/MCP | Provider itself | Config engine | Provider-defined | Frequently sensitive | Byte-preserving plan/apply, never duplicate |
-| Session profiles and version history | Profile store | Desktop/launcher | Yes | Must contain **no secrets** | Versioned import/export with explicit user review |
-| Handoff package | Handoff store only on explicit save | User, chosen target | Explicit, bounded | Untrusted/confidential user context | Reopen review; no automatic send |
-| Device identities, pairing and grants | Future gateway | Local owner management | Yes, with revocation | Device key material | Revoke if integrity or migration uncertain |
-| F14 API credential values | OS wallet/locked vault | Dedicated native credential handler only | Yes when secure store available | **Secret** | Key loss/wallet locked yields unavailable, not plaintext |
-| Diagnosics, stats, performance samples | Observability collector | Owner | Bounded and opt-in | No prompt/credential/terminal bytes | Delete/export with clear policy |
+| State                                                  | Sole writer                         | Readers                                  | Durable?                           | Sensitive?                           | Recovery                                                 |
+| ------------------------------------------------------ | ----------------------------------- | ---------------------------------------- | ---------------------------------- | ------------------------------------ | -------------------------------------------------------- |
+| Managed approvals, leases, events, attestations        | Managed authority                   | Authorized local control view            | As authority contracts             | Yes: audit metadata                  | Authority's existing recovery only                       |
+| Native session registry, live PTYs, bounded scrollback | F9 host                             | Local/authorized clients                 | Registry yes; process/PTY volatile | Terminal output may contain secrets  | Attach if same generation; otherwise Lost                |
+| Window layout, focus, pane tree and UI preferences     | Desktop UI store                    | Desktop                                  | Yes                                | Metadata; sanitized titles/path refs | Safe default, never spawn unknown process                |
+| Config inventory cache/last-seen fingerprints          | Configuration engine                | Desktop                                  | Metadata only by default           | Paths may be sensitive               | Rescan; no automatic outside restore                     |
+| Reversible config mutations, encrypted undo            | Configuration engine                | Owner via confirmation                   | Yes within retention               | Possibly secrets                     | Journal replay + wallet key, fail closed                 |
+| Provider settings/hooks/skills/MCP                     | Provider itself                     | Config engine                            | Provider-defined                   | Frequently sensitive                 | Byte-preserving plan/apply, never duplicate              |
+| Session profiles and version history                   | Profile store                       | Desktop/launcher                         | Yes                                | Must contain **no secrets**          | Versioned import/export with explicit user review        |
+| Handoff package                                        | Handoff store only on explicit save | User, chosen target                      | Explicit, bounded                  | Untrusted/confidential user context  | Reopen review; no automatic send                         |
+| Device identities, pairing and grants                  | Future gateway                      | Local owner management                   | Yes, with revocation               | Device key material                  | Revoke if integrity or migration uncertain               |
+| F14 API credential values                              | OS wallet/locked vault              | Dedicated native credential handler only | Yes when secure store available    | **Secret**                           | Key loss/wallet locked yields unavailable, not plaintext |
+| Diagnosics, stats, performance samples                 | Observability collector             | Owner                                    | Bounded and opt-in                 | No prompt/credential/terminal bytes  | Delete/export with clear policy                          |
 
 Never store terminal content as a side effect of persisting UI layout. Persistent PTY host means its process survives the GUI, **not** that active providers survive a host crash.
 
@@ -50,17 +50,17 @@ This is illustrative only: no implementation may claim compatibility until fixtu
 
 ## Migration rules
 
-| Scenario | Correct behavior |
-| --- | --- |
-| Same-version restart | Read-only scan then ordinary attach/recovery |
-| Supported older schema | Dry-run plan, verified backup, atomic migration, post-check, new schema receipt |
-| Failed migration mid-way | Restore exact verified pre-migration snapshot where safe; no silent data wipe |
-| Newer unsupported schema | Enter read-only or unavailable with actionable error; never downgrade automatically |
-| Replaced/symlinked store | Reject; do not open untrusted write location |
-| Missing KWallet key | Mark encrypted data unrecoverable until key restored; do not derive a replacement silently |
-| Host upgraded with live provider processes | Version negotiation or defer upgrade until graceful detach; don't SIGKILL by default |
-| Remote grants during gateway upgrade | Reject stale/revoked identities across restarts; no fresh broad grant |
-| Provider external edit concurrent with undo | Conflict receipt; preserve the newer provider bytes |
+| Scenario                                    | Correct behavior                                                                           |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Same-version restart                        | Read-only scan then ordinary attach/recovery                                               |
+| Supported older schema                      | Dry-run plan, verified backup, atomic migration, post-check, new schema receipt            |
+| Failed migration mid-way                    | Restore exact verified pre-migration snapshot where safe; no silent data wipe              |
+| Newer unsupported schema                    | Enter read-only or unavailable with actionable error; never downgrade automatically        |
+| Replaced/symlinked store                    | Reject; do not open untrusted write location                                               |
+| Missing KWallet key                         | Mark encrypted data unrecoverable until key restored; do not derive a replacement silently |
+| Host upgraded with live provider processes  | Version negotiation or defer upgrade until graceful detach; don't SIGKILL by default       |
+| Remote grants during gateway upgrade        | Reject stale/revoked identities across restarts; no fresh broad grant                      |
+| Provider external edit concurrent with undo | Conflict receipt; preserve the newer provider bytes                                        |
 
 ## Deletion and uninstall
 

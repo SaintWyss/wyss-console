@@ -55,20 +55,20 @@ Controls: authenticated encrypted transport with host identity validation; expli
 
 ## Proposed acceptance (map to canonical TS-REM-01–13)
 
-| Case | Required behavior |
-| --- | --- |
-| REM-A01 | Gateway off by default; local app unchanged |
-| REM-A02 | Pair second desktop after local host confirmation |
-| REM-A03 | Reconnect PTY with correct scrollback/gap |
-| REM-A04 | View-only grant cannot type |
-| REM-A05 | Revoke active device: drop stream and reject old credential |
+| Case    | Required behavior                                            |
+| ------- | ------------------------------------------------------------ |
+| REM-A01 | Gateway off by default; local app unchanged                  |
+| REM-A02 | Pair second desktop after local host confirmation            |
+| REM-A03 | Reconnect PTY with correct scrollback/gap                    |
+| REM-A04 | View-only grant cannot type                                  |
+| REM-A05 | Revoke active device: drop stream and reject old credential  |
 | REM-A06 | Network loss does not end host process; UI says disconnected |
-| REM-A07 | Retry/replay never duplicates actions |
-| REM-A08 | Wrong host/expired grant/malformed frame fail closed |
-| REM-A09 | Remote mutation cannot bypass native confirmation |
-| REM-A10 | No secrets in gateway logs/errors |
-| REM-A11 | Physical phone lock/pairing/reauth acceptance |
-| REM-A12 | Gateway disable/uninstall revokes access and listeners |
+| REM-A07 | Retry/replay never duplicates actions                        |
+| REM-A08 | Wrong host/expired grant/malformed frame fail closed         |
+| REM-A09 | Remote mutation cannot bypass native confirmation            |
+| REM-A10 | No secrets in gateway logs/errors                            |
+| REM-A11 | Physical phone lock/pairing/reauth acceptance                |
+| REM-A12 | Gateway disable/uninstall revokes access and listeners       |
 
 ## Delivery gates
 

@@ -40,16 +40,16 @@ The webview sends structured data; it does not choose executable commands. The n
 
 ## Acceptance
 
-| Case | Expected |
-| --- | --- |
+| Case                             | Expected                                                       |
+| -------------------------------- | -------------------------------------------------------------- |
 | Shell metacharacters in new hook | No unintended Console command; provider receives intended text |
-| Create/edit/delete/undo | Byte-identical restoration; unrelated comments unchanged |
-| Concurrent edit | No silent overwrite; deterministic conflict and recovery |
-| Credential-shaped values | No secret in projection, logs, journal or diagnostic |
-| Risky authoring | Required native confirmation cannot be bypassed |
-| Unsupported version/type | Write unavailable with honest explanation |
-| Provider writer | Only verified closed command contract |
-| Import/export | Versioned schema; no silent grant/activation |
+| Create/edit/delete/undo          | Byte-identical restoration; unrelated comments unchanged       |
+| Concurrent edit                  | No silent overwrite; deterministic conflict and recovery       |
+| Credential-shaped values         | No secret in projection, logs, journal or diagnostic           |
+| Risky authoring                  | Required native confirmation cannot be bypassed                |
+| Unsupported version/type         | Write unavailable with honest explanation                      |
+| Provider writer                  | Only verified closed command contract                          |
+| Import/export                    | Versioned schema; no silent grant/activation                   |
 
 F5 focused external security review is mandatory before real authoring. An unrelated read-only adjustment does not require rerunning the whole security audit.
 

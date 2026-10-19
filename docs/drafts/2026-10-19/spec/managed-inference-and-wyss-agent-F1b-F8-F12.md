@@ -13,6 +13,7 @@ Never use a terminal fallback to bypass managed failure, present a desktop predi
 The canonical roadmap requires E1–E8 in disposable provider homes, with a written contract covering architecture 10 §5.6. **Read the local canonical catalogue before executing: do not fabricate experiment definitions.**
 
 Each experiment record should include:
+
 - Exact canonical hypothesis/ID, provider version and tested protocol/schema.
 - Source/test home, namespace, policy and credential isolation.
 - Baseline controls and deliberately changed variable.

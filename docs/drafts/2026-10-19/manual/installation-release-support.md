@@ -53,6 +53,7 @@ No updating the running authority behind its back; no swallowing migration error
 ## 5. Uninstall
 
 Present independent choices to retain/remove:
+
 - Program files, icon and user services.
 - Profiles, layouts and settings.
 - Native session registry/log metadata.
@@ -64,19 +65,19 @@ Stop or safely detach host/native sessions before removing its executable or ser
 
 ## 6. Release quality gates
 
-| Gate | Evidence |
-| --- | --- |
-| R1: source provenance | Build commit, artifact checksums, dependency license audit |
-| R2: isolated clean install | Fresh supported non-owner user, no provider installed |
-| R3: real providers | Claude and Codex detected/launched under actual permissions |
-| R4: host and authority | Private peer identity, correct process owners, restart |
-| R5: upgrade | N−1 → N with real-shaped sealed fixtures, no data loss |
-| R6: rollback | Fail step-injection, restored package and compatible data |
-| R7: uninstall | Explicit retained/deleted state, wallet handling |
-| R8: privacy and network | No telemetry/listener/secret exposure by default |
-| R9: performance/a11y | Accepted P1 budgets on supported reference machines |
-| R10: security maintenance | Vulnerability intake channel, support window, update ownership |
-| R11: product walkthrough | Core real GUI workflows, negative states and F10 where released |
+| Gate                       | Evidence                                                        |
+| -------------------------- | --------------------------------------------------------------- |
+| R1: source provenance      | Build commit, artifact checksums, dependency license audit      |
+| R2: isolated clean install | Fresh supported non-owner user, no provider installed           |
+| R3: real providers         | Claude and Codex detected/launched under actual permissions     |
+| R4: host and authority     | Private peer identity, correct process owners, restart          |
+| R5: upgrade                | N−1 → N with real-shaped sealed fixtures, no data loss          |
+| R6: rollback               | Fail step-injection, restored package and compatible data       |
+| R7: uninstall              | Explicit retained/deleted state, wallet handling                |
+| R8: privacy and network    | No telemetry/listener/secret exposure by default                |
+| R9: performance/a11y       | Accepted P1 budgets on supported reference machines             |
+| R10: security maintenance  | Vulnerability intake channel, support window, update ownership  |
+| R11: product walkthrough   | Core real GUI workflows, negative states and F10 where released |
 
 Any failed R1–R8 blocks the affected release. F10b physical mobile acceptance must be separate from desktop package acceptance.
 

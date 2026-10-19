@@ -10,12 +10,12 @@ A dedicated protected Credentials view stores and manages API credentials of sup
 
 ## Storage model
 
-| Object | Permitted contents | Store |
-| --- | --- | --- |
-| Metadata | ID, provider, masked label, status, dates; no value | Private Console state |
-| Secret | Raw credential bytes | KWallet/Secret Service or authenticated encryption keyed through it |
-| Use reference | Credential ID, consent/grant scope | Profile/session; no copied secret |
-| Audit | Closed event words, hashed ID, outcome, timestamp | No secret, command or header |
+| Object        | Permitted contents                                  | Store                                                               |
+| ------------- | --------------------------------------------------- | ------------------------------------------------------------------- |
+| Metadata      | ID, provider, masked label, status, dates; no value | Private Console state                                               |
+| Secret        | Raw credential bytes                                | KWallet/Secret Service or authenticated encryption keyed through it |
+| Use reference | Credential ID, consent/grant scope                  | Profile/session; no copied secret                                   |
+| Audit         | Closed event words, hashed ID, outcome, timestamp   | No secret, command or header                                        |
 
 Use a versioned AEAD envelope, nonce uniqueness and AAD binding identity/provider/version. Reusing restoration crypto primitives does not make the restoration format an acceptable vault format automatically. Never fall back to plaintext if KWallet is unavailable. Differentiate locked, absent, permission denied, backend unavailable, corruption and unknown.
 

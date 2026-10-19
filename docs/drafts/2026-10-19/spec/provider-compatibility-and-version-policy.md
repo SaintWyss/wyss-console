@@ -4,13 +4,13 @@
 
 ## Known local evidence as reported 2026-10-19
 
-| Runtime | Reported version | Verified operations according to owner | Explicit limits |
-| --- | --- | --- | --- |
-| Claude Code | 2.1.303 | Native launch/PTY, live input, configuration inventory, hook/skill toggle and restore, session profile `--model` / `--settings` overlay, real first-screen smoke | Real `rtk hook claude` not directly mutated in latest smoke; effects of all live reloads unverified |
-| Codex | 0.159.0 | Native launcher/PTY, configuration inventory, user MCP toggle exact undo, skill on/off via provider `skills/list`, first-screen smoke | Individual Codex hooks remain read-only; active-session skill reload not verified |
-| OpenCode | Not independently tested in reported local F4 | None declared implemented | Requires F4a version detection and real config format verification |
-| Hermes Agent | Not installed/verified in original architecture | None declared implemented | Requires consent to inspect/install and F4b adapter tests |
-| Wyss Agent | Product strategy undecided | Not a verified Console provider | F12 comparison and owner DN-06 |
+| Runtime      | Reported version                                | Verified operations according to owner                                                                                                                           | Explicit limits                                                                                     |
+| ------------ | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Claude Code  | 2.1.303                                         | Native launch/PTY, live input, configuration inventory, hook/skill toggle and restore, session profile `--model` / `--settings` overlay, real first-screen smoke | Real `rtk hook claude` not directly mutated in latest smoke; effects of all live reloads unverified |
+| Codex        | 0.159.0                                         | Native launcher/PTY, configuration inventory, user MCP toggle exact undo, skill on/off via provider `skills/list`, first-screen smoke                            | Individual Codex hooks remain read-only; active-session skill reload not verified                   |
+| OpenCode     | Not independently tested in reported local F4   | None declared implemented                                                                                                                                        | Requires F4a version detection and real config format verification                                  |
+| Hermes Agent | Not installed/verified in original architecture | None declared implemented                                                                                                                                        | Requires consent to inspect/install and F4b adapter tests                                           |
+| Wyss Agent   | Product strategy undecided                      | Not a verified Console provider                                                                                                                                  | F12 comparison and owner DN-06                                                                      |
 
 Reported version-specific features must be revalidated after provider upgrades; no automatic claim for future major or minor versions.
 
@@ -19,6 +19,7 @@ Reported version-specific features must be revalidated after provider upgrades; 
 `verified` = observed against named real provider version and recorded test. `documented` = vendor documentation only, not tested. `predicted` = derived from current file/plan rather than actual running provider. `unavailable` = proven unsupported. `unverified` = unknown, no action allowed when safety-relevant. `stale` = previous provider generation/report.
 
 A provider adapter declares capability independently for:
+
 - Installation detection, version and binary resolution.
 - Native launch, launch-model flag, per-session overlay, CLI restart/resume.
 - Configuration inventory per global/project scope; active/disabled/unknown.

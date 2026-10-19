@@ -41,23 +41,29 @@ A broken terminal host must not compromise authority leases, approvals or isolat
 
 ```typescript
 type Evidence = {
-  level: "observed" | "documented" | "predicted" | "unverified";
+  level: 'observed' | 'documented' | 'predicted' | 'unverified';
   providerVersion?: string;
   checkedAt?: string;
-  source?: "provider" | "file" | "authority" | "host";
+  source?: 'provider' | 'file' | 'authority' | 'host';
 };
 
 type HostSessionView = {
   schemaVersion: number;
   hostId: string;
   hostGeneration: string;
-  sessionId: string;                // never PID alone
-  plane: "native" | "managed";
+  sessionId: string; // never PID alone
+  plane: 'native' | 'managed';
   providerId?: string;
   profileId?: string;
-  projectRef?: string;              // sanitized path reference
-  lifecycle: "starting" | "active" | "stopped" | "failed"
-    | "ended_by_signal" | "lost" | "disconnected";
+  projectRef?: string; // sanitized path reference
+  lifecycle:
+    | 'starting'
+    | 'active'
+    | 'stopped'
+    | 'failed'
+    | 'ended_by_signal'
+    | 'lost'
+    | 'disconnected';
   reconnectable: boolean;
   reasonCode?: string;
   observedAt: string;
@@ -66,11 +72,11 @@ type HostSessionView = {
 type ModelDisplay = {
   providerId: string;
   sessionId?: string;
-  catalogueIds?: string[];         // list !== entitlement
+  catalogueIds?: string[]; // list !== entitlement
   configuredId?: string;
   requestedId?: string;
-  observedId?: string;             // only provider report
-  observedScope?: "session" | "turn";
+  observedId?: string; // only provider report
+  observedScope?: 'session' | 'turn';
   evidence: Evidence;
 };
 
@@ -78,7 +84,7 @@ type OperationReceipt = {
   requestId: string;
   operation: string;
   resourceId?: string;
-  result: "applied" | "no_change" | "conflict" | "failed" | "unverified";
+  result: 'applied' | 'no_change' | 'conflict' | 'failed' | 'unverified';
   safeErrorCode?: string;
   verifiedEffect?: boolean;
 };
@@ -87,7 +93,7 @@ type RemoteGrant = {
   grantId: string;
   hostId: string;
   deviceId: string;
-  capabilities: string[];          // closed, explicit enum in real schema
+  capabilities: string[]; // closed, explicit enum in real schema
   validUntil: string;
   revokedAt?: string;
 };
