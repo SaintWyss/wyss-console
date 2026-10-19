@@ -184,4 +184,60 @@ mod tests {
             );
         }
     }
+
+    /// The contract the window is written against, as one file both sides read:
+    /// `tests/fixtures/configuration-inventory-v1.json`. Set `WYSS_UPDATE_FIXTURES=1` to
+    /// write it again after a deliberate change, then run Prettier on it.
+    #[test]
+    fn the_inventory_reply_is_exactly_the_shared_fixture() {
+        use std::os::unix::fs::PermissionsExt;
+        let (configuration, home) = configuration_over(&[
+            (
+                ".claude/settings.json",
+                r#"{ "model": "opus",
+                    "skillOverrides": { "noisy": "off" },
+                    "hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [
+                      { "type": "command", "command": "guard.sh --token SEKRET", "timeout": 5 } ] } ] } }"#,
+            ),
+            (".claude/skills/useful/SKILL.md", "# useful"),
+            (".claude/skills/noisy/SKILL.md", "# noisy"),
+            (".claude/CLAUDE.md", "rules"),
+            (
+                ".claude.json",
+                r#"{ "mcpServers": { "context7": { "command": "npx", "args": ["-y", "ctx"],
+                     "env": { "CONTEXT7_API_KEY": "SEKRET" } } } }"#,
+            ),
+            (
+                ".codex/config.toml",
+                "model = \"gpt-6\"\n[mcp_servers.off]\ncommand = \"x\"\nenabled = false\n",
+            ),
+            (".codex/hooks.json", "{ not json"),
+        ]);
+        // A provider directory a group can write: read, and never writable.
+        fs::set_permissions(home.join(".codex"), fs::Permissions::from_mode(0o775)).unwrap();
+        configuration
+            .service()
+            .unwrap()
+            .select_project(Some(home.clone()));
+        let reply = inventory_reply(&configuration).unwrap();
+        let mut value = serde_json::to_value(&reply).unwrap();
+        // The revision depends on how many readings the setup caused; the fixture pins
+        // the shape, not that count.
+        value["revision"] = serde_json::json!(1);
+        let text = serde_json::to_string_pretty(&value).unwrap() + "\n";
+        assert!(!text.contains("SEKRET") && !text.contains(home.to_str().unwrap()));
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests/fixtures/configuration-inventory-v1.json");
+        if std::env::var_os("WYSS_UPDATE_FIXTURES").is_some() {
+            fs::write(&path, &text).unwrap();
+        }
+        // Compared as values: the file is formatted by Prettier, not by this test.
+        let expected: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            value, expected,
+            "the contract changed: update the fixture on purpose"
+        );
+        let _ = fs::remove_dir_all(home);
+    }
 }

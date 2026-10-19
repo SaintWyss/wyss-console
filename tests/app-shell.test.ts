@@ -138,6 +138,7 @@ it('lists every view, and every one of them exists', () => {
     'Agents',
     'Approvals',
     'Events',
+    'Configuration',
     'Settings',
   ]);
   expect(NAV_ITEMS.map((item) => item.id)).toEqual([
@@ -146,6 +147,7 @@ it('lists every view, and every one of them exists', () => {
     'agents',
     'approvals',
     'events',
+    'configuration',
     'settings',
   ]);
   // Nothing is a placeholder any more: no item is disabled or marked as coming.
@@ -160,7 +162,7 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
   const nav = Array.from(
     document.querySelectorAll<HTMLButtonElement>('.sidebar .nav-item'),
   );
-  expect(nav).toHaveLength(6);
+  expect(nav).toHaveLength(7);
   expect(nav[0].getAttribute('aria-current')).toBe('page');
   expect(nav.every((b) => !b.disabled)).toBe(true);
   expect(nav.map((b) => b.textContent?.trim())).toEqual([
@@ -169,6 +171,7 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
     'Agents',
     'Approvals',
     'Events',
+    'Configuration',
     'Settings',
   ]);
   // No item is a placeholder.

@@ -1,5 +1,11 @@
 export type ViewId =
-  'console' | 'sessions' | 'agents' | 'approvals' | 'events' | 'settings';
+  | 'console'
+  | 'sessions'
+  | 'agents'
+  | 'approvals'
+  | 'events'
+  | 'configuration'
+  | 'settings';
 
 export interface NavItem {
   id: ViewId;
@@ -40,6 +46,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: 'Events',
     subtitle: 'What the authority recorded',
     icon: 'M3 12h4l2.5-6 4 12 2.5-6H21',
+  },
+  {
+    id: 'configuration',
+    label: 'Configuration',
+    subtitle: 'What the agents are set up with',
+    icon: 'M4 6h16M4 12h16M4 18h16M8 4v4M15 10v4M10 16v4',
   },
   {
     id: 'settings',

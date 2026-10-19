@@ -7,6 +7,8 @@
   import { AgentController } from './lib/features/agent/controller';
   import ApprovalsView from './lib/features/approvals/ApprovalsView.svelte';
   import { ApprovalsController } from './lib/features/approvals/controller';
+  import ConfigurationView from './lib/features/configuration/ConfigurationView.svelte';
+  import { ConfigurationController } from './lib/features/configuration/controller';
   import { EventsController } from './lib/features/events/controller';
   import { SettingsController } from './lib/features/settings/controller';
   import SettingsView from './lib/features/settings/SettingsView.svelte';
@@ -72,6 +74,12 @@
     events = next;
   });
   let events = $state(eventsController.state());
+  // What the agents are configured with: read, and followed for changes, only while its
+  // view is shown. The desktop's watcher sees the files; the window only asks it.
+  const configurationController = new ConfigurationController((next) => {
+    configuration = next;
+  });
+  let configuration = $state(configurationController.state());
   // The desktop's own preferences: read once, written only when the user changes one.
   const settingsController = new SettingsController((next) => {
     settings = next;
@@ -99,6 +107,9 @@
   });
   $effect(() => {
     eventsController.setVisible(activeView === 'events');
+  });
+  $effect(() => {
+    configurationController.setVisible(activeView === 'configuration');
   });
 
   // The window opens on the view the preferences name, unless the user has already
@@ -152,6 +163,7 @@
       agentController.dispose();
       approvalsController.dispose();
       eventsController.dispose();
+      configurationController.dispose();
       settingsController.dispose();
     };
   });
@@ -279,6 +291,11 @@
       onsession={showSession}
       onagent={showAgent}
       onapprovals={() => go('approvals')}
+    />
+    <ConfigurationView
+      visible={activeView === 'configuration'}
+      {configuration}
+      controller={configurationController}
     />
     <SettingsView
       visible={activeView === 'settings'}

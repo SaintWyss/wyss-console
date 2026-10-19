@@ -635,6 +635,33 @@ npm run desktop:run                        # Events
 
 See [ADR 0024](docs/adr/0024-events-history-ui.md).
 
+## Agent configuration in the window
+
+The Configuration view shows what Claude Code and Codex are set up with, read from their
+own files: hooks, skills, MCP servers, rule files and model settings, each with where it was
+found, what the file says about it, what cannot be confirmed without running the provider,
+and why nothing can be changed (everything is read-only in this phase). A second list says
+what became of every place that was looked at, with a closed reason when it could not be
+read, and never a path.
+
+- **What is read.** `~/.claude` (or `CLAUDE_CONFIG_DIR`), `~/.claude.json` (only the MCP
+  servers in it), `~/.codex` (or `CODEX_HOME`), `/etc/claude-code` and `/etc/codex`. Nothing
+  else, and never a credential file such as `auth.json` or `.credentials.json`. A project's
+  own files are read for a selected project, and Codex's only if the user trusts it.
+- **What is shown.** Commands, flags and names stay; environment values, headers, tokens and
+  anything named like a secret are replaced before anything leaves the backend. Rule files
+  are shown by name and fingerprint, never their text.
+- **How it stays current.** The backend watches the directories and rescans after an edit
+  settles, within two seconds; the window asks only whether the revision changed, and only
+  while the view is shown. A rescan every 30 seconds covers what no watch can see.
+- **Where the code is.** `src-tauri/src/agentconfig/` (reader, adapters, redaction, service)
+  and `src-tauri/src/configuration.rs` (the two commands) are in the desktop binary, not in
+  the library the authority links; `tests/authority_boundary.rs` searches the built
+  authority binary to prove it. The contract with the window is
+  `tests/fixtures/configuration-inventory-v1.json`, read by both sides' tests.
+- **Trying it on your own machine.** `cargo test -- --ignored real_machine --nocapture`
+  prints counts and outcomes of your real configuration, never a value, and writes nothing.
+
 ## Authority-owned Codex runtime
 
 `wyss-control` can supervise one shared, long-lived `codex app-server`, independently

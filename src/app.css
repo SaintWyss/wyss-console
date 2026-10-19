@@ -422,6 +422,7 @@ button:focus-visible {
 .agent-feature[hidden],
 .approvals-feature[hidden],
 .events-feature[hidden],
+.configuration-feature[hidden],
 .settings-feature[hidden] {
   display: none;
 }
@@ -1367,7 +1368,8 @@ button:focus-visible {
 
 /* Approvals: what waits for a decision, and the card that asks for one */
 .approvals-feature,
-.events-feature {
+.events-feature,
+.configuration-feature {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -1659,12 +1661,14 @@ html[data-glass='transparent'] .shell {
   align-items: center;
   gap: 6px;
 }
-.events-feature .action.chip {
+.events-feature .action.chip,
+.configuration-feature .action.chip {
   min-height: 28px;
   padding: 2px 10px;
   font-size: 12px;
 }
-.events-feature .action.chip[aria-pressed='true'] {
+.events-feature .action.chip[aria-pressed='true'],
+.configuration-feature .action.chip[aria-pressed='true'] {
   color: var(--text);
   border-color: rgba(95, 212, 245, 0.35);
   background: var(--accent-soft);
@@ -1968,4 +1972,115 @@ html[data-glass='transparent'] .shell {
   .settings-section {
     max-width: none;
   }
+}
+
+/* Configuration: what the agents are set up with. Read-only, grouped by what it is. */
+.configuration-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.configuration-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-line-strong) transparent;
+}
+.configuration-row {
+  grid-template-columns: 7.5rem minmax(0, 1fr) auto;
+}
+.configuration-row .configuration-provider {
+  grid-area: 1 / 1;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.configuration-row .event-title {
+  grid-area: 1 / 2;
+}
+.configuration-row .pill {
+  grid-area: 1 / 3;
+}
+.configuration-row .event-meta {
+  grid-area: 2 / 2 / auto / -1;
+}
+.configuration-detail {
+  padding: 12px 14px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+}
+.configuration-detail h3,
+.configuration-detail h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.configuration-detail h4 {
+  margin-top: 12px;
+  color: var(--muted);
+}
+.configuration-detail dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 14px;
+  margin: 0;
+  font-size: 12.5px;
+}
+.configuration-detail dt {
+  color: var(--muted);
+}
+.configuration-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.configuration-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.configuration-lines li {
+  display: grid;
+  grid-template-columns: minmax(8rem, 14rem) minmax(0, 1fr);
+  gap: 10px;
+}
+.configuration-lines .mono {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.configuration-value {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.configuration-value.hidden {
+  color: var(--warn);
+}
+.configuration-sources {
+  font-size: 12.5px;
+}
+.configuration-sources summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.configuration-sources ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.configuration-sources li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
 }

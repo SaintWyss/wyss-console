@@ -205,6 +205,9 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-terminal-resize',
     'allow-close-terminal',
     'allow-terminal-status',
+    // The agents' configuration: two reads of what the desktop already holds.
+    'allow-configuration-inventory',
+    'allow-configuration-changes',
   ]);
   // Every permission is one of this application's own commands: none belongs to a
   // plugin (`fs:`, `shell:`, `dialog:`) or to the framework's core (`core:`).

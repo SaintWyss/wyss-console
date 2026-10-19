@@ -38,7 +38,7 @@
   tokens in commands and the rest of `~/.claude.json` never appear. TOML is parsed with the
   same bounds as JSON (the crate is the one tauri already builds).
 
-### Reading the agents' configuration, third part: service and commands (F1-PR3, backend)
+### Reading the agents' configuration, third part: service, commands and view (F1-PR3)
 
 - **The inventory is kept current and the window can ask for it.** A service holds the
   latest reading with a revision and a bounded log of which sources changed. A watcher on
@@ -50,6 +50,11 @@
   return what the service already holds, take no path and write nothing. The desktop
   library only routes them: their code stays in the desktop binary, and the test that
   searches the built authority binary still finds nothing of the engine in it.
+- **A Configuration view.** It lists hooks, skills, MCP servers, rule files and model
+  settings of both agents with filters by agent and kind, opens an item to say where it
+  was found, what the file says, what cannot be confirmed and why it cannot be changed,
+  and says what became of every place that was read. It has no control that changes
+  anything. It reads only while shown, asking whether the revision moved every 1.5 s.
 
 ### Sessions that can be told apart
 
