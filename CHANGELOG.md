@@ -6,7 +6,8 @@
 
 - The Configuration view lists OpenCode's plugins, MCP servers, models, providers (by name only,
   never what is inside) and instructions files, from `opencode.jsonc` with comments and trailing
-  commas. No switch yet. ADR 0041.
+  commas. Turn an MCP server on or off, take a plugin out of the list and put it back, as edits of
+  the file's own bytes (comments and the keys stay exactly as they were), with undo. ADR 0041.
 
 ### Install, upgrade, roll back, diagnose (F13)
 

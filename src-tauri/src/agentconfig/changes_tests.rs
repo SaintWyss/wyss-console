@@ -2637,3 +2637,167 @@ fn a_plugin_with_options_is_always_sealed() {
     assert_eq!(plan.storage, Some(Protection::Sealed));
     assert!(plan.holds_hidden_values);
 }
+
+/// The real `~/.config/opencode/opencode.jsonc`, which holds real API keys, with the discipline
+/// the owner asked for: the exact bytes are kept first (a backup in a private file); one plugin
+/// (named by `WYSS_REAL_OPENCODE_PLUGIN`) is taken out of the list through the service and put
+/// back through its record; the file must be the same bytes it began as. NOTHING of the file
+/// is printed: only lengths, hashes and the words of the plan. The key store is in memory, so
+/// no wallet is touched, and the keys are never read as values: the test compares the region
+/// of the `provider` entry by hash before and after. If anything fails midway the original
+/// bytes are put back, and only if the file is still exactly what this test wrote.
+///
+/// By hand: `WYSS_REAL_OPENCODE_PLUGIN=rtk cargo test -- --ignored real_opencode --nocapture`.
+#[test]
+#[ignore = "changes the real opencode.jsonc for a moment and puts it back"]
+fn real_opencode_config_one_plugin_out_and_back() {
+    use sha2::{Digest, Sha256};
+    let plugin = std::env::var("WYSS_REAL_OPENCODE_PLUGIN").expect("name the plugin");
+    let environment = Environment::from_process(None).unwrap();
+    let path = environment.opencode_dir().join("opencode.jsonc");
+    let original = fs::read(&path).unwrap();
+    let digest = |b: &[u8]| -> String {
+        Sha256::digest(b)[..6]
+            .iter()
+            .map(|x| format!("{x:02x}"))
+            .collect()
+    };
+    let backup = std::env::temp_dir().join(format!(
+        "wyss-opencode-{}.bak",
+        uuid::Uuid::new_v4().simple()
+    ));
+    fs::write(&backup, &original).unwrap();
+    fs::set_permissions(&backup, fs::Permissions::from_mode(0o600)).unwrap();
+    println!(
+        "backup of the exact bytes: {} ({} bytes, sha {})",
+        backup.display(),
+        original.len(),
+        digest(&original)
+    );
+    // The `provider` entry's own text, by hash: nothing of it is shown.
+    let provider_hash = |bytes: &[u8]| -> Option<String> {
+        let node = super::jsonspan::parse_jsonc(bytes).ok()?;
+        let member = node.member("provider")?;
+        let span = member.value.span();
+        Some(digest(&bytes[span.start..span.end]))
+    };
+    let provider_before = provider_hash(&original).expect("the file has a provider entry");
+
+    struct Guard<'a> {
+        path: &'a Path,
+        original: &'a [u8],
+        produced: std::cell::RefCell<Option<Vec<u8>>>,
+    }
+    impl Drop for Guard<'_> {
+        fn drop(&mut self) {
+            let now = fs::read(self.path).unwrap_or_default();
+            let ours = self.produced.borrow().clone();
+            if now != self.original && ours.as_deref() == Some(now.as_slice()) {
+                let _ = fs::write(self.path, self.original);
+                eprintln!("the guard put the original bytes back");
+            }
+        }
+    }
+    let guard = Guard {
+        path: &path,
+        original: &original,
+        produced: std::cell::RefCell::new(None),
+    };
+
+    let state =
+        std::env::temp_dir().join(format!("wyss-real-state-{}", uuid::Uuid::new_v4().simple()));
+    fs::DirBuilder::new().mode(0o700).create(&state).unwrap();
+    let inventory = InventoryService::start(environment.clone(), Bounds::PROPOSED).unwrap();
+    let confirm = Arc::new(FakeConfirm::default());
+    confirm.accept.store(true, Ordering::SeqCst);
+    let service = ChangeService::for_providers(
+        environment,
+        inventory.clone(),
+        &state,
+        Vault::new(Box::new(MemoryStore::new())),
+        Box::new(confirm.clone()),
+        Faults::default(),
+    )
+    .unwrap();
+    let id = inventory
+        .snapshot()
+        .inventory
+        .items
+        .iter()
+        .find(|i| {
+            i.kind == ItemKind::Plugin
+                && i.name.as_str() == plugin
+                && i.source == SourceKey::OpencodeUserConfig
+        })
+        .expect("the plugin is in the inventory")
+        .id
+        .clone();
+    let plan = service.plan(Operation::ParkPlugin, &id).unwrap();
+    println!(
+        "plan: {} · risk {:?} · storage {:?} · hidden {}",
+        plan.name, plan.risk, plan.storage, plan.holds_hidden_values
+    );
+    assert!(
+        !format!("{plan:?}").contains("apiKey"),
+        "a key name reached a plan"
+    );
+    let out = service.apply(&plan.id).unwrap();
+    *guard.produced.borrow_mut() = fs::read(&path).ok();
+    assert_eq!(out.outcome, Outcome::Applied);
+    let changed = fs::read(&path).unwrap();
+    println!(
+        "taken out: {} -> {} bytes, sha {}",
+        original.len(),
+        changed.len(),
+        digest(&changed)
+    );
+    // The `provider` entry is the same bytes; so is everything outside the plugin list.
+    assert_eq!(
+        provider_hash(&changed).as_deref(),
+        Some(provider_before.as_str())
+    );
+    let value = |b: &[u8]| {
+        super::reader::parse_jsonc(b, &Bounds::PROPOSED)
+            .unwrap()
+            .unwrap()
+    };
+    let (mut a, mut b) = (value(&original), value(&changed));
+    let (la, lb) = (
+        a["plugin"].as_array().unwrap().len(),
+        b["plugin"].as_array().unwrap().len(),
+    );
+    assert_eq!(lb + 1, la, "exactly one plugin left the list");
+    a.as_object_mut().unwrap().remove("plugin");
+    b.as_object_mut().unwrap().remove("plugin");
+    assert_eq!(a, b, "nothing but the plugin list changed");
+    assert!(
+        !String::from_utf8_lossy(&changed).contains(&plugin),
+        "the plugin is gone from the file"
+    );
+
+    // And back, through the record.
+    inventory.rescan();
+    let record = service
+        .records()
+        .into_iter()
+        .find(|r| r.state == State::Parked)
+        .expect("a record");
+    let back = service.plan(Operation::RestoreHook, &record.id).unwrap();
+    assert!(back.needs_native_dialog, "a plugin is code: the dialog");
+    let done = service.apply(&back.id).unwrap();
+    assert_eq!(done.outcome, Outcome::Applied);
+    let restored = fs::read(&path).unwrap();
+    println!(
+        "put back: {} bytes, sha {} (original {})",
+        restored.len(),
+        digest(&restored),
+        digest(&original)
+    );
+    assert_eq!(
+        restored, original,
+        "the file is the exact bytes it began as"
+    );
+    drop(guard);
+    let _ = fs::remove_dir_all(&state);
+    // The backup is kept until the owner removes it: it holds the keys, like the file.
+}
