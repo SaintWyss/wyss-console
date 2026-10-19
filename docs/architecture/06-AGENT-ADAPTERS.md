@@ -23,14 +23,14 @@ add no `request` to ADR 0008.
 
 Every capability of a configuration adapter is a record:
 
-| Field       | Values                                                                                                                                                                                           |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `kind`      | `rule`, `hook`, `skill`, `mcp_server`, `plugin`, `setting`, `model_preference`                                                                                                                   |
-| `operation` | `inventory`, `enable`, `disable`, `restore`, `create`, `edit`, `delete`, `effective_read`                                                                                                        |
-| `support`   | `native` (the provider has this state), `by_removal` (the entry is taken out and kept), `by_provider_writer` (done through the provider's own command), `read_only`, `unsupported`, `unverified` |
-| `effect`    | `new_sessions`, `running_sessions` (provider reloads), `needs_restart`, `needs_provider_review`, `unknown`                                                                                       |
-| `evidence`  | One of the five marks, with its source                                                                                                                                                           |
-| `versions`  | The provider versions the evidence was gathered on                                                                                                                                               |
+| Field       | Values                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `kind`      | `rule`, `hook`, `skill`, `mcp_server`, `plugin`, `setting`, `model_preference`                                                                                                                                                                                                                                                                                           |
+| `operation` | `inventory`, `enable`, `disable`, `restore`, `create`, `edit`, `delete`, `effective_read`                                                                                                                                                                                                                                                                                |
+| `support`   | `native` (the provider has this state), `by_removal` (ADR 0028's word: the entry is disabled without a native switch; under proposed ADR 0029 it is kept inside the same file where that is verified, and otherwise removed and sealed in the protected vault), `by_provider_writer` (done through the provider's own command), `read_only`, `unsupported`, `unverified` |
+| `effect`    | `new_sessions`, `running_sessions` (provider reloads), `needs_restart`, `needs_provider_review`, `unknown`                                                                                                                                                                                                                                                               |
+| `evidence`  | One of the five marks, with its source                                                                                                                                                                                                                                                                                                                                   |
+| `versions`  | The provider versions the evidence was gathered on                                                                                                                                                                                                                                                                                                                       |
 
 Rules: a missing record means unknown, and unknown is never offered (ADR 0008 `:13-15` `[R]`).
 A capability whose evidence is `[N]` may be shown as an inventory fact and never as an action.
@@ -72,21 +72,21 @@ Installed version observed: 2.1.296 `[O]`.
 
 Capability table for the configuration adapter:
 
-| Kind · operation            | Support                                                                    | Effect             | Evidence                  |
-| --------------------------- | -------------------------------------------------------------------------- | ------------------ | ------------------------- |
-| hook · inventory            | native (read)                                                              | —                  | `[D]`                     |
-| hook · disable              | `by_removal`                                                               | `running_sessions` | `[D]` (no switch; reload) |
-| hook · restore              | `by_removal`                                                               | `running_sessions` | `[D]`                     |
-| hook · disable all          | native                                                                     | `running_sessions` | `[D]`                     |
-| hook · create, edit, delete | native (file edit)                                                         | `running_sessions` | `[D]`; gated to F5        |
-| rule · inventory            | native (read)                                                              | —                  | `[D]`, `[O]`              |
-| rule · disable, enable      | `by_removal` (move the file) or `unsupported` for a section of `CLAUDE.md` | `unknown`          | `[N]`                     |
-| skill · disable, enable     | native (`skillOverrides`)                                                  | `unknown`          | `[O]`, `[N]` (OQ-15)      |
-| plugin · disable, enable    | native (`enabledPlugins`)                                                  | `unknown`          | `[O]`, `[N]`              |
-| mcp_server · inventory      | native (read of `~/.claude.json`, bounded projection)                      | —                  | `[D]`                     |
-| mcp_server · add, remove    | `by_provider_writer` (`claude mcp`)                                        | `unknown`          | `[O]`; semantics `[N]`    |
-| setting · model_preference  | native                                                                     | `new_sessions`     | `[D]`                     |
-| any · effective_read        | `unverified`                                                               | —                  | `[N]` (OQ-05)             |
+| Kind · operation            | Support                                                                                                                                                            | Effect                              | Evidence                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | ----------------------------------------------------------------- |
+| hook · inventory            | native (read)                                                                                                                                                      | —                                   | `[D]`                                                             |
+| hook · disable              | `by_removal`: in place where the compatibility test of ADR 0029 §5 passed; otherwise to the protected vault (27). **Unavailable** until one of the two can be used | `running_sessions`, documented only | `[D]` for "no switch" and for the reload; `[N]` for the kept form |
+| hook · restore              | The same                                                                                                                                                           | `running_sessions`, documented only | `[N]`                                                             |
+| hook · disable all          | native                                                                                                                                                             | `running_sessions`                  | `[D]`                                                             |
+| hook · create, edit, delete | native (file edit)                                                                                                                                                 | `running_sessions`                  | `[D]`; gated to F5                                                |
+| rule · inventory            | native (read)                                                                                                                                                      | —                                   | `[D]`, `[O]`                                                      |
+| rule · disable, enable      | `unsupported` until a destination the provider does not read is verified (OQ-23); never for a section of `CLAUDE.md`                                               | `unknown`                           | `[N]`                                                             |
+| skill · disable, enable     | native (`skillOverrides`)                                                                                                                                          | `unknown`                           | `[O]`, `[N]` (OQ-15)                                              |
+| plugin · disable, enable    | native (`enabledPlugins`)                                                                                                                                          | `unknown`                           | `[O]`, `[N]`                                                      |
+| mcp_server · inventory      | native (read of `~/.claude.json`, bounded projection)                                                                                                              | —                                   | `[D]`                                                             |
+| mcp_server · add, remove    | `by_provider_writer` (`claude mcp`)                                                                                                                                | `unknown`                           | `[O]`; semantics `[N]`                                            |
+| setting · model_preference  | native                                                                                                                                                             | `new_sessions`                      | `[D]`                                                             |
+| any · effective_read        | `unverified`                                                                                                                                                       | —                                   | `[N]` (OQ-05)                                                     |
 
 ### 3.2 Codex
 
@@ -162,25 +162,66 @@ Everything beyond inventory is `unverified` until F4a.
 
 ### 3.4 Hermes Agent
 
-Not installed `[O]`. Everything is from one documentation page and is to be re-verified when
-it is installed, with the owner's consent (F4b).
+Not installed `[O]`. Revised on 2026-10-13 from Hermes's source and documentation at commit
+`e06df9c2eae6901f4c88f464e0ae6e753c0428b8`, read and not run (17 §4).
 
-| Topic         | Finding                                                                                                                                                    | Evidence                                      |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| Configuration | `~/.hermes/`: `config.yaml` (settings), `.env` (keys and secrets), `auth.json` (OAuth), `SOUL.md` (identity), `memories/`, `skills/`, `cron/`, `sessions/` | `[D]`                                         |
-| Format        | YAML; written with `hermes config set`                                                                                                                     | `[D]`                                         |
-| Profiles      | State is profile-scoped through `HERMES_HOME`                                                                                                              | `[D]`; relocation of the base directory `[N]` |
-| Skills        | `skills.config`, `skills.auto_load`; write approval optional                                                                                               | `[D]`                                         |
-| Tools         | `agent.disabled_toolsets`                                                                                                                                  | `[D]`                                         |
-| MCP           | `mcp_servers`; switch not stated                                                                                                                           | `[N]`                                         |
-| Hooks         | Context-engine plugins; registration not stated                                                                                                            | `[N]`                                         |
-| Memory        | `memory.memory_enabled`, limits, provider plugins                                                                                                          | `[D]`                                         |
-| Approval      | Dangerous-command approval exists; keys not stated                                                                                                         | `[N]`                                         |
-| Interfaces    | ACP helper processes, a gateway for messaging platforms, `hermes serve`                                                                                    | `[D]` (mentioned); `[N]` in detail            |
-| Licence       | Reported as MIT by the vision report                                                                                                                       | `[N]` (OQ-11): to be read in the repository   |
+- `[D]` here means the documentation at that commit.
+- `[S]` means its source.
+- Every behaviour on the owner's computer is `[N]` until F4b's fixtures and an authorised
+  inspection exist (OQ-11, OQ-55 to OQ-57).
 
-Because its file is YAML and the product has a writer of its own, the adapter writes through
-`hermes config set` (`by_provider_writer`) and never edits the YAML directly `[P]`.
+| Topic               | Finding                                                                                                                                                                                                                                                                                                                                    | Evidence                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| Home                | `HERMES_HOME`, default `~/.hermes`; a profile is a separate home under `~/.hermes/profiles/<name>` selected by `-p/--profile` or `HERMES_HOME`; two processes must not share one                                                                                                                                                           | `[D]`                                                             |
+| Files               | `config.yaml` (settings), `.env` (secrets and environment-shaped settings), `auth.json` and `auth/` (sign-in), `SOUL.md` (identity), `memories/MEMORY.md`, `memories/USER.md`, `skills/`, `plugins/`, `hooks/`, `cron/jobs.json`, a state database                                                                                         | `[D]`                                                             |
+| Administrator scope | `/etc/hermes/config.yaml` and `/etc/hermes/.env`, root-owned, pin keys (or `HERMES_MANAGED_DIR`)                                                                                                                                                                                                                                           | `[D]`                                                             |
+| Project files       | `.hermes.md` or `HERMES.md` (first match wins over `AGENTS.md`) in the working directory                                                                                                                                                                                                                                                   | `[D]`                                                             |
+| Format              | YAML 1.1 parsed by ruamel                                                                                                                                                                                                                                                                                                                  | `[S]` `hermes_yaml.py`                                            |
+| Writer              | `hermes config set <dotted.key> <value>` writes `config.yaml`, type-checked; any `UPPER_SNAKE` name goes to `.env`; `unset` reverts to default. Comments, order and unchanged nodes survive by a ruamel round-trip; the rename is atomic except for a copy fallback on `EXDEV` or a busy target `[S]` (`utils.py:168-176, 529-554`; OQ-56) | `[D]`                                                             |
+| Tools               | `agent.disabled_toolsets` (a list), applied after per-platform toolsets; `--toolsets` per session                                                                                                                                                                                                                                          | `[D]`                                                             |
+| Skills              | `skills.disabled` (a list); bundled skills seeded unless opted out                                                                                                                                                                                                                                                                         | `[D]`                                                             |
+| MCP                 | `mcp_servers.<name>`, with `enabled: false` as a native switch that keeps the entry                                                                                                                                                                                                                                                        | `[D]`                                                             |
+| Hooks               | Shell hooks under `hooks.<event>` in `config.yaml` with optional `matcher`; plugin hooks in Python under `plugins/`; gateway hooks under `hooks/`, trusted by placement                                                                                                                                                                    | `[D]`                                                             |
+| Approvals           | `approvals.mode` (`smart`, `manual`, `off`), `approvals.deny`, `approvals.timeout`, `cron_mode`, `single_query_mode`, `unattended_mode`; `--yolo`, `/yolo`, `HERMES_YOLO_MODE`                                                                                                                                                             | `[D]`                                                             |
+| Memory              | `memories/` with character limits; `write_approval`; external memory providers                                                                                                                                                                                                                                                             | `[D]`                                                             |
+| Interfaces          | ACP (stdio), TUI gateway JSON-RPC (stdio or WebSocket), OpenAI-compatible API server, messaging gateway                                                                                                                                                                                                                                    | `[D]`                                                             |
+| Writes elsewhere    | Its optional Codex app-server runtime writes a managed block into `~/.codex/config.toml`                                                                                                                                                                                                                                                   | `[D]`; for the Console, an outside writer of Codex's file (07 §7) |
+| Reload              | Tools and skills at the next session; context length and compression on a running gateway's next message `[D]`; approvals and MCP during a session `[N]` (OQ-57)                                                                                                                                                                           | —                                                                 |
+| Licence             | MIT                                                                                                                                                                                                                                                                                                                                        | `[S]` `LICENSE`                                                   |
+
+#### 3.4.1 The Hermes configuration adapter (IF-CONFIG-ADAPTER, §4)
+
+| Function                         | Hermes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity()`                     | `hermes`, "Hermes Agent", executable `hermes`                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `detect()`                       | Executable found by ADR 0010's discovery rule; version from `hermes --version` text, bounded and opaque. **Running it is running a provider binary**: allowed for detection only as the other adapters do (ADR 0010), never with a session                                                                                                                                                                                                                                                                           |
+| `sources(project?)`              | Closed list: `$HERMES_HOME/config.yaml` (`user`), `$HERMES_HOME/SOUL.md` (`user`), `$HERMES_HOME/memories/` (listed by name and size only, `provider_owned`), `$HERMES_HOME/skills/` (`user`), `$HERMES_HOME/plugins/` and `$HERMES_HOME/hooks/` (`user`, executable content), `$HERMES_HOME/cron/jobs.json` (`provider_owned`), `/etc/hermes/config.yaml` (`system`), and for a project `.hermes.md` or `HERMES.md` and `AGENTS.md` (`project`). Each profile under `~/.hermes/profiles/` is listed as its own home |
+| Never opened                     | `.env` (both homes), `auth.json`, `auth/`, `mcp-tokens/`, `pairing/`, `vault/`, `browser-profile/`, `cache/bws_cache*.json`, `/etc/hermes/.env`, the state database (§4.2: credential files and provider state)                                                                                                                                                                                                                                                                                                      |
+| `read(source)`                   | YAML 1.1 with the bounds of C-11; duplicate keys refused, as Hermes refuses them; an `UPPER_SNAKE` key found in `config.yaml` reported as a stale copy, never shown as a value                                                                                                                                                                                                                                                                                                                                       |
+| `capabilities(version)`          | Per verified version only. Candidates from `[D]`: MCP `switch: native` (`enabled: false`); skill `switch: native` (`skills.disabled`); toolset `switch: native` (`agent.disabled_toolsets`); shell hook disable `unsupported` until a native switch is documented; plugin enable or disable through `plugins.enabled` and `plugins.disabled` `[D]`, behaviour `[N]`                                                                                                                                                  |
+| `redact(item)`                   | MCP `env` values and headers; credential-shaped values (`api_key`, `*_TOKEN`, `*_SECRET`, `password`), mirroring what `hermes config get` masks; hook commands shown as configuration (11 §5)                                                                                                                                                                                                                                                                                                                        |
+| `plan(operation, item, content)` | `by_provider_writer`: the plan is a list of `hermes config set` or `unset` invocations, never edited YAML. **Two blocks apply**: direct provider-file writes are blocked (L1, L2, L5; DN-21); running the provider's own configuration command from the desktop is DN-13. Until both are lifted, every Hermes mutation is `unavailable`, with its reason                                                                                                                                                             |
+| `verify(operation, content)`     | The key read back from `config.yaml` after the writer ran                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `managed_effect(plan)`           | None: Hermes is not managed (17 §7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `reload_rule(kind)`              | `new_sessions` for toolsets, skills, MCP and approvals until OQ-57 shows otherwise; `running_sessions` only for the compression and context-length keys a gateway documents                                                                                                                                                                                                                                                                                                                                          |
+
+What the adapter shows, and never hides:
+
+- **`approvals.mode: off`**, an active `HERMES_YOLO_MODE` in the Console's view of the
+  environment, and any profile with `--yolo` in a launch plan: each is a weakened control (13 U3).
+- **A container terminal backend**: "dangerous-command checks skipped" `[D]`.
+- **Enabled `terminal` or `code_execution` toolsets:** "this agent can run any command as you"
+  (17 §6.1).
+- **Hermes's gateway, cron jobs and API server:** shown as present, never started by the Console.
+
+#### 3.4.2 Starting Hermes (05 §17)
+
+| Element          | Rule                                                                                                                                                      |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Program          | `hermes` (interactive), in a PTY; never `hermes -z`, `hermes gateway`, `hermes serve` or `hermes acp` from the launcher                                   |
+| Flags it may add | `-p <profile>` for a session profile mapped to a Hermes profile; `-m <model>` (12 §5.3); `--toolsets <list>` from the profile's choices; `--in <project>` |
+| Never added      | `--yolo`; any secret; `HERMES_YOLO_MODE`                                                                                                                  |
+| Evidence         | Flags `[D]` from `reference/cli-commands.md`; to be checked against `--help` of the installed version before F4b, as the other launch recipes are         |
 
 ## 4. The configuration adapter contract (IF-CONFIG-ADAPTER)
 
@@ -195,7 +236,7 @@ a path from its caller. `[P]`
 | `read(source)`                   | One of its own sources             | Parsed items, or a typed failure                                                                                        | Size, count, depth and link bounds (C-11); the path rules of `control/paths.rs`     |
 | `capabilities(version)`          | A version                          | The records of §2                                                                                                       | Unknown version → every mutation `unverified`                                       |
 | `redact(item)`                   | A parsed item                      | Its projection for the page                                                                                             | Secret classes removed before anything is serialised (C-07)                         |
-| `plan(operation, item, content)` | An operation and the current bytes | New bytes, a diff, a risk class, the restoration record it needs                                                        | Pure; no I/O                                                                        |
+| `plan(operation, item, content)` | An operation and the current bytes | New bytes, a diff, a risk class, how the entry stays restorable (ADR 0029 §3)                                           | Pure; no I/O                                                                        |
 | `verify(operation, content)`     | The bytes read back                | Whether the item is in the intended state                                                                               | Pure                                                                                |
 | `managed_effect(plan)`           | A plan                             | Whether the result is compatible with managed execution, and why                                                        | Only Codex has one today (10 §5)                                                    |
 | `reload_rule(kind)`              | A kind                             | The `effect` of §2                                                                                                      | From documentation, never guessed                                                   |
@@ -219,12 +260,13 @@ protected file is read only in the Console `[P]` (OQ-21).
 
 What an adapter must never let through to the page or to any record:
 
-| Class                                                             | Examples                                                             |
-| ----------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Credential files                                                  | `auth.json`, `.credentials.json`, `.env`: never opened at all        |
-| Values of environment maps                                        | `env` in settings, `env` of an MCP server: names shown, values never |
-| Headers and tokens of HTTP handlers                               | A hook of type `http`, an MCP server reached by URL with credentials |
-| Anything in a provider-owned state file that is not configuration | Sign-in and session state in `~/.claude.json`                        |
+| Class                                                             | Examples                                                                                                                                                                                                 |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Credential files                                                  | `auth.json`, `.credentials.json`, `.env`: never opened at all                                                                                                                                            |
+| Values of environment maps                                        | `env` in settings, `env` of an MCP server: names shown, values never                                                                                                                                     |
+| Headers and tokens of HTTP handlers                               | A hook of type `http`, an MCP server reached by URL with credentials                                                                                                                                     |
+| Token and credential fields of MCP server entries                 | Bearer-token and similar fields of a server reached over the network. Reported by the independent review from Codex's configuration reference; to be enumerated per provider version with fixtures `[N]` |
+| Anything in a provider-owned state file that is not configuration | Sign-in and session state in `~/.claude.json`                                                                                                                                                            |
 
 A hook's command line is configuration and is shown; it can still contain a secret the user
 wrote into it. That case is the subject of [11 §5](11-SECURITY-THREAT-MODEL.md).
@@ -237,13 +279,74 @@ any code: the provider's supported protocol with evidence, a safety contract equ
 0015 and 0016, an isolation attestation, and an ADR. Nothing in the native plane is a step
 towards it: starting `claude` in a terminal is not managing it.
 
-## 6. Version policy
+## 6. Version policy and compatibility evidence
 
-| Situation                                               | Inventory                                                          | Mutation                                               | Native start        |
-| ------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------ | ------------------- |
-| Version with recorded evidence                          | Yes                                                                | Per capability                                         | Yes                 |
-| Newer or older version, same major configuration format | Yes, marked unverified                                             | Refused (`unverified_version`) until evidence is added | Yes, with a warning |
-| Provider not installed                                  | Files are still listed if present, marked "provider not installed" | Refused                                                | No                  |
+A provider updates itself, independently of the Console. What was verified for one version may
+not hold for the next. This section is the design asked for by decision DN-23; nothing in it is
+built, and how a row is renewed is still that decision.
 
-Evidence is added by a fixture test that reproduces the provider's documented behaviour for
-that version, and a note in the adapter's version table (NFR-MNT-01).
+### 6.1 By situation
+
+| Situation                                               | Inventory                                                          | Mutation                                                           | Native start        |
+| ------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ | ------------------- |
+| Version with recorded evidence                          | Yes                                                                | Per capability                                                     | Yes                 |
+| Newer or older version, same major configuration format | Yes, marked unverified                                             | Per tier (§6.3): some refused (`unverified_version`), some allowed | Yes, with a warning |
+| Provider not installed                                  | Files are still listed if present, marked "provider not installed" | Refused                                                            | No                  |
+
+### 6.2 The evidence manifest
+
+One row per provider, version, capability and configuration form. A mutation is offered only
+where a row allows it.
+
+| Field              | Content                                                                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Provider           | Its identifier                                                                                                                                |
+| Version            | One exact version; or a range, only where §6.3 allows one, with its justification written in the row                                          |
+| Capability         | One identifier from the **closed set compiled into the build**: a row can switch a known capability on or off, and can never define a new one |
+| Form               | The file, and for a hook the event, the handler type and the position (ADR 0029 §5)                                                           |
+| Source of evidence | `fixture`, `documentation` with its date, or `real run` with its report                                                                       |
+| Verified on, by    | Date; who ran it                                                                                                                              |
+| Known limitations  | What the evidence does not cover: a rewrite path not exercised, a second computer not checked                                                 |
+| Status             | `valid`, `invalidated`, or `not applicable`                                                                                                   |
+| Invalidated by     | The version, date and reason, when a later observation contradicts the row                                                                    |
+
+### 6.3 Tiers, by what a wrong assumption costs
+
+| Tier | Capability                                              | Evidence valid for                                                                                                                                      | Why                                                                                                                                 |
+| ---- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| E0   | Reading and inventory                                   | Any version whose files parse; marked unverified outside recorded versions                                                                              | A misreading is shown, not written                                                                                                  |
+| E1   | A provider-native switch                                | Exact versions, or a range whose two ends both pass the same fixture and whose documented key did not change                                            | A wrong write of a documented key is visible and reversible                                                                         |
+| E2   | Removing an entry to the vault and putting it back      | Any version on which the adapter **recognises** the entry's place and the file passes the round-trip check. Gated by recognition, not by a version list | The file left behind holds only ordinary entries. If the provider moves or reshapes hooks, recognition fails and nothing is offered |
+| E3   | Keeping an entry in place, in a form the provider skips | One exact version, per cell. **Never a range**                                                                                                          | A provider that stops tolerating the form can drop every hook of the file (check V1)                                                |
+| E4   | Running the provider's own writer                       | One exact version; the command and its arguments are part of the row                                                                                    | The desktop starts a provider's program (DN-13)                                                                                     |
+
+The consequence that matters: the central capability, disabling one hook through the vault, is
+tier E2 and does **not** switch off at every provider update. Tier E3 does.
+
+### 6.4 Invalidation and safe degradation
+
+| Event                                                                        | Effect                                                                                                                         |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| The installed version has no row for a capability of tier E1, E3 or E4       | That capability is not offered (`unverified_version`), with the version it was last verified for. Nothing is written           |
+| A row is marked `invalidated`                                                | The capability is off for those versions even where it was used before                                                         |
+| Entries were kept in place (rung 2) under a version that no longer has a row | They are shown, never touched automatically, and can be restored only by the user's explicit act after a warning (ADR 0029 §5) |
+| The adapter no longer recognises where entries live (E2)                     | The source is read only; records already in the vault stay, and their content can be revealed to the user (27 §8.3)            |
+| The provider's version cannot be determined without running it               | Treated as unknown: tiers E1, E3 and E4 are off                                                                                |
+| The manifest itself cannot be read or verified                               | The manifest compiled into the build stands; a manifest that fails its signature is ignored whole. Never a partial trust       |
+
+Unsafe mutations fail closed. Nothing here ever widens what is allowed because evidence is
+missing.
+
+### 6.5 How a row is renewed for a new version (DN-23)
+
+| Option | Mechanism                                                                                                                                                                                                                                                                                                             | Keeps the feature alive | Risk                                                                                                                                           |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| R-a    | A new build of the Console carries the manifest                                                                                                                                                                                                                                                                       | No: off until the build | None new                                                                                                                                       |
+| R-b    | A **signed manifest**, separate from the build. Data only: it can mark a pair of provider version and compiled-in capability as valid or invalidated, and nothing else. It cannot add a capability, a command, an argument, a path or a format. Verified against a key pinned in the build; applied by the user's act | Yes, without a build    | A signing key to protect; a channel to deliver it, which belongs to distribution (DN-07). No network path is added to the configuration engine |
+| R-c    | A verification the user runs himself on a throwaway home, producing evidence valid for that installation only                                                                                                                                                                                                         | Yes, on that computer   | The Console runs a provider (DN-13, DN-24); the user's run is only as good as its procedure                                                    |
+| R-d    | Accepting a range of versions                                                                                                                                                                                                                                                                                         | Yes                     | It assumes what the evidence rule exists to avoid. Allowed for E1 by its own rule; never for E3                                                |
+
+Recommended: R-a now; tier E2 by recognition, so that the vault path survives provider updates;
+R-b designed with distribution; R-c studied with the procedures of research RS1; R-d only as
+§6.3 allows. A manifest never authorises an operation the build does not already contain, so a
+remote file cannot make the Console run something new.
