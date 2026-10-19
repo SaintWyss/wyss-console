@@ -121,6 +121,27 @@ flowchart TD
 | Unknown fields                     | Kept untouched and counted; never dropped, never interpreted                                                                                                                                             |
 | A file of a newer provider version | Read as far as it parses; items the adapter does not know are listed as "unknown to this version of Wyss Console"                                                                                        |
 
+What F1-PR1 implements of the table above (`src-tauri/src/agentconfig/`, in the desktop
+binary and not in the library the authority links):
+
+- **Approved roots.** The reader is built from an `ApprovedRoots` list that an adapter
+  derives (4.1) and takes no other path. A path, and every place a link leads to, outside
+  the list is refused as `source_untrusted_path` (`outside_roots`) before anything is
+  opened or stat-ed, so the answer is not an oracle for what exists elsewhere. A link
+  between two approved roots is followed; the list decides, not the link.
+- **Credentials.** The final name is judged on every hop (`auth.json`, `.env*`,
+  `.credentials*`, keys and the like; a Markdown or text note called `secrets` is not a
+  credential store). A directory named `.ssh`, `.gnupg`, `.aws` or `secrets` _below_ a
+  root is never read or listed; the names above the root do not count.
+- **Descriptors.** Each directory is opened below the one before it without following a
+  link and judged by its descriptor, so a file or directory swapped for a link after it
+  was judged is not followed. A group-writable place is read and never writable; one
+  anyone can write is refused.
+- **Bounds.** `Bounds::PROPOSED` plus a hard ceiling on each, enforced by `Bounds::new`:
+  the elements bound (262,144 keys and values, counted from the document's structure
+  before it is parsed) is new, and arithmetic at the edge of the integers saturates.
+  Values stay open under OQ-22.
+
 ### 4.3 Links and generated files
 
 A link is followed to a regular file owned by the user; the inventory shows both the link and

@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Reading the agents' configuration, first part (F1-PR1)
+
+- **The foundation of the configuration inventory exists in the desktop backend, and nothing
+  uses it yet.** `src-tauri/src/agentconfig/` holds the typed model, the closed list of
+  approved roots, a bounded read-only reader and redaction. It is part of the desktop
+  binary only: the authority binary does not contain it, and a test searches the built
+  binary to say so. Nothing in the window, the commands or the capability list changed, and
+  nothing is written anywhere.
+- **Reads stay inside what an adapter approved.** A path, or a link target, outside the
+  approved roots is refused without being opened; credential files and `.ssh`, `.gnupg`,
+  `.aws` and `secrets` folders under a root are never read; each directory is walked by
+  descriptor, so a swap for a link in the middle of a read is not followed. Group-writable
+  configuration (the owner's `~/.claude` is `0775`) is read and never marked writable.
+- **Secrets stay out, configuration stays in.** Quoted, escaped and multi-line secrets,
+  cookies, name/value pairs and numeric PINs are hidden; counts such as `max_tokens` and
+  helper commands such as `apiKeyHelper` are shown.
+- **Bounded.** File size, items, keys and values, nesting, link hops, listing length and
+  re-reads each have a limit and a hard ceiling; a hostile document is refused before it
+  is parsed.
+
 ### Sessions that can be told apart
 
 - **A session is named so that no other session shown with it has the same name.** Until
