@@ -17,7 +17,7 @@ use super::restore::{Level, RecordBody};
 use serde_json::Value;
 
 /// What the plan does to the value tree, for checking the byte edit.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Logical {
     /// `mcp.<name>.enabled` becomes this, or is removed (`None`).
     McpEnabled {
@@ -27,6 +27,11 @@ pub enum Logical {
     RemovePlugin {
         index: usize,
     },
+    /// The entry goes back at this place in the list.
+    InsertPlugin {
+        index: usize,
+        unit: Value,
+    },
     AppendPlugin {
         unit: Value,
     },
@@ -35,6 +40,22 @@ pub enum Logical {
         unit: Value,
     },
     Nothing,
+}
+
+/// A plugin entry may hold options with a key: what is inside it is never printed.
+impl std::fmt::Debug for Logical {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::McpEnabled { name, value } => {
+                write!(f, "McpEnabled({} chars, {value:?})", name.len())
+            }
+            Self::RemovePlugin { index } => write!(f, "RemovePlugin({index})"),
+            Self::InsertPlugin { index, .. } => write!(f, "InsertPlugin({index}, ..)"),
+            Self::AppendPlugin { .. } => write!(f, "AppendPlugin(..)"),
+            Self::CreatePlugins { .. } => write!(f, "CreatePlugins(..)"),
+            Self::Nothing => write!(f, "Nothing"),
+        }
+    }
 }
 
 pub fn apply_logical(before: &Value, edit: &Logical) -> Option<Value> {
@@ -58,6 +79,13 @@ pub fn apply_logical(before: &Value, edit: &Logical) -> Option<Value> {
                 return None;
             }
             plugins.remove(*index);
+        }
+        Logical::InsertPlugin { index, unit } => {
+            let plugins = root.get_mut("plugin")?.as_array_mut()?;
+            if *index > plugins.len() {
+                return None;
+            }
+            plugins.insert(*index, unit.clone());
         }
         Logical::AppendPlugin { unit } => {
             root.get_mut("plugin")?.as_array_mut()?.push(unit.clone());
@@ -112,14 +140,17 @@ pub fn resolve_plugin(
         .get("plugin")
         .and_then(Value::as_array)
         .ok_or(PlanError::EntryGone)?;
-    plugins
-        .iter()
-        .enumerate()
-        .find_map(|(index, plugin)| {
-            let spec = spec_of(plugin)?;
-            (item_id_for(key, &[spec]) == item).then(|| (index, spec.to_owned()))
-        })
-        .ok_or(PlanError::EntryGone)
+    let mut found = plugins.iter().enumerate().filter_map(|(index, plugin)| {
+        let spec = spec_of(plugin)?;
+        (item_id_for(key, &["plugin", spec]) == item).then(|| (index, spec.to_owned()))
+    });
+    let first = found.next().ok_or(PlanError::EntryGone)?;
+    // The same plugin twice is two entries the identifier cannot tell apart: which one the
+    // user meant is not guessed.
+    if found.next().is_some() {
+        return Err(PlanError::NotSupported);
+    }
+    Ok(first)
 }
 
 /// Which server of `mcp` an item identifier names.
@@ -282,19 +313,28 @@ pub struct Restored {
 }
 
 /// Puts a parked plugin back: exactly where it was when the file is as the removal left it,
-/// otherwise at the end of the list, and refused when the same plugin is back already.
+/// otherwise at the end of the list, and refused when the same plugin is back already or a
+/// different entry of the same name is in the way. A record is believed only as far as it can
+/// be checked: its source, its removed text against its entry, and the result against the value
+/// the same insertion makes.
 pub fn draft_restore_plugin(bytes: &[u8], body: &RecordBody) -> Result<Restored, PlanError> {
+    if body.source != SourceKey::OpencodeUserConfig || body.event != "plugin" {
+        return Err(PlanError::RecordUnreadable);
+    }
     let (root, before) = parse(bytes)?;
     let unit: Value =
         serde_json::from_str(&body.unit_text).map_err(|_| PlanError::RecordUnreadable)?;
     let spec = spec_of(&unit)
         .ok_or(PlanError::RecordUnreadable)?
         .to_owned();
-    let present = before
+    let same_spec: Vec<&Value> = before
         .get("plugin")
         .and_then(Value::as_array)
-        .is_some_and(|plugins| plugins.iter().any(|p| spec_of(p) == Some(&spec)));
-    if present {
+        .into_iter()
+        .flatten()
+        .filter(|p| spec_of(p) == Some(&spec))
+        .collect();
+    if same_spec.iter().any(|p| **p == unit) {
         return Ok(Restored {
             new_bytes: bytes.to_vec(),
             logical: Logical::Nothing,
@@ -302,18 +342,30 @@ pub fn draft_restore_plugin(bytes: &[u8], body: &RecordBody) -> Result<Restored,
             unit,
         });
     }
+    // The same plugin with other options is a different entry in the same place.
+    if !same_spec.is_empty() {
+        return Err(PlanError::RestoreConflict);
+    }
     // Exact: the file is as the removal left it, so the bytes go back where they were.
-    if hash(bytes) == body.h1 && body.removed_at <= bytes.len() {
+    let clean = body
+        .removed_text
+        .trim_matches(&[' ', '\t', '\r', '\n', ','][..])
+        == body.unit_text;
+    if clean && hash(bytes) == body.h1 && body.removed_at <= bytes.len() {
         let edit = Edit {
             at: body.removed_at,
             remove: 0,
             insert: body.removed_text.clone(),
         };
         let restored = edit.apply(bytes);
-        if hash(&restored) == body.h0 {
+        let logical = Logical::InsertPlugin {
+            index: body.index,
+            unit: unit.clone(),
+        };
+        if hash(&restored) == body.h0 && is_exactly(bytes, &restored, &logical) {
             return Ok(Restored {
                 new_bytes: restored,
-                logical: Logical::Nothing,
+                logical,
                 already_present: false,
                 unit,
             });
@@ -424,7 +476,9 @@ pub fn drafted_park(
     protection: impl Fn(bool) -> Result<Protection, RestoreError>,
 ) -> Result<Drafted, PlanError> {
     let parked = draft_park_plugin(bytes, key, index)?;
-    let secret_bearing = super::classify::may_hold_secret(&parked.unit, bounds);
+    // A plugin with options is a plausible place for a key: it is always sealed.
+    let secret_bearing = matches!(parked.unit, Value::Array(_))
+        || super::classify::may_hold_secret(&parked.unit, bounds);
     let protection = protection(secret_bearing).map_err(|e| match e {
         RestoreError::NoKeyStoreForSecret => PlanError::KeyStoreUnavailable,
         _ => PlanError::NotSupported,
@@ -470,7 +524,10 @@ pub fn drafted_restore(
         .map(plugin_label)
         .unwrap_or_else(|| "plugin".to_owned());
     let (diff, hidden) = redact_lines(&restored.unit, DiffKind::Added, bounds);
-    let exact = matches!(restored.logical, Logical::Nothing) && !restored.already_present;
+    // Already back: nothing to write, nothing to undo, and the record is kept.
+    if restored.already_present {
+        return Err(PlanError::AlreadyDone);
+    }
     Ok(Drafted {
         operation: Operation::RestoreHook,
         item: record.to_owned(),
@@ -479,15 +536,10 @@ pub fn drafted_restore(
         h0: hash(bytes),
         h1: hash(&restored.new_bytes),
         new_bytes: restored.new_bytes,
-        // The exact path is checked by the file's own earlier hash, as for a hook.
-        logical: if exact {
-            PlanLogical::Nothing
-        } else {
-            PlanLogical::Opencode(restored.logical)
-        },
+        logical: PlanLogical::Opencode(restored.logical),
         prepared: Prepared::Restore {
             record: record.to_owned(),
-            already_present: restored.already_present,
+            already_present: false,
         },
         diff,
         holds_hidden_values: hidden || secret_bearing,

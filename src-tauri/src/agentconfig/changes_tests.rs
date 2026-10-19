@@ -2591,3 +2591,49 @@ fn a_failure_or_a_crash_at_any_step_of_an_opencode_edit_is_repaired_and_undoable
         }
     }
 }
+
+#[test]
+fn restoring_a_plugin_the_user_already_put_back_changes_nothing_and_keeps_the_record() {
+    let world = World::new(SETTINGS);
+    world.opencode(OPENCODE);
+    let id = world.opencode_item(ItemKind::Plugin, "auth-plugin");
+    let plan = world.service.plan(Operation::ParkPlugin, &id).unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    // The user puts it back by hand.
+    world.opencode(OPENCODE);
+    let record = world
+        .service
+        .records()
+        .into_iter()
+        .find(|r| r.state == State::Parked)
+        .unwrap();
+    assert_eq!(
+        world
+            .service
+            .plan(Operation::RestoreHook, &record.id)
+            .unwrap_err(),
+        ChangeFailure::AlreadyDone
+    );
+    // Nothing was marked used: the record is still there, and nothing could be undone.
+    assert!(
+        world
+            .service
+            .records()
+            .iter()
+            .any(|r| r.id == record.id && r.state == State::Parked)
+    );
+    assert_eq!(world.opencode_file(), OPENCODE);
+}
+
+#[test]
+fn a_plugin_with_options_is_always_sealed() {
+    let world = World::new(SETTINGS);
+    world.opencode(&OPENCODE.replace(
+        r#"{ "token": "SEKRET-plugin-option" }"#,
+        r#"{ "mode": "fast" }"#,
+    ));
+    let id = world.opencode_item(ItemKind::Plugin, "rtk");
+    let plan = world.service.plan(Operation::ParkPlugin, &id).unwrap();
+    assert_eq!(plan.storage, Some(Protection::Sealed));
+    assert!(plan.holds_hidden_values);
+}

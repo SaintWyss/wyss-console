@@ -132,11 +132,14 @@ impl Reader<'_> {
                     }
                 }
                 Some(b'*') => {
-                    // An unterminated comment runs to the end, and the parse then fails.
-                    self.at = self.bytes[self.at + 2..]
+                    // An unterminated comment is not a blank: the parse fails there.
+                    match self.bytes[self.at + 2..]
                         .windows(2)
                         .position(|w| w == b"*/")
-                        .map_or(self.bytes.len(), |end| self.at + 2 + end + 2);
+                    {
+                        Some(end) => self.at += 2 + end + 2,
+                        None => return,
+                    }
                 }
                 _ => return,
             }
@@ -234,6 +237,7 @@ impl Reader<'_> {
         let start = self.at;
         self.at += 1;
         let mut members: Vec<Member> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         self.blanks();
         if self.peek() == Some(b'}') {
             self.at += 1;
@@ -246,7 +250,7 @@ impl Reader<'_> {
                 let key_span = self.string()?;
                 let key: String = serde_json::from_slice(&self.bytes[key_span.start..key_span.end])
                     .map_err(|_| SpanError::Invalid)?;
-                if members.iter().any(|m| m.key == key) {
+                if !seen.insert(key.clone()) {
                     return Err(SpanError::DuplicateKey);
                 }
                 self.blanks();
@@ -430,6 +434,10 @@ pub fn remove_child_checked(bytes: &[u8], container: &Node, index: usize) -> Opt
     let removal = remove_child(bytes, container, index)?;
     let (at, end) = (removal.edit.at, removal.edit.at + removal.edit.remove);
     let child = *container.child_spans().get(index)?;
+    // A comment inside the entry (between a key and its value, say) would go with it.
+    if has_comment(bytes, child) {
+        return None;
+    }
     // The stretch is the child plus its separator and blanks: outside the child, only those.
     let clean = if end <= child.start || at >= child.end {
         only_blanks_and_commas(bytes, at, end)
@@ -452,10 +460,15 @@ pub fn append_child_lenient(bytes: &[u8], container: &Node, text: &str) -> Optio
     let base = indentation(bytes, span.start);
     let multiline = bytes[span.start..span.end].contains(&b'\n');
     let unit = if base.contains('\t') { "\t" } else { "  " };
+    let eol = if bytes[span.start..span.end].windows(2).any(|w| w == b"\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
     let lead = if multiline {
         let own = indentation(bytes, last.start);
         format!(
-            "\n{}",
+            "{eol}{}",
             if own.is_empty() {
                 format!("{base}{unit}")
             } else {
@@ -483,4 +496,23 @@ pub fn append_child_lenient(bytes: &[u8], container: &Node, text: &str) -> Optio
             insert: format!(",{lead}{text}"),
         })
     }
+}
+
+/// Whether a `//` or `/*` opens anywhere in `span` outside a string.
+fn has_comment(bytes: &[u8], span: Span) -> bool {
+    let (mut i, end) = (span.start, span.end);
+    while i < end {
+        match bytes[i] {
+            b'"' => {
+                i += 1;
+                while i < end && bytes[i] != b'"' {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            b'/' if matches!(bytes.get(i + 1), Some(b'/' | b'*')) => return true,
+            _ => i += 1,
+        }
+    }
+    false
 }

@@ -327,10 +327,11 @@ fn strip_jsonc(bytes: &[u8]) -> Vec<u8> {
                 }
             }
             b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                let end = bytes[i + 2..]
-                    .windows(2)
-                    .position(|w| w == b"*/")
-                    .map_or(len, |at| i + 2 + at + 2);
+                // Never closed: left as it is, so the parse fails on it.
+                let Some(at) = bytes[i + 2..].windows(2).position(|w| w == b"*/") else {
+                    break;
+                };
+                let end = i + 2 + at + 2;
                 for byte in &mut out[i..end] {
                     if *byte != b'\n' {
                         *byte = b' ';

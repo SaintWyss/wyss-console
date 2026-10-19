@@ -110,7 +110,7 @@ pub enum Prepared {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Drafted {
     pub operation: Operation,
     pub item: String,
@@ -127,6 +127,20 @@ pub struct Drafted {
     pub prior: Option<Prior>,
     /// What this change does to managed Inference, as a prediction (Codex).
     pub managed: Option<super::codex_plan::Prediction>,
+}
+
+/// A drafted plan holds the whole new file and what it would keep: neither is ever printed.
+impl std::fmt::Debug for Drafted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Drafted")
+            .field("operation", &self.operation)
+            .field("item", &self.item)
+            .field("risk", &self.risk)
+            .field("h0", &self.h0)
+            .field("h1", &self.h1)
+            .field("new_bytes", &format_args!("{} bytes", self.new_bytes.len()))
+            .finish_non_exhaustive()
+    }
 }
 
 pub fn hash(bytes: &[u8]) -> String {

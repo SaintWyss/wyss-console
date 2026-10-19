@@ -92,7 +92,7 @@ fn items(document: &Document, bounds: &Bounds, sink: &mut Sink) -> u32 {
                 };
                 sink.push(place.item(
                     ItemKind::Plugin,
-                    &[spec],
+                    &["plugin", spec],
                     &plugin_name(spec),
                     Persisted::PresentEnabled,
                     Effective::NotVerifiable,
@@ -119,7 +119,7 @@ fn items(document: &Document, bounds: &Bounds, sink: &mut Sink) -> u32 {
         if let Some(setting) = value.get(key) {
             sink.push(place.item(
                 ItemKind::ModelPreference,
-                &[key],
+                &["model", key],
                 key,
                 Persisted::PresentEnabled,
                 Effective::NotVerifiable,

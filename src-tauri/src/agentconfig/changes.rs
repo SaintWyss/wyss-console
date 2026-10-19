@@ -918,7 +918,7 @@ impl ChangeService {
                             _ => None,
                         })
                         .ok_or(ChangeFailure::NotUndoable)?;
-                    let item = super::inventory::item_id_for(body.source, &[&spec]);
+                    let item = super::inventory::item_id_for(body.source, &["plugin", &spec]);
                     return self.plan_with(Operation::ParkPlugin, &item, undoes, None);
                 }
                 let item = super::inventory::item_id_for(

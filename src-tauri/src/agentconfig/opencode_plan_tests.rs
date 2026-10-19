@@ -174,9 +174,9 @@ fn plain_layouts_are_edited_in_their_own_style() {
 
 #[test]
 fn items_are_found_by_their_identifier_and_provider_options_are_never_read() {
-    let id = super::inventory::item_id_for(KEY, &["file:///opt/b"]);
+    let id = super::inventory::item_id_for(KEY, &["plugin", "file:///opt/b"]);
     assert_eq!(resolve_plugin(FILE.as_bytes(), KEY, &id).unwrap().0, 1);
-    let rtk = super::inventory::item_id_for(KEY, &["rtk.ts"]);
+    let rtk = super::inventory::item_id_for(KEY, &["plugin", "rtk.ts"]);
     assert_eq!(resolve_plugin(FILE.as_bytes(), KEY, &rtk).unwrap().0, 2);
     let docs = super::inventory::item_id_for(KEY, &["docs"]);
     assert_eq!(resolve_server(FILE.as_bytes(), KEY, &docs).unwrap(), "docs");
@@ -206,4 +206,97 @@ fn every_edit_is_checked_against_the_value_it_claims_to_make() {
         wrong.as_bytes(),
         &Logical::RemovePlugin { index: 1 }
     ));
+}
+
+// ---- findings of the independent review -------------------------------------------------
+
+#[test]
+fn the_same_plugin_twice_is_not_guessed_and_a_restore_never_loses_options() {
+    let twice = r#"{ "plugin": ["a", ["a", { "token": "SEKRET-opt" }]] }"#;
+    let id = super::inventory::item_id_for(KEY, &["plugin", "a"]);
+    assert_eq!(
+        resolve_plugin(twice.as_bytes(), KEY, &id).err(),
+        Some(PlanError::NotSupported)
+    );
+    // A parked entry with options, and a plain entry of the same name back in its place:
+    // different entries, so it is a conflict, never "already there".
+    let parked = draft_park_plugin(twice.as_bytes(), KEY, 1).unwrap();
+    let plain_back = r#"{ "plugin": ["a"] }"#;
+    assert_eq!(
+        draft_restore_plugin(plain_back.as_bytes(), &parked.body).err(),
+        Some(PlanError::RestoreConflict)
+    );
+}
+
+#[test]
+fn a_record_is_believed_only_as_far_as_it_can_be_checked() {
+    let parked = draft_park_plugin(FILE.as_bytes(), KEY, 1).unwrap();
+    // Another source or event: not ours.
+    let mut body = parked.body.clone();
+    body.source = SourceKey::ClaudeUserSettings;
+    assert_eq!(
+        draft_restore_plugin(&parked.new_bytes, &body).err(),
+        Some(PlanError::RecordUnreadable)
+    );
+    // The text that would be written is not the entry the record names: the exact path is
+    // not taken, and nothing arbitrary reaches the file.
+    let mut body = parked.body.clone();
+    body.removed_text = ", \"file:///opt/evil\"".to_owned();
+    let back = draft_restore_plugin(&parked.new_bytes, &body).unwrap();
+    assert!(
+        !String::from_utf8(back.new_bytes.clone())
+            .unwrap()
+            .contains("evil")
+    );
+    assert_eq!(
+        value(&back.new_bytes)["plugin"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap(),
+        "file:///opt/b"
+    );
+}
+
+#[test]
+fn a_comment_inside_an_entry_or_never_closed_is_refused() {
+    let inside = r#"{ "mcp": { "a": { "enabled" /* why */ : false } } }"#;
+    assert_eq!(
+        draft_mcp(inside.as_bytes(), "a", true, Some(Prior::Absent)).err(),
+        Some(PlanError::NotSupported)
+    );
+    let open = "{ \"plugin\": [\"a\"] } /* never closed";
+    assert_eq!(
+        draft_park_plugin(open.as_bytes(), KEY, 0).err(),
+        Some(PlanError::Malformed)
+    );
+}
+
+#[test]
+fn a_file_with_windows_line_ends_keeps_them() {
+    let crlf = "{\r\n  \"plugin\": [\r\n    \"a\",\r\n    \"b\"\r\n  ]\r\n}\r\n";
+    let parked = draft_park_plugin(crlf.as_bytes(), KEY, 1).unwrap();
+    let moved = String::from_utf8(parked.new_bytes.clone())
+        .unwrap()
+        .replace("\"a\"", "\"a\", \"z\"");
+    let back = draft_restore_plugin(moved.as_bytes(), &parked.body).unwrap();
+    let text = String::from_utf8(back.new_bytes).unwrap();
+    assert!(
+        !text.contains("\n\n") && text.matches('\n').count() == text.matches("\r\n").count(),
+        "{text:?}"
+    );
+}
+
+#[test]
+fn a_debug_print_of_a_plan_holds_no_file_and_no_option() {
+    let parked = draft_park_plugin(FILE.as_bytes(), KEY, 2).unwrap();
+    assert!(!format!("{:?}", parked.logical).contains("rtk"));
+    let drafted =
+        super::opencode_plan::drafted_mcp(FILE.as_bytes(), "x", "docs", "docs", true, None)
+            .unwrap();
+    let printed = format!("{drafted:?}");
+    assert!(
+        !printed.contains("SEKRET") && !printed.contains("apiKey"),
+        "{printed}"
+    );
 }
