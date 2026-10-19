@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Operation {
+    /// An instruction file reviewed in the native editor, with an exact sealed inverse.
+    EditDocument,
     /// Claude Code has no per-hook switch: the handler leaves the file and is kept.
     ParkHook,
     /// Puts a parked handler back where it was.

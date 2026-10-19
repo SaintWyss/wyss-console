@@ -10,6 +10,7 @@ use super::author::{self, HookSpec};
 use super::change::{Operation, Outcome, Prior, Risk};
 use super::codex_author;
 use super::codex_plan::{self, CodexOperation, CodexPlanError};
+use super::document::{self, Target as DocumentTarget};
 use super::fault::{Faults, Injected, Step};
 use super::fsutil::private_dir;
 use super::inventory::{Environment, SourceKey};
@@ -68,6 +69,8 @@ pub trait Confirm: Send + Sync {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Effect {
+    /// Instruction bytes were written; provider reload is not observed.
+    DocumentWritten,
     /// A new Claude Code session follows the file (checked against 2.1.303 with a real
     /// `claude`); a session already running is documented to reload, and not checked.
     HooksNewSessionsChecked,
@@ -227,6 +230,15 @@ fn writable(key: SourceKey) -> bool {
 }
 
 fn effect_of(operation: Operation, source: SourceKey) -> Effect {
+    if matches!(
+        source,
+        SourceKey::ClaudeUserSkills
+            | SourceKey::ClaudeUserRules
+            | SourceKey::CodexUserRules
+            | SourceKey::OpencodeUserRules
+    ) {
+        return Effect::DocumentWritten;
+    }
     match operation {
         Operation::RevertAuthored | Operation::RestoreHook
             if source == SourceKey::OpencodeUserConfig =>
@@ -333,6 +345,90 @@ impl ChangeService {
         }
     }
 
+    fn path_for_draft(&self, source: SourceKey, drafted: &Drafted) -> Option<PathBuf> {
+        if let super::plan::Logical::Document(target) = &drafted.logical {
+            target.path(&lock(&self.environment)).ok()
+        } else {
+            self.path_of(source)
+        }
+    }
+
+    fn read_document(&self, target: &DocumentTarget) -> Result<Vec<u8>, ChangeFailure> {
+        let path = target.path(&lock(&self.environment))?;
+        let file = self
+            .reader
+            .read_file(&path)
+            .map_err(|_| ChangeFailure::SourceUnreadable)?;
+        // Editing a shared/link-backed skill could modify somebody else's installation.
+        // Deliberately require the file and all ancestors to be real trusted places.
+        let parent = parent_for_write(self.reader.roots(), &path, 0)
+            .map_err(|_| ChangeFailure::NotWritable)?;
+        if file.trust() != PathTrust::Trusted
+            || !file.links().is_empty()
+            || parent.trust != PathTrust::Trusted
+            || !identity_of(&parent).is_ok_and(|i| i.is_owned_by_this_user())
+            || file.bytes().len() > document::MOST_BYTES
+        {
+            return Err(ChangeFailure::NotWritable);
+        }
+        Ok(file.bytes().to_vec())
+    }
+
+    /// Resolve the opaque item against raw names from the bounded inventory roots.
+    /// A redacted page label is never interpreted as a filename.
+    fn document_target(&self, item: &str) -> Result<DocumentTarget, ChangeFailure> {
+        let found = self.item(item).ok_or(ChangeFailure::EntryGone)?;
+        if !matches!(found.kind, ItemKind::Skill | ItemKind::RuleFile) {
+            return Err(ChangeFailure::NotSupported);
+        }
+        let env = lock(&self.environment);
+        let mut names = match found.source {
+            SourceKey::ClaudeUserRules => vec!["CLAUDE.md".to_owned()],
+            SourceKey::CodexUserRules => {
+                vec!["AGENTS.md".to_owned(), "AGENTS.override.md".to_owned()]
+            }
+            SourceKey::OpencodeUserRules => vec!["AGENTS.md".to_owned()],
+            SourceKey::ClaudeUserSkills => Vec::new(),
+            _ => return Err(ChangeFailure::NotSupported),
+        };
+        let directory = match found.source {
+            SourceKey::ClaudeUserSkills => Some(env.claude_dir().join("skills")),
+            SourceKey::ClaudeUserRules => Some(env.claude_dir().join("rules")),
+            _ => None,
+        };
+        if let Some(directory) = directory
+            && let Ok(listing) = self.reader.list_directory(&directory)
+        {
+            names.extend(listing.entries.iter().filter_map(|entry| {
+                let name = entry.name.to_str()?;
+                Some(if found.source == SourceKey::ClaudeUserRules {
+                    format!("rules/{name}")
+                } else {
+                    name.to_owned()
+                })
+            }));
+        }
+        names
+            .into_iter()
+            .map(|name| DocumentTarget {
+                source: found.source,
+                name,
+            })
+            .find(|target| target.check().is_ok() && target.id() == item)
+            .ok_or(ChangeFailure::NotSupported)
+    }
+
+    /// Only the desktop's native editor may obtain this content. No window command returns it.
+    pub fn document_current(&self, item: &str) -> Result<(String, String), ChangeFailure> {
+        let target = self.document_target(item)?;
+        let bytes = self.read_document(&target)?;
+        let text = String::from_utf8(bytes).map_err(|_| ChangeFailure::SourceMalformed)?;
+        if !document::valid_text(&text) {
+            return Err(ChangeFailure::InvalidEntry);
+        }
+        Ok((target.label(), text))
+    }
+
     /// The file a plan is made on: read through the approved roots, and writable only if it
     /// is this user's, in a place nobody else can change.
     fn read_target(&self, key: SourceKey) -> Result<(PathBuf, Vec<u8>), ChangeFailure> {
@@ -395,14 +491,14 @@ impl ChangeService {
         undoes: Option<String>,
         detail: Option<String>,
     ) -> PlanView {
+        let path = self.path_for_draft(source, &drafted);
         let stored = Stored {
             id: new_id(),
             drafted,
             source,
             undoes,
             detail,
-            shared_with_declared_writers: self
-                .path_of(source)
+            shared_with_declared_writers: path
                 .and_then(|path| {
                     parent_for_write(self.reader.roots(), &path, self.bounds.link_hops).ok()
                 })
@@ -514,6 +610,25 @@ impl ChangeService {
         let protection = |secret: bool| self.store.protection_for(secret);
         let detail;
         let (source, drafted) = match request {
+            Authoring::EditDocument {
+                item,
+                text,
+                expected,
+            } => {
+                let target = self.document_target(&item)?;
+                let bytes = self.read_document(&target)?;
+                if bytes != expected.as_bytes() {
+                    return Err(ChangeFailure::EntryChanged);
+                }
+                // This is a promise to seal, checked before offering the plan.
+                self.store.protection_for(true)?;
+                detail = Some(format!(
+                    "Instruction file: {}. {} bytes reviewed in the native editor.",
+                    target.label(),
+                    text.len()
+                ));
+                (target.source, document::draft(target, &bytes, &text)?)
+            }
             Authoring::AddHook(spec) => {
                 detail = Some(plain_detail("command", &spec.command));
                 let source = SourceKey::ClaudeUserSettings;
@@ -767,7 +882,8 @@ impl ChangeService {
                 )
             }
             // These carry text the user wrote, which only `plan_authored` accepts.
-            Operation::AddHook
+            Operation::EditDocument
+            | Operation::AddHook
             | Operation::EditHook
             | Operation::AddMcp
             | Operation::EditMcp
@@ -809,8 +925,14 @@ impl ChangeService {
             }
             Operation::RevertAuthored => {
                 let body = self.store.read(target)?;
-                let (_, bytes) = self.read_target(body.source)?;
-                (body.source, author::draft_revert(&bytes, target, &body)?)
+                if document::is_record(&body) {
+                    let place = document::from_record(&body)?;
+                    let bytes = self.read_document(&place)?;
+                    (body.source, document::revert(&bytes, target, &body)?)
+                } else {
+                    let (_, bytes) = self.read_target(body.source)?;
+                    (body.source, author::draft_revert(&bytes, target, &body)?)
+                }
             }
             Operation::OpencodeMcpOff | Operation::OpencodeMcpOn => {
                 let item = self.item(target).ok_or(ChangeFailure::EntryGone)?;
@@ -968,7 +1090,7 @@ impl ChangeService {
             }
         }
 
-        let Some(path) = self.path_of(source) else {
+        let Some(path) = self.path_for_draft(source, drafted) else {
             return Ok(applied(Outcome::ChangedOutside));
         };
         let Ok(_target_lock): Result<TargetLock, _> = lock_target(&self.locks, &path) else {
@@ -976,11 +1098,18 @@ impl ChangeService {
         };
 
         // Read again under the lock: the plan was made on these bytes or on nothing.
-        let parent: Parent =
-            match parent_for_write(self.reader.roots(), &path, self.bounds.link_hops) {
-                Ok(parent) if parent.trust == PathTrust::Trusted => parent,
-                Ok(_) | Err(_) => return Ok(applied(Outcome::WriteFailed)),
-            };
+        let parent: Parent = match parent_for_write(
+            self.reader.roots(),
+            &path,
+            if matches!(drafted.logical, super::plan::Logical::Document(_)) {
+                0
+            } else {
+                self.bounds.link_hops
+            },
+        ) {
+            Ok(parent) if parent.trust == PathTrust::Trusted => parent,
+            Ok(_) | Err(_) => return Ok(applied(Outcome::WriteFailed)),
+        };
         let Ok(before) = identity_of(&parent) else {
             return Ok(applied(Outcome::ChangedOutside));
         };
@@ -1131,7 +1260,7 @@ impl ChangeService {
                 let actual = hash(file.bytes());
                 let same = actual == drafted.h1
                     && match &drafted.logical {
-                        super::plan::Logical::Nothing => true,
+                        super::plan::Logical::Nothing | super::plan::Logical::Document(_) => true,
                         super::plan::Logical::Toml(edit) => {
                             super::codex_plan::is_exactly(current.bytes(), file.bytes(), edit)
                         }
@@ -1202,7 +1331,8 @@ impl ChangeService {
             }
             // What the user wrote goes back to exactly what it replaced, while the file is as
             // the change left it; after that, it is theirs to turn off.
-            Operation::AddHook
+            Operation::EditDocument
+            | Operation::AddHook
             | Operation::EditHook
             | Operation::AddMcp
             | Operation::EditMcp
@@ -1319,21 +1449,40 @@ impl ChangeService {
     /// found, the file's hash says how far it got, and the outcome is written.
     pub fn recover(&self) -> usize {
         let unfinished = self.journal.unfinished();
-        let sources = [
+        let mut sources: Vec<_> = [
             SourceKey::ClaudeUserSettings,
             SourceKey::ClaudeProjectSettings,
             SourceKey::ClaudeProjectLocalSettings,
             SourceKey::CodexUserConfig,
             SourceKey::OpencodeUserConfig,
-        ];
+        ]
+        .into_iter()
+        .filter_map(|key| self.path_of(key).map(|path| (key, path, None)))
+        .collect();
+        for intent in &unfinished {
+            let target = intent
+                .record
+                .as_ref()
+                .and_then(|id| self.store.read(id).ok())
+                .and_then(|body| document::from_record(&body).ok())
+                .or_else(|| self.document_target(&intent.item).ok());
+            if let Some(target) = target
+                && let Ok(path) = target.path(&lock(&self.environment))
+            {
+                let entry = (target.source, path, Some(target.id()));
+                if !sources.contains(&entry) {
+                    sources.push(entry);
+                }
+            }
+        }
         // Temporary files of a write that was cut short, judged one by one. Nothing is
         // deleted that cannot be accounted for: a file left at a temporary name may be the
         // provider's newer version, displaced by the swap in the instant before the crash.
         let mut put_back_for: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for key in sources {
-            let Some(parent) = self.path_of(key).and_then(|path| {
+        for (key, path, item) in sources {
+            let Some(parent) =
                 parent_for_write(self.reader.roots(), &path, self.bounds.link_hops).ok()
-            }) else {
+            else {
                 continue;
             };
             let names = leftovers(&parent);
@@ -1341,10 +1490,14 @@ impl ChangeService {
                 continue;
             }
             let target = self
-                .path_of(key)
-                .and_then(|path| self.reader.read_file(&path).ok())
+                .reader
+                .read_file(&path)
+                .ok()
                 .map(|file| hash(file.bytes()));
-            let intents: Vec<&Entry> = unfinished.iter().filter(|i| i.source == key).collect();
+            let intents: Vec<&Entry> = unfinished
+                .iter()
+                .filter(|i| i.source == key && item.as_ref().is_none_or(|id| &i.item == id))
+                .collect();
             let swapped = intents
                 .iter()
                 .find(|i| target.is_some() && target.as_deref() == i.h1.as_deref());
@@ -1383,7 +1536,19 @@ impl ChangeService {
 
         let mut repaired = 0;
         for intent in unfinished {
-            let Some(path) = self.path_of(intent.source) else {
+            let path = intent
+                .record
+                .as_ref()
+                .and_then(|id| self.store.read(id).ok())
+                .and_then(|body| document::from_record(&body).ok())
+                .and_then(|target| target.path(&lock(&self.environment)).ok())
+                .or_else(|| {
+                    self.document_target(&intent.item)
+                        .ok()
+                        .and_then(|target| target.path(&lock(&self.environment)).ok())
+                })
+                .or_else(|| self.path_of(intent.source));
+            let Some(path) = path else {
                 continue;
             };
             let current = self.reader.read_file(&path).ok().map(|f| hash(f.bytes()));
@@ -1400,7 +1565,8 @@ impl ChangeService {
                 // The file was not changed, so the entry is still in it: the record is spare.
                 (
                     Outcome::RecoveredNotApplied | Outcome::RecoveredProviderKept,
-                    Operation::ParkHook
+                    Operation::EditDocument
+                    | Operation::ParkHook
                     | Operation::ParkPlugin
                     | Operation::ParkMcp
                     | Operation::CodexParkMcp
@@ -1459,6 +1625,11 @@ fn _unused(_: Class) {}
 /// What the user wrote for a change, as typed data. It comes from the desktop's own window.
 #[derive(Clone, PartialEq, Eq)]
 pub enum Authoring {
+    EditDocument {
+        item: String,
+        text: String,
+        expected: String,
+    },
     AddHook(HookSpec),
     /// `expected` is the command the user was shown when they started: if the file holds
     /// another by the time the plan is made, nothing is replaced.
@@ -1513,6 +1684,7 @@ fn plain_mcp(spec: &McpSpec) -> String {
 impl std::fmt::Debug for Authoring {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::EditDocument { .. } => "Authoring::EditDocument(..)",
             Self::AddHook(_) => "Authoring::AddHook(..)",
             Self::EditHook { .. } => "Authoring::EditHook(..)",
             Self::AddMcp { .. } => "Authoring::AddMcp(..)",

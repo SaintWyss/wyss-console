@@ -425,8 +425,11 @@ impl RestorationStore {
             open_with_passphrase(RecordKind::Export, &export.id, &export.sealed, passphrase)?;
         let body: RecordBody =
             serde_json::from_slice(&plaintext).map_err(|_| RestoreError::ImportInvalid)?;
-        let protection = self.protection_for(export.secret_bearing)?;
-        self.park(&export.label, export.secret_bearing, protection, &body)
+        // The outer export header is not authority for the sensitivity of an instruction
+        // file. A forged flag must never enable a plaintext fallback for its contents.
+        let secret_bearing = export.secret_bearing || super::document::is_record(&body);
+        let protection = self.protection_for(secret_bearing)?;
+        self.park(&export.label, secret_bearing, protection, &body)
     }
 }
 

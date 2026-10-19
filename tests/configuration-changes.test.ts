@@ -65,6 +65,34 @@ describe('what the user can write', () => {
     expect(authoringFor(item({ not_writable: 'shared_path' }))).toBeNull();
     expect(authoringFor(item({ kind: 'skill' }))).toBeNull();
   });
+  it('offers native instruction editing only for supported user files', () => {
+    for (const source of [
+      'claude_user_rules',
+      'codex_user_rules',
+      'opencode_user_rules',
+    ]) {
+      expect(authoringFor(item({ source, kind: 'rule_file' }))).toEqual({
+        edit: 'document',
+        remove: null,
+      });
+      expect(
+        authoringFor(
+          item({ source, kind: 'rule_file', not_writable: 'shared_path' }),
+        ),
+      ).toBeNull();
+    }
+    expect(
+      authoringFor(item({ source: 'claude_user_skills', kind: 'skill' })),
+    ).toEqual({ edit: 'document', remove: null });
+    expect(
+      authoringFor(
+        item({ source: 'codex_user_hooks', kind: 'hook', provider: 'codex' }),
+      ),
+    ).toBeNull();
+    expect(
+      authoringFor(item({ source: 'claude_project_rules', kind: 'rule_file' })),
+    ).toBeNull();
+  });
   it('names events and servers as the desktop checks them', () => {
     expect(HOOK_EVENTS).toContain('PreToolUse');
     expect(HOOK_EVENTS).not.toContain('rm -rf');
@@ -252,6 +280,12 @@ describe('the changes controller', () => {
     controller.cancel();
   });
 
+  it('requests instruction editing by opaque ID without instruction text and never applies automatically', async () => {
+    controller.author((c) => c.editDocument('a'.repeat(32)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.calls).toEqual(['edit_document:' + 'a'.repeat(32)]);
+    expect(states.at(-1)?.plan).not.toBeNull();
+  });
   it('treats closing the desktop’s writing window as a cancel, not a failure', async () => {
     fake.failNext = 'cancelled';
     controller.author((c) => c.editHook('a'.repeat(32)));

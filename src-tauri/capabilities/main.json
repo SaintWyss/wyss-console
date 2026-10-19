@@ -50,6 +50,7 @@
     "allow-configuration-edit-hook",
     "allow-configuration-author-mcp",
     "allow-configuration-edit-mcp",
+    "allow-configuration-edit-document",
     "allow-native-launcher",
     "allow-native-preview",
     "allow-native-start",

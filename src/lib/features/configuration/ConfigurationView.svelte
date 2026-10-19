@@ -619,10 +619,17 @@
                   class="action"
                   disabled={busy}
                   onclick={() =>
-                    selectedAuthoring.edit === 'hook'
-                      ? changesController.author((c) => c.editHook(selected.id))
-                      : changesController.author((c) => c.editMcp(selected.id))}
-                  >Change it…</button
+                    selectedAuthoring.edit === 'document'
+                      ? changesController.author((c) =>
+                          c.editDocument(selected.id),
+                        )
+                      : selectedAuthoring.edit === 'hook'
+                        ? changesController.author((c) =>
+                            c.editHook(selected.id),
+                          )
+                        : changesController.author((c) =>
+                            c.editMcp(selected.id),
+                          )}>Change it…</button
                 >
                 {#if selectedAuthoring.remove}
                   <button

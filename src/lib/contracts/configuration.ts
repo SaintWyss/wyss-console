@@ -230,6 +230,7 @@ export const CONFIGURATION_FAILURES = [
 export type ConfigurationFailure = (typeof CONFIGURATION_FAILURES)[number];
 
 export const OPERATIONS = [
+  'edit_document',
   'park_hook',
   'restore_hook',
   'disable_all_hooks',
@@ -259,6 +260,7 @@ export const RISKS = ['normal', 'weakens_security', 'executes_code'] as const;
 export type Risk = (typeof RISKS)[number];
 
 export const EFFECTS = [
+  'document_written',
   'hooks_new_sessions_checked',
   'skills_new_sessions_checked',
   'codex_mcp_checked',

@@ -13,6 +13,7 @@ import {
   authorHook,
   authorMcp,
   editHook,
+  editDocument,
   editMcp,
   deleteRecord,
   exportRecord,
@@ -34,6 +35,7 @@ export interface ChangesClient {
     timeout: number | null,
   ): Promise<Plan>;
   editHook(item: string): Promise<Plan>;
+  editDocument(item: string): Promise<Plan>;
   authorMcp(
     name: string,
     kind: 'local' | 'remote',
@@ -52,6 +54,7 @@ const desktopClient: ChangesClient = {
   undo: planUndo,
   authorHook,
   editHook,
+  editDocument,
   authorMcp,
   editMcp,
   records: readRecords,

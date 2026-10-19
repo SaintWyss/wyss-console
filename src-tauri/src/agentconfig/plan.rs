@@ -58,6 +58,8 @@ pub struct DiffLine {
 /// The change as a value-level edit, for checking the byte-level one.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Logical {
+    /// A single provider-owned instruction file; checked by exact byte digest.
+    Document(super::document::Target),
     RemoveHook {
         event: String,
         group: usize,
@@ -178,7 +180,10 @@ pub fn apply_logical(before: &Value, edit: &Logical) -> Option<Value> {
     let root = value.as_object_mut()?;
     match edit {
         Logical::Nothing => (),
-        Logical::Toml(_) | Logical::Opencode(_) | Logical::CodexAuthor(_) => return None,
+        Logical::Document(_)
+        | Logical::Toml(_)
+        | Logical::Opencode(_)
+        | Logical::CodexAuthor(_) => return None,
         Logical::SetHookCommand {
             event,
             group,

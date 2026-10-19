@@ -37,6 +37,7 @@ fn on_gtk<T: Send + 'static>(
 
 fn operation_text(operation: Operation) -> &'static str {
     match operation {
+        Operation::EditDocument => "Change an agent instruction file reviewed in the native editor",
         Operation::ParkHook => "Turn off a hook (remove it from the file and keep it here)",
         Operation::RestoreHook => "Turn a hook back on (put it back in the file)",
         Operation::DisableAllHooks => "Turn off every hook",
@@ -78,6 +79,9 @@ fn risk_text(risk: Risk) -> &'static str {
 
 fn effect_text(effect: Effect) -> &'static str {
     match effect {
+        Effect::DocumentWritten => {
+            "The instruction file is written and read back. Reload and use by a running provider are not observed."
+        }
         Effect::HooksNewSessionsChecked => {
             "A new Claude Code session follows the file (checked). A session that is already running is documented to pick it up; that has not been checked."
         }

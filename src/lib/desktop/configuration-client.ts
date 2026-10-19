@@ -107,6 +107,13 @@ export function authorHook(
     parsePlan,
   );
 }
+export function editDocument(item: string): Promise<Plan> {
+  return checked(
+    'configuration_edit_document',
+    { request: { item } },
+    parsePlan,
+  );
+}
 export function editHook(item: string): Promise<Plan> {
   return checked('configuration_edit_hook', { request: { item } }, parsePlan);
 }

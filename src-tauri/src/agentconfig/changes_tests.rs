@@ -4101,3 +4101,302 @@ fn a_codex_server_with_arguments_is_sealed_and_an_args_line_with_a_hash_in_a_str
     assert_eq!(applied(&world, &edit), Outcome::Applied);
     assert!(!world.codex_file().contains("args"));
 }
+
+// F5 instruction-file editing. These are ordinary filesystem unit fixtures, not
+// real-provider acceptance; the latter is recorded separately on the owner's machine.
+fn document_fixture(world: &World, source: SourceKey, name: &str, text: &str) -> (String, PathBuf) {
+    let target = super::document::Target {
+        source,
+        name: name.to_owned(),
+    };
+    let env = Environment {
+        home: world.home.clone(),
+        claude_config_dir: None,
+        codex_home: None,
+        project: None,
+        system: world.base.join("etc"),
+        declared_writers: Vec::new(),
+    };
+    let path = target.path(&env).unwrap();
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, text).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    world.inventory.rescan();
+    (target.id(), path)
+}
+
+fn edit_document(
+    world: &World,
+    item: &str,
+    expected: &str,
+    text: &str,
+) -> Result<super::changes::PlanView, ChangeFailure> {
+    world
+        .service
+        .plan_authored(super::changes::Authoring::EditDocument {
+            item: item.to_owned(),
+            expected: expected.to_owned(),
+            text: text.to_owned(),
+        })
+}
+
+#[test]
+fn instruction_files_edit_and_undo_exact_bytes_through_the_existing_transaction() {
+    let original = "# Instructions\r\n\r\nKeep café and 日本語.\r\n";
+    let edited = "# Instructions\r\n\r\nKeep cafè and 日本語.\r\n";
+    for (source, name) in [
+        (SourceKey::ClaudeUserSkills, "noisy"),
+        (SourceKey::ClaudeUserRules, "rules/review.md"),
+        (SourceKey::ClaudeUserRules, "CLAUDE.md"),
+        (SourceKey::CodexUserRules, "AGENTS.md"),
+        (SourceKey::CodexUserRules, "AGENTS.override.md"),
+        (SourceKey::OpencodeUserRules, "AGENTS.md"),
+    ] {
+        let world = World::new(SETTINGS);
+        let (item, path) = document_fixture(&world, source, name, original);
+        let plan = edit_document(&world, &item, original, edited).unwrap();
+        assert_eq!(plan.operation, Operation::EditDocument);
+        assert_eq!(plan.effect, super::changes::Effect::DocumentWritten);
+        assert!(plan.needs_native_dialog);
+        assert_eq!(plan.storage, Some(Protection::Sealed));
+        assert!(!serde_json::to_string(&plan).unwrap().contains("café"));
+        let done = world.service.apply(&plan.id).unwrap();
+        assert_eq!(done.outcome, Outcome::Applied, "{source:?}");
+        assert_eq!(fs::read(&path).unwrap(), edited.as_bytes());
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let back = world.service.undo(&done.change).unwrap();
+        assert_eq!(back.source, source);
+        assert!(back.needs_native_dialog);
+        assert_eq!(
+            world.service.apply(&back.id).unwrap().outcome,
+            Outcome::Applied
+        );
+        assert_eq!(fs::read(&path).unwrap(), original.as_bytes());
+        assert_eq!(world.file(), SETTINGS);
+    }
+}
+
+#[test]
+fn instruction_edit_checks_what_the_native_editor_showed_and_what_the_plan_read() {
+    let world = World::new(SETTINGS);
+    let (item, path) = document_fixture(
+        &world,
+        SourceKey::ClaudeUserRules,
+        "rules/review.md",
+        "original",
+    );
+    assert_eq!(
+        edit_document(&world, &item, "stale", "new"),
+        Err(ChangeFailure::EntryChanged)
+    );
+    let plan = edit_document(&world, &item, "original", "new").unwrap();
+    fs::write(&path, "outside").unwrap();
+    assert_eq!(
+        world.service.apply(&plan.id).unwrap().outcome,
+        Outcome::ChangedOutside
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), "outside");
+    let plan = edit_document(&world, &item, "outside", "new").unwrap();
+    let done = world.service.apply(&plan.id).unwrap();
+    fs::write(&path, "later outside").unwrap();
+    assert_eq!(
+        world.service.undo(&done.change),
+        Err(ChangeFailure::EntryChanged)
+    );
+    assert_eq!(fs::read_to_string(path).unwrap(), "later outside");
+}
+
+#[test]
+fn instruction_edit_requires_the_real_native_confirmation_and_an_available_key_store() {
+    let world = World::new(SETTINGS);
+    let (item, path) = document_fixture(
+        &world,
+        SourceKey::ClaudeUserSkills,
+        "noisy",
+        "private instructions",
+    );
+    world.keys.set_unavailable(true);
+    assert_eq!(
+        edit_document(&world, &item, "private instructions", "new"),
+        Err(ChangeFailure::KeyStoreUnavailable)
+    );
+    world.keys.set_unavailable(false);
+    let plan = edit_document(&world, &item, "private instructions", "new").unwrap();
+    world.confirm.accept.store(false, Ordering::SeqCst);
+    assert_eq!(
+        world.service.apply(&plan.id).unwrap().outcome,
+        Outcome::RefusedByUser
+    );
+    assert_eq!(fs::read_to_string(path).unwrap(), "private instructions");
+    assert_eq!(
+        world
+            .confirm
+            .asked
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .operation,
+        Operation::EditDocument
+    );
+    assert_eq!(
+        world.service.plan(Operation::EditDocument, &item),
+        Err(ChangeFailure::NotSupported)
+    );
+}
+
+#[test]
+fn instruction_edit_refuses_links_hardlinks_conflict_copies_and_invisible_controls() {
+    let world = World::new(SETTINGS);
+    let (item, path) = document_fixture(
+        &world,
+        SourceKey::ClaudeUserRules,
+        "rules/review.md",
+        "original",
+    );
+    for bad in ["a\0b", "a\u{202e}b", "a\u{200b}b"] {
+        assert_eq!(
+            edit_document(&world, &item, "original", bad),
+            Err(ChangeFailure::InvalidEntry)
+        );
+    }
+    assert_eq!(
+        edit_document(&world, &item, "original", "original"),
+        Err(ChangeFailure::AlreadyDone)
+    );
+    let plan = edit_document(&world, &item, "original", "new").unwrap();
+    fs::write(
+        path.with_file_name("review.sync-conflict-one.md"),
+        "conflict",
+    )
+    .unwrap();
+    assert_eq!(
+        world.service.apply(&plan.id).unwrap().outcome,
+        Outcome::ConflictCopyPresent
+    );
+    fs::remove_file(path.with_file_name("review.sync-conflict-one.md")).unwrap();
+    fs::hard_link(&path, path.with_extension("hardlink")).unwrap();
+    assert_eq!(
+        edit_document(&world, &item, "original", "new"),
+        Err(ChangeFailure::NotWritable)
+    );
+    fs::remove_file(path.with_extension("hardlink")).unwrap();
+    let elsewhere = path.with_extension("other");
+    fs::rename(&path, &elsewhere).unwrap();
+    symlink(&elsewhere, &path).unwrap();
+    assert_eq!(
+        edit_document(&world, &item, "original", "new"),
+        Err(ChangeFailure::NotWritable)
+    );
+    assert_eq!(fs::read_to_string(elsewhere).unwrap(), "original");
+}
+
+#[test]
+fn instruction_records_cannot_name_hooks_system_policy_or_another_provider() {
+    use super::document::{Target, from_record};
+    for (source, name) in [
+        (SourceKey::ClaudeUserRules, "../settings.json"),
+        (SourceKey::ClaudeUserRules, "rules/../../settings.json"),
+        (SourceKey::ClaudeUserSkills, "../hooks"),
+        (SourceKey::CodexUserRules, "config.toml"),
+        (SourceKey::CodexUserHooks, "AGENTS.md"),
+        (SourceKey::CodexSystemManaged, "AGENTS.md"),
+    ] {
+        assert!(
+            Target {
+                source,
+                name: name.into()
+            }
+            .check()
+            .is_err()
+        );
+    }
+    let mut body = super::author::inverse_of(
+        super::ProviderId::Codex,
+        SourceKey::CodexUserRules,
+        b"a",
+        b"b",
+    );
+    body.event = "document_v1".into();
+    body.matcher = Some("AGENTS.md".into());
+    assert!(from_record(&body).is_ok());
+    body.provider = super::ProviderId::ClaudeCode;
+    assert!(from_record(&body).is_err());
+}
+
+#[test]
+fn instruction_file_fault_matrix_recovers_and_keeps_exact_undo() {
+    for step in [
+        Step::IntentJournaled,
+        Step::RecordSealed,
+        Step::RecordWritten,
+        Step::TemporaryCreated,
+        Step::TemporaryWritten,
+        Step::TemporaryFlushed,
+        Step::Renamed,
+        Step::Exchanged,
+        Step::DirectoryFlushed,
+        Step::ReadBack,
+        Step::OutcomeJournaled,
+    ] {
+        for fault in [Fault::Fail, Fault::Crash] {
+            let world = World::new(SETTINGS);
+            let (item, path) = document_fixture(
+                &world,
+                SourceKey::ClaudeUserRules,
+                "rules/review.md",
+                "old\r\n",
+            );
+            let plan = edit_document(&world, &item, "old\r\n", "new\r\n").unwrap();
+            world.faults.arm(step, fault);
+            let _ = world.service.apply(&plan.id);
+            let restarted = world.restarted();
+            restarted.service.recover();
+            let text = fs::read_to_string(&path).unwrap();
+            assert!(text == "old\r\n" || text == "new\r\n", "{step:?} {fault:?}");
+            if text == "new\r\n" {
+                let changes = restarted.service.history(None, 20).0;
+                let change = changes
+                    .iter()
+                    .find(|c| c.operation == Operation::EditDocument)
+                    .unwrap();
+                let undo = restarted.service.undo(&change.id).unwrap();
+                assert_eq!(
+                    restarted.service.apply(&undo.id).unwrap().outcome,
+                    Outcome::Applied,
+                    "{step:?} {fault:?}"
+                );
+                assert_eq!(fs::read_to_string(&path).unwrap(), "old\r\n");
+            }
+            assert_eq!(world.file(), SETTINGS);
+        }
+    }
+}
+
+#[test]
+fn an_imported_instruction_inverse_cannot_request_plaintext_storage() {
+    let world = World::new(SETTINGS);
+    let (item, _) = document_fixture(
+        &world,
+        SourceKey::ClaudeUserRules,
+        "rules/review.md",
+        "SEKRET-instruction",
+    );
+    let plan = edit_document(&world, &item, "SEKRET-instruction", "new").unwrap();
+    world.service.apply(&plan.id).unwrap();
+    let record = world.service.records()[0].id.clone();
+    let bytes = world.service.export_record(&record, "passphrase").unwrap();
+    let mut value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    value["secret_bearing"] = serde_json::json!(false);
+    world.keys.set_unavailable(true);
+    assert_eq!(
+        world
+            .service
+            .import_record(&serde_json::to_vec(&value).unwrap(), "passphrase"),
+        Err(ChangeFailure::KeyStoreUnavailable)
+    );
+    world.assert_no_secret_outside_the_file();
+}

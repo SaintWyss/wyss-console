@@ -360,6 +360,27 @@ fn mcp_from(typed: &[String], remote: bool) -> McpSpec {
     }
 }
 
+/// Instruction text never crosses the webview boundary, in either direction.
+#[tauri::command]
+async fn configuration_edit_document(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: ItemId,
+) -> Result<PlanView, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let item = checked(&request.item)?.to_owned();
+        let (label, expected) = changes.document_current(&item)?;
+        let typed = text_form(
+            &app,
+            "Change an instruction file",
+            &format!("File: {label} in your account. These instructions can change an agent's behaviour. Review the full text here. The previous bytes are kept encrypted for exact undo; a later outside edit is never overwritten."),
+            vec![Field { label: "Instructions (Markdown, at most 64 KiB)".to_owned(), initial: expected.clone(), multiline: true }],
+        ).ok_or_else(cancelled)?;
+        Ok(changes.plan_authored(Authoring::EditDocument { item, text: typed[0].clone(), expected })?)
+    }).await
+}
+
 #[tauri::command]
 async fn configuration_author_hook(
     app: AppHandle,
@@ -645,6 +666,7 @@ const COMMANDS: &[&str] = &[
     "configuration_edit_hook",
     "configuration_author_mcp",
     "configuration_edit_mcp",
+    "configuration_edit_document",
 ];
 
 /// What the desktop binary hands to the library: the commands, the state they read, and
@@ -666,7 +688,8 @@ pub fn extension() -> wyss_console::Extension {
             configuration_author_hook,
             configuration_edit_hook,
             configuration_author_mcp,
-            configuration_edit_mcp
+            configuration_edit_mcp,
+            configuration_edit_document
         ]),
         install: Box::new(|builder| builder.manage(Configuration::start())),
         on_exit: None,

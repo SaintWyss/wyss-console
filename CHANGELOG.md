@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-19 — Native instruction-file editing (F5 increment)
+
+- Existing user skills/rules open in the native editor, with mandatory native confirmation,
+  always-sealed exact undo and concurrent-write/crash recovery (ADR 0045).
+- GUI-only upgrades can preserve the running host with `install --keep-host`.
+- Corrected the pushed-main/Codex-TOML checkpoint and real-environment testing instructions;
+  normal development no longer redirects XDG configuration/data to private directories.
+
 ## Unreleased
 
 ### Writing configuration, models (F5, F6a)

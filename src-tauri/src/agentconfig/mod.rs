@@ -42,6 +42,7 @@ pub mod codex_plan;
 #[cfg(test)]
 mod codex_plan_tests;
 pub mod declared;
+pub mod document;
 mod fault;
 mod fsutil;
 mod inventory;

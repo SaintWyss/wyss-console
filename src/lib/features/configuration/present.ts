@@ -283,6 +283,7 @@ export function detailLines(projection: Projection | null): DetailLine[] {
 // ---- changing (F2a) ----------------------------------------------------------------------
 
 export const OPERATION_LABEL: Record<Operation, string> = {
+  edit_document: 'Change this instruction file',
   park_hook: 'Turn off this hook',
   restore_hook: 'Put this hook back',
   disable_all_hooks: 'Turn off every hook',
@@ -316,6 +317,8 @@ export const RISK_LABEL: Record<Risk, string> = {
 };
 
 export const EFFECT_LABEL: Record<Effect, string> = {
+  document_written:
+    'Written and read back. Reload and use by a running provider are not observed.',
   hooks_new_sessions_checked:
     'A new Claude Code session follows the file (checked). A session that is already running is documented to pick it up; that has not been checked.',
   codex_mcp_checked:
@@ -519,10 +522,18 @@ export const mcpNameOk = (name: string): boolean =>
 
 /** What the user can write for an item: change its command, or delete it. */
 export function authoringFor(item: ConfigItem): {
-  edit: 'hook' | 'mcp';
+  edit: 'hook' | 'mcp' | 'document';
   remove: 'park_mcp' | 'codex_park_mcp' | null;
 } | null {
   if (item.not_writable !== 'not_in_this_phase') return null;
+  if (
+    (item.kind === 'rule_file' &&
+      ['claude_user_rules', 'codex_user_rules', 'opencode_user_rules'].includes(
+        item.source,
+      )) ||
+    (item.kind === 'skill' && item.source === 'claude_user_skills')
+  )
+    return { edit: 'document', remove: null };
   if (
     item.provider === 'claude_code' &&
     item.kind === 'hook' &&
