@@ -547,6 +547,27 @@ mod tests {
             "allow-configuration-record-delete",
             "allow-configuration-export",
             "allow-configuration-import",
+            // Native agent sessions and session profiles (F3, ADR 0030): an agent of the
+            // closed catalogue, a project the native dialog returned, a session or a profile
+            // of the desktop's own registry. None takes a command, an argument list, an
+            // environment or a path.
+            "allow-native-launcher",
+            "allow-native-preview",
+            "allow-native-start",
+            "allow-native-sessions",
+            "allow-native-stop",
+            "allow-native-restart",
+            "allow-native-forget",
+            "allow-native-choose-project",
+            "allow-native-project-default",
+            "allow-native-profiles",
+            "allow-native-profile-create",
+            "allow-native-profile-save",
+            "allow-native-profile-delete",
+            "allow-native-profile-duplicate",
+            "allow-native-profile-restore",
+            "allow-native-profile-export",
+            "allow-native-profile-import",
         ];
         assert_eq!(granted, expected);
         let manifest = include_str!("../../build.rs");

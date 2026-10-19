@@ -662,6 +662,30 @@ read, and never a path.
 - **Trying it on your own machine.** `cargo test -- --ignored real_machine --nocapture`
   prints counts and outcomes of your real configuration, never a value, and writes nothing.
 
+## Agents in the window (native sessions and profiles)
+
+The Workspace view starts the installed Claude Code or Codex in a terminal tab of the Console.
+They are **native** sessions: your own agents in your own shell, not mediated, contained or
+approved by the Console (the managed sessions of the Sessions view are another plane).
+
+- **How it starts.** The terminal runs your interactive shell with a command that replaces it
+  by the agent (`exec`), so your start-up files run and the process the terminal owns is the
+  agent. Recipes exist for `sh`, `bash`, `zsh` and `fish`; any other shell starts the agent
+  directly and the session says so. The window names an agent of a closed list, a project
+  folder (home, one chosen in the native dialog, or a known project) and a profile; it never
+  sends a command, arguments, an environment or a path.
+- **What it keeps.** `~/.local/state/wyss-console/native/` holds `registry.json` (metadata of
+  the sessions and projects; no process is kept) and `profiles/`. After the window closes,
+  what was running is shown as **Lost**: the Console did not see it end and its terminal went
+  with the window.
+- **Profiles.** A profile is applied when a session starts and changes no global file. For
+  Claude Code it becomes flags and a generated `--settings` overlay under
+  `native/sessions/<id>/` (removed when the session ends). For Codex it becomes flags
+  (`-m`, `-s`, `-a`). What the agent cannot do for one session (Codex hooks and skills) refuses
+  to start instead of being ignored.
+- **Code.** `src-tauri/src/native/` (desktop binary only) and `src/lib/features/native/`.
+  Decision record: `docs/adr/0030-native-launcher-registry-and-session-profiles.md`.
+
 ## Changing Claude Code's configuration
 
 From the Configuration view the user can turn a Claude Code hook off and back on, turn every

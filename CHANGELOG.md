@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Native agent workspace (F3a, F3b, F3c)
+
+- **Start Claude Code and Codex from the Console** (new Workspace view). Pick an agent, a
+  project folder (home, a folder chosen in the native dialog, or a known project) and a
+  profile; the installed CLI starts in a terminal tab through your own shell, so the
+  environment is the one you get when you type it. Words reach the agent as words: tested for
+  `sh`, `bash`, `zsh` and `fish`. A shell without a recipe falls back to a direct start, and
+  the session says so.
+- **A registry of native sessions** with provider, version, project, profile, process,
+  processor and memory (sampled only while the overview is shown), and the states Active,
+  Stopped, Failed, Restarting and Lost. Stop, restart (a new session), remove. After the
+  window is closed what was running is shown as **Lost**, never as exited. Sessions of one
+  folder are grouped and warned about.
+- **Session profiles** (new Profiles view): model, permissions, hooks off, skills off, notes;
+  inheritance, 20 versions each, four read-only templates, export and import in native
+  windows. A profile is applied when the session starts and changes no global file: shown
+  with the installed Claude Code (an overlay `--settings` file per session; hooks off for
+  that session only; the user's `settings.json` has the same SHA-256). A profile the agent
+  cannot apply (Codex hooks or skills) refuses to start and says why.
+- Seventeen new window commands; none takes a command, an argument list, an environment or a
+  path. ADR 0030.
+
 ### Review of F2b and the ACL rule
 
 - **Codex skills checked against the installed Codex** through its own `skills/list`: switched

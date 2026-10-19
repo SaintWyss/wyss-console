@@ -46,52 +46,63 @@ fn row(stat: &str) -> Option<(i32, Row)> {
     ))
 }
 
-/// The tree rooted at `root`, or `None` when that process is gone.
-pub fn tree(root: i32) -> Option<Sample> {
-    let mut rows: HashMap<i32, Row> = HashMap::new();
-    for entry in fs::read_dir("/proc").ok()?.flatten() {
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|n| n.parse::<i32>().ok())
-        else {
-            continue;
-        };
-        if let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat"))
-            && let Some((_, parsed)) = row(&stat)
-        {
-            rows.insert(pid, parsed);
-        }
-    }
-    rows.get(&root)?;
-    let mut in_tree = vec![root];
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for (pid, parsed) in &rows {
-            if !in_tree.contains(pid) && in_tree.contains(&parsed.parent) {
-                in_tree.push(*pid);
-                changed = true;
+/// Every process, read once: `/proc` is walked a single time however many trees are asked for.
+pub struct Snapshot {
+    rows: HashMap<i32, Row>,
+    page: u64,
+}
+
+impl Snapshot {
+    pub fn take() -> Option<Self> {
+        let mut rows: HashMap<i32, Row> = HashMap::new();
+        for entry in fs::read_dir("/proc").ok()?.flatten() {
+            let Some(pid) = entry
+                .file_name()
+                .to_str()
+                .and_then(|n| n.parse::<i32>().ok())
+            else {
+                continue;
+            };
+            if let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat"))
+                && let Some((_, parsed)) = row(&stat)
+            {
+                rows.insert(pid, parsed);
             }
         }
+        let page = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)
+            .ok()
+            .flatten()
+            .unwrap_or(4096) as u64;
+        Some(Self { rows, page })
     }
-    let page = nix::unistd::sysconf(nix::unistd::SysconfVar::PAGE_SIZE)
-        .ok()
-        .flatten()
-        .unwrap_or(4096) as u64;
-    Some(Sample {
-        ticks: in_tree
-            .iter()
-            .filter_map(|p| rows.get(p))
-            .map(|r| r.ticks)
-            .sum(),
-        rss_bytes: in_tree
-            .iter()
-            .filter_map(|p| rows.get(p))
-            .map(|r| r.rss_pages * page)
-            .sum(),
-        processes: u32::try_from(in_tree.len()).unwrap_or(u32::MAX),
-    })
+
+    /// The tree rooted at `root`, or `None` when that process is gone.
+    pub fn tree(&self, root: i32) -> Option<Sample> {
+        self.rows.get(&root)?;
+        let mut in_tree = vec![root];
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for (pid, parsed) in &self.rows {
+                if !in_tree.contains(pid) && in_tree.contains(&parsed.parent) {
+                    in_tree.push(*pid);
+                    changed = true;
+                }
+            }
+        }
+        let members = || in_tree.iter().filter_map(|p| self.rows.get(p));
+        Some(Sample {
+            ticks: members().map(|r| r.ticks).sum(),
+            rss_bytes: members().map(|r| r.rss_pages * self.page).sum(),
+            processes: u32::try_from(in_tree.len()).unwrap_or(u32::MAX),
+        })
+    }
+}
+
+/// The tree rooted at `root`, or `None` when that process is gone.
+#[cfg(test)]
+pub fn tree(root: i32) -> Option<Sample> {
+    Snapshot::take()?.tree(root)
 }
 
 /// Percent of one core between two samples `seconds` apart.

@@ -669,10 +669,12 @@ impl NativeService {
                             .exit
                             .as_ref()
                             .map_or((None, None), |e| (Some(e.code), e.signal.clone()));
-                        let state = match (info.state, info.exit.is_some()) {
-                            (TerminalState::Failed, _) => State::FailedStart,
-                            (_, true) => State::Exited,
-                            _ => State::Stopped,
+                        // A closed terminal was closed on purpose (the window's tab, or Stop):
+                        // the process was ended, it did not end by itself.
+                        let state = match info.state {
+                            TerminalState::Failed => State::FailedStart,
+                            TerminalState::Closed => State::Stopped,
+                            _ => State::Exited,
                         };
                         self.finish(&id, state, code, signal);
                     }
@@ -709,11 +711,18 @@ impl NativeService {
 
     fn sample(&self) {
         let mut live = lock(&self.inner.live);
+        if live.is_empty() {
+            return;
+        }
+        // One walk of `/proc` for every session.
+        let Some(snapshot) = resources::Snapshot::take() else {
+            return;
+        };
         for entry in live.values_mut() {
             let Some(pid) = entry.pid.and_then(|p| i32::try_from(p).ok()) else {
                 continue;
             };
-            let Some(now) = resources::tree(pid) else {
+            let Some(now) = snapshot.tree(pid) else {
                 entry.usage = None;
                 continue;
             };

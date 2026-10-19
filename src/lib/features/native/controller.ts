@@ -29,6 +29,7 @@ import {
   stopNative,
 } from '../../desktop/native-client';
 import { currentWorkspace } from './bridge';
+import { restorable } from './present';
 
 export interface NativeClient {
   launcher(): Promise<Launcher>;
@@ -309,6 +310,18 @@ export class NativeController {
       this.starting = false;
       this.emit();
     }
+  }
+  /**
+   * Starts again, one after another, what was lost when the window closed: same agent,
+   * project and profile, each a new session. Nothing is claimed to have survived.
+   */
+  async restoreLost(): Promise<number> {
+    let started = 0;
+    for (const lost of restorable(this.sessions)) {
+      if (!(await this.restart(lost.id))) break;
+      started += 1;
+    }
+    return started;
   }
   async stop(id: string) {
     try {

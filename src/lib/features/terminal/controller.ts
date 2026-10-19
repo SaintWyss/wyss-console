@@ -261,8 +261,22 @@ export class TerminalController {
         }
       }
     } catch (error) {
+      if (this.stopped) return;
+      // The desktop closed this terminal itself (Stop on a native session): the tab keeps
+      // what it showed and says it was closed, which is not a failure of the terminal.
+      if (
+        typeof error === 'object' &&
+        error &&
+        'code' in error &&
+        error.code === 'already_closed'
+      ) {
+        this.state = 'closed';
+        this.stopIO();
+        this.publish();
+        return;
+      }
       // Lost IPC replies/ACKs are ambiguous: do not blindly retransmit data.
-      if (!this.stopped) this.fail(error);
+      this.fail(error);
     }
   }
   private stopIO() {

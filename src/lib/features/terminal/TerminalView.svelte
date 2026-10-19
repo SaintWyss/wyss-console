@@ -106,8 +106,8 @@
           >
             {#if session.native}<span class="tab-agent" aria-hidden="true"
                 >◆</span
-              >{/if}{session.title}{#if session.view.state !== 'running'}
-              · {session.view.state}{/if}
+              >{/if}{session.title}{#if session.view.state !== 'running'}{' · '}{session
+                .view.state}{/if}
           </button>
           <button
             class="tab-close"

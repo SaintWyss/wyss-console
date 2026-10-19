@@ -7,6 +7,7 @@ import {
 } from '../src/lib/contracts/native';
 import { NativeController } from '../src/lib/features/native/controller';
 import {
+  restorable,
   folderName,
   formatBytes,
   groupByProject,
@@ -97,6 +98,64 @@ describe('what the overview says', () => {
     expect([...sharedFolders([a, b, c])]).toEqual(['/p']);
     expect(folderName('/home/u/work/app')).toBe('app');
     expect(formatBytes(300 * 1024 * 1024)).toBe('300 MB');
+  });
+});
+
+describe('restoring a workspace', () => {
+  it('offers what was lost and has no successor, and starts each again as a new session', async () => {
+    const lost = session({
+      id: '1'.repeat(32),
+      state: 'lost',
+      terminal_id: null,
+      pid: null,
+    });
+    const already = session({
+      id: '2'.repeat(32),
+      state: 'lost',
+      terminal_id: null,
+      pid: null,
+    });
+    const successor = session({ id: '3'.repeat(32), restart_of: already.id });
+    const stopped = session({
+      id: '4'.repeat(32),
+      state: 'stopped',
+      terminal_id: null,
+      pid: null,
+    });
+    expect(
+      restorable([lost, already, successor, stopped]).map((s) => s.id),
+    ).toEqual([lost.id]);
+  });
+  it('restores in order and stops at the first refusal', async () => {
+    vi.useFakeTimers();
+    const lost = ['1', '2', '3'].map((n) =>
+      session({
+        id: n.repeat(32),
+        state: 'lost',
+        terminal_id: null,
+        pid: null,
+      }),
+    );
+    const { NativeCallError } =
+      await import('../src/lib/desktop/native-client');
+    let calls = 0;
+    const client = fakeClient({
+      sessions: vi.fn(async () => lost),
+      restart: vi.fn(async () => {
+        calls += 1;
+        if (calls === 2)
+          throw new NativeCallError({ code: 'limit_reached', reasons: [] });
+        return reply({ id: 'f'.repeat(32) });
+      }),
+    });
+    const controller = new NativeController(() => undefined, undefined, client);
+    controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await controller.restoreLost()).toBe(1);
+    expect(client.restart).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(client.restart).mock.calls[0]![0]).toBe('1'.repeat(32));
+    controller.dispose();
+    vi.useRealTimers();
   });
 });
 

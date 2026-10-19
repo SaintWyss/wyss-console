@@ -111,3 +111,20 @@ it('counts an agent against the same limit as any terminal', async () => {
   expect(manager.createNative(reply())).toBeUndefined();
   expect(state.error).toContain('limit');
 });
+
+it('shows a tab whose terminal the desktop closed (Stop) as closed, not as a failure', async () => {
+  const started = reply();
+  adoptTerminal(started.terminal);
+  mockIPC((command) => {
+    if (command === 'terminal_read_output')
+      return Promise.reject({ code: 'already_closed' });
+    return started.terminal;
+  });
+  const id = manager.createNative(started)!;
+  manager.attach(id, document.createElement('div'));
+  await flush();
+  await vi.advanceTimersByTimeAsync(50);
+  const tab = state.sessions.find((s) => s.id === id)!;
+  expect(tab.view.state).toBe('closed');
+  expect(tab.view.error).toBeUndefined();
+});

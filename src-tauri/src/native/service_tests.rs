@@ -436,3 +436,19 @@ fn a_request_with_an_unknown_field_or_a_free_command_is_not_a_start_request() {
         "an agent is an identifier of the catalogue, not a program"
     );
 }
+
+#[test]
+fn closing_the_tab_of_an_agent_is_a_stop_not_a_failure() {
+    let world = World::new();
+    let reply = world.start(AgentId::ClaudeCode, None).unwrap();
+    let id = reply.session.session.id.clone();
+    world.output_until(&reply.terminal.terminal_id, "SESSION=");
+    // What the window's close button does: it closes the terminal itself.
+    world.terminal.close(&reply.terminal.terminal_id).unwrap();
+    let view = world.wait_state(&id, State::Stopped);
+    assert!(
+        view.terminal_id.is_none(),
+        "nothing is observed for a finished session"
+    );
+    assert!(!world.base.join("sessions").join(&id).exists());
+}

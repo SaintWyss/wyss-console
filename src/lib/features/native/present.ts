@@ -166,3 +166,14 @@ export function sharedFolders(sessions: NativeSession[]): Set<string> {
       running.set(s.project, (running.get(s.project) ?? 0) + 1);
   return new Set([...running].filter(([, n]) => n > 1).map(([p]) => p));
 }
+
+/**
+ * Sessions the Console lost sight of and has not started again since: what a restored
+ * workspace would start. A record that already has a successor is not offered twice.
+ */
+export function restorable(sessions: NativeSession[]): NativeSession[] {
+  const restarted = new Set(
+    sessions.map((s) => s.restart_of).filter((id): id is string => id !== null),
+  );
+  return sessions.filter((s) => s.state === 'lost' && !restarted.has(s.id));
+}

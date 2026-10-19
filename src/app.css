@@ -2369,9 +2369,17 @@ li.native-row {
 li.native-row[data-state='running'] {
   border-color: rgba(74, 222, 128, 0.18);
 }
+li.native-row .event-title {
+  grid-area: 1 / 1;
+}
+li.native-row .pill {
+  grid-area: 1 / 2;
+}
 li.native-row .native-facts,
 li.native-row .native-note {
-  grid-column: 1 / -1;
+  grid-area: auto / 1 / auto / -1;
+  white-space: normal;
+  overflow: visible;
   overflow-wrap: anywhere;
 }
 .native-actions {

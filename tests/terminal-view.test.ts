@@ -218,6 +218,26 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-configuration-record-delete',
     'allow-configuration-export',
     'allow-configuration-import',
+    // Native agent sessions (F3): the closed catalogue, a start that names an agent, a
+    // project the user chose and a profile, the registry, and the profiles. None takes a
+    // command, an argument list, an environment or a path.
+    'allow-native-launcher',
+    'allow-native-preview',
+    'allow-native-start',
+    'allow-native-sessions',
+    'allow-native-stop',
+    'allow-native-restart',
+    'allow-native-forget',
+    'allow-native-choose-project',
+    'allow-native-project-default',
+    'allow-native-profiles',
+    'allow-native-profile-create',
+    'allow-native-profile-save',
+    'allow-native-profile-delete',
+    'allow-native-profile-duplicate',
+    'allow-native-profile-restore',
+    'allow-native-profile-export',
+    'allow-native-profile-import',
   ]);
   // Every permission is one of this application's own commands: none belongs to a
   // plugin (`fs:`, `shell:`, `dialog:`) or to the framework's core (`core:`).
@@ -287,11 +307,23 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   // One exception, deliberate and narrow (ADR 0029, F2a): exporting a kept hook. The page
   // names a record it was given and nothing else; the passphrase and the file are asked
   // for in native windows the page cannot reach, and what is written is ciphertext.
+  // Second exception, deliberate and bounded (ADR 0030, F3): the native sessions' own
+  // commands. They name an agent of a closed catalogue, a project the native dialog
+  // returned, a session or a profile of the desktop's own registry, and so they are
+  // allowed words like stop, restart, profile and export; the words that would mean the
+  // window can run something of its own stay forbidden for them below.
   for (const permission of capability.permissions.filter(
-    (p: string) => p !== 'allow-configuration-export',
+    (p: string) =>
+      p !== 'allow-configuration-export' && !p.startsWith('allow-native-'),
   ))
     expect(permission).not.toMatch(
       /always|remember|trust|rule|policy|allowlist|respond|decision|lease|scope|profile|runtime|control|request|invoke|exec|shell|spawn|process|socket|fs|audit|watch|replay|export|save|payload|envelope|service|unit|systemd|systemctl|dbus|install|binary|path|restart|stop|kill|command/,
+    );
+  for (const permission of capability.permissions.filter((p: string) =>
+    p.startsWith('allow-native-'),
+  ))
+    expect(permission).not.toMatch(
+      /exec|shell|spawn|command|path|invoke|socket|systemd|systemctl|dbus|install|binary|process|fs|run|env|argv|argument/,
     );
   const directives = Object.fromEntries(
     config.app.security.csp

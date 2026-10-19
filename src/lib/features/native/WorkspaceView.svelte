@@ -10,6 +10,7 @@
     formatBytes,
     groupByProject,
     profilesFor,
+    restorable,
     sharedFolders,
     since,
     stateLabel,
@@ -41,6 +42,7 @@
   const projects = $derived(launcher?.projects ?? []);
   const groups = $derived(groupByProject(native.sessions));
   const crowded = $derived(sharedFolders(native.sessions));
+  const toRestore = $derived(restorable(native.sessions));
   const known = $derived(projects.find((p) => p.path === project) ?? null);
   const canStart = $derived(
     !!agent &&
@@ -92,7 +94,7 @@
   $effect(() => {
     if (!visible) return;
     now = Date.now();
-    const timer = setInterval(() => (now = Date.now()), 1000);
+    const timer = setInterval(() => (now = Date.now()), 5000);
     return () => clearInterval(timer);
   });
   onMount(() => {
@@ -273,6 +275,19 @@
           Sessions <span class="pill compact" data-tone="idle"
             ><span class="dot" aria-hidden="true"></span>Native plane</span
           >
+          {#if toRestore.length > 0}
+            <button
+              type="button"
+              class="action"
+              disabled={native.starting}
+              onclick={async () => {
+                if ((await controller.restoreLost()) > 0) onconsole();
+              }}
+              >Start {toRestore.length === 1
+                ? 'the lost session'
+                : `${toRestore.length} lost sessions`} again</button
+            >
+          {/if}
         </h3>
         {#if native.sessions.length === 0}
           <div class="sessions-empty">
