@@ -518,9 +518,7 @@ export const mcpNameOk = (name: string): boolean =>
   /^[A-Za-z0-9_-]{1,64}$/.test(name);
 
 /** What the user can write for an item: change its command, or delete it. */
-export function authoringFor(
-  item: ConfigItem,
-): {
+export function authoringFor(item: ConfigItem): {
   edit: 'hook' | 'mcp';
   remove: 'park_mcp' | 'codex_park_mcp' | null;
 } | null {

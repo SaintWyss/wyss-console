@@ -3990,7 +3990,8 @@ fn real_codex_authoring_add_edit_park_and_back() {
         fs::read_dir(path.parent().unwrap())
             .unwrap()
             .flatten()
-            .all(|e| !e.file_name().to_string_lossy().ends_with(".tmp")),
+            // Codex's own `.tmp` is a directory: only a file of ours would be left over.
+            .all(|e| e.path().is_dir() || !e.file_name().to_string_lossy().ends_with(".tmp")),
         "no temporary file left"
     );
     drop(guard);

@@ -4,6 +4,10 @@
 
 ### Writing configuration, models (F5, F6a)
 
+- **Codex MCP servers** can be added (a new table), changed in place and deleted with every table
+  of the server, and put back; verified on the real `config.toml` with the real Codex CLI, byte for
+  byte. ADR 0044.
+
 - **Add a hook** (Claude Code) and **add, change or delete an OpenCode MCP server** from the
   Configuration view. The command is typed in a window of the desktop's own, never built from page
   text; the native confirmation shows what will run; an edit is refused if the file moved on; every
