@@ -11,7 +11,7 @@ use super::model::{
 };
 use super::reader::{ConfigReader, EntryKind, Listing, ReadFile, parse_json, parse_toml};
 use super::redact::{self, Projection, Shown};
-use super::roots::{ApprovedRoots, InvalidRoot};
+use super::roots::InvalidRoot;
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};

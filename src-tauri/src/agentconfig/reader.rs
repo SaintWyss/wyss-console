@@ -152,10 +152,6 @@ impl ConfigReader {
         })
     }
 
-    pub fn bounds(&self) -> &Bounds {
-        &self.bounds
-    }
-
     /// Reads one source file. A final link is followed hop by hop and every hop is
     /// checked against the roots and judged again; the file is read twice from one
     /// descriptor and accepted only if both reads and the descriptor's record agree. A

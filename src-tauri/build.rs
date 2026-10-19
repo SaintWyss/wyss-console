@@ -110,6 +110,8 @@ fn main() {
             "terminal_resize",
             "close_terminal",
             "terminal_status",
+            "configuration_inventory",
+            "configuration_changes",
         ]),
     ))
     .expect("failed to build Wyss Console metadata");
