@@ -76,6 +76,7 @@ and its application through the ordinary plan, and the window controller's calls
 
 ## Not claimed
 
-That a provider loads, reloads or obeys a project file or a template-derived entry is **not observed**. The
-real window for these commands has not been exercised on the owner's desktop: the installed application is
-the earlier build. Codex trust for a project (`projects.<path>.trust_level`) is read, not set.
+That a provider loads, reloads or obeys a project file or a template-derived entry is **not observed**. Native project selection, path rejection, authoring, deletion, exact Undo and encrypted hook/MCP
+export/import/prefill/cancellation were observed on the owner's desktop with GUI revision `2f50390`;
+see [native acceptance](../acceptance/f5-native-wayland-2026-10-20.md). Confirmed application of
+imported account templates remains NOT_RUN. Provider consumption remains NOT_PROVEN. Codex trust for a project (`projects.<path>.trust_level`) is read, not set.

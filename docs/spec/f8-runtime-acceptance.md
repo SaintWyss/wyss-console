@@ -59,3 +59,25 @@ swap, aggregate process-tree memory and CPU, peak startup cost, latency, failure
 Use bounded non-inference operations first; paid turns/auth experiments need explicit authorization.
 If safe conditions cannot be met, retain NOT_RUN. Unit fakes cannot substitute for real-provider
 isolation, token-refresh safety, quota behaviour or GUI acceptance.
+
+## Candidate contract coverage, 2026-10-20
+
+[Exact candidate artifacts](../contracts/f8/README.md) and `src-tauri/tests/f8_contracts.rs`
+provide ten passing ordinary unit tests. This is a bounded implementation input, not F8 acceptance:
+
+- F8-01/03/12: routing and request-delta reference oracles reject crossed session, stale authority,
+  instance/generation, unknown fields and generic execution input. No production router/parser tested.
+- F8-07/14: SQL lifetime-row limits and counter-reset refusal; finite numeric budget/reservation
+  reference checks. No parallel admission, timing, process reap or resource enforcement tested.
+- F8-11: real SQLite per-session active-turn/pending-approval indexes and crossed sidecar FKs;
+  stale launch and orphan sidecar refusal. Core admission remains future work.
+- Migration: every candidate SQL statement boundary rolls back schema/data/version; existing V7
+  history bytes remain unassigned; an active lease blocks migration. Fixtures use current schema
+  and synthetic records, not full canonical-record validation or all older migration paths.
+- Receipt lookup under exhaustion proves preservation/readability only. Actual intent replay,
+  scheduler fairness, budget failure, storage faults, crash windows, owned cleanup and consistent
+  backup/restore require implementation tests. All installed-provider concurrency remains NOT_RUN.
+
+The independent follow-up reviewed candidate design surfaces and found no new blockers after four
+corrections; it did not execute tests or providers. Owner approval and implementation security review
+are still required; no production security guarantee is changed.

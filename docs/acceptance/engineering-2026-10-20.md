@@ -5,6 +5,11 @@ Worktree `~/Github_repos/wyss-console-rama-4`; the other worktree and its pendin
 Normal desktop/HOME/XDG/bus/wallet throughout. No authority/host restart, paid model prompt,
 cache drop, reboot, broad signal, unrelated application closure or network exposure.
 
+**Follow-up supersedes the installed-state and NOT_RUN statements below:**
+[GUI-only update and observed native acceptance](f5-native-wayland-2026-10-20.md);
+[F8 exact candidate contracts and review](../contracts/f8/README.md). The remainder records the
+earlier read-only pass and is retained as historical evidence.
+
 ## F5 implementation versus installed native acceptance
 
 F5 is implemented under ADR 0050; it was not rebuilt here. Inspection found three distinct states:

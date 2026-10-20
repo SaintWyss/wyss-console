@@ -6,20 +6,20 @@ The other worktree and all unrelated pending work are preserved.
 
 ## Implementation and acceptance are different states
 
-| Block                                                          | Implementation                                     | Real acceptance / next requirement                                                                 |
-| -------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| F1/F2                                                          | Implemented                                        | Accepted; `acceptance/f1-f2a-2026-10-19.md`, `f2b-owner-decisions.md`                              |
-| F3 native sessions/profiles                                    | Implemented                                        | Accepted baseline; `acceptance/f3-2026-10-19.md`, ADR 0035                                         |
-| F9 persistent host                                             | Implemented                                        | Accepted baseline; ADR 0036; preserve live terminals across GUI upgrades                           |
-| F14/F11a/F13 baseline                                          | Implemented                                        | Historical acceptance in `acceptance/f14-f11a-f13-closure-2026-10-19.md`                           |
-| F4a inventory/switches                                         | Implemented                                        | Baseline accepted; `acceptance/f4a-f5-f6-f1b-2026-10-19.md`                                        |
-| F5 account hooks/MCP/instruction edits/templates/create/delete | Implemented                                        | Baseline real acceptance; ADRs 0042–0047 and linked acceptance records                             |
-| F5 project files and hook/MCP templates                        | Implemented, ADR 0050                              | **Native acceptance NOT_RUN**, provider consumption NOT_PROVEN                                     |
-| F6 models/catalogue/reroute/native effort                      | Implemented, ADR 0048                              | Partial installed-provider acceptance; old host/authority lack new behaviour                       |
-| F8 per-session runtimes                                        | **Proposed design only**, ADR 0051                 | Independently reviewed candidate, NOT_PROVEN; not implementation-ready yet; owner has not accepted |
-| P1                                                             | Backend baseline and idle optimization implemented | Partial measurements; visual matrix NOT_RUN; no canonical budget pass                              |
-| F10 gateway                                                    | Reviewed unreachable foundations, ADR 0049         | Authentication decision preparation only; no transport/listener/device enrollment                  |
-| F1b / B1 / G-INF                                               | Research and reviewed pure contracts               | Isolation/provider claims remain partial or NOT_PROVEN; no production B1 worker                    |
+| Block                                                          | Implementation                                     | Real acceptance / next requirement                                                                                               |
+| -------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| F1/F2                                                          | Implemented                                        | Accepted; `acceptance/f1-f2a-2026-10-19.md`, `f2b-owner-decisions.md`                                                            |
+| F3 native sessions/profiles                                    | Implemented                                        | Accepted baseline; `acceptance/f3-2026-10-19.md`, ADR 0035                                                                       |
+| F9 persistent host                                             | Implemented                                        | Accepted baseline; ADR 0036; preserve live terminals across GUI upgrades                                                         |
+| F14/F11a/F13 baseline                                          | Implemented                                        | Historical acceptance in `acceptance/f14-f11a-f13-closure-2026-10-19.md`                                                         |
+| F4a inventory/switches                                         | Implemented                                        | Baseline accepted; `acceptance/f4a-f5-f6-f1b-2026-10-19.md`                                                                      |
+| F5 account hooks/MCP/instruction edits/templates/create/delete | Implemented                                        | Baseline real acceptance; ADRs 0042–0047 and linked acceptance records                                                           |
+| F5 project files and hook/MCP templates                        | Implemented, ADR 0050                              | Native authoring/Undo and template roundtrip PASS; confirmed template apply NOT_RUN; provider consumption NOT_PROVEN             |
+| F6 models/catalogue/reroute/native effort                      | Implemented, ADR 0048                              | Partial installed-provider acceptance; old host/authority lack new behaviour                                                     |
+| F8 per-session runtimes                                        | **Proposed design only**, ADR 0051                 | Exact SQL/protocol/resource candidate and ten contract tests reviewed; production enforcement NOT_PROVEN; owner has not accepted |
+| P1                                                             | Backend baseline and idle optimization implemented | Partial measurements; visual matrix NOT_RUN; no canonical budget pass                                                            |
+| F10 gateway                                                    | Reviewed unreachable foundations, ADR 0049         | Authentication decision preparation only; no transport/listener/device enrollment                                                |
+| F1b / B1 / G-INF                                               | Research and reviewed pure contracts               | Isolation/provider claims remain partial or NOT_PROVEN; no production B1 worker                                                  |
 
 Authoritative record of this continuation:
 [engineering acceptance and preservation](acceptance/engineering-2026-10-20.md).
@@ -29,17 +29,21 @@ selection as unimplemented, said gateway had no second review, or used old insta
 
 ## Live installation observed on 2026-10-20
 
-- Installed `--diagnose`: revision `2fdb88b2b992`, timestamp `2026-10-20T05:38:40Z`.
-- GUI PID 1607295 and host PID 1607394 execute the **previous** installation, not the binary currently
-  at the launcher path. Host has one running non-native terminal. Do not replace/stop it.
-- Authority PID 1167285 owns Codex PID 1167441, 0.159.0, ready/inference, runtime revision 9.
-  Two managed session records; seven cached models. No thread/turn writes observed in status counters.
-- Host protocol 1 hello has no features: effort-profile support absent. Authority model-list lacks
-  offers/completeness. Keep compatible fallback and update-pending behaviour; do not restart for acceptance.
-- These identities are historical evidence, **never signal targets**. Recheck start ticks and owned
-  process handles before every operation. No install, authority/host restart or GUI replacement this run.
-- Native GUI is Wayland and available UI tools lack native control. F5 real dialogs remain unexercised.
-  Do not claim acceptance using a browser, nested display or artificial HOME.
+- Installed GUI revision `2f503902946a`, PID 1852991, is open after a GUI-only `--keep-host` update.
+  Existing packaged authority payload was preserved byte-for-byte; compatible update pending remains.
+- Host 1607394 and fish 1607420 retained identities/inode; the same terminal remains running.
+  Authority 1167285 and Codex 1167441 retained identities, schema 7, runtime revision 9, ready/inference,
+  seven cached models, unchanged outbound counters and durable head 76. No authority/host restart.
+- Original provider configuration bytes/owners/modes and inventoried live process identities unchanged.
+  Both project fixtures returned empty through Undo; GUI project selection cleared.
+- Native AT-SPI control was available. Real chooser, trust/path rejection, instruction authoring,
+  confirmations/cancellations, deletion/exact Undo and encrypted hook/MCP roundtrip observed PASS.
+  Confirmed template application and provider consumption remain separate outstanding slices.
+- Host protocol 1 still lacks effort-profile support; authority model-list lacks new offers/completeness.
+  F6 incompatible-runtime behavior remains explicit; SG-12 unchanged. No paid provider experiment.
+- Retained packages preserve previous GUI and the older inode used by the host. Rollback stops the
+  host and must not run unattended. These historical PIDs are never cleanup targets.
+- Details and local evidence: [native acceptance](acceptance/f5-native-wayland-2026-10-20.md).
 
 ## Current engineering decisions
 
@@ -47,8 +51,10 @@ F8 candidate ADR 0051 now targets **V7→V8**; V7 already exists. Both active-tu
 indexes, all transient routing and private per-launch provider/catalogue state need scoping. Candidate
 protocol 2 refuses ambiguous v1 targeting. Explicit-only recovery and fresh leases after runtime loss
 are proposed changes needing owner acceptance. Independent design review found seven issues and
-checked corrections; implementation security review remains future work. Exact SQL, protocol shapes,
-numeric budgets, qualified concurrency measurements and provider shared-state compatibility remain.
+checked corrections; implementation security review remains future work. Exact SQL, protocol 2 shapes, routing and numeric budgets are now in the
+[reviewed candidate contracts](contracts/f8/README.md), with ten executable reference/SQL tests.
+Production enforcement/validators, qualified concurrency measurements and provider shared-state
+compatibility remain unproven; no live migration or guarantee change occurred.
 See [F8 evidence](research/f8-runtime-decision-2026-10-20.md) and
 [adversarial specification](spec/f8-runtime-acceptance.md).
 

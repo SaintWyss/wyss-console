@@ -29,13 +29,14 @@ isolation proof (32 §2); what follows says what has to be true instead.
 A runtime is named by `RuntimeKey = (adapter_id, runtime_kind, managed_session_id)`: at most one desired-state
 row per session. Every launch has `RuntimeIdentityV2`:
 
-| Field                 | Meaning                                                                        |
-| --------------------- | ------------------------------------------------------------------------------ |
-| `managed_session_id`  | The only session this process may serve                                        |
-| `runtime_instance_id` | Fresh per launch, published after spawn, never reused (unchanged from 0012)    |
-| `generation`          | Monotone per `RuntimeKey`; a relaunch is `generation + 1`; stored, never reset |
-| `observed_version`    | The provider's numeric version at the handshake that created this generation   |
-| `schema`              | `runtime_identity` version (2). An unknown version is refused, not interpreted |
+| Field                   | Meaning                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `authority_instance_id` | Authority instance owning the allocation; also fenced in post-hello requests   |
+| `managed_session_id`    | The only session this process may serve                                        |
+| `runtime_instance_id`   | Fresh per launch, published after spawn, never reused (unchanged from 0012)    |
+| `generation`            | Monotone per `RuntimeKey`; a relaunch is `generation + 1`; stored, never reset |
+| `observed_version`      | The provider's numeric version at the handshake that created this generation   |
+| `schema`                | `runtime_identity` version (2). An unknown version is refused, not interpreted |
 
 The requested session key is validated against canonical storage. Instance and generation are assigned by
 the authority; provider version is observed at handshake. PID and client assertions never supply these facts. Two runtimes never share an instance id,
@@ -57,12 +58,12 @@ value fails closed with a fixed reason. Consequences, each a test:
 ## 3. Concurrency and resource budgets
 
 - **Admission bound.** A global limit `MAX_ACTIVE_RUNTIMES` (an integer in the authority's own constants, not
-  client-settable, default to be set from the measurements below, not guessed) and one active turn **per
+  client-settable, candidate cap **1** pending qualified compatibility/resource measurements) and one active turn **per
   runtime**: `managed_turns_one_active` becomes a unique index on `managed_session_id` over the same predicate
   (candidate V8). The pending-approval index also becomes session-scoped. The global bound is enforced by the core's single writer before a spawn, so a start beyond it is a
-  fixed `capacity` refusal, not a queue that grows.
+  fixed `capacity_exceeded` refusal, not a queue that grows.
 - **Per-runtime budgets**, each with a fixed refusal or cancellation reason and none client-supplied: resident
-  memory of the owned child, observed descendant count, wall-clock per turn, bytes and events per turn and
+  soft memory observations of retained owned roots, wall-clock per turn, bytes and events per turn and
   per second, pending approvals. They are read from `/proc/<pid>` of **the child the authority owns** (held as
   an unreaped `Child` plus a pidfd, the P0 rule), never from a search by name. A budget exceeded cancels that
   runtime's turn (§4) and marks it `failed` with the budget's name; it never touches another runtime.
@@ -87,7 +88,7 @@ completed. `PR_SET_PDEATHSIG` remains the hard-crash mechanism for every child.
 - A crash of runtime A fails A (and its turn `indeterminate`); B is unaffected. There is no automatic restart
   loop.
 - **Migration V7 → V8** (the `managed_runtimes` key, both turn and approval indexes, `generation`): one transaction, exact
-  schema and integrity validation of the result, the existing single row kept unchanged in a separate immutable legacy record of the previous shared runtime (no session
+  schema and integrity validation of the result, up to one existing row kept unchanged in a separate immutable legacy record of the previous shared runtime (no session
   attached); failure rolls back DDL, data and `user_version`.
   There is no downgrade: **a database snapshot is taken before the first start of the migrated authority**, and
   the previous application stays installed (`wyss-console.previous`) for rollback.
@@ -151,8 +152,8 @@ These refine the candidate above; no production code changed. See the
   revocation/expiry/cancellation capacity. Freeze numeric queue, bytes/events/rate, retained-row, aggregate
   memory and control-latency ceilings before release. Missing limits block release.
 - Freeze exact V8 SQL and validators before implementing migration. Older supported schemas keep their
-  validated path to V7. Preserve stream ID, sequence, vocabulary, events, receipts and historical identity
-  bytes. Never invent historical generations. Validate exact schema, all records and foreign keys before commit.
+  validated path to V7. Preserve stream ID, sequence, events, receipts and historical identity
+  bytes; raise vocabulary monotonically to 2 without rewriting historical events. Never invent historical generations. Validate exact schema, all records and foreign keys before commit.
 - Backup uses SQLite's consistent backup facility or a verified quiescent DB/WAL pair, private permissions,
   schema/version and checksum manifest, matching prior binaries and exclusive-writer proof. Never copy only
   a live `.db`. Rollback requires owner-approved downtime, stopping the new authority through its owned
@@ -161,6 +162,11 @@ These refine the candidate above; no production code changed. See the
 
 Only Santiago may accept this ADR and its restart/lease/protocol tradeoffs, authorize interruption of live
 sessions or installed migration/rollback, approve paid-quota experiments, or expand Managed guarantees.
-Exact SQL, numeric budgets, provider compatibility, concurrency measurements and implemented adversarial tests
-still block implementation readiness. **Reviewed candidate; NOT_PROVEN; not implementation-ready yet.** Design review is not review of implemented F8 security;
+The [candidate implementation contracts](../contracts/f8/README.md) now specify exact V8 SQL, protocol 2,
+identity routing and numeric budgets, with ten executable contract/reference tests and independent
+follow-up review. These are implementation inputs, not a production migration or enforcement proof.
+Production validators/serializers, scheduler and owned cleanup, provider compatibility, concurrency
+measurements and implementation-level adversarial/security review remain required. Active capacity
+stays 1 until separate compatibility/resource evidence supports an owner-approved increase.
+**Reviewed implementation contract candidate; NOT_PROVEN; not approved for production.** Design review is not review of implemented F8 security;
 F8 remains **NOT_PROVEN**.
