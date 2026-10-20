@@ -22,6 +22,10 @@ use std::{
         unix::process::{CommandExt, ExitStatusExt},
     },
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus},
+    sync::{
+        OnceLock,
+        mpsc::{self, RecvTimeoutError, SyncSender, TrySendError},
+    },
     time::{Duration, Instant},
 };
 
@@ -90,7 +94,8 @@ impl Default for Grace {
 }
 
 pub struct OwnedChild {
-    child: Child,
+    // Option permits handing an unreaped child to the asynchronous reaper from Drop.
+    child: Option<Child>,
     pidfd: OwnedFd,
     pid: i32,
     start_ticks: u64,
@@ -168,7 +173,7 @@ impl OwnedChild {
         let stdin = child.stdin.take();
         Ok((
             Self {
-                child,
+                child: Some(child),
                 pidfd,
                 pid,
                 start_ticks,
@@ -216,10 +221,10 @@ impl OwnedChild {
         self.stdin.as_mut()
     }
     pub fn take_stdout(&mut self) -> Option<ChildStdout> {
-        self.child.stdout.take()
+        self.child.as_mut().and_then(|child| child.stdout.take())
     }
     pub fn take_stderr(&mut self) -> Option<ChildStderr> {
-        self.child.stderr.take()
+        self.child.as_mut().and_then(|child| child.stderr.take())
     }
     /// Diagnostic only. It is never an input to any signalling decision.
     pub fn pid_for_diagnostics(&self) -> i32 {
@@ -268,7 +273,12 @@ impl OwnedChild {
         if let Some(s) = self.exit {
             return Ok(Some(s));
         }
-        let status = self.child.try_wait().map_err(|_| E::InternalError)?;
+        let status = self
+            .child
+            .as_mut()
+            .ok_or(E::InternalError)?
+            .try_wait()
+            .map_err(|_| E::InternalError)?;
         self.exit = status;
         Ok(status)
     }
@@ -375,13 +385,69 @@ fn verify_namespace_launch(command: &Command) -> ControlResult<()> {
     Ok(())
 }
 
+/// Last-resort child reaping is separate from the sole-writer runtime. A stuck child
+/// cannot cause OwnedChild::drop to block another session's requests or shutdown.
+fn orphan_reaper() -> Option<&'static SyncSender<Child>> {
+    static REAPER: OnceLock<Option<SyncSender<Child>>> = OnceLock::new();
+    REAPER
+        .get_or_init(|| {
+            // The durable contract caps launch attempts at 4096; if all slots are
+            // occupied the sender refuses immediately instead of blocking the writer.
+            let (sender, receiver) = mpsc::sync_channel::<Child>(4096);
+            let runner = std::thread::Builder::new()
+                .name("wyss-f8-owned-reaper".into())
+                .spawn(move || {
+                    let mut pending = Vec::<Child>::new();
+                    loop {
+                        match receiver.recv_timeout(Duration::from_millis(50)) {
+                            Ok(child) => pending.push(child),
+                            Err(RecvTimeoutError::Timeout) => (),
+                            Err(RecvTimeoutError::Disconnected) if pending.is_empty() => break,
+                            Err(RecvTimeoutError::Disconnected) => (),
+                        }
+                        while let Ok(child) = receiver.try_recv() {
+                            pending.push(child);
+                        }
+                        // Never call Child::wait on a process that may be in uninterruptible
+                        // sleep. Keep the handle and periodically try again.
+                        pending.retain_mut(|child| !matches!(child.try_wait(), Ok(Some(_))));
+                    }
+                });
+            runner.ok().map(|_| sender)
+        })
+        .as_ref()
+}
+
+fn handoff_for_reap(child: Child) {
+    let unsent = match orphan_reaper() {
+        Some(sender) => match sender.try_send(child) {
+            Ok(()) => return,
+            Err(TrySendError::Full(child) | TrySendError::Disconnected(child)) => child,
+        },
+        None => child,
+    };
+    // Emergency bounded-time handoff (thread creation can fail under resource pressure).
+    // Neither this fallback nor the normal reaper blocks Drop.
+    let _ = std::thread::Builder::new()
+        .name("wyss-f8-owned-reap-fallback".into())
+        .spawn(move || {
+            let mut child = unsent;
+            let _ = child.wait();
+        });
+}
+
 impl Drop for OwnedChild {
     fn drop(&mut self) {
         self.stdin.take();
-        if self.exit.is_none() {
-            // Safety net for an error/panic path: this handle owns the unreaped child.
-            let _ = self.signal(libc::SIGKILL);
-            let _ = self.child.wait();
+        if self.exit.is_some() {
+            return;
+        }
+        // The pidfd refers only to this handle's unreaped child.
+        let _ = self.signal(libc::SIGKILL);
+        if let Some(mut child) = self.child.take() {
+            if !matches!(child.try_wait(), Ok(Some(_))) {
+                handoff_for_reap(child);
+            }
         }
     }
 }
