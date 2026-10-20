@@ -3,6 +3,8 @@ mod anchor;
 mod approval_action;
 pub mod client;
 mod conversations;
+#[cfg(test)]
+pub(crate) mod f8_fixture;
 mod framing;
 mod gate;
 mod mediation;

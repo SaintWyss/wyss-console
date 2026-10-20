@@ -17,6 +17,10 @@ impl PreparedMigration {
     pub fn validate(&self) -> ControlResult<()> {
         validate_migrated(&self.connection)
     }
+    #[cfg(test)]
+    pub(super) fn into_connection(self) -> Connection {
+        self.connection
+    }
     pub fn metadata(&self) -> ControlResult<(String, String)> {
         self.connection
             .query_row(
@@ -207,7 +211,7 @@ pub fn validate_migrated(c: &Connection) -> ControlResult<()> {
     Store::validate_offline_connection(legacy)?;
     Ok(())
 }
-fn expected_v8() -> ControlResult<BTreeMap<String, String>> {
+pub(super) fn expected_v8() -> ControlResult<BTreeMap<String, String>> {
     let mut c = Connection::open_in_memory().map_err(db)?;
     schema::migrate(&mut c)?;
     c.execute_batch(SQL).map_err(invalid)?;
@@ -229,7 +233,7 @@ fn statements() -> Vec<String> {
     );
     out
 }
-fn clone_database(c: &Connection) -> ControlResult<Connection> {
+pub(super) fn clone_database(c: &Connection) -> ControlResult<Connection> {
     integrity(c)?;
     let copy = Connection::open_in_memory().map_err(db)?;
     copy.pragma_update(None, "foreign_keys", false)
@@ -288,7 +292,7 @@ fn rows(c: &Connection) -> ControlResult<BTreeMap<String, Vec<Vec<Value>>>> {
     }
     Ok(result)
 }
-fn objects(c: &Connection) -> ControlResult<BTreeMap<String, String>> {
+pub(super) fn objects(c: &Connection) -> ControlResult<BTreeMap<String, String>> {
     let mut q=c.prepare("SELECT name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY name").map_err(invalid)?;
     q.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
         .map_err(invalid)?
@@ -305,7 +309,7 @@ fn validate_objects(c: &Connection, expected: &[(&str, &str)]) -> ControlResult<
     }
     integrity(c)
 }
-fn integrity(c: &Connection) -> ControlResult<()> {
+pub(super) fn integrity(c: &Connection) -> ControlResult<()> {
     let quick: String = c
         .query_row("PRAGMA quick_check", [], |r| r.get(0))
         .map_err(invalid)?;

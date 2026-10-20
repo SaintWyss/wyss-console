@@ -539,32 +539,29 @@ impl Response {
                         o.remove("runtime_identity").ok_or(E::InvalidRequest)?,
                     )?);
                 }
-                "turn_status" | "approval" | "pending_approval" => {
-                    if !data.is_null() {
-                        let o = data.as_object_mut().ok_or(E::InvalidRequest)?;
-                        let reference: Option<RuntimeRef> =
-                            decode(o.remove("runtime_ref").ok_or(E::InvalidRequest)?)?;
-                        let attestation: Option<RuntimeIdentity> =
-                            decode(o.remove("attestation").ok_or(E::InvalidRequest)?)?;
-                        if let Some(r) = &reference {
-                            r.validate()?;
-                        }
-                        if let Some(a) = &attestation {
-                            a.validate()?;
-                            if reference.as_ref() != Some(&a.reference())
-                                || a.authority_instance_id != authority
-                            {
-                                return Err(E::CorrelationError);
-                            }
-                        }
-                        projection = Projection::History {
-                            reference,
-                            attestation,
-                        };
+                "turn_status" | "approval" | "pending_approval" if !data.is_null() => {
+                    let o = data.as_object_mut().ok_or(E::InvalidRequest)?;
+                    let reference: Option<RuntimeRef> =
+                        decode(o.remove("runtime_ref").ok_or(E::InvalidRequest)?)?;
+                    let attestation: Option<RuntimeIdentity> =
+                        decode(o.remove("attestation").ok_or(E::InvalidRequest)?)?;
+                    if let Some(r) = &reference {
+                        r.validate()?;
                     }
+                    if let Some(a) = &attestation {
+                        a.validate()?;
+                        if reference.as_ref() != Some(&a.reference())
+                            || a.authority_instance_id != authority
+                        {
+                            return Err(E::CorrelationError);
+                        }
+                    }
+                    projection = Projection::History {
+                        reference,
+                        attestation,
+                    };
                 }
-                // Vocabulary-2 audit payload replay/validation is a separate, not-yet-implemented boundary.
-                "audit" => return Err(E::Unsupported),
+                // Event payloads are validated against their declared vocabulary in validate_projection.
                 _ => (),
             }
         }
@@ -586,6 +583,12 @@ impl Response {
     }
     fn validate_projection(&self) -> ControlResult<()> {
         match (&self.outcome, &self.projection) {
+            (Ok(v1::ResultValue::Audit { events, .. }), _) => {
+                for event in events {
+                    let value = serde_json::to_value(event).map_err(|_| E::InvalidRequest)?;
+                    super::audit::validate_event(&value)?;
+                }
+            }
             (
                 Ok(v1::ResultValue::RuntimeModels { next, .. }),
                 Projection::Runtime {
@@ -734,9 +737,7 @@ impl Response {
                 v1::Operation::ApprovalPending(_) => "pending_approval",
                 v1::Operation::ApprovalStatus(_) => "approval",
                 v1::Operation::ApprovalRespond(_) => "approval_receipt",
-                v1::Operation::AuditRead(_) | v1::Operation::AuditWatch(_) => {
-                    return Err(E::Unsupported);
-                }
+                v1::Operation::AuditRead(_) | v1::Operation::AuditWatch(_) => "audit",
             };
             if value["kind"] != expected {
                 return Err(E::CorrelationError);
@@ -1004,7 +1005,13 @@ fn correlate_record(
                 && p.decision == a.decision
                 && next_revision(p.expected_revision, a.revision)
         }
-        // Runtime/authority variants are checked by the dedicated correlation above. Audit is refused.
+        (O::AuditRead(p), R::Audit { events, next }) => {
+            super::audit::check_page(&p.stream_id, p.after_sequence, p.limit, events, *next).is_ok()
+        }
+        (O::AuditWatch(p), R::Audit { events, next }) => {
+            super::audit::check_page(&p.stream_id, p.after_sequence, p.limit, events, *next).is_ok()
+        }
+        // Runtime/authority variants are checked by the dedicated correlation above.
         (O::Hello(_), R::Hello(_))
         | (O::Status(_), R::Status(_))
         | (O::RuntimeStatus(_), R::RuntimeStatus(_))

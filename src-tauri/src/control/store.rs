@@ -54,13 +54,21 @@ impl Store {
     /// Read-only canonical validation for an offline in-memory image. No open/migrate,
     /// vocabulary update, journal configuration or runtime reconciliation occurs.
     pub(crate) fn validate_offline_connection(conn: Connection) -> ControlResult<Connection> {
+        Self::validate_offline(conn, false)
+    }
+    /// The same verification for an offline schema-8 image, including new work. Generation
+    /// attribution, runtime rows, launches and sidecars are verified by the F8 validator.
+    pub(crate) fn validate_offline_connection_v8(conn: Connection) -> ControlResult<Connection> {
+        Self::validate_offline(conn, true)
+    }
+    fn validate_offline(conn: Connection, v8: bool) -> ControlResult<Connection> {
         if conn.path() != Some("") {
             return Err(ControlError::UnsafePath);
         }
         let (version, stream, head, vocabulary): (i64, String, String, i64) = conn.query_row(
             "SELECT schema_version,stream_id,last_sequence,event_vocabulary FROM authority_metadata WHERE id=1",
             [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).map_err(invalid)?;
-        if version != 7 || vocabulary < 1 {
+        if version != if v8 { 8 } else { 7 } || vocabulary < if v8 { 2 } else { 1 } {
             return Err(ControlError::StorageIncompatible);
         }
         let store = Self {
@@ -70,7 +78,7 @@ impl Store {
             clock: std::sync::Arc::new(leases::SystemClock),
             execution_available: false,
         };
-        store.verify(&head, vocabulary > i64::from(events::VOCABULARY))?;
+        store.verify(&head, !v8 && vocabulary > i64::from(events::VOCABULARY), v8)?;
         Ok(store.conn)
     }
     #[cfg(test)]
@@ -153,7 +161,7 @@ impl Store {
             clock: std::sync::Arc::new(leases::SystemClock),
             execution_available: true,
         };
-        store.verify(&head, newer_writer)?;
+        store.verify(&head, newer_writer, false)?;
         store.checkpoint_on_close(true)?;
         Ok(store)
     }
@@ -170,7 +178,7 @@ impl Store {
     }
     /// `newer_writer`: a build with a larger event vocabulary has opened this store, so it
     /// may hold valid events of types this build cannot name.
-    fn verify(&self, head: &str, newer_writer: bool) -> ControlResult<()> {
+    fn verify(&self, head: &str, newer_writer: bool, v8: bool) -> ControlResult<()> {
         let head = parse_head(head)?;
         let mut foreign = self
             .conn
@@ -189,7 +197,10 @@ impl Store {
         let mut rows = query.query([]).map_err(invalid)?;
         let mut n = 0u64;
         // A read-only view of what the log says happened, compared below with the tables.
-        let mut replay = events::Replay::default();
+        let mut replay = events::Replay {
+            v8,
+            ..Default::default()
+        };
         while let Some(r) = rows.next().map_err(invalid)? {
             n = n.checked_add(1).ok_or(ControlError::StorageIncompatible)?;
             let id: String = r.get(0).map_err(invalid)?;
@@ -262,6 +273,10 @@ impl Store {
                 turns::verify_fingerprint_receipt(&id, &mutation, &result)?;
                 continue;
             }
+            // Schema-8 runtime receipts carry a session and generation; the F8 validator owns them.
+            if v8 && matches!(method.as_str(), Some("runtime/start" | "runtime/stop")) {
+                continue;
+            }
             if method == approvals::METHOD {
                 // One decision receipt per approval, ever.
                 if !decided_approvals.insert(approvals::verify_receipt(&id, &mutation, &result)?) {
@@ -283,7 +298,12 @@ impl Store {
             decode_receipt(&op, &result)?;
         }
         self.verify_approvals(&replay.approvals, &decided_approvals)?;
-        let runtime = self.runtime_control()?;
+        let runtime = if v8 {
+            // Per-session runtime rows are verified by F8; only the frozen baseline row is here.
+            read_legacy_runtime(&self.conn)?
+        } else {
+            self.runtime_control()?
+        };
         if let Some(runtime) = &runtime {
             runtime.validate()?;
         }
@@ -687,12 +707,24 @@ fn decode_receipt(op: &Operation, raw: &str) -> ControlResult<ResultValue> {
         Ok(ResultValue::Session(s))
     }
 }
+fn read_legacy_runtime(c: &Connection) -> ControlResult<Option<RuntimeControlRecord>> {
+    let row:Option<(String,i64,String,String)>=c.query_row("SELECT desired_state,revision,created_at,updated_at FROM managed_runtimes_legacy_v7 WHERE adapter_id='codex'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(db)?;
+    row.map(|(state,revision,created,updated)| {
+        let r:RuntimeControlRecord=serde_json::from_value(json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":state,"revision":revision,"created_at":created,"updated_at":updated})).map_err(invalid)?;
+        r.validate()?; Ok(r)
+    }).transpose()
+}
 fn read_runtime(c: &Connection) -> ControlResult<Option<RuntimeControlRecord>> {
     let row:Option<(String,i64,String,String)>=c.query_row("SELECT desired_state,revision,created_at,updated_at FROM managed_runtimes WHERE adapter_id='codex'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(db)?;
     row.map(|(state,revision,created,updated)| {
         let r:RuntimeControlRecord=serde_json::from_value(json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":state,"revision":revision,"created_at":created,"updated_at":updated})).map_err(invalid)?;
         r.validate()?; Ok(r)
     }).transpose()
+}
+/// Read-only payload-contract check of one decoded vocabulary-1 event, for F8's historical
+/// validators. It writes nothing and authorizes nothing.
+pub(crate) fn validate_historical_event(v: &Value) -> ControlResult<()> {
+    validate_audit(v)
 }
 fn validate_audit(v: &Value) -> ControlResult<()> {
     let kind = v["event_type"]

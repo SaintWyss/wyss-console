@@ -167,6 +167,9 @@ pub(super) struct Replay {
     /// Operations the log declared uncertain, and whether they were later abandoned.
     pub uncertain: HashMap<String, bool>,
     pub runtime: Option<Head>,
+    /// Offline schema-8 verification only: generation-aware events are folded through their
+    /// baseline projection. Their attribution is verified by the F8 validator, never here.
+    pub v8: bool,
     pub known: u64,
     pub unknown: u64,
 }
@@ -196,6 +199,25 @@ impl Replay {
     /// Folds one decoded envelope. An unknown future event is counted and nothing else.
     pub(super) fn observe(&mut self, v: &Value) -> ControlResult<()> {
         let kind = text(&v["event_type"])?;
+        if v["payload_schema_version"].as_u64() == Some(2) {
+            // Never in a schema-7 store; there a version-2 payload fails its contract.
+            if self.v8 && classify(&kind) == Class::Known {
+                if kind.starts_with("authority.runtime.") {
+                    self.known += 1;
+                    return Ok(());
+                }
+                let mut base = v.clone();
+                if base["payload"]
+                    .as_object_mut()
+                    .and_then(|p| p.remove("generation"))
+                    .is_none()
+                {
+                    return Err(ControlError::StorageIncompatible);
+                }
+                base["payload_schema_version"] = json!(1);
+                return self.observe(&base);
+            }
+        }
         if classify(&kind) == Class::Unknown {
             self.unknown += 1;
             return Ok(());
