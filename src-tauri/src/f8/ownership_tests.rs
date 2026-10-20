@@ -128,9 +128,24 @@ fn dropping_an_owned_child_reaps_it_and_spares_everything_else() {
     let child = owned_sleep();
     let pid = child.pid_for_diagnostics();
     let start = child.start_ticks;
+    let began = Instant::now();
     drop(child);
-    // Gone: either the PID has no process any more or it has a different start time.
-    assert!(proc_start_ticks(pid).is_ok_and(|t| t != start) || proc_start_ticks(pid).is_err());
+    assert!(
+        began.elapsed() < Duration::from_millis(500),
+        "Drop must never synchronously wait for process exit"
+    );
+    // The background reaper owns the child until actual wait/reap, without stalling
+    // the original caller. Observe with a bounded timeout, not a synchronous wait.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while proc_start_ticks(pid).is_ok_and(|ticks| ticks == start)
+        && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        proc_start_ticks(pid).is_ok_and(|ticks| ticks != start) || proc_start_ticks(pid).is_err(),
+        "the background reaper must eventually collect a killable owned child"
+    );
     assert!(alive(&mut other));
     other.kill().unwrap();
     other.wait().unwrap();
