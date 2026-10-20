@@ -461,17 +461,6 @@ impl Engine {
             );
             return Err(E::InternalError);
         }
-        let ready = self
-            .allocator()
-            .and_then(|mut a| a.record_ready(reference, observed_version, "compatible"));
-        if let Err(e) = ready {
-            self.begin_stop_internal(
-                reference.managed_session_id.as_str(),
-                "audit_unavailable",
-                None,
-            );
-            return Err(e);
-        }
         let identity = RuntimeIdentity {
             schema: 2,
             authority_instance_id: reference.authority_instance_id.clone(),
@@ -480,7 +469,8 @@ impl Engine {
             generation: reference.generation,
             observed_version: observed_version.to_owned(),
         };
-        // A tool-capable profile needs the namespace actually observed, not merely promised.
+        // No immutable 'ready' audit may precede either a proved containment boundary
+        // or the registry's ability to accept this exact, initializing generation.
         let needs = self
             .live
             .get(reference.managed_session_id.as_str())
@@ -498,6 +488,25 @@ impl Engine {
                 );
                 return Err(E::Unsupported);
             }
+        }
+        if let Err(e) = self.registry.check_ready(&identity) {
+            self.begin_stop_internal(
+                reference.managed_session_id.as_str(),
+                "protocol_failed",
+                None,
+            );
+            return Err(e);
+        }
+        let ready = self
+            .allocator()
+            .and_then(|mut a| a.record_ready(reference, observed_version, "compatible"));
+        if let Err(e) = ready {
+            self.begin_stop_internal(
+                reference.managed_session_id.as_str(),
+                "audit_unavailable",
+                None,
+            );
+            return Err(e);
         }
         self.registry.ready(identity)?;
         if let Some(live) = self.live.get_mut(reference.managed_session_id.as_str()) {
