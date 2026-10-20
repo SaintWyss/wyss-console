@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import {
   credentialFiles,
+  environmentArtifacts,
   scanCheckout,
   secretKindsIn,
 } from '../scripts/repo-scan-lib.mjs';
@@ -498,4 +499,91 @@ it('reports a committed file too large to scan, rather than passing it', () => {
     secrets: [],
     problems: [],
   });
+});
+
+// ------------------------------------------------ local-environment artifacts (2026-10-20)
+
+/** Commits `files` plus links (`links`: path -> target) and reports the environment findings. */
+function environmentOf(
+  files: Record<string, string>,
+  links: Record<string, string> = {},
+) {
+  const repo = join(scratch, `env-${Math.random().toString(16).slice(2)}`);
+  mkdirSync(repo, { recursive: true });
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(repo, path)), { recursive: true });
+    writeFileSync(join(repo, path), content);
+  }
+  for (const [path, target] of Object.entries(links)) {
+    mkdirSync(dirname(join(repo, path)), { recursive: true });
+    symlinkSync(target, join(repo, path));
+  }
+  gitIn(repo, 'init', '-q');
+  gitIn(repo, 'add', '-A');
+  gitIn(repo, 'commit', '-q', '-m', 'files');
+  return environmentArtifacts(repo, { personalNames: ['santi'] })
+    .map((f) => `${f.path}: ${f.kind}`)
+    .sort();
+}
+
+it('stops a dependency link to the working machine, as happened with node_modules', () => {
+  expect(
+    environmentOf(
+      { 'a.txt': 'x' },
+      { node_modules: '/home/santi/repo/node_modules' },
+    ),
+  ).toEqual([
+    'node_modules: link to a path of the working machine',
+    'node_modules: local dependency or build directory',
+  ]);
+});
+
+it('stops links that leave the repository or point at a dependency directory', () => {
+  expect(
+    environmentOf({ 'a.txt': 'x' }, { 'x/out': '../../elsewhere' }),
+  ).toEqual(['x/out: link that leaves the repository']);
+  expect(
+    environmentOf({ 'a.txt': 'x' }, { shortcut: 'node_modules/.bin/tsc' }),
+  ).toEqual(['shortcut: link to a local dependency or build directory']);
+});
+
+it('stops dependency and build directories being tracked', () => {
+  expect(
+    environmentOf({
+      'a/node_modules/m/index.js': '1',
+      'src-tauri/target/x': '1',
+      '.artifacts/r.json': '{}',
+    }).sort(),
+  ).toEqual([
+    '.artifacts/r.json: local dependency or build directory',
+    'a/node_modules/m/index.js: local dependency or build directory',
+    'src-tauri/target/x: local dependency or build directory',
+  ]);
+});
+
+it('stops the owner home directory in code and configuration but not in documentation or fixtures', () => {
+  expect(
+    environmentOf({
+      'scripts/run.sh': 'cd /home/santi/Github_repos/x\n',
+      'src/a.ts': "const p = '/Users/santi/x';",
+      'docs/acceptance/a.md': 'ran in /home/santi/repo',
+      'README.md': '/home/santi/.config',
+      'tests/fixtures/a.json': '{"p":"/home/santi/x"}',
+      'src/ok.ts':
+        "const p = '/home/u/.codex'; // a fixture user, not the owner",
+      'src/other.ts': "const p = '/home/santiago-x/';",
+    }),
+  ).toEqual([
+    "scripts/run.sh: the owner's home directory named in code or configuration",
+    "src/a.ts: the owner's home directory named in code or configuration",
+  ]);
+});
+
+it('allows a relative link inside the repository and ordinary files', () => {
+  expect(
+    environmentOf(
+      { 'docs/a.md': 'x', 'src/b.ts': 'y' },
+      { 'docs/link.md': '../src/b.ts' },
+    ),
+  ).toEqual([]);
 });

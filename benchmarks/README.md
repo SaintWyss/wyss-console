@@ -36,5 +36,8 @@ python3 -I benchmarks/aggregate.py out-run1.json out-run2.json out-run3.json
 They generate the corpora of architecture 15 §11.2 from a fixed seed in a private temporary file
 that they remove by its exact path, and record the machine's state (load, memory, swap, power).
 Nothing is dropped from a sample list. `threads.py` reads one process's threads (processor time and
-wake-ups); `idle-ab.sh` compares two builds of the GUI idle on an isolated display. Neither starts
-or ends anything but the process it launched itself.
+wake-ups); `idle_ab.py` compares two builds of the GUI idle on an isolated display. `threads.py` starts and
+ends nothing. `idle_ab.py` ends only the process it launched, through `owned.py` (a direct child held
+by a pidfd; no process is ever found by name or path; see `docs/incidents/2026-10-20-benchmark-ended-live-session.md`).
+`python3 -I benchmarks/test_owned.py` is the negative test of that rule and also fails a script that
+uses `pkill`, `pgrep`, `killall` or a `kill` on a variable.

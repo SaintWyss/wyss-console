@@ -14,7 +14,11 @@
 // value: a finding names a file and a kind.
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { credentialFiles, scanCheckout } from './repo-scan-lib.mjs';
+import {
+  credentialFiles,
+  environmentArtifacts,
+  scanCheckout,
+} from './repo-scan-lib.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -55,6 +59,13 @@ check(
   scan.secrets.length === 0,
   `no credential in any of the ${scan.paths.length} tracked files`,
   scan.secrets.map((s) => `${s.path} (${s.kind})`).join(', '),
+);
+
+const local = environmentArtifacts(where);
+check(
+  local.length === 0,
+  'no local-environment artifact is tracked (links to this machine, dependency directories, home paths in code)',
+  local.map((f) => `${f.path} (${f.kind})`).join(', '),
 );
 
 for (const line of passed) console.log(`ok    ${line}`);

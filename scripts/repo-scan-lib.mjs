@@ -6,7 +6,7 @@
 // matched.
 import { spawnSync } from 'node:child_process';
 import { lstatSync, readFileSync, readlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 
 /**
  * Names that only a credential has, and that are therefore never tracked. `.npmrc` is not
@@ -435,4 +435,94 @@ export function scanCheckout(where, limits = {}) {
     secrets: [...secrets.values()],
     problems,
   };
+}
+
+/**
+ * Directories that only a working machine has: dependencies, build output, local records.
+ * Tracking one means a local artifact was staged (a `node_modules` link was, 2026-10-20).
+ */
+const LOCAL_DIRECTORIES = new Set([
+  'node_modules',
+  'target',
+  '.artifacts',
+  '.venv',
+  '__pycache__',
+]);
+
+/**
+ * Places where a path of the owner's own machine is documentation or history, not a dependency
+ * of the build: prose, the changelog and the records of what was run where.
+ * @param {string} path
+ */
+function mayNamePersonalPaths(path) {
+  return (
+    path.endsWith('.md') ||
+    path.startsWith('docs/') ||
+    path.startsWith('tests/fixtures/') ||
+    path === 'scripts/repo-scan-lib.mjs' ||
+    path === 'tests/repo-scan.test.ts'
+  );
+}
+
+/**
+ * Local-environment artifacts in what Git records: a link to the working machine, a dependency
+ * or build directory, or code and configuration that names the owner's home directory. A
+ * relative link inside the repository, documentation and fixtures are normal and not reported.
+ * A finding names a path and a kind.
+ * @param {string} where
+ * @param {{ personalNames?: readonly string[] }} [options] account names whose home directory
+ *   must not appear in code or configuration (default: the owner's, and the account running)
+ * @returns {{ path: string, kind: string }[]}
+ */
+export function environmentArtifacts(where, options = {}) {
+  const names = options.personalNames ?? [
+    ...new Set(
+      ['saintwyss', process.env.USER ?? ''].filter(
+        (n) => n !== '' && n !== 'root',
+      ),
+    ),
+  ];
+  const home = names.length
+    ? new RegExp(`(?:/home|/Users)/(?:${names.join('|')})(?:/|\\b)`)
+    : null;
+  const { found } = trackedRecords(where);
+  /** @type {Map<string, { path: string, kind: string }>} */
+  const out = new Map();
+  /** @param {string} path @param {string} kind */
+  const add = (path, kind) => out.set(`${path}\0${kind}`, { path, kind });
+  const blobs = found.filter((r) => r.type === 'blob');
+  const contents = blobContents(
+    where,
+    [...new Set(blobs.map((r) => r.oid))],
+    MAX_SCAN,
+  );
+  for (const r of blobs) {
+    const parts = r.path.split('/');
+    if (parts.some((p) => LOCAL_DIRECTORIES.has(p)))
+      add(r.path, 'local dependency or build directory');
+    const bytes = contents.get(r.oid)?.bytes;
+    if (bytes === undefined) continue;
+    if (r.mode === '120000') {
+      const target = bytes.toString('utf8');
+      if (target.startsWith('/') || target.startsWith('~'))
+        add(r.path, 'link to a path of the working machine');
+      else if (
+        posix
+          .normalize(posix.join(posix.dirname(r.path), target))
+          .startsWith('..')
+      )
+        add(r.path, 'link that leaves the repository');
+      else if (target.split('/').some((p) => LOCAL_DIRECTORIES.has(p)))
+        add(r.path, 'link to a local dependency or build directory');
+      continue;
+    }
+    if (home !== null && !mayNamePersonalPaths(r.path) && !bytes.includes(0)) {
+      if (home.test(bytes.toString('utf8')))
+        add(
+          r.path,
+          "the owner's home directory named in code or configuration",
+        );
+    }
+  }
+  return [...out.values()];
 }
