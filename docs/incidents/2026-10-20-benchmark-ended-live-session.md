@@ -54,3 +54,14 @@ None of the others selects a process by name or path.
 
 No process-ending benchmark is run again until the fix is independently reviewed. Before any run with the
 application: note the owner's live PIDs, and check they are unchanged afterwards.
+
+## Independent review
+
+Two cold passes by Codex (`codex-gsd-check`), given the goal and the code and none of the author's
+reasoning. Pass 1: no path signalling a process the program did not launch; findings fixed: a launch that
+failed after `Popen` (pidfd error, early interrupt) left the child running; `stop()` could be cut short by
+an error or a second interrupt; the lint missed `kill -- "$X"`, `kill -s`, `kill 1234`, `os.killpg`,
+`os.system`. Pass 2 (of the fixes): cleanup of a failed launch could itself be interrupted; the
+Popen fallback assumes nobody else reaps the child (now refused when a SIGCHLD handler exists); the lint
+missed `process.kill` and `command kill`/`/bin/kill`. All fixed, each with a test that fails on the earlier
+code. The residual assumption is documented in `owned.py`: this class is the only reaper of its child.

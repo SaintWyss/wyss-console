@@ -16,6 +16,8 @@ How the guarantees are kept:
   is trusted; a mismatch ends only the process this class launched and raises.
 * Descendants are *adopted* by pidfd after the same kind of check, and only adopted ones are ever
   signalled. Anything else that remains is reported, not touched.
+* This class must be the only code that reaps its child (no SIGCHLD handler, no `waitpid(-1)`):
+  that is what keeps the PID from being reused, and the constructor refuses a SIGCHLD handler.
 * `with Owned(...)` ends the process on every exit: normal, exception, timeout, SIGINT, SIGTERM.
 
 Nothing here reads a process list to decide whom to end.
@@ -47,15 +49,42 @@ class Owned:
         self.proc = None
         self.fd = None
         self.adopted = {}
+        self.leftovers = []
         self._old = {}
-        self.proc = subprocess.Popen(
-            argv, env=env, stdin=subprocess.DEVNULL,
-            stdout=log if log is not None else subprocess.DEVNULL,
-            stderr=subprocess.STDOUT, start_new_session=True,
-        )
-        self.pid = self.proc.pid
-        self.fd = os.pidfd_open(self.pid)
-        self._verify_launch()
+        if signal.getsignal(signal.SIGCHLD) not in (signal.SIG_DFL, signal.SIG_IGN):
+            # The unreaped-child guarantee (and the fallback through Popen) needs this to be the
+            # only code that reaps its children.
+            raise RuntimeError("a SIGCHLD handler could reap the child behind this class's back")
+        self._install_handlers()  # before the launch: no gap in which an interrupt leaves it loose
+        try:
+            self.proc = subprocess.Popen(
+                argv, env=env, stdin=subprocess.DEVNULL,
+                stdout=log if log is not None else subprocess.DEVNULL,
+                stderr=subprocess.STDOUT, start_new_session=True,
+            )
+            self.pid = self.proc.pid
+            self.fd = os.pidfd_open(self.pid)
+            self._verify_launch()
+        except BaseException:
+            held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
+            try:
+                self._abandon_launch()
+            finally:
+                self._restore_handlers()
+                signal.pthread_sigmask(signal.SIG_SETMASK, held)
+            raise
+
+    def _abandon_launch(self):
+        """The launch failed part-way: end what Popen created, through the Popen handle (an
+        unreaped child, so its PID is still ours), and close whatever was opened."""
+        try:
+            if self.proc is not None and self.proc.poll() is None:
+                self.proc.kill()
+                self.proc.wait()
+        finally:
+            if self.fd is not None:
+                os.close(self.fd)
+                self.fd = None
 
     def _verify_launch(self):
         try:
@@ -64,7 +93,6 @@ class Owned:
         except OSError:
             stat, exe = None, None
         if stat is None or stat[0] != os.getpid() or exe != self.expect_exe:
-            self.stop()
             raise NotOurs(f"launch is not the expected binary {self.expect_exe}")
 
     # -- signalling: only through descriptors this object holds --------------------------------
@@ -72,7 +100,7 @@ class Owned:
         try:
             signal.pidfd_send_signal(fd, sig)
             return True
-        except ProcessLookupError:
+        except OSError:
             return False
 
     def alive(self):
@@ -109,30 +137,47 @@ class Owned:
         return None
 
     def stop(self, grace=10.0):
-        """End what was launched and what was adopted. Idempotent."""
-        if self.proc is not None and self.fd is not None:
-            if self.proc.poll() is None:
-                self._send(self.fd, signal.SIGTERM)
-                try:
-                    self.proc.wait(timeout=grace)
-                except subprocess.TimeoutExpired:
-                    self._send(self.fd, signal.SIGKILL)
-                    self.proc.wait(timeout=grace)
-            os.close(self.fd)
-            self.fd = None
-        # Adopted descendants still running after their parent went: ours, by descriptor.
-        leftovers = []
-        for pid, fd in list(self.adopted.items()):
-            if self._send(fd, 0):
-                self._send(fd, signal.SIGKILL)
-                leftovers.append(pid)
-            os.close(fd)
-            del self.adopted[pid]
-        self.leftovers = leftovers
+        """End what was launched and what was adopted. Idempotent. Interruptions are held back
+        while it runs, and a failure in one step does not skip the next."""
+        held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
+        try:
+            try:
+                if self.proc is not None and self.fd is not None:
+                    if self.proc.poll() is None:
+                        if not self._send(self.fd, signal.SIGTERM):
+                            self.proc.send_signal(signal.SIGTERM)  # our unreaped child
+                        try:
+                            self.proc.wait(timeout=grace)
+                        except subprocess.TimeoutExpired:
+                            if not self._send(self.fd, signal.SIGKILL):
+                                self.proc.kill()
+                            self.proc.wait(timeout=grace)
+            finally:
+                if self.fd is not None:
+                    os.close(self.fd)
+                    self.fd = None
+                # Adopted descendants still running after their parent went: ours, by descriptor.
+                for pid, fd in list(self.adopted.items()):
+                    try:
+                        if self._send(fd, 0):
+                            self._send(fd, signal.SIGKILL)
+                            self.leftovers.append(pid)
+                    finally:
+                        os.close(fd)
+                        del self.adopted[pid]
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, held)
 
-    def __enter__(self):
+    def _install_handlers(self):
         for sig in (signal.SIGINT, signal.SIGTERM):
             self._old[sig] = signal.signal(sig, self._interrupted)
+
+    def _restore_handlers(self):
+        for sig, handler in self._old.items():
+            signal.signal(sig, handler)
+        self._old = {}
+
+    def __enter__(self):
         return self
 
     def _interrupted(self, signum, _frame):
@@ -142,6 +187,5 @@ class Owned:
         try:
             self.stop()
         finally:
-            for sig, handler in self._old.items():
-                signal.signal(sig, handler)
+            self._restore_handlers()
         return False
