@@ -121,3 +121,10 @@ HOME. It is not provider hot-reload evidence.
 
 Remaining F5 scope: absent-aware creation/deletion, Codex skill inventory/authoring,
 project authoring and hook/MCP templates. **The full product remains unfinished.**
+
+Final deployment: the validated code was committed/pushed as `e17dfc2`, packaged again
+from that commit and installed with `--keep-host`. The installed diagnostic reports
+`e17dfc2d8264`; the normal GUI PID 1310334 exposes Change, Export template and Apply
+template on a supported user rule. Host 1188641/fish 1188667 were preserved and the
+previous installation remains available. No provider mutation was repeated merely to
+check the packaging copy; its build/digests, diagnostic and controls were verified.

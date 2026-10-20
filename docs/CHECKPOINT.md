@@ -28,6 +28,36 @@ editing and passphrase-sealed instruction templates are implemented (ADR 0045/00
 remain engineering work. Preserve the accepted provider writers and Managed authority guarantees.
 See `docs/acceptance/remaining-roadmap-2026-10-19.md` for the remaining scope.
 
+## Installed/runtime state at this milestone
+
+- Code `e17dfc2` is built, installed at `~/.local/opt/wyss-console`, and opened in the
+  normal desktop. `--diagnose` reports revision `e17dfc2d8264`; the preceding installation
+  is at `.previous`. `--keep-host` retained the live protocol-1 host and its terminal.
+- Last observed GUI PID 1310334, host 1188641, original fish 1188667. These are historical
+  identities to recheck, never targets to kill blindly. No native agent is running under
+  the host. The temporary release GUI and benchmark Ghostty window were closed.
+- Frontend 800 tests; Rust 501 library + 291 binary + 1 boundary, 12 ignored; clippy,
+  formatting, repository scan and package build passed. Native editing/template import,
+  separate confirmations and exact undo passed on real benign acceptance rules/skill;
+  all created provider files were removed after exact restoration. Original real provider
+  configuration checksums/owners/modes matched. Provider consumption/hot reload is not proven.
+- P1 is partial: two 300-second observations, one alongside installed Ghostty 1.3.1;
+  see `docs/acceptance/p1-2026-10-19.md`. Significant swap and uncontrolled background/
+  visibility conditions prevent canonical conclusions. Ghostty no longer needs installation.
+- The mistakenly started inherited private-systemd lifecycle run was interrupted. Its
+  exact private manager was identified and stopped, and its generated fixture removed.
+  Do not repeat that suite under the current owner policy.
+
+## Next unblocked engineering
+
+Finish F5 absent-aware creation/deletion, Codex skill inventory/authoring and remaining
+scope; keep ordinary file edits/templates on the accepted transaction. Then F6 catalogue/
+native model effort and the remaining own-environment P1 harness. F10 local foundations
+may proceed without a listener; F8/F11b cannot replace the authority contract before its
+security verification. Hermes installation, real credential/quota experiments and remote
+exposure/device enrolment still require specific owner authorisation. No G-INF completion
+claim: E3 remains partial, E5/E6 unresolved.
+
 ## Current testing policy (owner directive, 2026-10-19)
 
 Development and real acceptance use the owner's normal computer, HOME, XDG directories,
@@ -56,6 +86,9 @@ sessions before changing the installed binary or stopping a host; retain rollbac
    network exposure without the specific owner authorisation.
 
 ## Commits of this stretch
+
+Current product completion: `fc1473a` policy/context; `1c6df1d` host-preserving upgrade;
+`1600b78` instruction edits; `e17dfc2` sealed instruction templates. All pushed to private main.
 
 F5 Codex `e97c48d`; F4a `fc23270`..`0af736b`, F1b `a4a2ca7`, F5 `a5b1614` + `fb9dba2`, F6 `439c741`; F3 backend `277b8f8`, window `5969b8f`, capability `d10b9cb`, env scrub `eb36717`, F9 `ad6a985`, T1/T2 `5708c09` + follow-up.
 

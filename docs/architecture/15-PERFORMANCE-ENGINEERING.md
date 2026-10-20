@@ -1,5 +1,11 @@
 # 15 — Performance engineering
 
+> Current evidence (2026-10-19): `../acceptance/p1-2026-10-19.md` records two partial
+> measurements of the real installed application, including Ghostty already present on
+> the machine. `benchmarks/idle.py` exists. Historical “none measured” statements below
+> describe the planning baseline; canonical P1 coverage/budgets remain unverified.
+> Follow the real-environment testing policy in `../CHECKPOINT.md`.
+
 Domain Q of [04](04-TARGET-ARCHITECTURE.md). What is measured, where its boundary is, how it is
 measured, against what provisional target, what the design does when a target cannot be met, and
 which parts of the existing design are likely to cost the most. **No measurement of Wyss Console
