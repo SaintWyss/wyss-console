@@ -693,3 +693,81 @@ fn reviewed_all_provider_decisions_report_failed_critical_dispatch_as_errors() {
         validate_v8(rig.authority.engine().connection()).unwrap();
     }
 }
+
+#[test]
+fn review_cancel_refuses_stopping_launch_before_committing_a_new_intent() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (launch, fence) = rig.ready();
+    let session = rig.sessions[0].clone();
+    rig.call("executionLease/grant", json!({
+        "intent_id": uuid(), "session_id": session, "expected_session_revision":1,
+        "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence
+    }));
+    let start = rig.call("managedSession/turn/start", json!({
+        "intent_id":uuid(),"managed_session_id":session,
+        "expected_session_revision":1,"prompt":"cancel-check","runtime_fence":fence
+    }));
+    let turn_id = start["result"]["value"]["managed_turn_id"].as_str().unwrap();
+    let turn = ManagedTurnId::parse(turn_id).unwrap();
+    rig.authority.provider_turn_event(
+        &launch, &turn, Some("provider-cancel"), TurnState::Running, None
+    ).unwrap();
+    rig.authority.engine_mut().transport_failed(&launch);
+    let before: (i64,i64) = rig.authority.engine().connection().query_row(
+        "SELECT (SELECT count(*) FROM control_events), (SELECT count(*) FROM processed_intents)",
+        [], |r| Ok((r.get(0)?,r.get(1)?))
+    ).unwrap();
+    let denied = rig.call("managedSession/turn/cancel", json!({
+        "intent_id":uuid(),"managed_turn_id":turn_id,
+        "expected_revision":2,"runtime_fence":fence
+    }));
+    assert_ne!(code(&denied), "<ok>", "{denied}");
+    let after: (i64,i64) = rig.authority.engine().connection().query_row(
+        "SELECT (SELECT count(*) FROM control_events), (SELECT count(*) FROM processed_intents)",
+        [], |r| Ok((r.get(0)?,r.get(1)?))
+    ).unwrap();
+    assert_eq!(before, after, "rejected cancellation must not mutate the journal");
+}
+
+#[test]
+fn review_failed_recovery_remains_pending_and_retries_after_storage_restoration() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (launch, fence) = rig.ready();
+    let session = rig.sessions[0].clone();
+    rig.call("executionLease/grant", json!({
+        "intent_id":uuid(),"session_id":session,"expected_session_revision":1,
+        "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence
+    }));
+    let started = rig.call("managedSession/turn/start", json!({
+        "intent_id":uuid(),"managed_session_id":session,
+        "expected_session_revision":1,"prompt":"recovery-check","runtime_fence":fence
+    }));
+    let turn_id = started["result"]["value"]["managed_turn_id"].as_str().unwrap().to_owned();
+    let turn = ManagedTurnId::parse(&turn_id).unwrap();
+    rig.authority.provider_turn_event(
+        &launch, &turn, Some("provider-recovery"), TurnState::Running, None
+    ).unwrap();
+    // Only recovery writes to the stranded turn are rejected: runtime exit audit
+    // itself succeeds so that the original one-shot ended marker is consumed.
+    rig.authority.engine().connection().execute_batch(
+        "CREATE TEMP TRIGGER f8_fail_recover BEFORE UPDATE ON main.managed_turns
+         WHEN NEW.state='indeterminate'
+         BEGIN SELECT RAISE(ABORT,'injected recovery storage refusal'); END;"
+    ).unwrap();
+    *rig.spawn.exited.lock().unwrap() = true;
+    assert!(rig.authority.tick(Instant::now()).is_err());
+    assert!(rig.authority.recovery_pending, "recovery must remain retryable");
+    rig.authority.engine().connection().execute_batch(
+        "DROP TRIGGER temp.f8_fail_recover"
+    ).unwrap();
+    rig.authority.tick(Instant::now()).unwrap();
+    assert!(!rig.authority.recovery_pending);
+    let state: String = rig.authority.engine().connection().query_row(
+        "SELECT state FROM managed_turns WHERE managed_turn_id=?1",
+        [&turn_id], |r| r.get(0)
+    ).unwrap();
+    assert_eq!(state, "indeterminate");
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
