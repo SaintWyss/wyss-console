@@ -336,3 +336,21 @@ fn a_pid_namespace_takes_every_descendant_down_with_the_owned_child() {
         })
     });
 }
+
+#[test]
+fn reaper_capacity_refuses_before_spawn_and_releases_completed_slots() {
+    // A local counter fixture exercises overflow without occupying global
+    // reaper capacity or launching 4096 real processes in other test threads.
+    let reaper = Arc::new(Reaper {
+        slots: AtomicUsize::new(REAPER_LIMIT - 1),
+        queue: Mutex::new(Vec::new()),
+        wake: Condvar::new(),
+    });
+    let permit = reserve_slot(&reaper).unwrap();
+    assert_eq!(reaper.slots.load(Ordering::Acquire), REAPER_LIMIT);
+    assert!(matches!(reserve_slot(&reaper), Err(E::CapacityExceeded)));
+    drop(permit);
+    assert_eq!(reaper.slots.load(Ordering::Acquire), REAPER_LIMIT - 1);
+    let again = reserve_slot(&reaper).unwrap();
+    drop(again);
+}
