@@ -76,6 +76,14 @@ the real installed `e17dfc2d8264` GUI/host/terminal and rollback copy are retain
 See `docs/acceptance/branch-integration-2026-10-19.md` for per-branch decisions and
 the final package/push record.
 
+Integration code `ac3b056cd0c5` was release-packaged, its manifest hashes and fixture
+exclusion verified, and pushed to private main (remote HEAD checked). The package was
+not installed. Repository scan: 830 tracked files, four checks passed. The only branch
+work deliberately left out is the three F1 trials, the weaker JavaScript prototype and
+the incompatible native E2E harness; the latter's packaging check was recovered safely.
+This acceptance closure follows as a documentation-only commit. Recheck Git for its
+exact current local/remote HEAD. No new roadmap feature is claimed complete here.
+
 ## Current testing policy (owner directive, 2026-10-19)
 
 Development and real acceptance use the owner's normal computer, HOME, XDG directories,

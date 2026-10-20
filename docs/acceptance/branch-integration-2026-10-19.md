@@ -68,7 +68,21 @@ backend contracts. The existing installed `e17dfc2d8264` diagnostic still passed
 host PID 1188641, normal Secret Service and installed providers. The installation,
 previous rollback copy, running GUI and original terminal were not replaced or stopped.
 
-Package rebuild and final remote verification will be recorded below after completion.
+Release packaging passed from committed source `ac3b056cd0c5`; the rebuilt desktop
+carries that revision and the packaged authority digest. Manifest file hashes matched,
+and both freshly built product binaries passed `check:package-fixtures`. Authority
+SHA-256: `162ce1591c46fef928bcceaf17af0d322b6a859c6e00575951313e6f6e872ec0`.
+The package was not installed. The final repository scan passed all four checks over
+830 tracked files, with no credential findings. Temporary dependency links were removed.
+
+The validated integration was pushed without force to private `origin/main` and the
+remote was verified at `ac3b056cd0c5695fd64466727b7dcc62c119dadb`; this final acceptance
+note is a subsequent documentation-only commit. After the integration, only the three
+excluded local F1 branches (one unique commit each), the excluded native E2E harness
+(48 unique commits, with the safe packaging check selectively adapted) and the excluded
+JavaScript prototype (four unique commits) remain outside main. All other reviewed
+branch tips are ancestors of main. No branch or existing worktree was removed.
+
 Local execution logs: `.artifacts/acceptance/branch-integration-2026-10-19/`.
 
 ## Intentionally excluded
