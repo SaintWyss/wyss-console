@@ -411,6 +411,24 @@ impl Authority {
         // The fingerprint compared at decision time is the provider's own live request, never the
         // client's claim. After a restart none exists, so a late answer cannot be decided at all.
         let live = self.engine.pending_fingerprint(&session, &item);
+        // A durable fingerprint is history, not a live admission ticket. Only an
+        // exact replay may be read after the pending provider request disappeared.
+        // The writer still validates the canonical replay payload itself.
+        if live.is_none() {
+            let existing: Option<i64> = self
+                .engine
+                .connection()
+                .query_row(
+                    "SELECT 1 FROM processed_intents WHERE intent_id=?1",
+                    [p.intent_id.as_str()],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|_| E::StorageUnavailable)?;
+            if existing.is_none() {
+                return Err(E::StaleRevision);
+            }
+        }
         let authority = self.authority();
         let decided = Writer::new(self.engine.connection_mut(), authority.clone())?
             .decide_approval(
