@@ -23,7 +23,10 @@ fn wire(s: &str) -> WireUuid {
 }
 
 type Sent = Arc<Mutex<Vec<Vec<u8>>>>;
+type Inbound = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 struct Recorder {
+    session: String,
+    inbound: Inbound,
     sent: Sent,
     exited: Arc<Mutex<bool>>,
     refuse_critical: Arc<Mutex<bool>>,
@@ -39,11 +42,25 @@ impl Worker for Recorder {
         }
         self.send(frame)
     }
+    fn inbound(&mut self, max_frames: usize) -> ControlResult<Vec<Vec<u8>>> {
+        let mut incoming = self.inbound.lock().unwrap();
+        let mut frames = Vec::new();
+        let mut index = 0;
+        while index < incoming.len() && frames.len() < max_frames {
+            if incoming[index].0 == self.session {
+                frames.push(incoming.remove(index).1);
+            } else {
+                index += 1;
+            }
+        }
+        Ok(frames)
+    }
     fn has_exited(&mut self) -> bool {
         *self.exited.lock().unwrap()
     }
 }
 struct Spawn {
+    inbound: Inbound,
     sent: Sent,
     exited: Arc<Mutex<bool>>,
     refuse_critical: Arc<Mutex<bool>>,
@@ -51,11 +68,13 @@ struct Spawn {
 impl Spawner for Spawn {
     fn spawn(
         &mut self,
-        _launch: &RuntimeRef,
+        launch: &RuntimeRef,
         _staging: Option<&mut super::super::staging::LaunchStaging>,
     ) -> ControlResult<Spawned> {
         Ok(Spawned {
             worker: Box::new(Recorder {
+                session: launch.managed_session_id.as_str().to_owned(),
+                inbound: self.inbound.clone(),
                 sent: self.sent.clone(),
                 exited: self.exited.clone(),
                 refuse_critical: self.refuse_critical.clone(),
@@ -90,6 +109,7 @@ impl Rig {
             authority: Authority::new(engine),
             client: Client::default(),
             spawn: Spawn {
+                inbound: Arc::default(),
                 sent: Arc::default(),
                 exited: Arc::default(),
                 refuse_critical: Arc::default(),
