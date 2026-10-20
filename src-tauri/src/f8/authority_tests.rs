@@ -791,3 +791,56 @@ fn review_failed_recovery_remains_pending_and_retries_after_storage_restoration(
     assert_eq!(state, "indeterminate");
     validate_v8(rig.authority.engine().connection()).unwrap();
 }
+
+#[test]
+fn review_inbound_scheduler_dispatches_only_from_its_owned_runtime() {
+    let mut rig = Rig::with_capacity(2);
+    rig.hello();
+    let (a, fence_a) = rig.ready_for(0);
+    let (b, _fence_b) = rig.ready_for(1);
+    let session_a = rig.sessions[0].clone();
+    let session_b = rig.sessions[1].clone();
+    rig.call("executionLease/grant", json!({
+        "intent_id":uuid(),"session_id":session_a,"expected_session_revision":1,
+        "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence_a
+    }));
+    let started = rig.call("managedSession/turn/start", json!({
+        "intent_id":uuid(),"managed_session_id":session_a,
+        "expected_session_revision":1,"prompt":"inbound-check","runtime_fence":fence_a
+    }));
+    let turn_id = started["result"]["value"]["managed_turn_id"].as_str().unwrap().to_owned();
+    let head = |rig: &Rig| -> i64 {
+        rig.authority.engine().connection().query_row(
+            "SELECT count(*) FROM control_events", [], |r| r.get(0)
+        ).unwrap()
+    };
+    // A legitimate B worker emits a validly encoded turn event carrying A's ID.
+    // The transport, not the payload, determines its origin and must reject it.
+    rig.spawn.inbound.lock().unwrap().push((session_b.clone(),
+        serde_json::to_vec(&json!({
+            "kind":"turn_running","managed_turn_id":turn_id,
+            "provider_turn_id":"provider-foreign"
+        })).unwrap()
+    ));
+    let prior = head(&rig);
+    rig.authority.tick(Instant::now()).unwrap();
+    assert_eq!(head(&rig) - prior, 0, "B cannot change A's durable turn");
+    assert_eq!(rig.authority.engine().runtime_view(&session_b).map(|r|r.0),Some("stopping"));
+    assert_eq!(rig.authority.engine().runtime_view(&session_a).map(|r|r.0),Some("ready"));
+
+    rig.spawn.inbound.lock().unwrap().push((session_a.clone(),
+        serde_json::to_vec(&json!({
+            "kind":"turn_running","managed_turn_id":turn_id,
+            "provider_turn_id":"provider-owned"
+        })).unwrap()
+    ));
+    rig.authority.tick(Instant::now()).unwrap();
+    let state: String = rig.authority.engine().connection().query_row(
+        "SELECT state FROM managed_turns WHERE managed_turn_id=?1",
+        [&turn_id], |r| r.get(0)
+    ).unwrap();
+    assert_eq!(state, "running");
+    assert_eq!(rig.authority.engine().reference(&session_a), Some(a));
+    assert_eq!(rig.authority.engine().reference(&session_b), Some(b));
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
