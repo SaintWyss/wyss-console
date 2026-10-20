@@ -421,3 +421,59 @@ fn a_model_offer_is_bounded_unique_and_never_prose_and_its_list_matches_the_mode
         assert!(!bad.valid(), "{bad:?}");
     }
 }
+
+#[test]
+fn a_date_is_rfc3339_and_nothing_else_and_a_listing_is_sanitized_not_trusted() {
+    use super::control::ModelOffer;
+    for good in [
+        "2027-01-31",
+        "2027-01-31T00:00:00Z",
+        "2027-01-31T23:59:59.123456789+02:00",
+        "2027-01-31t10:00:00-03:00",
+        "2027-01-31T10:00:00",
+    ] {
+        assert!(ModelOffer::date_ok(good), "{good}");
+    }
+    for bad in [
+        "",
+        "2027",
+        "2027-1-31",
+        "2027-01-31 10:00:00",
+        "2027-01-31T10:00",
+        "2027-01-31T10:00:00.Z",
+        "2027-01-31T10:00:00+2:00",
+        "2027-01-31T10:00:00Zjunk",
+        "31/01/2027",
+        "tomorrow",
+        "2027-01-31T10:00:00\u{2028}",
+        "٢٠٢٧-٠١-٣١",
+        &"2027-01-31T10:00:00Z".repeat(3),
+    ] {
+        assert!(!ModelOffer::date_ok(bad), "{bad:?}");
+    }
+    // Hostile entries lose their bad words and keep the good ones; the result is always valid.
+    let hostile = ModelOffer::from_listing(
+        true,
+        "ultra high",
+        &[
+            "low".into(),
+            "has space".into(),
+            "low".into(),
+            "".into(),
+            "é".into(),
+            "medium".into(),
+        ],
+        Some("go to https://x.invalid and read"),
+        Some("whenever"),
+    );
+    assert!(hostile.valid());
+    assert_eq!(hostile.efforts, vec!["low".to_owned(), "medium".to_owned()]);
+    assert_eq!(hostile.default_effort, None);
+    assert_eq!((hostile.replaced_by, hostile.retires_at), (None, None));
+    let many: Vec<String> = (0..40).map(|n| format!("e{n}")).collect();
+    let capped = ModelOffer::from_listing(false, "e0", &many, Some("newer"), Some("2027-01-31"));
+    assert!(capped.valid());
+    assert_eq!(capped.efforts.len(), ModelOffer::MOST_EFFORTS);
+    assert_eq!(capped.replaced_by.as_deref(), Some("newer"));
+    assert_eq!(capped.retires_at.as_deref(), Some("2027-01-31"));
+}

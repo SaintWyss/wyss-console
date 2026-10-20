@@ -874,12 +874,14 @@ fn run(
         let offers = report
             .models
             .iter()
-            .map(|m| crate::contracts::control::ModelOffer {
-                is_default: m.is_default,
-                default_effort: Some(m.default_reasoning_effort.clone()),
-                efforts: m.reasoning_efforts.clone(),
-                replaced_by: m.replaced_by.clone(),
-                retires_at: m.retires_at.clone(),
+            .map(|m| {
+                crate::contracts::control::ModelOffer::from_listing(
+                    m.is_default,
+                    &m.default_reasoning_effort,
+                    &m.reasoning_efforts,
+                    m.replaced_by.as_deref(),
+                    m.retires_at.as_deref(),
+                )
             })
             .collect();
         let complete = !report.next_cursor_present;

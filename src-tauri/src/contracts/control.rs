@@ -844,12 +844,88 @@ pub struct ModelOffer {
 }
 impl ModelOffer {
     pub const MOST_EFFORTS: usize = 16;
-    fn word(value: &str, most: usize) -> bool {
-        !value.is_empty() && value.len() <= most && !value.chars().any(char::is_control)
+    /// One provider identifier: printable ASCII with no space, so it is a name and cannot be a
+    /// sentence, a link with prose around it or anything that needs more than one glance.
+    pub fn word_ok(value: &str, most: usize) -> bool {
+        !value.is_empty() && value.len() <= most && value.chars().all(|c| c.is_ascii_graphic())
+    }
+    /// A date as RFC 3339 writes it (`2027-01-31`, or with `T`, a time, fractions and a zone).
+    /// Nothing else is a date: no month names, no words, no space.
+    pub fn date_ok(value: &str) -> bool {
+        fn digits(s: &str, n: usize) -> bool {
+            s.len() == n && s.bytes().all(|b| b.is_ascii_digit())
+        }
+        if value.len() > 40 || !value.is_ascii() {
+            return false;
+        }
+        let (date, rest) = match value.find(['T', 't']) {
+            Some(at) => (&value[..at], Some(&value[at + 1..])),
+            None => (value, None),
+        };
+        let mut parts = date.split('-');
+        let ok_date = matches!(
+            (parts.next(), parts.next(), parts.next(), parts.next()),
+            (Some(y), Some(m), Some(d), None) if digits(y, 4) && digits(m, 2) && digits(d, 2)
+        );
+        let Some(rest) = rest else { return ok_date };
+        // `HH:MM:SS`, optionally `.fraction`, then `Z` or `±HH:MM`.
+        let (clock, zone) = match rest.find(['Z', 'z', '+', '-']) {
+            Some(at) => (&rest[..at], &rest[at..]),
+            None => (rest, ""),
+        };
+        let (hms, fraction) = clock
+            .split_once('.')
+            .map_or((clock, None), |(h, f)| (h, Some(f)));
+        let mut clock_parts = hms.split(':');
+        let ok_clock = matches!(
+            (clock_parts.next(), clock_parts.next(), clock_parts.next(), clock_parts.next()),
+            (Some(h), Some(m), Some(sec), None) if digits(h, 2) && digits(m, 2) && digits(sec, 2)
+        ) && fraction
+            .is_none_or(|f| (1..=9).contains(&f.len()) && f.bytes().all(|b| b.is_ascii_digit()));
+        let ok_zone = match zone {
+            "" | "Z" | "z" => true,
+            _ => {
+                let (sign, tail) = zone.split_at(1);
+                matches!(sign, "+" | "-")
+                    && tail
+                        .split_once(':')
+                        .is_some_and(|(h, m)| digits(h, 2) && digits(m, 2))
+            }
+        };
+        ok_date && ok_clock && ok_zone
+    }
+    /// What a listing's entry yields once every word has been judged: a word that is not a
+    /// plain identifier (or a date that is not one) is **left out**, never kept and never
+    /// repaired, so a hostile listing cannot make the catalogue unreadable or carry prose.
+    pub fn from_listing(
+        is_default: bool,
+        default_effort: &str,
+        efforts: &[String],
+        replaced_by: Option<&str>,
+        retires_at: Option<&str>,
+    ) -> Self {
+        let mut kept: Vec<String> = Vec::new();
+        for effort in efforts {
+            if Self::word_ok(effort, 64)
+                && !kept.contains(effort)
+                && kept.len() < Self::MOST_EFFORTS
+            {
+                kept.push(effort.clone());
+            }
+        }
+        Self {
+            is_default,
+            default_effort: Self::word_ok(default_effort, 64).then(|| default_effort.to_owned()),
+            efforts: kept,
+            replaced_by: replaced_by
+                .filter(|m| Self::word_ok(m, 256))
+                .map(str::to_owned),
+            retires_at: retires_at.filter(|t| Self::date_ok(t)).map(str::to_owned),
+        }
     }
     pub fn valid(&self) -> bool {
         self.efforts.len() <= Self::MOST_EFFORTS
-            && self.efforts.iter().all(|e| Self::word(e, 64))
+            && self.efforts.iter().all(|e| Self::word_ok(e, 64))
             && self
                 .efforts
                 .iter()
@@ -858,12 +934,12 @@ impl ModelOffer {
             && self
                 .default_effort
                 .as_deref()
-                .is_none_or(|e| Self::word(e, 64))
+                .is_none_or(|e| Self::word_ok(e, 64))
             && self
                 .replaced_by
                 .as_deref()
-                .is_none_or(|m| Self::word(m, 256))
-            && self.retires_at.as_deref().is_none_or(|t| Self::word(t, 64))
+                .is_none_or(|m| Self::word_ok(m, 256))
+            && self.retires_at.as_deref().is_none_or(Self::date_ok)
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

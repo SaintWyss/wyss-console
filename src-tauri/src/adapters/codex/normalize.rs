@@ -162,11 +162,19 @@ fn model(id: &str, name: Option<&str>, provider: Option<&str>) -> Result<AgentMo
     let provider = provider.and_then(|p| ModelProviderId::parse(p).ok());
     AgentModelDescriptorV1::from_value(json!({"schema_version":1,"provider_id":provider,"model_id":id,"display_name":name,"availability":"unknown"})).map_err(contract_error)
 }
-/// A short printable provider word, or nothing: never a partial or a truncated one.
+/// A provider identifier as the window can trust it: printable ASCII with no space, within the
+/// bound, or nothing. Never prose, a link with words around it, or a truncated one.
 fn bounded_word(value: Option<&Value>, most: usize) -> Option<String> {
     value
         .and_then(Value::as_str)
-        .filter(|s| !s.is_empty() && s.len() <= most && !s.chars().any(char::is_control))
+        .filter(|s| crate::contracts::control::ModelOffer::word_ok(s, most))
+        .map(str::to_owned)
+}
+/// A retirement date as RFC 3339 writes it, or nothing.
+fn bounded_date(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .filter(|s| crate::contracts::control::ModelOffer::date_ok(s))
         .map(str::to_owned)
 }
 fn safe_error(runtime: bool) -> Result<AdapterErrorV1> {
@@ -451,7 +459,7 @@ pub fn normalize_response(
                 let info = m.get("upgradeInfo").and_then(Value::as_object);
                 let replaced_by = bounded_word(info.and_then(|i| i.get("model")), 256)
                     .or_else(|| bounded_word(m.get("upgrade"), 256));
-                let retires_at = bounded_word(info.and_then(|i| i.get("retirementAt")), 64);
+                let retires_at = bounded_date(info.and_then(|i| i.get("retirementAt")));
                 let mut codex = json!({
                     "id":m["id"],"hidden":m["hidden"],"isDefault":m["isDefault"],"defaultReasoningEffort":m["defaultReasoningEffort"],"supportedReasoningEfforts":m["supportedReasoningEfforts"],"inputModalities":m.get("inputModalities").cloned().unwrap_or(json!(["text","image"]))
                 });

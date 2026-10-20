@@ -49,15 +49,18 @@ function record(
     throw invalid(field);
   return value as Record<string, unknown>;
 }
-/** A provider's short printable word, or null. Never prose: no space, no control character. */
+/**
+ * A provider identifier or effort as the desktop vouches for it: printable ASCII with no
+ * space. A sentence, a link with words around it or a date in prose is never one.
+ */
+const IDENTIFIER = /^[\x21-\x7e]+$/;
 function word(value: unknown, most: number, field: string): string | null {
   if (value === null) return null;
   if (
     typeof value !== 'string' ||
     value.length === 0 ||
     value.length > most ||
-    // eslint-disable-next-line no-control-regex
-    /[\u0000-\u001f\u007f-\u009f\s]/.test(value)
+    !IDENTIFIER.test(value)
   )
     throw invalid(field);
   return value;

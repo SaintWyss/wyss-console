@@ -851,6 +851,14 @@ fn a_malformed_or_oversized_marking_is_nothing_marked_and_does_not_fail_the_list
         json!({"upgradeInfo": {"model": ["no"], "retirementAt": 3}}),
         json!({"upgradeInfo": {"retirementAt": "t".repeat(65)}}),
         json!({"upgrade": null, "upgradeInfo": null}),
+        // Prose, links and non-ASCII are not identifiers; words and spaces are not dates.
+        json!({"upgrade": "use the new one instead"}),
+        json!({"upgradeInfo": {"model": "see https://example.invalid/x now"}}),
+        json!({"upgradeInfo": {"model": "modèle-é"}}),
+        json!({"upgradeInfo": {"retirementAt": "next Tuesday"}}),
+        json!({"upgradeInfo": {"retirementAt": "2027-01-31 00:00:00Z"}}),
+        json!({"upgradeInfo": {"retirementAt": "2027-13-01x"}}),
+        json!({"upgradeInfo": {"retirementAt": "https://example.invalid"}}),
     ] {
         let CodexObservation::ModelCatalog { models, .. } = listing(entry(bad.clone())) else {
             panic!()

@@ -77,6 +77,10 @@ describe('the catalogue contract', () => {
     break_((c) => (c.entries[0].efforts = ['a\nb']));
     break_((c) => (c.entries[0].is_default = 'true'));
     break_((c) => (c.entries[0].replaced_by = 'two words'));
+    break_((c) => (c.entries[0].efforts = ['é']));
+    break_(
+      (c) => (c.entries[0].retires_at = 'next Tuesday'.replace(' ', '\u00a0')),
+    );
     break_((c) => (c.entries[0].display_name = 'line\nbreak'));
     break_((c) => (c.entries = Array(101).fill(c.entries[0])));
     // A runtime that is not ready lists nothing and says nothing about a list.

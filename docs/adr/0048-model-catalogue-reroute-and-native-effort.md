@@ -52,6 +52,17 @@ turn_rerouted`, where it came from, the closed reason and the turn; provider and
    reads (the managed catalogue once on first show and again on request, the inventory the
    Configuration view reads, the sessions the Sessions view reads, the profiles).
 
+## Independent review
+
+A cold external review (Codex, with the contract and threat model above and no reasoning from
+the builder) of the first version found one MEDIUM: replacement and retirement words were only
+checked for control characters, so a hostile listing could carry prose or a link to the window.
+Fixed and covered by tests: identifiers are printable ASCII without space; a retirement is
+RFC 3339 or nothing; a listing's words are judged one by one and a bad one is left out
+(`ModelOffer::from_listing`), so the catalogue never becomes unreadable because of one entry.
+The review found nothing in the classifier, the turn controller or the observation. Its output
+and this fix are in `docs/acceptance/f6-models-2026-10-20.md`.
+
 ## Not done, on purpose
 
 - **No managed model or effort choice.** `thread/start`, `thread/resume` and `turn/start`
