@@ -18,15 +18,34 @@
     failureText,
   } from './present';
 
+  import type { ModelCatalogue } from '../../contracts/models';
+  import {
+    CLAUDE_EFFORTS,
+    CLAUDE_MODEL_ALIASES,
+    listedEfforts,
+    listedModels,
+  } from '../models/present';
+
   let {
     native,
     controller,
     visible,
+    catalogue = null,
   }: {
     native: NativeState;
     controller: NativeController;
     visible: boolean;
+    /** What the managed runtime lists, for suggestions only. Null when it is not known. */
+    catalogue?: ModelCatalogue | null;
   } = $props();
+
+  // Suggestions, never a check: the names are the agents' own and are passed as typed.
+  const modelChoices = $derived([
+    ...new Set([...CLAUDE_MODEL_ALIASES, ...listedModels(catalogue)]),
+  ]);
+  const effortChoices = $derived([
+    ...new Set([...CLAUDE_EFFORTS, ...listedEfforts(catalogue)]),
+  ]);
 
   const selected = $derived(
     native.editing && native.editing !== 'new'
@@ -75,6 +94,7 @@
     const body: ProfileBody = {
       ...$state.snapshot(form),
       model: form.model?.trim() ? form.model.trim() : null,
+      effort: form.effort?.trim() ? form.effort.trim() : null,
       skills_off: parse(skillsText),
     };
     await controller.saveProfile(
@@ -211,9 +231,43 @@
               type="text"
               maxlength="64"
               placeholder="the agent’s own default"
+              list="p-model-choices"
               bind:value={form.model}
               disabled={readOnly}
             />
+            <datalist id="p-model-choices">
+              {#each modelChoices as choice (choice)}
+                <option value={choice}></option>
+              {/each}
+            </datalist>
+          </div>
+          <div class="native-field">
+            <label for="p-effort">Reasoning effort</label>
+            <input
+              id="p-effort"
+              type="text"
+              maxlength="32"
+              placeholder="the agent’s own default"
+              list="p-effort-choices"
+              bind:value={form.effort}
+              disabled={readOnly}
+            />
+            <datalist id="p-effort-choices">
+              {#each effortChoices as choice (choice)}
+                <option value={choice}></option>
+              {/each}
+            </datalist>
+            <p class="native-note">
+              Names are suggestions: Claude Code’s documented levels, its model
+              aliases (<em>it</em> decides what they mean), and what the managed
+              Codex runtime lists
+              {catalogue?.state === 'listed'
+                ? 'right now'
+                : '(not running, so none are offered)'}. Wyss Console cannot
+              check a name: the agent says so in its session if it does not know
+              it. Claude Code takes only its documented levels; Codex takes the
+              word as a configuration override for that session only.
+            </p>
           </div>
           <div class="native-field">
             <label for="p-permission">Permissions</label>

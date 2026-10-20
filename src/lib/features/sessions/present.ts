@@ -210,6 +210,8 @@ export function observedModelLine(
   const effort = model.reasoning_effort
     ? `, effort ${model.reasoning_effort}`
     : '';
+  if (model.source === 'turn_rerouted')
+    return `Model in use: ${model.model_id}${effort} (the runtime said it rerouted a turn from ${model.rerouted_from}, ${model.reroute_reason === 'high_risk_cyber_activity' ? 'for a safety reason it named' : 'for a reason this app does not know'}; whether later turns stay on it is not documented)`;
   return `Model in use: ${model.model_id}${effort} (reported by the runtime when the session was ${model.source === 'thread_resume' ? 'resumed' : 'started'})`;
 }
 

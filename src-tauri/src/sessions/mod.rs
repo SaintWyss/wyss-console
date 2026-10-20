@@ -9,10 +9,12 @@
 //! committed it; what the window is told is what the authority answered, reduced to a
 //! narrow projection. No dependency on Tauri or human terminals.
 mod activation;
+mod models;
 mod service;
 mod view;
 
 pub use activation::TurnGuard;
+pub use models::{CatalogueEntry, CatalogueState, ModelCatalogue};
 pub(crate) use service::{Grant, Held, session_revision};
 pub use service::{SessionService, SessionStats};
 pub use view::{

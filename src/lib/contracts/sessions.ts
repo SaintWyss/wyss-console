@@ -3,7 +3,12 @@
  * intents answer. It is not the control contract: it names no control method, and the
  * only identity it carries is the session's own.
  */
-import { parseManagedSessionId, type ManagedSessionId } from './identities';
+import {
+  parseManagedSessionId,
+  parseManagedTurnId,
+  type ManagedSessionId,
+  type ManagedTurnId,
+} from './identities';
 
 export type SessionState = 'prepared' | 'closed';
 export type SessionBinding =
@@ -200,18 +205,43 @@ function parseRuntime(value: unknown): RuntimeFacts {
   return { mode, workspace: folder };
 }
 
+export const REROUTE_REASONS = [
+  'high_risk_cyber_activity',
+  'unrecognised',
+] as const;
+export type RerouteReason = (typeof REROUTE_REASONS)[number];
 export interface ObservedModel {
   model_id: string;
   provider_id: string | null;
   reasoning_effort: string | null;
-  source: 'thread_start' | 'thread_resume';
+  /** `turn_rerouted`: the provider said it rerouted a turn, and `model_id` is where to. */
+  source: 'thread_start' | 'thread_resume' | 'turn_rerouted';
+  /** Only with `turn_rerouted`, and then all three: where from, why, and which turn. */
+  rerouted_from?: string;
+  reroute_reason?: RerouteReason;
+  rerouted_turn?: ManagedTurnId;
 }
 const WORD = /^[\x21-\x7e]+$/;
+const OBSERVED_BASE = [
+  'model_id',
+  'provider_id',
+  'reasoning_effort',
+  'source',
+] as const;
+const OBSERVED_REROUTE = [
+  'rerouted_from',
+  'reroute_reason',
+  'rerouted_turn',
+] as const;
 function parseObservedModel(value: unknown): ObservedModel | null {
   if (value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value))
+    throw invalid('observed_model');
+  // Four fields, or those and the three a reroute adds: nothing in between, nothing else.
+  const rerouted = 'source' in value && value.source === 'turn_rerouted';
   const v = record(
     value,
-    ['model_id', 'provider_id', 'reasoning_effort', 'source'],
+    rerouted ? [...OBSERVED_BASE, ...OBSERVED_REROUTE] : OBSERVED_BASE,
     'observed_model',
   );
   const word = (x: unknown, most: number): string | null => {
@@ -227,13 +257,31 @@ function parseObservedModel(value: unknown): ObservedModel | null {
   };
   const model = word(v.model_id, 256);
   if (model === null) throw invalid('observed_model');
-  if (v.source !== 'thread_start' && v.source !== 'thread_resume')
-    throw invalid('observed_model');
-  return {
+  const source = member(
+    v.source,
+    ['thread_start', 'thread_resume', 'turn_rerouted'] as const,
+    'observed_model',
+  );
+  const base = {
     model_id: model,
     provider_id: word(v.provider_id, 64),
     reasoning_effort: word(v.reasoning_effort, 64),
-    source: v.source,
+    source,
+  };
+  if (!rerouted) return base;
+  const from = word(v.rerouted_from, 256);
+  if (from === null) throw invalid('observed_model');
+  let turn: ManagedTurnId;
+  try {
+    turn = parseManagedTurnId(v.rerouted_turn);
+  } catch {
+    throw invalid('observed_model');
+  }
+  return {
+    ...base,
+    rerouted_from: from,
+    reroute_reason: member(v.reroute_reason, REROUTE_REASONS, 'observed_model'),
+    rerouted_turn: turn,
   };
 }
 

@@ -113,6 +113,14 @@ pub async fn managed_sessions_page(
     })
     .await
 }
+/// What the managed runtime offers: one read, no argument. The window cannot name a runtime,
+/// a model or a page; it is told the catalogue the authority holds, or that there is none.
+#[tauri::command]
+pub async fn managed_model_catalogue(
+    service: State<'_, SessionService>,
+) -> Result<crate::sessions::ModelCatalogue, SessionError> {
+    blocking(service.inner().clone(), |service| service.model_catalogue()).await
+}
 #[tauri::command]
 pub async fn managed_session_prepare(
     service: State<'_, SessionService>,
@@ -505,6 +513,7 @@ mod tests {
             "allow-authority-lifecycle",
             "allow-authority-retry",
             "allow-managed-sessions-page",
+            "allow-managed-model-catalogue",
             "allow-managed-session-prepare",
             "allow-managed-session-resume",
             "allow-managed-session-close",

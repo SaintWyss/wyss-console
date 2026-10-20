@@ -1,0 +1,61 @@
+{
+  "listed": {
+    "schema_version": 1,
+    "state": "listed",
+    "mode": "inference",
+    "runtime_version": "0.159.0",
+    "complete": true,
+    "entries": [
+      {
+        "model_id": "model-a",
+        "display_name": "Model A",
+        "provider_id": null,
+        "is_default": true,
+        "default_effort": "medium",
+        "efforts": ["low", "medium", "high"],
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "model_id": "model-b",
+        "display_name": "Model B (older)",
+        "provider_id": "custom",
+        "is_default": false,
+        "default_effort": "high",
+        "efforts": ["high"],
+        "replaced_by": "model-a",
+        "retires_at": "2027-01-31T00:00:00Z"
+      }
+    ],
+    "read_at": 1792466400
+  },
+  "partial_without_offers": {
+    "schema_version": 1,
+    "state": "listed",
+    "mode": "local_tools",
+    "runtime_version": null,
+    "complete": false,
+    "entries": [
+      {
+        "model_id": "model-only",
+        "display_name": null,
+        "provider_id": null,
+        "is_default": null,
+        "default_effort": null,
+        "efforts": null,
+        "replaced_by": null,
+        "retires_at": null
+      }
+    ],
+    "read_at": 1792466401
+  },
+  "not_ready": {
+    "schema_version": 1,
+    "state": "not_ready",
+    "mode": null,
+    "runtime_version": null,
+    "complete": null,
+    "entries": [],
+    "read_at": 1792466402
+  }
+}

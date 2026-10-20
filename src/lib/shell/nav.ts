@@ -6,6 +6,7 @@ export type ViewId =
   | 'approvals'
   | 'events'
   | 'configuration'
+  | 'models'
   | 'profiles'
   | 'credentials'
   | 'settings';
@@ -61,6 +62,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: 'Configuration',
     subtitle: 'What the agents are set up with',
     icon: 'M4 6h16M4 12h16M4 18h16M8 4v4M15 10v4M10 16v4',
+  },
+  {
+    id: 'models',
+    label: 'Models',
+    subtitle: 'What is offered, set, selected and in use',
+    icon: 'M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12v9M12 12L4 7.5',
   },
   {
     id: 'profiles',

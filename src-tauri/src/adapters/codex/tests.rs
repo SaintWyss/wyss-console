@@ -787,3 +787,75 @@ fn materialization_notifications_are_validated_and_consumed_without_attachment()
         );
     }
 }
+
+fn listing(entry: Value) -> CodexObservation {
+    let wire = json!({"id":"request-fixture","result":{"data":[entry],"nextCursor":null}});
+    let m = WireMessage::parse(
+        serde_json::to_vec(&wire).unwrap().as_slice(),
+        Direction::ServerToClient,
+    )
+    .unwrap();
+    normalize_response(
+        &m,
+        &CodexRequestId::String("request-fixture".into()),
+        Operation::ModelList,
+        None,
+    )
+    .unwrap()
+}
+fn entry(extra: Value) -> Value {
+    let mut base = json!({"id":"a","model":"m","displayName":"M","description":"d","hidden":false,
+        "isDefault":true,"defaultReasoningEffort":"medium",
+        "supportedReasoningEfforts":[{"reasoningEffort":"low","description":"x"},{"reasoningEffort":"medium","description":"y"}]});
+    for (key, value) in extra.as_object().unwrap() {
+        base[key] = value.clone();
+    }
+    base
+}
+
+#[test]
+fn a_replacement_the_runtime_marks_is_carried_as_identifiers_and_a_date_and_never_as_its_prose() {
+    let CodexObservation::ModelCatalog { models, .. } = listing(entry(json!({
+        "upgrade": "older-name",
+        "upgradeInfo": {
+            "model": "newer-model", "retirementAt": "2027-01-31T00:00:00Z",
+            "modelLink": "https://example.invalid/x",
+            "upgradeCopy": "PROVIDER COPY MUST NOT SURVIVE",
+            "migrationMarkdown": "# PROVIDER MARKDOWN MUST NOT SURVIVE"
+        }
+    }))) else {
+        panic!()
+    };
+    assert_eq!(models[0].codex["replacedBy"], "newer-model");
+    assert_eq!(models[0].codex["retirementAt"], "2027-01-31T00:00:00Z");
+    let kept = models[0].codex.to_string();
+    assert!(!kept.contains("PROVIDER") && !kept.contains("example.invalid"));
+    // Without upgradeInfo the plain `upgrade` identifier is the marking.
+    let CodexObservation::ModelCatalog { models, .. } =
+        listing(entry(json!({"upgrade": "only-this"})))
+    else {
+        panic!()
+    };
+    assert_eq!(models[0].codex["replacedBy"], "only-this");
+    assert!(models[0].codex.get("retirementAt").is_none());
+}
+
+#[test]
+fn a_malformed_or_oversized_marking_is_nothing_marked_and_does_not_fail_the_listing() {
+    for bad in [
+        json!({"upgrade": 7}),
+        json!({"upgrade": ""}),
+        json!({"upgrade": "x".repeat(257)}),
+        json!({"upgrade": "a\nb"}),
+        json!({"upgradeInfo": "text"}),
+        json!({"upgradeInfo": {"model": ["no"], "retirementAt": 3}}),
+        json!({"upgradeInfo": {"retirementAt": "t".repeat(65)}}),
+        json!({"upgrade": null, "upgradeInfo": null}),
+    ] {
+        let CodexObservation::ModelCatalog { models, .. } = listing(entry(bad.clone())) else {
+            panic!()
+        };
+        assert!(models[0].codex.get("replacedBy").is_none(), "{bad}");
+        assert!(models[0].codex.get("retirementAt").is_none(), "{bad}");
+    }
+}

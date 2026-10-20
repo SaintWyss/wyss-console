@@ -3330,3 +3330,196 @@ fn a_turn_is_admitted_only_at_the_session_revision_the_client_saw() {
         Ok(RuntimeCommand::Start(_))
     ));
 }
+
+fn reroute_frame(extra: serde_json::Value) -> serde_json::Value {
+    let mut params = json!({
+        "threadId": "opaque-durable-thread", "turnId": "provider-turn-1",
+        "fromModel": "model-a", "toModel": "model-b", "reason": "highRiskCyberActivity",
+    });
+    for (k, v) in extra.as_object().unwrap() {
+        if v.is_null() {
+            params.as_object_mut().unwrap().remove(k);
+        } else {
+            params[k] = v.clone();
+        }
+    }
+    json!({"method": "model/rerouted", "params": params})
+}
+
+#[test]
+fn a_reroute_is_tolerated_only_when_it_is_exactly_the_schema_and_in_both_profiles() {
+    use crate::contracts::binding::RerouteReason;
+    for local in [false, true] {
+        let classify = |v: serde_json::Value| {
+            let m = frame(v);
+            if local {
+                safety::local_notification(&m)
+            } else {
+                safety::notification(&m)
+            }
+        };
+        let Ok(Some(TurnNotice {
+            kind: NoticeKind::Rerouted(r),
+            thread,
+            turn,
+        })) = classify(reroute_frame(json!({})))
+        else {
+            panic!("not accepted (local={local})")
+        };
+        assert_eq!((r.from.as_str(), r.to.as_str()), ("model-a", "model-b"));
+        assert_eq!(r.reason, RerouteReason::HighRiskCyberActivity);
+        assert_eq!(
+            (thread.as_str(), turn.as_str()),
+            ("opaque-durable-thread", "provider-turn-1")
+        );
+        // An unknown reason is a closed word, never the provider's text, and never a failure.
+        let Ok(Some(TurnNotice {
+            kind: NoticeKind::Rerouted(r),
+            ..
+        })) = classify(reroute_frame(json!({"reason": "somethingNew"})))
+        else {
+            panic!()
+        };
+        assert_eq!(r.reason, RerouteReason::Unrecognised);
+        // Everything else about it is the isolation violation it has always been.
+        for bad in [
+            json!({"extra": "field"}),
+            json!({"reason": null}),
+            json!({"fromModel": null}),
+            json!({"toModel": null}),
+            json!({"threadId": null}),
+            json!({"turnId": null}),
+            json!({"fromModel": ""}),
+            json!({"toModel": "m".repeat(257)}),
+            json!({"toModel": "has space"}),
+            json!({"fromModel": "line\nbreak"}),
+            json!({"toModel": 7}),
+            json!({"reason": ["highRiskCyberActivity"]}),
+            json!({"reason": "r".repeat(65)}),
+            json!({"threadId": 5}),
+            json!({"turnId": ""}),
+        ] {
+            assert!(
+                classify(reroute_frame(bad.clone()))
+                    .is_err_and(|e| e.code == "inference_isolation_violation"),
+                "local={local}: {bad}"
+            );
+        }
+        // And nothing next to it is let through by it: an unknown notification still is not.
+        assert!(
+            classify(json!({"method": "model/somethingElse", "params": {}}))
+                .is_err_and(|e| e.code == "inference_isolation_violation")
+        );
+    }
+}
+
+#[test]
+fn a_reroute_of_the_running_turn_is_recorded_in_memory_and_every_other_one_is_a_violation() {
+    use crate::contracts::binding::{ObservedModel, ObservedModelSource, RerouteReason};
+    let mut rig = Rig::new();
+    let reroute = |from: &str, to: &str| {
+        NoticeKind::Rerouted(safety::Reroute {
+            from: from.into(),
+            to: to.into(),
+            reason: RerouteReason::HighRiskCyberActivity,
+        })
+    };
+    // The session was attached with what its thread answer reported.
+    rig.conversations.attach_with_model_for_test(
+        &rig.session.managed_session_id,
+        &rig.instance,
+        ObservedModel {
+            model_id: "model-a".into(),
+            provider_id: Some("custom".into()),
+            reasoning_effort: Some("high".into()),
+            source: ObservedModelSource::ThreadStart,
+            rerouted_from: None,
+            reroute_reason: None,
+            rerouted_turn: None,
+        },
+    );
+    // Another thread, another turn: a violation, and nothing is recorded.
+    for (thread, turn) in [
+        ("another-thread", "provider-turn-1"),
+        ("opaque-durable-thread", "another-turn"),
+    ] {
+        let verdict = rig
+            .turns
+            .notice(
+                &mut rig.store,
+                &mut rig.runtime,
+                &rig.instance.clone(),
+                TurnNotice {
+                    thread: CodexThreadId::parse(thread).unwrap(),
+                    turn: CodexTurnId::parse(turn).unwrap(),
+                    kind: reroute("model-a", "model-b"),
+                },
+            )
+            .unwrap();
+        assert_eq!(verdict, Verdict::Violation, "{thread}/{turn}");
+        assert!(rig.turns.take_reroute().is_none());
+    }
+    // The running turn: accepted, the turn goes on, and the controller hands it over once.
+    assert_eq!(rig.notice(reroute("model-a", "model-b")), Verdict::Continue);
+    let accepted = rig.turns.take_reroute().expect("accepted");
+    assert!(rig.turns.take_reroute().is_none(), "taken once");
+    assert_eq!(accepted.session, rig.session.managed_session_id);
+    assert_eq!(accepted.turn, rig.turn.managed_turn_id);
+    rig.conversations.rerouted(
+        &rig.instance,
+        &accepted.session,
+        accepted.turn.clone(),
+        &accepted.reroute,
+    );
+    let status = rig
+        .conversations
+        .projection(&rig.store, &rig.runtime, &rig.session.managed_session_id)
+        .unwrap();
+    let seen = status.observed_model.expect("observed");
+    // The destination is what is reported now, marked as such and from where; what the thread
+    // answer said about provider and effort is kept, not inferred or dropped.
+    assert_eq!(seen.model_id, "model-b");
+    assert_eq!(seen.source, ObservedModelSource::TurnRerouted);
+    assert_eq!(seen.rerouted_from.as_deref(), Some("model-a"));
+    assert_eq!(
+        seen.reroute_reason,
+        Some(RerouteReason::HighRiskCyberActivity)
+    );
+    assert_eq!(seen.rerouted_turn.as_ref(), Some(&rig.turn.managed_turn_id));
+    assert_eq!(seen.provider_id.as_deref(), Some("custom"));
+    assert_eq!(seen.reasoning_effort.as_deref(), Some("high"));
+    // The turn is still running, and its stream carries nothing new for it.
+    assert_eq!(
+        rig.notice(NoticeKind::Terminal(TurnOutcome::Completed)),
+        Verdict::Continue
+    );
+    // With no turn at all a reroute is a violation.
+    assert_eq!(
+        rig.notice(reroute("model-b", "model-c")),
+        Verdict::Violation
+    );
+    // A reroute for another generation's attachment records nothing.
+    let other = AgentRuntimeInstanceId::parse(uuid().as_str()).unwrap();
+    let before = rig
+        .conversations
+        .projection(&rig.store, &rig.runtime, &rig.session.managed_session_id)
+        .unwrap()
+        .observed_model;
+    rig.conversations.rerouted(
+        &other,
+        &rig.session.managed_session_id,
+        rig.turn.managed_turn_id.clone(),
+        &safety::Reroute {
+            from: "x".into(),
+            to: "y".into(),
+            reason: RerouteReason::Unrecognised,
+        },
+    );
+    assert_eq!(
+        rig.conversations
+            .projection(&rig.store, &rig.runtime, &rig.session.managed_session_id)
+            .unwrap()
+            .observed_model,
+        before
+    );
+}

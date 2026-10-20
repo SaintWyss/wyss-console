@@ -10,7 +10,7 @@ use super::{
 use crate::contracts::{
     binding::ObservedModel,
     control::*,
-    identities::{AgentRuntimeInstanceId, ManagedSessionId},
+    identities::{AgentRuntimeInstanceId, ManagedSessionId, ManagedTurnId},
 };
 use std::{
     collections::BTreeMap,
@@ -74,6 +74,38 @@ impl Conversations {
     }
 }
 impl Conversations {
+    /// Records a reroute the turn controller accepted: the model in use for this session is now
+    /// the one the notice names, marked as reported by a reroute and from which model. Only an
+    /// attachment of this very generation is touched. What the thread's own answer reported
+    /// (provider, effort) is kept; when it reported no model, the notice's source model stands
+    /// in as the base, so nothing is taken from a default or a catalogue.
+    pub fn rerouted(
+        &mut self,
+        instance: &AgentRuntimeInstanceId,
+        session: &ManagedSessionId,
+        turn: ManagedTurnId,
+        reroute: &crate::adapters::codex::safety::Reroute,
+    ) {
+        let Some(attached) = self
+            .attachments
+            .get_mut(&session.as_str().to_ascii_lowercase())
+            .filter(|a| a.instance == *instance)
+        else {
+            return;
+        };
+        let base = attached.model.clone().unwrap_or(ObservedModel {
+            model_id: reroute.from.clone(),
+            provider_id: None,
+            reasoning_effort: None,
+            source: crate::contracts::binding::ObservedModelSource::ThreadStart,
+            rerouted_from: None,
+            reroute_reason: None,
+            rerouted_turn: None,
+        });
+        if let Some(next) = base.rerouted(&reroute.from, &reroute.to, reroute.reason, turn) {
+            attached.model = Some(next);
+        }
+    }
     pub fn invalidate_admission(&self) {
         if let Some(p) = &self.pending {
             p.admission.store(false, Ordering::Release)

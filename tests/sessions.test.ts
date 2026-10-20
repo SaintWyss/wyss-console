@@ -802,6 +802,46 @@ describe('the model of a managed session', () => {
       'not known while detached',
     );
   });
+  it('says a reroute as what it is: where to, from where, why, and what is not known', () => {
+    const { page, s } = attached();
+    const turn = '33333333-3333-4333-8333-333333333333';
+    s.observed_model = {
+      model_id: 'model-b',
+      provider_id: 'custom',
+      reasoning_effort: 'high',
+      source: 'turn_rerouted',
+      rerouted_from: 'model-a',
+      reroute_reason: 'high_risk_cyber_activity',
+      rerouted_turn: turn,
+    };
+    const model = parseSessionPage(page).sessions[1];
+    expect(model.observed_model?.rerouted_from).toBe('model-a');
+    const line = observedModelLine(model);
+    expect(line).toContain('model-b');
+    expect(line).toContain('rerouted a turn from model-a');
+    expect(line).toContain('whether later turns stay on it is not documented');
+    // An unrecognised reason is said as unknown, not as the provider's text.
+    s.observed_model.reroute_reason = 'unrecognised';
+    expect(observedModelLine(parseSessionPage(page).sessions[1])).toContain(
+      'a reason this app does not know',
+    );
+    // A reroute has all three extra fields or none; nobody else carries any.
+    for (const mutate of [
+      (m: any) => delete m.rerouted_from,
+      (m: any) => delete m.reroute_reason,
+      (m: any) => delete m.rerouted_turn,
+      (m: any) => (m.rerouted_from = ''),
+      (m: any) => (m.rerouted_from = 'a b'),
+      (m: any) => (m.reroute_reason = 'because'),
+      (m: any) => (m.rerouted_turn = 'not-a-turn'),
+      (m: any) => (m.source = 'thread_start'),
+    ]) {
+      const { page: damaged, s: shown } = attached();
+      shown.observed_model = { ...s.observed_model };
+      mutate(shown.observed_model);
+      expect(() => parseSessionPage(damaged)).toThrow();
+    }
+  });
   it('is refused when it does not fit or when the session is not attached', () => {
     const { page, s } = attached();
     for (const bad of [

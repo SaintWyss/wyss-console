@@ -1346,3 +1346,58 @@ fn a_head_is_witnessed_only_once_its_replacement_reached_the_directory() {
     assert_eq!(head(&witness), "5");
     assert!(!staging.exists());
 }
+
+#[test]
+fn a_page_of_model_offers_matches_its_models_decodes_from_older_authorities_and_refuses_the_unknown()
+ {
+    use crate::contracts::control::ModelOffer;
+    let id = crate::contracts::identities::AgentRuntimeInstanceId::parse(
+        "22222222-2222-4222-8222-222222222222",
+    )
+    .unwrap();
+    let model = |name: &str| {
+        crate::contracts::agent_adapter::AgentModelDescriptorV1::from_value(json!({
+            "schema_version": 1, "provider_id": null, "model_id": name,
+            "display_name": null, "availability": "unknown"
+        }))
+        .unwrap()
+    };
+    let offer = || ModelOffer {
+        is_default: true,
+        default_effort: Some("medium".into()),
+        efforts: vec!["low".into(), "medium".into()],
+        replaced_by: None,
+        retires_at: None,
+    };
+    let encoded = |models: Vec<_>, offers: Vec<ModelOffer>| {
+        Response {
+            request_id: uuid(),
+            authority_instance_id: uuid(),
+            outcome: Ok(ResultValue::RuntimeModels {
+                runtime_instance_id: id.clone(),
+                models,
+                offers,
+                complete: Some(true),
+                next: None,
+            }),
+        }
+        .encode()
+        .and_then(|bytes| Response::parse(&bytes))
+    };
+    assert!(encoded(vec![model("a")], vec![offer()]).is_ok());
+    assert!(encoded(vec![model("a")], vec![]).is_ok());
+    assert!(encoded(vec![model("a"), model("b")], vec![offer()]).is_err());
+    let mut bad = offer();
+    bad.efforts = vec!["a\nb".into()];
+    assert!(encoded(vec![model("a")], vec![bad]).is_err());
+    // What an earlier authority sent still decodes: no offers, completeness not reported.
+    let old = json!({"kind":"runtime_models","value":{
+        "runtime_instance_id":"22222222-2222-4222-8222-222222222222","models":[],"next":null}});
+    assert!(matches!(
+        serde_json::from_value::<ResultValue>(old).unwrap(),
+        ResultValue::RuntimeModels { complete: None, ref offers, .. } if offers.is_empty()
+    ));
+    let unknown = json!({"kind":"runtime_models","value":{
+        "runtime_instance_id":"22222222-2222-4222-8222-222222222222","models":[],"next":null,"x":1}});
+    assert!(serde_json::from_value::<ResultValue>(unknown).is_err());
+}

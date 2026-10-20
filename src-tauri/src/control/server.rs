@@ -349,7 +349,13 @@ pub fn run_from_environment() -> ControlResult<()> {
                     }
                     let verdict = match &observation {
                         Observation::TurnNotice(n) => {
-                            turns.notice(&mut store, &mut runtime, &id, n.clone())
+                            let verdict = turns.notice(&mut store, &mut runtime, &id, n.clone());
+                            // A reroute the turn controller accepted is recorded beside the
+                            // attachment, in memory only (ADR 0048).
+                            if let Some(r) = turns.take_reroute() {
+                                conversations.rerouted(&id, &r.session, r.turn, &r.reroute);
+                            }
+                            verdict
                         }
                         Observation::TurnResult {
                             managed_turn_id,

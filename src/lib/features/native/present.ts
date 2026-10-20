@@ -74,6 +74,8 @@ export const FAILURE_TEXT: Record<string, string> = {
   profile_applies_to_invalid: 'Choose at least one agent, each once.',
   profile_model_invalid:
     'The model may hold letters, digits and . _ : - / only, and may not start with a dash.',
+  profile_effort_invalid:
+    'The effort may hold letters, digits and . _ - only (32 at most), and may not start with a dash.',
   profile_skill_invalid:
     'A skill name may hold letters, digits and . _ : - only (64 at most).',
   profile_notes_invalid: 'The notes are too long or hold control characters.',
@@ -128,6 +130,7 @@ export function emptyBody(): ProfileBody {
     applies_to: ['claude_code', 'codex'],
     extends: null,
     model: null,
+    effort: null,
     permission: null,
     hooks: null,
     skills_off: [],
@@ -144,7 +147,11 @@ export function emptyBody(): ProfileBody {
  */
 export interface ModelFacts {
   requested: string;
+  /** The effort the profile asked for, or why there is none to say. */
+  requestedEffort: string;
   configured: string;
+  /** The effort the agent's own files hold, or why there is none to say. */
+  configuredEffort: string;
   inUse: string;
 }
 export function modelFacts(
@@ -153,31 +160,60 @@ export function modelFacts(
   config: readonly ConfigItem[] | null,
 ): ModelFacts {
   let requested = 'none (the agent’s own choice)';
+  let requestedEffort = requested;
   if (session.profile) {
     const profile = profiles.find((p) => p.id === session.profile?.id);
-    if (!profile) requested = 'the profile no longer exists';
+    if (!profile) requested = requestedEffort = 'the profile no longer exists';
     else if (profile.current !== session.profile.version)
-      requested = 'the profile has changed since this session started';
-    else if (profile.body.model) requested = profile.body.model;
+      requested = requestedEffort =
+        'the profile has changed since this session started';
+    else {
+      if (profile.body.model) requested = profile.body.model;
+      if (profile.body.effort) requestedEffort = profile.body.effort;
+    }
   }
   let configured = 'not read yet (open Configuration)';
+  let configuredEffort = configured;
   if (config !== null) {
     const provider =
       session.agent_id === 'claude_code' ? 'claude_code' : 'codex';
-    const item = config.find(
-      (i) =>
-        i.provider === provider &&
-        i.kind === 'model_preference' &&
-        i.name === 'model' &&
-        i.scope === 'global' &&
-        i.detail?.kind === 'text',
-    );
-    configured =
-      item?.detail?.kind === 'text'
-        ? item.detail.value.text
-        : 'not set in its files';
+    const keyed = (key: string): string | null => {
+      const item = config.find(
+        (i) =>
+          i.provider === provider &&
+          i.kind === 'model_preference' &&
+          i.name === key &&
+          i.scope === 'global' &&
+          i.detail?.kind === 'text',
+      );
+      return item?.detail?.kind === 'text' ? item.detail.value.text : null;
+    };
+    // Each agent names its effort key its own way.
+    const effortKey =
+      session.agent_id === 'claude_code'
+        ? 'effortLevel'
+        : 'model_reasoning_effort';
+    configured = keyed('model') ?? 'not set in its files';
+    configuredEffort = keyed(effortKey) ?? 'not set in its files';
   }
-  return { requested, configured, inUse: 'not reported by the agent' };
+  return {
+    requested,
+    requestedEffort,
+    configured,
+    configuredEffort,
+    inUse: 'not reported by the agent',
+  };
+}
+
+/**
+ * What can be said about changing the model of a session that is already running. Claude
+ * Code's own command is documented (and says it saves your default too); Codex's is not
+ * verified, so none is offered. The text sends nothing to the terminal and copies nothing.
+ */
+export function switchHint(agent: AgentId): string {
+  return agent === 'claude_code'
+    ? 'To change the model in this session, type /model in it. Claude Code also saves your choice as its default.'
+    : 'How to change the model of a running Codex session is not verified, so none is suggested.';
 }
 
 export function profilesFor(profiles: Profile[], agent: AgentId): Profile[] {

@@ -13,6 +13,7 @@
     formatBytes,
     groupByProject,
     modelFacts,
+    switchHint,
     profilesFor,
     restorable,
     sharedFolders,
@@ -408,7 +409,11 @@
                         data-testid="models"
                       >
                         Model: asked for {facts.requested} · set in its files {facts.configured}
-                        · in use: {facts.inUse}
+                        · in use: {facts.inUse} · Effort: asked for {facts.requestedEffort}
+                        · set in its files {facts.configuredEffort}
+                      </span>
+                      <span class="event-meta native-note" data-testid="switch">
+                        {switchHint(session.agent_id)}
                       </span>
                     {/if}
                     {#if session.state === 'lost'}

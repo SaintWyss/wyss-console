@@ -765,6 +765,17 @@ pub(crate) enum NoticeKind {
     RequestResolved(super::CodexRequestId),
     /// The provider reports applied file changes in this turn.
     DiffUpdated,
+    /// The provider says it rerouted this turn to another model (ADR 0048). It carries no
+    /// tool, command or content. The turn controller accepts it only for the running turn.
+    Rerouted(Reroute),
+}
+/// What a provider's `model/rerouted` notice says, after the classifier accepted its shape.
+/// The reason is a closed word; the provider's text is never kept.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Reroute {
+    pub from: String,
+    pub to: String,
+    pub reason: crate::contracts::binding::RerouteReason,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ActionKind {
@@ -844,6 +855,39 @@ const FILE_APPROVAL_FIELDS: [&str; 6] = [
     "grantRoot",
 ];
 const ACTION_LABEL_BYTES: usize = crate::contracts::approval::MAX_PARSED_ACTION_BYTES;
+/// `model/rerouted` (ModelReroutedNotification): `threadId`, `turnId`, `fromModel`, `toModel`
+/// and `reason`, and nothing else. Models are provider identifiers within the descriptor's
+/// bounds; the reason is mapped to a closed word. Whether it belongs to the running turn is the
+/// turn controller's judgement, not this function's.
+fn reroute(p: &Value) -> Result<TurnNotice> {
+    use crate::contracts::binding::RerouteReason;
+    const KEYS: [&str; 5] = ["threadId", "turnId", "fromModel", "toModel", "reason"];
+    let o = p.as_object().ok_or_else(invalid)?;
+    if o.len() != KEYS.len() || KEYS.iter().any(|k| !o.contains_key(*k)) {
+        return fail("invalid_reroute");
+    }
+    let word = |k: &str, most: usize| -> Result<&str> {
+        let t = o[k].as_str().ok_or_else(invalid)?;
+        (!t.is_empty() && t.len() <= most && t.chars().all(|c| c.is_ascii_graphic()))
+            .then_some(t)
+            .ok_or(CodecError {
+                code: "invalid_reroute",
+            })
+    };
+    let reason = match word("reason", 64)? {
+        "highRiskCyberActivity" => RerouteReason::HighRiskCyberActivity,
+        _ => RerouteReason::Unrecognised,
+    };
+    Ok(TurnNotice {
+        thread: super::CodexThreadId::parse(word("threadId", 256)?)?,
+        turn: super::CodexTurnId::parse(word("turnId", 256)?)?,
+        kind: NoticeKind::Rerouted(Reroute {
+            from: word("fromModel", 256)?.to_owned(),
+            to: word("toModel", 256)?.to_owned(),
+            reason,
+        }),
+    })
+}
 fn violation<T>() -> Result<T> {
     fail("inference_isolation_violation")
 }
@@ -1122,6 +1166,11 @@ fn classify(m: &super::WireMessage, local: bool) -> Result<Option<TurnNotice>> {
     let p = m.params().unwrap_or(&Value::Null);
     if local && let Some(notice) = local_action(method, p)? {
         return Ok(Some(notice));
+    }
+    // Exactly one new notification is tolerated, and only when it is exactly what the schema
+    // says: anything malformed is the isolation violation it has always been.
+    if method == "model/rerouted" {
+        return guard(reroute(p)).map(Some);
     }
     if action_candidate(method, p, local) {
         return violation();

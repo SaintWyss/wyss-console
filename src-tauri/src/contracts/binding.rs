@@ -75,6 +75,17 @@ pub fn validate_workspace_text(s: &str) -> ControlResult<()> {
 pub enum ObservedModelSource {
     ThreadStart,
     ThreadResume,
+    /// A provider's notice that it rerouted a turn (ADR 0048). The model is the one the notice
+    /// names as the destination; whether later turns stay rerouted is not documented.
+    TurnRerouted,
+}
+/// Why a provider rerouted a turn, as a closed word. The provider's own text is never kept: a
+/// value it sends that this product does not know is `unrecognised`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RerouteReason {
+    HighRiskCyberActivity,
+    Unrecognised,
 }
 /// The model a managed runtime itself reported for a session's thread (ADR 0031, option A):
 /// transient attachment state, kept in memory while attached and gone with the attachment.
@@ -87,6 +98,15 @@ pub struct ObservedModel {
     pub provider_id: Option<String>,
     pub reasoning_effort: Option<String>,
     pub source: ObservedModelSource,
+    /// Only for `turn_rerouted`: the model the notice says the turn was rerouted from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rerouted_from: Option<String>,
+    /// Only for `turn_rerouted`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reroute_reason: Option<RerouteReason>,
+    /// Only for `turn_rerouted`: the managed turn the notice named, while the window shows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rerouted_turn: Option<super::identities::ManagedTurnId>,
 }
 impl ObservedModel {
     const MOST_ID: usize = 256;
@@ -115,6 +135,29 @@ impl ObservedModel {
             provider_id: word("modelProvider"),
             reasoning_effort: word("reasoningEffort"),
             source,
+            rerouted_from: None,
+            reroute_reason: None,
+            rerouted_turn: None,
+        })
+    }
+    /// The observation after a valid reroute notice: the destination model is what the
+    /// provider now reports for the turn. The provider and effort the thread answer gave stay
+    /// as they were reported: the notice names neither, so neither is inferred or dropped.
+    pub fn rerouted(
+        &self,
+        from: &str,
+        to: &str,
+        reason: RerouteReason,
+        turn: super::identities::ManagedTurnId,
+    ) -> Option<Self> {
+        (Self::word_ok(from, Self::MOST_ID) && Self::word_ok(to, Self::MOST_ID)).then(|| Self {
+            model_id: to.to_owned(),
+            provider_id: self.provider_id.clone(),
+            reasoning_effort: self.reasoning_effort.clone(),
+            source: ObservedModelSource::TurnRerouted,
+            rerouted_from: Some(from.to_owned()),
+            reroute_reason: Some(reason),
+            rerouted_turn: Some(turn),
         })
     }
 }
@@ -212,5 +255,55 @@ mod observed_model_tests {
         let text = r#"{"managed_session_id":"11111111-1111-4111-8111-111111111111","state":"unbound","binding":null,"runtime_instance_id":null,"operation_id":null}"#;
         let status: BindingStatus = serde_json::from_str(text).unwrap();
         assert!(status.observed_model.is_none());
+    }
+
+    #[test]
+    fn a_reroute_keeps_what_the_thread_reported_and_adds_only_what_the_notice_says() {
+        let base = ObservedModel::from_thread_answer(
+            &json!({"model": "model-a", "modelProvider": "custom", "reasoningEffort": "high"}),
+            ObservedModelSource::ThreadStart,
+        )
+        .unwrap();
+        // The encoding of an unrerouted observation is what it was before reroutes existed.
+        assert_eq!(
+            serde_json::to_value(&base).unwrap(),
+            json!({"model_id":"model-a","provider_id":"custom","reasoning_effort":"high","source":"thread_start"})
+        );
+        let turn = crate::contracts::identities::ManagedTurnId::parse(
+            "33333333-3333-4333-8333-333333333333",
+        )
+        .unwrap();
+        let next = base
+            .rerouted(
+                "model-a",
+                "model-b",
+                RerouteReason::HighRiskCyberActivity,
+                turn.clone(),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&next).unwrap(),
+            json!({"model_id":"model-b","provider_id":"custom","reasoning_effort":"high",
+                "source":"turn_rerouted","rerouted_from":"model-a",
+                "reroute_reason":"high_risk_cyber_activity",
+                "rerouted_turn":"33333333-3333-4333-8333-333333333333"})
+        );
+        // What it serialized to is what it deserializes from; older shapes still decode.
+        assert_eq!(
+            serde_json::from_value::<ObservedModel>(serde_json::to_value(&next).unwrap()).unwrap(),
+            next
+        );
+        let older: ObservedModel = serde_json::from_value(
+            json!({"model_id":"m","provider_id":null,"reasoning_effort":null,"source":"thread_resume"}),
+        )
+        .unwrap();
+        assert_eq!(older.rerouted_from, None);
+        // A model outside the bounds is no reroute at all.
+        for (from, to) in [("a b", "m"), ("m", ""), ("m", "x".repeat(257).as_str())] {
+            assert!(
+                base.rerouted(from, to, RerouteReason::Unrecognised, turn.clone())
+                    .is_none()
+            );
+        }
     }
 }

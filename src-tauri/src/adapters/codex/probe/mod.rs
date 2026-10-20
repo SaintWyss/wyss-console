@@ -70,6 +70,9 @@ pub struct ProbeModel {
     is_default: bool,
     default_reasoning_effort: String,
     reasoning_efforts: Vec<String>,
+    /// The runtime's marking of a replacement, as identifiers and a date. Never its text.
+    replaced_by: Option<String>,
+    retires_at: Option<String>,
 }
 /// Safe allowlisted output only. No raw provider error, stderr, response or auth data.
 /// This is an internal developer report; it is not a frontend or durable DTO.
@@ -409,6 +412,8 @@ fn handshake(
                     .iter()
                     .map(|e| e["reasoningEffort"].as_str().unwrap().to_owned())
                     .collect(),
+                replaced_by: m.codex["replacedBy"].as_str().map(str::to_owned),
+                retires_at: m.codex["retirementAt"].as_str().map(str::to_owned),
             })
             .collect();
         report.next_cursor_present = next_cursor.is_some();

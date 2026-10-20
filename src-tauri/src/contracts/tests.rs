@@ -371,3 +371,53 @@ fn runtime_start_selects_a_profile_without_changing_the_stored_encoding_of_older
         0
     );
 }
+
+#[test]
+fn a_model_offer_is_bounded_unique_and_never_prose_and_its_list_matches_the_models() {
+    use super::control::ModelOffer;
+    let ok = || ModelOffer {
+        is_default: true,
+        default_effort: Some("medium".into()),
+        efforts: vec!["low".into(), "medium".into()],
+        replaced_by: Some("newer".into()),
+        retires_at: Some("2027-01-31T00:00:00Z".into()),
+    };
+    assert!(ok().valid());
+    let mut many = ok();
+    many.efforts = (0..=ModelOffer::MOST_EFFORTS)
+        .map(|n| format!("e{n}"))
+        .collect();
+    for bad in [
+        many,
+        ModelOffer {
+            efforts: vec!["low".into(), "low".into()],
+            ..ok()
+        },
+        ModelOffer {
+            efforts: vec!["".into()],
+            ..ok()
+        },
+        ModelOffer {
+            efforts: vec!["a".repeat(65)],
+            ..ok()
+        },
+        ModelOffer {
+            efforts: vec!["a\nb".into()],
+            ..ok()
+        },
+        ModelOffer {
+            default_effort: Some("x".repeat(65)),
+            ..ok()
+        },
+        ModelOffer {
+            replaced_by: Some("m".repeat(257)),
+            ..ok()
+        },
+        ModelOffer {
+            retires_at: Some(String::new()),
+            ..ok()
+        },
+    ] {
+        assert!(!bad.valid(), "{bad:?}");
+    }
+}

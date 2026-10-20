@@ -12,11 +12,11 @@ use super::{
 use crate::{
     adapters::codex::{
         CodexTurnId, TurnOutcome,
-        safety::{NoticeKind, TurnNotice},
+        safety::{NoticeKind, Reroute, TurnNotice},
     },
     contracts::{
         control::*,
-        identities::{AgentRuntimeInstanceId, ManagedTurnId},
+        identities::{AgentRuntimeInstanceId, ManagedSessionId, ManagedTurnId},
     },
 };
 use std::{
@@ -50,9 +50,18 @@ struct Active {
     workspace: String,
     mediation: Mediation,
 }
+/// A reroute the provider announced for the running turn, accepted and not yet recorded
+/// beside the session's attachment. Transient: never stored, never an event.
+pub(super) struct Rerouted {
+    pub session: ManagedSessionId,
+    pub turn: ManagedTurnId,
+    pub reroute: Reroute,
+}
 #[derive(Default)]
 pub(super) struct Turns {
     active: Option<Active>,
+    /// Taken by the core right after the notice that set it.
+    rerouted: Option<Rerouted>,
     streams: Streams,
     /// The one Accept whose profile attestation is in flight. Nothing is decided yet.
     accepting: Option<approvals::Accepting>,
@@ -362,6 +371,10 @@ impl Turns {
         }
         Ok(Verdict::Continue)
     }
+    /// The reroute accepted by the last notice, once.
+    pub fn take_reroute(&mut self) -> Option<Rerouted> {
+        self.rerouted.take()
+    }
     pub fn notice(
         &mut self,
         store: &mut Store,
@@ -369,6 +382,26 @@ impl Turns {
         instance: &AgentRuntimeInstanceId,
         n: TurnNotice,
     ) -> ControlResult<Verdict> {
+        // A reroute is legal for the running turn of this generation and for nothing else: a
+        // different thread, a different turn, a turn the provider has not named yet, or no turn
+        // at all is the isolation violation it has always been (ADR 0048).
+        if let NoticeKind::Rerouted(reroute) = &n.kind {
+            let Some(a) = self.active.as_ref() else {
+                return Ok(Verdict::Violation);
+            };
+            if a.turn.runtime_instance_id != *instance
+                || a.turn.codex_thread_id != n.thread
+                || a.turn.codex_turn_id.as_ref() != Some(&n.turn)
+            {
+                return Ok(Verdict::Violation);
+            }
+            self.rerouted = Some(Rerouted {
+                session: a.turn.managed_session_id.clone(),
+                turn: a.turn.managed_turn_id.clone(),
+                reroute: reroute.clone(),
+            });
+            return Ok(Verdict::Continue);
+        }
         let Some(a) = self.active.as_mut() else {
             return Ok(Verdict::Continue);
         };

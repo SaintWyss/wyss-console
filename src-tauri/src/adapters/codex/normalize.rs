@@ -162,6 +162,13 @@ fn model(id: &str, name: Option<&str>, provider: Option<&str>) -> Result<AgentMo
     let provider = provider.and_then(|p| ModelProviderId::parse(p).ok());
     AgentModelDescriptorV1::from_value(json!({"schema_version":1,"provider_id":provider,"model_id":id,"display_name":name,"availability":"unknown"})).map_err(contract_error)
 }
+/// A short printable provider word, or nothing: never a partial or a truncated one.
+fn bounded_word(value: Option<&Value>, most: usize) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty() && s.len() <= most && !s.chars().any(char::is_control))
+        .map(str::to_owned)
+}
 fn safe_error(runtime: bool) -> Result<AdapterErrorV1> {
     AdapterErrorV1::from_value(json!({"schema_version":1,"code":if runtime {"runtime_failed"}else{"protocol_error"},"operation":null,"diagnostic":{"code":"codex.request_failed","summary":if runtime {"Codex reported failed work."}else{"Codex reported a protocol request failure."}}})).map_err(contract_error)
 }
@@ -438,9 +445,31 @@ pub fn normalize_response(
             let mut models = Vec::new();
             for v in array(&p["data"])? {
                 let m = object(v)?;
-                models.push(CatalogModel {model:model(field_text(m,"model",256)?,Some(field_text(m,"displayName",128)?),None)?,codex:json!({
+                // Replacement marking is carried as identifiers and a date only. The provider's own
+                // upgrade copy and Markdown are never read (FR-ADP-05); anything malformed is
+                // "nothing marked", never a failure of the listing.
+                let info = m.get("upgradeInfo").and_then(Value::as_object);
+                let replaced_by = bounded_word(info.and_then(|i| i.get("model")), 256)
+                    .or_else(|| bounded_word(m.get("upgrade"), 256));
+                let retires_at = bounded_word(info.and_then(|i| i.get("retirementAt")), 64);
+                let mut codex = json!({
                     "id":m["id"],"hidden":m["hidden"],"isDefault":m["isDefault"],"defaultReasoningEffort":m["defaultReasoningEffort"],"supportedReasoningEfforts":m["supportedReasoningEfforts"],"inputModalities":m.get("inputModalities").cloned().unwrap_or(json!(["text","image"]))
-                })});
+                });
+                // Only when the runtime marked something: an unmarked entry is what it was.
+                if let Some(replaced_by) = replaced_by {
+                    codex["replacedBy"] = json!(replaced_by);
+                }
+                if let Some(retires_at) = retires_at {
+                    codex["retirementAt"] = json!(retires_at);
+                }
+                models.push(CatalogModel {
+                    model: model(
+                        field_text(m, "model", 256)?,
+                        Some(field_text(m, "displayName", 128)?),
+                        None,
+                    )?,
+                    codex,
+                });
             }
             Ok(CodexObservation::ModelCatalog {
                 models,

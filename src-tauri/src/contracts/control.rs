@@ -377,6 +377,14 @@ pub enum ResultValue {
     RuntimeModels {
         runtime_instance_id: super::identities::AgentRuntimeInstanceId,
         models: Vec<super::agent_adapter::AgentModelDescriptorV1>,
+        /// What the runtime's own listing says about each model, entry for entry. Empty when
+        /// an authority of an earlier version did not report it. Offered is not entitled.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        offers: Vec<ModelOffer>,
+        /// Whether the listing the authority took at the handshake was the whole of it.
+        /// `None`: not reported.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        complete: Option<bool>,
         next: Option<ModelCursor>,
     },
     Sessions {
@@ -512,8 +520,11 @@ fn validate_result(r: &ResultValue) -> ControlResult<()> {
                 return Err(ControlError::InvalidRequest);
             }
         }
-        ResultValue::RuntimeModels { models, .. } => {
-            if models.len() > 20 {
+        ResultValue::RuntimeModels { models, offers, .. } => {
+            if models.len() > 20
+                || !(offers.is_empty() || offers.len() == models.len())
+                || offers.iter().any(|offer| !offer.valid())
+            {
                 return Err(ControlError::InvalidRequest);
             }
         }
@@ -817,6 +828,42 @@ impl RuntimeStatus {
             return Err(ControlError::InvalidRequest);
         }
         Ok(())
+    }
+}
+/// What a runtime's own listing says about one model: its default mark, its reasoning
+/// efforts and any replacement it marks. All of it is the provider's, as identifiers and a
+/// date: never its prose. Nothing here says the account may use the model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelOffer {
+    pub is_default: bool,
+    pub default_effort: Option<String>,
+    pub efforts: Vec<String>,
+    pub replaced_by: Option<String>,
+    pub retires_at: Option<String>,
+}
+impl ModelOffer {
+    pub const MOST_EFFORTS: usize = 16;
+    fn word(value: &str, most: usize) -> bool {
+        !value.is_empty() && value.len() <= most && !value.chars().any(char::is_control)
+    }
+    pub fn valid(&self) -> bool {
+        self.efforts.len() <= Self::MOST_EFFORTS
+            && self.efforts.iter().all(|e| Self::word(e, 64))
+            && self
+                .efforts
+                .iter()
+                .enumerate()
+                .all(|(i, e)| !self.efforts[..i].contains(e))
+            && self
+                .default_effort
+                .as_deref()
+                .is_none_or(|e| Self::word(e, 64))
+            && self
+                .replaced_by
+                .as_deref()
+                .is_none_or(|m| Self::word(m, 256))
+            && self.retires_at.as_deref().is_none_or(|t| Self::word(t, 64))
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

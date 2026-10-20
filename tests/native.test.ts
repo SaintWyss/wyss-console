@@ -14,6 +14,7 @@ import {
   modelFacts,
   sharedFolders,
   stateLabel,
+  switchHint,
 } from '../src/lib/features/native/present';
 import {
   fakeClient,
@@ -334,6 +335,56 @@ describe('the controller', () => {
 });
 
 describe('the model of a native session', () => {
+  it('keeps the effort asked for and the effort the files hold as two facts, per agent’s own key', () => {
+    const p = structuredClone(profiles()[0]);
+    p.id = 'p'.repeat(32);
+    p.template = false;
+    p.current = 3;
+    p.body.effort = 'high';
+    const claude = session({ profile: { id: p.id, name: 'x', version: 3 } });
+    const effort = (key: string, provider: string, text: string): ConfigItem =>
+      ({
+        id: 'e'.repeat(32),
+        provider,
+        source: 'claude_user_settings',
+        scope: 'global',
+        kind: 'model_preference',
+        name: key,
+        persisted: 'present_enabled',
+        effective: 'documented',
+        session_use: 'unknown',
+        not_writable: 'not_in_this_phase',
+        detail: { kind: 'text', value: { text, found: [] } },
+        hash: null,
+      }) as ConfigItem;
+    const facts = modelFacts(
+      claude,
+      [p],
+      [effort('effortLevel', 'claude_code', 'low')],
+    );
+    expect(facts.requestedEffort).toBe('high');
+    expect(facts.configuredEffort).toBe('low');
+    // Another agent's key is not this agent's setting, and nothing is filled in for it.
+    expect(
+      modelFacts(
+        claude,
+        [p],
+        [effort('model_reasoning_effort', 'codex', 'xhigh')],
+      ).configuredEffort,
+    ).toBe('not set in its files');
+    expect(modelFacts(claude, [p], null).configuredEffort).toContain(
+      'not read yet',
+    );
+    expect(facts.inUse).toBe('not reported by the agent');
+  });
+  it('offers Claude Code’s own command to change it, and none for Codex, whose is not verified', () => {
+    expect(switchHint('claude_code')).toContain('/model');
+    expect(switchHint('claude_code')).toContain(
+      'saves your choice as its default',
+    );
+    expect(switchHint('codex')).toContain('not verified');
+    expect(switchHint('codex')).not.toContain('/model');
+  });
   const saved = () => {
     const p = structuredClone(profiles()[0]);
     p.id = 'p'.repeat(32);

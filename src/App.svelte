@@ -13,6 +13,8 @@
   import { CredentialsController } from './lib/features/credentials/controller';
   import CredentialsView from './lib/features/credentials/CredentialsView.svelte';
   import { EventsController } from './lib/features/events/controller';
+  import { ModelsController } from './lib/features/models/controller';
+  import ModelsView from './lib/features/models/ModelsView.svelte';
   import { NativeController } from './lib/features/native/controller';
   import ProfilesView from './lib/features/native/ProfilesView.svelte';
   import WorkspaceView from './lib/features/native/WorkspaceView.svelte';
@@ -108,6 +110,11 @@
     },
   );
   let native = $state(nativeController.state());
+  // What the managed runtime offers: read once when a view that needs it is first shown.
+  const modelsController = new ModelsController((next) => {
+    models = next;
+  });
+  let models = $state(modelsController.state());
   // API keys: listed by name while their view is shown; a key never reaches the window.
   const credentialsController = new CredentialsController((next) => {
     credentials = next;
@@ -125,9 +132,6 @@
 
   // Sessions are read only while their view is shown.
   $effect(() => {
-    sessionsController.setVisible(activeView === 'sessions');
-  });
-  $effect(() => {
     agentController.setVisible(activeView === 'agents');
   });
   // Approvals are read while their view is shown or a turn is being followed: an
@@ -141,8 +145,21 @@
   $effect(() => {
     eventsController.setVisible(activeView === 'events');
   });
+  // The Models view reads the same inventory as Configuration, the managed sessions of the
+  // Sessions view and the profiles, and the runtime's list: it asks for nothing of its own.
   $effect(() => {
-    configurationController.setVisible(activeView === 'configuration');
+    configurationController.setVisible(
+      activeView === 'configuration' || activeView === 'models',
+    );
+  });
+  $effect(() => {
+    if (activeView === 'models') sessionsController.setVisible(true);
+    else sessionsController.setVisible(activeView === 'sessions');
+  });
+  $effect(() => {
+    modelsController.setVisible(
+      activeView === 'models' || activeView === 'profiles',
+    );
   });
   $effect(() => {
     credentialsController.setVisible(activeView === 'credentials');
@@ -151,7 +168,9 @@
   // are read once when either of their views first is.
   $effect(() => {
     nativeController.setVisible(
-      activeView === 'workspace' || activeView === 'profiles',
+      activeView === 'workspace' ||
+        activeView === 'profiles' ||
+        activeView === 'models',
     );
   });
 
@@ -209,6 +228,7 @@
       configurationController.dispose();
       changesController.dispose();
       nativeController.dispose();
+      modelsController.dispose();
       credentialsController.dispose();
       settingsController.dispose();
     };
@@ -353,10 +373,19 @@
       {changes}
       {changesController}
     />
+    <ModelsView
+      visible={activeView === 'models'}
+      {models}
+      controller={modelsController}
+      configItems={configuration.reply?.inventory.items ?? null}
+      profiles={native.profiles}
+      sessions={sessions.page?.sessions ?? null}
+    />
     <ProfilesView
       visible={activeView === 'profiles'}
       {native}
       controller={nativeController}
+      catalogue={models.catalogue}
     />
     <CredentialsView
       visible={activeView === 'credentials'}

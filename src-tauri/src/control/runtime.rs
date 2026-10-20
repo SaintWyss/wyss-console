@@ -33,6 +33,8 @@ pub(super) struct Runtime {
     worker: Option<Worker>,
     version: Option<String>,
     models: Vec<AgentModelDescriptorV1>,
+    offers: Vec<crate::contracts::control::ModelOffer>,
+    models_complete: Option<bool>,
     diagnostic: Option<RuntimeDiagnostic>,
     methods: RuntimeMethods,
     safety: Option<RuntimeSafetyProfile>,
@@ -69,6 +71,8 @@ impl Runtime {
             worker: None,
             version: None,
             models: Vec::new(),
+            offers: Vec::new(),
+            models_complete: None,
             diagnostic: None,
             methods: RuntimeMethods::default(),
             safety: None,
@@ -168,6 +172,12 @@ impl Runtime {
         Ok(ResultValue::RuntimeModels {
             runtime_instance_id: id.clone(),
             models: self.models[start..end].to_vec(),
+            offers: self
+                .offers
+                .get(start..end)
+                .map(<[_]>::to_vec)
+                .unwrap_or_default(),
+            complete: self.models_complete,
             next: (end < self.models.len()).then(|| ModelCursor {
                 runtime_instance_id: id.clone(),
                 index: end as u16,
@@ -193,6 +203,8 @@ impl Runtime {
         } else if self.worker.is_none() && (startup || changed) {
             self.state = ActualState::Starting;
             self.models.clear();
+            self.offers.clear();
+            self.models_complete = None;
             self.version = None;
             self.diagnostic = None;
             self.methods = RuntimeMethods::default();
@@ -297,6 +309,8 @@ impl Runtime {
             Observation::Ready {
                 version,
                 models,
+                offers,
+                complete,
                 methods,
             } => {
                 if self.live.as_ref() != Some(&id) || self.desired() != DesiredState::Running {
@@ -311,6 +325,8 @@ impl Runtime {
                 }
                 self.version = Some(version);
                 self.models = models;
+                self.offers = offers;
+                self.models_complete = Some(complete);
                 self.methods = methods;
                 self.state = ActualState::Ready;
                 // Readiness is reported only after the attestation of this exact profile.
@@ -356,6 +372,8 @@ impl Runtime {
         self.safety = None;
         self.generation = None;
         self.models.clear();
+        self.offers.clear();
+        self.models_complete = None;
         self.version = None;
         self.state = ActualState::Stopped;
         self.diagnostic = None;

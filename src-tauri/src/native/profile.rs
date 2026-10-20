@@ -42,6 +42,10 @@ pub struct Body {
     pub extends: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// A reasoning effort, as the provider names it. Opaque like the model: it is passed, never
+    /// interpreted, and the product cannot tell whether the agent knows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     #[serde(default)]
     pub permission: Option<Permission>,
     #[serde(default)]
@@ -58,6 +62,7 @@ pub enum ProfileError {
     NameInvalid,
     AppliesToInvalid,
     ModelInvalid,
+    EffortInvalid,
     SkillInvalid,
     NotesInvalid,
     NotesHoldSecret,
@@ -85,6 +90,19 @@ fn model_ok(model: &str) -> bool {
         && !model.starts_with('-')
 }
 
+/// An effort word: letters, digits and `. _ -`, short, and not starting with a dash. Nothing
+/// that could end a TOML string or start a flag, because it is passed on a command line.
+fn effort_ok(effort: &str) -> bool {
+    (1..=32).contains(&effort.len())
+        && effort
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        && !effort.starts_with('-')
+}
+
+/// What Claude Code documents for `--effort` (its own `--help`, checked against 2.1.304).
+pub const CLAUDE_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
 fn skill_ok(name: &str) -> bool {
     (1..=64).contains(&name.len())
         && name
@@ -107,6 +125,9 @@ impl Body {
         }
         if self.model.as_deref().is_some_and(|m| !model_ok(m)) {
             return Err(ProfileError::ModelInvalid);
+        }
+        if self.effort.as_deref().is_some_and(|e| !effort_ok(e)) {
+            return Err(ProfileError::EffortInvalid);
         }
         if self.skills_off.len() > MAX_SKILLS || self.skills_off.iter().any(|s| !skill_ok(s)) {
             return Err(ProfileError::SkillInvalid);
@@ -148,6 +169,10 @@ pub fn merge(chain: &[(String, Body)]) -> Resolved {
         if let Some(model) = &body.model {
             resolved.model = Some(model.clone());
             from.insert("model", name.clone());
+        }
+        if let Some(effort) = &body.effort {
+            resolved.effort = Some(effort.clone());
+            from.insert("effort", name.clone());
         }
         if let Some(permission) = body.permission {
             resolved.permission = Some(permission);
@@ -210,6 +235,31 @@ pub fn plan(profile: &Resolved, agent: AgentId, applies: bool) -> LaunchPlan {
             AgentId::Codex => literal(&mut plan, &["-m", model]),
         }
         plan.applied.push(format!("Model: {model}."));
+    }
+    if let Some(effort) = &body.effort {
+        match agent {
+            // Claude Code documents a closed set; a word outside it is not passed.
+            AgentId::ClaudeCode if CLAUDE_EFFORTS.contains(&effort.as_str()) => {
+                literal(&mut plan, &["--effort", effort]);
+                plan.applied.push(format!("Reasoning effort: {effort}."));
+            }
+            AgentId::ClaudeCode => plan.not_applicable.push(format!(
+                "Claude Code documents these effort levels: {}. \"{effort}\" is not one of them, so it is not passed.",
+                CLAUDE_EFFORTS.join(", ")
+            )),
+            // Codex has no start flag of its own for effort; its documented way is the
+            // configuration key, overridden for this session only. The word is shape-checked,
+            // so it cannot end the string.
+            AgentId::Codex => {
+                literal(
+                    &mut plan,
+                    &["-c", &format!("model_reasoning_effort=\"{effort}\"")],
+                );
+                plan.applied.push(format!(
+                    "Reasoning effort: {effort} (this session only; Codex reads it as a configuration override)."
+                ));
+            }
+        }
     }
     match (agent, body.permission) {
         (_, None) => {}

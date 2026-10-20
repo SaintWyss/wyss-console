@@ -119,6 +119,7 @@ pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>)
         lifecycle::authority_lifecycle,
         lifecycle::authority_retry,
         sessions::managed_sessions_page,
+        sessions::managed_model_catalogue,
         sessions::managed_session_prepare,
         sessions::managed_session_resume,
         sessions::managed_session_close,

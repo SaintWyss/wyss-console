@@ -99,6 +99,8 @@ export interface ProfileBody {
   applies_to: AgentId[];
   extends: string | null;
   model: string | null;
+  /** A reasoning effort as the provider names it; passed, never checked here. */
+  effort: string | null;
   permission: Permission | null;
   hooks: HooksMode | null;
   skills_off: string[];
@@ -277,6 +279,9 @@ export function parseBody(value: unknown): ProfileBody {
     ),
     extends: orNull(o.extends, (v) => str(v, 'extends')),
     model: orNull(o.model, (v) => str(v, 'model')),
+    // Absent from a profile saved before efforts existed, and from one that sets none.
+    effort:
+      o.effort === undefined ? null : orNull(o.effort, (v) => str(v, 'effort')),
     permission: orNull(o.permission, (v) => one(v, PERMISSIONS, 'permission')),
     hooks: orNull(o.hooks, (v) => one(v, HOOKS_MODES, 'hooks')),
     skills_off: strings(o.skills_off, 'skills_off'),

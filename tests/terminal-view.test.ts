@@ -178,6 +178,7 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-authority-lifecycle',
     'allow-authority-retry',
     'allow-managed-sessions-page',
+    'allow-managed-model-catalogue',
     'allow-managed-session-prepare',
     'allow-managed-session-resume',
     'allow-managed-session-close',

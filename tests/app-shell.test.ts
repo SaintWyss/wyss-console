@@ -141,6 +141,7 @@ it('lists every view, and every one of them exists', () => {
     'Approvals',
     'Events',
     'Configuration',
+    'Models',
     'Profiles',
     'Credentials',
     'Settings',
@@ -153,6 +154,7 @@ it('lists every view, and every one of them exists', () => {
     'approvals',
     'events',
     'configuration',
+    'models',
     'profiles',
     'credentials',
     'settings',
@@ -169,7 +171,7 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
   const nav = Array.from(
     document.querySelectorAll<HTMLButtonElement>('.sidebar .nav-item'),
   );
-  expect(nav).toHaveLength(10);
+  expect(nav).toHaveLength(11);
   expect(nav[0].getAttribute('aria-current')).toBe('page');
   expect(nav.every((b) => !b.disabled)).toBe(true);
   expect(nav.map((b) => b.textContent?.trim())).toEqual([
@@ -180,6 +182,7 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
     'Approvals',
     'Events',
     'Configuration',
+    'Models',
     'Profiles',
     'Credentials',
     'Settings',

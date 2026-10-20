@@ -118,6 +118,10 @@ pub(crate) enum Observation {
     Ready {
         version: String,
         models: Vec<AgentModelDescriptorV1>,
+        /// Entry for entry with `models`: what the runtime's listing says about each.
+        offers: Vec<crate::contracts::control::ModelOffer>,
+        /// Whether the single listing taken at the handshake was complete.
+        complete: bool,
         methods: RuntimeMethods,
     },
     Exited {
@@ -867,10 +871,24 @@ fn run(
             &mut initial_report(report.cwd.clone()),
         )?;
         let models = report.models.iter().map(|m| m.model.clone()).collect();
+        let offers = report
+            .models
+            .iter()
+            .map(|m| crate::contracts::control::ModelOffer {
+                is_default: m.is_default,
+                default_effort: Some(m.default_reasoning_effort.clone()),
+                efforts: m.reasoning_efforts.clone(),
+                replaced_by: m.replaced_by.clone(),
+                retires_at: m.retires_at.clone(),
+            })
+            .collect();
+        let complete = !report.next_cursor_present;
         let methods = io.methods.clone();
         io.emit(Observation::Ready {
             version,
             models,
+            offers,
+            complete,
             methods,
         });
         attested = true;
