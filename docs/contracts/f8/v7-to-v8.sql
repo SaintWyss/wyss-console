@@ -53,6 +53,13 @@ CREATE TRIGGER managed_operation_launches_no_delete BEFORE DELETE ON managed_ope
 CREATE TRIGGER managed_operation_launches_no_legacy_attach BEFORE INSERT ON managed_operation_launches WHEN EXISTS(SELECT 1 FROM managed_session_operations WHERE operation_id=NEW.operation_id) BEGIN SELECT RAISE(ABORT,'legacy_launch_unassigned'); END;
 CREATE TRIGGER managed_session_operations_require_launch BEFORE INSERT ON managed_session_operations WHEN NOT EXISTS(SELECT 1 FROM managed_operation_launches l WHERE l.operation_id=NEW.operation_id AND l.managed_session_id=NEW.managed_session_id) BEGIN SELECT RAISE(ABORT,'operation_launch_required'); END;
 
+-- Migration trust boundary. The caller (never SQL) inserts the single row after these statements and
+-- before validation: the last V7 sequence and a SHA-256 over every V7 event "<sequence key>\n<envelope>\n".
+-- Every later baseline-shaped runtime/turn/approval event is a forgery; rewritten V7 history is detected.
+CREATE TABLE migration_boundary (id INTEGER PRIMARY KEY CHECK(id=1), v7_last_sequence TEXT NOT NULL CHECK(length(v7_last_sequence) BETWEEN 1 AND 20), v7_events_sha256 TEXT NOT NULL CHECK(length(v7_events_sha256)=64), v7_stream_id TEXT NOT NULL) STRICT;
+CREATE TRIGGER migration_boundary_no_update BEFORE UPDATE ON migration_boundary BEGIN SELECT RAISE(ABORT,'append_only'); END;
+CREATE TRIGGER migration_boundary_no_delete BEFORE DELETE ON migration_boundary BEGIN SELECT RAISE(ABORT,'append_only'); END;
+
 DROP INDEX managed_turns_one_active;
 CREATE UNIQUE INDEX managed_turns_one_active ON managed_turns(managed_session_id) WHERE state IN ('starting','running');
 DROP INDEX managed_approvals_one_pending;

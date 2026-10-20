@@ -16,6 +16,8 @@ pub mod scheduler;
 #[cfg(target_os = "linux")]
 pub mod staging;
 #[cfg(target_os = "linux")]
+pub mod writers;
+#[cfg(target_os = "linux")]
 pub mod v8;
 
 #[cfg(test)]

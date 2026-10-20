@@ -26,10 +26,10 @@ const MAX_LAUNCH_ROWS: i64 = 4096;
 const MAX_EVENT_BYTES: usize = 2048;
 const MAX_RECEIPT_BYTES: usize = 1024;
 
-fn db(_: impl std::fmt::Debug) -> E {
+pub(super) fn db(_: impl std::fmt::Debug) -> E {
     E::StorageUnavailable
 }
-fn invalid(_: impl std::fmt::Debug) -> E {
+pub(super) fn invalid(_: impl std::fmt::Debug) -> E {
     E::StorageIncompatible
 }
 
@@ -262,6 +262,7 @@ impl<'c> Allocator<'c> {
             (generation, None, false, false)
         };
 
+        attest(&tx, &authority, &stream, &now)?;
         let desired_text = if running { "running" } else { "stopped" };
         if row.is_some() {
             tx.execute(
@@ -295,7 +296,7 @@ impl<'c> Allocator<'c> {
             &tx,
             (&authority, &stream, &now),
             Draft {
-                session: &session,
+                session: Some(&session),
                 kind: "authority.runtime.desired_state_changed",
                 correlation: Some(&intent),
                 payload: json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":desired_text,
@@ -404,6 +405,7 @@ impl<'c> Allocator<'c> {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .map_err(db)?;
+        attest(&tx, &authority, &stream, &now)?;
         let ready = kind.ends_with("instance_ready");
         if ready && (desired != "running" || generation as u64 != launch.generation) {
             return Err(E::StaleRevision);
@@ -420,7 +422,7 @@ impl<'c> Allocator<'c> {
             &tx,
             (&authority, &stream, &now),
             Draft {
-                session,
+                session: Some(session),
                 kind,
                 correlation: None,
                 payload: payload(&desired)?,
@@ -509,18 +511,54 @@ impl<'c> Allocator<'c> {
 
 /// Instances ever allocated, and each session's durable generation.
 pub type RegistryHistory = (Vec<String>, Vec<(String, u64)>);
-type Fault<'c> = Option<Box<dyn FnMut(usize) -> ControlResult<()> + 'c>>;
-fn step(fault: &mut Fault<'_>, n: usize) -> ControlResult<()> {
+pub(super) type Fault<'c> = Option<Box<dyn FnMut(usize) -> ControlResult<()> + 'c>>;
+pub(super) fn step(fault: &mut Fault<'_>, n: usize) -> ControlResult<()> {
     match fault.as_mut() {
         Some(f) => f(n),
         None => Ok(()),
     }
 }
+/// A new authority instance announces itself before its first durable event, naming the writer
+/// it succeeds. Idempotent per instance; part of the very transaction of the first mutation.
+pub(super) fn attest(tx: &Transaction<'_>, authority: &str, stream: &str, now: &str) -> ControlResult<()> {
+    let boundary: String = tx
+        .query_row("SELECT v7_last_sequence FROM migration_boundary WHERE id=1", [], |r| r.get(0))
+        .map_err(invalid)?;
+    let announced: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM control_events WHERE sequence>?1 AND json_extract(envelope,'$.source.instance_id')=?2)",
+            params![format!("{:020}", boundary.parse::<u64>().map_err(invalid)?), authority],
+            |r| r.get(0),
+        )
+        .map_err(db)?;
+    if announced {
+        return Ok(());
+    }
+    let predecessor: Option<String> = tx
+        .query_row(
+            "SELECT json_extract(envelope,'$.source.instance_id') FROM control_events ORDER BY sequence DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(db)?;
+    append(
+        tx,
+        (authority, stream, now),
+        Draft {
+            session: None,
+            kind: audit::STARTED,
+            correlation: None,
+            payload: json!({"predecessor_instance_id": predecessor}),
+        },
+    )?;
+    Ok(())
+}
 fn count(tx: &Transaction<'_>, table: &str) -> ControlResult<i64> {
     tx.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
         .map_err(db)
 }
-fn events_for(c: &Connection, kind: &str, instance: &str) -> ControlResult<i64> {
+pub(super) fn events_for(c: &Connection, kind: &str, instance: &str) -> ControlResult<i64> {
     c.query_row(
         "SELECT count(*) FROM control_events WHERE json_extract(envelope,'$.event_type')=?1 AND json_extract(envelope,'$.payload.runtime_instance_id')=?2",
         params![kind, instance],
@@ -582,13 +620,13 @@ fn replay(tx: &Transaction<'_>, intent: &str, canonical: &str) -> ControlResult<
 
 /// The single event writer of this module: validates the exact vocabulary-2 contract, the
 /// unchanged durable size bound and sequence continuity before advancing the stream head.
-struct Draft<'a> {
-    session: &'a str,
-    kind: &'a str,
-    correlation: Option<&'a str>,
-    payload: Value,
+pub(super) struct Draft<'a> {
+    pub session: Option<&'a str>,
+    pub kind: &'a str,
+    pub correlation: Option<&'a str>,
+    pub payload: Value,
 }
-fn append(
+pub(super) fn append(
     tx: &Transaction<'_>,
     (authority, stream, now): (&str, &str, &str),
     d: Draft<'_>,

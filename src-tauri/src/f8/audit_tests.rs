@@ -961,3 +961,75 @@ fn review_a_refusal_poisons_the_replay() {
     // The valid next event no longer folds: nothing continues past a refusal.
     assert!(r.observe(&l.events[2]).is_err());
 }
+
+fn started(l: &mut Log, predecessor: Option<&str>, src: &str) {
+    l.raw(
+        crate::f8::audit::STARTED,
+        None,
+        None,
+        2,
+        json!({ "predecessor_instance_id": predecessor }),
+        src,
+    );
+}
+fn replay_with_boundary(l: &Log, upto: u64) -> Result<AuditReplay, E> {
+    let mut r = AuditReplay::with_boundary(upto);
+    for e in &l.events {
+        r.observe(e)?;
+    }
+    Ok(r)
+}
+
+#[test]
+fn attestation_every_authority_announces_its_predecessor_before_writing() {
+    // Two baseline events, then the boundary.
+    let base = || {
+        let mut l = Log::new();
+        l.prepared(S1).prepared(S2);
+        l
+    };
+    let mut ok = base();
+    started(&mut ok, Some(AUTH), AUTH2);
+    ok.desired(S1, true, 1, 1, Some(I1), AUTH2).ready(S1, I1, 1, AUTH2);
+    replay_with_boundary(&ok, 2).unwrap();
+    // The first post-boundary event must be an announcement.
+    let mut l = base();
+    l.desired(S1, true, 1, 1, Some(I1), AUTH2);
+    assert!(replay_with_boundary(&l, 2).is_err(), "unannounced writer");
+    // It must name the actual previous writer, and only once.
+    let mut l = base();
+    started(&mut l, Some(AUTH2), AUTH2);
+    assert!(replay_with_boundary(&l, 2).is_err(), "self-succession");
+    let mut l = base();
+    started(&mut l, Some(S1), AUTH2);
+    assert!(replay_with_boundary(&l, 2).is_err(), "wrong predecessor");
+    let mut l = base();
+    started(&mut l, None, AUTH2);
+    assert!(replay_with_boundary(&l, 2).is_err(), "null predecessor after history");
+    let mut l = base();
+    started(&mut l, Some(AUTH), AUTH2);
+    started(&mut l, Some(AUTH), AUTH2);
+    assert!(replay_with_boundary(&l, 2).is_err(), "announced twice");
+    // A chain AUTH -> AUTH2 -> AUTH3 is valid; the retired AUTH2 can then never write again.
+    let auth3 = "00000000-0000-4000-8000-0000000000a3";
+    let mut chain = base();
+    started(&mut chain, Some(AUTH), AUTH2);
+    started(&mut chain, Some(AUTH2), auth3);
+    replay_with_boundary(&chain, 2).unwrap();
+    chain.desired(S1, true, 1, 1, Some(I1), AUTH2);
+    assert!(replay_with_boundary(&chain, 2).is_err(), "retired authority wrote again");
+}
+
+#[test]
+fn attestation_generation_two_cannot_predate_the_boundary_and_baseline_work_cannot_follow_it() {
+    // A version-2 event inside the pre-migration range is impossible history.
+    let mut l = Log::new();
+    l.prepared(S1).desired(S1, true, 1, 1, Some(I1), AUTH);
+    assert!(replay_with_boundary(&l, 5).is_err());
+    // Baseline turn after the boundary, even by an announced authority, is a forgery.
+    let mut l = Log::new();
+    l.prepared(S1);
+    started(&mut l, Some(AUTH), AUTH2);
+    v1_turn(&mut l, "admitted", T1, 1);
+    assert!(replay_with_boundary(&l, 1).is_err());
+}

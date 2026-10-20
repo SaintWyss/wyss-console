@@ -99,6 +99,22 @@ pub fn prepare_with(
         tx.execute_batch(sql).map_err(invalid)?;
         after_step(i)?;
     }
+    // The trust boundary is computed from the validated V7 image, then frozen by triggers.
+    let last_v7 = match old_meta[0].get(3) {
+        Some(Value::Text(t)) => t.clone(),
+        _ => return Err(E::StorageIncompatible),
+    };
+    let stream_v7 = match old_meta[0].get(2) {
+        Some(Value::Text(t)) => t.clone(),
+        _ => return Err(E::StorageIncompatible),
+    };
+    let digest = boundary_digest(&tx, last_v7.parse().map_err(invalid)?)?;
+    tx.execute(
+        "INSERT INTO migration_boundary VALUES(1,?1,?2,?3)",
+        rusqlite::params![last_v7, digest, stream_v7],
+    )
+    .map_err(invalid)?;
+    after_step(statements.len())?;
     validate_migrated(&tx)?;
     let after = rows(&tx)?;
     for (table, data) in before {
@@ -118,12 +134,57 @@ pub fn prepare_with(
     if old_meta.len() != 1 || new_meta.len() != 1 || old_meta[0][2..4] != new_meta[0][2..4] {
         return Err(E::StorageIncompatible);
     }
-    after_step(statements.len())?;
+    after_step(statements.len() + 1)?;
     tx.commit().map_err(db)?;
     snapshot.rollback().map_err(db)?;
     Ok(PreparedMigration { connection: image })
 }
 
+/// SHA-256 over every event up to `upto` as `"<sequence key>\n<envelope>\n"`, in sequence order.
+pub(super) fn boundary_digest(c: &Connection, upto: u64) -> ControlResult<String> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    let mut q = c
+        .prepare("SELECT sequence,envelope FROM control_events ORDER BY sequence")
+        .map_err(invalid)?;
+    let mut r = q.query([]).map_err(invalid)?;
+    let mut n = 0u64;
+    while let Some(row) = r.next().map_err(invalid)? {
+        n += 1;
+        if n > upto {
+            break;
+        }
+        let key: String = row.get(0).map_err(invalid)?;
+        let envelope: String = row.get(1).map_err(invalid)?;
+        hasher.update(key.as_bytes());
+        hasher.update(b"\n");
+        hasher.update(envelope.as_bytes());
+        hasher.update(b"\n");
+    }
+    if n < upto {
+        return Err(E::StorageIncompatible);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+/// The recorded boundary, verified against the stored events: the digest of the V7 prefix must
+/// match, so rewritten or truncated pre-migration history is refused. Returns the V7 head.
+pub(super) fn verify_boundary(c: &Connection) -> ControlResult<u64> {
+    let (last, digest, stream): (String, String, String) = c
+        .query_row(
+            "SELECT v7_last_sequence,v7_events_sha256,v7_stream_id FROM migration_boundary WHERE id=1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(invalid)?;
+    let upto: u64 = last.parse().map_err(invalid)?;
+    let current: String = c
+        .query_row("SELECT stream_id FROM authority_metadata WHERE id=1", [], |r| r.get(0))
+        .map_err(invalid)?;
+    if stream != current || boundary_digest(c, upto)? != digest {
+        return Err(E::StorageIncompatible);
+    }
+    Ok(upto)
+}
 /// Exact V8 schema, FK/integrity, canonical legacy records/receipts/audit and zero-new-work check.
 /// NOT a validator for a V8 authority that has started accepting new work: it refuses that image.
 pub fn validate_migrated(c: &Connection) -> ControlResult<()> {
@@ -169,6 +230,14 @@ pub fn validate_migrated(c: &Connection) -> ControlResult<()> {
     if version != 8 || vocabulary < 2 {
         return Err(E::StorageIncompatible);
     }
+    // An immediately migrated image has no event beyond the boundary.
+    let upto = verify_boundary(c)?;
+    let head: String = c
+        .query_row("SELECT last_sequence FROM authority_metadata WHERE id=1", [], |r| r.get(0))
+        .map_err(invalid)?;
+    if head.parse::<u64>().map_err(invalid)? != upto {
+        return Err(E::StorageIncompatible);
+    }
     // Reconstruct the old canonical view, keeping original event/receipt bytes. Only the metadata
     // version and table name differ. No historical launch identity or provider version is invented.
     let mut legacy = Connection::open_in_memory().map_err(db)?;
@@ -182,6 +251,7 @@ pub fn validate_migrated(c: &Connection) -> ControlResult<()> {
     let all = rows(c)?;
     for (name, data) in all {
         if name == "managed_runtimes"
+            || name == "migration_boundary"
             || [
                 "managed_runtime_launches",
                 "managed_turn_launches",

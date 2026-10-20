@@ -50,7 +50,8 @@ pub fn validate_v8(c: &Connection) -> ControlResult<V8Summary> {
     // receipts and the legacy runtime, on a private copy so the caller's connection is untouched.
     Store::validate_offline_connection_v8(clone_database(c)?)?;
 
-    let mut replay = AuditReplay::default();
+    let upto = super::migration::verify_boundary(c)?;
+    let mut replay = AuditReplay::with_boundary(upto);
     let mut events = 0u64;
     {
         let mut q = c

@@ -103,6 +103,10 @@ pub fn validate_event(v: &Value) -> ControlResult<Vocabulary> {
             super::super::control::store::validate_historical_event(v)?;
             Ok(Vocabulary::Historical1)
         }
+        Some(2) if kind == STARTED => {
+            started_shape(v)?;
+            Ok(Vocabulary::Generation2)
+        }
         Some(2) => {
             common(v)?;
             if RUNTIME_V2.contains(&kind) {
@@ -120,6 +124,29 @@ pub fn validate_event(v: &Value) -> ControlResult<Vocabulary> {
             }
             Ok(Vocabulary::Generation2)
         }
+        _ => Err(bad()),
+    }
+}
+
+/// A new authority instance announces itself, naming the instance it succeeds.
+pub const STARTED: &str = "authority.instance.started";
+
+fn started_shape(v: &Value) -> ControlResult<()> {
+    if v["persistence"] != "durable"
+        || v["sensitivity"] != "internal"
+        || v["redaction"] != "none"
+        || v["source"]["component"] != "wyss_control"
+        || !v["session_id"].is_null()
+        || !v["correlation_id"].is_null()
+        || !v["causation_id"].is_null()
+    {
+        return Err(bad());
+    }
+    exact(&v["payload"], &["predecessor_instance_id"])?;
+    let source = canonical_source(v)?;
+    match &v["payload"]["predecessor_instance_id"] {
+        Value::Null => Ok(()),
+        Value::String(p) if p != source => canonical(p).map_err(|_| bad()),
         _ => Err(bad()),
     }
 }
@@ -415,6 +442,11 @@ pub struct AuditReplay {
     /// can never write again, so a forged "successor" is detected by the owner's next event.
     writer: Option<String>,
     retired: HashSet<String>,
+    /// V7 head recorded by the migration boundary. Up to it only baseline history may exist; after it
+    /// no baseline-shaped runtime, turn or approval event may, and every authority instance must
+    /// announce itself (naming its predecessor) before its first event.
+    boundary: Option<u64>,
+    attested: HashSet<String>,
     /// A refusal leaves the replay unusable; callers cannot keep folding past it.
     poisoned: bool,
     pub historical: u64,
@@ -422,6 +454,12 @@ pub struct AuditReplay {
 }
 
 impl AuditReplay {
+    pub fn with_boundary(v7_head: u64) -> Self {
+        Self {
+            boundary: Some(v7_head),
+            ..Self::default()
+        }
+    }
     pub fn head(&self) -> u64 {
         self.head
     }
@@ -454,6 +492,7 @@ impl AuditReplay {
         if self.retired.contains(&source) {
             return Err(bad());
         }
+        let prior_writer = self.writer.clone();
         if self.writer.as_deref() != Some(source.as_str()) {
             if let Some(old) = self.writer.replace(source.clone()) {
                 self.retired.insert(old);
@@ -468,8 +507,37 @@ impl AuditReplay {
         {
             return Err(bad());
         }
+        let kind = text(v, "event_type")?;
+        if let Some(upto) = self.boundary {
+            let baseline_work = ["authority.runtime.", "authority.managed_turn.", "authority.managed_approval."]
+                .iter()
+                .any(|p| kind.starts_with(p));
+            match (sequence <= upto, vocabulary) {
+                // Version-2 payloads cannot predate the migration that introduced them.
+                (true, Vocabulary::Generation2) => return Err(bad()),
+                (false, Vocabulary::Historical1) if baseline_work => return Err(bad()),
+                _ => (),
+            }
+            if sequence > upto {
+                let announce = kind == STARTED;
+                if self.attested.contains(&source) == announce {
+                    return Err(bad());
+                }
+                if announce {
+                    let predecessor = v["payload"]["predecessor_instance_id"].as_str();
+                    if predecessor != prior_writer.as_deref() {
+                        return Err(bad());
+                    }
+                    self.attested.insert(source.clone());
+                }
+            }
+        }
         match vocabulary {
             Vocabulary::Historical1 => self.historical_event(v)?,
+            Vocabulary::Generation2 if kind == STARTED => {
+                self.v2_started = true;
+                self.attributed += 1;
+            }
             Vocabulary::Generation2 => {
                 self.v2_started = true;
                 self.attributed += 1;
@@ -973,7 +1041,9 @@ impl AuditReplay {
             }
         }
         for (id, a) in &self.approvals {
-            if matches!(a.state.as_str(), "pending") && gone(&a.launch, &a.session) {
+            // Undecided, or accepted with the provider outcome never confirmed (effect unknown).
+            let stranded = a.state == "pending" || (a.state == "accepted" && a.effect == "dispatched");
+            if stranded && gone(&a.launch, &a.session) {
                 out.approvals.push(id.clone());
             }
         }

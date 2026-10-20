@@ -61,6 +61,25 @@ fn append(
     )
     .unwrap();
 }
+fn announce(c: &Connection, stream: &str, authority: &str) {
+    let predecessor: String = one(
+        c,
+        "SELECT json_extract(envelope,'$.source.instance_id') FROM control_events ORDER BY sequence DESC LIMIT 1",
+    );
+    let n = head(c) + 1;
+    let id = uuid();
+    let envelope = json!({"schema_version":1,"event_id":id,"event_type":"authority.instance.started",
+        "payload_schema_version":2,"timestamp":"2026-10-20T10:00:00.000Z","stream_id":stream,
+        "sequence":n.to_string(),"session_id":null,"source":{"component":"wyss_control","instance_id":authority},
+        "correlation_id":null,"causation_id":null,"payload":{"predecessor_instance_id":predecessor},
+        "persistence":"durable","sensitivity":"internal","redaction":"none"});
+    c.execute(
+        "INSERT INTO control_events VALUES(?1,?2,?3,NULL,?4)",
+        rusqlite::params![id, stream, format!("{n:020}"), envelope.to_string()],
+    )
+    .unwrap();
+    c.execute("UPDATE authority_metadata SET last_sequence=?1", [n.to_string()]).unwrap();
+}
 fn mutation_for(session: &str, intent: &str) -> (String, Value) {
     let request = json!({"schema_version":2,"request_id":uuid(),"authority_instance_id":uuid(),"method":"runtime/start",
         "params":{"intent_id":intent,"adapter_id":"codex","runtime_kind":"codex","managed_session_id":session,
@@ -79,6 +98,7 @@ fn with_work() -> Work {
     let stream: String = one(&c, "SELECT stream_id FROM authority_metadata");
     let (authority, instance, intent) = (uuid(), uuid(), uuid());
     c.execute_batch("BEGIN IMMEDIATE").unwrap();
+    announce(&c, &stream, &authority);
     c.execute("INSERT INTO managed_runtimes VALUES(?1,'codex','codex','running',1,1,'2026-10-20T10:00:00Z','2026-10-20T10:00:00Z')", [&session]).unwrap();
     c.execute("INSERT INTO managed_runtime_launches VALUES(?1,'codex','codex',1,?2,?3,'2026-10-20T10:00:00Z')", [&session, &instance, &authority]).unwrap();
     append(
@@ -549,5 +569,76 @@ fn unassigned_unfinished_work_is_refused_directly() {
         unassigned_work_is_finished(&w.conn),
         Err(E::StorageIncompatible)
     );
+    assert!(validate_v8(&w.conn).is_err());
+}
+
+/// A finished-looking baseline turn appended after the migration, before any V8 mutation: the
+/// events keep payload version 1 and the row has no sidecar. Nothing but a migration boundary
+/// can tell this from real pre-migration history.
+fn forge_baseline_turn_after_migration() -> Connection {
+    let c = legacy_image();
+    let session: String = one(&c, "SELECT session_id FROM managed_sessions");
+    let stream: String = one(&c, "SELECT stream_id FROM authority_metadata");
+    let (old_turn, old_intent, old_codex): (String, String, Option<String>) = c
+        .query_row("SELECT managed_turn_id,intent_id,codex_turn_id FROM managed_turns", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap();
+    let (turn, intent, codex, authority) = (uuid(), uuid(), uuid(), uuid());
+    let mut pairs = vec![(&old_turn, &turn), (&old_intent, &intent)];
+    if let Some(o) = &old_codex {
+        pairs.push((o, &codex));
+    }
+    let swap = |col: &str| pairs.iter().fold(col.to_owned(), |e, (o, n)| format!("replace({e},'{o}','{n}')"));
+    let cols: Vec<(String, String)> = c.prepare("SELECT name,type FROM pragma_table_info('managed_turns')").unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect();
+    let select = cols.iter().map(|(n, t)| if t == "TEXT" { swap(n) } else { n.clone() }).collect::<Vec<_>>().join(",");
+    let mut sql = format!("INSERT INTO managed_turns SELECT {select} FROM managed_turns WHERE managed_turn_id='{old_turn}';");
+    sql += &format!("INSERT INTO processed_intents SELECT {},{},{} FROM processed_intents WHERE intent_id='{old_intent}';", swap("intent_id"), swap("mutation"), swap("result"));
+    let events: Vec<String> = c.prepare("SELECT envelope FROM control_events WHERE json_extract(envelope,'$.event_type') LIKE 'authority.managed_turn.%' AND json_extract(envelope,'$.payload.managed_turn_id')=?1 ORDER BY sequence").unwrap()
+        .query_map([&old_turn], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+    let mut n = head(&c);
+    for raw in events {
+        n += 1;
+        let mut v: Value = serde_json::from_str(&raw).unwrap();
+        let id = uuid();
+        v["event_id"] = json!(id);
+        v["sequence"] = json!(n.to_string());
+        v["payload"]["managed_turn_id"] = json!(turn);
+        v["source"]["instance_id"] = json!(authority);
+        if v["correlation_id"] == json!(old_intent) {
+            v["correlation_id"] = json!(intent);
+        }
+        sql += &format!(
+            "INSERT INTO control_events VALUES('{id}','{stream}','{n:020}','{session}','{}');",
+            v.to_string().replace('\'', "''")
+        );
+    }
+    sql += &format!("UPDATE authority_metadata SET last_sequence='{n}';");
+    tamper(&c, &sql);
+    c
+}
+
+#[test]
+fn migration_boundary_rejects_baseline_shaped_history_written_after_it() {
+    // A turn recorded as baseline history after the boundary, before any other V8 mutation
+    // could be told apart from real history, must be refused.
+    let c = forge_baseline_turn_after_migration();
+    assert!(validate_v8(&c).is_err());
+}
+
+#[test]
+fn migration_boundary_detects_rewritten_pre_migration_history() {
+    let w = with_work();
+    validate_v8(&w.conn).unwrap();
+    // Rewrite one pre-migration event byte-for-byte differently but still valid.
+    tamper(
+        &w.conn,
+        "UPDATE control_events SET envelope=replace(envelope,'.000Z\"','.001Z\"') WHERE sequence='00000000000000000001' AND envelope LIKE '%.000Z\"%'",
+    );
+    let changed: i64 = w.conn.query_row("SELECT changes()", [], |r| r.get(0)).unwrap();
+    tamper(
+        &w.conn,
+        "UPDATE control_events SET envelope=json_set(envelope,'$.timestamp','2001-01-01T00:00:00.000Z') WHERE sequence='00000000000000000001'",
+    );
+    let _ = changed;
     assert!(validate_v8(&w.conn).is_err());
 }

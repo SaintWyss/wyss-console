@@ -469,3 +469,27 @@ fn restart_leaves_predecessor_launches_unowned_and_reuse_impossible() {
     assert_ne!(retained.runtime_instance_id, o.runtime_instance_id);
     validate_v8(&c).unwrap();
 }
+
+#[test]
+fn every_authority_instance_announces_itself_once_naming_its_predecessor() {
+    let (mut c, s) = image();
+    let started = |c: &Connection| -> Vec<(String, Option<String>)> {
+        c.prepare("SELECT json_extract(envelope,'$.source.instance_id'),json_extract(envelope,'$.payload.predecessor_instance_id') FROM control_events WHERE json_extract(envelope,'$.event_type')='authority.instance.started' ORDER BY sequence")
+            .unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
+    };
+    assert!(started(&c).is_empty());
+    Allocator::new(&mut c, wire(A)).unwrap().start(&start(&s, &uuid(), 0, 0), &free()).unwrap();
+    // A replay (no write) and further writes by the same instance announce nothing more.
+    let instance = instance_of(&c);
+    Allocator::new(&mut c, wire(A)).unwrap().stop(&stop(&s, &uuid(), 1, 1, Some(&instance)), &free()).unwrap();
+    let first = started(&c);
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].0, A);
+    assert!(first[0].1.is_some(), "the migrated store's last writer is named");
+    Allocator::new(&mut c, wire(B)).unwrap().start(&start(&s, &uuid(), 1, 2), &free()).unwrap();
+    assert_eq!(started(&c), vec![first[0].clone(), (B.to_owned(), Some(A.to_owned()))]);
+    validate_v8(&c).unwrap();
+}
+fn instance_of(c: &Connection) -> String {
+    c.query_row("SELECT runtime_instance_id FROM managed_runtime_launches", [], |r| r.get(0)).unwrap()
+}

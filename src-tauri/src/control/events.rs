@@ -199,6 +199,11 @@ impl Replay {
     /// Folds one decoded envelope. An unknown future event is counted and nothing else.
     pub(super) fn observe(&mut self, v: &Value) -> ControlResult<()> {
         let kind = text(&v["event_type"])?;
+        // F8 authority announcements are verified by the F8 validator; they affect nothing here.
+        if self.v8 && kind == "authority.instance.started" {
+            self.known += 1;
+            return Ok(());
+        }
         if v["payload_schema_version"].as_u64() == Some(2) {
             // Never in a schema-7 store; there a version-2 payload fails its contract.
             if self.v8 && classify(&kind) == Class::Known {
