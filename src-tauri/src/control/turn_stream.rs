@@ -140,3 +140,13 @@ impl Streams {
         }
     }
 }
+
+/// Ordinary unit fixture through the real bounded ring, never a provider or installed stream.
+#[cfg(test)]
+pub(crate) fn fixture_page(t: &ManagedTurnRecord, p: &TurnEvents, count: u16) -> TurnStreamPage {
+    let mut streams = Streams::default();
+    for _ in 0..count {
+        streams.push(t, StreamKind::AssistantMessageDelta, Some("fixture"));
+    }
+    streams.page(t, p)
+}

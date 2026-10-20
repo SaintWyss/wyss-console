@@ -56,7 +56,8 @@ and observational registry; review of the extended execution core remains future
 [reviewed candidate contracts](contracts/f8/README.md), with ten executable reference/SQL tests.
 Inactive protocol codecs, offline V0–V7→V8 preparation/initial-image validators and registry foundations
 now exist: [code evidence and precise limits](acceptance/f8-code-2026-10-20.md). New-work V8 event replay,
-complete result correlation, durable allocation/replay and production enforcement still remain.
+audit result validation, durable allocation/replay and production enforcement still remain. Non-audit
+result correlation is implemented, with explicit canonical-workspace context for binding creation.
 Qualified concurrency measurements and provider shared-state compatibility remain unproven; no live migration or guarantee change occurred.
 See [F8 evidence](research/f8-runtime-decision-2026-10-20.md) and
 [adversarial specification](spec/f8-runtime-acceptance.md).

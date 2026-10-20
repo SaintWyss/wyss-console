@@ -104,7 +104,8 @@ cancel a legitimate workload, a residual product risk requiring owner acceptance
   and provider auth/cache/session compatibility still require separate proof before concurrency.
 
 Canonical legacy/immediate-migration validation and partial protocol codecs are now implemented
-offline. New-work V8 canonical/event replay, complete result correlation, production integration, fair
+offline. Non-audit result correlation is implemented with explicit canonical workspace context.
+New-work V8 canonical/event replay, audit result validation, production integration, fair
 scheduler, owned cleanup and real provider tests are still future implementation requirements. Passing a request/routing
 oracle does not prove those implementations or the live authority boundary.
 

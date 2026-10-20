@@ -150,6 +150,8 @@ receipts have revision expected+1 and the requested desired state; stop retains 
 retains it for the same launch or increments exactly one (first allocation is 1). Exact-intent replay
 uses its original request expectations. These clarify the candidate; no approved V1 contract changes.
 
-Audit vocabulary-2 result validation and non-runtime successful method/result correlation are still
-unsupported in this module. Do not use partial codecs to enable a V8 client/server. See the
+Audit vocabulary-2 result validation is still unsupported in this module. All non-audit methods
+now have result-kind/record correlation. Binding-create success requires the independently accepted
+canonical workspace via `correlate_binding_create`; generic correlation refuses without that context.
+Closed-session no-op returns revision 2 unchanged, as in the baseline. Do not use partial codecs to enable a V8 client/server. See the
 [implementation evidence](../../acceptance/f8-code-2026-10-20.md) for the remaining boundaries.

@@ -679,6 +679,28 @@ impl Response {
         &self.projection
     }
     pub fn correlate(&self, request: &Request, authority: &WireUuid) -> ControlResult<()> {
+        self.correlate_with_context(request, authority, None)
+    }
+    /// A binding create canonicalizes its workspace before dispatch. Supply that independently
+    /// accepted canonical path; never resolve it here, especially when checking a replay receipt.
+    pub fn correlate_binding_create(
+        &self,
+        request: &Request,
+        authority: &WireUuid,
+        canonical_workspace: &str,
+    ) -> ControlResult<()> {
+        if !matches!(request.operation(), v1::Operation::BindingCreate(_)) {
+            return Err(E::InvalidRequest);
+        }
+        v1::validate_workspace_text(canonical_workspace)?;
+        self.correlate_with_context(request, authority, Some(canonical_workspace))
+    }
+    fn correlate_with_context(
+        &self,
+        request: &Request,
+        authority: &WireUuid,
+        canonical_workspace: Option<&str>,
+    ) -> ControlResult<()> {
         if self.request_id != *request.request_id()
             || self.authority != *authority
             || request.authority().is_some_and(|a| a != authority)
@@ -693,12 +715,33 @@ impl Response {
                 v1::Operation::RuntimeStatus(_) => "runtime_status",
                 v1::Operation::RuntimeModels(_) => "runtime_models",
                 v1::Operation::RuntimeStart(_) | v1::Operation::RuntimeStop(_) => "runtime_control",
-                // Other variants require coordinated method/result correlation before any future dispatch.
-                _ => return Err(E::Unsupported),
+                v1::Operation::Prepare(_) | v1::Operation::Get(_) | v1::Operation::Close(_) => {
+                    "session"
+                }
+                v1::Operation::List(_) => "sessions",
+                v1::Operation::BindingCreate(_) | v1::Operation::BindingResume(_) => "binding",
+                v1::Operation::BindingStatus(_) => "binding_status",
+                v1::Operation::BindingAbandon(_) => "binding_abandoned",
+                v1::Operation::LeaseGrant(_)
+                | v1::Operation::LeaseGet(_)
+                | v1::Operation::LeaseRenew(_)
+                | v1::Operation::LeaseRevoke(_) => "lease",
+                v1::Operation::LeaseActive(_) => "active_lease",
+                v1::Operation::GateStatus(_) => "gate_status",
+                v1::Operation::TurnStart(_) | v1::Operation::TurnCancel(_) => "turn",
+                v1::Operation::TurnStatus(_) => "turn_status",
+                v1::Operation::TurnEvents(_) => "turn_events",
+                v1::Operation::ApprovalPending(_) => "pending_approval",
+                v1::Operation::ApprovalStatus(_) => "approval",
+                v1::Operation::ApprovalRespond(_) => "approval_receipt",
+                v1::Operation::AuditRead(_) | v1::Operation::AuditWatch(_) => {
+                    return Err(E::Unsupported);
+                }
             };
             if value["kind"] != expected {
                 return Err(E::CorrelationError);
             }
+            correlate_record(request, r, canonical_workspace)?;
             if let (
                 v1::ResultValue::RuntimeControl(record),
                 Projection::Runtime { generation, .. },
@@ -819,5 +862,159 @@ impl Response {
         let b = encode(&v)?;
         Self::parse(&b)?;
         Ok(b)
+    }
+}
+
+fn correlate_record(
+    request: &Request,
+    result: &v1::ResultValue,
+    canonical_workspace: Option<&str>,
+) -> ControlResult<()> {
+    use v1::{Operation as O, ResultValue as R};
+    let fence_session = |session: &ManagedSessionId| match request.target() {
+        Target::Fenced(f) => &f.managed_session_id == session,
+        _ => true,
+    };
+    let fence_turn = |turn: &v1::ManagedTurnRecord| match request.target() {
+        Target::Fenced(f) => {
+            f.managed_session_id == turn.managed_session_id
+                && f.runtime_instance_id.as_ref() == Some(&turn.runtime_instance_id)
+        }
+        _ => false,
+    };
+    let next_revision = |expected: u64, actual: u64| expected.checked_add(1) == Some(actual);
+    let matches = match (request.operation(), result) {
+        (O::Prepare(p), R::Session(s)) => {
+            s.adapter_id == p.adapter_id
+                && s.runtime_kind == p.runtime_kind
+                && s.control_state == v1::ControlState::Prepared
+                && s.revision == 1
+        }
+        (O::Get(p), R::Session(s)) => p.managed_session_id == s.managed_session_id,
+        (O::Close(p), R::Session(s)) => {
+            p.managed_session_id == s.managed_session_id
+                && s.control_state == v1::ControlState::Closed
+                && (next_revision(p.expected_revision, s.revision)
+                    || p.expected_revision == 2 && s.revision == 2)
+        }
+        (O::List(p), R::Sessions { sessions, next }) => {
+            let increasing = sessions
+                .windows(2)
+                .all(|w| w[0].created_sequence < w[1].created_sequence);
+            let ids: std::collections::BTreeSet<_> = sessions
+                .iter()
+                .map(|s| s.managed_session_id.as_str())
+                .collect();
+            sessions.len() <= usize::from(p.limit)
+                && ids.len() == sessions.len()
+                && increasing
+                && sessions
+                    .iter()
+                    .all(|s| p.after.is_none_or(|a| s.created_sequence > a))
+                && next.is_none_or(|n| {
+                    sessions.len() == usize::from(p.limit)
+                        && sessions.last().is_some_and(|s| s.created_sequence == n)
+                })
+        }
+        (O::BindingCreate(p), R::Binding(b)) => {
+            p.managed_session_id == b.managed_session_id
+                && canonical_workspace.ok_or(E::Unsupported)? == b.workspace_root
+        }
+        (O::BindingResume(p), R::Binding(b)) => p.managed_session_id == b.managed_session_id,
+        (O::BindingStatus(p), R::BindingStatus(b)) => p.managed_session_id == b.managed_session_id,
+        (O::BindingAbandon(p), R::BindingAbandoned(b)) => p.operation_id == b.operation_id,
+        (O::LeaseGrant(p), R::Lease(l)) => {
+            let mut scopes = p.scopes.clone();
+            scopes.sort();
+            p.session_id == l.session_id
+                && scopes == l.scopes
+                && l.state == v1::LeaseState::Active
+                && l.revision == 1
+                && (v1::timestamp(&l.expires_at)? - v1::timestamp(&l.issued_at)?)
+                    == time::Duration::seconds(i64::from(p.ttl_seconds))
+        }
+        (O::LeaseGet(p), R::Lease(l)) => p.lease_id == l.lease_id,
+        (O::LeaseActive(p), R::ActiveLease(l)) => l
+            .as_ref()
+            .is_none_or(|l| p.session_id == l.session_id && l.state == v1::LeaseState::Active),
+        (O::LeaseRenew(p), R::Lease(l)) => {
+            p.lease_id == l.lease_id
+                && fence_session(&l.session_id)
+                && l.state == v1::LeaseState::Active
+                && next_revision(p.expected_revision, l.revision)
+                && (v1::timestamp(&l.expires_at)? - v1::timestamp(&l.updated_at)?)
+                    == time::Duration::seconds(i64::from(p.ttl_seconds))
+        }
+        (O::LeaseRevoke(p), R::Lease(l)) => {
+            p.lease_id == l.lease_id
+                && l.state == v1::LeaseState::Revoked
+                && l.revocation_reason == Some(v1::RevocationReason::UserRequest)
+                && next_revision(p.expected_revision, l.revision)
+        }
+        (O::GateStatus(p), R::GateStatus(g)) => {
+            p.session_id == g.session_id && p.action == g.action
+        }
+        (O::TurnStart(p), R::Turn(t)) => {
+            p.managed_session_id == t.managed_session_id && fence_turn(t)
+        }
+        (O::TurnCancel(p), R::Turn(t)) => p.managed_turn_id == t.managed_turn_id && fence_turn(t),
+        (O::TurnStatus(p), R::TurnStatus(t)) => p.managed_turn_id == t.turn.managed_turn_id,
+        (O::TurnEvents(p), R::TurnEvents(page)) => {
+            page.events.len() <= usize::from(p.limit)
+                && page.next_sequence == page.events.last().map(|e| e.sequence)
+                && page.gap
+                    == page
+                        .events
+                        .first()
+                        .is_some_and(|e| e.kind == v1::StreamKind::StreamGap)
+                && page.events.iter().enumerate().all(|(index, e)| {
+                    let after = p.after_sequence.map_or(0, |s| s.get());
+                    if e.kind == v1::StreamKind::StreamGap {
+                        let expected = page
+                            .earliest_sequence
+                            .map_or(after.saturating_add(1).max(1), |s| {
+                                s.get().saturating_sub(1).max(1)
+                            });
+                        index == 0
+                            && page.gap
+                            && e.sequence.get() == expected
+                            && e.text.is_none()
+                            && e.managed_approval_id.is_none()
+                    } else {
+                        e.sequence.get() > after
+                    }
+                })
+                && page
+                    .events
+                    .iter()
+                    .all(|e| e.managed_turn_id == p.managed_turn_id)
+                && page.events.windows(2).all(|w| {
+                    w[0].sequence < w[1].sequence
+                        && w[0].managed_session_id == w[1].managed_session_id
+                })
+        }
+        (O::ApprovalPending(p), R::PendingApproval(a)) => a
+            .as_ref()
+            .is_none_or(|a| p.managed_turn_id == a.approval.managed_turn_id),
+        (O::ApprovalStatus(p), R::Approval(a)) => {
+            p.managed_approval_id == a.approval.managed_approval_id
+        }
+        (O::ApprovalRespond(p), R::ApprovalReceipt(a)) => {
+            p.managed_approval_id == a.managed_approval_id
+                && p.decision == a.decision
+                && next_revision(p.expected_revision, a.revision)
+        }
+        // Runtime/authority variants are checked by the dedicated correlation above. Audit is refused.
+        (O::Hello(_), R::Hello(_))
+        | (O::Status(_), R::Status(_))
+        | (O::RuntimeStatus(_), R::RuntimeStatus(_))
+        | (O::RuntimeModels(_), R::RuntimeModels { .. })
+        | (O::RuntimeStart(_) | O::RuntimeStop(_), R::RuntimeControl(_)) => true,
+        _ => false,
+    };
+    if matches {
+        Ok(())
+    } else {
+        Err(E::CorrelationError)
     }
 }

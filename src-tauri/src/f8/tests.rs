@@ -279,3 +279,272 @@ fn model_cursor_cannot_cross_identity_in_request_or_response() {
         assert!(parse(&bad).is_err());
     }
 }
+fn response_value(kind: &str, value: Value) -> Result<Response, E> {
+    Response::parse(&serde_json::to_vec(&json!({"schema_version":2,"request_id":INTENT,"authority_instance_id":AUTH,"result":{"kind":kind,"value":value}})).unwrap())
+}
+fn session_value(session: &str, closed: bool) -> Value {
+    json!({"managed_session_id":session,"adapter_id":"codex","runtime_kind":"codex","control_state":if closed {"closed"} else {"prepared"},"revision":if closed {2} else {1},"created_at":"2026-10-20T00:00:00Z","updated_at":"2026-10-20T00:00:00Z","created_sequence":"1"})
+}
+fn lease_value(session: &str, state: &str, revision: u64) -> Value {
+    json!({"lease_id":B,"session_id":session,"state":state,"scopes":["turn_start"],"revision":revision,"issued_at":"2026-10-20T00:00:00Z","updated_at":"2026-10-20T00:00:00Z","expires_at":"2026-10-20T00:01:00Z","revocation_reason":if state=="revoked" {json!("user_request")} else {Value::Null}})
+}
+#[test]
+fn non_runtime_correlator_refuses_wrong_result_session_lease_gate_and_binding() {
+    let get = parse(&request(
+        "managedSession/get",
+        json!({"managed_session_id":A}),
+    ))
+    .unwrap();
+    response_value("session", session_value(A, false))
+        .unwrap()
+        .correlate(&get, &id(AUTH))
+        .unwrap();
+    assert_eq!(
+        response_value("session", session_value(B, false))
+            .unwrap()
+            .correlate(&get, &id(AUTH)),
+        Err(E::CorrelationError)
+    );
+    let close=parse(&request("managedSession/close",json!({"intent_id":INTENT,"managed_session_id":A,"expected_revision":1,"runtime_fence":fence()}))).unwrap();
+    response_value("session", session_value(A, true))
+        .unwrap()
+        .correlate(&close, &id(AUTH))
+        .unwrap();
+    assert!(
+        response_value("session", session_value(A, false))
+            .unwrap()
+            .correlate(&close, &id(AUTH))
+            .is_err()
+    );
+    let active = parse(&request("executionLease/active", json!({"session_id":A}))).unwrap();
+    response_value("active_lease", lease_value(A, "active", 1))
+        .unwrap()
+        .correlate(&active, &id(AUTH))
+        .unwrap();
+    assert!(
+        response_value("active_lease", lease_value(INSTANCE, "active", 1))
+            .unwrap()
+            .correlate(&active, &id(AUTH))
+            .is_err()
+    );
+    assert!(
+        response_value("session", session_value(A, false))
+            .unwrap()
+            .correlate(&active, &id(AUTH))
+            .is_err()
+    );
+    let gate = parse(&request(
+        "executionGate/status",
+        json!({"session_id":A,"action":"turn_start"}),
+    ))
+    .unwrap();
+    response_value(
+        "gate_status",
+        json!({"session_id":A,"action":"turn_start","reason":"lease_missing"}),
+    )
+    .unwrap()
+    .correlate(&gate, &id(AUTH))
+    .unwrap();
+    assert!(
+        response_value(
+            "gate_status",
+            json!({"session_id":B,"action":"turn_start","reason":"lease_missing"})
+        )
+        .unwrap()
+        .correlate(&gate, &id(AUTH))
+        .is_err()
+    );
+    let binding = parse(&request(
+        "managedSession/runtime/status",
+        json!({"managed_session_id":A}),
+    ))
+    .unwrap();
+    for (session, ok) in [(A, true), (B, false)] {
+        let result=response_value("binding_status",json!({"managed_session_id":session,"state":"unbound","binding":null,"runtime_instance_id":null,"operation_id":null,"runtime_identity":null})).unwrap();
+        assert_eq!(result.correlate(&binding, &id(AUTH)).is_ok(), ok);
+    }
+}
+#[test]
+fn lease_receipt_scope_ttl_revision_and_fenced_owner_must_match_request() {
+    let grant=parse(&request("executionLease/grant",json!({"intent_id":INTENT,"session_id":A,"expected_session_revision":1,"scopes":["turn_start"],"ttl_seconds":60,"runtime_fence":fence()}))).unwrap();
+    let valid = lease_value(A, "active", 1);
+    response_value("lease", valid.clone())
+        .unwrap()
+        .correlate(&grant, &id(AUTH))
+        .unwrap();
+    for (field, value) in [
+        ("scopes", json!(["session_create"])),
+        ("revision", json!(2)),
+        ("expires_at", json!("2026-10-20T00:01:01Z")),
+        ("session_id", json!(INSTANCE)),
+    ] {
+        let mut bad = valid.clone();
+        bad[field] = value;
+        assert!(
+            response_value("lease", bad)
+                .unwrap()
+                .correlate(&grant, &id(AUTH))
+                .is_err()
+        );
+    }
+    let renew=parse(&request("executionLease/renew",json!({"intent_id":INTENT,"lease_id":B,"expected_revision":1,"ttl_seconds":60,"runtime_fence":fence()}))).unwrap();
+    response_value("lease", lease_value(A, "active", 2))
+        .unwrap()
+        .correlate(&renew, &id(AUTH))
+        .unwrap();
+    assert!(
+        response_value("lease", lease_value(INSTANCE, "active", 2))
+            .unwrap()
+            .correlate(&renew, &id(AUTH))
+            .is_err()
+    );
+    let revoke = parse(&request(
+        "executionLease/revoke",
+        json!({"intent_id":INTENT,"lease_id":B,"expected_revision":1}),
+    ))
+    .unwrap();
+    response_value("lease", lease_value(A, "revoked", 2))
+        .unwrap()
+        .correlate(&revoke, &id(AUTH))
+        .unwrap();
+    assert!(
+        response_value("lease", lease_value(A, "active", 2))
+            .unwrap()
+            .correlate(&revoke, &id(AUTH))
+            .is_err()
+    );
+}
+#[test]
+fn approval_receipt_id_decision_revision_and_listing_cursor_cannot_cross() {
+    let approve=parse(&request("managedTurn/approval/respond",json!({"intent_id":INTENT,"managed_approval_id":B,"expected_revision":1,"decision":"accept","runtime_fence":fence()}))).unwrap();
+    let receipt = json!({"managed_approval_id":B,"managed_turn_id":INTENT,"kind":"command_execution","decision":"accept","state":"accepted","revision":2,"action_fingerprint":"a".repeat(64),"decided_at":"2026-10-20T00:00:00Z"});
+    response_value("approval_receipt", receipt.clone())
+        .unwrap()
+        .correlate(&approve, &id(AUTH))
+        .unwrap();
+    for (field, value) in [
+        ("managed_approval_id", json!(INSTANCE)),
+        ("revision", json!(3)),
+    ] {
+        let mut bad = receipt.clone();
+        bad[field] = value;
+        assert!(
+            response_value("approval_receipt", bad)
+                .unwrap()
+                .correlate(&approve, &id(AUTH))
+                .is_err()
+        );
+    }
+    let mut wrong = receipt;
+    wrong["decision"] = json!("decline");
+    wrong["state"] = json!("declined");
+    assert!(
+        response_value("approval_receipt", wrong)
+            .unwrap()
+            .correlate(&approve, &id(AUTH))
+            .is_err()
+    );
+    let list = parse(&request(
+        "managedSession/list",
+        json!({"after":null,"limit":1}),
+    ))
+    .unwrap();
+    response_value(
+        "sessions",
+        json!({"sessions":[session_value(A,false)],"next":"1"}),
+    )
+    .unwrap()
+    .correlate(&list, &id(AUTH))
+    .unwrap();
+    assert!(
+        response_value(
+            "sessions",
+            json!({"sessions":[session_value(A,false)],"next":"2"})
+        )
+        .unwrap()
+        .correlate(&list, &id(AUTH))
+        .is_err()
+    );
+}
+#[test]
+fn closed_noop_and_canonical_binding_context_preserve_existing_contracts() {
+    let close=parse(&request("managedSession/close",json!({"intent_id":INTENT,"managed_session_id":A,"expected_revision":2,"runtime_fence":fence()}))).unwrap();
+    response_value("session", session_value(A, true))
+        .unwrap()
+        .correlate(&close, &id(AUTH))
+        .unwrap();
+    let create=parse(&request("managedSession/runtime/create",json!({"intent_id":INTENT,"managed_session_id":A,"expected_session_revision":1,"workspace_root":"/project/.","runtime_fence":fence()}))).unwrap();
+    let binding=response_value("binding",json!({"managed_session_id":A,"adapter_id":"codex","runtime_kind":"codex","runtime_session_id":B,"workspace_root":"/project","binding_revision":1,"created_at":"2026-10-20T00:00:00Z","updated_at":"2026-10-20T00:00:00Z"})).unwrap();
+    assert_eq!(binding.correlate(&create, &id(AUTH)), Err(E::Unsupported));
+    binding
+        .correlate_binding_create(&create, &id(AUTH), "/project")
+        .unwrap();
+    assert!(
+        binding
+            .correlate_binding_create(&create, &id(AUTH), "/other")
+            .is_err()
+    );
+}
+#[test]
+fn active_lease_projection_and_fractional_ttl_must_refuse() {
+    for state in ["revoked", "expired"] {
+        assert!(response_value("active_lease", lease_value(A, state, 2)).is_err());
+    }
+    let grant=parse(&request("executionLease/grant",json!({"intent_id":INTENT,"session_id":A,"expected_session_revision":1,"scopes":["turn_start"],"ttl_seconds":60,"runtime_fence":fence()}))).unwrap();
+    let mut fractional = lease_value(A, "active", 1);
+    fractional["expires_at"] = json!("2026-10-20T00:01:00.5Z");
+    assert_eq!(
+        response_value("lease", fractional)
+            .unwrap()
+            .correlate(&grant, &id(AUTH)),
+        Err(E::CorrelationError)
+    );
+}
+#[test]
+fn real_stream_gap_pagination_preserves_cursor_and_refuses_stale_ordinary_events() {
+    use crate::contracts::control::{ManagedTurnRecord, TurnEvents};
+    let turn:ManagedTurnRecord=serde_json::from_value(json!({"managed_turn_id":B,"managed_session_id":A,"codex_thread_id":"thread-1","codex_turn_id":"turn-1","admitted_lease_id":INTENT,"admitted_lease_revision":1,"runtime_instance_id":INSTANCE,"state":"running","revision":1,"created_at":"2026-10-20T00:00:00Z","updated_at":"2026-10-20T00:00:00Z","terminal_at":null,"terminal_reason":null})).unwrap();
+    for count in [0, 300] {
+        let query: TurnEvents =
+            serde_json::from_value(json!({"managed_turn_id":B,"after_sequence":"1","limit":3}))
+                .unwrap();
+        let page = crate::control::stream_page_fixture(&turn, &query, count);
+        assert!(page.gap);
+        let req = parse(&request(
+            "managedSession/turn/events",
+            serde_json::to_value(&query).unwrap(),
+        ))
+        .unwrap();
+        response_value("turn_events", serde_json::to_value(page).unwrap())
+            .unwrap()
+            .correlate(&req, &id(AUTH))
+            .unwrap();
+    }
+    let query: TurnEvents =
+        serde_json::from_value(json!({"managed_turn_id":B,"after_sequence":null,"limit":3}))
+            .unwrap();
+    let page = crate::control::stream_page_fixture(&turn, &query, 1);
+    let value = serde_json::to_value(page).unwrap();
+    let mut late = serde_json::to_value(&query).unwrap();
+    late["after_sequence"] = json!("100");
+    let req = parse(&request("managedSession/turn/events", late)).unwrap();
+    assert_eq!(
+        response_value("turn_events", value.clone())
+            .unwrap()
+            .correlate(&req, &id(AUTH)),
+        Err(E::CorrelationError)
+    );
+    let req = parse(&request(
+        "managedSession/turn/events",
+        serde_json::to_value(&query).unwrap(),
+    ))
+    .unwrap();
+    let mut bad = value;
+    bad["next_sequence"] = json!("99");
+    assert!(
+        response_value("turn_events", bad)
+            .unwrap()
+            .correlate(&req, &id(AUTH))
+            .is_err()
+    );
+}
