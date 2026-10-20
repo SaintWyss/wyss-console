@@ -518,6 +518,9 @@ impl Authority {
         action_fingerprint: &str,
         structure: ApprovalStructure,
     ) -> ControlResult<crate::contracts::approval::ManagedApprovalRecord> {
+        // Verify the independently observed provider connection before creating durable work.
+        // A caller-supplied record ID cannot select a different session or launch.
+        self.engine.observe_fence(&from.fence())?;
         let session = from.managed_session_id.as_str().to_owned();
         let turn = self
             .engine
@@ -552,7 +555,28 @@ impl Authority {
         state: TurnState,
         reason: Option<TurnReason>,
     ) -> ControlResult<()> {
-        let session = from.managed_session_id.as_str().to_owned();
+        // The provider connection, not the event's record ID, determines its launch.
+        // Durable ownership by *this authority* is insufficient when multiple sessions
+        // belong to the same authority.
+        self.engine.observe_fence(&from.fence())?;
+        let row: Option<(String, String, i64)> = self
+            .engine
+            .connection()
+            .query_row(
+                "SELECT managed_session_id,runtime_instance_id,generation FROM managed_turn_launches WHERE managed_turn_id=?1",
+                [turn.as_str()],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .map_err(|_| E::StorageUnavailable)?;
+        let (session, instance, generation) = row.ok_or(E::TurnNotFound)?;
+        if session != from.managed_session_id.as_str()
+            || instance != from.runtime_instance_id.as_str()
+            || generation != i64::try_from(from.generation).map_err(|_| E::StaleRevision)?
+            || self.engine.active_turn(&session) != Some(turn.as_str())
+        {
+            return Err(E::StaleRevision);
+        }
         let authority = self.authority();
         Writer::new(self.engine.connection_mut(), authority)?.transition_turn(
             turn,
@@ -565,13 +589,36 @@ impl Authority {
         {
             let _ = self.engine.end_turn(&ticket);
         }
-        let _ = session;
         Ok(())
     }
+    /// A provider acknowledgement is attributed to its actual connection and item.
+    /// The durable approval ID alone is never a dispatch or confirmation capability.
     pub fn provider_approval_confirmed(
         &mut self,
+        from: &RuntimeRef,
         approval: &crate::contracts::identities::ManagedApprovalId,
+        provider_item_id: &str,
     ) -> ControlResult<()> {
+        self.engine.observe_fence(&from.fence())?;
+        let row: Option<(String, String, String, String, i64)> = self
+            .engine
+            .connection()
+            .query_row(
+                "SELECT a.managed_session_id,a.managed_turn_id,a.provider_item_id,l.runtime_instance_id,l.generation                  FROM managed_approvals a JOIN managed_approval_launches l                  ON a.managed_approval_id=l.managed_approval_id WHERE a.managed_approval_id=?1",
+                [approval.as_str()],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .optional()
+            .map_err(|_| E::StorageUnavailable)?;
+        let (session, turn, item, instance, generation) = row.ok_or(E::ApprovalNotFound)?;
+        if session != from.managed_session_id.as_str()
+            || instance != from.runtime_instance_id.as_str()
+            || generation != i64::try_from(from.generation).map_err(|_| E::StaleRevision)?
+            || item != provider_item_id
+            || self.engine.active_turn(&session) != Some(turn.as_str())
+        {
+            return Err(E::StaleRevision);
+        }
         let authority = self.authority();
         Writer::new(self.engine.connection_mut(), authority)?
             .confirm_approval(approval)
