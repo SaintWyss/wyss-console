@@ -156,7 +156,8 @@ impl OwnedChild {
         let pid = match i32::try_from(child.id()) {
             Ok(pid) => pid,
             Err(_) => {
-                let _ = child.kill();
+                // No safe signal target has been established. Retain the owned
+                // handle for nonblocking reaping rather than guessing a PID.
                 enqueue_reap(child, permit);
                 return Err(E::InternalError);
             }
@@ -170,22 +171,33 @@ impl OwnedChild {
         } else {
             None
         };
-        // The pidfd refers to our child only if the child was still ours (unreaped) when it was
-        // opened; a child reaped by someone else could have let the PID number be reused.
+        // The pidfd refers to our child only if it is still our unreaped direct child.
+        // An external SIGCHLD consumer must not make a recycled PID a signal target.
         let still_ours = matches!(child.try_wait(), Ok(None));
         let start = proc_start_ticks(pid);
-        let (Some(pidfd), Ok(start_ticks), true) = (opened, start, still_ours) else {
-            // Child is still our direct spawn. A failed pidfd/identity preflight
-            // cannot justify synchronous wait on the authority writer thread.
-            // The bounded background reaper holds the Child until actual reap.
-            // Never signal by numeric PID if ownership could have been lost
-            // through an unexpected external reap.
+        if !still_ours || start.is_err() || opened.is_none() {
+            // Signal solely through a verified pinned descriptor. If none could
+            // be acquired, refuse launch and retain the child without signalling
+            // by its numeric PID. The reaper keeps its bounded capacity slot.
             if still_ours {
-                let _ = child.kill();
+                if let Some(ref pinned) = opened {
+                    // SAFETY: pinned belongs to the still-unreaped child we spawned.
+                    let _ = unsafe {
+                        libc::syscall(
+                            libc::SYS_pidfd_send_signal,
+                            pinned.as_raw_fd(),
+                            libc::SIGKILL,
+                            std::ptr::null::<libc::siginfo_t>(),
+                            0,
+                        )
+                    };
+                }
             }
             enqueue_reap(child, permit);
             return Err(E::InternalError);
-        };
+        }
+        let pidfd = opened.ok_or(E::InternalError)?;
+        let start_ticks = start.map_err(|_| E::InternalError)?;
         let stdin = child.stdin.take();
         Ok((
             Self {
