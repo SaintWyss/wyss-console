@@ -30,10 +30,16 @@ struct Recorder {
     sent: Sent,
     exited: Arc<Mutex<bool>>,
     refuse_critical: Arc<Mutex<bool>>,
+    ambiguous_send: Arc<Mutex<bool>>,
 }
 impl Worker for Recorder {
     fn send(&mut self, frame: &[u8]) -> ControlResult<()> {
+        // Simulates a transport that might have delivered bytes before
+        // reporting an error. A safe caller cannot infer zero effect.
         self.sent.lock().unwrap().push(frame.to_vec());
+        if *self.ambiguous_send.lock().unwrap() {
+            return Err(E::TransportError);
+        }
         Ok(())
     }
     fn send_critical(&mut self, frame: &[u8]) -> ControlResult<()> {
@@ -64,6 +70,7 @@ struct Spawn {
     sent: Sent,
     exited: Arc<Mutex<bool>>,
     refuse_critical: Arc<Mutex<bool>>,
+    ambiguous_send: Arc<Mutex<bool>>,
 }
 impl Spawner for Spawn {
     fn spawn(
@@ -78,6 +85,7 @@ impl Spawner for Spawn {
                 sent: self.sent.clone(),
                 exited: self.exited.clone(),
                 refuse_critical: self.refuse_critical.clone(),
+                ambiguous_send: self.ambiguous_send.clone(),
             }),
         })
     }
@@ -113,6 +121,7 @@ impl Rig {
                 sent: Arc::default(),
                 exited: Arc::default(),
                 refuse_critical: Arc::default(),
+                ambiguous_send: Arc::default(),
             },
             sessions,
         }
