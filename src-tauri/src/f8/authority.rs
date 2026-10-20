@@ -39,6 +39,8 @@ pub struct Authority {
     engine: Engine,
     /// In-memory admission tickets by turn id: transient, launch-scoped, never durable.
     tickets: BTreeMap<String, TurnTicket>,
+    /// Retry audit-backed recovery until its transaction actually commits.
+    recovery_pending: bool,
 }
 
 /// Lease facts read from the database at the moment of an effect.
@@ -79,6 +81,8 @@ impl Authority {
         Self {
             engine,
             tickets: BTreeMap::new(),
+            // A successor must reconcile previous authority work even with no local exits.
+            recovery_pending: true,
         }
     }
     pub fn engine(&self) -> &Engine {
@@ -366,20 +370,36 @@ impl Authority {
         {
             return Err(E::StaleRevision);
         }
+        // A new cancellation requires the observed live launch BEFORE durable mutation.
+        // Exact already-committed intent replays and terminal turns need no live process.
+        let replay: bool = self.engine.connection().query_row(
+            "SELECT EXISTS(SELECT 1 FROM processed_intents WHERE intent_id=?1)",
+            [p.intent_id.as_str()], |r| r.get(0),
+        ).map_err(|_| E::StorageUnavailable)?;
+        let active: bool = self.engine.connection().query_row(
+            "SELECT state IN ('starting','running') FROM managed_turns WHERE managed_turn_id=?1",
+            [p.managed_turn_id.as_str()], |r| r.get(0),
+        ).map_err(|_| E::TurnNotFound)?;
+        if active && !replay {
+            self.engine.observe_fence(fence)?;
+        }
         let authority = self.authority();
         let (record, dispatch) =
             Writer::new(self.engine.connection_mut(), authority)?.cancel_turn(p)?;
         if dispatch {
-            self.engine.observe_fence(fence)?;
             if let Some(ticket) = self.tickets.get(p.managed_turn_id.as_str()).cloned() {
                 let snapshot = lease_snapshot(self.engine.connection(), &session, &ticket.lease_id);
-                // A refused interrupt is reported by the next poll/timeout; never retried blindly.
-                let _ = self.engine.write_frame(
+                // A buffered write is only queued, not proof that the provider
+                // processed the interrupt. Refusals must never be silently hidden.
+                if self.engine.write_frame(
                     &ticket,
                     b"{\"method\":\"turn/interrupt\"}",
                     &snapshot,
                     0,
-                );
+                ).is_err() {
+                    self.engine.transport_failed(&ticket.reference);
+                    return Err(E::ExternalEffectUnknown);
+                }
             }
         }
         Ok(json!({"kind":"turn","value":record}))
@@ -686,7 +706,12 @@ impl Authority {
         Writer::new(self.engine.connection_mut(), authority.clone())?.expire_approvals()?;
         self.engine.poll(now);
         if self.engine.take_ended() > 0 {
+            self.recovery_pending = true;
+        }
+        if self.recovery_pending {
+            // Keep the recovery edge set on any SQLite/audit failure; next tick retries.
             Writer::new(self.engine.connection_mut(), authority)?.recover()?;
+            self.recovery_pending = false;
             let live: Vec<String> = self.tickets.keys().cloned().collect();
             for turn in live {
                 let state: Option<String> = self
