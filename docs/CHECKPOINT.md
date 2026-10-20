@@ -17,6 +17,7 @@ Recheck both heads and `git status` before writing or pushing.
 | F4a OpenCode inventory and switches         | done    | ADR 0041; real-file reversible test; `docs/acceptance/f4a-f5-f6-f1b-2026-10-19.md`                                |
 | F5 hook/MCP authoring (subset)              | done    | ADR 0042, 0044; reviews; real config and real window (same record)                                                |
 | F5 project files, hook/MCP templates        | done    | ADR 0050; tests only, real window not yet exercised on the owner's desktop (installed build is older)             |
+| F8 per-session runtimes (DN-08 = A)         | design  | ADR 0051 **Proposed**: no code, authority and schema V6 unchanged; needs measurements, review, owner              |
 | F6a models (managed observed, native)       | done    | ADR 0043; managed choice not built                                                                                |
 | F6 catalogue view, `model/rerouted`, effort | done    | ADR 0048; `docs/acceptance/f6-models-2026-10-20.md`; new authority behaviour proven by tests only                 |
 | F10a gateway core (no transport)            | partial | ADR 0049; 36 tests; two cold reviews; unreachable; no signature scheme, no listener (DN-05)                       |

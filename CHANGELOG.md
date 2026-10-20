@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-20 — Per-session managed runtimes, proposed (F8 design only)
+
+- ADR 0051 (Proposed): identity, attestation per generation, bounded concurrency and budgets, cancellation,
+  recovery and a V6→V7 migration with its evidence list. No code; the authority and its guarantees are unchanged.
+
 ## 2026-10-20 — Remote gateway core, second review (still no transport)
 
 - Five fixes from a second cold review: a stored decision no longer outlives its issuer's revocation,
