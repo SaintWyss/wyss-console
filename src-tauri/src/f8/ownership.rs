@@ -453,6 +453,10 @@ fn reap_permit() -> ControlResult<ReapPermit> {
             });
         started.ok().map(|_| reaper)
     }).as_ref().ok_or(E::InternalError)?;
+    reserve_slot(reaper)
+}
+
+fn reserve_slot(reaper: &Arc<Reaper>) -> ControlResult<ReapPermit> {
     let mut count = reaper.slots.load(Ordering::Acquire);
     loop {
         if count >= REAPER_LIMIT {
