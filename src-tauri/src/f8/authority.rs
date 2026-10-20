@@ -456,14 +456,24 @@ impl Authority {
                     }
                     _ => Err(E::StaleRevision),
                 };
-                if sent.is_err() && p.decision == ApprovalDecision::Accept {
-                    // The accept was committed as dispatched but never reached the provider:
-                    // its effect is unknown and stays so; nothing is retried.
-                    let _ = Writer::new(self.engine.connection_mut(), authority)?.settle_approvals(
-                        Some(&record.managed_turn_id),
-                        ApprovalReason::EffectUnknown,
-                    );
-                    return Err(E::ExternalEffectUnknown);
+                if sent.is_err() {
+                    // All decisions are already durable. A declined or cancelled request
+                    // that was not delivered must NOT be reported as successful dispatch.
+                    // Fence the affected runtime; never retry an ambiguous provider write.
+                    if let Some(t) = ticket.as_ref() {
+                        self.engine.transport_failed(&t.reference);
+                    }
+                    if p.decision == ApprovalDecision::Accept {
+                        // A persisted accept may have reached the provider before the
+                        // transport failed. Keep that effect indeterminate, not retried.
+                        let _ = Writer::new(self.engine.connection_mut(), authority)?
+                            .settle_approvals(
+                                Some(&record.managed_turn_id),
+                                ApprovalReason::EffectUnknown,
+                            );
+                        return Err(E::ExternalEffectUnknown);
+                    }
+                    return Err(E::TransportError);
                 }
                 Ok(json!({"kind":"approval_receipt","value":receipt}))
             }
