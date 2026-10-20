@@ -13,7 +13,13 @@ pub mod migration;
 #[cfg(target_os = "linux")]
 pub mod ownership;
 #[cfg(target_os = "linux")]
+pub mod operations;
+#[cfg(target_os = "linux")]
 pub mod process_worker;
+#[cfg(target_os = "linux")]
+pub mod provider_adapter;
+#[cfg(target_os = "linux")]
+pub mod service;
 pub mod protocol;
 pub mod registry;
 pub mod scheduler;
@@ -31,3 +37,11 @@ mod tests;
 #[cfg(test)]
 #[path = "f8/audit_tests.rs"]
 mod audit_tests;
+
+#[cfg(test)]
+#[path = "f8/storage_tests.rs"]
+mod storage_tests;
+
+#[cfg(test)]
+#[path = "f8/process_integration_tests.rs"]
+mod process_integration_tests;

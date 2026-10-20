@@ -11,6 +11,23 @@ fn limits() -> Limits {
 }
 
 #[test]
+fn advertised_data_room_reserves_bytes_for_every_maximal_frame() {
+    let mut s = sched();
+    let l = limits();
+    let frame_max = l.data_bytes / 3;
+    s.push("a", Class::Data, frame_max, 1, 0).unwrap();
+    let room = s.data_room("a", frame_max);
+    assert_eq!(room, 2);
+    for _ in 0..room {
+        s.push("a", Class::Data, frame_max, 2, 0).unwrap();
+    }
+    assert_eq!(s.data_room("a", frame_max), 0);
+    // Zero-sized messages are bounded by event slots, with no division by zero.
+    assert_eq!(s.data_room("b", 0), l.data_events);
+    assert_eq!(s.data_room("missing", frame_max), 0);
+}
+
+#[test]
 fn lanes_are_bounded_and_back_pressure_is_explicit_never_a_growing_queue() {
     let mut s = sched();
     let l = limits();

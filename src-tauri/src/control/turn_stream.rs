@@ -13,7 +13,7 @@ struct Ring {
     dropped: u64,
 }
 #[derive(Default)]
-pub(super) struct Streams {
+pub(crate) struct Streams {
     rings: BTreeMap<String, Ring>,
     order: VecDeque<String>,
 }

@@ -253,6 +253,7 @@ fn approval_decisions_are_exactly_three_and_presentation_types_hide_their_conten
     }))
     .unwrap();
     let status = ApprovalStatus {
+        delivery: None,
         approval: record,
         acceptable: true,
         command: Some(CommandPresentation {

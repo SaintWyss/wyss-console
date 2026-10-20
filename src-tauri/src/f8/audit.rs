@@ -109,7 +109,14 @@ pub fn validate_event(v: &Value) -> ControlResult<Vocabulary> {
         }
         Some(2) => {
             common(v)?;
-            if RUNTIME_V2.contains(&kind) {
+            if kind == DELIVERY {
+                exact(&v["payload"], &["managed_approval_id", "runtime_instance_id", "generation", "delivery"])?;
+                uuid_text(&v["payload"], "managed_approval_id")?;
+                uuid_text(&v["payload"], "runtime_instance_id")?;
+                positive(&v["payload"], "generation")?;
+                serde_json::from_value::<crate::contracts::approval::ApprovalDelivery>(v["payload"]["delivery"].clone()).map_err(|_| bad())?;
+                if !v["correlation_id"].is_null() { return Err(bad()); }
+            } else if RUNTIME_V2.contains(&kind) {
                 runtime_v2(v, kind)?;
             } else if kind
                 .strip_prefix("authority.managed_turn.")
@@ -130,6 +137,8 @@ pub fn validate_event(v: &Value) -> ControlResult<Vocabulary> {
 
 /// A new authority instance announces itself, naming the instance it succeeds.
 pub const STARTED: &str = "authority.instance.started";
+pub const DELIVERY: &str = "authority.approval_delivery.changed";
+
 
 fn started_shape(v: &Value) -> ControlResult<()> {
     if v["persistence"] != "durable"
@@ -432,6 +441,7 @@ pub struct AuditReplay {
     launches: HashMap<String, Launch>,
     turns: HashMap<String, Turn>,
     approvals: HashMap<String, Approval>,
+    deliveries: BTreeMap<String, String>,
     /// Mutation intent (the event's correlation) to the runtime state it produced.
     intents: HashMap<String, Intent>,
     /// Baseline runtime mutation intents (null session), with the revision they produced.
@@ -687,7 +697,27 @@ impl AuditReplay {
         let source = canonical_source(v)?;
         let authorized = self.live_for(&session, &instance, source);
         let name = kind.rsplit('.').next().unwrap_or_default();
-        if kind.starts_with("authority.managed_turn.") {
+        if kind == DELIVERY {
+            let id = uuid_text(p, "managed_approval_id")?;
+            let a = self.approvals.get(id).ok_or_else(bad)?;
+            let next = text(p, "delivery")?;
+            if a.session != session || a.launch.as_ref() != Some(&(instance.clone(), generation)) {
+                return Err(bad());
+            }
+            let legal = match self.deliveries.get(id).map(String::as_str) {
+                None => next == "decision_accepted" && matches!(a.state.as_str(), "accepted" | "declined" | "cancelled"),
+                Some("decision_accepted") => matches!(next, "kernel_accepted" | "indeterminate"),
+                Some("kernel_accepted") => matches!(next, "provider_consumed" | "effect_confirmed" | "indeterminate"),
+                Some("provider_consumed") => matches!(next, "effect_confirmed" | "indeterminate"),
+                _ => false,
+            };
+            if !legal || (next != "indeterminate" && !authorized)
+                || (next == "effect_confirmed" && a.effect != "confirmed") {
+                return Err(bad());
+            }
+            self.deliveries.insert(id.to_owned(), next.to_owned());
+            Ok(())
+        } else if kind.starts_with("authority.managed_turn.") {
             self.turn_event(v, name, (&session, &instance, generation), authorized)
         } else {
             self.approval_event(v, name, (&session, &instance, generation), authorized)
@@ -1027,6 +1057,7 @@ impl AuditReplay {
     pub fn legacy_intents(&self) -> &HashMap<String, u64> {
         &self.legacy_intents
     }
+    pub fn deliveries(&self) -> &BTreeMap<String, String> { &self.deliveries }
     /// Unresolved work as seen by the stream's last writer.
     pub fn unresolved(&self) -> Unresolved {
         self.unresolved_for(self.writer.as_deref().unwrap_or_default())

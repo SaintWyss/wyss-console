@@ -200,7 +200,7 @@ impl Replay {
     pub(super) fn observe(&mut self, v: &Value) -> ControlResult<()> {
         let kind = text(&v["event_type"])?;
         // F8 authority announcements are verified by the F8 validator; they affect nothing here.
-        if self.v8 && kind == "authority.instance.started" {
+        if self.v8 && matches!(kind.as_str(), "authority.instance.started" | "authority.approval_delivery.changed") {
             self.known += 1;
             return Ok(());
         }

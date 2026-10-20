@@ -1,6 +1,6 @@
 //! External authority foundation. No dependency on Tauri or human terminals.
 mod anchor;
-mod approval_action;
+pub(crate) mod approval_action;
 pub mod client;
 mod conversations;
 #[cfg(test)]
@@ -14,10 +14,12 @@ mod runtime;
 pub(crate) mod schema;
 mod server;
 pub(crate) mod store;
-mod turn_stream;
+pub(crate) mod turn_stream;
 mod turns;
 mod watch;
 pub use server::run_from_environment;
+#[cfg(target_os = "linux")]
+pub use server::F8Transport;
 #[cfg(test)]
 mod tests;
 

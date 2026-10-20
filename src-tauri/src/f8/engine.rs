@@ -33,6 +33,8 @@ const MAX_OUTBOUND_FRAME: usize = 65_536;
 /// buffer and return an error (back pressure) instead of waiting, because it runs on the thread
 /// which also drives every other runtime's cleanup.
 pub trait Worker: Send {
+    /// Fresh provider configuration and hooks attestation before admitting executable work.
+    fn preflight(&mut self, _context: &Attachment) -> ControlResult<()> { Err(E::Unsupported) }
     fn send(&mut self, frame: &[u8]) -> ControlResult<()>;
     /// A security-sensitive approval decision must be accepted by the kernel pipe as one
     /// complete atomic frame now, never merely queued for delivery after lease revocation.
@@ -153,6 +155,7 @@ enum Phase {
 }
 struct Pending {
     fingerprint: String,
+    action: Option<super::operations::HeldAction>,
 }
 struct Live {
     reference: RuntimeRef,
@@ -167,6 +170,11 @@ struct Live {
     attachment: Option<Attachment>,
     exit: Option<(String, Option<String>)>,
     requires_containment: bool,
+    requested_workspace: Option<String>,
+    observed_dead: Option<Instant>,
+    drained_frames: usize,
+    drain_empty: bool,
+    models: Option<(Vec<crate::contracts::agent_adapter::AgentModelDescriptorV1>, Vec<v1::ModelOffer>, bool)>,
 }
 
 type StageHook = Box<dyn FnMut(LaunchStage) -> ControlResult<()> + Send>;
@@ -237,6 +245,56 @@ impl Engine {
         self.live.get(session).and_then(|l| l.attachment.clone())
     }
     /// The fingerprint of the provider's own pending request, independent of any client claim.
+    /// Catalogue snapshots belong to one attested connection, never to a global provider.
+    pub fn record_models(&mut self, origin: &RuntimeRef, models: Vec<crate::contracts::agent_adapter::AgentModelDescriptorV1>, offers: Vec<v1::ModelOffer>, complete: bool) -> ControlResult<()> {
+        self.check_current(origin)?;
+        if models.len() > 50 || models.len() != offers.len() || models.iter().any(|m| m.validate().is_err()) || offers.iter().any(|m| !m.valid()) {
+            return Err(E::InvalidRequest);
+        }
+        let live = self.fenced_mut(&origin.fence())?;
+        live.models = Some((models, offers, complete));
+        Ok(())
+    }
+    pub fn model_snapshot(&self, fence: &RuntimeFence) -> ControlResult<(&[crate::contracts::agent_adapter::AgentModelDescriptorV1], &[v1::ModelOffer], bool)> {
+        self.observe_fence(fence)?;
+        let live = self.live.get(fence.managed_session_id.as_str()).ok_or(E::StaleRevision)?;
+        let (models, offers, complete) = live.models.as_ref().ok_or(E::RuntimeOperationInProgress)?;
+        Ok((models, offers, *complete))
+    }
+    /// Only the sole authority writer calls this after session, lease and intent checks.
+    pub fn preflight(&mut self, fence: &RuntimeFence, context: &Attachment) -> ControlResult<()> {
+        let live = self.fenced_mut(fence)?;
+        if live.attachment.as_ref() != Some(context) { return Err(E::GateDenied); }
+        live.worker.preflight(context)
+    }
+    pub(super) fn dispatch_binding(&mut self, fence: &RuntimeFence, frame: &[u8]) -> ControlResult<()> {
+        if frame.len() > MAX_OUTBOUND_FRAME { return Err(E::FrameTooLarge); }
+        self.fenced_mut(fence)?.worker.send(frame)
+    }
+    /// Retains only a complete, independently normalized proposal on the owned connection.
+    pub fn hold_approval_action(&mut self, origin: &RuntimeRef, item: &str, action: super::operations::ProviderAction) -> ControlResult<()> {
+        self.check_current(origin)?;
+        let held = action.build(item)?;
+        let live = self.fenced_mut(&origin.fence())?;
+        let context = live.attachment.as_ref().ok_or(E::GateDenied)?;
+        if !held.confined(&context.workspace) { return Err(E::GateDenied); }
+        let pending = live.approvals.get_mut(item).ok_or(E::ApprovalNotFound)?;
+        if pending.fingerprint != held.fingerprint() { return Err(E::CorrelationError); }
+        pending.action = Some(held);
+        Ok(())
+    }
+    pub fn approval_action_confined(&self, fence: &RuntimeFence, item: &str) -> ControlResult<()> {
+        self.observe_fence(fence)?;
+        let live = self.live.get(fence.managed_session_id.as_str()).ok_or(E::StaleRevision)?;
+        let action = live.approvals.get(item).and_then(|p|p.action.as_ref()).ok_or(E::GateDenied)?;
+        let context = live.attachment.as_ref().ok_or(E::GateDenied)?;
+        if !action.confined(&context.workspace) { return Err(E::GateDenied); }
+        Ok(())
+    }
+    pub fn approval_presentation(&self, fence: &RuntimeFence, item: &str, index: Option<u16>, offset: Option<u32>) -> ControlResult<serde_json::Value> {
+        self.approval_action_confined(fence,item)?;
+        self.live.get(fence.managed_session_id.as_str()).and_then(|l|l.approvals.get(item)).and_then(|p|p.action.as_ref()).ok_or(E::GateDenied)?.presentation(index,offset)
+    }
     pub fn pending_fingerprint(&self, session: &str, request_id: &str) -> Option<String> {
         self.live
             .get(session)
@@ -358,6 +416,14 @@ impl Engine {
         {
             return Err(E::Unsupported);
         }
+        let workspace = match request.operation() {
+            v1::Operation::RuntimeStart(m) => m.workspace_root.as_ref().map(|w| {
+                let p=std::fs::canonicalize(w).map_err(|_|E::WorkspaceInvalid)?;
+                if !p.is_dir(){return Err(E::WorkspaceInvalid)}
+                p.to_str().map(str::to_owned).ok_or(E::WorkspaceInvalid)
+            }).transpose()?,
+            _=>return Err(E::InvalidRequest),
+        };
         let admission = Admission {
             live: current.filter(|_| {
                 self.live
@@ -387,7 +453,7 @@ impl Engine {
             request.operation(),
             v1::Operation::RuntimeStart(m) if m.safety_profile == Some(v1::RuntimeSafetyProfile::CodexLocalToolsV1)
         );
-        self.launch(&reference, spawner, tools)?;
+        self.launch(&reference, spawner, tools, workspace)?;
         Ok(outcome)
     }
 
@@ -396,6 +462,7 @@ impl Engine {
         reference: &RuntimeRef,
         spawner: &mut dyn Spawner,
         tools: bool,
+        requested_workspace: Option<String>,
     ) -> ControlResult<()> {
         let session = reference.managed_session_id.as_str().to_owned();
         let result = (|| {
@@ -427,6 +494,11 @@ impl Engine {
                 attachment: None,
                 exit: None,
                 requires_containment: tools,
+                requested_workspace,
+                observed_dead: None,
+                drained_frames: 0,
+                drain_empty: false,
+                models: None,
             };
             self.live.insert(session.clone(), live);
             self.stage(LaunchStage::AfterSpawn)?;
@@ -461,6 +533,13 @@ impl Engine {
         attachment: Attachment,
     ) -> ControlResult<()> {
         self.check_current(reference)?;
+        let expected = self.live.get(reference.managed_session_id.as_str()).ok_or(E::StaleRevision)?;
+        let profile = if expected.requires_containment { "codex_local_tools_v1" } else { "codex_inference_v1" };
+        if attachment.profile != profile || attachment.revision == 0
+            || expected.requested_workspace.as_ref().is_some_and(|w|w!=&attachment.workspace) {
+            self.begin_stop_internal(reference.managed_session_id.as_str(),"safety_unproven",None);
+            return Err(E::GateDenied);
+        }
         if self.stage(LaunchStage::AfterHandshake).is_err() {
             self.begin_stop_internal(
                 reference.managed_session_id.as_str(),
@@ -545,6 +624,8 @@ impl Engine {
     ) -> ControlResult<()> {
         let now = self.ms(Instant::now());
         let live = self.fenced_mut(fence)?;
+        let profile=if live.requires_containment {"codex_local_tools_v1"}else{"codex_inference_v1"};
+        if next.profile!=profile || live.requested_workspace.as_ref().is_some_and(|w|w!=&next.workspace) { return Err(E::GateDenied); }
         if live
             .attachment
             .as_ref()
@@ -564,7 +645,7 @@ impl Engine {
             .live
             .get_mut(fence.managed_session_id.as_str())
             .ok_or(E::StaleRevision)?;
-        if live.reference.fence() != *fence || live.phase != Phase::Ready {
+        if live.reference.fence() != *fence || live.phase != Phase::Ready || live.observed_dead.is_some() {
             return Err(E::StaleRevision);
         }
         Ok(live)
@@ -630,7 +711,7 @@ impl Engine {
         self.check_current(&ticket.reference)?;
         let session = ticket.reference.managed_session_id.as_str().to_owned();
         let live = self.live.get_mut(&session).ok_or(E::StaleRevision)?;
-        if live.phase != Phase::Ready
+        if live.observed_dead.is_some() || live.phase != Phase::Ready
             || live.turn.as_ref().map(|t| (&t.0, &t.1)) != Some((&ticket.turn_id, &ticket.lease_id))
         {
             return Err(E::StaleRevision);
@@ -693,7 +774,7 @@ impl Engine {
             .live
             .get(from.managed_session_id.as_str())
             .ok_or(E::StaleRevision)?;
-        if live.phase != Phase::Ready || live.turn.is_none() {
+        if live.observed_dead.is_some() || live.phase != Phase::Ready || live.turn.is_none() {
             return Err(E::GateDenied);
         }
         if live.approvals.contains_key(request_id) {
@@ -719,6 +800,7 @@ impl Engine {
             request_id.to_owned(),
             Pending {
                 fingerprint: fingerprint.to_owned(),
+                action: None,
             },
         );
         Ok(())
@@ -763,6 +845,10 @@ impl Engine {
             .get(session)
             .and_then(|l| l.turn.as_ref())
             .map(|t| t.0.as_str())
+    }
+    /// Exit observation fences all new executable effects while final existing events drain.
+    pub fn provider_exited(&self, reference: &RuntimeRef) -> bool {
+        self.live.get(reference.managed_session_id.as_str()).is_none_or(|l|l.reference!=*reference || l.observed_dead.is_some())
     }
     pub fn is_live(&self, session: &str) -> bool {
         self.live.contains_key(session)
@@ -834,7 +920,13 @@ impl Engine {
                 continue;
             }
             if live.worker.has_exited() {
-                verdicts.push((session.clone(), "child_exited", None));
+                live.observed_dead.get_or_insert(now);
+                // An inherited pipe in a descendant must never retain this slot forever.
+                let queue_empty=self.scheduler.queued_bytes(session).is_none_or(|(c,d)|c==0 && d==0);
+                let expired=live.observed_dead.is_some_and(|at|now.saturating_duration_since(at)>=std::time::Duration::from_millis(250));
+                if (live.drain_empty && queue_empty) || expired || live.drained_frames>=256 {
+                    verdicts.push((session.clone(), "child_exited", None));
+                }
             } else if live.phase == Phase::Spawned
                 && u64::try_from(now.saturating_duration_since(live.spawned_at).as_millis())
                     .unwrap_or(u64::MAX)
@@ -848,6 +940,12 @@ impl Engine {
             }
         }
         self.pump(now_ms, &mut verdicts);
+        for (session,live) in &self.live {
+            if live.observed_dead.is_some() && live.drain_empty && self.scheduler.queued_bytes(session).is_none_or(|(c,d)|c==0 && d==0)
+                && !verdicts.iter().any(|(s,_,_)|s==session) {
+                verdicts.push((session.clone(),"child_exited",None));
+            }
+        }
         for fault in self.scheduler.check_stalls(now_ms) {
             verdicts.push((fault.runtime, "transport_failed", None));
         }
@@ -914,7 +1012,7 @@ impl Engine {
             let Some(live) = self.live.get_mut(&session) else {
                 continue;
             };
-            if live.worker.flush().is_err() {
+            if live.observed_dead.is_none() && live.worker.flush().is_err() {
                 verdicts.push((session, "transport_failed", None));
                 continue;
             }
@@ -930,6 +1028,10 @@ impl Engine {
                     continue;
                 }
             };
+            if live.observed_dead.is_some() && room>0 {
+                live.drain_empty=frames.is_empty();
+                live.drained_frames=live.drained_frames.saturating_add(frames.len());
+            }
             for frame in frames {
                 if let Err(v) = live.meter.charge_event(now_ms, frame.len() as u64) {
                     verdicts.push((session.clone(), "budget_exceeded", Some(v.key.to_owned())));

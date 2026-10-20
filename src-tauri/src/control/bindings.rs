@@ -388,7 +388,7 @@ impl Store {
     }
     /// Every binding row is the one the log recorded, and an operation the log declared
     /// uncertain is still uncertain or was abandoned.
-    pub(super) fn verify_bindings(&self, replay: &events::Replay) -> ControlResult<()> {
+    pub(super) fn verify_bindings(&self, replay: &events::Replay, v8: bool) -> ControlResult<()> {
         let mut q = self
             .conn
             .prepare("SELECT managed_session_id FROM managed_session_bindings")
@@ -434,9 +434,16 @@ impl Store {
             let session: String = r.get(1).map_err(invalid)?;
             let kind: String = r.get(2).map_err(invalid)?;
             let raw: String = r.get(3).map_err(invalid)?;
-            let op: Operation =
-                serde_json::from_value(unique_json(raw.as_bytes()).map_err(invalid)?)
-                    .map_err(invalid)?;
+            let decoded = unique_json(raw.as_bytes()).map_err(invalid)?;
+            let fenced = v8 && decoded["params"].get("runtime_fence").is_some();
+            let request = if fenced { Some(crate::f8::operations::decode_mutation(&raw)?) } else { None };
+            let op: Operation = if let Some(request) = &request {
+                if request.canonical_intent().map_err(invalid)? != raw.as_bytes() { return Err(ControlError::StorageIncompatible); }
+                let crate::f8::protocol::Target::Fenced(fence) = request.target() else { return Err(ControlError::StorageIncompatible); };
+                let sidecar: Option<(String,String,i64)> = self.conn.query_row("SELECT managed_session_id,runtime_instance_id,generation FROM managed_operation_launches WHERE operation_id=?1", [&id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(invalid)?;
+                if sidecar != Some((fence.managed_session_id.as_str().to_owned(),fence.runtime_instance_id.as_ref().ok_or(ControlError::StorageIncompatible)?.as_str().to_owned(),fence.generation as i64)) { return Err(ControlError::StorageIncompatible); }
+                request.operation().clone()
+            } else { serde_json::from_value(decoded).map_err(invalid)? };
             op.validate().map_err(invalid)?;
             let (oid, sid, k) = match &op {
                 Operation::BindingCreate(p) => (
@@ -454,7 +461,7 @@ impl Store {
             if canonical(oid) != id
                 || canonical(sid) != session
                 || k != kind
-                || mutation(&op)? != raw
+                || (!fenced && mutation(&op)? != raw)
             {
                 return Err(ControlError::StorageIncompatible);
             }

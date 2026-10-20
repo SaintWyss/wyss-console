@@ -137,9 +137,7 @@ fn dropping_an_owned_child_reaps_it_and_spares_everything_else() {
     // The background reaper owns the child until actual wait/reap, without stalling
     // the original caller. Observe with a bounded timeout, not a synchronous wait.
     let deadline = Instant::now() + Duration::from_secs(5);
-    while proc_start_ticks(pid).is_ok_and(|ticks| ticks == start)
-        && Instant::now() < deadline
-    {
+    while proc_start_ticks(pid).is_ok_and(|ticks| ticks == start) && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(
@@ -353,4 +351,165 @@ fn reaper_capacity_refuses_before_spawn_and_releases_completed_slots() {
     assert_eq!(reaper.slots.load(Ordering::Acquire), REAPER_LIMIT - 1);
     let again = reserve_slot(&reaper).unwrap();
     drop(again);
+}
+
+#[test]
+fn failed_child_pin_never_executes_payload_and_releases_reap_permit() {
+    let root = std::env::temp_dir().join(format!("wyss-f8-gate-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let marker = root.join("executed");
+    let mut command = sh(&format!("touch '{}'; sleep 30", marker.display()));
+    let reaper = Arc::new(Reaper {
+        slots: AtomicUsize::new(0),
+        queue: Mutex::new(Vec::new()),
+        wake: Condvar::new(),
+    });
+    let permit = reserve_slot(&reaper).unwrap();
+    assert_eq!(
+        gated_spawn(&mut command, permit, quick(), true).err(),
+        Some(E::ProviderRejected)
+    );
+    assert!(!marker.exists(), "an unpinned child must never reach exec");
+    assert_eq!(reaper.slots.load(Ordering::Acquire), 0);
+    std::fs::remove_dir(root).unwrap();
+}
+
+#[test]
+fn external_reap_releases_owned_slot_and_reports_unknown_status() {
+    let reaper = Arc::new(Reaper {
+        slots: AtomicUsize::new(0),
+        queue: Mutex::new(Vec::new()),
+        wake: Condvar::new(),
+    });
+    let mut command = sh("exec sleep 30");
+    let mut child = gated_spawn(&mut command, reserve_slot(&reaper).unwrap(), quick(), false)
+        .unwrap()
+        .0;
+    child.signal(libc::SIGKILL).unwrap();
+    let mut status = 0;
+    // Test alone consumes its own exact child's status, modeling a SIGCHLD collector.
+    assert_eq!(
+        unsafe { libc::waitpid(child.pid, &mut status, 0) },
+        child.pid
+    );
+    assert_eq!(
+        child.poll_stop(Instant::now()).unwrap(),
+        Progress::Reaped(-1)
+    );
+    assert!(child.is_reaped());
+    drop(child);
+    assert_eq!(reaper.slots.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn command_can_be_reused_after_a_gated_launch() {
+    let mut command = sh("cat >/dev/null");
+    for _ in 0..2 {
+        let (mut child, _) =
+            OwnedChild::spawn(&mut command, ContainmentPolicy::DirectChildOnly, quick()).unwrap();
+        assert_eq!(drive(&mut child).0, Progress::Reaped(0));
+    }
+}
+
+#[test]
+fn caller_thread_exit_does_not_kill_coordinator_owned_child() {
+    let mut child = std::thread::spawn(owned_sleep).join().unwrap();
+    child.verify().unwrap();
+    assert!(child.try_wait().unwrap().is_none());
+    assert!(matches!(drive(&mut child).0, Progress::Reaped(_)));
+}
+
+#[test]
+fn delayed_post_exec_handoff_kills_pinned_child_before_refusing_launch() {
+    let root = std::env::temp_dir().join(format!("wyss-f8-gate-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let marker = root.join("late-effect");
+    let mut command = sh(&format!(
+        "sleep 0.3; touch '{}'; sleep 30",
+        marker.display()
+    ));
+    let permit = reap_permit().unwrap();
+    let began = Instant::now();
+    assert_eq!(
+        gated_spawn_timed(
+            &mut command,
+            permit,
+            quick(),
+            false,
+            Duration::from_millis(50),
+            Duration::from_millis(150)
+        )
+        .err(),
+        Some(E::ProviderRejected)
+    );
+    assert!(began.elapsed() < Duration::from_millis(500));
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(
+        !marker.exists(),
+        "handoff timeout must kill the exact pinned child before returning refusal"
+    );
+    std::fs::remove_dir(root).unwrap();
+}
+
+#[test]
+fn ownership_resource_diagnostics_for_reused_command_and_idle_threads() {
+    fn fds() -> usize {
+        std::fs::read_dir("/proc/self/fd").unwrap().count()
+    }
+    fn owned_threads() -> std::collections::BTreeMap<String, u64> {
+        let mut found = std::collections::BTreeMap::new();
+        for entry in std::fs::read_dir("/proc/self/task").unwrap().flatten() {
+            let name = std::fs::read_to_string(entry.path().join("comm")).unwrap_or_default();
+            if !name.starts_with("wyss-f8-owned") && !name.starts_with("wyss-f8-spawn") {
+                continue;
+            }
+            let stat = std::fs::read_to_string(entry.path().join("stat")).unwrap();
+            let fields: Vec<_> = stat
+                .rsplit_once(')')
+                .unwrap()
+                .1
+                .split_whitespace()
+                .collect();
+            let ticks = fields[11].parse::<u64>().unwrap() + fields[12].parse::<u64>().unwrap();
+            found.insert(name.trim().to_owned(), ticks);
+        }
+        found
+    }
+    let mut command = sh("cat >/dev/null");
+    // Initialize the two lifetime threads before taking descriptor/thread baselines.
+    let (mut warmup, _) =
+        OwnedChild::spawn(&mut command, ContainmentPolicy::DirectChildOnly, quick()).unwrap();
+    assert_eq!(drive(&mut warmup).0, Progress::Reaped(0));
+    drop(warmup);
+    let before_fds = fds();
+    let began = Instant::now();
+    for _ in 0..50 {
+        let (mut child, _) =
+            OwnedChild::spawn(&mut command, ContainmentPolicy::DirectChildOnly, quick()).unwrap();
+        assert_eq!(drive(&mut child).0, Progress::Reaped(0));
+    }
+    let launch_elapsed = began.elapsed();
+    let after_fds = fds();
+    let threads_before = owned_threads();
+    std::thread::sleep(Duration::from_millis(250));
+    let threads_after = owned_threads();
+    let ticks: u64 = threads_after
+        .iter()
+        .map(|(name, after)| after.saturating_sub(*threads_before.get(name).unwrap_or(after)))
+        .sum();
+    // Metrics are deliberately reported rather than timing-gated: other tests
+    // may concurrently own children. Root also executes this diagnostic alone.
+    println!(
+        "F8 ownership diagnostics: launches=50 elapsed_ms={} fd_before={} fd_after={} owned_threads={} idle_window_ms=250 cpu_ticks={}",
+        launch_elapsed.as_millis(),
+        before_fds,
+        after_fds,
+        threads_after.len(),
+        ticks
+    );
+    assert_eq!(
+        threads_after.len(),
+        2,
+        "one spawn coordinator and one reaper only"
+    );
 }

@@ -813,6 +813,7 @@ impl Turns {
                     .then_some((a, held))
             });
         let mut status = ApprovalStatus {
+            delivery: None,
             approval,
             acceptable: false,
             command: None,

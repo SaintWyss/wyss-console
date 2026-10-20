@@ -15,7 +15,7 @@ const PROTECTED: [&str; 3] = [".codex", ".git", ".agents"];
 
 /// What the last component of a confined path has to be.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::control) enum Leaf {
+pub(crate) enum Leaf {
     Directory,
     ExistingFile,
     FileOrMissing,
@@ -28,7 +28,7 @@ pub(in crate::control) enum Leaf {
 /// name or anything that cannot be inspected makes the proof fail, and without the proof
 /// an action is never accepted. The check is repeated immediately before every Accept; the
 /// runtime's own sandbox remains the enforcement against a change after it.
-pub(in crate::control) fn confine(workspace: &str, path: &str, leaf: Leaf) -> bool {
+pub(crate) fn confine(workspace: &str, path: &str, leaf: Leaf) -> bool {
     let root = Path::new(workspace);
     let Ok(root_meta) = fs::symlink_metadata(root) else {
         return false;
@@ -84,7 +84,7 @@ pub(in crate::control) fn confine(workspace: &str, path: &str, leaf: Leaf) -> bo
 /// Lexical normal form of an absolute path: no empty or `.` component and no trailing
 /// slash. A `..` component is refused rather than resolved, because resolving it lexically
 /// is wrong as soon as a symlink is involved.
-pub(in crate::control) fn normal_path(raw: &str, limit: usize) -> ControlResult<String> {
+pub(crate) fn normal_path(raw: &str, limit: usize) -> ControlResult<String> {
     if raw.len() > limit || !raw.starts_with('/') || raw.chars().any(char::is_control) {
         return Err(ControlError::InvalidRequest);
     }
@@ -115,7 +115,7 @@ fn kind_text(kind: FileChangeKind) -> &'static [u8] {
     }
 }
 // Deliberately no Debug on any action type.
-pub(in crate::control) struct CommandAction {
+pub(crate) struct CommandAction {
     provider_item_id: String,
     command: String,
     cwd: String,
@@ -192,13 +192,13 @@ impl CommandAction {
         confine(workspace, &self.cwd, Leaf::Directory)
     }
 }
-pub(in crate::control) struct FileChange {
+pub(crate) struct FileChange {
     pub path: String,
     pub kind: FileChangeKind,
     pub move_path: Option<String>,
     pub diff: String,
 }
-pub(in crate::control) struct FileAction {
+pub(crate) struct FileAction {
     provider_item_id: String,
     changes: Vec<FileChange>,
 }

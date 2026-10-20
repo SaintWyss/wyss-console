@@ -154,7 +154,10 @@ fn critical_approval_write_is_atomic_and_never_queued_after_backpressure() {
     let frame = until(|| w.inbound(1).unwrap().into_iter().next());
     assert_eq!(frame, b"approval item-1 accept".to_vec());
     assert_eq!(w.buffered_outbound(), 0);
-    assert_eq!(w.send_critical(b"approval\nitem-1 accept"), Err(E::FrameTooLarge));
+    assert_eq!(
+        w.send_critical(b"approval\nitem-1 accept"),
+        Err(E::FrameTooLarge)
+    );
     assert_eq!(w.send_critical(&vec![b'x'; 4096]), Err(E::FrameTooLarge));
     finish(&mut w);
 
@@ -166,14 +169,29 @@ fn critical_approval_write_is_atomic_and_never_queued_after_backpressure() {
             break;
         }
     }
-    assert!(blocked.buffered_outbound() > 0, "fixture must saturate the child pipe");
+    assert!(
+        blocked.buffered_outbound() > 0,
+        "fixture must saturate the child pipe"
+    );
     let queued = blocked.buffered_outbound();
     let start = Instant::now();
     assert_eq!(
         blocked.send_critical(b"approval item-1 accept"),
         Err(E::CapacityExceeded)
     );
-    assert_eq!(blocked.buffered_outbound(), queued, "no approval was enqueued");
+    assert_eq!(
+        blocked.buffered_outbound(),
+        queued,
+        "no approval was enqueued"
+    );
     assert!(start.elapsed() < Duration::from_millis(500));
     finish(&mut blocked);
+}
+
+#[test]
+fn eof_during_a_frame_is_a_transport_failure() {
+    let mut worker = worker("printf incomplete");
+    assert_eq!(until(|| worker.inbound(8).err()), E::TransportError);
+    assert_eq!(worker.failure(), Some(E::TransportError));
+    finish(&mut worker);
 }

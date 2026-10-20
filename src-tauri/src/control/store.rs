@@ -254,7 +254,7 @@ impl Store {
             }
         }
         self.verify_leases(&replay.leases)?;
-        self.verify_bindings(&replay)?;
+        self.verify_bindings(&replay, v8)?;
         self.verify_turns(&replay.turns)?;
         // Receipts contain only typed minimal mutations and their original session projection.
         let mut q = self
@@ -284,9 +284,16 @@ impl Store {
                 }
                 continue;
             }
-            let op: Operation =
-                serde_json::from_value(unique_json(mutation.as_bytes()).map_err(invalid)?)
-                    .map_err(invalid)?;
+            let decoded = unique_json(mutation.as_bytes()).map_err(invalid)?;
+            let op: Operation = if v8 && decoded["params"].get("runtime_fence").is_some() {
+                let request = crate::f8::operations::decode_mutation(&mutation)?;
+                if request.canonical_intent().map_err(invalid)? != mutation.as_bytes() {
+                    return Err(ControlError::StorageIncompatible);
+                }
+                request.operation().clone()
+            } else {
+                serde_json::from_value(decoded).map_err(invalid)?
+            };
             op.validate().map_err(invalid)?;
             let Some(intent) = intent(&op) else {
                 return Err(ControlError::StorageIncompatible);

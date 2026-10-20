@@ -209,6 +209,7 @@ pub fn validate_migrated(c: &Connection) -> ControlResult<()> {
         "managed_turn_launches",
         "managed_approval_launches",
         "managed_operation_launches",
+        "managed_approval_delivery",
     ] {
         if c.query_row::<i64, _, _>(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
             .map_err(invalid)?
@@ -265,6 +266,7 @@ pub fn validate_migrated(c: &Connection) -> ControlResult<()> {
                 "managed_turn_launches",
                 "managed_approval_launches",
                 "managed_operation_launches",
+                "managed_approval_delivery",
             ]
             .contains(&name.as_str())
         {

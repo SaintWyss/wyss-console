@@ -293,6 +293,17 @@ pub struct FilePresentation {
     pub chunk: String,
     pub next_offset: Option<u32>,
 }
+
+/// Authoritative schema-8 delivery evidence, separate from the legacy conservative effect journal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalDelivery {
+    DecisionAccepted,
+    KernelAccepted,
+    ProviderConsumed,
+    EffectConfirmed,
+    Indeterminate,
+}
 /// Memory-only view for the client that must decide. Lost on authority or runtime restart.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -300,6 +311,8 @@ pub struct ApprovalStatus {
     pub approval: ManagedApprovalRecord,
     /// True only while the approval is pending and its transient action is still held.
     pub acceptable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<ApprovalDelivery>,
     pub command: Option<CommandPresentation>,
     pub file_count: Option<u16>,
     pub file: Option<FilePresentation>,

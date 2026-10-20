@@ -160,7 +160,10 @@ impl Worker for ProcessWorker {
         if let Some(e) = self.failed {
             return Err(e);
         }
-        while !self.out.is_empty() {
+        for _ in 0..32 {
+            if self.out.is_empty() {
+                break;
+            }
             let Some(stdin) = self.child.stdin() else {
                 self.failed = Some(E::TransportError);
                 return Err(E::TransportError);
@@ -188,7 +191,7 @@ impl Worker for ProcessWorker {
         self.drain_stderr();
         let mut frames = Vec::new();
         let mut budget = READ_BUDGET;
-        loop {
+        for _ in 0..32 {
             // Complete frames already buffered are delivered before reading more.
             while frames.len() < max_frames {
                 let Some(end) = self.inbuf.iter().position(|b| *b == b'\n') else {
@@ -214,7 +217,13 @@ impl Worker for ProcessWorker {
             let mut chunk = [0u8; CHUNK];
             let want = CHUNK.min(budget);
             match self.stdout.read(&mut chunk[..want]) {
-                Ok(0) => self.eof = true,
+                Ok(0) => {
+                    self.eof = true;
+                    if !self.inbuf.is_empty() {
+                        self.failed = Some(E::TransportError);
+                        return Err(E::TransportError);
+                    }
+                }
                 Ok(n) => {
                     budget -= n;
                     self.inbuf.extend_from_slice(&chunk[..n]);

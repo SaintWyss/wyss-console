@@ -327,10 +327,12 @@ impl<T: Weigh> Scheduler<T> {
     /// right now (0 when full, faulted, or too few bytes remain for one maximal item).
     pub fn data_room(&self, key: &str, item_max: usize) -> usize {
         self.lanes.get(key).map_or(0, |l| {
-            if l.faulted || self.limits.data_bytes.saturating_sub(l.data_bytes) < item_max {
+            if l.faulted {
                 0
             } else {
-                self.limits.data_events.saturating_sub(l.data.len())
+                let events = self.limits.data_events.saturating_sub(l.data.len());
+                let bytes = self.limits.data_bytes.saturating_sub(l.data_bytes);
+                events.min(bytes.checked_div(item_max).unwrap_or(events))
             }
         })
     }

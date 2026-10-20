@@ -33,6 +33,8 @@ struct Recorder {
     ambiguous_send: Arc<Mutex<bool>>,
 }
 impl Worker for Recorder {
+    fn containment(&mut self)->super::super::engine::Containment { super::super::engine::Containment::PidNamespace }
+    fn preflight(&mut self, _context:&Attachment)->ControlResult<()> { Ok(()) }
     fn send(&mut self, frame: &[u8]) -> ControlResult<()> {
         // Simulates a transport that might have delivered bytes before
         // reporting an error. A safe caller cannot infer zero effect.
@@ -73,6 +75,7 @@ struct Spawn {
     ambiguous_send: Arc<Mutex<bool>>,
 }
 impl Spawner for Spawn {
+    fn descendant_containment(&self)->bool { true }
     fn spawn(
         &mut self,
         launch: &RuntimeRef,
@@ -96,6 +99,7 @@ struct Rig {
     client: Client,
     spawn: Spawn,
     sessions: Vec<String>,
+    workspace: std::path::PathBuf,
 }
 impl Rig {
     fn new() -> Self {
@@ -111,6 +115,9 @@ impl Rig {
             .unwrap()
             .map(Result::unwrap)
             .collect();
+        let workspace: String = conn.query_row("SELECT workspace_root FROM managed_session_bindings LIMIT 1",[],|r|r.get(0)).unwrap();
+        let workspace = std::path::PathBuf::from(workspace);
+        std::fs::create_dir(&workspace).unwrap();
         let registry = Registry::new(wire(AUTH)).unwrap().with_test_limit(capacity);
         let engine = Engine::new(conn, wire(AUTH), registry, None).unwrap();
         Self {
@@ -124,7 +131,22 @@ impl Rig {
                 ambiguous_send: Arc::default(),
             },
             sessions,
+            workspace,
         }
+    }
+    fn bind(&mut self, launch:&RuntimeRef) {
+        let id=uuid();
+        let reply=self.call("managedSession/runtime/resume",json!({"intent_id":id,"managed_session_id":launch.managed_session_id,"expected_session_revision":1,"runtime_fence":launch.fence()}));
+        assert_eq!(code(&reply),"runtime_operation_in_progress","{reply}");
+        let thread:String=self.authority.engine().connection().query_row("SELECT runtime_session_id FROM managed_session_bindings WHERE managed_session_id=?1",[launch.managed_session_id.as_str()],|r|r.get(0)).unwrap();
+        super::super::operations::confirm_binding(self.authority.engine_mut(),launch,&wire(&id),&thread).unwrap();
+    }
+    fn action_approval(&mut self, launch:&RuntimeRef, item:&str) -> crate::contracts::approval::ManagedApprovalRecord {
+        let action=super::super::operations::ProviderAction::Command {command:"true".into(),cwd:self.workspace.to_str().unwrap().into(),parsed_actions:vec![]};
+        let (kind,fingerprint,structure)=action.metadata(item).unwrap();
+        let record=self.authority.provider_approval_request(launch,kind,item,&fingerprint,structure).unwrap();
+        self.authority.engine_mut().hold_approval_action(launch,item,action).unwrap();
+        record
     }
     fn raw(&mut self, v: Value) -> Value {
         let bytes = serde_json::to_vec(&v).unwrap();
@@ -169,7 +191,8 @@ impl Rig {
         let reply = self.call(
             "runtime/start",
             json!({"intent_id":uuid(),"adapter_id":"codex","runtime_kind":"codex",
-            "managed_session_id":s,"expected_generation":g,"expected_revision":r}),
+            "managed_session_id":s,"expected_generation":g,"expected_revision":r,
+                "safety_profile":"codex_local_tools_v1","workspace_root":self.workspace.to_str().unwrap()}),
         );
         let value = &reply["result"]["value"];
         assert_eq!(reply["result"]["kind"], "runtime_control", "{reply}");
@@ -181,7 +204,7 @@ impl Rig {
                 &reference,
                 "0.159.0",
                 Attachment {
-                    workspace: "/work/space".into(),
+                    workspace: self.workspace.to_str().unwrap().into(),
                     profile: "codex_local_tools_v1".into(),
                     revision: 1,
                 },
@@ -194,6 +217,7 @@ impl Rig {
         )
     }
 }
+impl Drop for Rig { fn drop(&mut self) { let _ = std::fs::remove_dir(&self.workspace); } }
 fn code(v: &Value) -> &str {
     v["error"]["code"].as_str().unwrap_or("<ok>")
 }
@@ -228,7 +252,7 @@ fn handshake_versions_and_unsupported_methods_are_strict() {
         "authority_instance_id":"00000000-0000-4000-8000-0000000000ff","method":"authority/status","params":{}}));
     assert_eq!(code(&stale), "correlation_error");
     let r = rig.call("managedSession/get", json!({"managed_session_id":s}));
-    assert_eq!(code(&r), "unsupported");
+    assert_eq!(r["result"]["kind"], "session", "{r}");
     // Runtime status of a never-started runtime does not invent one.
     let r = rig.call(
         "runtime/status",
@@ -275,6 +299,7 @@ fn full_conversation_start_lease_turn_approval_cancel_and_audit() {
         "lease_already_active"
     );
 
+    rig.bind(&reference);
     // Turn start: replay returns the record without a second frame; a changed intent conflicts.
     let intent = uuid();
     let start = |rig: &mut Rig, prompt: &str| {
@@ -290,13 +315,13 @@ fn full_conversation_start_lease_turn_approval_cancel_and_audit() {
         .as_str()
         .unwrap()
         .to_owned();
-    assert_eq!(rig.sent().len(), 1);
-    assert!(String::from_utf8_lossy(&rig.sent()[0]).contains("\"turn/start\""));
+    assert_eq!(rig.sent().len(), 2);
+    assert!(String::from_utf8_lossy(&rig.sent()[1]).contains("\"turn/start\""));
     assert_eq!(
         start(&mut rig, "hello world")["result"]["value"],
         turn["result"]["value"]
     );
-    assert_eq!(rig.sent().len(), 1, "a replay never reaches the provider");
+    assert_eq!(rig.sent().len(), 2, "a replay never reaches the provider");
     assert_eq!(code(&start(&mut rig, "other prompt")), "intent_conflict");
     let second = rig.call(
         "managedSession/turn/start",
@@ -332,22 +357,7 @@ fn full_conversation_start_lease_turn_approval_cancel_and_audit() {
             None,
         )
         .unwrap();
-    let approval = rig
-        .authority
-        .provider_approval_request(
-            &reference,
-            ApprovalKind::CommandExecution,
-            "item-1",
-            FP,
-            ApprovalStructure {
-                command_bytes: 12,
-                cwd_bytes: 6,
-                parsed_actions: 1,
-                files: 0,
-                diff_bytes: 0,
-            },
-        )
-        .unwrap();
+    let approval = rig.action_approval(&reference, "item-1");
     let respond = |rig: &mut Rig, intent: &str, rev: u64, fence: Value| {
         rig.call(
             "managedTurn/approval/respond",
@@ -466,6 +476,7 @@ fn a_foreign_or_swapped_fence_and_a_lost_lease_change_nothing() {
     );
     assert_eq!(code(&r), "invalid_request", "revoke has no fence parameter");
     assert!(rig.sent().is_empty());
+    rig.bind(&reference);
     // A turn then a revoked lease: the turn is interrupted, its ticket gone, nothing more is written.
     let turn = rig.call(
         "managedSession/turn/start",
@@ -513,6 +524,7 @@ fn a_dead_runtime_is_noticed_recovered_and_never_inherited() {
         json!({"intent_id":uuid(),"session_id":s,"expected_session_revision":1,
         "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence}),
     );
+    rig.bind(&reference);
     let turn = rig.call(
         "managedSession/turn/start",
         json!({"intent_id":uuid(),"managed_session_id":s,
@@ -573,6 +585,7 @@ fn reviewed_real_foreign_launch_cannot_mutate_another_sessions_turn_or_approval(
             "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence_a}),
     );
     assert_eq!(granted["result"]["kind"], "lease", "{granted}");
+    rig.bind(&a);
     let started = rig.call(
         "managedSession/turn/start",
         json!({"intent_id":uuid(),"managed_session_id":session,"expected_session_revision":1,
@@ -594,12 +607,7 @@ fn reviewed_real_foreign_launch_cannot_mutate_another_sessions_turn_or_approval(
     rig.authority.provider_turn_event(
         &a, &turn, Some("provider-a"), TurnState::Running, None,
     ).unwrap();
-    let approved = rig.authority.provider_approval_request(
-        &a, ApprovalKind::CommandExecution, "owned-item", FP,
-        ApprovalStructure {
-            command_bytes: 12, cwd_bytes: 6, parsed_actions: 1, files: 0, diff_bytes: 0,
-        },
-    ).unwrap();
+    let approved = rig.action_approval(&a, "owned-item");
     let pending_count = head(&rig);
     // Duplicate provider IDs must not write a second record or invalidate the first.
     assert!(rig.authority.provider_approval_request(
@@ -639,6 +647,7 @@ fn reviewed_lost_pending_ticket_cannot_authorize_a_new_durable_accept() {
             "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence}),
     );
     let lease = granted["result"]["value"]["lease_id"].as_str().unwrap().to_owned();
+    rig.bind(&a);
     let started = rig.call(
         "managedSession/turn/start",
         json!({"intent_id":uuid(),"managed_session_id":session,"expected_session_revision":1,
@@ -650,12 +659,7 @@ fn reviewed_lost_pending_ticket_cannot_authorize_a_new_durable_accept() {
     rig.authority.provider_turn_event(
         &a, &turn, Some("p"), TurnState::Running, None,
     ).unwrap();
-    let approval = rig.authority.provider_approval_request(
-        &a, ApprovalKind::CommandExecution, "pending-item", FP,
-        ApprovalStructure {
-            command_bytes: 12, cwd_bytes: 6, parsed_actions: 1, files: 0, diff_bytes: 0,
-        },
-    ).unwrap();
+    let approval = rig.action_approval(&a, "pending-item");
     // The durable lease remains active, but volatile ticket ownership was lost.
     rig.authority.engine_mut().lease_lost(&session, &lease);
     let before: i64 = rig.authority.engine().connection().query_row(
@@ -688,6 +692,7 @@ fn reviewed_all_provider_decisions_report_failed_critical_dispatch_as_errors() {
             json!({"intent_id":uuid(),"session_id":session,"expected_session_revision":1,
                 "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence}),
         );
+        rig.bind(&from);
         let started = rig.call(
             "managedSession/turn/start",
             json!({"intent_id":uuid(),"managed_session_id":session,"expected_session_revision":1,
@@ -699,12 +704,7 @@ fn reviewed_all_provider_decisions_report_failed_critical_dispatch_as_errors() {
         rig.authority.provider_turn_event(
             &from, &turn, Some("p"), TurnState::Running, None,
         ).unwrap();
-        let approval = rig.authority.provider_approval_request(
-            &from, ApprovalKind::CommandExecution, "item-1", FP,
-            ApprovalStructure {
-                command_bytes: 12, cwd_bytes: 6, parsed_actions: 1, files: 0, diff_bytes: 0,
-            },
-        ).unwrap();
+        let approval = rig.action_approval(&from, "item-1");
         *rig.spawn.refuse_critical.lock().unwrap() = true;
         let sent = rig.sent().len();
         let response = rig.call(
@@ -733,6 +733,7 @@ fn review_cancel_refuses_stopping_launch_before_committing_a_new_intent() {
         "intent_id": uuid(), "session_id": session, "expected_session_revision":1,
         "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence
     }));
+    rig.bind(&launch);
     let start = rig.call("managedSession/turn/start", json!({
         "intent_id":uuid(),"managed_session_id":session,
         "expected_session_revision":1,"prompt":"cancel-check","runtime_fence":fence
@@ -769,6 +770,7 @@ fn review_failed_recovery_remains_pending_and_retries_after_storage_restoration(
         "intent_id":uuid(),"session_id":session,"expected_session_revision":1,
         "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence
     }));
+    rig.bind(&launch);
     let started = rig.call("managedSession/turn/start", json!({
         "intent_id":uuid(),"managed_session_id":session,
         "expected_session_revision":1,"prompt":"recovery-check","runtime_fence":fence
@@ -813,6 +815,7 @@ fn review_inbound_scheduler_dispatches_only_from_its_owned_runtime() {
         "intent_id":uuid(),"session_id":session_a,"expected_session_revision":1,
         "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence_a
     }));
+    rig.bind(&a);
     let started = rig.call("managedSession/turn/start", json!({
         "intent_id":uuid(),"managed_session_id":session_a,
         "expected_session_revision":1,"prompt":"inbound-check","runtime_fence":fence_a
@@ -850,7 +853,10 @@ fn review_inbound_scheduler_dispatches_only_from_its_owned_runtime() {
     ).unwrap();
     assert_eq!(state, "running");
     assert_eq!(rig.authority.engine().reference(&session_a), Some(a));
-    assert_eq!(rig.authority.engine().reference(&session_b), Some(b));
+    assert_eq!(rig.authority.engine().reference(&session_b), None, "faulted B was reaped while A continued");
+    assert!(rig.authority.engine().connection().query_row::<bool,_,_>(
+        "SELECT EXISTS(SELECT 1 FROM control_events WHERE json_extract(envelope,'$.event_type')='authority.runtime.instance_exited' AND json_extract(envelope,'$.payload.runtime_instance_id')=?1)",
+        [b.runtime_instance_id.as_str()], |r|r.get(0)).unwrap());
     validate_v8(rig.authority.engine().connection()).unwrap();
 }
 
@@ -864,6 +870,7 @@ fn review_ambiguous_turn_start_send_never_claims_definitive_no_effect() {
         "intent_id":uuid(),"session_id":session,"expected_session_revision":1,
         "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence
     }));
+    rig.bind(&_launch);
     *rig.spawn.ambiguous_send.lock().unwrap() = true;
     let reply = rig.call("managedSession/turn/start", json!({
         "intent_id":uuid(),"managed_session_id":session,
@@ -891,6 +898,7 @@ fn review_provider_interrupt_send_failure_does_not_report_success() {
         "intent_id":uuid(),"session_id":session,"expected_session_revision":1,
         "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence
     }));
+    rig.bind(&launch);
     let started = rig.call("managedSession/turn/start", json!({
         "intent_id":uuid(),"managed_session_id":session,
         "expected_session_revision":1,"prompt":"running-work","runtime_fence":fence
@@ -907,5 +915,48 @@ fn review_provider_interrupt_send_failure_does_not_report_success() {
     }));
     assert_eq!(code(&response), "external_effect_unknown", "{response}");
     assert_eq!(rig.authority.engine().runtime_view(&session).map(|r|r.0),Some("stopping"));
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
+
+#[test]
+fn approval_kernel_write_followed_by_writer_constructor_failure_fences_without_replay() {
+    let mut rig=Rig::new();rig.hello();let (origin,fence)=rig.ready();
+    let session=rig.sessions[0].clone();
+    let grant=rig.call("executionLease/grant",json!({"intent_id":uuid(),"session_id":session,"expected_session_revision":1,"scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence}));
+    assert_eq!(grant["result"]["kind"],"lease","{grant}");
+    rig.bind(&origin);
+    let started=rig.call("managedSession/turn/start",json!({"intent_id":uuid(),"managed_session_id":session,"expected_session_revision":1,"prompt":"effect","runtime_fence":fence}));
+    let turn=ManagedTurnId::parse(started["result"]["value"]["managed_turn_id"].as_str().unwrap()).unwrap();
+    rig.authority.provider_turn_event(&origin,&turn,Some("provider-t"),TurnState::Running,None).unwrap();
+    let approval=rig.action_approval(&origin,"effect-item");
+    let intent=uuid();let params=json!({"intent_id":intent,"managed_approval_id":approval.managed_approval_id,"expected_revision":1,"decision":"accept","runtime_fence":fence});
+    rig.authority.post_approval_write=Some(|c|c.pragma_update(None,"user_version",7).unwrap());
+    let before=rig.sent().len();let answer=rig.call("managedTurn/approval/respond",params.clone());
+    assert_eq!(code(&answer),"storage_incompatible","{answer}");
+    assert_eq!(rig.sent().len(),before+1,"one atomic provider write happened");
+    assert_eq!(rig.authority.engine().runtime_view(&session).map(|s|s.0),Some("stopping"));
+    rig.authority.engine_mut().connection_mut().pragma_update(None,"user_version",8).unwrap();
+    assert_eq!(super::super::writers::read_delivery(rig.authority.engine().connection(),approval.managed_approval_id.as_str()).unwrap(),Some(ApprovalDelivery::DecisionAccepted));
+    let replay=rig.call("managedTurn/approval/respond",params);
+    assert_eq!(replay["result"]["kind"],"approval_receipt","{replay}");
+    assert_eq!(rig.sent().len(),before+1,"durable decision replay never dispatches");
+    rig.authority.tick(Instant::now()).unwrap();
+    assert_eq!(super::super::writers::read_delivery(rig.authority.engine().connection(),approval.managed_approval_id.as_str()).unwrap(),Some(ApprovalDelivery::Indeterminate));
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
+
+#[test]
+fn exact_turn_start_replay_survives_lease_revocation_and_runtime_exit_without_dispatch() {
+    let mut rig=Rig::new();rig.hello();let (origin,fence)=rig.ready();let session=rig.sessions[0].clone();
+    let grant=rig.call("executionLease/grant",json!({"intent_id":uuid(),"session_id":session,"expected_session_revision":1,"scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence}));
+    rig.bind(&origin);
+    let params=json!({"intent_id":uuid(),"managed_session_id":session,"expected_session_revision":1,"prompt":"once","runtime_fence":fence});
+    let admitted=rig.call("managedSession/turn/start",params.clone());assert_eq!(admitted["result"]["kind"],"turn","{admitted}");
+    let revoked=rig.call("executionLease/revoke",json!({"intent_id":uuid(),"lease_id":grant["result"]["value"]["lease_id"],"expected_revision":1}));assert_eq!(revoked["result"]["kind"],"lease","{revoked}");
+    *rig.spawn.exited.lock().unwrap()=true;rig.authority.tick(Instant::now()).unwrap();
+    assert!(rig.authority.engine().reference(&session).is_none());let sent=rig.sent().len();
+    let replay=rig.call("managedSession/turn/start",params.clone());assert_eq!(replay["result"]["value"],admitted["result"]["value"],"{replay}");assert_eq!(rig.sent().len(),sent);
+    let mut changed=params.clone();changed["prompt"]=json!("different");assert_eq!(code(&rig.call("managedSession/turn/start",changed)),"intent_conflict");
+    let mut changed=params;changed["runtime_fence"]["generation"]=json!(origin.generation+1);assert_eq!(code(&rig.call("managedSession/turn/start",changed)),"intent_conflict");
     validate_v8(rig.authority.engine().connection()).unwrap();
 }
