@@ -1,9 +1,13 @@
 # 49 — CachyOS combined OL3 worker profile: falsifiable sandbox and trust contract
 
+> Integration note (2026-10-19): the dated design and experiment statements below are historical. Only the pure Rust data/validation foundation and test-only filesystem fixtures are being integrated; there is no production B1 launcher, trusted capture, quarantine service or new authority permission. B1 containment and FX-H01 remain NOT_PROVEN. The current owner policy permits ordinary unit fixtures but prohibits disposable HOME, private keyrings/buses, VMs, containers and artificial user installations for development/acceptance. Historical isolated experiment recipes are not current instructions. Accepted authority contracts remain unchanged.
+
 Date: 2026-10-14. **Status: design and test contract only — NOT_PROVEN, not an accepted ADR, not implemented.**
 The owner authorised documentation and safe synthetic/non-privileged CachyOS verification,
 not installation, privilege changes, provider execution, real credential access, or changes
 to the working desktop. This document is not an instruction to silently run the tests.
+
+**2026-10-14 post-experiment status addendum:** the composed native mock has now run: FX-B1-A **FAIL** (FX-H01 forbidden-signer hardlink read); FX-B1-B/C/D/E **PASS only within their synthetic scope**, as documented in [the pinned report](reviews/2026-10-14-fx-b1-composed-native-verification.md) at commit `3ff0d7a865e2b5aeddfa68a6c98a72c6f0667354`. This document's original sections 3/5 are retained as the _pre-execution specification/history_. The approved O-1/O-2/O-3 product choices, proposed RV-1..8 corrections and next candidate are in [50](50-B1-STAGED-WORKSPACE-AND-QUARANTINED-RESULT-CONTRACT.md), with consolidated CG gates in [51](51-B1-CONSOLIDATED-ACCEPTANCE-AND-DELIVERY-PLAN.md). **FX-H01 OPEN; B1 NOT_PROVEN; no ADR accepted or implementation authorized.**
 
 Read with:
 
@@ -173,16 +177,16 @@ force a host logout/crash. Those tests stay `BLOCKED_UNSAFE`.
 
 ## 4. Fail-fast matrix and evidence levels
 
-| Future test family         | Existing requirement                       | Acceptance                  | Minimum useful evidence                                                                                     | Current status                                                     |
-| -------------------------- | ------------------------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| FX-B1-A                    | FR-SEC-13                                  | TS-DOCKER-03 / AC-DOCKER-02 | Real CachyOS synthetic worker performs mock positive function **and** denies mock control/Docker/DBus paths | **NOT RUN as composed profile**                                    |
-| FX-B1-B                    | FR-PRF-12                                  | TS-DOCKER-04 / AC-DOCKER-03 | Both fake refresh algorithms across file-vs-dir privileges, tested exactly                                  | **PARTIAL synthetic observations**; no real provider compatibility |
-| FX-B1-C                    | FR-SEC-13 + future provider contract       | TS-DOCKER-03 / AC-DOCKER-02 | Fake inference succeeds without authority/broker escape                                                     | **NOT RUN**                                                        |
-| FX-B1-D                    | FR-SEC-13, FR-ORC-04                       | TS-SEC-OL3-02 / AC-IR-03    | Fake prompt/hook injection cannot promote authority                                                         | **NOT RUN**                                                        |
-| FX-B1-E                    | FR-REM-17 / FR-TERM-14                     | TS-SEC-HOST-01 / AC-IR-07   | Truthful synthetic child/PTY generation and stop                                                            | **PARTIAL**: PTY tested; host lifecycle not proven                 |
-| A protected human approver | FR-SEC-12                                  | TS-DOCKER-02 / AC-DOCKER-01 | Legitimate/nonforgeable approval + protected verifier/state against actual declared admin-level attacker    | **BLOCKED_ADMIN_DELEGATION**                                       |
-| Admin-delegation change    | Explicit owner-only environmental decision | TS-DOCKER-05 / AC-DOCKER-05 | Non-disruptive workload inventory, reversible rootless/on-demand privileged plan and **owner signoff**      | **NOT AUTHORISED** to change Docker                                |
-| Real native providers      | FR-PRF-12, DN-14/20/38                     | TV-PROV-04                  | Pinned provider versions and authorized nonsecret/independent auth lifecycle                                | **NOT AUTHORISED** to use real auth/config                         |
+| Test family / blocker      | Existing requirement                       | Acceptance                  | Minimum useful evidence                                                                                     | Current status as of 2026-10-14                                                                      |
+| -------------------------- | ------------------------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| FX-B1-A                    | FR-SEC-13                                  | TS-DOCKER-03 / AC-DOCKER-02 | Real CachyOS synthetic worker performs mock positive function **and** denies mock control/Docker/DBus paths | **EXECUTED / FAIL — FX-H01**; functionality passed but hardlink exposed forbidden synthetic signer   |
+| FX-B1-B                    | FR-PRF-12                                  | TS-DOCKER-04 / AC-DOCKER-03 | Both fake refresh algorithms across file-vs-dir privileges, tested exactly                                  | **EXECUTED / PASS — four fake file-vs-directory refresh cells only**; no real provider compatibility |
+| FX-B1-C                    | FR-SEC-13 + future provider contract       | TS-DOCKER-03 / AC-DOCKER-02 | Fake inference succeeds without authority/broker escape                                                     | **EXECUTED / PASS — fake inference and bounded broker assertions only**                              |
+| FX-B1-D                    | FR-SEC-13, FR-ORC-04                       | TS-SEC-OL3-02 / AC-IR-03    | Fake prompt/hook injection cannot promote authority                                                         | **EXECUTED / PASS — fake handoff/hook/digest assertions only**                                       |
+| FX-B1-E                    | FR-REM-17 / FR-TERM-14                     | TS-SEC-HOST-01 / AC-IR-07   | Truthful synthetic child/PTY generation and stop                                                            | **EXECUTED / PASS — owned synthetic PTY lifecycle only**; host logout/crash persistence not proven   |
+| A protected human approver | FR-SEC-12                                  | TS-DOCKER-02 / AC-DOCKER-01 | Legitimate/nonforgeable approval + protected verifier/state against actual declared admin-level attacker    | **BLOCKED_ADMIN_DELEGATION**                                                                         |
+| Admin-delegation change    | Explicit owner-only environmental decision | TS-DOCKER-05 / AC-DOCKER-05 | Non-disruptive workload inventory, reversible rootless/on-demand privileged plan and **owner signoff**      | **NOT AUTHORISED** to change Docker                                                                  |
+| Real native providers      | FR-PRF-12, DN-14/20/38                     | TV-PROV-04                  | Pinned provider versions and authorized nonsecret/independent auth lifecycle                                | **NOT AUTHORISED** to use real auth/config                                                           |
 
 Do not replace `NOT RUN` with `PASS` because another fixture proved
 the isolated kernel primitive or because a test-case identifier is present.
@@ -218,8 +222,7 @@ resource measurements, cleanup and any unexpected exposure.
    Synthetic Ed25519 signing proves only signature checks, not
    human presence or account integrity.
 
-**Next concrete deliverable:** a **CachyOS-native composed mock B1
-report** with FX-B1-A..E (pass, fail or blocked per case).
+**Historical next deliverable (now completed):** a **CachyOS-native composed mock B1 report** with FX-B1-A..E. Its actual result was **FAIL** because of FX-H01; see the post-experiment addendum and the newer [50](50-B1-STAGED-WORKSPACE-AND-QUARANTINED-RESULT-CONTRACT.md)/[51](51-B1-CONSOLIDATED-ACCEPTANCE-AND-DELIVERY-PLAN.md).
 The report can be produced without Docker API, existing
 provider credentials, sudo, package installation, VM or
 real systemd changes; dangerous/privileged cases stay blocked.
@@ -233,3 +236,11 @@ choice or claim final product viability.
 
 **Nothing in this document authorises application implementation,
 changes to installed providers, accepted ADR updates or PR merge.**
+
+## 6. Reconciled candidate and next gate (dated addendum)
+
+The tested B1 bound-project tree may contain a hardlink to a forbidden same-inode file; a hidden original pathname plus a Landlock project grant does not prevent reading that alias. Additional path canonicalization is not enough. The reconciled **proposed** design in [50](50-B1-STAGED-WORKSPACE-AND-QUARANTINED-RESULT-CONTRACT.md) is explicit owner-authorized Git-base plus local-modification overlay admission, new inodes on an independent disposable filesystem, trusted pre-exec confinement, frozen restricted export, and pending-only quarantine publication. It cannot promise to detect copies or transformed secret bytes admitted by an authorized owner. No live-tree auto-apply occurs within B1.
+
+The [consolidated acceptance plan](51-B1-CONSOLIDATED-ACCEPTANCE-AND-DELIVERY-PLAN.md) contains **CG-01..CG-14 required synthetic gates** and **CG-15..CG-16 separate real-provider-stage gates**. These new gates have **not** been run; previous FX-B1-B..E PASS results cannot be promoted to a PASS for this candidate. Owner decisions O-1/O-2/O-3 are recorded in the [reconciliation](reviews/2026-10-14-fx-h01-design-reconciliation.md). Design verdict stays **REVISE_DESIGN / NOT_PROVEN** pending typed planning, fresh independent plan review and future verified implementation.
+
+Nothing here authorizes editing code, changing system services, invoking Docker, using real providers or credentials, merging PRs, or accepting an ADR. The original 2026-10-14 contract above is preserved for historical comparison; these links explicitly supersede its old "NOT RUN" and "next deliverable" status lines.
