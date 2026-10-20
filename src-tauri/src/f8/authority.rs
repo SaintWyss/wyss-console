@@ -460,8 +460,11 @@ impl Authority {
                     // All decisions are already durable. A declined or cancelled request
                     // that was not delivered must NOT be reported as successful dispatch.
                     // Fence the affected runtime; never retry an ambiguous provider write.
-                    if let Some(t) = ticket.as_ref() {
-                        self.engine.transport_failed(&t.reference);
+                    // A missing transient ticket is also a protocol failure. The
+                    // already-validated request fence still identifies the single
+                    // affected launch, even when no TurnTicket survived.
+                    if let Some(reference) = self.engine.reference(&session) {
+                        self.engine.transport_failed(&reference);
                     }
                     if p.decision == ApprovalDecision::Accept {
                         // A persisted accept may have reached the provider before the
