@@ -382,14 +382,13 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
         if self.seen.contains_key(&request.request_id) {
             // The whole request again: if it also carries an answered challenge, that is the
             // single-use rule broken, and the device is suspect at once.
-            if let Some(step_up) = &request.step_up {
-                if self
+            if let Some(step_up) = &request.step_up
+                && self
                     .challenges
                     .get(&step_up.challenge_id)
                     .is_some_and(|c| c.used && c.device == device.id)
-                {
-                    device.challenge_reused();
-                }
+            {
+                device.challenge_reused();
             }
             return refused(self, &device, Refusal::StaleRequest);
         }
