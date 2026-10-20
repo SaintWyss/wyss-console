@@ -34,6 +34,14 @@ const MAX_OUTBOUND_FRAME: usize = 65_536;
 /// which also drives every other runtime's cleanup.
 pub trait Worker: Send {
     fn send(&mut self, frame: &[u8]) -> ControlResult<()>;
+    /// A security-sensitive approval decision must be accepted by the kernel pipe as one
+    /// complete atomic frame now, never merely queued for delivery after lease revocation.
+    /// This does not prove the provider processed the frame or that the effect completed.
+    /// Unknown worker implementations fail closed instead of claiming that buffered sends
+    /// have been dispatched.
+    fn send_critical(&mut self, _frame: &[u8]) -> ControlResult<()> {
+        Err(E::Unsupported)
+    }
     /// Pushes buffered outbound bytes without blocking.
     fn flush(&mut self) -> ControlResult<()> {
         Ok(())
@@ -727,7 +735,7 @@ impl Engine {
             return Err(E::GateDenied);
         }
         let frame = format!("approval {request_id} {decision}");
-        live.worker.send(frame.as_bytes())?;
+        live.worker.send_critical(frame.as_bytes())?;
         live.approvals.remove(request_id);
         live.meter.approval_closed();
         Ok(())
