@@ -178,7 +178,11 @@ impl OwnedChild {
             // Child is still our direct spawn. A failed pidfd/identity preflight
             // cannot justify synchronous wait on the authority writer thread.
             // The bounded background reaper holds the Child until actual reap.
-            let _ = child.kill();
+            // Never signal by numeric PID if ownership could have been lost
+            // through an unexpected external reap.
+            if still_ours {
+                let _ = child.kill();
+            }
             enqueue_reap(child, permit);
             return Err(E::InternalError);
         };
