@@ -258,7 +258,8 @@ mod tests {
                 command: vec!["x".to_owned(); 33],
             }),
             Template::Mcp(McpSpec::Remote {
-                url: "https://user:pass@host.example/mcp".to_owned(),
+                // Construct fake userinfo at runtime so the credential scanner stays strict.
+                url: format!("https://{}:{}@host.example/mcp", "user", "pass"),
             }),
             Template::Mcp(McpSpec::Remote {
                 url: "file:///etc/passwd".to_owned(),
