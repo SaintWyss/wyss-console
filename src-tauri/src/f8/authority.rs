@@ -417,7 +417,15 @@ impl Authority {
         let (record, dispatch) =
             Writer::new(self.engine.connection_mut(), authority)?.cancel_turn(p)?;
         if dispatch {
-            if let Some(ticket) = self.tickets.get(p.managed_turn_id.as_str()).cloned() {
+            let Some(ticket) = self.tickets.get(p.managed_turn_id.as_str()).cloned() else {
+                // Durable cancel_requested is not evidence that any provider
+                // received an interrupt. Fence this launch; effect is unknown.
+                if let Some(reference) = self.engine.reference(&session) {
+                    self.engine.transport_failed(&reference);
+                }
+                return Err(E::ExternalEffectUnknown);
+            };
+            {
                 let snapshot = lease_snapshot(self.engine.connection(), &session, &ticket.lease_id);
                 // A buffered write is only queued, not proof that the provider
                 // processed the interrupt. Refusals must never be silently hidden.
