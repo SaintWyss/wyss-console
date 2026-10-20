@@ -470,7 +470,16 @@ fn reap_permit() -> ControlResult<ReapPermit> {
                     }
                     scanning.extend(queued.drain(..));
                     drop(queued);
-                    scanning.retain_mut(|job| !matches!(job.child.try_wait(), Ok(Some(_))));
+                    scanning.retain_mut(|job| match job.child.try_wait() {
+                        Ok(Some(_)) => false,
+                        Ok(None) => true,
+                        // An external SIGCHLD collector has already reaped this
+                        // child. Never signal a stale numeric PID; release the slot.
+                        Err(e) if e.raw_os_error() == Some(libc::ECHILD) => false,
+                        // Other failures are not proof of process exit. Preserve
+                        // the owned handle, retry and refuse new launches at capacity.
+                        Err(_) => true,
+                    });
                     if !scanning.is_empty() {
                         std::thread::sleep(Duration::from_millis(50));
                     }
