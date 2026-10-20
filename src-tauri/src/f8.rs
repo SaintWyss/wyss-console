@@ -45,3 +45,7 @@ mod storage_tests;
 #[cfg(test)]
 #[path = "f8/process_integration_tests.rs"]
 mod process_integration_tests;
+
+#[cfg(test)]
+#[path = "f8/read_tests.rs"]
+mod read_tests;
