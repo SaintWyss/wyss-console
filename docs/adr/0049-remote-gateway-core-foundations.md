@@ -44,5 +44,28 @@ device (fields now private; only `handle` makes one); the paired key was not cov
 (a closed per-grant table; outside it is not a request); the replay cache forgot ids after 1,024 requests
 (now 24 hours and 65,536 entries, and a full cache refuses instead of forgetting); a replayed whole request
 with an answered challenge did not make the device suspect; the transcript bound was applied after the
-MAC work (now first, and it counts as an attempt); expiry sums could overflow (saturating). A review of
-the reviewed code has not been done, and the gateway remains unreachable.
+MAC work (now first, and it counts as an attempt); expiry sums could overflow (saturating).
+
+## Second independent review (2026-10-20)
+
+A second cold review of the corrected code returned six findings. Five are fixed with tests that fail on
+the earlier code; one is declined with its reason.
+
+- **Fixed — a decision outlived its issuer.** `apply_revoke` accepted a stored `Allowed` after the device
+  that obtained it had been revoked, suspended or narrowed. It now takes the time and re-checks that the
+  issuer is active and still holds an unexpired `devices.revoke`.
+- **Fixed — pairing the same key again shed `suspect`.** A key already enrolled, in any state, is refused at
+  the host's confirmation (as a revoked key already was); the host deals with the device it has.
+- **Fixed — a clock set back revived expired things.** The gateway keeps the latest time it has been given
+  and never decides with an earlier one. (A forward jump only expires things early. The caller's clock is
+  the host's own: nothing remote supplies it.)
+- **Fixed — the limiter forgot counters past 256 sources.** Past the bound, new sources share one counter;
+  nothing counted is forgotten, so rotating names does not start a clean history.
+- **Fixed — a target name in the journal.** The journal stores a short SHA-256 digest of the target, never
+  the target, so a name from a file cannot be kept there.
+- **Declined — refusal words distinguish an unknown id from a registered one.** The words
+  (`device_revoked`, `device_suspended`…) are the design's (16 §5.2.7) and are for the holder of the
+  device; device ids are 128 random bits, so telling them apart needs an id the prober already has.
+
+The gateway remains unreachable and unreviewed by anyone but these two passes; the signature scheme and
+the transport are still undecided (DN-05).

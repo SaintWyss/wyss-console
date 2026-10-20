@@ -19,7 +19,7 @@ Recheck both heads and `git status` before writing or pushing.
 | F5 project files, hook/MCP templates        | done    | ADR 0050; tests only, real window not yet exercised on the owner's desktop (installed build is older)             |
 | F6a models (managed observed, native)       | done    | ADR 0043; managed choice not built                                                                                |
 | F6 catalogue view, `model/rerouted`, effort | done    | ADR 0048; `docs/acceptance/f6-models-2026-10-20.md`; new authority behaviour proven by tests only                 |
-| F10a gateway core (no transport)            | partial | ADR 0049; 31 tests; unreviewed, unreachable; no signature scheme, no listener (DN-05)                             |
+| F10a gateway core (no transport)            | partial | ADR 0049; 36 tests; two cold reviews; unreachable; no signature scheme, no listener (DN-05)                       |
 | F1b research E1–E8                          | partial | `docs/research/inference-isolation-2026-10-19.md`: I4 recommended, not proven; G-INF not implemented              |
 | F14 / F11a in the real window               | done    | same record, "In the real window"                                                                                 |
 

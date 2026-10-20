@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-20 — Remote gateway core, second review (still no transport)
+
+- Five fixes from a second cold review: a stored decision no longer outlives its issuer's revocation,
+  an enrolled key cannot be paired again to shed `suspect`, the gateway's time never goes back, rotating
+  source names cannot reset the failure limiter, and the journal keeps a digest of a target, not the
+  target. One finding declined with its reason (ADR 0049). 36 tests; unreachable, signature scheme open.
+
 ## 2026-10-20 — Project files and hook/MCP templates (F5 closes)
 
 - **Choose project…** (native folder window; judged: inside the home, no link, nobody else can write it,

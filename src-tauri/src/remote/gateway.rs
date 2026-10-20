@@ -28,6 +28,7 @@ const MOST_HOURS: usize = 48;
 const BACKOFF_AFTER: usize = 5;
 const FAILURE_WINDOW: u64 = 10 * 60;
 const BACKOFF_SECONDS: u64 = 60;
+const OVERFLOW_SOURCE: &str = "\u{0}overflow";
 
 /// A request that was not well formed has nothing to be refused *as*: it is not answered with a
 /// grant word, and it is not journalled as a device's request.
@@ -89,7 +90,12 @@ struct Limiter {
 impl Limiter {
     /// After five failures in ten minutes a source gets one attempt a minute.
     fn check(&mut self, source: &str, now: u64) -> Result<(), Refusal> {
-        let Some((failures, last)) = self.sources.get_mut(source) else {
+        let key = if !self.sources.contains_key(source) && self.sources.len() >= MOST_SOURCES {
+            OVERFLOW_SOURCE
+        } else {
+            source
+        };
+        let Some((failures, last)) = self.sources.get_mut(key) else {
             return Ok(());
         };
         failures.retain(|at| now.saturating_sub(*at) < FAILURE_WINDOW);
@@ -100,18 +106,14 @@ impl Limiter {
         Ok(())
     }
     fn failed(&mut self, source: &str, now: u64) {
-        if !self.sources.contains_key(source) && self.sources.len() >= MOST_SOURCES {
-            // Forget the quietest source rather than refuse to count a new one.
-            if let Some(oldest) = self
-                .sources
-                .iter()
-                .min_by_key(|(_, (_, last))| *last)
-                .map(|(k, _)| k.clone())
-            {
-                self.sources.remove(&oldest);
-            }
-        }
-        let entry = self.sources.entry(source.to_owned()).or_default();
+        // Past the bound, new sources share one counter: rotating through names cannot start a
+        // clean history, and nothing already counted is forgotten.
+        let key = if !self.sources.contains_key(source) && self.sources.len() >= MOST_SOURCES {
+            OVERFLOW_SOURCE
+        } else {
+            source
+        };
+        let entry = self.sources.entry(key.to_owned()).or_default();
         entry.0.push(now);
         entry.1 = now;
     }
@@ -131,6 +133,9 @@ pub struct Gateway<J: Journal, V: StepUpVerifier, R: Random> {
     journal: J,
     verifier: V,
     random: R,
+    /// The latest time any call has carried. Time given to a decision never goes back below it, so
+    /// a clock set back cannot revive a challenge, an offer or a grant that has run out.
+    clock: u64,
 }
 
 impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
@@ -138,6 +143,7 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
         Self {
             host_fingerprint: host_fingerprint.to_owned(),
             devices: BTreeMap::new(),
+            clock: 0,
             revoked_keys: Vec::new(),
             offer: None,
             challenges: BTreeMap::new(),
@@ -171,6 +177,7 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
 
     /// The owner chose Devices → Pair at the host. An earlier offer that was not used dies.
     pub fn begin_pairing(&mut self, now: u64) -> Shown {
+        let now = self.tick(now);
         if let Some(old) = self.offer.as_mut() {
             old.cancel();
         }
@@ -181,6 +188,7 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
 
     /// A device presents its proof. Returns the six digits both screens show.
     pub fn present_pairing(&mut self, now: u64, attempt: &Attempt) -> Result<String, Refusal> {
+        let now = self.tick(now);
         let offer = self.offer.as_mut().ok_or(Refusal::PairingFailed)?;
         offer.present(now, attempt)
     }
@@ -192,9 +200,17 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
         now: u64,
         host: &impl HostConfirm,
     ) -> Result<DeviceId, Refusal> {
+        let now = self.tick(now);
         let offer = self.offer.as_mut().ok_or(Refusal::PairingFailed)?;
         let request = offer.confirm_request().ok_or(Refusal::PairingFailed)?;
-        if self.revoked_keys.contains(&request.device_fingerprint) {
+        // A key that is already enrolled, in any state, is not enrolled a second time: pairing again
+        // would shed a device's suspicion or suspension. The host deals with the device it has.
+        if self.revoked_keys.contains(&request.device_fingerprint)
+            || self
+                .devices
+                .values()
+                .any(|d| d.fingerprint == request.device_fingerprint)
+        {
             offer.cancel();
             return Err(Refusal::PairingRefused);
         }
@@ -230,6 +246,7 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
         days: u32,
         now: u64,
     ) -> Result<(), GrantRefused> {
+        let now = self.tick(now);
         let held = grants::give_profile(profile, now, days)?;
         let device = self
             .devices
@@ -242,6 +259,7 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
         Ok(())
     }
     pub fn renew_at_host(&mut self, id: &DeviceId, profile: Profile, days: u32, now: u64) -> bool {
+        let now = self.tick(now);
         let Ok(held) = grants::give_profile(profile, now, days) else {
             return false;
         };
@@ -250,6 +268,7 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
             .is_some_and(|d| d.renewed_at_host(held, now))
     }
     pub fn review_at_host(&mut self, id: &DeviceId, now: u64) -> bool {
+        let now = self.tick(now);
         self.devices
             .get_mut(id)
             .is_some_and(|d| d.reviewed_at_host(now))
@@ -263,6 +282,7 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
     }
     /// The clock's effect on every device (SM-DEVICE).
     pub fn sweep(&mut self, now: u64) {
+        let now = self.tick(now);
         for device in self.devices.values_mut() {
             device.sweep(now);
         }
@@ -283,10 +303,17 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
         changed
     }
 
+    /// Time only goes forward for the gateway.
+    fn tick(&mut self, now: u64) -> u64 {
+        self.clock = self.clock.max(now);
+        self.clock
+    }
+
     // ---- requests -----------------------------------------------------------------------------
 
     /// A single-use challenge for a device, valid for sixty seconds.
     pub fn issue_challenge(&mut self, device: &DeviceId, now: u64) -> Result<Challenge, Refusal> {
+        let now = self.tick(now);
         let known = self
             .devices
             .get(device)
@@ -318,7 +345,9 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
                 request_id: request.request_id.clone(),
                 grant: request.grant,
                 operation: request.operation.clone(),
-                target: request.target.clone(),
+                // What was acted on is journalled as a digest: a name from a file never lands in the
+                // journal, and two records about the same object still match.
+                target: request.target.as_deref().map(target_digest),
                 bytes: request.bytes,
                 outcome,
             })
@@ -336,6 +365,7 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
         channel_binding: &[u8],
         now: u64,
     ) -> Result<Allowed, Denied> {
+        let now = self.tick(now);
         if !self.journal.has_room() {
             return Err(Denied::Refused(Refusal::AuditUnavailable));
         }
@@ -455,9 +485,30 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
     /// The one change a request may make to the registry: `devices.revoke` of **another** device,
     /// after it passed `handle`. It ends the target's connections and refuses its later requests at
     /// once. A device holding the grant can revoke; it can never enrol or widen.
-    pub fn apply_revoke(&mut self, allowed: &Allowed) -> Result<(), Refusal> {
+    pub fn apply_revoke(&mut self, allowed: &Allowed, now: u64) -> Result<(), Refusal> {
+        let now = self.tick(now);
         if allowed.grant != Grant::DevicesRevoke || allowed.operation != "devices.revoke" {
             return Err(Refusal::GrantMissing);
+        }
+        // The decision was taken a moment ago; the device that took it must still be active and
+        // still hold the grant now (it may have been revoked, suspended or narrowed since).
+        let issuer = self
+            .devices
+            .get(&allowed.device)
+            .ok_or(Refusal::DeviceUnknown)?;
+        match issuer.state {
+            DeviceState::Active => {}
+            DeviceState::Revoked => return Err(Refusal::DeviceRevoked),
+            DeviceState::Suspended => return Err(Refusal::DeviceSuspended),
+            DeviceState::Suspect => return Err(Refusal::DeviceSuspect),
+        }
+        let held = issuer
+            .grants
+            .iter()
+            .find(|h| h.grant == Grant::DevicesRevoke)
+            .ok_or(Refusal::GrantMissing)?;
+        if state_of(held, now) == GrantState::Expired {
+            return Err(Refusal::GrantExpired);
         }
         let target = allowed
             .target
@@ -485,6 +536,14 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
     pub fn challenge_seconds() -> u64 {
         CHALLENGE_SECONDS
     }
+}
+
+/// The journal's account of a target: a short digest, never the target itself.
+fn target_digest(target: &str) -> String {
+    format!(
+        "sha256:{}",
+        &hex(&super::primitives::sha256(target.as_bytes()))[..16]
+    )
 }
 
 /// The hex of a key's digest, for a place that wants one (a fingerprint on a screen).

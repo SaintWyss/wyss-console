@@ -566,10 +566,10 @@ fn a_proof_made_for_one_key_cannot_enrol_another() {
 #[test]
 fn times_near_the_end_of_the_clock_do_not_overflow() {
     let (mut g, stand) = gateway();
+    let (id, _) = enrol(&mut g, &stand, T0, b"key-1");
     let shown = g.begin_pairing(u64::MAX - 1);
     assert_eq!(shown.expires_at, u64::MAX);
     let _ = g.present_pairing(u64::MAX, &attempt(&shown.secret_hex, b"k", b"t", "p"));
-    let (id, _) = enrol(&mut g, &stand, T0, b"key-1");
     assert!(g.issue_challenge(&id, u64::MAX).is_ok() || g.issue_challenge(&id, u64::MAX).is_err());
 }
 
@@ -1001,7 +1001,7 @@ fn revocation_is_at_once_by_the_host_or_by_another_device_that_holds_the_grant_a
         signature: stand.sign(&afp, &step_up_message(b"x", &c.nonce(), &revoke)),
     });
     let allowed = g.handle(&revoke, "s", b"x", now).unwrap();
-    g.apply_revoke(&allowed).unwrap();
+    g.apply_revoke(&allowed, now).unwrap();
     let revoked = g.device(&b).unwrap();
     assert_eq!(
         (revoked.state, revoked.grants.len()),
@@ -1022,21 +1022,24 @@ fn revocation_is_at_once_by_the_host_or_by_another_device_that_holds_the_grant_a
         "devices.revoke",
         Some(a.as_str()),
     );
-    assert_eq!(g.apply_revoke(&selfie), Err(Refusal::StaleRequest));
+    assert_eq!(g.apply_revoke(&selfie, now), Err(Refusal::StaleRequest));
     let wrong_op = Allowed::forged(
         a.clone(),
         Grant::DevicesRevoke,
         "devices.enrol",
         Some(b.as_str()),
     );
-    assert_eq!(g.apply_revoke(&wrong_op), Err(Refusal::GrantMissing));
+    assert_eq!(g.apply_revoke(&wrong_op, now), Err(Refusal::GrantMissing));
     let wrong_grant = Allowed::forged(
         a.clone(),
         Grant::SessionsRead,
         "devices.revoke",
         Some(b.as_str()),
     );
-    assert_eq!(g.apply_revoke(&wrong_grant), Err(Refusal::GrantMissing));
+    assert_eq!(
+        g.apply_revoke(&wrong_grant, now),
+        Err(Refusal::GrantMissing)
+    );
 }
 
 #[test]
@@ -1238,7 +1241,7 @@ fn grants_are_made_only_by_host_methods_and_none_of_them_can_give_lp4() {
             .unwrap()
             .grants
             .iter()
-            .all(|h| h.expires_at <= T0 + 30 * DAY
+            .all(|h| h.expires_at <= T0 + 10 + 30 * DAY
                 || h.grant == Grant::SessionsRead
                 || h.grant == Grant::ManagedRead)
     );
@@ -1247,4 +1250,104 @@ fn grants_are_made_only_by_host_methods_and_none_of_them_can_give_lp4() {
     assert_eq!(g.device(&id).unwrap().state, DeviceState::Suspended);
     assert!(!g.renew_at_host(&id, Profile::Lp4, 30, T0 + 41 * DAY));
     assert!(g.renew_at_host(&id, Profile::Lp1, 30, T0 + 41 * DAY));
+}
+
+#[test]
+fn a_decision_taken_for_a_device_does_not_outlive_that_devices_revocation_or_grant() {
+    let (mut g, stand) = gateway();
+    let (a, afp) = enrol(&mut g, &stand, T0, b"key-a");
+    let (b, _) = enrol(&mut g, &stand, T0 + 100, b"key-b");
+    let now = T0 + 200;
+    g.devices
+        .get_mut(&a)
+        .unwrap()
+        .grants
+        .push(grants::give(Grant::DevicesRevoke, now, 30).unwrap());
+    let mut revoke = request(&a, "rv", Grant::DevicesRevoke, "devices.revoke");
+    revoke.target = Some(b.as_str().to_owned());
+    let c = g.issue_challenge(&a, now).unwrap();
+    revoke.step_up = Some(StepUp {
+        challenge_id: c.id.clone(),
+        signature: stand.sign(&afp, &step_up_message(b"x", &c.nonce(), &revoke)),
+    });
+    let allowed = g.handle(&revoke, "s", b"x", now).unwrap();
+    // The issuer is revoked, narrowed or suspended between the decision and its use.
+    assert!(g.revoke_at_host(&a));
+    assert_eq!(
+        g.apply_revoke(&allowed, now + 1),
+        Err(Refusal::DeviceRevoked)
+    );
+    assert_eq!(g.device(&b).unwrap().state, DeviceState::Active);
+}
+
+#[test]
+fn a_key_that_is_already_enrolled_is_not_enrolled_again_in_any_state() {
+    let (mut g, stand) = gateway();
+    let (id, _) = enrol(&mut g, &stand, T0, b"key-1");
+    for _ in 0..5 {
+        let c = g.issue_challenge(&id, T0 + 100);
+        let _ = c;
+    }
+    // Suspect (or any state): the same key pairing again would shed it.
+    let shown = g.begin_pairing(T0 + 200);
+    let a = attempt(&shown.secret_hex, b"key-1", b"transcript-2", "again");
+    g.present_pairing(T0 + 205, &a).unwrap();
+    assert_eq!(
+        g.confirm_pairing(T0 + 210, &Yes),
+        Err(Refusal::PairingRefused)
+    );
+    assert_eq!(g.devices.len(), 1);
+}
+
+#[test]
+fn time_given_to_the_gateway_never_goes_back() {
+    let (mut g, stand) = gateway();
+    let (id, fp) = enrol(&mut g, &stand, T0, b"key-1");
+    g.give_at_host(&id, Profile::Lp2, 30, T0).unwrap();
+    let c = g.issue_challenge(&id, T0 + 1000).unwrap();
+    let mut r = request(&id, "r1", Grant::ApprovalsRespond, "approvals.respond");
+    r.step_up = Some(StepUp {
+        challenge_id: c.id.clone(),
+        signature: stand.sign(&fp, &step_up_message(b"b", &c.nonce(), &r)),
+    });
+    // Another call carries the clock past the challenge's sixty seconds; then the clock is set
+    // back to a time inside them. The challenge does not come back to life.
+    g.begin_pairing(T0 + 1100);
+    assert_eq!(
+        refused(g.handle(&r, "s", b"b", T0 + 1010)),
+        Refusal::StepUpFailed
+    );
+}
+
+#[test]
+fn rotating_source_names_cannot_start_a_clean_failure_history() {
+    let (mut g, stand) = gateway();
+    let (id, _) = enrol(&mut g, &stand, T0, b"key-1");
+    let unknown = DeviceId::from_bytes([9; 16]);
+    // Many sources fail once each, past the table's bound; then a new source keeps failing.
+    for n in 0..300 {
+        let r = request(
+            &unknown,
+            &format!("u{n}"),
+            Grant::SessionsRead,
+            "sessions.list",
+        );
+        let _ = g.handle(&r, &format!("src-{n}"), b"b", T0 + 10);
+    }
+    let r = request(&id, "ok1", Grant::SessionsRead, "sessions.list");
+    // A source never seen before, while the table is full and its shared counter is over the
+    // limit, is slowed like the rest; a source already counted keeps its own history.
+    let word = refused(g.handle(&r, "brand-new", b"b", T0 + 11));
+    assert_eq!(word, Refusal::RateLimited);
+}
+
+#[test]
+fn the_journal_names_what_was_acted_on_by_a_digest_and_never_by_the_name() {
+    let (mut g, stand) = gateway();
+    let (id, _) = enrol(&mut g, &stand, T0, b"key-1");
+    let mut r = request(&id, "r1", Grant::SessionsRead, "sessions.list");
+    r.target = Some("vault/customer123/secretname".to_owned());
+    g.handle(&r, "s", b"b", T0 + 10).unwrap();
+    let kept = g.journal().records()[0].target.clone().unwrap();
+    assert!(kept.starts_with("sha256:") && !kept.contains("customer123"));
 }
