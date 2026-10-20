@@ -1078,12 +1078,6 @@ fn f8_16_audit_storage_full_fails_closed_and_the_unknown_stays_visible() {
             .observe(&wire(AUTH), &reference.fence())
             .is_err()
     );
-    // A rejected namespace attestation must never be committed as a ready event.
-    let ready_events: i64 = rig.engine.connection().query_row(
-        "SELECT count(*) FROM control_events WHERE json_extract(envelope,'$.event_type')='authority.runtime.instance_ready'",
-        [], |r| r.get(0),
-    ).unwrap();
-    assert_eq!(ready_events, 0, "unsafe containment cannot emit durable ready");
     rig.drain();
     assert!(!rig.engine.is_live(&a));
     assert_eq!(
@@ -1542,6 +1536,12 @@ fn a_spawner_that_only_claims_containment_is_caught_at_the_handshake() {
             .observe(&wire(AUTH), &reference.fence())
             .is_err()
     );
+    // This is the actual containment refusal, not a simulated audit-store failure.
+    let ready_events: i64 = rig.engine.connection().query_row(
+        "SELECT count(*) FROM control_events WHERE json_extract(envelope,'$.event_type')='authority.runtime.instance_ready'",
+        [], |r| r.get(0),
+    ).unwrap();
+    assert_eq!(ready_events, 0, "unproved namespace cannot be durably ready");
     rig.drain();
     assert!(!rig.engine.is_live(&a));
     validate_v8(rig.engine.connection()).unwrap();
