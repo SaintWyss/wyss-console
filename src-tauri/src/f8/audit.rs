@@ -509,9 +509,13 @@ impl AuditReplay {
         }
         let kind = text(v, "event_type")?;
         if let Some(upto) = self.boundary {
-            let baseline_work = ["authority.runtime.", "authority.managed_turn.", "authority.managed_approval."]
-                .iter()
-                .any(|p| kind.starts_with(p));
+            let baseline_work = [
+                "authority.runtime.",
+                "authority.managed_turn.",
+                "authority.managed_approval.",
+            ]
+            .iter()
+            .any(|p| kind.starts_with(p));
             match (sequence <= upto, vocabulary) {
                 // Version-2 payloads cannot predate the migration that introduced them.
                 (true, Vocabulary::Generation2) => return Err(bad()),
@@ -1042,7 +1046,8 @@ impl AuditReplay {
         }
         for (id, a) in &self.approvals {
             // Undecided, or accepted with the provider outcome never confirmed (effect unknown).
-            let stranded = a.state == "pending" || (a.state == "accepted" && a.effect == "dispatched");
+            let stranded =
+                a.state == "pending" || (a.state == "accepted" && a.effect == "dispatched");
             if stranded && gone(&a.launch, &a.session) {
                 out.approvals.push(id.clone());
             }

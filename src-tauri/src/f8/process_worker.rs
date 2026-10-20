@@ -8,7 +8,7 @@
 //! drained into nothing (content is never kept) so a chatty child cannot wedge on a full pipe.
 //! Lifecycle (EOF, TERM, KILL, reap) is the owned handle's, never a PID or name.
 use super::{
-    engine::{StopState, Worker},
+    engine::{Containment, StopState, Worker},
     ownership::{ContainmentPolicy, Grace, OwnedChild, Progress},
 };
 use crate::contracts::control::{ControlError as E, ControlResult};
@@ -37,6 +37,8 @@ pub struct ProcessWorker {
     inbuf: Vec<u8>,
     failed: Option<E>,
     eof: bool,
+    /// Spawned under the PID-namespace containment policy.
+    namespace: bool,
 }
 
 fn nonblocking(fd: i32) -> ControlResult<()> {
@@ -53,11 +55,19 @@ impl ProcessWorker {
     /// Spawns the command as an owned child with piped stdio. The caller picks the program and
     /// arguments; this type adds no environment, shell or credential.
     pub fn spawn(command: &mut Command, grace: Grace) -> ControlResult<Self> {
+        Self::spawn_with(command, grace, ContainmentPolicy::DirectChildOnly)
+    }
+    /// As `spawn`, with an explicit containment requirement (`Unsupported` if it cannot be met).
+    pub fn spawn_with(
+        command: &mut Command,
+        grace: Grace,
+        policy: ContainmentPolicy,
+    ) -> ControlResult<Self> {
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let (mut child, _) = OwnedChild::spawn(command, ContainmentPolicy::DirectChildOnly, grace)?;
+        let (mut child, _) = OwnedChild::spawn(command, policy, grace)?;
         let stdout = child.take_stdout().ok_or(E::TransportError)?;
         let stderr = child.take_stderr().ok_or(E::TransportError)?;
         let stdin_fd = child.stdin().ok_or(E::TransportError)?.as_raw_fd();
@@ -72,6 +82,7 @@ impl ProcessWorker {
             inbuf: Vec::new(),
             failed: None,
             eof: false,
+            namespace: policy == ContainmentPolicy::DescendantsContained,
         })
     }
     pub fn failure(&self) -> Option<E> {
@@ -198,6 +209,17 @@ impl Worker for ProcessWorker {
             Ok(Progress::Pending(_)) => StopState::Pending,
             // Not provably gone: keep the slot and the handle.
             Err(_) => StopState::Stuck,
+        }
+    }
+    fn containment(&mut self) -> Containment {
+        if self.namespace {
+            if self.child.namespace_contained() {
+                Containment::PidNamespace
+            } else {
+                Containment::DirectChildOnly
+            }
+        } else {
+            Containment::DirectChildOnly
         }
     }
     fn descendants(&self) -> usize {

@@ -3,6 +3,8 @@
 #[cfg(target_os = "linux")]
 pub mod allocator;
 pub mod audit;
+#[cfg(target_os = "linux")]
+pub mod authority;
 pub mod budget;
 #[cfg(target_os = "linux")]
 pub mod engine;
@@ -18,9 +20,9 @@ pub mod scheduler;
 #[cfg(target_os = "linux")]
 pub mod staging;
 #[cfg(target_os = "linux")]
-pub mod writers;
-#[cfg(target_os = "linux")]
 pub mod v8;
+#[cfg(target_os = "linux")]
+pub mod writers;
 
 #[cfg(test)]
 #[path = "f8/tests.rs"]

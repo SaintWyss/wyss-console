@@ -78,7 +78,11 @@ fn announce(c: &Connection, stream: &str, authority: &str) {
         rusqlite::params![id, stream, format!("{n:020}"), envelope.to_string()],
     )
     .unwrap();
-    c.execute("UPDATE authority_metadata SET last_sequence=?1", [n.to_string()]).unwrap();
+    c.execute(
+        "UPDATE authority_metadata SET last_sequence=?1",
+        [n.to_string()],
+    )
+    .unwrap();
 }
 fn mutation_for(session: &str, intent: &str) -> (String, Value) {
     let request = json!({"schema_version":2,"request_id":uuid(),"authority_instance_id":uuid(),"method":"runtime/start",
@@ -580,19 +584,43 @@ fn forge_baseline_turn_after_migration() -> Connection {
     let session: String = one(&c, "SELECT session_id FROM managed_sessions");
     let stream: String = one(&c, "SELECT stream_id FROM authority_metadata");
     let (old_turn, old_intent, old_codex): (String, String, Option<String>) = c
-        .query_row("SELECT managed_turn_id,intent_id,codex_turn_id FROM managed_turns", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .query_row(
+            "SELECT managed_turn_id,intent_id,codex_turn_id FROM managed_turns",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
         .unwrap();
     let (turn, intent, codex, authority) = (uuid(), uuid(), uuid(), uuid());
     let mut pairs = vec![(&old_turn, &turn), (&old_intent, &intent)];
     if let Some(o) = &old_codex {
         pairs.push((o, &codex));
     }
-    let swap = |col: &str| pairs.iter().fold(col.to_owned(), |e, (o, n)| format!("replace({e},'{o}','{n}')"));
-    let cols: Vec<(String, String)> = c.prepare("SELECT name,type FROM pragma_table_info('managed_turns')").unwrap()
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect();
-    let select = cols.iter().map(|(n, t)| if t == "TEXT" { swap(n) } else { n.clone() }).collect::<Vec<_>>().join(",");
-    let mut sql = format!("INSERT INTO managed_turns SELECT {select} FROM managed_turns WHERE managed_turn_id='{old_turn}';");
-    sql += &format!("INSERT INTO processed_intents SELECT {},{},{} FROM processed_intents WHERE intent_id='{old_intent}';", swap("intent_id"), swap("mutation"), swap("result"));
+    let swap = |col: &str| {
+        pairs.iter().fold(col.to_owned(), |e, (o, n)| {
+            format!("replace({e},'{o}','{n}')")
+        })
+    };
+    let cols: Vec<(String, String)> = c
+        .prepare("SELECT name,type FROM pragma_table_info('managed_turns')")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let select = cols
+        .iter()
+        .map(|(n, t)| if t == "TEXT" { swap(n) } else { n.clone() })
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut sql = format!(
+        "INSERT INTO managed_turns SELECT {select} FROM managed_turns WHERE managed_turn_id='{old_turn}';"
+    );
+    sql += &format!(
+        "INSERT INTO processed_intents SELECT {},{},{} FROM processed_intents WHERE intent_id='{old_intent}';",
+        swap("intent_id"),
+        swap("mutation"),
+        swap("result")
+    );
     let events: Vec<String> = c.prepare("SELECT envelope FROM control_events WHERE json_extract(envelope,'$.event_type') LIKE 'authority.managed_turn.%' AND json_extract(envelope,'$.payload.managed_turn_id')=?1 ORDER BY sequence").unwrap()
         .query_map([&old_turn], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
     let mut n = head(&c);
@@ -634,7 +662,10 @@ fn migration_boundary_detects_rewritten_pre_migration_history() {
         &w.conn,
         "UPDATE control_events SET envelope=replace(envelope,'.000Z\"','.001Z\"') WHERE sequence='00000000000000000001' AND envelope LIKE '%.000Z\"%'",
     );
-    let changed: i64 = w.conn.query_row("SELECT changes()", [], |r| r.get(0)).unwrap();
+    let changed: i64 = w
+        .conn
+        .query_row("SELECT changes()", [], |r| r.get(0))
+        .unwrap();
     tamper(
         &w.conn,
         "UPDATE control_events SET envelope=json_set(envelope,'$.timestamp','2001-01-01T00:00:00.000Z') WHERE sequence='00000000000000000001'",

@@ -41,7 +41,10 @@ fn frames_round_trip_through_a_real_child() {
     assert_eq!(got, vec![b"{\"id\":1}".to_vec(), b"{\"id\":2}".to_vec()]);
     // Frames are single lines: an embedded newline can never smuggle a second frame.
     assert_eq!(w.send(b"a\nb"), Err(E::FrameTooLarge));
-    assert_eq!(w.send(&vec![b'x'; OUTBOUND_FRAME_MAX + 1]), Err(E::FrameTooLarge));
+    assert_eq!(
+        w.send(&vec![b'x'; OUTBOUND_FRAME_MAX + 1]),
+        Err(E::FrameTooLarge)
+    );
     finish(&mut w);
 }
 
@@ -63,7 +66,10 @@ fn a_child_that_never_reads_is_back_pressure_not_a_hang() {
     let (_, e) = refused.expect("the outbound buffer is bounded");
     assert_eq!(e, E::CapacityExceeded);
     assert!(w.buffered_outbound() <= OUTBOUND_BUFFER_MAX);
-    assert!(started.elapsed() < Duration::from_secs(2), "sends never wait");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "sends never wait"
+    );
     finish(&mut w);
 }
 
@@ -77,7 +83,10 @@ fn inbound_floods_are_read_in_bounded_slices() {
         let frames = w.inbound(4).unwrap();
         assert!(frames.len() <= 4);
         assert!(started.elapsed() < Duration::from_millis(500));
-        assert!(w.inbuf.len() <= INBOUND_FRAME_MAX + CHUNK, "buffered bytes are bounded");
+        assert!(
+            w.inbuf.len() <= INBOUND_FRAME_MAX + CHUNK,
+            "buffered bytes are bounded"
+        );
         total += frames.len();
     }
     assert!(total > 0);
@@ -130,7 +139,10 @@ fn an_unresponsive_child_is_killed_through_the_owned_handle_only() {
         .unwrap();
     let mut w = worker("trap '' TERM; while true; do sleep 0.05; done");
     finish(&mut w);
-    assert!(other.try_wait().unwrap().is_none(), "the unrelated same-path process survives");
+    assert!(
+        other.try_wait().unwrap().is_none(),
+        "the unrelated same-path process survives"
+    );
     other.kill().unwrap();
     other.wait().unwrap();
 }

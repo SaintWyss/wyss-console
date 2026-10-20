@@ -990,7 +990,8 @@ fn attestation_every_authority_announces_its_predecessor_before_writing() {
     };
     let mut ok = base();
     started(&mut ok, Some(AUTH), AUTH2);
-    ok.desired(S1, true, 1, 1, Some(I1), AUTH2).ready(S1, I1, 1, AUTH2);
+    ok.desired(S1, true, 1, 1, Some(I1), AUTH2)
+        .ready(S1, I1, 1, AUTH2);
     replay_with_boundary(&ok, 2).unwrap();
     // The first post-boundary event must be an announcement.
     let mut l = base();
@@ -1005,7 +1006,10 @@ fn attestation_every_authority_announces_its_predecessor_before_writing() {
     assert!(replay_with_boundary(&l, 2).is_err(), "wrong predecessor");
     let mut l = base();
     started(&mut l, None, AUTH2);
-    assert!(replay_with_boundary(&l, 2).is_err(), "null predecessor after history");
+    assert!(
+        replay_with_boundary(&l, 2).is_err(),
+        "null predecessor after history"
+    );
     let mut l = base();
     started(&mut l, Some(AUTH), AUTH2);
     started(&mut l, Some(AUTH), AUTH2);
@@ -1017,7 +1021,10 @@ fn attestation_every_authority_announces_its_predecessor_before_writing() {
     started(&mut chain, Some(AUTH2), auth3);
     replay_with_boundary(&chain, 2).unwrap();
     chain.desired(S1, true, 1, 1, Some(I1), AUTH2);
-    assert!(replay_with_boundary(&chain, 2).is_err(), "retired authority wrote again");
+    assert!(
+        replay_with_boundary(&chain, 2).is_err(),
+        "retired authority wrote again"
+    );
 }
 
 #[test]

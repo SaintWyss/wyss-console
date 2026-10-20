@@ -30,9 +30,15 @@ use std::{
 pub enum ContainmentPolicy {
     /// Only the direct child is owned; descendants are reported but never signalled.
     DirectChildOnly,
-    /// Every descendant is contained. No verified mechanism exists: always refused.
+    /// Every descendant is contained by a PID namespace whose init dies with the owned child.
+    /// The only accepted mechanism is the root-owned `bwrap` launcher invoked with both
+    /// `--unshare-pid` and `--die-with-parent`; any other command is refused (`Unsupported`),
+    /// and after the spawn the namespace is observed (read-only) before it is reported contained.
     DescendantsContained,
 }
+
+/// The one launcher whose PID-namespace semantics are relied on.
+pub const NAMESPACE_LAUNCHER: &str = "/usr/bin/bwrap";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContainmentReport {
@@ -114,7 +120,7 @@ impl OwnedChild {
         grace: Grace,
     ) -> ControlResult<(Self, ContainmentReport)> {
         if policy == ContainmentPolicy::DescendantsContained {
-            return Err(E::Unsupported);
+            verify_namespace_launch(command)?;
         }
         let expected_parent = nix::unistd::getpid();
         // SAFETY: the closure performs only async-signal-safe syscalls after fork and builds
@@ -178,6 +184,32 @@ impl OwnedChild {
                 descendants_contained: false,
             },
         ))
+    }
+
+    /// Read-only observation that the owned launcher really put its payload into another PID
+    /// namespace: some child of the owned process has a different `pid` namespace than this
+    /// process. `false` until the payload exists, and never a permission to signal anything.
+    pub fn namespace_contained(&self) -> bool {
+        let own = std::fs::read_link("/proc/self/ns/pid").ok();
+        if self.exit.is_some() || own.is_none() {
+            return false;
+        }
+        let Ok(tasks) = std::fs::read_dir(format!("/proc/{}/task", self.pid)) else {
+            return false;
+        };
+        for task in tasks.flatten() {
+            let Ok(children) = std::fs::read_to_string(task.path().join("children")) else {
+                continue;
+            };
+            for child in children.split_whitespace() {
+                if std::fs::read_link(format!("/proc/{child}/ns/pid"))
+                    .is_ok_and(|ns| Some(ns) != own)
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub fn stdin(&mut self) -> Option<&mut ChildStdin> {
@@ -314,6 +346,33 @@ fn exit_code(s: ExitStatus) -> i32 {
     s.code()
         .or_else(|| s.signal().map(|n| 128 + n))
         .unwrap_or(-1)
+}
+
+/// The command must be the root-owned launcher with both flags that give it its guarantee,
+/// given as options before an explicit `--` that starts the payload. The same words appearing
+/// in the payload's own arguments count for nothing.
+fn verify_namespace_launch(command: &Command) -> ControlResult<()> {
+    use std::os::unix::fs::MetadataExt;
+    let args: Vec<_> = command
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let meta = std::fs::symlink_metadata(NAMESPACE_LAUNCHER).map_err(|_| E::Unsupported)?;
+    let Some(payload) = args.iter().position(|a| a == "--") else {
+        return Err(E::Unsupported);
+    };
+    let options = &args[..payload];
+    if command.get_program() != NAMESPACE_LAUNCHER
+        || !meta.is_file()
+        || meta.uid() != 0
+        || meta.mode() & 0o022 != 0
+        || !options.iter().any(|a| a == "--unshare-pid")
+        || !options.iter().any(|a| a == "--die-with-parent")
+        || options.iter().any(|a| a == "--share-pid")
+    {
+        return Err(E::Unsupported);
+    }
+    Ok(())
 }
 
 impl Drop for OwnedChild {

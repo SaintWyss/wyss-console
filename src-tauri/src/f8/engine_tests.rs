@@ -74,6 +74,9 @@ struct Spawn {
     script: Option<String>,
     /// Use the real process-backed worker (bounded, non-blocking pipes) for the script.
     process: bool,
+    /// Launch the script inside a verified PID namespace (and claim descendant containment).
+    namespace: bool,
+    claim_containment: bool,
     fail: bool,
     catalogue: bool,
     grace: Grace,
@@ -85,6 +88,8 @@ impl Spawn {
             spawned: 0,
             script: None,
             process: false,
+            namespace: false,
+            claim_containment: false,
             fail: false,
             catalogue: false,
             grace: Grace {
@@ -96,6 +101,9 @@ impl Spawn {
     }
 }
 impl Spawner for Spawn {
+    fn descendant_containment(&self) -> bool {
+        self.claim_containment || self.namespace
+    }
     fn spawn(
         &mut self,
         launch: &RuntimeRef,
@@ -111,11 +119,34 @@ impl Spawner for Spawn {
         if self.fail {
             return Err(E::ProviderRejected);
         }
+        if let (true, Some(script)) = (self.namespace, &self.script) {
+            let mut c = Command::new(crate::f8::ownership::NAMESPACE_LAUNCHER);
+            c.args([
+                "--unshare-pid",
+                "--die-with-parent",
+                "--dev-bind",
+                "/",
+                "/",
+                "--",
+                "/bin/sh",
+                "-c",
+            ])
+            .arg(script.as_str());
+            return Ok(Spawned {
+                worker: Box::new(crate::f8::process_worker::ProcessWorker::spawn_with(
+                    &mut c,
+                    self.grace,
+                    ContainmentPolicy::DescendantsContained,
+                )?),
+            });
+        }
         if let (true, Some(script)) = (self.process, &self.script) {
             let mut c = Command::new("/bin/sh");
             c.arg("-c").arg(script.as_str());
             return Ok(Spawned {
-                worker: Box::new(crate::f8::process_worker::ProcessWorker::spawn(&mut c, self.grace)?),
+                worker: Box::new(crate::f8::process_worker::ProcessWorker::spawn(
+                    &mut c, self.grace,
+                )?),
             });
         }
         let child = match &self.script {
@@ -1332,15 +1363,25 @@ fn process_worker_frames_flow_through_the_real_meter_and_scheduler() {
     sp.script = Some("cat".into());
     let ra = rig.ready(&a, &mut sp);
     let (_claim, ticket) = turn(&mut rig, &ra, 0);
-    rig.engine.write_frame(&ticket, b"ping", &rig.leases, 1).unwrap();
+    rig.engine
+        .write_frame(&ticket, b"ping", &rig.leases, 1)
+        .unwrap();
     let mut got = Vec::new();
     settle(&mut rig, |r| {
         got.extend(r.engine.dispatch(Instant::now()));
         !got.is_empty()
     });
-    assert_eq!((got[0].runtime.as_str(), got[0].item.as_slice()), (a.as_str(), &b"ping"[..]));
+    assert_eq!(
+        (got[0].runtime.as_str(), got[0].item.as_slice()),
+        (a.as_str(), &b"ping"[..])
+    );
     // An unrelated runtime saw nothing of it.
-    assert!(rig.engine.dispatch(Instant::now()).iter().all(|d| d.runtime != b));
+    assert!(
+        rig.engine
+            .dispatch(Instant::now())
+            .iter()
+            .all(|d| d.runtime != b)
+    );
 }
 
 #[test]
@@ -1361,19 +1402,36 @@ fn a_flooding_process_is_stopped_alone_with_its_exact_budget_key() {
     });
     // B is untouched: still live, turn and approval intact, and it can still be written.
     assert!(rig.engine.is_live(&b));
-    assert_eq!((rig.engine.active_turn(&b).is_some(), rig.engine.pending_approvals(&b)), (true, 1));
-    rig.engine.write_frame(&tb, b"still", &rig.leases, 2).unwrap();
+    assert_eq!(
+        (
+            rig.engine.active_turn(&b).is_some(),
+            rig.engine.pending_approvals(&b)
+        ),
+        (true, 1)
+    );
+    rig.engine
+        .write_frame(&tb, b"still", &rig.leases, 2)
+        .unwrap();
     let key: Option<String> = rig.engine.connection().query_row(
         "SELECT json_extract(envelope,'$.payload.budget_failure') FROM control_events WHERE json_extract(envelope,'$.event_type')='authority.runtime.instance_exited' ORDER BY sequence DESC LIMIT 1",
         [], |r| r.get(0)).unwrap();
-    assert!(matches!(key.as_deref(), Some("turn_events_per_second" | "turn_events" | "turn_output_bytes")), "{key:?}");
+    assert!(
+        matches!(
+            key.as_deref(),
+            Some("turn_events_per_second" | "turn_events" | "turn_output_bytes")
+        ),
+        "{key:?}"
+    );
     validate_v8(rig.engine.connection()).unwrap();
 }
 
 #[test]
 fn protocol_violations_and_unexpected_exits_of_real_processes_stop_only_that_runtime() {
     for (script, expected) in [
-        ("head -c 300000 /dev/zero | tr '\\0' a; echo; sleep 30", "protocol_failed"),
+        (
+            "head -c 300000 /dev/zero | tr '\\0' a; echo; sleep 30",
+            "protocol_failed",
+        ),
         ("sleep 0.2", "child_exited"),
     ] {
         let mut rig = Rig::new(1, 0);
@@ -1421,4 +1479,91 @@ fn a_process_that_never_reads_cannot_block_the_writer_and_is_still_stopped() {
         !r.engine.is_live(&a)
     });
     assert!(rig.engine.is_live(&b));
+}
+
+fn tools_request(rig: &Rig, session: &str) -> Request {
+    let (generation, revision) = rig.expect(session);
+    request(
+        "runtime/start",
+        json!({"intent_id":uuid(),"adapter_id":"codex","runtime_kind":"codex",
+        "managed_session_id":session,"expected_generation":generation,"expected_revision":revision,
+        "safety_profile":"codex_local_tools_v1","workspace_root":"/tmp"}),
+    )
+}
+
+#[test]
+fn a_tool_capable_profile_is_refused_without_verified_descendant_containment() {
+    let mut rig = Rig::new(1, 0);
+    let a = rig.sessions[0].clone();
+    let mut sp = Spawn::new(&rig.frames);
+    let before = rig.count_rows();
+    let r = tools_request(&rig, &a);
+    assert_eq!(rig.engine.start(&r, &mut sp).err(), Some(E::Unsupported));
+    // Nothing was reserved, spawned or recorded: the refusal consumed no generation.
+    assert_eq!(
+        (
+            rig.count_rows(),
+            sp.spawned,
+            rig.engine.registry.active_slots()
+        ),
+        (before, 0, 0)
+    );
+    assert_eq!(rig.expect(&a), (0, 0));
+    // The inference profile executes no tools and is unaffected.
+    rig.ready(&a, &mut sp);
+}
+
+#[test]
+fn a_spawner_that_only_claims_containment_is_caught_at_the_handshake() {
+    let mut rig = Rig::new(1, 0);
+    let a = rig.sessions[0].clone();
+    let mut sp = Spawn::new(&rig.frames);
+    sp.claim_containment = true;
+    let r = tools_request(&rig, &a);
+    let started = rig.engine.start(&r, &mut sp).unwrap();
+    let reference = reference(&started);
+    assert_eq!(
+        rig.engine
+            .complete_handshake(&reference, "0.159.0", attach()),
+        Err(E::Unsupported)
+    );
+    assert!(
+        rig.engine
+            .registry
+            .observe(&wire(AUTH), &reference.fence())
+            .is_err()
+    );
+    rig.drain();
+    assert!(!rig.engine.is_live(&a));
+    validate_v8(rig.engine.connection()).unwrap();
+}
+
+#[test]
+fn a_verified_namespace_launch_is_ready_and_its_descendants_die_with_it() {
+    if !std::path::Path::new(crate::f8::ownership::NAMESPACE_LAUNCHER).exists() {
+        return;
+    }
+    let mut rig = Rig::new(1, 0);
+    let a = rig.sessions[0].clone();
+    let mut sp = Spawn::new(&rig.frames);
+    sp.namespace = true;
+    sp.script = Some("sleep 30 & sleep 31 & wait".into());
+    let r = tools_request(&rig, &a);
+    let started = rig.engine.start(&r, &mut sp).unwrap();
+    let reference = reference(&started);
+    let end = Instant::now() + Duration::from_secs(10);
+    while rig.engine.live.get_mut(&a).unwrap().worker.containment()
+        != crate::f8::engine::Containment::PidNamespace
+    {
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    rig.engine
+        .complete_handshake(&reference, "0.159.0", attach())
+        .unwrap();
+    assert!(rig.engine.live[&a].worker.descendants() >= 2);
+    let stop = rig.stop_request(&a, Some(reference.runtime_instance_id.as_str()));
+    rig.engine.stop(&stop, Instant::now()).unwrap();
+    rig.drain();
+    validate_v8(rig.engine.connection()).unwrap();
 }

@@ -57,10 +57,22 @@ pub trait Worker: Send {
     fn descendants(&self) -> usize {
         0
     }
+    /// How far the process tree of this worker is contained.
+    fn containment(&mut self) -> Containment {
+        Containment::DirectChildOnly
+    }
     /// Diagnostics only; never an input to any decision.
     fn pid_for_diagnostics(&self) -> Option<i32> {
         None
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Containment {
+    /// Only the direct child is owned; descendants would be reported, never contained.
+    DirectChildOnly,
+    /// The payload runs in a PID namespace which dies with the owned child (observed).
+    PidNamespace,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +89,11 @@ pub struct Spawned {
 /// Creates the worker for a launch the allocator already reserved. The engine never spawns
 /// anything for a launch that has no committed reservation.
 pub trait Spawner {
+    /// Whether this spawner launches payloads into a verified PID namespace. A profile which can
+    /// execute tools is refused unless it does, before anything is reserved.
+    fn descendant_containment(&self) -> bool {
+        false
+    }
     fn spawn(
         &mut self,
         launch: &RuntimeRef,
@@ -141,6 +158,7 @@ struct Live {
     approvals: BTreeMap<String, Pending>,
     attachment: Option<Attachment>,
     exit: Option<(String, Option<String>)>,
+    requires_containment: bool,
 }
 
 type StageHook = Box<dyn FnMut(LaunchStage) -> ControlResult<()> + Send>;
@@ -156,6 +174,7 @@ pub struct Engine {
     /// Launch directories whose cleanup reported an anomaly (reported, never retried blindly).
     staging_anomalies: usize,
     stuck: usize,
+    ended: usize,
     /// Exits whose audit record could not be written yet (storage failure): retried, never lost.
     unrecorded: Vec<(RuntimeRef, String, Option<String>)>,
     hook: Option<StageHook>,
@@ -178,6 +197,7 @@ impl Engine {
             epoch: Instant::now(),
             staging_anomalies: 0,
             stuck: 0,
+            ended: 0,
             unrecorded: Vec::new(),
             hook: None,
         })
@@ -191,6 +211,64 @@ impl Engine {
     }
     pub fn connection(&self) -> &Connection {
         &self.conn
+    }
+    pub fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+    pub fn authority_id(&self) -> &WireUuid {
+        &self.authority
+    }
+    /// The attested identity of the session's live launch, only if `fence` names it exactly.
+    pub fn observe_fence(&self, fence: &RuntimeFence) -> ControlResult<RuntimeIdentity> {
+        self.registry.observe(&self.authority, fence).cloned()
+    }
+    pub fn reference(&self, session: &str) -> Option<RuntimeRef> {
+        self.live.get(session).map(|l| l.reference.clone())
+    }
+    pub fn attachment(&self, session: &str) -> Option<Attachment> {
+        self.live.get(session).and_then(|l| l.attachment.clone())
+    }
+    /// The fingerprint of the provider's own pending request, independent of any client claim.
+    pub fn pending_fingerprint(&self, session: &str, request_id: &str) -> Option<String> {
+        self.live
+            .get(session)
+            .and_then(|l| l.approvals.get(request_id))
+            .map(|p| p.fingerprint.clone())
+    }
+    /// Phase of the session's live launch and, when attested, its identity.
+    pub fn runtime_view(&self, session: &str) -> Option<(&'static str, Option<RuntimeIdentity>)> {
+        let live = self.live.get(session)?;
+        let phase = match live.phase {
+            Phase::Spawned => "initializing",
+            Phase::Ready => "ready",
+            Phase::Stopping => "stopping",
+        };
+        let identity = (live.phase == Phase::Ready)
+            .then(|| {
+                self.registry
+                    .observe(&self.authority, &live.reference.fence())
+                    .ok()
+                    .cloned()
+            })
+            .flatten();
+        Some((phase, identity))
+    }
+    /// The lease admitting the session's turn was lost: the in-memory turn and approvals end.
+    pub fn lease_lost(&mut self, session: &str, lease_id: &str) {
+        let now = self.ms(Instant::now());
+        if let Some(live) = self.live.get_mut(session)
+            && live.turn.as_ref().is_some_and(|t| t.1 == lease_id)
+        {
+            live.turn = None;
+            live.approvals.clear();
+            if let Ok(m) = Meter::new(now) {
+                live.meter = m;
+            }
+        }
+    }
+    /// Launches reaped since the last call: the caller then recovers their stranded work.
+    pub fn take_ended(&mut self) -> usize {
+        std::mem::take(&mut self.ended)
     }
     #[cfg(test)]
     pub(crate) fn scheduler_mut(&mut self) -> &mut Scheduler<Vec<u8>> {
@@ -264,6 +342,14 @@ impl Engine {
             ),
             _ => return Err(E::InvalidRequest),
         };
+        // Execution paths whose required containment cannot be provided are refused outright:
+        // nothing is reserved, spawned or recorded for them.
+        if let v1::Operation::RuntimeStart(m) = request.operation()
+            && m.safety_profile == Some(v1::RuntimeSafetyProfile::CodexLocalToolsV1)
+            && !spawner.descendant_containment()
+        {
+            return Err(E::Unsupported);
+        }
         let admission = Admission {
             live: current.filter(|_| {
                 self.live
@@ -289,11 +375,20 @@ impl Engine {
         // The reservation is durable and its generation stays consumed even if this fails: a
         // launch which reached the live table records its own end when it is reaped, otherwise
         // `launch` records it now (or queues the record), so no phantom slot remains.
-        self.launch(&reference, spawner)?;
+        let tools = matches!(
+            request.operation(),
+            v1::Operation::RuntimeStart(m) if m.safety_profile == Some(v1::RuntimeSafetyProfile::CodexLocalToolsV1)
+        );
+        self.launch(&reference, spawner, tools)?;
         Ok(outcome)
     }
 
-    fn launch(&mut self, reference: &RuntimeRef, spawner: &mut dyn Spawner) -> ControlResult<()> {
+    fn launch(
+        &mut self,
+        reference: &RuntimeRef,
+        spawner: &mut dyn Spawner,
+        tools: bool,
+    ) -> ControlResult<()> {
         let session = reference.managed_session_id.as_str().to_owned();
         let result = (|| {
             self.registry.reserve(reference.clone())?;
@@ -323,6 +418,7 @@ impl Engine {
                 approvals: BTreeMap::new(),
                 attachment: None,
                 exit: None,
+                requires_containment: tools,
             };
             self.live.insert(session.clone(), live);
             self.stage(LaunchStage::AfterSpawn)?;
@@ -384,6 +480,25 @@ impl Engine {
             generation: reference.generation,
             observed_version: observed_version.to_owned(),
         };
+        // A tool-capable profile needs the namespace actually observed, not merely promised.
+        let needs = self
+            .live
+            .get(reference.managed_session_id.as_str())
+            .is_some_and(|l| l.requires_containment);
+        if needs {
+            let contained = self
+                .live
+                .get_mut(reference.managed_session_id.as_str())
+                .is_some_and(|l| l.worker.containment() == Containment::PidNamespace);
+            if !contained {
+                self.begin_stop_internal(
+                    reference.managed_session_id.as_str(),
+                    "safety_unproven",
+                    None,
+                );
+                return Err(E::Unsupported);
+            }
+        }
         self.registry.ready(identity)?;
         if let Some(live) = self.live.get_mut(reference.managed_session_id.as_str()) {
             live.phase = Phase::Ready;
@@ -723,6 +838,7 @@ impl Engine {
                 self.staging_anomalies += 1;
             }
             self.scheduler.remove_runtime(&session);
+            self.ended += 1;
             let (kind, budget) = live.exit.unwrap_or_else(|| ("child_exited".into(), None));
             self.record_end(&live.reference, &kind, budget);
         }
@@ -747,7 +863,8 @@ impl Engine {
             if verdicts.iter().any(|(s, _, _)| *s == session) {
                 continue;
             }
-            let room = self.scheduler
+            let room = self
+                .scheduler
                 .data_room(&session, 262_144)
                 .min(FRAMES_PER_POLL);
             let Some(live) = self.live.get_mut(&session) else {
@@ -777,7 +894,13 @@ impl Engine {
                 let bytes = frame.len();
                 if self
                     .scheduler
-                    .push(&session, super::scheduler::Class::Data, bytes, frame, now_ms)
+                    .push(
+                        &session,
+                        super::scheduler::Class::Data,
+                        bytes,
+                        frame,
+                        now_ms,
+                    )
                     .is_err()
                 {
                     verdicts.push((session.clone(), "transport_failed", None));

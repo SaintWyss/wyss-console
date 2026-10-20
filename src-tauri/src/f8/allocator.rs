@@ -522,9 +522,18 @@ pub(super) fn step(fault: &mut Fault<'_>, n: usize) -> ControlResult<()> {
 }
 /// A new authority instance announces itself before its first durable event, naming the writer
 /// it succeeds. Idempotent per instance; part of the very transaction of the first mutation.
-pub(super) fn attest(tx: &Transaction<'_>, authority: &str, stream: &str, now: &str) -> ControlResult<()> {
+pub(super) fn attest(
+    tx: &Transaction<'_>,
+    authority: &str,
+    stream: &str,
+    now: &str,
+) -> ControlResult<()> {
     let boundary: String = tx
-        .query_row("SELECT v7_last_sequence FROM migration_boundary WHERE id=1", [], |r| r.get(0))
+        .query_row(
+            "SELECT v7_last_sequence FROM migration_boundary WHERE id=1",
+            [],
+            |r| r.get(0),
+        )
         .map_err(invalid)?;
     let announced: bool = tx
         .query_row(

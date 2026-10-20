@@ -15,15 +15,13 @@ use super::{
 };
 use crate::contracts::{
     WireUuid,
-    control::Operation,
-    execution::{
-        ExecutionLease, LeaseState, RevocationReason, validate_scopes, validate_ttl,
-    },
     approval::{
         ApprovalDecision, ApprovalEffect, ApprovalKind, ApprovalReason, ApprovalReceipt,
         ApprovalState, ApprovalStructure, ManagedApprovalRecord, valid_fingerprint,
     },
+    control::Operation,
     control::{ControlError as E, ControlResult, unique_json},
+    execution::{ExecutionLease, LeaseState, RevocationReason, validate_scopes, validate_ttl},
     identities::{ManagedApprovalId, ManagedTurnId},
     turn::{ManagedTurnRecord, TurnReason, TurnState},
 };
@@ -81,7 +79,11 @@ impl<'c> Writer<'c> {
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .map_err(invalid)?;
         let stream: String = conn
-            .query_row("SELECT stream_id FROM authority_metadata WHERE id=1", [], |r| r.get(0))
+            .query_row(
+                "SELECT stream_id FROM authority_metadata WHERE id=1",
+                [],
+                |r| r.get(0),
+            )
             .map_err(invalid)?;
         if version != 8 {
             return Err(E::StorageIncompatible);
@@ -115,6 +117,16 @@ impl<'c> Writer<'c> {
         intent: &TurnIntent,
         lease_id: &str,
     ) -> ControlResult<ManagedTurnRecord> {
+        self.admit_turn_ex(launch, intent, lease_id).map(|(t, _)| t)
+    }
+    /// As `admit_turn`, also reporting whether this call created the turn (`true`) or returned
+    /// the original record of an identical, already committed intent (`false`).
+    pub fn admit_turn_ex(
+        &mut self,
+        launch: &RuntimeRef,
+        intent: &TurnIntent,
+        lease_id: &str,
+    ) -> ControlResult<(ManagedTurnRecord, bool)> {
         launch.validate()?;
         let session = launch.managed_session_id.as_str().to_owned();
         let mutation = json!({"method":METHOD_TURN,"params":{"intent_id":intent.intent_id,
@@ -133,7 +145,7 @@ impl<'c> Writer<'c> {
             if m != mutation {
                 return Err(E::IntentConflict);
             }
-            return serde_json::from_str(&r).map_err(invalid);
+            return Ok((serde_json::from_str(&r).map_err(invalid)?, false));
         }
         require_live(&tx, launch, &authority)?;
         let (state, revision): (String, i64) = tx
@@ -197,7 +209,12 @@ impl<'c> Writer<'c> {
         record.validate()?;
         tx.execute(
             "INSERT INTO managed_turn_launches VALUES(?1,?2,?3,?4)",
-            params![turn_id, session, launch.runtime_instance_id.as_str(), launch.generation as i64],
+            params![
+                turn_id,
+                session,
+                launch.runtime_instance_id.as_str(),
+                launch.generation as i64
+            ],
         )
         .map_err(db)?;
         tx.execute(
@@ -207,7 +224,14 @@ impl<'c> Writer<'c> {
         )
         .map_err(db)?;
         step(&mut self.fault, 0)?;
-        turn_event(&tx, (&authority, &stream), &record, launch.generation, Some(intent.intent_id.as_str()), "admitted")?;
+        turn_event(
+            &tx,
+            (&authority, &stream),
+            &record,
+            launch.generation,
+            Some(intent.intent_id.as_str()),
+            "admitted",
+        )?;
         step(&mut self.fault, 1)?;
         let result = serde_json::to_string(&record).map_err(invalid)?;
         tx.execute(
@@ -217,7 +241,7 @@ impl<'c> Writer<'c> {
         .map_err(db)?;
         step(&mut self.fault, 2)?;
         tx.commit().map_err(db)?;
-        Ok(record)
+        Ok((record, true))
     }
 
     /// One legal transition of a turn. Progress (`running`, `completed`) belongs to the live
@@ -233,31 +257,60 @@ impl<'c> Writer<'c> {
         let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
         let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
         let mut t = read_turn(&tx, turn.as_str())?;
-        let (instance, generation) = sidecar(&tx, "managed_turn_launches", "managed_turn_id", turn.as_str())?
-            .ok_or(E::InvalidTransition)?;
+        let (instance, generation) = sidecar(
+            &tx,
+            "managed_turn_launches",
+            "managed_turn_id",
+            turn.as_str(),
+        )?
+        .ok_or(E::InvalidTransition)?;
         let legal = matches!(
             (t.state, state),
-            (TurnState::Starting, TurnState::Running | TurnState::Failed | TurnState::Interrupted | TurnState::Indeterminate)
-                | (TurnState::Running, TurnState::Completed | TurnState::Failed | TurnState::Interrupted | TurnState::Indeterminate)
+            (
+                TurnState::Starting,
+                TurnState::Running
+                    | TurnState::Failed
+                    | TurnState::Interrupted
+                    | TurnState::Indeterminate
+            ) | (
+                TurnState::Running,
+                TurnState::Completed
+                    | TurnState::Failed
+                    | TurnState::Interrupted
+                    | TurnState::Indeterminate
+            )
         );
         if !legal {
             return Err(E::InvalidTransition);
         }
         if matches!(state, TurnState::Running | TurnState::Completed)
-            && !owner_live(&tx, t.managed_session_id.as_str(), &instance, generation, &authority)?
+            && !owner_live(
+                &tx,
+                t.managed_session_id.as_str(),
+                &instance,
+                generation,
+                &authority,
+            )?
         {
             return Err(E::GateDenied);
         }
         attest(&tx, &authority, &stream, &stamp(now)?)?;
         let at = stamp(now.max(ts(&enum_text(&t.updated_at)?)?))?;
         if let Some(p) = provider_turn_id {
-            if t.codex_turn_id.as_ref().is_some_and(|old| old.as_str() != p) {
+            if t.codex_turn_id
+                .as_ref()
+                .is_some_and(|old| old.as_str() != p)
+            {
                 return Err(E::CorrelationError);
             }
             t.codex_turn_id = Some(crate::adapters::codex::CodexTurnId::parse(p).map_err(invalid)?);
         }
         t.state = state;
-        t.revision = t.revision.checked_add(1).filter(|r| *r <= i64::MAX as u64).ok_or(E::CapacityExceeded)?;
+        t.revision = t
+            .revision
+            .checked_add(1)
+            .filter(|r| *r <= i64::MAX as u64)
+            .ok_or(E::CapacityExceeded)?;
         t.updated_at = at.clone().try_into().map_err(invalid)?;
         if state.terminal() {
             t.terminal_at = Some(at.clone().try_into().map_err(invalid)?);
@@ -272,15 +325,93 @@ impl<'c> Writer<'c> {
         )
         .map_err(db)?;
         step(&mut self.fault, 0)?;
-        turn_event(&tx, (&authority, &stream), &t, generation, None, &enum_text(&state)?)?;
+        turn_event(
+            &tx,
+            (&authority, &stream),
+            &t,
+            generation,
+            None,
+            &enum_text(&state)?,
+        )?;
         step(&mut self.fault, 1)?;
         // A finished turn leaves no approval able to wait on it.
         if state.terminal() {
-            settle_in(&tx, (&authority, &stream), Some(turn.as_str()), ApprovalReason::TurnEnded, now)?;
+            settle_in(
+                &tx,
+                (&authority, &stream),
+                Some(turn.as_str()),
+                ApprovalReason::TurnEnded,
+                now,
+            )?;
         }
         step(&mut self.fault, 2)?;
         tx.commit().map_err(db)?;
         Ok(t)
+    }
+
+    /// A client cancel. A turn which already ended returns its terminal record with no
+    /// dispatch (it need not find its launch alive). An active turn needs the live owner and the
+    /// current revision; it records the request and the caller (never this writer) interrupts the
+    /// provider. `true` means the caller should dispatch an interrupt exactly once.
+    pub fn cancel_turn(
+        &mut self,
+        p: &crate::contracts::turn::TurnCancel,
+    ) -> ControlResult<(ManagedTurnRecord, bool)> {
+        let mutation = serde_json::to_string(&Operation::TurnCancel(p.clone())).map_err(invalid)?;
+        let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
+        let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
+        if let Some((m, r)) = receipt(&tx, p.intent_id.as_str())? {
+            if m != mutation {
+                return Err(E::IntentConflict);
+            }
+            return Ok((serde_json::from_str(&r).map_err(invalid)?, false));
+        }
+        let t = read_turn(&tx, p.managed_turn_id.as_str())?;
+        let (instance, generation) = sidecar(
+            &tx,
+            "managed_turn_launches",
+            "managed_turn_id",
+            p.managed_turn_id.as_str(),
+        )?
+        .ok_or(E::InvalidTransition)?;
+        let dispatch = if t.state.terminal() {
+            false
+        } else {
+            if t.revision != p.expected_revision {
+                return Err(E::StaleRevision);
+            }
+            if !owner_live(
+                &tx,
+                t.managed_session_id.as_str(),
+                &instance,
+                generation,
+                &authority,
+            )? {
+                return Err(E::GateDenied);
+            }
+            attest(&tx, &authority, &stream, &stamp(now)?)?;
+            turn_event(
+                &tx,
+                (&authority, &stream),
+                &t,
+                generation,
+                Some(p.intent_id.as_str()),
+                "cancel_requested",
+            )?;
+            true
+        };
+        tx.execute(
+            "INSERT INTO processed_intents VALUES(?1,?2,?3)",
+            params![
+                p.intent_id.as_str(),
+                mutation,
+                serde_json::to_string(&t).map_err(invalid)?
+            ],
+        )
+        .map_err(db)?;
+        step(&mut self.fault, 0)?;
+        tx.commit().map_err(db)?;
+        Ok((t, dispatch))
     }
 
     // -------------------------------------------------------------- approvals
@@ -303,12 +434,23 @@ impl<'c> Writer<'c> {
         let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
         let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
         let t = read_turn(&tx, turn.as_str())?;
-        let (instance, generation) = sidecar(&tx, "managed_turn_launches", "managed_turn_id", turn.as_str())?
-            .ok_or(E::InvalidTransition)?;
+        let (instance, generation) = sidecar(
+            &tx,
+            "managed_turn_launches",
+            "managed_turn_id",
+            turn.as_str(),
+        )?
+        .ok_or(E::InvalidTransition)?;
         if t.state != TurnState::Running {
             return Err(E::InvalidTransition);
         }
-        if !owner_live(&tx, t.managed_session_id.as_str(), &instance, generation, &authority)? {
+        if !owner_live(
+            &tx,
+            t.managed_session_id.as_str(),
+            &instance,
+            generation,
+            &authority,
+        )? {
             return Err(E::GateDenied);
         }
         let session = t.managed_session_id.as_str().to_owned();
@@ -325,8 +467,8 @@ impl<'c> Writer<'c> {
         if pending {
             return Err(E::CapacityExceeded);
         }
-        let (lease_state, lease_session, lease_expires, scopes): (String, String, String, String) = tx
-            .query_row(
+        let (lease_state, lease_session, lease_expires, scopes): (String, String, String, String) =
+            tx.query_row(
                 "SELECT state,session_id,expires_at,scopes FROM execution_leases WHERE lease_id=?1",
                 [t.admitted_lease_id.as_str()],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
@@ -338,7 +480,11 @@ impl<'c> Writer<'c> {
         };
         let scopes: Vec<String> = serde_json::from_str(&scopes).map_err(invalid)?;
         let deadline = (now + Duration::seconds(APPROVAL_TTL_SECONDS)).min(ts(&lease_expires)?);
-        if lease_state != "active" || lease_session != session || deadline <= now || !scopes.iter().any(|s| s == scope) {
+        if lease_state != "active"
+            || lease_session != session
+            || deadline <= now
+            || !scopes.iter().any(|s| s == scope)
+        {
             return Err(E::GateDenied);
         }
         attest(&tx, &authority, &stream, &stamp(now)?)?;
@@ -361,7 +507,14 @@ impl<'c> Writer<'c> {
         .map_err(db)?;
         insert_approval(&tx, &a, sequence)?;
         step(&mut self.fault, 0)?;
-        let written = approval_event(&tx, (&authority, &stream), &a, generation, None, "requested")?;
+        let written = approval_event(
+            &tx,
+            (&authority, &stream),
+            &a,
+            generation,
+            None,
+            "requested",
+        )?;
         if written != sequence {
             return Err(E::InternalError);
         }
@@ -390,11 +543,18 @@ impl<'c> Writer<'c> {
             if m != mutation {
                 return Err(E::IntentConflict);
             }
-            return Ok(Decided::Replayed(serde_json::from_str(&r).map_err(invalid)?));
+            return Ok(Decided::Replayed(
+                serde_json::from_str(&r).map_err(invalid)?,
+            ));
         }
         let mut a = read_approval(&tx, approval.as_str())?;
-        let (instance, generation) = sidecar(&tx, "managed_approval_launches", "managed_approval_id", approval.as_str())?
-            .ok_or(E::InvalidTransition)?;
+        let (instance, generation) = sidecar(
+            &tx,
+            "managed_approval_launches",
+            "managed_approval_id",
+            approval.as_str(),
+        )?
+        .ok_or(E::InvalidTransition)?;
         if a.state != ApprovalState::Pending {
             return Err(E::InvalidTransition);
         }
@@ -404,7 +564,15 @@ impl<'c> Writer<'c> {
         if a.action_fingerprint != current_fingerprint {
             return Err(E::CorrelationError);
         }
-        if now >= ts(&enum_text(&a.expires_at)?)? || !owner_live(&tx, a.managed_session_id.as_str(), &instance, generation, &authority)? {
+        if now >= ts(&enum_text(&a.expires_at)?)?
+            || !owner_live(
+                &tx,
+                a.managed_session_id.as_str(),
+                &instance,
+                generation,
+                &authority,
+            )?
+        {
             return Err(E::GateDenied);
         }
         if decision == ApprovalDecision::Accept {
@@ -455,11 +623,22 @@ impl<'c> Writer<'c> {
         r.validate()?;
         update_approval(&tx, &a)?;
         step(&mut self.fault, 0)?;
-        approval_event(&tx, (&authority, &stream), &a, generation, Some(intent_id.as_str()), &enum_text(&a.state)?)?;
+        approval_event(
+            &tx,
+            (&authority, &stream),
+            &a,
+            generation,
+            Some(intent_id.as_str()),
+            &enum_text(&a.state)?,
+        )?;
         step(&mut self.fault, 1)?;
         tx.execute(
             "INSERT INTO processed_intents VALUES(?1,?2,?3)",
-            params![intent_id.as_str(), mutation, serde_json::to_string(&r).map_err(invalid)?],
+            params![
+                intent_id.as_str(),
+                mutation,
+                serde_json::to_string(&r).map_err(invalid)?
+            ],
         )
         .map_err(db)?;
         step(&mut self.fault, 2)?;
@@ -468,26 +647,47 @@ impl<'c> Writer<'c> {
     }
 
     /// The provider resolved the accepted request: the dispatched effect is confirmed.
-    pub fn confirm_approval(&mut self, approval: &ManagedApprovalId) -> ControlResult<ManagedApprovalRecord> {
+    pub fn confirm_approval(
+        &mut self,
+        approval: &ManagedApprovalId,
+    ) -> ControlResult<ManagedApprovalRecord> {
         let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
         let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
         let mut a = read_approval(&tx, approval.as_str())?;
-        let (instance, generation) = sidecar(&tx, "managed_approval_launches", "managed_approval_id", approval.as_str())?
-            .ok_or(E::InvalidTransition)?;
+        let (instance, generation) = sidecar(
+            &tx,
+            "managed_approval_launches",
+            "managed_approval_id",
+            approval.as_str(),
+        )?
+        .ok_or(E::InvalidTransition)?;
         if a.state != ApprovalState::Accepted {
             return Err(E::InvalidTransition);
         }
         if a.effect == ApprovalEffect::Confirmed {
             return Ok(a);
         }
-        if !owner_live(&tx, a.managed_session_id.as_str(), &instance, generation, &authority)? {
+        if !owner_live(
+            &tx,
+            a.managed_session_id.as_str(),
+            &instance,
+            generation,
+            &authority,
+        )? {
             return Err(E::GateDenied);
         }
         attest(&tx, &authority, &stream, &stamp(now)?)?;
         a.effect = ApprovalEffect::Confirmed;
         bump(&mut a, now)?;
         update_approval(&tx, &a)?;
-        approval_event(&tx, (&authority, &stream), &a, generation, None, "confirmed")?;
+        approval_event(
+            &tx,
+            (&authority, &stream),
+            &a,
+            generation,
+            None,
+            "confirmed",
+        )?;
         tx.commit().map_err(db)?;
         Ok(a)
     }
@@ -506,7 +706,13 @@ impl<'c> Writer<'c> {
         let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
         let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
         attest(&tx, &authority, &stream, &stamp(now)?)?;
-        let n = settle_in(&tx, (&authority, &stream), turn.map(ManagedTurnId::as_str), reason, now)?;
+        let n = settle_in(
+            &tx,
+            (&authority, &stream),
+            turn.map(ManagedTurnId::as_str),
+            reason,
+            now,
+        )?;
         tx.commit().map_err(db)?;
         Ok(n)
     }
@@ -579,7 +785,11 @@ impl<'c> Writer<'c> {
                     return Err(E::InvalidTransition);
                 }
                 let open: String = tx
-                    .query_row("SELECT control_state FROM managed_sessions WHERE session_id=?1", [l.session_id.as_str()], |r| r.get(0))
+                    .query_row(
+                        "SELECT control_state FROM managed_sessions WHERE session_id=?1",
+                        [l.session_id.as_str()],
+                        |r| r.get(0),
+                    )
                     .map_err(db)?;
                 if open != "prepared" {
                     return Err(E::InvalidTransition);
@@ -589,7 +799,9 @@ impl<'c> Writer<'c> {
                 }
                 l.revision += 1;
                 l.updated_at = stamp(now)?.try_into().map_err(invalid)?;
-                l.expires_at = stamp(now + Duration::seconds(i64::from(p.ttl_seconds)))?.try_into().map_err(invalid)?;
+                l.expires_at = stamp(now + Duration::seconds(i64::from(p.ttl_seconds)))?
+                    .try_into()
+                    .map_err(invalid)?;
                 (l, "authority.execution_lease.renewed")
             }
             Operation::LeaseRevoke(p) => {
@@ -613,11 +825,22 @@ impl<'c> Writer<'c> {
         lease_event(&tx, ids, &lease, Some(intent.as_str()), kind)?;
         step(&mut self.fault, 0)?;
         if lease.state == LeaseState::Revoked {
-            lose_lease_work(&tx, ids, &lease, TurnReason::LeaseRevoked, ApprovalReason::LeaseRevoked, now)?;
+            lose_lease_work(
+                &tx,
+                ids,
+                &lease,
+                TurnReason::LeaseRevoked,
+                ApprovalReason::LeaseRevoked,
+                now,
+            )?;
         }
         tx.execute(
             "INSERT INTO processed_intents VALUES(?1,?2,?3)",
-            params![intent.as_str(), mutation, serde_json::to_string(&lease).map_err(invalid)?],
+            params![
+                intent.as_str(),
+                mutation,
+                serde_json::to_string(&lease).map_err(invalid)?
+            ],
         )
         .map_err(db)?;
         step(&mut self.fault, 1)?;
@@ -631,7 +854,9 @@ impl<'c> Writer<'c> {
         let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
         let due: Vec<String> = {
             let mut q = tx
-                .prepare("SELECT lease_id FROM execution_leases WHERE state='active' ORDER BY lease_id")
+                .prepare(
+                    "SELECT lease_id FROM execution_leases WHERE state='active' ORDER BY lease_id",
+                )
                 .map_err(db)?;
             q.query_map([], |r| r.get::<_, String>(0))
                 .map_err(db)?
@@ -653,6 +878,39 @@ impl<'c> Writer<'c> {
         Ok(n)
     }
 
+    /// Settles every pending approval whose deadline passed. The binding bound names the reason:
+    /// the lease's own expiry or the approval TTL. Returns how many were settled.
+    pub fn expire_approvals(&mut self) -> ControlResult<usize> {
+        let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
+        let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
+        let due: Vec<(String, String, String, String)> = {
+            let mut q = tx
+                .prepare("SELECT a.managed_approval_id,a.managed_turn_id,a.expires_at,l.expires_at FROM managed_approvals a JOIN execution_leases l ON l.lease_id=a.admitted_lease_id WHERE a.state='pending' ORDER BY a.created_sequence")
+                .map_err(db)?;
+            q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                .map_err(db)?
+                .collect::<Result<_, _>>()
+                .map_err(db)?
+        };
+        let mut n = 0;
+        for (_, turn, expires, lease_expires) in due {
+            if now < ts(&expires)? {
+                continue;
+            }
+            let reason = if ts(&lease_expires)? <= ts(&expires)? {
+                ApprovalReason::LeaseExpired
+            } else {
+                ApprovalReason::ApprovalTimeout
+            };
+            if n == 0 {
+                attest(&tx, &authority, &stream, &stamp(now)?)?;
+            }
+            n += settle_in(&tx, (&authority, &stream), Some(&turn), reason, now)?;
+        }
+        tx.commit().map_err(db)?;
+        Ok(n)
+    }
+
     // --------------------------------------------------------------- recovery
 
     /// Startup recovery by an authority instance. Everything stranded on a launch this instance
@@ -665,7 +923,9 @@ impl<'c> Writer<'c> {
         let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
         let mut replay = AuditReplay::with_boundary(super::migration::verify_boundary(&tx)?);
         {
-            let mut q = tx.prepare("SELECT envelope FROM control_events ORDER BY sequence").map_err(db)?;
+            let mut q = tx
+                .prepare("SELECT envelope FROM control_events ORDER BY sequence")
+                .map_err(db)?;
             let mut rows = q.query([]).map_err(db)?;
             while let Some(r) = rows.next().map_err(db)? {
                 let raw: String = r.get(0).map_err(db)?;
@@ -694,7 +954,14 @@ impl<'c> Writer<'c> {
             a.terminal_reason = Some(ApprovalReason::AuthorityRestarted);
             bump(&mut a, now)?;
             update_approval(&tx, &a)?;
-            approval_event(&tx, (&authority, &stream), &a, generation, None, &enum_text(&a.state)?)?;
+            approval_event(
+                &tx,
+                (&authority, &stream),
+                &a,
+                generation,
+                None,
+                &enum_text(&a.state)?,
+            )?;
             approvals += 1;
         }
         let mut turns = 0;
@@ -715,7 +982,14 @@ impl<'c> Writer<'c> {
                 params![id, t.revision as i64, at],
             )
             .map_err(db)?;
-            turn_event(&tx, (&authority, &stream), &t, generation, None, "indeterminate")?;
+            turn_event(
+                &tx,
+                (&authority, &stream),
+                &t,
+                generation,
+                None,
+                "indeterminate",
+            )?;
             turns += 1;
         }
         step(&mut self.fault, 0)?;
@@ -747,11 +1021,23 @@ fn receipt(tx: &Transaction<'_>, intent: &str) -> ControlResult<Option<(String, 
 }
 fn next_sequence(tx: &Transaction<'_>) -> ControlResult<u64> {
     let head: String = tx
-        .query_row("SELECT last_sequence FROM authority_metadata WHERE id=1", [], |r| r.get(0))
+        .query_row(
+            "SELECT last_sequence FROM authority_metadata WHERE id=1",
+            [],
+            |r| r.get(0),
+        )
         .map_err(db)?;
-    head.parse::<u64>().map_err(invalid)?.checked_add(1).ok_or(E::CapacityExceeded)
+    head.parse::<u64>()
+        .map_err(invalid)?
+        .checked_add(1)
+        .ok_or(E::CapacityExceeded)
 }
-fn sidecar(tx: &Transaction<'_>, table: &str, key: &str, id: &str) -> ControlResult<Option<(String, u64)>> {
+fn sidecar(
+    tx: &Transaction<'_>,
+    table: &str,
+    key: &str,
+    id: &str,
+) -> ControlResult<Option<(String, u64)>> {
     let row: Option<(String, i64)> = tx
         .query_row(
             &format!("SELECT runtime_instance_id,generation FROM {table} WHERE {key}=?1"),
@@ -760,12 +1046,19 @@ fn sidecar(tx: &Transaction<'_>, table: &str, key: &str, id: &str) -> ControlRes
         )
         .optional()
         .map_err(db)?;
-    row.map(|(i, g)| Ok((i, u64::try_from(g).map_err(invalid)?))).transpose()
+    row.map(|(i, g)| Ok((i, u64::try_from(g).map_err(invalid)?)))
+        .transpose()
 }
 
 /// The launch is the session's current, attested, unexited, running generation which this very
 /// authority reserved (and the session is open).
-fn owner_live(tx: &Transaction<'_>, session: &str, instance: &str, generation: u64, authority: &str) -> ControlResult<bool> {
+fn owner_live(
+    tx: &Transaction<'_>,
+    session: &str,
+    instance: &str,
+    generation: u64,
+    authority: &str,
+) -> ControlResult<bool> {
     let ok: bool = tx
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM managed_runtime_launches l JOIN managed_runtimes r ON r.managed_session_id=l.managed_session_id JOIN managed_sessions s ON s.session_id=l.managed_session_id WHERE l.managed_session_id=?1 AND l.runtime_instance_id=?2 AND l.generation=?3 AND l.authority_instance_id=?4 AND r.generation=l.generation AND r.desired_state='running' AND s.control_state='prepared')",
@@ -779,7 +1072,13 @@ fn owner_live(tx: &Transaction<'_>, session: &str, instance: &str, generation: u
 }
 fn require_live(tx: &Transaction<'_>, launch: &RuntimeRef, authority: &str) -> ControlResult<()> {
     if launch.authority_instance_id.as_str() != authority
-        || !owner_live(tx, launch.managed_session_id.as_str(), launch.runtime_instance_id.as_str(), launch.generation, authority)?
+        || !owner_live(
+            tx,
+            launch.managed_session_id.as_str(),
+            launch.runtime_instance_id.as_str(),
+            launch.generation,
+            authority,
+        )?
     {
         return Err(E::StaleRevision);
     }
@@ -795,7 +1094,8 @@ fn read_turn(tx: &Transaction<'_>, id: &str) -> ControlResult<ManagedTurnRecord>
         )
         .optional()
         .map_err(db)?;
-    let t: ManagedTurnRecord = serde_json::from_str(&raw.ok_or(E::TurnNotFound)?).map_err(invalid)?;
+    let t: ManagedTurnRecord =
+        serde_json::from_str(&raw.ok_or(E::TurnNotFound)?).map_err(invalid)?;
     t.validate()?;
     Ok(t)
 }
@@ -808,11 +1108,16 @@ fn read_approval(tx: &Transaction<'_>, id: &str) -> ControlResult<ManagedApprova
         )
         .optional()
         .map_err(db)?;
-    let a: ManagedApprovalRecord = serde_json::from_str(&raw.ok_or(E::ApprovalNotFound)?).map_err(invalid)?;
+    let a: ManagedApprovalRecord =
+        serde_json::from_str(&raw.ok_or(E::ApprovalNotFound)?).map_err(invalid)?;
     a.validate().map_err(invalid)?;
     Ok(a)
 }
-fn insert_approval(tx: &Transaction<'_>, a: &ManagedApprovalRecord, sequence: u64) -> ControlResult<()> {
+fn insert_approval(
+    tx: &Transaction<'_>,
+    a: &ManagedApprovalRecord,
+    sequence: u64,
+) -> ControlResult<()> {
     tx.execute(
         "INSERT INTO managed_approvals VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
         params![
@@ -841,12 +1146,22 @@ fn update_approval(tx: &Transaction<'_>, a: &ManagedApprovalRecord) -> ControlRe
             ],
         )
         .map_err(|_| E::InvalidTransition)?;
-    if changed == 1 { Ok(()) } else { Err(E::StaleRevision) }
+    if changed == 1 {
+        Ok(())
+    } else {
+        Err(E::StaleRevision)
+    }
 }
 fn bump(a: &mut ManagedApprovalRecord, at: OffsetDateTime) -> ControlResult<()> {
-    a.revision = a.revision.checked_add(1).filter(|n| *n <= i64::MAX as u64).ok_or(E::CapacityExceeded)?;
+    a.revision = a
+        .revision
+        .checked_add(1)
+        .filter(|n| *n <= i64::MAX as u64)
+        .ok_or(E::CapacityExceeded)?;
     // The journal clock never runs backwards within one approval.
-    a.updated_at = stamp(at.max(ts(&enum_text(&a.updated_at)?)?))?.try_into().map_err(invalid)?;
+    a.updated_at = stamp(at.max(ts(&enum_text(&a.updated_at)?)?))?
+        .try_into()
+        .map_err(invalid)?;
     if a.terminal_at.is_none() && a.state.terminal() {
         a.terminal_at = Some(a.updated_at.clone());
     }
@@ -904,8 +1219,19 @@ fn approval_event(
 fn lease_ts(t: &crate::contracts::UtcTimestamp) -> ControlResult<OffsetDateTime> {
     ts(&enum_text(t)?)
 }
-fn read_lease(tx: &Transaction<'_>, id: &str) -> ControlResult<ExecutionLease> {
-    let row: Option<(String, String, String, String, i64, String, String, String, Option<String>)> = tx
+pub(super) type LeaseRow = (
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+    String,
+    Option<String>,
+);
+pub(super) fn read_lease(tx: &Connection, id: &str) -> ControlResult<ExecutionLease> {
+    let row: Option<LeaseRow> = tx
         .query_row(
             "SELECT lease_id,session_id,state,scopes,revision,issued_at,expires_at,updated_at,revocation_reason FROM execution_leases WHERE lease_id=?1",
             [id],
@@ -924,7 +1250,10 @@ fn read_lease(tx: &Transaction<'_>, id: &str) -> ControlResult<ExecutionLease> {
     validate_scopes(&l.scopes)?;
     Ok(l)
 }
-fn active_lease(tx: &Transaction<'_>, session: &str) -> ControlResult<Option<ExecutionLease>> {
+pub(super) fn active_lease(
+    tx: &Connection,
+    session: &str,
+) -> ControlResult<Option<ExecutionLease>> {
     let id: Option<String> = tx
         .query_row(
             "SELECT lease_id FROM execution_leases WHERE session_id=?1 AND state='active'",
@@ -961,7 +1290,13 @@ fn lease_event(
     append(
         tx,
         (authority, stream, &enum_text(&l.updated_at)?),
-        Draft { session: Some(l.session_id.as_str()), kind, correlation, payload, version: 1 },
+        Draft {
+            session: Some(l.session_id.as_str()),
+            kind,
+            correlation,
+            payload,
+            version: 1,
+        },
     )
 }
 fn expire_in(
@@ -975,7 +1310,14 @@ fn expire_in(
     l.updated_at = stamp(now)?.try_into().map_err(invalid)?;
     write_lease(tx, &l)?;
     lease_event(tx, ids, &l, None, "authority.execution_lease.expired")?;
-    lose_lease_work(tx, ids, &l, TurnReason::LeaseExpired, ApprovalReason::LeaseExpired, now)
+    lose_lease_work(
+        tx,
+        ids,
+        &l,
+        TurnReason::LeaseExpired,
+        ApprovalReason::LeaseExpired,
+        now,
+    )
 }
 /// Work admitted under a lost lease ends with it: approvals first, then the turns interrupted.
 fn lose_lease_work(
@@ -1026,7 +1368,10 @@ fn settle_in(
     reason: ApprovalReason,
     now: OffsetDateTime,
 ) -> ControlResult<usize> {
-    let deadline = matches!(reason, ApprovalReason::ApprovalTimeout | ApprovalReason::LeaseExpired);
+    let deadline = matches!(
+        reason,
+        ApprovalReason::ApprovalTimeout | ApprovalReason::LeaseExpired
+    );
     let found: Vec<String> = {
         let mut q = tx
             .prepare("SELECT managed_approval_id FROM managed_approvals WHERE (state='pending' OR (state='accepted' AND effect='dispatched')) AND (?1 IS NULL OR managed_turn_id=?1) ORDER BY created_sequence")

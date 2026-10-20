@@ -178,7 +178,11 @@ pub(super) fn verify_boundary(c: &Connection) -> ControlResult<u64> {
         .map_err(invalid)?;
     let upto: u64 = last.parse().map_err(invalid)?;
     let current: String = c
-        .query_row("SELECT stream_id FROM authority_metadata WHERE id=1", [], |r| r.get(0))
+        .query_row(
+            "SELECT stream_id FROM authority_metadata WHERE id=1",
+            [],
+            |r| r.get(0),
+        )
         .map_err(invalid)?;
     if stream != current || boundary_digest(c, upto)? != digest {
         return Err(E::StorageIncompatible);
@@ -233,7 +237,11 @@ pub fn validate_migrated(c: &Connection) -> ControlResult<()> {
     // An immediately migrated image has no event beyond the boundary.
     let upto = verify_boundary(c)?;
     let head: String = c
-        .query_row("SELECT last_sequence FROM authority_metadata WHERE id=1", [], |r| r.get(0))
+        .query_row(
+            "SELECT last_sequence FROM authority_metadata WHERE id=1",
+            [],
+            |r| r.get(0),
+        )
         .map_err(invalid)?;
     if head.parse::<u64>().map_err(invalid)? != upto {
         return Err(E::StorageIncompatible);

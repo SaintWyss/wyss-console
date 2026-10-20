@@ -478,18 +478,38 @@ fn every_authority_instance_announces_itself_once_naming_its_predecessor() {
             .unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
     };
     assert!(started(&c).is_empty());
-    Allocator::new(&mut c, wire(A)).unwrap().start(&start(&s, &uuid(), 0, 0), &free()).unwrap();
+    Allocator::new(&mut c, wire(A))
+        .unwrap()
+        .start(&start(&s, &uuid(), 0, 0), &free())
+        .unwrap();
     // A replay (no write) and further writes by the same instance announce nothing more.
     let instance = instance_of(&c);
-    Allocator::new(&mut c, wire(A)).unwrap().stop(&stop(&s, &uuid(), 1, 1, Some(&instance)), &free()).unwrap();
+    Allocator::new(&mut c, wire(A))
+        .unwrap()
+        .stop(&stop(&s, &uuid(), 1, 1, Some(&instance)), &free())
+        .unwrap();
     let first = started(&c);
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].0, A);
-    assert!(first[0].1.is_some(), "the migrated store's last writer is named");
-    Allocator::new(&mut c, wire(B)).unwrap().start(&start(&s, &uuid(), 1, 2), &free()).unwrap();
-    assert_eq!(started(&c), vec![first[0].clone(), (B.to_owned(), Some(A.to_owned()))]);
+    assert!(
+        first[0].1.is_some(),
+        "the migrated store's last writer is named"
+    );
+    Allocator::new(&mut c, wire(B))
+        .unwrap()
+        .start(&start(&s, &uuid(), 1, 2), &free())
+        .unwrap();
+    assert_eq!(
+        started(&c),
+        vec![first[0].clone(), (B.to_owned(), Some(A.to_owned()))]
+    );
     validate_v8(&c).unwrap();
 }
 fn instance_of(c: &Connection) -> String {
-    c.query_row("SELECT runtime_instance_id FROM managed_runtime_launches", [], |r| r.get(0)).unwrap()
+    c.query_row(
+        "SELECT runtime_instance_id FROM managed_runtime_launches",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap()
 }

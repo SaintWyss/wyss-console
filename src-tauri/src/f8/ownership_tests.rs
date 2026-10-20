@@ -1,5 +1,5 @@
 use super::*;
-use std::{io::Read, process::Stdio};
+use std::{io::Read, os::fd::AsFd, process::Stdio};
 
 fn quick() -> Grace {
     Grace {
@@ -190,6 +190,7 @@ fn descendants_are_reported_but_never_signalled_and_full_containment_is_refused(
         ContainmentPolicy::DescendantsContained,
         quick(),
     );
+    // A plain shell is not a verified namespace launcher.
     assert_eq!(refused.err(), Some(E::Unsupported));
     std::thread::sleep(Duration::from_millis(100));
     assert!(!marker.exists());
@@ -202,4 +203,121 @@ fn a_failed_exec_is_an_error_not_a_dangling_owner() {
         OwnedChild::spawn(&mut c, ContainmentPolicy::DirectChildOnly, quick()).err(),
         Some(E::ProviderRejected)
     );
+}
+
+fn bwrap(extra: &[&str], payload: &str) -> Command {
+    let mut c = Command::new(NAMESPACE_LAUNCHER);
+    c.args(extra)
+        .args(["--dev-bind", "/", "/", "--"])
+        .arg("/bin/sh")
+        .arg("-c")
+        .arg(payload)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    c
+}
+fn wait_for(mut f: impl FnMut() -> bool) {
+    let end = Instant::now() + Duration::from_secs(10);
+    while !f() {
+        assert!(Instant::now() < end, "timed out");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn full_containment_is_granted_only_to_the_verified_namespace_launcher() {
+    let marker = std::env::temp_dir().join(format!("wyss-f8-ns-{}", std::process::id()));
+    let touch = format!("touch {}", marker.display());
+    // Not the launcher, missing flags, flags only inside the payload, or sharing the PID space.
+    let mut spoof = Command::new("/bin/sh");
+    spoof.args(["-c", &touch, "--unshare-pid", "--die-with-parent", "--"]);
+    let mut late = Command::new(NAMESPACE_LAUNCHER);
+    late.args([
+        "--dev-bind",
+        "/",
+        "/",
+        "--",
+        "/bin/sh",
+        "-c",
+        &touch,
+        "--unshare-pid",
+        "--die-with-parent",
+    ]);
+    let mut shared = bwrap(
+        &["--unshare-pid", "--die-with-parent", "--share-pid"],
+        &touch,
+    );
+    let mut half = bwrap(&["--die-with-parent"], &touch);
+    let mut no_separator = Command::new(NAMESPACE_LAUNCHER);
+    no_separator.args(["--unshare-pid", "--die-with-parent", "/bin/true"]);
+    for c in [
+        &mut spoof,
+        &mut late,
+        &mut shared,
+        &mut half,
+        &mut no_separator,
+    ] {
+        assert_eq!(
+            OwnedChild::spawn(c, ContainmentPolicy::DescendantsContained, quick()).err(),
+            Some(E::Unsupported)
+        );
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(!marker.exists(), "a refused launch runs nothing");
+}
+
+#[test]
+fn a_pid_namespace_takes_every_descendant_down_with_the_owned_child() {
+    if !std::path::Path::new(NAMESPACE_LAUNCHER).exists() {
+        return;
+    }
+    let mut c = bwrap(
+        &["--unshare-pid", "--die-with-parent"],
+        "sleep 30 & sleep 31 & echo ready; wait",
+    );
+    let (mut child, _) =
+        OwnedChild::spawn(&mut c, ContainmentPolicy::DescendantsContained, quick()).unwrap();
+    let mut out = child.take_stdout().unwrap();
+    let mut buf = [0u8; 16];
+    wait_for(|| out.read(&mut buf).is_ok_and(|n| n > 0) || true);
+    // The payload lives in another PID namespace: observed, not assumed.
+    wait_for(|| child.namespace_contained() && child.descendant_count() >= 3);
+    // Pin everything under the owned launcher by pidfd (the test's own artifacts) ...
+    let mut pinned = Vec::new();
+    fn walk(pid: i32, depth: usize, out: &mut Vec<OwnedFd>) {
+        let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+            return;
+        };
+        for t in tasks.flatten() {
+            let kids = std::fs::read_to_string(t.path().join("children")).unwrap_or_default();
+            for k in kids
+                .split_whitespace()
+                .filter_map(|k| k.parse::<i32>().ok())
+            {
+                // SAFETY: integer-only syscall; ownership of the fd moves into OwnedFd.
+                let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, k, 0) };
+                if fd >= 0 {
+                    out.push(unsafe { OwnedFd::from_raw_fd(fd as i32) });
+                }
+                if depth > 0 {
+                    walk(k, depth - 1, out);
+                }
+            }
+        }
+    }
+    walk(child.pid_for_diagnostics(), 4, &mut pinned);
+    assert!(pinned.len() >= 3);
+    // ... stop only the owned launcher, and every one of them must end.
+    let (end, _) = drive(&mut child);
+    assert!(matches!(end, Progress::Reaped(_)));
+    wait_for(|| {
+        pinned.iter().all(|fd| {
+            let mut p = [nix::poll::PollFd::new(
+                fd.as_fd(),
+                nix::poll::PollFlags::POLLIN,
+            )];
+            nix::poll::poll(&mut p, nix::poll::PollTimeout::ZERO).is_ok_and(|n| n == 1)
+        })
+    });
 }
