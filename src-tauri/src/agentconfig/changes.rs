@@ -37,7 +37,7 @@ use super::writer::{
 use serde::Serialize;
 use std::{
     path::PathBuf,
-    sync::{Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError, RwLock},
     time::{Duration, Instant},
 };
 
@@ -114,6 +114,8 @@ pub enum ChangeFailure {
     /// The user closed the window that asked for what they wanted to write.
     Cancelled,
     Internal,
+    /// The folder chosen cannot be the project (`project.rs`).
+    ProjectRefused,
 }
 
 impl From<PlanError> for ChangeFailure {
@@ -203,7 +205,8 @@ struct Stored {
 }
 
 pub struct ChangeService {
-    reader: ConfigReader,
+    /// Replaced when the project changes: its approved roots include the project's own files.
+    reader: RwLock<Arc<ConfigReader>>,
     environment: Mutex<Environment>,
     inventory: InventoryService,
     journal: Journal,
@@ -212,6 +215,8 @@ pub struct ChangeService {
     locks: PathBuf,
     confirm: Box<dyn Confirm>,
     plans: Mutex<Vec<Stored>>,
+    /// Held for a whole apply, and by a change of project, so the two never overlap.
+    serial: Mutex<()>,
     bounds: Bounds,
 }
 
@@ -232,6 +237,21 @@ fn writable(key: SourceKey) -> bool {
     ) && matches!(key.class(), SourceClass::User | SourceClass::Project)
 }
 
+/// The target of a file a plan names, with the selected project for the files of a project.
+/// A project file with no project selected is not something that can be named.
+fn target_in(
+    env: &Environment,
+    source: SourceKey,
+    name: String,
+) -> Result<DocumentTarget, ChangeFailure> {
+    if source.scope() == Scope::Project {
+        let project = env.project.as_ref().ok_or(ChangeFailure::NotSupported)?;
+        Ok(DocumentTarget::in_project(source, name, project))
+    } else {
+        Ok(DocumentTarget::user(source, name))
+    }
+}
+
 fn effect_of(operation: Operation, source: SourceKey) -> Effect {
     if matches!(
         source,
@@ -240,6 +260,10 @@ fn effect_of(operation: Operation, source: SourceKey) -> Effect {
             | SourceKey::ClaudeUserRules
             | SourceKey::CodexUserRules
             | SourceKey::OpencodeUserRules
+            | SourceKey::ClaudeProjectSkills
+            | SourceKey::ClaudeProjectRules
+            | SourceKey::CodexProjectRules
+            | SourceKey::OpencodeProjectRules
     ) {
         return Effect::DocumentWritten;
     }
@@ -282,13 +306,14 @@ impl ChangeService {
         Ok(Self {
             journal: Journal::open(state, faults.clone())?,
             locks: private_dir(&state.join("locks"))?,
-            reader,
+            reader: RwLock::new(Arc::new(reader)),
             environment: Mutex::new(environment),
             inventory,
             store,
             faults,
             confirm,
             plans: Mutex::new(Vec::new()),
+            serial: Mutex::new(()),
             bounds,
         })
     }
@@ -303,12 +328,7 @@ impl ChangeService {
         confirm: Box<dyn Confirm>,
         faults: Faults,
     ) -> Result<Self, ChangeFailure> {
-        let roots = super::claude::roots(&environment)
-            .and_then(|claude| claude.union(&super::codex::roots(&environment)?))
-            .and_then(|roots| roots.union(&super::opencode::roots(&environment)?))
-            .map_err(|_| ChangeFailure::Internal)?;
-        let reader =
-            ConfigReader::new(roots, Bounds::PROPOSED).map_err(|_| ChangeFailure::Internal)?;
+        let reader = Self::reader_for(&environment, Bounds::PROPOSED)?;
         let store = RestorationStore::open(state, vault, faults.clone())?;
         Self::new(
             reader,
@@ -330,6 +350,87 @@ impl ChangeService {
                 plan.at = older;
             }
         }
+    }
+
+    fn reader(&self) -> Arc<ConfigReader> {
+        self.reader
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Selects the project whose own instruction files and skills may be read and written, or
+    /// none. The folder is judged first (`project.rs`); then the approved roots are rebuilt
+    /// with it, the plans drafted for the previous project are forgotten, and the inventory
+    /// reads again. An undo of a project's file only applies while its project is selected.
+    pub fn select_project(&self, project: Option<PathBuf>) -> Result<(), ChangeFailure> {
+        // Waits for an apply in flight (and its native confirmation) rather than cutting in.
+        let _serial = lock(&self.serial);
+        let mut environment = lock(&self.environment).clone();
+        environment.project = match project {
+            Some(path) => Some(
+                super::project::validate(&environment, &path)
+                    .map_err(|_| ChangeFailure::ProjectRefused)?,
+            ),
+            None => None,
+        };
+        let reader = Self::reader_for(&environment, self.bounds)?;
+        // Taken in this order and never together with the plans' lock, so nothing can wait on
+        // a lock held by something waiting on this one.
+        let selected = environment.project.clone();
+        {
+            let mut held = lock(&self.environment);
+            *self.reader.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(reader);
+            *held = environment;
+        }
+        // A plan drafted for the previous project is forgotten; one that slips through the
+        // gap is refused anyway, because a project file's target names its project.
+        lock(&self.plans).clear();
+        self.inventory.select_project(selected);
+        Ok(())
+    }
+
+    /// Where a file of `source` is, in words for a native window: the account, or the project by
+    /// the name of its folder.
+    pub fn place_words(&self, source: SourceKey) -> String {
+        if source.scope() != Scope::Project {
+            return "in your account".to_owned();
+        }
+        match self.project_name() {
+            Some(name) => format!("in the project \"{name}\""),
+            None => "in the selected project".to_owned(),
+        }
+    }
+
+    /// The same for an inventory item.
+    pub fn document_place(&self, item: &str) -> String {
+        self.item(item).map_or_else(
+            || "in your account".to_owned(),
+            |i| self.place_words(i.source),
+        )
+    }
+
+    /// The last name of the selected project's folder, when it is plain enough to show.
+    pub fn project_name(&self) -> Option<String> {
+        let project = self.project()?;
+        let name = project.file_name()?.to_str()?;
+        author::line_ok(name, 64).then(|| name.to_owned())
+    }
+
+    /// The project now selected, if any.
+    pub fn project(&self) -> Option<PathBuf> {
+        lock(&self.environment).project.clone()
+    }
+
+    fn reader_for(
+        environment: &Environment,
+        bounds: Bounds,
+    ) -> Result<ConfigReader, ChangeFailure> {
+        let roots = super::claude::roots(environment)
+            .and_then(|claude| claude.union(&super::codex::roots(environment)?))
+            .and_then(|roots| roots.union(&super::opencode::roots(environment)?))
+            .map_err(|_| ChangeFailure::Internal)?;
+        ConfigReader::new(roots, bounds).map_err(|_| ChangeFailure::Internal)
     }
 
     fn path_of(&self, key: SourceKey) -> Option<PathBuf> {
@@ -369,12 +470,12 @@ impl ChangeService {
     ) -> Result<(Vec<u8>, u32), ChangeFailure> {
         let path = target.path(&lock(&self.environment))?;
         let file = self
-            .reader
+            .reader()
             .read_file(&path)
             .map_err(|_| ChangeFailure::SourceUnreadable)?;
         // Editing a shared/link-backed skill could modify somebody else's installation.
         // Deliberately require the file and all ancestors to be real trusted places.
-        let parent = parent_for_write(self.reader.roots(), &path, 0)
+        let parent = parent_for_write(self.reader().roots(), &path, 0)
             .map_err(|_| ChangeFailure::NotWritable)?;
         let identity = identity_of(&parent).map_err(|_| ChangeFailure::NotWritable)?;
         if file.trust() != PathTrust::Trusted
@@ -395,7 +496,7 @@ impl ChangeService {
         target: &DocumentTarget,
     ) -> Result<Option<Vec<u8>>, ChangeFailure> {
         let path = target.path(&lock(&self.environment))?;
-        match self.reader.read_file(&path) {
+        match self.reader().read_file(&path) {
             Err(SourceFailure::Missing) => Ok(None),
             _ => self.read_document(target).map(Some),
         }
@@ -406,7 +507,7 @@ impl ChangeService {
     fn remove_directories(&self, target: &DocumentTarget, count: usize) {
         let folders = target.directories(&lock(&self.environment), count);
         for folder in folders {
-            let Ok(parent) = parent_of_directory(self.reader.roots(), &folder) else {
+            let Ok(parent) = parent_of_directory(self.reader().roots(), &folder) else {
                 return;
             };
             if parent.trust != PathTrust::Trusted || !remove_empty_directory(&parent) {
@@ -428,34 +529,45 @@ impl ChangeService {
             SourceKey::CodexUserRules => {
                 vec!["AGENTS.md".to_owned(), "AGENTS.override.md".to_owned()]
             }
-            SourceKey::OpencodeUserRules => vec!["AGENTS.md".to_owned()],
-            SourceKey::ClaudeUserSkills | SourceKey::CodexUserSkills => Vec::new(),
+            SourceKey::OpencodeUserRules
+            | SourceKey::CodexProjectRules
+            | SourceKey::OpencodeProjectRules => vec!["AGENTS.md".to_owned()],
+            SourceKey::ClaudeProjectRules => vec!["CLAUDE.md".to_owned()],
+            SourceKey::ClaudeUserSkills
+            | SourceKey::CodexUserSkills
+            | SourceKey::ClaudeProjectSkills => Vec::new(),
             _ => return Err(ChangeFailure::NotSupported),
         };
         let directory = match found.source {
             SourceKey::ClaudeUserSkills => Some(env.claude_dir().join("skills")),
             SourceKey::CodexUserSkills => Some(env.agents_skills_dir()),
             SourceKey::ClaudeUserRules => Some(env.claude_dir().join("rules")),
+            SourceKey::ClaudeProjectSkills => {
+                env.project.as_ref().map(|p| p.join(".claude/skills"))
+            }
+            SourceKey::ClaudeProjectRules => env.project.as_ref().map(|p| p.join(".claude/rules")),
             _ => None,
         };
         if let Some(directory) = directory
-            && let Ok(listing) = self.reader.list_directory(&directory)
+            && let Ok(listing) = self.reader().list_directory(&directory)
         {
             names.extend(listing.entries.iter().filter_map(|entry| {
                 let name = entry.name.to_str()?;
-                Some(if found.source == SourceKey::ClaudeUserRules {
-                    format!("rules/{name}")
-                } else {
-                    name.to_owned()
-                })
+                Some(
+                    if matches!(
+                        found.source,
+                        SourceKey::ClaudeUserRules | SourceKey::ClaudeProjectRules
+                    ) {
+                        format!("rules/{name}")
+                    } else {
+                        name.to_owned()
+                    },
+                )
             }));
         }
         names
             .into_iter()
-            .map(|name| DocumentTarget {
-                source: found.source,
-                name,
-            })
+            .filter_map(|name| target_in(&env, found.source, name).ok())
             .find(|target| target.check().is_ok() && target.id() == item)
             .ok_or(ChangeFailure::NotSupported)
     }
@@ -501,7 +613,7 @@ impl ChangeService {
     fn survey_new_document(&self, target: &DocumentTarget) -> Result<usize, ChangeFailure> {
         target.check()?;
         let path = target.path(&lock(&self.environment))?;
-        match parent_for_create(self.reader.roots(), &path, target.most_new_dirs(), false) {
+        match parent_for_create(self.reader().roots(), &path, target.most_new_dirs(), false) {
             Ok((_, missing)) => Ok(missing),
             Err(CreateWalk::Exists) => Err(ChangeFailure::AlreadyExists),
             Err(CreateWalk::TooManyMissing) => Err(ChangeFailure::NotSupported),
@@ -511,11 +623,8 @@ impl ChangeService {
 
     /// The same check for the desktop's window, before it opens the editor for the text.
     pub fn check_new_document(&self, source: SourceKey, name: &str) -> Result<(), ChangeFailure> {
-        self.survey_new_document(&DocumentTarget {
-            source,
-            name: name.to_owned(),
-        })
-        .map(|_| ())
+        let target = target_in(&lock(&self.environment), source, name.to_owned())?;
+        self.survey_new_document(&target).map(|_| ())
     }
 
     /// Opens a template for a file that does not exist yet: the text goes to the native editor
@@ -527,10 +636,7 @@ impl ChangeService {
         bytes: &[u8],
         passphrase: &str,
     ) -> Result<String, ChangeFailure> {
-        let target = DocumentTarget {
-            source,
-            name: name.to_owned(),
-        };
+        let target = target_in(&lock(&self.environment), source, name.to_owned())?;
         target.check()?;
         super::instruction_template::open(&target, bytes, passphrase)
             .map_err(|_| ChangeFailure::ImportInvalid)
@@ -544,7 +650,7 @@ impl ChangeService {
         }
         let path = self.path_of(key).ok_or(ChangeFailure::SourceMissing)?;
         let file = self
-            .reader
+            .reader()
             .read_file(&path)
             .map_err(|failure| match failure {
                 SourceFailure::Missing => ChangeFailure::SourceMissing,
@@ -607,7 +713,7 @@ impl ChangeService {
             detail,
             shared_with_declared_writers: path
                 .and_then(|path| {
-                    parent_for_write(self.reader.roots(), &path, self.bounds.link_hops).ok()
+                    parent_for_write(self.reader().roots(), &path, self.bounds.link_hops).ok()
                 })
                 .is_some_and(|parent| parent.shared_with_declared),
             at: Instant::now(),
@@ -626,7 +732,7 @@ impl ChangeService {
     /// Inference, so part of the prediction.
     fn codex_hooks_json(&self) -> Option<serde_json::Value> {
         let path = lock(&self.environment).codex_dir().join("hooks.json");
-        let file = self.reader.read_file(&path).ok()?;
+        let file = self.reader().read_file(&path).ok()?;
         super::reader::parse_json(file.bytes(), &self.bounds)
             .ok()
             .flatten()
@@ -651,6 +757,12 @@ impl ChangeService {
     /// The command of a hook as the file has it, for the window that lets the user change it.
     /// It goes to that window and nowhere else: no page command returns it.
     pub fn hook_command(&self, item: &str) -> Option<String> {
+        self.hook_spec(item).map(|spec| spec.command)
+    }
+
+    /// A hook as the file has it: event, matcher, command and timeout. For the window that
+    /// changes it and for exporting it as a template; no page command returns it.
+    fn hook_spec(&self, item: &str) -> Option<HookSpec> {
         let found = self.item(item)?;
         if found.kind != ItemKind::Hook || found.source != SourceKey::ClaudeUserSettings {
             return None;
@@ -658,15 +770,50 @@ impl ChangeService {
         let (_, bytes) = self.read_target(found.source).ok()?;
         let (root, value) = super::plan::parse(&bytes).ok()?;
         let hook = super::plan::find_hook(&root, found.source, item)?;
-        value
-            .pointer(&format!(
-                "/hooks/{}/{}/hooks/{}/command",
-                hook.event.replace('~', "~0").replace('/', "~1"),
-                hook.group,
-                hook.index
-            ))?
-            .as_str()
-            .map(str::to_owned)
+        let event = hook.event.replace('~', "~0").replace('/', "~1");
+        let group = format!("/hooks/{event}/{}", hook.group);
+        let handler = format!("{group}/hooks/{}", hook.index);
+        Some(HookSpec {
+            event: hook.event.clone(),
+            matcher: value
+                .pointer(&format!("{group}/matcher"))
+                .and_then(|m| m.as_str())
+                .map(str::to_owned),
+            command: value
+                .pointer(&format!("{handler}/command"))?
+                .as_str()?
+                .to_owned(),
+            timeout: value
+                .pointer(&format!("{handler}/timeout"))
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|t| u32::try_from(t).ok()),
+        })
+    }
+
+    /// A hook or an MCP server the user wrote, sealed under a passphrase as a template. The
+    /// bytes go to the desktop's save window and nowhere else.
+    pub fn export_config_template(
+        &self,
+        item: &str,
+        passphrase: &str,
+    ) -> Result<Vec<u8>, ChangeFailure> {
+        let template = if let Some(spec) = self.hook_spec(item) {
+            super::config_template::Template::Hook(spec)
+        } else if let Some(spec) = self.mcp_current(item) {
+            super::config_template::Template::Mcp(spec)
+        } else {
+            return Err(ChangeFailure::EntryGone);
+        };
+        super::config_template::export(&template, passphrase, EXPORT_ROUNDS)
+            .map_err(|_| ChangeFailure::InvalidEntry)
+    }
+
+    /// Opens a template for the window that writes the entry. Nothing is planned or written.
+    pub fn open_config_template(
+        bytes: &[u8],
+        passphrase: &str,
+    ) -> Result<super::config_template::Template, ChangeFailure> {
+        super::config_template::open(bytes, passphrase).map_err(|_| ChangeFailure::ImportInvalid)
     }
 
     /// Which agent an item belongs to, as the inventory holds it.
@@ -737,7 +884,7 @@ impl ChangeService {
                 (target.source, document::draft(target, &bytes, &text)?)
             }
             Authoring::CreateDocument { source, name, text } => {
-                let target = DocumentTarget { source, name };
+                let target = target_in(&lock(&self.environment), source, name)?;
                 let missing = self.survey_new_document(&target)?;
                 // Instructions may hold private data: no sealed record, no plan.
                 self.store.protection_for(true)?;
@@ -1012,7 +1159,7 @@ impl ChangeService {
                     let path = target.path(&lock(&self.environment))?;
                     let folder = path.parent().ok_or(ChangeFailure::NotSupported)?;
                     let listing = self
-                        .reader
+                        .reader()
                         .list_directory(folder)
                         .map_err(|_| ChangeFailure::NotWritable)?;
                     if listing.entries.len() != 1 || !listing.links.is_empty() {
@@ -1188,6 +1335,13 @@ impl ChangeService {
     /// Carries a plan out. The page's call is the user's confirmation in the page; a risk
     /// above `normal` also needs the native dialog, which only the desktop can show.
     pub fn apply(&self, plan: &str) -> Result<Applied, ChangeFailure> {
+        // One apply at a time, and never while the project changes underneath it: the write
+        // that was confirmed for a project finishes in that project, or does not start.
+        let _serial = lock(&self.serial);
+        self.apply_serial(plan)
+    }
+
+    fn apply_serial(&self, plan: &str) -> Result<Applied, ChangeFailure> {
         let stored = {
             let mut plans = lock(&self.plans);
             let index = plans
@@ -1256,12 +1410,13 @@ impl ChangeService {
         };
         let (parent, before, current_bytes): (Option<Parent>, Option<Identity>, Vec<u8>) =
             if let Some((target, dirs, _)) = &creating {
-                match parent_for_create(self.reader.roots(), &path, target.most_new_dirs(), false) {
+                match parent_for_create(self.reader().roots(), &path, target.most_new_dirs(), false)
+                {
                     // The same folders are still missing: they are made later, as part of the change.
                     Ok((None, missing)) if missing == *dirs => (None, None, Vec::new()),
                     Ok((Some(parent), 0)) if *dirs == 0 => {
                         if let Ok(listing) = self
-                            .reader
+                            .reader()
                             .list_directory(parent.path.parent().unwrap_or(&parent.path))
                         {
                             let names: Vec<_> =
@@ -1279,7 +1434,7 @@ impl ChangeService {
                 }
             } else {
                 let parent: Parent = match parent_for_write(
-                    self.reader.roots(),
+                    self.reader().roots(),
                     &path,
                     if drafted.logical.document().is_some() {
                         0
@@ -1293,7 +1448,7 @@ impl ChangeService {
                 let Ok(before) = identity_of(&parent) else {
                     return Ok(applied(Outcome::ChangedOutside));
                 };
-                let current = match self.reader.read_file(&path) {
+                let current = match self.reader().read_file(&path) {
                     Ok(file) if file.trust() == PathTrust::Trusted => file,
                     Ok(_) => return Ok(applied(Outcome::WriteFailed)),
                     Err(SourceFailure::Missing) => return Ok(applied(Outcome::ChangedOutside)),
@@ -1304,7 +1459,7 @@ impl ChangeService {
                     return Ok(applied(Outcome::ChangedOutside));
                 }
                 if let Ok(listing) = self
-                    .reader
+                    .reader()
                     .list_directory(parent.path.parent().unwrap_or(&parent.path))
                 {
                     let names: Vec<_> = listing.entries.iter().map(|e| e.name.clone()).collect();
@@ -1423,7 +1578,8 @@ impl ChangeService {
         // A restoration whose entry is already in the file writes nothing.
         let outcome_of_write = match &drafted.logical {
             super::plan::Logical::DocumentCreate { target, dirs, mode } => {
-                match parent_for_create(self.reader.roots(), &path, target.most_new_dirs(), true) {
+                match parent_for_create(self.reader().roots(), &path, target.most_new_dirs(), true)
+                {
                     Ok((Some(parent), made)) if made == *dirs => {
                         let result = create_new(&parent, &drafted.new_bytes, *mode, &self.faults);
                         if matches!(result, Err(WriteError::Failed | WriteError::Replaced)) {
@@ -1475,7 +1631,7 @@ impl ChangeService {
         let read_back = match self.faults.check(Step::ReadBack) {
             Err(Injected::Crashed) => return Err(ChangeFailure::Internal),
             Err(Injected::Failed) => Err(SourceFailure::Unreadable),
-            Ok(()) => self.reader.read_file(&path),
+            Ok(()) => self.reader().read_file(&path),
         };
         let removal = matches!(drafted.logical, super::plan::Logical::DocumentRemove { .. });
         let (verified, found) = match &read_back {
@@ -1525,7 +1681,7 @@ impl ChangeService {
 
     /// What a file holds as a digest, or `absent` when there is no such file.
     fn current_hash(&self, path: &std::path::Path) -> Option<String> {
-        match self.reader.read_file(path) {
+        match self.reader().read_file(path) {
             Ok(file) => Some(hash(file.bytes())),
             Err(SourceFailure::Missing) => Some(ABSENT.to_owned()),
             Err(_) => None,
@@ -1721,13 +1877,14 @@ impl ChangeService {
         for (key, path, item) in sources {
             // A file that is not there (a creation that did not finish, a removal that did) has
             // its leftovers beside the name it would have.
-            let Some(parent) = parent_for_write(self.reader.roots(), &path, self.bounds.link_hops)
-                .ok()
-                .or_else(|| {
-                    parent_for_create(self.reader.roots(), &path, 0, false)
-                        .ok()
-                        .and_then(|(parent, _)| parent)
-                })
+            let Some(parent) =
+                parent_for_write(self.reader().roots(), &path, self.bounds.link_hops)
+                    .ok()
+                    .or_else(|| {
+                        parent_for_create(self.reader().roots(), &path, 0, false)
+                            .ok()
+                            .and_then(|(parent, _)| parent)
+                    })
             else {
                 continue;
             };

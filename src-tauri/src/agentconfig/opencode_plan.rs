@@ -331,6 +331,7 @@ pub fn draft_park_plugin(bytes: &[u8], key: SourceKey, index: usize) -> Result<P
         removed_at: removal.edit.at,
         unit_text: removal.unit.clone(),
         handler_text: removal.unit,
+        project: None,
         h0: hash(bytes),
         h1: hash(&new_bytes),
     };
@@ -894,6 +895,7 @@ pub fn draft_park_mcp(
         removed_at: removal.edit.at,
         unit_text: removal.unit,
         handler_text: String::new(),
+        project: None,
         h0: hash(bytes),
         h1: hash(&new),
     };

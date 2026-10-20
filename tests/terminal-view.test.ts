@@ -227,6 +227,9 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-configuration-document-export',
     'allow-configuration-document-import',
     'allow-configuration-create-document',
+    'allow-configuration-project',
+    'allow-configuration-select-project',
+    'allow-configuration-template-export',
     // Native agent sessions (F3): the closed catalogue, a start that names an agent, a
     // project the user chose and a profile, the registry, and the profiles. None takes a
     // command, an argument list, an environment or a path.
@@ -336,6 +339,8 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   // for in native windows the page cannot reach, and what is written is ciphertext.
   // The instruction-template export has the same native chooser/passphrase boundary:
   // only an inventory ID enters; ciphertext leaves through the chosen native file.
+  // The hook and MCP-server template export (ADR 0050) is the same: only an inventory ID
+  // enters, the passphrase and the file are asked in native windows, ciphertext leaves.
   // Second exception, deliberate and bounded (ADR 0035, F3): the native sessions' own
   // commands. They name an agent of a closed catalogue, a project the native dialog
   // returned, a session or a profile of the desktop's own registry, and so they are
@@ -345,6 +350,7 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     (p: string) =>
       p !== 'allow-configuration-export' &&
       p !== 'allow-configuration-document-export' &&
+      p !== 'allow-configuration-template-export' &&
       !p.startsWith('allow-native-'),
   ))
     expect(permission).not.toMatch(

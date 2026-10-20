@@ -21,6 +21,7 @@
     VERDICT_LABEL,
     HOOK_EVENTS,
     NEW_DOCUMENT_LABEL,
+    PROJECT_DOCUMENT_KINDS,
     allHooksSwitch,
     authoringFor,
     changeFor,
@@ -99,6 +100,21 @@
   let writing = $state<'hook' | 'mcp' | 'document' | null>(null);
   let documentKind = $state<NewDocumentKind>('claude_rule');
   let documentFromTemplate = $state(false);
+  let writeFromTemplate = $state(false);
+  let documentScope = $state<'account' | 'project'>('account');
+  // A kind the project does not have cannot be asked for there.
+  const documentKinds = $derived(
+    documentScope === 'project' ? PROJECT_DOCUMENT_KINDS : NEW_DOCUMENT_KINDS,
+  );
+  $effect(() => {
+    if (!documentKinds.includes(documentKind)) documentKind = documentKinds[0]!;
+    if (changes.project === null && documentScope === 'project')
+      documentScope = 'account';
+  });
+  // The selected project is the desktop's: read when this view is shown.
+  $effect(() => {
+    if (visible) changesController.loadProject();
+  });
   let hookEvent = $state<string>('PreToolUse');
   let hookMatcher = $state('');
   let mcpName = $state('');
@@ -330,6 +346,29 @@
           >New instruction file…</button
         >
       {/if}
+      {#if changes.panel === 'items'}
+        <button
+          type="button"
+          class="action chip"
+          disabled={changes.busy || changes.planning || changes.applying}
+          title={changes.project === null
+            ? 'Choose the project whose instruction files and skills are listed and may be changed.'
+            : 'Choose another project.'}
+          onclick={() => changesController.chooseProject(false)}
+          >{changes.project === null
+            ? 'Choose project…'
+            : `Project: ${changes.project}`}</button
+        >
+        {#if changes.project !== null}
+          <button
+            type="button"
+            class="action chip"
+            disabled={changes.busy || changes.planning || changes.applying}
+            onclick={() => changesController.chooseProject(true)}
+            >No project</button
+          >
+        {/if}
+      {/if}
       {#if allHooks && changes.panel === 'items'}
         <button
           type="button"
@@ -353,16 +392,26 @@
           event.preventDefault();
           if (writing === 'document')
             changesController.author((c) =>
-              c.createDocument(documentKind, documentFromTemplate),
+              c.createDocument(
+                documentKind,
+                documentFromTemplate,
+                documentScope,
+              ),
             );
           else if (writing === 'hook')
             changesController.author((c) =>
-              c.authorHook(hookEvent, hookMatcher.trim() || null, null),
+              c.authorHook(
+                hookEvent,
+                hookMatcher.trim() || null,
+                null,
+                writeFromTemplate,
+              ),
             );
           else
             changesController.author((c) =>
-              c.authorMcp(mcpName, mcpKind, mcpAgent),
+              c.authorMcp(mcpName, mcpKind, mcpAgent, writeFromTemplate),
             );
+          writeFromTemplate = false;
           writing = null;
         }}
       >
@@ -388,6 +437,11 @@
               placeholder="Bash"
             />
           </label>
+          <label class="configuration-check"
+            ><input type="checkbox" bind:checked={writeFromTemplate} />
+            Start from a sealed template (asks for the file and its passphrase; what
+            it holds is shown for review before anything is planned)
+          </label>
         {:else if writing === 'document'}
           <p class="event-meta">
             Creates a file that does not exist yet. The name (where one is
@@ -395,10 +449,19 @@
             is written until you review the plan and confirm it separately. Undo
             removes it again.
           </p>
+          {#if changes.project !== null}
+            <label
+              >Where
+              <select bind:value={documentScope}>
+                <option value="account">Your account</option>
+                <option value="project">Project “{changes.project}”</option>
+              </select>
+            </label>
+          {/if}
           <label
             >What to create
             <select bind:value={documentKind}>
-              {#each NEW_DOCUMENT_KINDS as kind (kind)}<option value={kind}
+              {#each documentKinds as kind (kind)}<option value={kind}
                   >{NEW_DOCUMENT_LABEL[kind]}</option
                 >{/each}
             </select>
@@ -434,6 +497,11 @@
               <option value="local">Starts a program</option>
               <option value="remote">Connects to an address</option>
             </select>
+          </label>
+          <label class="configuration-check"
+            ><input type="checkbox" bind:checked={writeFromTemplate} />
+            Start from a sealed template (asks for the file and its passphrase; what
+            it holds is shown for review before anything is planned)
           </label>
         {/if}
         <div class="configuration-plan-actions">
@@ -691,6 +759,16 @@
                             c.editMcp(selected.id),
                           )}>Change it…</button
                 >
+                {#if selectedAuthoring.edit === 'hook' || selectedAuthoring.edit === 'mcp'}
+                  <button
+                    type="button"
+                    class="action"
+                    disabled={busy || changes.busy}
+                    onclick={() =>
+                      changesController.exportTemplate(selected.id)}
+                    >Export template…</button
+                  >
+                {/if}
                 {#if selectedAuthoring.edit === 'document'}
                   <button
                     type="button"

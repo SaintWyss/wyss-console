@@ -131,6 +131,7 @@ pub fn inverse_of(provider: ProviderId, source: SourceKey, old: &[u8], new: &[u8
         removed_at: head,
         unit_text: String::new(),
         handler_text: text(new),
+        project: None,
         h0: hash(old),
         h1: hash(new),
     }
@@ -227,6 +228,7 @@ pub fn draft_add_hook(
             removed_at: 0,
             unit_text: handler_text.clone(),
             handler_text,
+            project: None,
             // Neither is this file: the exact path is never taken for a new entry.
             h0: String::new(),
             h1: String::new(),

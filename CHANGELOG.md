@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-20 — Project files and hook/MCP templates (F5 closes)
+
+- **Choose project…** (native folder window; judged: inside the home, no link, nobody else can write it,
+  not a provider or credential folder). Project `CLAUDE.md`, rules, skills and `AGENTS.md` can be listed,
+  created, edited, deleted and undone through the same transaction; a project file's plan or undo only
+  applies while its project is selected.
+- Hook and MCP-server **templates**: sealed export of an entry; applying one only fills the native form,
+  after which it is the ordinary reviewed, confirmed plan (ADR 0050).
+- Benchmark safety follow-up: `owned.py` also refuses an ignored SIGCHLD; `idle_ab.py` ends its own
+  helpers on error.
+
 ## 2026-10-20 — Remote gateway core, no transport (F10a foundations)
 
 - Host-side decisions of the remote design as code with tests and no listener: grants and profiles

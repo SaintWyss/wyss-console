@@ -4105,10 +4105,7 @@ fn a_codex_server_with_arguments_is_sealed_and_an_args_line_with_a_hash_in_a_str
 // F5 instruction-file editing. These are ordinary filesystem unit fixtures, not
 // real-provider acceptance; the latter is recorded separately on the owner's machine.
 fn document_fixture(world: &World, source: SourceKey, name: &str, text: &str) -> (String, PathBuf) {
-    let target = super::document::Target {
-        source,
-        name: name.to_owned(),
-    };
+    let target = super::document::Target::user(source, name);
     let env = Environment {
         home: world.home.clone(),
         claude_config_dir: None,
@@ -4305,14 +4302,7 @@ fn instruction_records_cannot_name_hooks_system_policy_or_another_provider() {
         (SourceKey::CodexUserHooks, "AGENTS.md"),
         (SourceKey::CodexSystemManaged, "AGENTS.md"),
     ] {
-        assert!(
-            Target {
-                source,
-                name: name.into()
-            }
-            .check()
-            .is_err()
-        );
+        assert!(Target::user(source, name).check().is_err());
     }
     let mut body = super::author::inverse_of(
         super::ProviderId::Codex,
@@ -4410,10 +4400,7 @@ fn instruction_template_import_is_only_native_editor_input_until_a_separate_plan
         "rules/review.md",
         "before\r\n",
     );
-    let target = super::document::Target {
-        source: SourceKey::ClaudeUserRules,
-        name: "rules/review.md".into(),
-    };
+    let target = super::document::Target::user(SourceKey::ClaudeUserRules, "rules/review.md");
     let bytes =
         super::instruction_template::export(&target, "imported\r\n", "test passphrase", 1000)
             .unwrap();
@@ -4472,12 +4459,9 @@ fn doc_path(world: &World, source: SourceKey, name: &str) -> PathBuf {
         system: world.base.join("etc"),
         declared_writers: Vec::new(),
     };
-    super::document::Target {
-        source,
-        name: name.to_owned(),
-    }
-    .path(&env)
-    .unwrap()
+    super::document::Target::user(source, name)
+        .path(&env)
+        .unwrap()
 }
 
 fn ensure_provider_dirs(world: &World) {
@@ -5187,4 +5171,314 @@ fn codex_user_skills_are_listed_by_folder_name_and_never_read() {
         Outcome::Applied
     );
     assert_eq!(fs::read(&path).unwrap(), SKILL_TEXT.as_bytes());
+}
+
+// ---- F5: project-level files ----------------------------------------------------------------
+
+fn make_project(world: &World, name: &str) -> PathBuf {
+    let project = world.home.join(name);
+    fs::DirBuilder::new().mode(0o755).create(&project).unwrap();
+    project
+}
+
+#[test]
+fn project_files_are_created_and_undone_to_true_absence_for_every_project_kind() {
+    for (source, name, text, made) in [
+        (SourceKey::ClaudeProjectSkills, "fresh", SKILL_TEXT, 3usize),
+        (
+            SourceKey::ClaudeProjectRules,
+            "rules/new.md",
+            "SEKRET rule\n",
+            2,
+        ),
+        (
+            SourceKey::ClaudeProjectRules,
+            "CLAUDE.md",
+            "SEKRET memory\n",
+            0,
+        ),
+        (
+            SourceKey::CodexProjectRules,
+            "AGENTS.md",
+            "SEKRET codex\n",
+            0,
+        ),
+        (
+            SourceKey::OpencodeProjectRules,
+            "AGENTS.md",
+            "SEKRET opencode\n",
+            0,
+        ),
+    ] {
+        let world = World::new(SETTINGS);
+        let project = make_project(&world, "repo");
+        world.service.select_project(Some(project.clone())).unwrap();
+        assert_eq!(world.service.project(), Some(project.clone()));
+        let path = match (source, name) {
+            (SourceKey::ClaudeProjectSkills, _) => project.join(".claude/skills/fresh/SKILL.md"),
+            (SourceKey::ClaudeProjectRules, "rules/new.md") => project.join(".claude/rules/new.md"),
+            (_, file) => project.join(file),
+        };
+        let plan = create_document(&world, source, name, text).unwrap();
+        let page = serde_json::to_string(&plan).unwrap();
+        assert!(
+            !page.contains("SEKRET") && !page.contains("café"),
+            "no text on the page"
+        );
+        assert!(
+            !path.exists() && !project.join(".claude").exists(),
+            "planning touches nothing"
+        );
+        let done = world.service.apply(&plan.id).unwrap();
+        assert_eq!(done.outcome, Outcome::Applied, "{source:?} {name}");
+        assert_eq!(fs::read(&path).unwrap(), text.as_bytes());
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        if made > 0 {
+            assert_eq!(
+                fs::metadata(project.join(".claude"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
+        let back = world.service.undo(&done.change).unwrap();
+        assert_eq!(
+            world.service.apply(&back.id).unwrap().outcome,
+            Outcome::Applied
+        );
+        assert!(!path.exists(), "{source:?} {name}");
+        assert!(
+            !project.join(".claude").exists(),
+            "folders the change made go with it"
+        );
+        assert!(project.exists());
+        assert_eq!(world.file(), SETTINGS);
+        assert!(world.leftovers().is_empty());
+    }
+}
+
+#[test]
+fn a_project_folder_that_is_not_the_accounts_own_plain_folder_is_refused() {
+    let world = World::new(SETTINGS);
+    let outside = world.base.join("elsewhere");
+    fs::create_dir(&outside).unwrap();
+    let refused = |path: &Path| world.service.select_project(Some(path.to_owned()));
+    // Not under the home, the home itself, a provider's folder, a credential folder.
+    assert_eq!(refused(&outside), Err(ChangeFailure::ProjectRefused));
+    assert_eq!(refused(&world.home), Err(ChangeFailure::ProjectRefused));
+    assert_eq!(
+        refused(&world.home.join(".claude")),
+        Err(ChangeFailure::ProjectRefused)
+    );
+    assert_eq!(
+        refused(&world.home.join(".claude/skills")),
+        Err(ChangeFailure::ProjectRefused)
+    );
+    let ssh = make_project(&world, ".ssh");
+    assert_eq!(refused(&ssh), Err(ChangeFailure::ProjectRefused));
+    // Not absolute, with a `..`, missing, a file.
+    assert_eq!(
+        refused(Path::new("repo")),
+        Err(ChangeFailure::ProjectRefused)
+    );
+    assert_eq!(
+        refused(&world.home.join("a/../.claude")),
+        Err(ChangeFailure::ProjectRefused)
+    );
+    assert_eq!(
+        refused(&world.home.join("missing")),
+        Err(ChangeFailure::ProjectRefused)
+    );
+    fs::write(world.home.join("file"), "x").unwrap();
+    assert_eq!(
+        refused(&world.home.join("file")),
+        Err(ChangeFailure::ProjectRefused)
+    );
+    // A link to a real project, as the project and as a folder on the way.
+    let real = make_project(&world, "real");
+    std::os::unix::fs::symlink(&real, world.home.join("link")).unwrap();
+    assert_eq!(
+        refused(&world.home.join("link")),
+        Err(ChangeFailure::ProjectRefused)
+    );
+    assert_eq!(
+        refused(&world.home.join("link/inner")),
+        Err(ChangeFailure::ProjectRefused)
+    );
+    // Writable by everyone (the owner's own private group is nobody else, as everywhere).
+    let open = make_project(&world, "open");
+    fs::set_permissions(&open, fs::Permissions::from_mode(0o777)).unwrap();
+    assert_eq!(refused(&open), Err(ChangeFailure::ProjectRefused));
+    // Nothing was selected by any of that, and a project file cannot be named without one.
+    assert_eq!(world.service.project(), None);
+    assert_eq!(
+        create_document(&world, SourceKey::ClaudeProjectRules, "CLAUDE.md", "x").map(|_| ()),
+        Err(ChangeFailure::NotSupported)
+    );
+    // A good one is accepted, and so is none again.
+    assert!(refused(&real).is_ok());
+    assert!(world.service.select_project(None).is_ok());
+    assert_eq!(world.service.project(), None);
+}
+
+#[test]
+fn a_project_file_cannot_be_written_or_undone_for_another_project() {
+    let world = World::new(SETTINGS);
+    let (one, two) = (make_project(&world, "one"), make_project(&world, "two"));
+    world.service.select_project(Some(one.clone())).unwrap();
+    let plan =
+        create_document(&world, SourceKey::CodexProjectRules, "AGENTS.md", "mine\n").unwrap();
+    let made = world.service.apply(&plan.id).unwrap();
+    assert_eq!(made.outcome, Outcome::Applied);
+    // A plan drafted for one project is gone when another is selected.
+    let pending =
+        create_document(&world, SourceKey::ClaudeProjectRules, "CLAUDE.md", "x\n").unwrap();
+    world.service.select_project(Some(two.clone())).unwrap();
+    assert!(world.service.apply(&pending.id).is_err());
+    assert!(!two.join("CLAUDE.md").exists());
+    // Undoing the first project's file does not reach into the second, or anywhere.
+    assert_eq!(
+        world.service.undo(&made.change).map(|_| ()),
+        Err(ChangeFailure::NotSupported)
+    );
+    assert!(!two.join("AGENTS.md").exists());
+    // Back in its own project the undo works and removes exactly that file.
+    world.service.select_project(Some(one.clone())).unwrap();
+    let back = world.service.undo(&made.change).unwrap();
+    assert_eq!(
+        world.service.apply(&back.id).unwrap().outcome,
+        Outcome::Applied
+    );
+    assert!(!one.join("AGENTS.md").exists());
+}
+
+#[test]
+fn a_project_file_is_never_written_through_a_link_or_over_something_there() {
+    let world = World::new(SETTINGS);
+    let project = make_project(&world, "repo");
+    world.service.select_project(Some(project.clone())).unwrap();
+    // A name that is already a file, a link or a folder is never replaced.
+    fs::write(project.join("AGENTS.md"), "theirs").unwrap();
+    assert_eq!(
+        create_document(&world, SourceKey::CodexProjectRules, "AGENTS.md", "mine").map(|_| ()),
+        Err(ChangeFailure::AlreadyExists)
+    );
+    assert_eq!(fs::read(project.join("AGENTS.md")).unwrap(), b"theirs");
+    // A `.claude` that is a link to somewhere else cannot hold a new file.
+    let elsewhere = world.base.join("elsewhere");
+    fs::create_dir(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, project.join(".claude")).unwrap();
+    assert!(create_document(&world, SourceKey::ClaudeProjectRules, "rules/x.md", "x\n").is_err());
+    assert!(fs::read_dir(&elsewhere).unwrap().next().is_none());
+}
+
+#[test]
+fn project_files_that_exist_are_edited_and_deleted_with_exact_undo() {
+    for (source, name, path) in [
+        (
+            SourceKey::ClaudeProjectSkills,
+            "kept",
+            ".claude/skills/kept/SKILL.md",
+        ),
+        (
+            SourceKey::ClaudeProjectRules,
+            "rules/r.md",
+            ".claude/rules/r.md",
+        ),
+        (SourceKey::ClaudeProjectRules, "CLAUDE.md", "CLAUDE.md"),
+        (SourceKey::CodexProjectRules, "AGENTS.md", "AGENTS.md"),
+        (SourceKey::OpencodeProjectRules, "AGENTS.md", "AGENTS.md"),
+    ] {
+        let world = World::new(SETTINGS);
+        let project = make_project(&world, "repo");
+        let file = project.join(path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let original = "---\nname: kept\ndescription: when kept\n---\nbody café\r\n";
+        fs::write(&file, original).unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).unwrap();
+        world.service.select_project(Some(project.clone())).unwrap();
+        let item = super::document::Target::in_project(source, name, &project).id();
+        let edited = original.replace("body", "BODY");
+        let plan = edit_document(&world, &item, original, &edited)
+            .unwrap_or_else(|e| panic!("{source:?} {name} {e:?}"));
+        assert_eq!(
+            applied(&world, &plan),
+            Outcome::Applied,
+            "{source:?} {name}"
+        );
+        assert_eq!(fs::read_to_string(&file).unwrap(), edited);
+        let change = world.service.history(None, 5).0.remove(0).id;
+        let back = world.service.undo(&change).unwrap();
+        assert_eq!(applied(&world, &back), Outcome::Applied);
+        assert_eq!(fs::read_to_string(&file).unwrap(), original);
+        let plan = world
+            .service
+            .plan(Operation::DeleteDocument, &item)
+            .unwrap();
+        assert_eq!(
+            applied(&world, &plan),
+            Outcome::Applied,
+            "{source:?} {name}"
+        );
+        assert!(!file.exists());
+        let change = world.service.history(None, 5).0.remove(0).id;
+        let back = world.service.undo(&change).unwrap();
+        assert_eq!(applied(&world, &back), Outcome::Applied);
+        assert_eq!(fs::read_to_string(&file).unwrap(), original);
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+}
+
+#[test]
+fn a_hook_is_exported_as_a_sealed_template_and_applied_only_through_the_ordinary_plan() {
+    use super::config_template::Template;
+    let world = World::new(SETTINGS);
+    let id = world.hook("PreToolUse", 0, 0);
+    let bytes = world
+        .service
+        .export_config_template(&id, "test passphrase")
+        .unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(!text.contains("guard") && !text.contains("Bash") && !text.contains("PreToolUse"));
+    let Template::Hook(spec) =
+        ChangeService::open_config_template(&bytes, "test passphrase").unwrap()
+    else {
+        panic!("a hook template");
+    };
+    assert_eq!(spec.event, "PreToolUse");
+    assert_eq!(spec.matcher.as_deref(), Some("Bash"));
+    assert_eq!(spec.command, "guard.sh");
+    assert_eq!(
+        ChangeService::open_config_template(&bytes, "wrong"),
+        Err(ChangeFailure::ImportInvalid)
+    );
+    // Exporting wrote nothing and opened no plan; only the plan of a hook applies it.
+    assert_eq!(world.file(), SETTINGS);
+    assert!(world.service.history(None, 5).0.is_empty());
+    let mut changed = spec.clone();
+    changed.event = "SessionStart".to_owned();
+    changed.command = "welcome.sh".to_owned();
+    let plan = world
+        .service
+        .plan_authored(Authoring::AddHook(changed))
+        .unwrap();
+    assert!(
+        plan.needs_native_dialog,
+        "a hook runs code: native confirmation"
+    );
+    assert_eq!(applied(&world, &plan), Outcome::Applied);
+    assert!(world.file().contains("welcome.sh"));
+    // Items that are not a hook or a server cannot be exported.
+    assert_eq!(
+        world.service.export_config_template(&"0".repeat(32), "p"),
+        Err(ChangeFailure::EntryGone)
+    );
 }

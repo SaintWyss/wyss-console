@@ -7,6 +7,7 @@ import {
   parseHistory,
   parseInventoryReply,
   parsePlan,
+  parseProject,
   parseRecords,
   type Applied,
   type Changes,
@@ -101,11 +102,20 @@ export function authorHook(
   event: string,
   matcher: string | null,
   timeout: number | null,
+  fromTemplate = false,
 ): Promise<Plan> {
   return checked(
     'configuration_author_hook',
-    { request: { event, matcher, timeout } },
+    { request: { event, matcher, timeout, from_template: fromTemplate } },
     parsePlan,
+  );
+}
+/** A hook or an MCP server saved as a sealed template; its content never reaches the page. */
+export function exportTemplate(item: string): Promise<boolean> {
+  return checked(
+    'configuration_template_export',
+    { request: { item } },
+    parseDone,
   );
 }
 export function exportDocument(item: string): Promise<boolean> {
@@ -133,11 +143,24 @@ export function editDocument(item: string): Promise<Plan> {
 export function createDocument(
   kind: NewDocumentKind,
   fromTemplate = false,
+  scope: 'account' | 'project' = 'account',
 ): Promise<Plan> {
   return checked(
     'configuration_create_document',
-    { request: { kind, from_template: fromTemplate } },
+    { request: { kind, from_template: fromTemplate, scope } },
     parsePlan,
+  );
+}
+/** The selected project's folder name, or none. */
+export function readProject(): Promise<string | null> {
+  return checked('configuration_project', {}, parseProject);
+}
+/** Opens the desktop's own folder window (or, with `clear`, selects none). */
+export function selectProject(clear: boolean): Promise<string | null> {
+  return checked(
+    'configuration_select_project',
+    { request: { clear } },
+    parseProject,
   );
 }
 export function editHook(item: string): Promise<Plan> {
@@ -147,10 +170,11 @@ export function authorMcp(
   name: string,
   kind: 'local' | 'remote',
   agent: 'opencode' | 'codex' = 'opencode',
+  fromTemplate = false,
 ): Promise<Plan> {
   return checked(
     'configuration_author_mcp',
-    { request: { name, kind, agent } },
+    { request: { name, kind, agent, from_template: fromTemplate } },
     parsePlan,
   );
 }

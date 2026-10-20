@@ -45,6 +45,8 @@ pub enum RecordKind {
     Credential,
     /// An untrusted instruction template, sealed for transfer (F5).
     InstructionTemplate,
+    /// An untrusted hook or MCP-server template, sealed for transfer (F5).
+    ConfigTemplate,
 }
 
 impl RecordKind {
@@ -54,6 +56,7 @@ impl RecordKind {
             Self::Export => "export",
             Self::Credential => "credential",
             Self::InstructionTemplate => "instruction-template",
+            Self::ConfigTemplate => "config-template",
         }
     }
 }

@@ -11,7 +11,8 @@ use crate::agentconfig::{
     SecretToolStore, Summary, Vault,
 };
 use crate::native_dialog::{
-    Field, GtkConfirm, choose_file, choose_file_titled, passphrase, text_form, text_form_labeled,
+    Field, GtkConfirm, choose_file, choose_file_titled, choose_folder, passphrase, text_form,
+    text_form_labeled,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
@@ -272,6 +273,10 @@ pub struct AuthorHook {
     event: String,
     matcher: Option<String>,
     timeout: Option<u32>,
+    /// Start from a passphrase-sealed template: its event, matcher, command and timeout fill
+    /// the form of the native window, which the user reviews and may change.
+    #[serde(default)]
+    from_template: bool,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -286,6 +291,10 @@ pub struct AuthorMcp {
     kind: String,
     /// `opencode` or `codex`: whose configuration the server goes into.
     agent: String,
+    /// Start from a sealed template: whether the server is local or remote is then the
+    /// template's, and what it starts or connects to fills the native window.
+    #[serde(default)]
+    from_template: bool,
 }
 
 fn cancelled() -> ConfigurationError {
@@ -403,12 +412,13 @@ async fn configuration_document_import(
     blocking(move || {
         let item = checked(&request.item)?.to_owned();
         let (label, expected) = changes.document_current(&item)?;
+        let place = changes.document_place(&item);
         let path = choose_file_titled(&app, false, "", "Import instruction template").ok_or_else(cancelled)?;
         let bytes = read_small_file(&path).map_err(|()| ConfigurationError::Change(ChangeFailure::ImportInvalid))?;
         let secret = passphrase(&app, false).ok_or_else(cancelled)?;
         let text = changes.open_document_template(&item, &bytes, &secret)?;
         let typed = text_form(&app, "Review an instruction template",
-            &format!("Destination: {label} in your account. This imported text is untrusted. Review every instruction before replacing this existing file. Importing grants no permissions; a separate plan and native confirmation are still required."),
+            &format!("Destination: {label} {place}. This imported text is untrusted. Review every instruction before replacing this existing file. Importing grants no permissions; a separate plan and native confirmation are still required."),
             vec![Field { label: "Imported instructions (Markdown, at most 64 KiB)".to_owned(), initial: text, multiline: true }]
         ).ok_or_else(cancelled)?;
         Ok(changes.plan_authored(Authoring::EditDocument { item, text: typed[0].clone(), expected })?)
@@ -426,10 +436,11 @@ async fn configuration_edit_document(
     blocking(move || {
         let item = checked(&request.item)?.to_owned();
         let (label, expected) = changes.document_current(&item)?;
+        let place = changes.document_place(&item);
         let typed = text_form(
             &app,
             "Change an instruction file",
-            &format!("File: {label} in your account. These instructions can change an agent's behaviour. Review the full text here. The previous bytes are kept encrypted for exact undo; a later outside edit is never overwritten."),
+            &format!("File: {label} {place}. These instructions can change an agent's behaviour. Review the full text here. The previous bytes are kept encrypted for exact undo; a later outside edit is never overwritten."),
             vec![Field { label: "Instructions (Markdown, at most 64 KiB)".to_owned(), initial: expected.clone(), multiline: true }],
         ).ok_or_else(cancelled)?;
         Ok(changes.plan_authored(Authoring::EditDocument { item, text: typed[0].clone(), expected })?)
@@ -444,6 +455,18 @@ pub struct CreateDocument {
     /// Start from a passphrase-sealed template the user chooses in a native window.
     #[serde(default)]
     from_template: bool,
+    /// `account` (the default) or `project`: the project selected in the desktop, which the
+    /// page cannot name.
+    #[serde(default)]
+    scope: Scope,
+}
+
+#[derive(Debug, Default, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum Scope {
+    #[default]
+    Account,
+    Project,
 }
 
 /// A new instruction file or skill where none exists. The page names only a kind; the
@@ -457,6 +480,12 @@ async fn configuration_create_document(
     let changes = configuration.changes(&app)?;
     blocking(move || {
         let kind = NewKind::parse(&request.kind).ok_or_else(invalid)?;
+        // A kind the project level does not have is refused here, before any window.
+        let source = match request.scope {
+            Scope::Account => kind.source(),
+            Scope::Project => kind.project_source().ok_or_else(invalid)?,
+        };
+        let place = changes.place_words(source);
         let typed_name = match kind.fixed_name() {
             Some(_) => String::new(),
             None => {
@@ -480,14 +509,14 @@ async fn configuration_create_document(
         let name = kind.checked_name(&typed_name).ok_or_else(invalid)?;
         // Nothing is typed into a window for a file that cannot be made: a name already taken
         // (a file, a link, a folder) or a place that cannot be trusted is said at once.
-        changes.check_new_document(kind.source(), &name)?;
+        changes.check_new_document(source, &name)?;
         let initial = if request.from_template {
             let path = choose_file_titled(&app, false, "", "Choose an instruction template")
                 .ok_or_else(cancelled)?;
             let bytes = read_small_file(&path)
                 .map_err(|()| ConfigurationError::Change(ChangeFailure::ImportInvalid))?;
             let secret = passphrase(&app, false).ok_or_else(cancelled)?;
-            changes.open_new_document_template(kind.source(), &name, &bytes, &secret)?
+            changes.open_new_document_template(source, &name, &bytes, &secret)?
         } else {
             kind.starting_text(&name)
         };
@@ -495,7 +524,7 @@ async fn configuration_create_document(
         let typed = text_form(
             &app,
             "Write the new instruction file",
-            &format!("New file: {shown} in your account. It does not exist yet, and undoing the change removes it again. These instructions can change an agent's behaviour: review the full text here."),
+            &format!("New file: {shown} {place}. It does not exist yet, and undoing the change removes it again. These instructions can change an agent's behaviour: review the full text here."),
             vec![Field {
                 label: "Instructions (Markdown, at most 64 KiB)".to_owned(),
                 initial,
@@ -504,10 +533,100 @@ async fn configuration_create_document(
         )
         .ok_or_else(cancelled)?;
         Ok(changes.plan_authored(Authoring::CreateDocument {
-            source: kind.source(),
+            source,
             name,
             text: typed[0].clone(),
         })?)
+    })
+    .await
+}
+
+/// The project the desktop has selected, by the name of its folder; never its path.
+#[derive(Debug, Serialize)]
+pub struct ProjectView {
+    name: Option<String>,
+}
+
+#[tauri::command]
+async fn configuration_project(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+) -> Result<ProjectView, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    Ok(ProjectView {
+        name: changes.project_name(),
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelectProject {
+    /// Select none. Otherwise the desktop's own folder window chooses.
+    clear: bool,
+}
+
+/// Selects the project whose instruction files and skills are listed and may be changed. The
+/// folder is chosen in the desktop's own window and judged before it is kept; the page never
+/// names a path.
+#[tauri::command]
+async fn configuration_select_project(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: SelectProject,
+) -> Result<ProjectView, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let chosen = if request.clear {
+            None
+        } else {
+            Some(choose_folder(&app).ok_or_else(cancelled)?)
+        };
+        changes.select_project(chosen)?;
+        Ok(ProjectView {
+            name: changes.project_name(),
+        })
+    })
+    .await
+}
+
+/// The file and passphrase of a template, chosen and typed in the desktop's own windows.
+fn open_template(
+    app: &AppHandle,
+) -> Result<crate::agentconfig::config_template::Template, ConfigurationError> {
+    let path = choose_file_titled(app, false, "", "Choose a hook or server template")
+        .ok_or_else(cancelled)?;
+    let bytes = read_small_file(&path)
+        .map_err(|()| ConfigurationError::Change(ChangeFailure::ImportInvalid))?;
+    let secret = passphrase(app, false).ok_or_else(cancelled)?;
+    Ok(ChangeService::open_config_template(&bytes, &secret)?)
+}
+
+/// A hook or an MCP server the user has, sealed under a passphrase and saved to a file the
+/// user names. The page names the item; the content never reaches it.
+#[tauri::command]
+async fn configuration_template_export(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: ItemId,
+) -> Result<Done, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let item = checked(&request.item)?.to_owned();
+        let Some(secret) = passphrase(&app, true) else {
+            return Ok(Done { done: false });
+        };
+        let bytes = changes.export_config_template(&item, &secret)?;
+        let Some(path) = choose_file_titled(
+            &app,
+            true,
+            "entry.wyss-template",
+            "Export a hook or server template",
+        ) else {
+            return Ok(Done { done: false });
+        };
+        write_private_file(&path, &bytes)
+            .map_err(|()| ConfigurationError::Change(ChangeFailure::Internal))?;
+        Ok(Done { done: true })
     })
     .await
 }
@@ -528,6 +647,37 @@ async fn configuration_author_hook(
         };
         // What the page named is judged before a window is drawn for it.
         spec.check().map_err(|_| invalid())?;
+        if request.from_template {
+            let template = open_template(&app)?;
+            let crate::agentconfig::config_template::Template::Hook(found) = template else {
+                return Err(ConfigurationError::Change(ChangeFailure::ImportInvalid));
+            };
+            let typed = text_form(
+                &app,
+                "Add a hook from a template",
+                "This hook came from a file. It is untrusted: review every field. The command will run on the event you keep, in every Claude Code session you start, and is written into your own Claude Code settings.",
+                vec![
+                    Field { label: "Event".to_owned(), initial: found.event, multiline: false },
+                    Field { label: "Matcher (optional)".to_owned(), initial: found.matcher.unwrap_or_default(), multiline: false },
+                    Field { label: "Command".to_owned(), initial: found.command, multiline: false },
+                    Field { label: "Timeout in seconds (optional)".to_owned(), initial: found.timeout.map(|t| t.to_string()).unwrap_or_default(), multiline: false },
+                ],
+            )
+            .ok_or_else(cancelled)?;
+            let optional = |text: &str| Some(text.trim().to_owned()).filter(|t| !t.is_empty());
+            let timeout = match optional(&typed[3]) {
+                Some(text) => Some(text.parse::<u32>().map_err(|_| invalid())?),
+                None => None,
+            };
+            let spec = HookSpec {
+                event: typed[0].trim().to_owned(),
+                matcher: optional(&typed[1]),
+                command: typed[2].trim().to_owned(),
+                timeout,
+            };
+            spec.check().map_err(|_| invalid())?;
+            return Ok(changes.plan_authored(Authoring::AddHook(spec))?);
+        }
         let where_ = format!(
             "This command will run on every {} event{} of every Claude Code session you start. \
              It is written into your own Claude Code settings.",
@@ -600,10 +750,20 @@ async fn configuration_author_mcp(
         if !mcp_name_ok(&request.name) {
             return Err(invalid());
         }
-        let remote = match request.kind.as_str() {
+        let mut remote = match request.kind.as_str() {
             "local" => false,
             "remote" => true,
             _ => return Err(invalid()),
+        };
+        let from_template = if request.from_template {
+            let crate::agentconfig::config_template::Template::Mcp(found) = open_template(&app)?
+            else {
+                return Err(ConfigurationError::Change(ChangeFailure::ImportInvalid));
+            };
+            remote = matches!(found, McpSpec::Remote { .. });
+            Some(found)
+        } else {
+            None
         };
         let codex = match request.agent.as_str() {
             "codex" => true,
@@ -621,8 +781,18 @@ async fn configuration_author_mcp(
             request.name,
             if codex { "Codex" } else { "OpenCode" }
         );
-        let typed = text_form(&app, "Add an MCP server", &intro, mcp_fields(None, remote))
-            .ok_or_else(cancelled)?;
+        let intro = if from_template.is_some() {
+            format!("{intro} This server came from a file and is untrusted: review what it starts or connects to.")
+        } else {
+            intro
+        };
+        let typed = text_form(
+            &app,
+            "Add an MCP server",
+            &intro,
+            mcp_fields(from_template.as_ref(), remote),
+        )
+        .ok_or_else(cancelled)?;
         let spec = mcp_from(&typed, remote);
         Ok(changes.plan_authored(if codex {
             Authoring::AddCodexMcp {
@@ -801,6 +971,9 @@ const COMMANDS: &[&str] = &[
     "configuration_document_export",
     "configuration_document_import",
     "configuration_create_document",
+    "configuration_project",
+    "configuration_select_project",
+    "configuration_template_export",
 ];
 
 /// What the desktop binary hands to the library: the commands, the state they read, and
@@ -826,7 +999,10 @@ pub fn extension() -> wyss_console::Extension {
             configuration_edit_document,
             configuration_document_export,
             configuration_document_import,
-            configuration_create_document
+            configuration_create_document,
+            configuration_project,
+            configuration_select_project,
+            configuration_template_export
         ]),
         install: Box::new(|builder| builder.manage(Configuration::start())),
         on_exit: None,

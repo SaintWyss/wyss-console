@@ -77,6 +77,10 @@ pub struct RecordBody {
     /// The file before the removal, and after it.
     pub h0: String,
     pub h1: String,
+    /// The project folder an instruction file belongs to, for the files of a project; absent
+    /// for the account's own. An undo only applies while this is still the selected project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
 }
 
 /// A record holds the text that left a file, and what the user wrote: it is never printed.

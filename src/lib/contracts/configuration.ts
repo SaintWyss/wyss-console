@@ -232,6 +232,7 @@ export const CHANGE_FAILURES = [
   'invalid_entry',
   'cancelled',
   'internal',
+  'project_refused',
 ] as const;
 export type ChangeFailure = (typeof CHANGE_FAILURES)[number];
 
@@ -850,6 +851,15 @@ export function parseRecords(value: unknown): ParkedRecord[] {
       past_retention: flag(r.past_retention, 'records'),
     };
   });
+}
+
+/** The project the desktop has selected, by the name of its folder; never a path. */
+export function parseProject(value: unknown): string | null {
+  const name = record(value, ['name'], 'project').name;
+  if (name === null) return null;
+  if (typeof name !== 'string' || name.length === 0 || name.length > 64)
+    throw invalid('project');
+  return name;
 }
 
 export function parseDone(value: unknown): boolean {

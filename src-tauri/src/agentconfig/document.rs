@@ -6,7 +6,7 @@ use super::change::{Operation, Risk};
 use super::inventory::{Environment, SourceKey, item_id_for};
 use super::plan::{ABSENT, DiffKind, DiffLine, Drafted, Logical, PlanError, Prepared, hash};
 use super::restore::{Protection, RecordBody};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const EVENT: &str = "document_v1";
 pub const MOST_BYTES: usize = 64 * 1024;
@@ -15,6 +15,8 @@ pub const MOST_BYTES: usize = 64 * 1024;
 pub struct Target {
     pub source: SourceKey,
     pub name: String,
+    /// The project folder, for the sources that belong to one; `None` for the account's own.
+    pub project: Option<String>,
 }
 
 fn component(name: &str) -> bool {
@@ -27,25 +29,80 @@ fn component(name: &str) -> bool {
         && name != ".."
 }
 
+/// Whether a source is a project's own file rather than the account's.
+const fn is_project(source: SourceKey) -> bool {
+    matches!(
+        source,
+        SourceKey::ClaudeProjectSkills
+            | SourceKey::ClaudeProjectRules
+            | SourceKey::CodexProjectRules
+            | SourceKey::OpencodeProjectRules
+    )
+}
+
+/// A project folder as a record or a plan may carry it: absolute, made of plain names.
+fn project_ok(project: &str) -> bool {
+    let path = Path::new(project);
+    project.len() <= 4096
+        && path.is_absolute()
+        && super::place::names(path).is_ok_and(|n| !n.is_empty())
+}
+
 impl Target {
+    pub fn user(source: SourceKey, name: impl Into<String>) -> Self {
+        Self {
+            source,
+            name: name.into(),
+            project: None,
+        }
+    }
+
+    pub fn in_project(source: SourceKey, name: impl Into<String>, project: &Path) -> Self {
+        Self {
+            source,
+            name: name.into(),
+            project: Some(project.to_string_lossy().into_owned()),
+        }
+    }
+
     /// A closed provider root and a checked local name; no imported path is trusted.
     pub fn check(&self) -> Result<(), PlanError> {
+        // A project's file carries its project; an account's file carries none.
+        if is_project(self.source) != self.project.as_deref().is_some_and(project_ok)
+            || (self.project.is_some() && !is_project(self.source))
+        {
+            return Err(PlanError::NotSupported);
+        }
+        let rules_name = |name: &str| {
+            name == "CLAUDE.md"
+                || name
+                    .strip_prefix("rules/")
+                    .is_some_and(|n| component(n) && n.ends_with(".md"))
+        };
         let ok = match self.source {
-            SourceKey::ClaudeUserSkills | SourceKey::CodexUserSkills => component(&self.name),
-            SourceKey::ClaudeUserRules => {
-                self.name == "CLAUDE.md"
-                    || self
-                        .name
-                        .strip_prefix("rules/")
-                        .is_some_and(|n| component(n) && n.ends_with(".md"))
-            }
+            SourceKey::ClaudeUserSkills
+            | SourceKey::CodexUserSkills
+            | SourceKey::ClaudeProjectSkills => component(&self.name),
+            SourceKey::ClaudeUserRules | SourceKey::ClaudeProjectRules => rules_name(&self.name),
             SourceKey::CodexUserRules => {
                 matches!(self.name.as_str(), "AGENTS.md" | "AGENTS.override.md")
             }
-            SourceKey::OpencodeUserRules => self.name == "AGENTS.md",
+            // The inventory reads only a project's `AGENTS.md`, so only that can be made.
+            SourceKey::OpencodeUserRules
+            | SourceKey::CodexProjectRules
+            | SourceKey::OpencodeProjectRules => self.name == "AGENTS.md",
             _ => false,
         };
         ok.then_some(()).ok_or(PlanError::NotSupported)
+    }
+
+    /// The project folder of a project file, which must be the one now selected.
+    fn project_dir(&self, env: &Environment) -> Result<PathBuf, PlanError> {
+        let selected = env.project.as_deref().ok_or(PlanError::NotSupported)?;
+        if self.project.as_deref().map(Path::new) != Some(selected) {
+            return Err(PlanError::NotSupported);
+        }
+        Ok(selected.to_owned())
     }
 
     pub fn path(&self, env: &Environment) -> Result<PathBuf, PlanError> {
@@ -60,6 +117,19 @@ impl Target {
             SourceKey::ClaudeUserRules => env.claude_dir().join(&self.name),
             SourceKey::CodexUserRules => env.codex_dir().join(&self.name),
             SourceKey::OpencodeUserRules => env.opencode_dir().join(&self.name),
+            SourceKey::ClaudeProjectSkills => self
+                .project_dir(env)?
+                .join(".claude/skills")
+                .join(&self.name)
+                .join("SKILL.md"),
+            // `CLAUDE.md` sits at the project's root; its rules in `.claude/rules`.
+            SourceKey::ClaudeProjectRules => match self.name.strip_prefix("rules/") {
+                Some(rule) => self.project_dir(env)?.join(".claude/rules").join(rule),
+                None => self.project_dir(env)?.join(&self.name),
+            },
+            SourceKey::CodexProjectRules | SourceKey::OpencodeProjectRules => {
+                self.project_dir(env)?.join(&self.name)
+            }
             _ => return Err(PlanError::NotSupported),
         })
     }
@@ -69,11 +139,14 @@ impl Target {
     }
 
     /// How many directories, at most, a new file of this kind may bring with it. A provider's
-    /// own folder is never made: if `~/.claude` is not there, that is a different problem.
+    /// own folder in the account is never made: if `~/.claude` is not there, that is a
+    /// different problem. A project's `.claude` is the project's own and may be.
     pub fn most_new_dirs(&self) -> usize {
         match self.source {
             SourceKey::ClaudeUserSkills | SourceKey::CodexUserSkills => 2,
             SourceKey::ClaudeUserRules if self.name.starts_with("rules/") => 1,
+            SourceKey::ClaudeProjectSkills => 3,
+            SourceKey::ClaudeProjectRules if self.name.starts_with("rules/") => 2,
             _ => 0,
         }
     }
@@ -94,6 +167,19 @@ impl Target {
             SourceKey::ClaudeUserRules if self.name.starts_with("rules/") => {
                 chain.push(env.claude_dir().join("rules"));
             }
+            SourceKey::ClaudeProjectSkills => {
+                if let Ok(project) = self.project_dir(env) {
+                    chain.push(project.join(".claude/skills").join(&self.name));
+                    chain.push(project.join(".claude/skills"));
+                    chain.push(project.join(".claude"));
+                }
+            }
+            SourceKey::ClaudeProjectRules if self.name.starts_with("rules/") => {
+                if let Ok(project) = self.project_dir(env) {
+                    chain.push(project.join(".claude/rules"));
+                    chain.push(project.join(".claude"));
+                }
+            }
             _ => (),
         }
         chain.truncate(count);
@@ -104,7 +190,9 @@ impl Target {
     pub fn owns_folder(&self) -> bool {
         matches!(
             self.source,
-            SourceKey::ClaudeUserSkills | SourceKey::CodexUserSkills
+            SourceKey::ClaudeUserSkills
+                | SourceKey::CodexUserSkills
+                | SourceKey::ClaudeProjectSkills
         )
     }
 
@@ -124,6 +212,7 @@ pub fn from_record(body: &RecordBody) -> Result<Target, PlanError> {
     let target = Target {
         source: body.source,
         name: body.matcher.clone().ok_or(PlanError::RecordUnreadable)?,
+        project: body.project.clone(),
     };
     target.check()?;
     Ok(target)
@@ -184,6 +273,7 @@ pub fn draft_create(
     body.event = EVENT.to_owned();
     body.matcher = Some(target.name.clone());
     body.group = dirs;
+    body.project.clone_from(&target.project);
     body.index = mode as usize;
     body.h0 = ABSENT.to_owned();
     body.h1 = hash(text.as_bytes());
@@ -243,6 +333,7 @@ pub fn draft_delete(
     body.event = EVENT.to_owned();
     body.matcher = Some(target.name.clone());
     body.group = dirs;
+    body.project.clone_from(&target.project);
     body.index = mode as usize;
     body.removed_text = old.to_owned();
     body.h0 = hash(before);
@@ -297,6 +388,7 @@ pub fn draft(target: Target, before: &[u8], text: &str) -> Result<Drafted, PlanE
     );
     body.event = EVENT.to_owned();
     body.matcher = Some(target.name.clone());
+    body.project.clone_from(&target.project);
     Ok(Drafted {
         operation: Operation::EditDocument,
         item: target.id(),
@@ -459,6 +551,18 @@ impl NewKind {
         }
     }
 
+    /// Where the same kind goes in a project; `None` for a kind the project level does not have
+    /// (Codex skills and the override file are read only from the account).
+    pub const fn project_source(self) -> Option<SourceKey> {
+        Some(match self {
+            Self::ClaudeSkill => SourceKey::ClaudeProjectSkills,
+            Self::ClaudeRule | Self::ClaudeMemory => SourceKey::ClaudeProjectRules,
+            Self::CodexAgents => SourceKey::CodexProjectRules,
+            Self::OpencodeAgents => SourceKey::OpencodeProjectRules,
+            Self::CodexSkill | Self::CodexOverride => return None,
+        })
+    }
+
     /// A kind with one possible file has its name here; the others ask for one.
     pub const fn fixed_name(self) -> Option<&'static str> {
         match self {
@@ -495,13 +599,10 @@ impl NewKind {
     /// separator, a dot at its start or an odd character is refused here, not later.
     pub fn checked_name(self, typed: &str) -> Option<String> {
         let name = self.name_from(typed)?;
-        Target {
-            source: self.source(),
-            name: name.clone(),
-        }
-        .check()
-        .ok()
-        .map(|()| name)
+        Target::user(self.source(), name.clone())
+            .check()
+            .ok()
+            .map(|()| name)
     }
 
     /// What the editor starts with. A skill needs the front matter the provider reads.
@@ -531,10 +632,7 @@ mod tests {
         ] {
             let kind = NewKind::parse(word).unwrap();
             let name = kind.name_from("review").unwrap();
-            let target = Target {
-                source: kind.source(),
-                name,
-            };
+            let target = Target::user(kind.source(), name);
             assert!(target.check().is_ok(), "{word}");
             if kind.is_skill() {
                 assert!(skill_text_ok(
@@ -554,10 +652,7 @@ mod tests {
         let rule = NewKind::parse("claude_rule").unwrap();
         assert_eq!(rule.name_from(" a ").unwrap(), "rules/a.md");
         assert_eq!(rule.name_from("a.md").unwrap(), "rules/a.md");
-        let bad = Target {
-            source: SourceKey::ClaudeUserRules,
-            name: rule.name_from("../x").unwrap(),
-        };
+        let bad = Target::user(SourceKey::ClaudeUserRules, rule.name_from("../x").unwrap());
         assert!(bad.check().is_err());
         for typed in ["../x", "a/b", ".h", "wyss/console/f5b", "", "a\0b", " "] {
             assert!(rule.checked_name(typed).is_none(), "{typed:?}");
@@ -565,6 +660,64 @@ mod tests {
             assert!(skill.checked_name(typed).is_none(), "{typed:?}");
         }
         assert_eq!(rule.checked_name("review").unwrap(), "rules/review.md");
+    }
+
+    #[test]
+    fn a_files_project_must_match_its_source_in_names_and_in_records() {
+        let project = Path::new("/home/u/repo");
+        let ok = Target::in_project(SourceKey::ClaudeProjectRules, "CLAUDE.md", project);
+        assert!(ok.check().is_ok());
+        // A project source without a project, an account source with one, a relative or
+        // dotted project, and names only the account's kind has.
+        assert!(
+            Target::user(SourceKey::ClaudeProjectRules, "CLAUDE.md")
+                .check()
+                .is_err()
+        );
+        assert!(
+            Target::in_project(SourceKey::ClaudeUserRules, "CLAUDE.md", project)
+                .check()
+                .is_err()
+        );
+        for bad in ["repo", "/home/u/../x", "/", ""] {
+            let target =
+                Target::in_project(SourceKey::CodexProjectRules, "AGENTS.md", Path::new(bad));
+            assert!(target.check().is_err(), "{bad:?}");
+        }
+        assert!(
+            Target::in_project(SourceKey::CodexProjectRules, "AGENTS.override.md", project)
+                .check()
+                .is_err()
+        );
+        assert!(
+            Target::in_project(SourceKey::ClaudeProjectSkills, "../x", project)
+                .check()
+                .is_err()
+        );
+        // A record names its project, and one without it (older records) is an account file.
+        let mut body = inverse_of(ok.source.provider(), ok.source, b"", b"");
+        body.event = EVENT.to_owned();
+        body.matcher = Some("CLAUDE.md".to_owned());
+        assert!(from_record(&body).is_err());
+        body.project = Some("/home/u/repo".to_owned());
+        assert_eq!(from_record(&body).unwrap(), ok);
+        body.source = SourceKey::ClaudeUserRules;
+        assert!(from_record(&body).is_err());
+        // Without the field a stored record still reads, as an account file.
+        let json = serde_json::to_string(&inverse_of(
+            crate::agentconfig::ProviderId::ClaudeCode,
+            SourceKey::ClaudeUserRules,
+            b"",
+            b"",
+        ))
+        .unwrap();
+        assert!(!json.contains("project"));
+        assert!(
+            serde_json::from_str::<RecordBody>(&json)
+                .unwrap()
+                .project
+                .is_none()
+        );
     }
 
     #[test]

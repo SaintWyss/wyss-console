@@ -16,6 +16,7 @@ Recheck both heads and `git status` before writing or pushing.
 | F14 / F11a closing tests                    | done    | `docs/acceptance/f14-f11a-f13-closure-2026-10-19.md` (isolated Secret Service; real Claude Code to Codex handoff) |
 | F4a OpenCode inventory and switches         | done    | ADR 0041; real-file reversible test; `docs/acceptance/f4a-f5-f6-f1b-2026-10-19.md`                                |
 | F5 hook/MCP authoring (subset)              | done    | ADR 0042, 0044; reviews; real config and real window (same record)                                                |
+| F5 project files, hook/MCP templates        | done    | ADR 0050; tests only, real window not yet exercised on the owner's desktop (installed build is older)             |
 | F6a models (managed observed, native)       | done    | ADR 0043; managed choice not built                                                                                |
 | F6 catalogue view, `model/rerouted`, effort | done    | ADR 0048; `docs/acceptance/f6-models-2026-10-20.md`; new authority behaviour proven by tests only                 |
 | F10a gateway core (no transport)            | partial | ADR 0049; 31 tests; unreviewed, unreachable; no signature scheme, no listener (DN-05)                             |
@@ -70,9 +71,8 @@ host restart. Rule learned: never end a process found by name; only the PID of o
 
 ## Next unblocked engineering
 
-Finish F5 absent-aware creation/deletion, Codex skill inventory/authoring and remaining
-scope; keep ordinary file edits/templates on the accepted transaction. Then F6 catalogue/
-native model effort and the remaining own-environment P1 harness. F10 local foundations
+F5 is complete (ADR 0050). Remaining: eligible F6 acceptance against the installed runtime, the
+rest of the P1 matrix through `benchmarks/owned.py`, a second focused review of the F10a core. F10 local foundations
 may proceed without a listener; F8/F11b cannot replace the authority contract before its
 security verification. Hermes installation, real credential/quota experiments and remote
 exposure/device enrolment still require specific owner authorisation. No G-INF completion

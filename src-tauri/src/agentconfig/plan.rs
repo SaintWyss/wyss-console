@@ -519,6 +519,7 @@ pub fn draft_park(
         removed_at: removal.edit.at,
         unit_text: removal.unit,
         handler_text,
+        project: None,
         h0: h0.clone(),
         h1: h1.clone(),
     };

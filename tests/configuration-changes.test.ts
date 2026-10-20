@@ -98,8 +98,21 @@ describe('what the user can write', () => {
         item({ source: 'codex_user_hooks', kind: 'hook', provider: 'codex' }),
       ),
     ).toBeNull();
+    // A project's own files are editable like the account's; its settings and hooks are not.
+    for (const source of [
+      'claude_project_rules',
+      'codex_project_rules',
+      'opencode_project_rules',
+    ])
+      expect(authoringFor(item({ source, kind: 'rule_file' }))).toEqual({
+        edit: 'document',
+        remove: 'delete_document',
+      });
     expect(
-      authoringFor(item({ source: 'claude_project_rules', kind: 'rule_file' })),
+      authoringFor(item({ source: 'claude_project_skills', kind: 'skill' })),
+    ).toEqual({ edit: 'document', remove: 'delete_document' });
+    expect(
+      authoringFor(item({ source: 'claude_project_settings', kind: 'hook' })),
     ).toBeNull();
   });
   it('names events and servers as the desktop checks them', () => {
@@ -302,7 +315,7 @@ describe('the changes controller', () => {
       controller.cancel();
     }
     expect(fake.calls).toEqual(
-      NEW_DOCUMENT_KINDS.map((kind) => `create_document:${kind}:false`),
+      NEW_DOCUMENT_KINDS.map((kind) => `create_document:${kind}:false:account`),
     );
     expect(fake.calls.some((c) => c.startsWith('apply'))).toBe(false);
   });
@@ -330,7 +343,51 @@ describe('the changes controller', () => {
   it('can start a creation from a sealed template without sending any text', async () => {
     controller.author((c) => c.createDocument('claude_rule', true));
     await vi.advanceTimersByTimeAsync(0);
-    expect(fake.calls).toEqual(['create_document:claude_rule:true']);
+    expect(fake.calls).toEqual(['create_document:claude_rule:true:account']);
+  });
+  it('asks for a project file with a scope word, never a path, and keeps only the folder name', async () => {
+    controller.author((c) =>
+      c.createDocument('claude_skill', false, 'project'),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.calls).toEqual(['create_document:claude_skill:false:project']);
+    controller.chooseProject(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)?.project).toBe('repo');
+    expect(states.at(-1)?.plan).toBeNull();
+    controller.chooseProject(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)?.project).toBeNull();
+    expect(fake.calls.slice(1)).toEqual([
+      'select_project:false',
+      'select_project:true',
+    ]);
+  });
+  it('says a refused folder in one closed word and keeps the project it had', async () => {
+    controller.chooseProject(false);
+    await vi.advanceTimersByTimeAsync(0);
+    fake.failNext = 'project_refused';
+    controller.chooseProject(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)?.failure).toBe('project_refused');
+    expect(states.at(-1)?.project).toBe('repo');
+  });
+  it('exports and applies hook and server templates by item and flag only, never content', async () => {
+    controller.author((c) => c.authorHook('PreToolUse', null, null, true));
+    await vi.advanceTimersByTimeAsync(0);
+    controller.cancel();
+    controller.author((c) => c.authorMcp('docs', 'local', 'codex', true));
+    await vi.advanceTimersByTimeAsync(0);
+    controller.cancel();
+    controller.exportTemplate('b'.repeat(32));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.calls).toEqual([
+      'author_hook:PreToolUse:null:null:template',
+      'author_mcp:docs:local:codex:template',
+      'export_template:' + 'b'.repeat(32),
+      'records',
+    ]);
+    expect(fake.calls.some((c) => c.startsWith('apply'))).toBe(false);
   });
   it('plans a deletion by inventory ID through the ordinary plan and holds it for confirmation', async () => {
     controller.draft('delete_document', 'a'.repeat(32));

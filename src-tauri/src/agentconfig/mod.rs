@@ -41,6 +41,7 @@ mod codex;
 pub mod codex_plan;
 #[cfg(test)]
 mod codex_plan_tests;
+pub mod config_template;
 pub mod declared;
 pub mod document;
 mod fault;
@@ -58,6 +59,7 @@ mod place;
 mod plan;
 #[cfg(test)]
 mod plan_tests;
+pub mod project;
 mod reader;
 pub mod redact;
 #[cfg(test)]

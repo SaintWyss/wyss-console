@@ -122,10 +122,7 @@ mod tests {
     use super::super::inventory::SourceKey;
     use super::*;
     fn rule() -> Target {
-        Target {
-            source: SourceKey::ClaudeUserRules,
-            name: "rules/review.md".into(),
-        }
+        Target::user(SourceKey::ClaudeUserRules, "rules/review.md")
     }
 
     #[test]
@@ -134,15 +131,9 @@ mod tests {
         let bytes = export(&rule(), text, "test passphrase", 1000).unwrap();
         assert!(!String::from_utf8_lossy(&bytes).contains("SEKRET"));
         assert_eq!(open(&rule(), &bytes, "test passphrase").unwrap(), text);
-        let codex = Target {
-            source: SourceKey::CodexUserRules,
-            name: "AGENTS.md".into(),
-        };
+        let codex = Target::user(SourceKey::CodexUserRules, "AGENTS.md");
         assert_eq!(open(&codex, &bytes, "test passphrase").unwrap(), text);
-        let skill = Target {
-            source: SourceKey::ClaudeUserSkills,
-            name: "review".into(),
-        };
+        let skill = Target::user(SourceKey::ClaudeUserSkills, "review");
         assert!(open(&skill, &bytes, "test passphrase").is_err());
         assert!(open(&rule(), &bytes, "wrong passphrase").is_err());
         let envelope: Envelope = serde_json::from_slice(&bytes).unwrap();

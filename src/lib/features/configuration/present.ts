@@ -448,6 +448,8 @@ export const CHANGE_FAILURE_TEXT: Record<ConfigurationFailure, string> = {
   invalid_entry:
     'That is not something that can be written: an event this app does not know, an empty or multi-line command, an unusable name or address.',
   cancelled: 'Cancelled. Nothing was changed.',
+  project_refused:
+    'That folder cannot be the project: it must be your own, inside your home, with no link on the way and nobody else able to write it or the folders above it.',
 };
 
 export const VERDICT_LABEL: Record<Verdict, string> = {
@@ -545,6 +547,15 @@ export const NEW_DOCUMENT_LABEL: Record<NewDocumentKind, string> = {
   opencode_agents: 'OpenCode AGENTS.md',
 };
 
+/** The kinds a project can hold: Codex skills and the override file live in the account only. */
+export const PROJECT_DOCUMENT_KINDS: readonly NewDocumentKind[] = [
+  'claude_skill',
+  'claude_rule',
+  'claude_memory',
+  'codex_agents',
+  'opencode_agents',
+];
+
 /** A name OpenCode may key an MCP server by, as the desktop checks it. */
 export const mcpNameOk = (name: string): boolean =>
   /^[A-Za-z0-9_-]{1,64}$/.test(name);
@@ -557,11 +568,20 @@ export function authoringFor(item: ConfigItem): {
   if (item.not_writable !== 'not_in_this_phase') return null;
   if (
     (item.kind === 'rule_file' &&
-      ['claude_user_rules', 'codex_user_rules', 'opencode_user_rules'].includes(
-        item.source,
-      )) ||
+      [
+        'claude_user_rules',
+        'codex_user_rules',
+        'opencode_user_rules',
+        'claude_project_rules',
+        'codex_project_rules',
+        'opencode_project_rules',
+      ].includes(item.source)) ||
     (item.kind === 'skill' &&
-      ['claude_user_skills', 'codex_user_skills'].includes(item.source))
+      [
+        'claude_user_skills',
+        'codex_user_skills',
+        'claude_project_skills',
+      ].includes(item.source))
   )
     return { edit: 'document', remove: 'delete_document' };
   if (

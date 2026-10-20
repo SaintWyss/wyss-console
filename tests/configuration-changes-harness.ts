@@ -37,11 +37,16 @@ export class FakeChanges {
   history: History = fixture.history();
   records: ParkedRecord[] = fixture.records();
   failNext:
-    'entry_gone' | 'key_store_unavailable' | 'cancelled' | 'internal' | null =
-    null;
+    | 'entry_gone'
+    | 'key_store_unavailable'
+    | 'cancelled'
+    | 'internal'
+    | 'project_refused'
+    | null = null;
   /** Held applies: each waits for `release`. */
   hold: (() => void)[] | null = null;
   exported = true;
+  project: string | null = null;
 
   private check() {
     if (this.failNext) {
@@ -80,10 +85,18 @@ export class FakeChanges {
         event: string,
         matcher: string | null,
         timeout: number | null,
+        fromTemplate = false,
       ) => {
-        this.calls.push(`author_hook:${event}:${matcher}:${timeout}`);
+        this.calls.push(
+          `author_hook:${event}:${matcher}:${timeout}${fromTemplate ? ':template' : ''}`,
+        );
         this.check();
         return this.plan;
+      },
+      exportTemplate: async (item: string) => {
+        this.calls.push(`export_template:${item}`);
+        this.check();
+        return true;
       },
       exportDocument: async (item: string) => {
         this.calls.push(`export_document:${item}`);
@@ -95,10 +108,23 @@ export class FakeChanges {
         this.check();
         return this.plan;
       },
-      createDocument: async (kind: string, fromTemplate = false) => {
-        this.calls.push(`create_document:${kind}:${fromTemplate}`);
+      createDocument: async (
+        kind: string,
+        fromTemplate = false,
+        scope: 'account' | 'project' = 'account',
+      ) => {
+        this.calls.push(`create_document:${kind}:${fromTemplate}:${scope}`);
         this.check();
         return this.plan;
+      },
+      project: async () => {
+        return this.project;
+      },
+      selectProject: async (clear: boolean) => {
+        this.calls.push(`select_project:${clear}`);
+        this.check();
+        this.project = clear ? null : 'repo';
+        return this.project;
       },
       editDocument: async (item: string) => {
         this.calls.push(`edit_document:${item}`);
@@ -114,8 +140,11 @@ export class FakeChanges {
         name: string,
         kind: 'local' | 'remote',
         agent: 'opencode' | 'codex' = 'opencode',
+        fromTemplate = false,
       ) => {
-        this.calls.push(`author_mcp:${name}:${kind}:${agent}`);
+        this.calls.push(
+          `author_mcp:${name}:${kind}:${agent}${fromTemplate ? ':template' : ''}`,
+        );
         this.check();
         return this.plan;
       },

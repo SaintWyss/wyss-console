@@ -21,11 +21,14 @@ import {
   editMcp,
   deleteRecord,
   exportRecord,
+  exportTemplate,
   importRecord,
   planChange,
   planUndo,
   readHistory,
+  readProject,
   readRecords,
+  selectProject,
 } from '../../desktop/configuration-client';
 
 export interface ChangesClient {
@@ -37,16 +40,25 @@ export interface ChangesClient {
     event: string,
     matcher: string | null,
     timeout: number | null,
+    fromTemplate?: boolean,
   ): Promise<Plan>;
+  exportTemplate(item: string): Promise<boolean>;
   editHook(item: string): Promise<Plan>;
   editDocument(item: string): Promise<Plan>;
-  createDocument(kind: NewDocumentKind, fromTemplate?: boolean): Promise<Plan>;
+  createDocument(
+    kind: NewDocumentKind,
+    fromTemplate?: boolean,
+    scope?: 'account' | 'project',
+  ): Promise<Plan>;
+  project(): Promise<string | null>;
+  selectProject(clear: boolean): Promise<string | null>;
   exportDocument(item: string): Promise<boolean>;
   importDocument(item: string): Promise<Plan>;
   authorMcp(
     name: string,
     kind: 'local' | 'remote',
     agent?: 'opencode' | 'codex',
+    fromTemplate?: boolean,
   ): Promise<Plan>;
   editMcp(item: string): Promise<Plan>;
   records(): Promise<ParkedRecord[]>;
@@ -60,9 +72,12 @@ const desktopClient: ChangesClient = {
   history: readHistory,
   undo: planUndo,
   authorHook,
+  exportTemplate,
   editHook,
   editDocument,
   createDocument,
+  project: readProject,
+  selectProject,
   exportDocument,
   importDocument,
   authorMcp,
@@ -89,6 +104,8 @@ export interface ChangesState {
   records: ParkedRecord[] | null;
   /** Something else in flight: a deletion, an export, an import. */
   busy: boolean;
+  /** The folder name of the selected project, if any. Never a path. */
+  project: string | null;
   /** What the last record operation came to. */
   notice: 'exported' | 'imported' | 'not_done' | 'expired' | null;
 }
@@ -109,6 +126,7 @@ export class ChangesController {
   private history: History | null = null;
   private records: ParkedRecord[] | null = null;
   private busy = false;
+  private project: string | null = null;
   private notice: ChangesState['notice'] = null;
   private disposed = false;
   private expiry: ReturnType<typeof setTimeout> | null = null;
@@ -131,6 +149,7 @@ export class ChangesController {
       history: this.history,
       records: this.records,
       busy: this.busy,
+      project: this.project,
       notice: this.notice,
     };
   }
@@ -269,6 +288,49 @@ export class ChangesController {
     );
   }
 
+  /** The project the desktop has selected, read once the window opens. */
+  loadProject() {
+    if (this.disposed) return;
+    void this.client.project().then(
+      (name) => {
+        if (this.disposed) return;
+        this.project = name;
+        this.emit();
+      },
+      () => undefined,
+    );
+  }
+
+  /**
+   * Selects the project in the desktop's own folder window, or none. The lists are read again
+   * whatever came of it: the project's files are among them.
+   */
+  chooseProject(clear: boolean) {
+    if (this.disposed || this.busy || this.planning || this.applying) return;
+    this.busy = true;
+    this.failure = null;
+    this.result = null;
+    this.notice = null;
+    this.plan = null;
+    this.clearExpiry();
+    this.emit();
+    void this.client.selectProject(clear).then(
+      (name) => {
+        this.busy = false;
+        this.project = name;
+        this.emit();
+        this.changed();
+      },
+      (error: unknown) => {
+        this.busy = false;
+        const failure = this.fail(error);
+        if (failure === 'cancelled') this.notice = 'not_done';
+        else this.failure = failure;
+        this.emit();
+      },
+    );
+  }
+
   /** The first page, or the next. */
   loadHistory(more: boolean) {
     if (this.disposed) return;
@@ -336,6 +398,9 @@ export class ChangesController {
   }
   exportRecord(record: string) {
     this.record(() => this.client.exportRecord(record), 'exported');
+  }
+  exportTemplate(item: string) {
+    this.record(() => this.client.exportTemplate(item), 'exported');
   }
   exportDocument(item: string) {
     this.record(() => this.client.exportDocument(item), 'exported');

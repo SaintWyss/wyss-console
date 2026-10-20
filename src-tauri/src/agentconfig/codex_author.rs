@@ -443,6 +443,7 @@ pub fn draft_park(
         removed_at: start,
         unit_text: removed.to_owned(),
         handler_text: String::new(),
+        project: None,
         h0: hash(text.as_bytes()),
         h1: hash(new.as_bytes()),
     };
