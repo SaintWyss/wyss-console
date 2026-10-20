@@ -23,6 +23,7 @@ import {
 import { arch } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyPackageFixtures } from './package-fixtures.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const release = join(root, 'src-tauri', 'target', 'release');
@@ -132,6 +133,8 @@ for (const directory of [
 }
 chmodSync(join(staging, 'share', 'wyss-console', 'package.json'), 0o644);
 const out = join(parent, name);
+// Refuse test fixtures before replacing the previous package artifact.
+verifyPackageFixtures(staging);
 rmSync(out, { recursive: true, force: true });
 renameSync(staging, out);
 console.log(`package: ${out}`);

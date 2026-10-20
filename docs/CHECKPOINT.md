@@ -58,6 +58,24 @@ security verification. Hermes installation, real credential/quota experiments an
 exposure/device enrolment still require specific owner authorisation. No G-INF completion
 claim: E3 remains partial, E5/E6 unresolved.
 
+## Existing branch reconciliation (subsequent 2026-10-19 task)
+
+Santiago authorised integrating valid branch work and explicitly excluded `rama-1`,
+`rama-2` and `rama-3`. Reviewed B1 pure contracts/admission/snapshot/test-fixture work
+was merged (`3f9bf38`), with two reproduced validation defects fixed. The old planning
+audit was merged as historical evidence (`c2fc6c2`). Only fixture-marker packaging
+checks were recovered from the native E2E branch; its disposable HOME/private-systemd
+harness remains excluded. The weaker JavaScript B1 prototype remains excluded after
+reproducing path and export-digest defects. Existing worktrees/branches are preserved.
+
+Validation: frontend 804 tests, Rust 622 library + 291 binary + 1 boundary (12 ignored),
+14 documentation tests; final focused B1 121 tests and all-target clippy passed.
+No production B1 worker or new authority permission was enabled. FX-H01/B1 containment
+and G-INF are still not proven. No GUI/provider behaviour was added or newly accepted;
+the real installed `e17dfc2d8264` GUI/host/terminal and rollback copy are retained.
+See `docs/acceptance/branch-integration-2026-10-19.md` for per-branch decisions and
+the final package/push record.
+
 ## Current testing policy (owner directive, 2026-10-19)
 
 Development and real acceptance use the owner's normal computer, HOME, XDG directories,
