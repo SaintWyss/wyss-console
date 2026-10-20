@@ -17,9 +17,12 @@ use super::{
         step_up_message,
     },
 };
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 
-const MOST_SEEN: usize = 1024;
+/// Request ids remembered, and for how long. A full cache with nothing to forget refuses new
+/// requests: an old id is never forgotten to make room.
+const MOST_SEEN: usize = 65_536;
+const SEEN_SECONDS: u64 = 24 * 3600;
 const MOST_SOURCES: usize = 256;
 const MOST_HOURS: usize = 48;
 const BACKOFF_AFTER: usize = 5;
@@ -36,11 +39,42 @@ pub enum Denied {
 
 /// A request that passed every check. It is journalled before it is returned.
 #[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Its fields are private to this module: only `handle` makes one, so `apply_revoke` cannot be
+/// handed an invented decision (a test-only constructor exists for the tests of the refusals).
 pub struct Allowed {
-    pub device: DeviceId,
-    pub grant: Grant,
-    pub operation: String,
-    pub target: Option<String>,
+    device: DeviceId,
+    grant: Grant,
+    operation: String,
+    target: Option<String>,
+}
+impl Allowed {
+    pub fn device(&self) -> &DeviceId {
+        &self.device
+    }
+    pub fn grant(&self) -> Grant {
+        self.grant
+    }
+    pub fn operation(&self) -> &str {
+        &self.operation
+    }
+    pub fn target(&self) -> Option<&str> {
+        self.target.as_deref()
+    }
+    #[cfg(test)]
+    pub(super) fn forged(
+        device: DeviceId,
+        grant: Grant,
+        operation: &str,
+        target: Option<&str>,
+    ) -> Self {
+        Self {
+            device,
+            grant,
+            operation: operation.to_owned(),
+            target: target.map(str::to_owned),
+        }
+    }
 }
 
 /// ND-13: the native dialog at the host. `None` is a dialog closed or not answered.
@@ -90,7 +124,7 @@ pub struct Gateway<J: Journal, V: StepUpVerifier, R: Random> {
     revoked_keys: Vec<String>,
     offer: Option<Offer>,
     challenges: BTreeMap<String, Challenge>,
-    seen: VecDeque<String>,
+    seen: BTreeMap<String, u64>,
     limiter: Limiter,
     /// Unknown-key attempts, counted per hour: a flood cannot fill the journal.
     unknown_per_hour: BTreeMap<u64, u32>,
@@ -107,7 +141,7 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
             revoked_keys: Vec::new(),
             offer: None,
             challenges: BTreeMap::new(),
-            seen: VecDeque::new(),
+            seen: BTreeMap::new(),
             limiter: Limiter::default(),
             unknown_per_hour: BTreeMap::new(),
             journal,
@@ -307,6 +341,10 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
         }
         if !identifier_ok(&request.request_id, 64)
             || !identifier_ok(&request.operation, 64)
+            || !request
+                .grant
+                .operations()
+                .contains(&request.operation.as_str())
             || !identifier_ok(&request.connection, 64)
             || request
                 .target
@@ -341,9 +379,21 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
             DeviceState::Suspended => return refused(self, &device, Refusal::DeviceSuspended),
             DeviceState::Suspect => return refused(self, &device, Refusal::DeviceSuspect),
         }
-        if self.seen.contains(&request.request_id) {
+        if self.seen.contains_key(&request.request_id) {
+            // The whole request again: if it also carries an answered challenge, that is the
+            // single-use rule broken, and the device is suspect at once.
+            if let Some(step_up) = &request.step_up {
+                if self
+                    .challenges
+                    .get(&step_up.challenge_id)
+                    .is_some_and(|c| c.used && c.device == device.id)
+                {
+                    device.challenge_reused();
+                }
+            }
             return refused(self, &device, Refusal::StaleRequest);
         }
+
         let Some(held) = device
             .grants
             .iter()
@@ -384,13 +434,15 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
                 return refused(self, &device, Refusal::StepUpFailed);
             }
         }
+        self.seen
+            .retain(|_, at| now.saturating_sub(*at) < SEEN_SECONDS);
+        if self.seen.len() >= MOST_SEEN {
+            return refused(self, &device, Refusal::RateLimited);
+        }
         if !self.record(&device, request, now, Outcome::Allowed) {
             return refused(self, &device, Refusal::AuditUnavailable);
         }
-        self.seen.push_back(request.request_id.clone());
-        while self.seen.len() > MOST_SEEN {
-            self.seen.pop_front();
-        }
+        self.seen.insert(request.request_id.clone(), now);
         device.seen(now);
         self.devices.insert(device.id.clone(), device);
         Ok(Allowed {

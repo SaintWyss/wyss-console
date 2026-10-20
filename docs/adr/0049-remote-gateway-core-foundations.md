@@ -34,3 +34,15 @@ independently reviewed, so **not a protection**: it is unreviewed code that noth
 
 25 unit tests in `remote/tests.rs` (RFC 4231 HMAC vectors, each rule above, the refusal order,
 tampering of every signed field, journal-full, 90-day retention). Clippy `-D warnings` clean.
+
+## Independent review (2026-10-20)
+
+A cold review (Codex, via `codex-gsd-check`) of the code against the rules above returned seven findings,
+all fixed with tests that fail on the earlier code: `Allowed` could be built by any caller to revoke a
+device (fields now private; only `handle` makes one); the paired key was not covered by the pairing MAC
+(the proof and the six digits now cover transcript **and** key); an operation was not tied to its grant
+(a closed per-grant table; outside it is not a request); the replay cache forgot ids after 1,024 requests
+(now 24 hours and 65,536 entries, and a full cache refuses instead of forgetting); a replayed whole request
+with an answered challenge did not make the device suspect; the transcript bound was applied after the
+MAC work (now first, and it counts as an attempt); expiry sums could overflow (saturating). A review of
+the reviewed code has not been done, and the gateway remains unreachable.

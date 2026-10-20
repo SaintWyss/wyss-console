@@ -99,7 +99,7 @@ impl Offer {
             offer_id: hex(&id),
             secret_hex: Zeroizing::new(hex(&secret)),
             host_fingerprint: host_fingerprint.to_owned(),
-            expires_at: now + OFFER_SECONDS,
+            expires_at: now.saturating_add(OFFER_SECONDS),
         };
         (
             Self {
@@ -120,7 +120,7 @@ impl Offer {
 
     /// Whether the offer can still be proved.
     pub fn is_open(&self, now: u64) -> bool {
-        self.phase == Phase::Offered && now < self.created_at + OFFER_SECONDS
+        self.phase == Phase::Offered && now < self.created_at.saturating_add(OFFER_SECONDS)
     }
     pub fn is_dead(&self) -> bool {
         matches!(self.phase, Phase::Dead(_))
@@ -136,17 +136,21 @@ impl Offer {
 
     /// The MAC a device makes with the secret over the transcript. The device and the host run the
     /// same function, over the same bytes.
-    pub fn mac_of(secret: &[u8; 16], transcript: &[u8]) -> [u8; 32] {
-        let mut message = b"wyss-pair-proof-v1".to_vec();
+    /// The **device key is inside what the MAC covers**, so a proof made for one key cannot enrol
+    /// another.
+    pub fn mac_of(secret: &[u8; 16], transcript: &[u8], device_key: &[u8]) -> [u8; 32] {
+        let mut message = b"wyss-pair-proof-v2".to_vec();
         field(&mut message, transcript);
+        field(&mut message, device_key);
         hmac_sha256(secret, &message)
     }
 
     /// The six digits both screens show: derived from the same transcript, so that a device that
     /// was reached through someone else's channel shows a different value.
-    pub fn comparison_of(secret: &[u8; 16], transcript: &[u8]) -> String {
-        let mut message = b"wyss-pair-compare-v1".to_vec();
+    pub fn comparison_of(secret: &[u8; 16], transcript: &[u8], device_key: &[u8]) -> String {
+        let mut message = b"wyss-pair-compare-v2".to_vec();
         field(&mut message, transcript);
+        field(&mut message, device_key);
         let digest = hmac_sha256(secret, &message);
         let value = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) % 1_000_000;
         format!("{value:06}")
@@ -155,7 +159,7 @@ impl Offer {
     /// A device presents its proof. The offer is consumed at the **first attempt that proves the
     /// secret**, whatever happens next; three wrong ones kill it.
     pub fn present(&mut self, now: u64, attempt: &Attempt) -> Result<String, Refusal> {
-        if self.phase == Phase::Offered && now >= self.created_at + OFFER_SECONDS {
+        if self.phase == Phase::Offered && now >= self.created_at.saturating_add(OFFER_SECONDS) {
             self.phase = Phase::Dead(Dead::Expired);
         }
         match &self.phase {
@@ -163,12 +167,23 @@ impl Offer {
             Phase::Dead(Dead::Expired) => return Err(Refusal::PairingExpired),
             _ => return Err(Refusal::PairingFailed),
         }
+        // Bounds first, before any work is done over the attacker's bytes; it counts as an attempt.
+        if attempt.device_key.is_empty()
+            || attempt.device_key.len() > MOST_KEY_BYTES
+            || attempt.transcript.len() > MOST_TRANSCRIPT_BYTES
+        {
+            self.attempts += 1;
+            if self.attempts >= MAX_ATTEMPTS {
+                self.phase = Phase::Dead(Dead::Failed);
+            }
+            return Err(Refusal::PairingFailed);
+        }
         // A device that saw another host's key is told so, and the attempt still counts.
         let host_matches = same(
             attempt.host_fingerprint_seen.as_bytes(),
             self.host_fingerprint.as_bytes(),
         );
-        let expected = Self::mac_of(&self.secret, &attempt.transcript);
+        let expected = Self::mac_of(&self.secret, &attempt.transcript, &attempt.device_key);
         let proved = same(&expected, &attempt.mac);
         if !host_matches || !proved {
             self.attempts += 1;
@@ -181,13 +196,6 @@ impl Offer {
                 Refusal::HostKeyMismatch
             });
         }
-        if attempt.device_key.is_empty()
-            || attempt.device_key.len() > MOST_KEY_BYTES
-            || attempt.transcript.len() > MOST_TRANSCRIPT_BYTES
-        {
-            self.phase = Phase::Dead(Dead::Failed);
-            return Err(Refusal::PairingFailed);
-        }
         let (Some(name), Some(platform)) =
             (clean_label(&attempt.name), clean_label(&attempt.platform))
         else {
@@ -195,7 +203,8 @@ impl Offer {
             self.phase = Phase::Dead(Dead::Failed);
             return Err(Refusal::PairingFailed);
         };
-        let comparison = Self::comparison_of(&self.secret, &attempt.transcript);
+        let comparison =
+            Self::comparison_of(&self.secret, &attempt.transcript, &attempt.device_key);
         self.phase = Phase::Proved {
             at: now,
             key_fingerprint: hex(&sha256(&attempt.device_key)),
@@ -221,7 +230,7 @@ impl Offer {
                 device_fingerprint: key_fingerprint.clone(),
                 host_fingerprint: self.host_fingerprint.clone(),
                 comparison: comparison.clone(),
-                expires_at: at + CONFIRM_SECONDS,
+                expires_at: at.saturating_add(CONFIRM_SECONDS),
             }),
             _ => None,
         }
@@ -240,7 +249,7 @@ impl Offer {
         else {
             return Err(Refusal::PairingFailed);
         };
-        if now >= at + CONFIRM_SECONDS || answer != Some(true) {
+        if now >= at.saturating_add(CONFIRM_SECONDS) || answer != Some(true) {
             self.phase = Phase::Dead(Dead::Refused);
             return Err(Refusal::PairingRefused);
         }

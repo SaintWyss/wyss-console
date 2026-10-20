@@ -34,6 +34,24 @@ impl Grant {
         Self::DevicesRevoke,
     ];
 
+    /// The operations a request under this grant may name: a closed table. A request that names an
+    /// operation outside its grant's list is not a request (`Denied::Malformed`), so a dispatcher
+    /// behind the gateway never sees an operation its grant does not cover.
+    pub const fn operations(self) -> &'static [&'static str] {
+        match self {
+            Self::SessionsRead => &["sessions.list", "sessions.get"],
+            Self::ManagedRead => &["managed.list", "managed.get"],
+            Self::ApprovalsRespond => &["approvals.respond", "approvals.defer"],
+            Self::ManagedTurns => &["managed.turn.start", "managed.turn.interrupt"],
+            Self::TerminalRead => &["terminal.attach", "terminal.read"],
+            Self::TerminalWrite => &["terminal.write"],
+            Self::ConfigRead => &["config.list", "config.get"],
+            Self::ConfigRequest => &["config.request"],
+            Self::VaultMetadata => &["vault.list"],
+            Self::DevicesRevoke => &["devices.revoke"],
+        }
+    }
+
     /// Whether a request under this grant needs a fresh signature of the device's presence key
     /// (the "Step-up" column of 16 §5.3): every response, claim, start, request and revocation.
     pub const fn needs_step_up(self) -> bool {

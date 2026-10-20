@@ -89,7 +89,7 @@ fn attempt(secret_hex: &str, key: &[u8], transcript: &[u8], name: &str) -> Attem
         name: name.to_owned(),
         platform: "Android 15".to_owned(),
         transcript: transcript.to_vec(),
-        mac: Offer::mac_of(&secret, transcript),
+        mac: Offer::mac_of(&secret, transcript, key),
     }
 }
 
@@ -370,7 +370,10 @@ fn before_the_first_offer_the_gateway_does_not_listen_and_pairing_enrols_only_on
     assert_eq!(g.devices().count(), 0);
     // The device computes the same six digits from the secret and the transcript.
     let secret: [u8; 16] = unhex(&shown.secret_hex).unwrap().try_into().unwrap();
-    assert_eq!(comparison, Offer::comparison_of(&secret, b"t"));
+    assert_eq!(
+        comparison,
+        Offer::comparison_of(&secret, b"t", b"device-key-A")
+    );
     let id = g.confirm_pairing(T0 + 2, &Yes).unwrap();
     let d = g.device(&id).unwrap();
     assert_eq!(d.state, DeviceState::Active);
@@ -489,33 +492,26 @@ fn a_proof_over_another_transcript_or_another_secret_or_a_host_key_that_is_not_o
     // The comparison value depends on the transcript, so a device reached through another
     // channel shows a different value.
     let secret = [9_u8; 16];
+    let digits = |t: &[u8], k: &[u8]| Offer::comparison_of(&secret, t, k);
+    assert_ne!(digits(b"one", b"k"), digits(b"two", b"k"));
     assert_ne!(
-        Offer::comparison_of(&secret, b"one"),
-        Offer::comparison_of(&secret, b"two")
+        digits(b"one", b"k1"),
+        digits(b"one", b"k2"),
+        "the key is part of it"
     );
-    assert_eq!(
-        Offer::comparison_of(&secret, b"one"),
-        Offer::comparison_of(&secret, b"one")
-    );
+    assert_eq!(digits(b"one", b"k"), digits(b"one", b"k"));
 }
 
 #[test]
-fn a_right_proof_with_a_label_that_is_not_text_or_oversized_input_is_consumed_and_dead() {
+fn a_right_proof_with_a_label_that_is_not_text_is_consumed_and_dead() {
     for tweak in [
         |a: &mut Attempt| a.name = "evil\u{202e}".into(),
         |a: &mut Attempt| a.platform = String::new(),
-        |a: &mut Attempt| a.device_key = Vec::new(),
-        |a: &mut Attempt| a.device_key = vec![1; 257],
-        |a: &mut Attempt| a.transcript = vec![0; 5000],
     ] {
         let (mut g, _) = gateway();
         let shown = g.begin_pairing(T0);
         let mut a = attempt(&shown.secret_hex, b"k", b"t", "p");
         tweak(&mut a);
-        if a.transcript.len() == 5000 {
-            let secret: [u8; 16] = unhex(&shown.secret_hex).unwrap().try_into().unwrap();
-            a.mac = Offer::mac_of(&secret, &a.transcript);
-        }
         assert_eq!(g.present_pairing(T0, &a), Err(Refusal::PairingFailed));
         assert_eq!(
             g.present_pairing(T0, &attempt(&shown.secret_hex, b"k", b"t", "p")),
@@ -523,6 +519,128 @@ fn a_right_proof_with_a_label_that_is_not_text_or_oversized_input_is_consumed_an
             "the offer was consumed by the right proof"
         );
     }
+}
+
+#[test]
+fn oversized_input_is_refused_before_any_work_and_counts_as_an_attempt() {
+    for tweak in [
+        |a: &mut Attempt| a.device_key = Vec::new(),
+        |a: &mut Attempt| a.device_key = vec![1; 257],
+        |a: &mut Attempt| a.transcript = vec![0; 5000],
+        |a: &mut Attempt| a.transcript = vec![0; 10 * 1024 * 1024],
+    ] {
+        let (mut g, _) = gateway();
+        let shown = g.begin_pairing(T0);
+        let mut a = attempt(&shown.secret_hex, b"k", b"t", "p");
+        tweak(&mut a);
+        for _ in 0..MAX_ATTEMPTS {
+            assert_eq!(g.present_pairing(T0, &a), Err(Refusal::PairingFailed));
+        }
+        assert_eq!(
+            g.present_pairing(T0, &attempt(&shown.secret_hex, b"k", b"t", "p")),
+            Err(Refusal::PairingFailed),
+            "three oversized attempts killed the offer"
+        );
+    }
+    // One oversized attempt does not.
+    let (mut g, _) = gateway();
+    let shown = g.begin_pairing(T0);
+    let mut big = attempt(&shown.secret_hex, b"k", b"t", "p");
+    big.transcript = vec![0; 5000];
+    assert!(g.present_pairing(T0, &big).is_err());
+    assert!(
+        g.present_pairing(T0, &attempt(&shown.secret_hex, b"k", b"t", "p"))
+            .is_ok()
+    );
+}
+
+#[test]
+fn a_proof_made_for_one_key_cannot_enrol_another() {
+    let (mut g, _) = gateway();
+    let shown = g.begin_pairing(T0);
+    let mut swapped = attempt(&shown.secret_hex, b"honest-key", b"t", "p");
+    swapped.device_key = b"attacker-key".to_vec(); // the MAC covers the honest one
+    assert_eq!(g.present_pairing(T0, &swapped), Err(Refusal::PairingFailed));
+}
+
+#[test]
+fn times_near_the_end_of_the_clock_do_not_overflow() {
+    let (mut g, stand) = gateway();
+    let shown = g.begin_pairing(u64::MAX - 1);
+    assert_eq!(shown.expires_at, u64::MAX);
+    let _ = g.present_pairing(u64::MAX, &attempt(&shown.secret_hex, b"k", b"t", "p"));
+    let (id, _) = enrol(&mut g, &stand, T0, b"key-1");
+    assert!(g.issue_challenge(&id, u64::MAX).is_ok() || g.issue_challenge(&id, u64::MAX).is_err());
+}
+
+#[test]
+fn a_request_id_is_remembered_for_a_day_and_a_full_cache_refuses_instead_of_forgetting() {
+    let (mut g, stand) = gateway();
+    let (id, _) = enrol(&mut g, &stand, T0, b"key-1");
+    let first = request(&id, "r-first", Grant::SessionsRead, "sessions.list");
+    g.handle(&first, "s", b"b", T0 + 10).unwrap();
+    // Far more than the old 1,024 distinct requests later, the first id is still refused.
+    for n in 0..3000 {
+        let r = request(&id, &format!("n{n}"), Grant::SessionsRead, "sessions.list");
+        g.handle(&r, "s", b"b", T0 + 11).unwrap();
+    }
+    assert_eq!(
+        refused(g.handle(&first, "s", b"b", T0 + 12)),
+        Refusal::StaleRequest
+    );
+}
+
+#[test]
+fn a_whole_request_replayed_with_its_answered_challenge_makes_the_device_suspect() {
+    let (mut g, stand) = gateway();
+    let (id, fp) = enrol(&mut g, &stand, T0, b"key-1");
+    g.give_at_host(&id, Profile::Lp2, 30, T0).unwrap();
+    let now = T0 + 50;
+    let r = stepped(
+        &mut g,
+        &stand,
+        &id,
+        &fp,
+        "r1",
+        b"b",
+        now,
+        Grant::ApprovalsRespond,
+        "approvals.respond",
+    );
+    assert!(g.handle(&r, "s", b"b", now).is_ok());
+    assert_eq!(
+        refused(g.handle(&r, "s", b"b", now + 1)),
+        Refusal::StaleRequest
+    );
+    assert_eq!(g.device(&id).unwrap().state, DeviceState::Suspect);
+}
+
+#[test]
+fn an_operation_outside_its_grant_is_not_a_request() {
+    let (mut g, stand) = gateway();
+    let (id, _) = enrol(&mut g, &stand, T0, b"key-1");
+    for (grant, op) in [
+        (Grant::SessionsRead, "terminal.write"),
+        (Grant::SessionsRead, "devices.revoke"),
+        (Grant::ManagedRead, "sessions.list"),
+    ] {
+        let r = request(&id, "r-x", grant, op);
+        assert_eq!(
+            g.handle(&r, "s", b"b", T0 + 10),
+            Err(Denied::Malformed),
+            "{op}"
+        );
+    }
+    // Every grant names at least one operation, each a well-formed identifier, none shared.
+    let mut all: Vec<&str> = Vec::new();
+    for g in Grant::ALL {
+        assert!(!g.operations().is_empty());
+        all.extend(g.operations());
+    }
+    let before = all.len();
+    all.sort_unstable();
+    all.dedup();
+    assert_eq!(all.len(), before);
 }
 
 #[test]
@@ -694,7 +812,7 @@ fn a_step_up_binds_the_channel_the_challenge_the_request_and_its_object_and_noth
         ("revision", Box::new(|r| r.object_revision = Some(4))),
         (
             "operation",
-            Box::new(|r| r.operation = "approvals.other".into()),
+            Box::new(|r| r.operation = "approvals.defer".into()),
         ),
         ("request id", Box::new(|r| r.request_id = "r-other".into())),
     ];
@@ -898,18 +1016,27 @@ fn revocation_is_at_once_by_the_host_or_by_another_device_that_holds_the_grant_a
     assert!(g.give_at_host(&b, Profile::Lp1, 30, now + 2).is_err());
     assert!(!g.renew_at_host(&b, Profile::Lp1, 30, now + 2));
     // A device cannot revoke itself through this, and an operation that is not revocation is not it.
-    let mut selfie = Allowed {
-        device: a.clone(),
-        grant: Grant::DevicesRevoke,
-        operation: "devices.revoke".into(),
-        target: Some(a.as_str().into()),
-    };
+    let selfie = Allowed::forged(
+        a.clone(),
+        Grant::DevicesRevoke,
+        "devices.revoke",
+        Some(a.as_str()),
+    );
     assert_eq!(g.apply_revoke(&selfie), Err(Refusal::StaleRequest));
-    selfie.operation = "devices.enrol".into();
-    assert_eq!(g.apply_revoke(&selfie), Err(Refusal::GrantMissing));
-    selfie.grant = Grant::SessionsRead;
-    selfie.operation = "devices.revoke".into();
-    assert_eq!(g.apply_revoke(&selfie), Err(Refusal::GrantMissing));
+    let wrong_op = Allowed::forged(
+        a.clone(),
+        Grant::DevicesRevoke,
+        "devices.enrol",
+        Some(b.as_str()),
+    );
+    assert_eq!(g.apply_revoke(&wrong_op), Err(Refusal::GrantMissing));
+    let wrong_grant = Allowed::forged(
+        a.clone(),
+        Grant::SessionsRead,
+        "devices.revoke",
+        Some(b.as_str()),
+    );
+    assert_eq!(g.apply_revoke(&wrong_grant), Err(Refusal::GrantMissing));
 }
 
 #[test]

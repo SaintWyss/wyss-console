@@ -71,7 +71,7 @@ impl Challenge {
         self.nonce
     }
     pub fn expired(&self, now: u64) -> bool {
-        now >= self.issued_at + CHALLENGE_SECONDS
+        now >= self.issued_at.saturating_add(CHALLENGE_SECONDS)
     }
 }
 
