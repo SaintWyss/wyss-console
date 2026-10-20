@@ -13,6 +13,11 @@ use rusqlite::Connection;
 use std::os::unix::fs::DirBuilderExt;
 
 pub(crate) fn v7_with_completed_turn() -> Connection {
+    v7_with_sessions(0)
+}
+
+/// The same image plus `extra` independent prepared sessions (no binding, no work).
+pub(crate) fn v7_with_sessions(extra: usize) -> Connection {
     let root = std::env::temp_dir().join(format!("wyss-f8-fixture-{}", uuid().as_str()));
     std::fs::DirBuilder::new()
         .mode(0o700)
@@ -100,6 +105,15 @@ pub(crate) fn v7_with_completed_turn() -> Connection {
             expected_revision: lease.revision,
         }))
         .unwrap();
+    for _ in 0..extra {
+        store
+            .apply(&Operation::Prepare(Prepare {
+                intent_id: uuid(),
+                adapter_id: RuntimeTarget::codex().adapter_id,
+                runtime_kind: RuntimeTarget::codex().runtime_kind,
+            }))
+            .unwrap();
+    }
     let _ = std::fs::remove_dir_all(&root);
     store.conn
 }

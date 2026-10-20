@@ -22,6 +22,9 @@ struct Entry {
 }
 pub struct Registry {
     authority: WireUuid,
+    /// Active-slot bound. The production constructor always yields the reviewed bound of one;
+    /// no API takes a larger, client-selected or configured value.
+    limit: usize,
     entries: BTreeMap<String, Entry>,
     // Lifetime anti-reuse history is bounded independently of active slots.
     used: BTreeSet<String>,
@@ -32,6 +35,7 @@ impl Registry {
         super::protocol::canonical(authority.as_str())?;
         Ok(Self {
             authority,
+            limit: 1,
             entries: BTreeMap::new(),
             used: BTreeSet::new(),
             generations: BTreeMap::new(),
@@ -65,7 +69,7 @@ impl Registry {
         if reference.authority_instance_id != self.authority {
             return Err(E::CorrelationError);
         }
-        if !self.entries.is_empty()
+        if self.entries.len() >= self.limit
             || self.used.len() >= 4096
             || (!self
                 .generations
@@ -75,6 +79,10 @@ impl Registry {
             return Err(E::CapacityExceeded);
         }
         let key = reference.managed_session_id.as_str().to_owned();
+        // A session's previous launch keeps its slot until it is reaped; it is never replaced.
+        if self.entries.contains_key(&key) {
+            return Err(E::CapacityExceeded);
+        }
         if self.used.contains(reference.runtime_instance_id.as_str())
             || self
                 .generations
@@ -150,6 +158,16 @@ impl Registry {
             .as_ref()
             .filter(|_| e.phase == Phase::Ready)
             .ok_or(E::GateDenied)
+    }
+    /// Isolation tests only: exercises the multi-runtime logic without changing production
+    /// capacity, which stays one until separate evidence supports an owner-approved increase.
+    #[cfg(test)]
+    pub(crate) fn with_test_limit(mut self, limit: usize) -> Self {
+        self.limit = limit;
+        self
+    }
+    pub fn has_free_slot(&self) -> bool {
+        self.entries.len() < self.limit
     }
     pub fn active_slots(&self) -> usize {
         self.entries.len()

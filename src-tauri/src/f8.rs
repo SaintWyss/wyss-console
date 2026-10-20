@@ -3,10 +3,18 @@
 #[cfg(target_os = "linux")]
 pub mod allocator;
 pub mod audit;
+pub mod budget;
+#[cfg(target_os = "linux")]
+pub mod engine;
 #[cfg(target_os = "linux")]
 pub mod migration;
+#[cfg(target_os = "linux")]
+pub mod ownership;
 pub mod protocol;
 pub mod registry;
+pub mod scheduler;
+#[cfg(target_os = "linux")]
+pub mod staging;
 #[cfg(target_os = "linux")]
 pub mod v8;
 
