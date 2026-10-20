@@ -68,6 +68,8 @@ export const FAILURE_TEXT: Record<string, string> = {
   unavailable:
     'The Console has no private folder to keep native sessions in, so it cannot start agents.',
   request_invalid: 'The request was not valid.',
+  host_outdated:
+    'The terminal host that is running is older than this window and cannot keep a reasoning effort. Close your terminals and restart the app so it runs again, or leave the effort empty.',
   export_failed: 'The file could not be written.',
   profile_name_invalid:
     'The name must be 1 to 60 characters, without control characters.',

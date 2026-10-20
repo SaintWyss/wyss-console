@@ -17,6 +17,7 @@ Recheck both heads and `git status` before writing or pushing.
 | F4a OpenCode inventory and switches         | done    | ADR 0041; real-file reversible test; `docs/acceptance/f4a-f5-f6-f1b-2026-10-19.md`                                |
 | F5 hook/MCP authoring (subset)              | done    | ADR 0042, 0044; reviews; real config and real window (same record)                                                |
 | F6a models (managed observed, native)       | done    | ADR 0043; managed choice not built                                                                                |
+| F6 catalogue view, `model/rerouted`, effort | done    | ADR 0048; `docs/acceptance/f6-models-2026-10-20.md`; new authority behaviour proven by tests only                 |
 | F1b research E1–E8                          | partial | `docs/research/inference-isolation-2026-10-19.md`: I4 recommended, not proven; G-INF not implemented              |
 | F14 / F11a in the real window               | done    | same record, "In the real window"                                                                                 |
 
@@ -49,6 +50,15 @@ authority guarantees. See `docs/acceptance/remaining-roadmap-2026-10-19.md`.
 - The mistakenly started inherited private-systemd lifecycle run was interrupted. Its
   exact private manager was identified and stopped, and its generated fixture removed.
   Do not repeat that suite under the current owner policy.
+
+## F6 increment (2026-10-20)
+
+Models view (offered / configured / selected / reported, with provenance and unknown entitlement),
+`model/rerouted` tolerated for exactly the running turn, native reasoning effort in profiles
+(ADR 0048). Independently reviewed; its fix is in. The new authority behaviour is **not** running on
+this computer (the installed authority is older and replacing it interrupts managed sessions); the
+host keeps working with an older host through feature negotiation. Managed model choice is not
+built (SG-12, DN-42).
 
 ## Next unblocked engineering
 

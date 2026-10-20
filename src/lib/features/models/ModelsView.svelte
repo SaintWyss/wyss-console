@@ -151,10 +151,13 @@
             >{row.profile}{row.template ? ' (template)' : ''}</span
           >
           <span class="event-meta">
-            {row.agents} · Model: {row.model ?? 'the agent’s own choice'} · Effort:
-            {row.effort ?? 'the agent’s own choice'}{row.inherited.length
-              ? ` · inherited: ${row.inherited.join(', ')}`
-              : ''}
+            {row.agents} · Model: {row.model ??
+              (row.modelFrom
+                ? `inherited from ${row.modelFrom}`
+                : 'the agent’s own choice')} · Effort: {row.effort ??
+              (row.effortFrom
+                ? `inherited from ${row.effortFrom}`
+                : 'the agent’s own choice')}
           </span>
         </li>
       {/each}

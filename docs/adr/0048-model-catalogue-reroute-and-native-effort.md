@@ -73,6 +73,13 @@ and this fix are in `docs/acceptance/f6-models-2026-10-20.md`.
 
 ## Compatibility
 
+The terminal host outlives the window and is kept running across a GUI-only upgrade
+(`install --keep-host`), so a new window can meet an older host. `hello` now also lists the
+host's `features` (`profile_effort`); a window refuses to send a profile that carries an effort to
+a host without it and says so, because the older host would answer an unreadable request. A body
+without an effort omits the key and goes to an older host unchanged, so stored profiles keep their
+bytes and version hashes. Found in the real window.
+
 Window page schema stays 4: the three reroute fields appear only for a rerouted observation, so
 every earlier shape is byte-identical. An older desktop with a newer authority would refuse a
 rerouted observation it cannot read; both ship in one package.

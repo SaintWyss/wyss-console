@@ -7,6 +7,7 @@ import {
 } from '../src/lib/contracts/native';
 import { NativeController } from '../src/lib/features/native/controller';
 import {
+  failureText,
   restorable,
   folderName,
   formatBytes,
@@ -376,6 +377,12 @@ describe('the model of a native session', () => {
       'not read yet',
     );
     expect(facts.inUse).toBe('not reported by the agent');
+  });
+  it('says in plain words that an older terminal host cannot keep an effort, and a code it has no words for is never shown raw', () => {
+    expect(failureText('host_outdated')).toContain('older than this window');
+    expect(failureText('host_outdated')).toContain('leave the effort empty');
+    expect(failureText('profile_effort_invalid')).toContain('letters, digits');
+    expect(failureText('some_unknown_code')).not.toContain('some_unknown_code');
   });
   it('offers Claude Code’s own command to change it, and none for Codex, whose is not verified', () => {
     expect(switchHint('claude_code')).toContain('/model');

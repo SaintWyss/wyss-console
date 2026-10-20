@@ -290,6 +290,9 @@ impl HostCore {
                 "version": env!("CARGO_PKG_VERSION"),
                 "pid": std::process::id(),
                 "native": self.native.is_some(),
+                // What this host accepts beyond protocol 1, by name, so a newer window can tell
+                // an older host that is kept running across an upgrade from one that is not.
+                "features": super::protocol::FEATURES,
             })),
 
             // ---- terminals ----

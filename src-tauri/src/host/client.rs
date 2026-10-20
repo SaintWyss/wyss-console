@@ -128,6 +128,16 @@ impl HostLink {
             .clone()
     }
 
+    /// Whether the host in use says it has `feature`. A host from before features existed
+    /// says nothing, and so has none.
+    pub fn has_feature(&self, feature: &str) -> bool {
+        self.call("hello", Value::Null).is_ok_and(|hello| {
+            hello["features"]
+                .as_array()
+                .is_some_and(|names| names.iter().any(|n| n == feature))
+        })
+    }
+
     /// Whether the terminals live outside this window's process.
     pub fn is_remote(&self) -> bool {
         matches!(*self.mode(), Mode::Remote(_))

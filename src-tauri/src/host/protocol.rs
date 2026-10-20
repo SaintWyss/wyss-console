@@ -8,6 +8,9 @@ use std::io::{self, Read, Write};
 
 /// Changed whenever a request or an answer changes shape.
 pub const PROTOCOL: u32 = 1;
+/// Additions to protocol 1 that a window may need to ask about before it relies on them.
+/// A feature is never removed; a host without the name does not have it.
+pub const FEATURES: [&str; 1] = ["profile_effort"];
 pub const MAX_FRAME: usize = 1024 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]

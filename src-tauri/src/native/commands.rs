@@ -203,10 +203,26 @@ pub async fn native_profiles(link: State<'_, HostLink>) -> Answer {
     blocking(move || link.call("profiles", Value::Null)).await
 }
 
+/// What a profile body needs of the host beyond protocol 1: nothing for a body that existed
+/// before efforts did, so that an older host kept running across an upgrade still takes it.
+pub(crate) fn needed_feature(body: &Body) -> Option<&'static str> {
+    body.effort.is_some().then_some("profile_effort")
+}
+
+/// Says so plainly when the host that is running cannot keep what the body carries, instead of
+/// letting it answer with a request it does not understand.
+fn host_can_keep(link: &HostLink, body: &Body) -> Result<(), HostError> {
+    match needed_feature(body) {
+        Some(feature) if !link.has_feature(feature) => Err(HostError::new("host_outdated")),
+        _ => Ok(()),
+    }
+}
+
 #[tauri::command]
 pub async fn native_profile_create(link: State<'_, HostLink>, body: Body) -> Answer {
     let link = link.inner().clone();
     blocking(move || {
+        host_can_keep(&link, &body)?;
         link.call(
             "profile_create",
             serde_json::to_value(body).map_err(|_| HostError::new("internal"))?,
@@ -227,6 +243,7 @@ pub async fn native_profile_save(link: State<'_, HostLink>, request: SaveRequest
     profile_id(&request.id)?;
     let link = link.inner().clone();
     blocking(move || {
+        host_can_keep(&link, &request.body)?;
         link.call(
             "profile_save",
             json!({"id": request.id, "body": request.body}),

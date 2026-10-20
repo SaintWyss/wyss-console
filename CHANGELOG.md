@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-20 — Models view, catalogue offers, `model/rerouted`, native effort (F6 increment)
+
+- **Models** view: what the managed runtime offers (default, efforts, replacement marking,
+  completeness, provenance, "listing is not entitlement"), what the agents' files configure, what
+  profiles select and what a runtime reported in use; never merged (ADR 0048).
+- `model/rerouted` is accepted for exactly the running turn and exactly its schema; everything else
+  stays an isolation violation. Recorded in memory only. An external review's one finding is fixed.
+- Profiles carry a reasoning effort, passed per agent (`--effort`; `-c model_reasoning_effort`), and a
+  terminal host older than the window is detected instead of failing opaquely.
+
 ## 2026-10-20 — Create and delete instruction files and skills (F5 increment)
 
 - **New instruction file…** creates a Claude Code skill/rule/`CLAUDE.md`, a Codex skill

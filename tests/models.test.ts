@@ -181,6 +181,7 @@ describe('configured, selected and observed are three lists', () => {
       setting('effortLevel', 'high', 'claude_code'),
       setting('model_reasoning_effort', 'low', 'codex'),
       setting('hooks', 'x', 'claude_code', { kind: 'hook' } as never),
+      setting('provider deepseek', 'x', 'opencode'),
     ]);
     expect(rows.map((r) => [r.providerName, r.key, r.value])).toEqual([
       ['Claude Code', 'model', 'opus'],
@@ -196,21 +197,40 @@ describe('configured, selected and observed are three lists', () => {
         ?.value,
     ).toBe('not shown here');
   });
-  it('shows what a profile would pass, and which fields it inherits', () => {
+  it('shows what a profile would pass, and says by whom a field it does not name is inherited', () => {
     const all = profiles();
     const mine = all.find((p) => !p.template)!;
     mine.body.effort = 'high';
-    mine.from = { model: mine.id, effort: 'c'.repeat(32) };
-    const rows = selectedRows(all);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      profile: 'Mine',
-      model: 'sonnet',
-      effort: 'high',
-      inherited: ['effort'],
-      template: false,
+    // It names its own model and effort: nothing is inherited, whatever the source says.
+    mine.from = { model: mine.body.name, effort: mine.body.name };
+    expect(selectedRows(all)).toEqual([
+      {
+        profile: 'Mine',
+        agents: 'Claude Code · Codex',
+        model: 'sonnet',
+        effort: 'high',
+        modelFrom: null,
+        effortFrom: null,
+        template: false,
+      },
+    ]);
+    // A profile that names neither itself but extends one that does.
+    const child = structuredClone(mine);
+    child.id = 'c'.repeat(32);
+    child.body.name = 'Child';
+    child.body.model = null;
+    child.body.effort = null;
+    child.from = { model: 'Mine', effort: 'Mine' };
+    const rows = selectedRows([mine, child]);
+    expect(rows[1]).toMatchObject({
+      profile: 'Child',
+      model: null,
+      modelFrom: 'Mine',
+      effortFrom: 'Mine',
     });
-    // A profile that names neither is not a selection.
+    // A profile that names nothing and inherits nothing is not a selection.
+    child.from = {};
+    expect(selectedRows([child])).toEqual([]);
     expect(selectedRows(all.filter((p) => p.template))).toEqual([]);
   });
   it('shows only what a runtime reported for an attached session, in the Sessions view’s words', () => {

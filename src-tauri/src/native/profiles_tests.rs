@@ -331,3 +331,19 @@ fn an_effort_is_inherited_like_a_model_and_the_nearer_profile_wins() {
     ]);
     assert_eq!(alone.body.effort.as_deref(), Some("low"));
 }
+
+#[test]
+fn only_a_body_that_carries_an_effort_needs_the_newer_host() {
+    use super::commands::needed_feature;
+    // Everything that existed before efforts goes to an older host, kept across an upgrade.
+    assert_eq!(needed_feature(&body("p")), None);
+    let mut with_model = body("p");
+    with_model.model = Some("sonnet".into());
+    assert_eq!(needed_feature(&with_model), None);
+    let mut with_effort = body("p");
+    with_effort.effort = Some("high".into());
+    assert_eq!(needed_feature(&with_effort), Some("profile_effort"));
+    // …and what it would send an older host for a body without an effort has no new key.
+    let sent = serde_json::to_value(&with_model).unwrap();
+    assert!(sent.get("effort").is_none(), "{sent}");
+}

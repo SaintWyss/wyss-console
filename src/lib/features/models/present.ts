@@ -52,7 +52,7 @@ export function provenance(catalogue: ModelCatalogue): string {
   const version = catalogue.runtime_version
     ? ` (version ${catalogue.runtime_version})`
     : '';
-  return `Listed once by the managed Codex runtime${version} when it started, in ${catalogue.mode === 'local_tools' ? 'Local Tools' : 'Inference'}. Read from the authority at ${readAt(catalogue.read_at)}.`;
+  return `Listed once by the managed Codex runtime${version} when it started, in ${catalogue.mode === 'local_tools' ? 'Local Tools' : 'Inference'}. Read from the authority at ${readAt(catalogue.read_at).replace(/\.$/, '')}.`;
 }
 
 /** Whether the list is the whole of what the runtime listed. Said only when it is known. */
@@ -151,41 +151,67 @@ export function configuredRows(
   items: readonly ConfigItem[] | null,
 ): ConfiguredRow[] {
   if (items === null) return [];
-  return items
-    .filter((i) => i.kind === 'model_preference')
-    .map((i) => ({
-      provider: i.provider,
-      providerName: PROVIDER_LABEL[i.provider],
-      key: i.name,
-      value: i.detail?.kind === 'text' ? i.detail.value.text : 'not shown here',
-      source: SOURCE_LABEL[i.source],
-      scope: SCOPE_LABEL[i.scope],
-    }));
+  return (
+    items
+      // OpenCode's provider entries are options of a provider, not a model setting.
+      .filter(
+        (i) => i.kind === 'model_preference' && !i.name.startsWith('provider'),
+      )
+      .map((i) => ({
+        provider: i.provider,
+        providerName: PROVIDER_LABEL[i.provider],
+        key: i.name,
+        value:
+          i.detail?.kind === 'text' ? i.detail.value.text : 'not shown here',
+        source: SOURCE_LABEL[i.source],
+        scope: SCOPE_LABEL[i.scope],
+      }))
+  );
 }
 
 export interface SelectedRow {
   profile: string;
   agents: string;
+  /** What the profile itself names; null when it names none. */
   model: string | null;
   effort: string | null;
-  inherited: string[];
+  /** When the profile names none itself: the profile it takes the field from. */
+  modelFrom: string | null;
+  effortFrom: string | null;
   template: boolean;
 }
 
-/** What each profile would pass when a session starts with it (a flag, never a check). */
+/**
+ * What each profile would pass when a session starts with it (a flag, never a check). A value the
+ * profile does not name itself but takes from a profile it extends is said as inherited, by the
+ * name of that profile: the value itself is shown in the profile it comes from.
+ */
 export function selectedRows(profiles: readonly Profile[]): SelectedRow[] {
+  const from = (p: Profile, field: 'model' | 'effort'): string | null => {
+    const source = p.from[field];
+    return p.body[field] === null &&
+      source !== undefined &&
+      source !== p.body.name
+      ? source
+      : null;
+  };
   return profiles
-    .filter((p) => p.body.model !== null || p.body.effort !== null)
     .map((p) => ({
       profile: p.body.name,
       agents: p.body.applies_to.map((a) => AGENT_LABEL[a]).join(' · '),
       model: p.body.model,
       effort: p.body.effort,
-      inherited: ['model', 'effort'].filter(
-        (field) => p.from[field] !== undefined && p.from[field] !== p.id,
-      ),
+      modelFrom: from(p, 'model'),
+      effortFrom: from(p, 'effort'),
       template: p.template,
-    }));
+    }))
+    .filter(
+      (row) =>
+        row.model !== null ||
+        row.effort !== null ||
+        row.modelFrom !== null ||
+        row.effortFrom !== null,
+    );
 }
 
 export const SELECTED_NOTE =
