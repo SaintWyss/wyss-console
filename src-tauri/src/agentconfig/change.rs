@@ -9,6 +9,11 @@ use serde::{Deserialize, Serialize};
 pub enum Operation {
     /// An instruction file reviewed in the native editor, with an exact sealed inverse.
     EditDocument,
+    /// A new instruction file or skill, where there was none. Undone by removing it.
+    CreateDocument,
+    /// An instruction file or skill is removed, its exact bytes kept sealed. Undone by
+    /// putting it back where it was.
+    DeleteDocument,
     /// Claude Code has no per-hook switch: the handler leaves the file and is kept.
     ParkHook,
     /// Puts a parked handler back where it was.

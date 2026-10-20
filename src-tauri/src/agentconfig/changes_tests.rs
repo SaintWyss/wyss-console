@@ -4442,3 +4442,749 @@ fn instruction_template_import_is_only_native_editor_input_until_a_separate_plan
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), "outside");
 }
+
+// ---- F5: absent-aware creation and deletion -----------------------------------------------
+
+const SKILL_TEXT: &str =
+    "---\nname: fresh\ndescription: Use when testing creation\n---\n\nBody café\r\n";
+
+fn create_document(
+    world: &World,
+    source: SourceKey,
+    name: &str,
+    text: &str,
+) -> Result<super::changes::PlanView, ChangeFailure> {
+    world
+        .service
+        .plan_authored(super::changes::Authoring::CreateDocument {
+            source,
+            name: name.to_owned(),
+            text: text.to_owned(),
+        })
+}
+
+fn doc_path(world: &World, source: SourceKey, name: &str) -> PathBuf {
+    let env = Environment {
+        home: world.home.clone(),
+        claude_config_dir: None,
+        codex_home: None,
+        project: None,
+        system: world.base.join("etc"),
+        declared_writers: Vec::new(),
+    };
+    super::document::Target {
+        source,
+        name: name.to_owned(),
+    }
+    .path(&env)
+    .unwrap()
+}
+
+fn ensure_provider_dirs(world: &World) {
+    fs::create_dir_all(world.home.join(".codex")).unwrap();
+    fs::create_dir_all(world.home.join(".config/opencode")).unwrap();
+}
+
+#[test]
+fn creating_an_absent_instruction_file_is_undone_to_true_absence_for_every_kind() {
+    for (source, name, text, folders) in [
+        (SourceKey::ClaudeUserSkills, "fresh", SKILL_TEXT, 2usize),
+        (
+            SourceKey::ClaudeUserRules,
+            "rules/new.md",
+            "rule café\r\n",
+            1,
+        ),
+        (SourceKey::ClaudeUserRules, "CLAUDE.md", "memory\n", 0),
+        (SourceKey::CodexUserRules, "AGENTS.md", "codex\n", 0),
+        (
+            SourceKey::CodexUserRules,
+            "AGENTS.override.md",
+            "override\n",
+            0,
+        ),
+        (SourceKey::OpencodeUserRules, "AGENTS.md", "opencode\n", 0),
+        (SourceKey::CodexUserSkills, "fresh", SKILL_TEXT, 2),
+    ] {
+        let world = World::new(SETTINGS);
+        ensure_provider_dirs(&world);
+        fs::create_dir_all(world.home.join(".agents")).unwrap();
+        // `skills/` does not exist for the two-folder case, as on a new account.
+        if folders == 2 && source == SourceKey::ClaudeUserSkills {
+            fs::remove_dir_all(world.home.join(".claude/skills")).unwrap();
+        }
+        let path = doc_path(&world, source, name);
+        assert!(!path.exists(), "{source:?} {name}: absent to begin with");
+        let plan = create_document(&world, source, name, text).unwrap();
+        assert_eq!(plan.operation, Operation::CreateDocument);
+        assert!(plan.needs_native_dialog);
+        assert_eq!(plan.storage, Some(Protection::Sealed));
+        assert!(!serde_json::to_string(&plan).unwrap().contains("café"));
+        assert!(!path.exists(), "planning must not touch the disk");
+        let done = world.service.apply(&plan.id).unwrap();
+        assert_eq!(done.outcome, Outcome::Applied, "{source:?} {name}");
+        assert_eq!(fs::read(&path).unwrap(), text.as_bytes());
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let back = world.service.undo(&done.change).unwrap();
+        assert!(back.needs_native_dialog);
+        assert_eq!(
+            world.service.apply(&back.id).unwrap().outcome,
+            Outcome::Applied,
+            "{source:?} {name}"
+        );
+        assert!(!path.exists(), "{source:?} {name}: absence restored");
+        if folders == 2 {
+            let skills = if source == SourceKey::CodexUserSkills {
+                world.home.join(".agents/skills")
+            } else {
+                world.home.join(".claude/skills")
+            };
+            assert!(!skills.exists(), "folders made by the change go with it");
+            assert!(world.home.join(".agents").exists());
+        } else if folders == 1 {
+            assert!(!world.home.join(".claude/rules").exists());
+        }
+        assert!(world.home.join(".claude").exists());
+        assert_eq!(world.file(), SETTINGS);
+        assert!(world.leftovers().is_empty());
+    }
+}
+
+#[test]
+fn an_empty_file_is_not_an_absent_one() {
+    let world = World::new(SETTINGS);
+    let path = doc_path(&world, SourceKey::ClaudeUserRules, "rules/empty.md");
+    let plan = create_document(&world, SourceKey::ClaudeUserRules, "rules/empty.md", "").unwrap();
+    let done = world.service.apply(&plan.id).unwrap();
+    assert_eq!(done.outcome, Outcome::Applied);
+    assert!(path.exists());
+    assert_eq!(fs::metadata(&path).unwrap().len(), 0);
+    // An empty file exists: creating it again is refused, not "already done".
+    assert_eq!(
+        create_document(&world, SourceKey::ClaudeUserRules, "rules/empty.md", "x").unwrap_err(),
+        ChangeFailure::AlreadyExists
+    );
+    // And it is undone to absence, not to emptiness.
+    let back = world.service.undo(&done.change).unwrap();
+    assert_eq!(
+        world.service.apply(&back.id).unwrap().outcome,
+        Outcome::Applied
+    );
+    assert!(!path.exists());
+    // Deleting an existing empty file puts back an empty file.
+    let (item, path) = document_fixture(&world, SourceKey::ClaudeUserRules, "rules/zero.md", "");
+    let plan = world
+        .service
+        .plan(Operation::DeleteDocument, &item)
+        .unwrap();
+    let removed = world.service.apply(&plan.id).unwrap();
+    assert_eq!(removed.outcome, Outcome::Applied);
+    assert!(!path.exists());
+    let back = world.service.undo(&removed.change).unwrap();
+    assert_eq!(
+        world.service.apply(&back.id).unwrap().outcome,
+        Outcome::Applied
+    );
+    assert_eq!(fs::metadata(&path).unwrap().len(), 0);
+}
+
+#[test]
+fn creation_never_overwrites_or_follows_what_already_has_the_name() {
+    let world = World::new(SETTINGS);
+    let rules = world.home.join(".claude/rules");
+    fs::create_dir_all(&rules).unwrap();
+    // A real file, a dangling link, a link to a file elsewhere, a directory.
+    fs::write(rules.join("real.md"), "theirs").unwrap();
+    symlink(world.base.join("nowhere"), rules.join("dangling.md")).unwrap();
+    let outside = world.base.join("victim");
+    fs::write(&outside, "do not touch").unwrap();
+    symlink(&outside, rules.join("link.md")).unwrap();
+    fs::create_dir(rules.join("dir.md")).unwrap();
+    for name in ["real.md", "dangling.md", "link.md", "dir.md"] {
+        assert_eq!(
+            create_document(
+                &world,
+                SourceKey::ClaudeUserRules,
+                &format!("rules/{name}"),
+                "x"
+            )
+            .unwrap_err(),
+            ChangeFailure::AlreadyExists,
+            "{name}"
+        );
+    }
+    assert_eq!(fs::read(rules.join("real.md")).unwrap(), b"theirs");
+    assert_eq!(fs::read(&outside).unwrap(), b"do not touch");
+    assert!(!world.base.join("nowhere").exists());
+}
+
+#[test]
+fn a_file_that_appears_between_plan_and_apply_is_never_replaced() {
+    let world = World::new(SETTINGS);
+    let path = doc_path(&world, SourceKey::ClaudeUserRules, "rules/race.md");
+    // Before apply starts.
+    let plan =
+        create_document(&world, SourceKey::ClaudeUserRules, "rules/race.md", "mine").unwrap();
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, "theirs").unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::ChangedOutside);
+    assert_eq!(fs::read(&path).unwrap(), b"theirs");
+    fs::remove_file(&path).unwrap();
+    // In the instant between the last look and the entry of the name.
+    let plan =
+        create_document(&world, SourceKey::ClaudeUserRules, "rules/race.md", "mine").unwrap();
+    let target = path.clone();
+    super::writer::seam::on_before_swap(move || fs::write(&target, "provider").unwrap());
+    assert_eq!(applied(&world, &plan), Outcome::ChangedOutside);
+    assert_eq!(fs::read(&path).unwrap(), b"provider");
+    assert!(
+        world.service.records().is_empty(),
+        "no record for a file never made"
+    );
+    let names: Vec<_> = fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["race.md".to_owned()],
+        "no temporary file is left"
+    );
+}
+
+#[test]
+fn creation_refuses_a_linked_or_foreign_or_untrusted_place_and_bad_names() {
+    let world = World::new(SETTINGS);
+    // `rules` is a link to somewhere else: nothing is written through it.
+    let elsewhere = world.base.join("elsewhere");
+    fs::create_dir(&elsewhere).unwrap();
+    symlink(&elsewhere, world.home.join(".claude/rules")).unwrap();
+    assert_eq!(
+        create_document(&world, SourceKey::ClaudeUserRules, "rules/x.md", "x").unwrap_err(),
+        ChangeFailure::NotWritable
+    );
+    assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0);
+    fs::remove_file(world.home.join(".claude/rules")).unwrap();
+    // A folder anyone can write is not a place for a new instruction.
+    fs::create_dir(world.home.join(".claude/rules")).unwrap();
+    fs::set_permissions(
+        world.home.join(".claude/rules"),
+        fs::Permissions::from_mode(0o777),
+    )
+    .unwrap();
+    assert_eq!(
+        create_document(&world, SourceKey::ClaudeUserRules, "rules/x.md", "x").unwrap_err(),
+        ChangeFailure::NotWritable
+    );
+    fs::remove_dir(world.home.join(".claude/rules")).unwrap();
+    for bad in [
+        "rules/../x.md",
+        "rules/a/b.md",
+        "rules/.hidden.md",
+        "../CLAUDE.md",
+        "/etc/passwd",
+        "rules/x.txt",
+        "rules/\u{202e}x.md",
+        "",
+    ] {
+        assert_eq!(
+            create_document(&world, SourceKey::ClaudeUserRules, bad, "x").unwrap_err(),
+            ChangeFailure::NotSupported,
+            "{bad:?}"
+        );
+    }
+    for bad in ["..", ".hidden", "a/b", "a\0b", ""] {
+        assert_eq!(
+            create_document(&world, SourceKey::ClaudeUserSkills, bad, SKILL_TEXT).unwrap_err(),
+            ChangeFailure::NotSupported,
+            "{bad:?}"
+        );
+    }
+    // Only a closed set of sources, and a provider folder that is not there is not made.
+    assert_eq!(
+        create_document(&world, SourceKey::ClaudeUserSettings, "settings.json", "{}").unwrap_err(),
+        ChangeFailure::NotSupported
+    );
+    assert_eq!(
+        create_document(&world, SourceKey::CodexUserRules, "AGENTS.md", "x").unwrap_err(),
+        ChangeFailure::NotSupported
+    );
+    assert!(!world.home.join(".codex").exists());
+}
+
+#[test]
+fn a_new_skill_needs_the_front_matter_a_provider_reads_and_text_is_checked() {
+    let world = World::new(SETTINGS);
+    for text in [
+        "no front matter",
+        "---\nname: x\n---\n",
+        "---\ndescription: \n---\n",
+        "---\ndescription: d\n",
+    ] {
+        assert_eq!(
+            create_document(&world, SourceKey::ClaudeUserSkills, "fresh", text).unwrap_err(),
+            ChangeFailure::InvalidEntry,
+            "{text:?}"
+        );
+    }
+    let big = "x".repeat(super::document::MOST_BYTES + 1);
+    assert_eq!(
+        create_document(&world, SourceKey::ClaudeUserRules, "rules/big.md", &big).unwrap_err(),
+        ChangeFailure::InvalidEntry
+    );
+    assert_eq!(
+        create_document(
+            &world,
+            SourceKey::ClaudeUserRules,
+            "rules/ctl.md",
+            "a\u{0}b"
+        )
+        .unwrap_err(),
+        ChangeFailure::InvalidEntry
+    );
+}
+
+#[test]
+fn creation_and_removal_are_refused_without_a_key_store_and_write_nothing() {
+    let world = World::new(SETTINGS);
+    world.keys.set_unavailable(true);
+    assert_eq!(
+        create_document(&world, SourceKey::ClaudeUserRules, "rules/k.md", "x").unwrap_err(),
+        ChangeFailure::KeyStoreUnavailable
+    );
+    let (item, path) = document_fixture(&world, SourceKey::ClaudeUserRules, "rules/k2.md", "keep");
+    assert_eq!(
+        world
+            .service
+            .plan(Operation::DeleteDocument, &item)
+            .unwrap_err(),
+        ChangeFailure::KeyStoreUnavailable
+    );
+    assert_eq!(fs::read(&path).unwrap(), b"keep");
+    assert!(!doc_path(&world, SourceKey::ClaudeUserRules, "rules/k.md").exists());
+}
+
+#[test]
+fn removing_a_file_keeps_its_exact_bytes_and_mode_and_undo_puts_them_back() {
+    for (source, name, text, mode) in [
+        (
+            SourceKey::ClaudeUserRules,
+            "rules/gone.md",
+            "a\r\nb café\n",
+            0o640u32,
+        ),
+        (SourceKey::ClaudeUserRules, "CLAUDE.md", "memory", 0o600),
+        (SourceKey::CodexUserRules, "AGENTS.md", "codex\n", 0o644),
+        (SourceKey::OpencodeUserRules, "AGENTS.md", "oc\n", 0o600),
+        (SourceKey::ClaudeUserSkills, "oldskill", SKILL_TEXT, 0o600),
+        (SourceKey::CodexUserSkills, "oldskill", SKILL_TEXT, 0o600),
+    ] {
+        let world = World::new(SETTINGS);
+        let (item, path) = document_fixture(&world, source, name, text);
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+        let plan = world
+            .service
+            .plan(Operation::DeleteDocument, &item)
+            .unwrap();
+        assert_eq!(plan.operation, Operation::DeleteDocument);
+        assert!(plan.needs_native_dialog);
+        assert_eq!(plan.storage, Some(Protection::Sealed));
+        assert!(path.exists(), "planning removes nothing");
+        let done = world.service.apply(&plan.id).unwrap();
+        assert_eq!(done.outcome, Outcome::Applied, "{source:?} {name}");
+        assert!(!path.exists());
+        if source == SourceKey::ClaudeUserSkills {
+            assert!(
+                !path.parent().unwrap().exists(),
+                "the skill folder leaves with it"
+            );
+            assert!(world.home.join(".claude/skills").exists());
+        }
+        world.assert_no_secret_outside_the_file();
+        let back = world.service.undo(&done.change).unwrap();
+        assert_eq!(
+            world.service.apply(&back.id).unwrap().outcome,
+            Outcome::Applied,
+            "{source:?} {name}"
+        );
+        assert_eq!(fs::read(&path).unwrap(), text.as_bytes());
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o7777,
+            mode
+        );
+        assert_eq!(world.file(), SETTINGS);
+    }
+}
+
+#[test]
+fn removal_is_refused_for_links_extra_names_foreign_content_and_shared_folders() {
+    let world = World::new(SETTINGS);
+    // A skill with other files is not removed by dropping one of them.
+    let (item, _) = document_fixture(&world, SourceKey::ClaudeUserSkills, "full", SKILL_TEXT);
+    fs::write(
+        world.home.join(".claude/skills/full/script.sh"),
+        "#!/bin/sh",
+    )
+    .unwrap();
+    assert_eq!(
+        world
+            .service
+            .plan(Operation::DeleteDocument, &item)
+            .unwrap_err(),
+        ChangeFailure::NotSupported
+    );
+    // A second name for the file: it could be removed through the other name.
+    let (item, path) = document_fixture(&world, SourceKey::ClaudeUserRules, "rules/two.md", "x");
+    fs::hard_link(&path, world.base.join("other-name")).unwrap();
+    world.inventory.rescan();
+    assert_eq!(
+        world
+            .service
+            .plan(Operation::DeleteDocument, &item)
+            .unwrap_err(),
+        ChangeFailure::NotWritable
+    );
+    fs::remove_file(world.base.join("other-name")).unwrap();
+    // A link in the place of the file is the provider's own arrangement; it is not removed.
+    let real = world.base.join("shared.md");
+    fs::write(&real, "shared").unwrap();
+    let link = world.home.join(".claude/rules/linked.md");
+    symlink(&real, &link).unwrap();
+    world.inventory.rescan();
+    let item = item_id_for(SourceKey::ClaudeUserRules, &["rules/linked.md"]);
+    assert!(
+        world
+            .service
+            .plan(Operation::DeleteDocument, &item)
+            .is_err()
+    );
+    assert_eq!(fs::read(&real).unwrap(), b"shared");
+    // Only a supported source can be named for removal.
+    let hook = world.hook("Stop", 0, 0);
+    assert_eq!(
+        world
+            .service
+            .plan(Operation::DeleteDocument, &hook)
+            .unwrap_err(),
+        ChangeFailure::NotSupported
+    );
+}
+
+#[test]
+fn removal_detects_a_change_between_plan_and_apply_and_a_provider_write_in_the_instant() {
+    let world = World::new(SETTINGS);
+    let (item, path) = document_fixture(&world, SourceKey::ClaudeUserRules, "rules/c.md", "one");
+    let plan = world
+        .service
+        .plan(Operation::DeleteDocument, &item)
+        .unwrap();
+    fs::write(&path, "two").unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::ChangedOutside);
+    assert_eq!(fs::read(&path).unwrap(), b"two");
+    assert!(world.service.records().is_empty());
+    // The provider replaces the file after our last look, before the name is taken away.
+    let plan = world
+        .service
+        .plan(Operation::DeleteDocument, &item)
+        .unwrap();
+    let target = path.clone();
+    super::writer::seam::on_before_swap(move || {
+        let beside = target.with_extension("provider-tmp");
+        fs::write(&beside, "provider's newer").unwrap();
+        fs::set_permissions(&beside, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::rename(&beside, &target).unwrap();
+    });
+    assert_eq!(applied(&world, &plan), Outcome::ChangedOutside);
+    assert_eq!(fs::read(&path).unwrap(), b"provider's newer");
+    assert!(world.service.records().is_empty());
+    assert!(world.leftovers().is_empty());
+    let names: Vec<_> = fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(names, vec!["c.md".to_owned()]);
+}
+
+#[test]
+fn undo_of_a_removal_never_overwrites_a_file_that_took_the_name_and_undo_of_a_creation_needs_the_bytes()
+ {
+    let world = World::new(SETTINGS);
+    let (item, path) = document_fixture(&world, SourceKey::ClaudeUserRules, "rules/u.md", "orig");
+    let plan = world
+        .service
+        .plan(Operation::DeleteDocument, &item)
+        .unwrap();
+    let removed = world.service.apply(&plan.id).unwrap();
+    fs::write(&path, "someone else").unwrap();
+    assert_eq!(
+        world.service.undo(&removed.change).unwrap_err(),
+        ChangeFailure::EntryChanged
+    );
+    assert_eq!(fs::read(&path).unwrap(), b"someone else");
+    // A created file edited since is not removed by undo.
+    let world = World::new(SETTINGS);
+    let path = doc_path(&world, SourceKey::ClaudeUserRules, "rules/v.md");
+    let plan = create_document(&world, SourceKey::ClaudeUserRules, "rules/v.md", "made").unwrap();
+    let made = world.service.apply(&plan.id).unwrap();
+    fs::write(&path, "edited since").unwrap();
+    assert_eq!(
+        world.service.undo(&made.change).unwrap_err(),
+        ChangeFailure::EntryChanged
+    );
+    assert_eq!(fs::read(&path).unwrap(), b"edited since");
+    // And once undone it cannot be undone twice.
+    fs::write(&path, "made").unwrap();
+    let back = world.service.undo(&made.change).unwrap();
+    assert_eq!(
+        world.service.apply(&back.id).unwrap().outcome,
+        Outcome::Applied
+    );
+    assert_eq!(
+        world.service.undo(&made.change).unwrap_err(),
+        ChangeFailure::NotUndoable
+    );
+}
+
+#[test]
+fn a_created_skill_directory_that_gained_a_file_is_not_removed_by_undo() {
+    let world = World::new(SETTINGS);
+    let plan = create_document(&world, SourceKey::ClaudeUserSkills, "fresh", SKILL_TEXT).unwrap();
+    let made = world.service.apply(&plan.id).unwrap();
+    let extra = world.home.join(".claude/skills/fresh/notes.txt");
+    fs::write(&extra, "user's").unwrap();
+    let back = world.service.undo(&made.change).unwrap();
+    assert_eq!(
+        world.service.apply(&back.id).unwrap().outcome,
+        Outcome::ChangedOutside
+    );
+    assert_eq!(fs::read(&extra).unwrap(), b"user's");
+    assert!(world.home.join(".claude/skills/fresh/SKILL.md").exists());
+}
+
+#[test]
+fn refusing_in_the_native_dialog_writes_nothing_for_creation_or_removal() {
+    let world = World::new(SETTINGS);
+    world.confirm.accept.store(false, Ordering::SeqCst);
+    let path = doc_path(&world, SourceKey::ClaudeUserSkills, "fresh");
+    let plan = create_document(&world, SourceKey::ClaudeUserSkills, "fresh", SKILL_TEXT).unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::RefusedByUser);
+    assert!(!path.exists() && !world.home.join(".claude/skills/fresh").exists());
+    let (item, path) = document_fixture(&world, SourceKey::ClaudeUserRules, "rules/r.md", "keep");
+    let plan = world
+        .service
+        .plan(Operation::DeleteDocument, &item)
+        .unwrap();
+    assert_eq!(applied(&world, &plan), Outcome::RefusedByUser);
+    assert_eq!(fs::read(&path).unwrap(), b"keep");
+    let asked = world.confirm.asked.lock().unwrap();
+    assert!(asked.iter().all(|a| a.risk == Risk::WeakensSecurity));
+}
+
+fn tree(root: &Path) -> Vec<(String, Vec<u8>)> {
+    fn walk(base: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) {
+        let mut entries: Vec<_> = fs::read_dir(dir).unwrap().flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            let path = entry.path();
+            let rel = path
+                .strip_prefix(base)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            if path.is_dir() {
+                out.push((format!("{rel}/"), Vec::new()));
+                walk(base, &path, out);
+            } else {
+                out.push((rel, fs::read(&path).unwrap()));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out
+}
+
+#[test]
+fn a_failure_or_crash_at_any_step_of_creation_leaves_absence_or_the_whole_file() {
+    for crash in [false, true] {
+        for step in STEPS {
+            // A creation makes no exchange: that step does not exist for it.
+            if step == Step::Exchanged {
+                continue;
+            }
+            let world = World::new(SETTINGS);
+            fs::remove_dir_all(world.home.join(".claude/skills")).unwrap();
+            let before = tree(&world.home.join(".claude"));
+            let path = doc_path(&world, SourceKey::ClaudeUserSkills, "fresh");
+            let plan =
+                create_document(&world, SourceKey::ClaudeUserSkills, "fresh", SKILL_TEXT).unwrap();
+            world
+                .faults
+                .arm(step, if crash { Fault::Crash } else { Fault::Fail });
+            let result = world.service.apply(&plan.id);
+            assert_eq!(result.is_err(), crash, "{step:?} crash={crash}");
+            let again = world.restarted();
+            again.service.recover();
+            let present = path.exists();
+            if present {
+                assert_eq!(
+                    fs::read(&path).unwrap(),
+                    SKILL_TEXT.as_bytes(),
+                    "{step:?} crash={crash}"
+                );
+                assert_eq!(
+                    fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
+            } else {
+                assert_eq!(
+                    tree(&world.home.join(".claude")),
+                    before,
+                    "{step:?} crash={crash}: absence is whole, with no stray folder or temporary"
+                );
+                assert!(
+                    again.service.records().is_empty(),
+                    "{step:?} crash={crash}: a record for a file never made"
+                );
+            }
+            assert!(again.leftovers().is_empty());
+            let (history, _) = again.service.history(None, 50);
+            assert!(
+                history.iter().all(|c| c.outcome.is_some()),
+                "{step:?} crash={crash}"
+            );
+            // Whatever happened, a made file is exactly undoable to absence.
+            if present {
+                let change = history
+                    .iter()
+                    .find(|c| c.outcome.is_some_and(Outcome::changed_the_file))
+                    .unwrap_or_else(|| panic!("{step:?} crash={crash}: present but unrecorded"));
+                let back = again.service.undo(&change.id).unwrap();
+                assert_eq!(
+                    again.service.apply(&back.id).unwrap().outcome,
+                    Outcome::Applied
+                );
+                assert_eq!(
+                    tree(&world.home.join(".claude")),
+                    before,
+                    "{step:?} crash={crash}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_failure_or_crash_at_any_step_of_removal_leaves_the_whole_file_or_exact_absence() {
+    for crash in [false, true] {
+        for step in STEPS {
+            // A removal writes no temporary file: those steps do not exist for it.
+            if matches!(
+                step,
+                Step::TemporaryCreated | Step::TemporaryWritten | Step::TemporaryFlushed
+            ) {
+                continue;
+            }
+            let world = World::new(SETTINGS);
+            let (item, path) =
+                document_fixture(&world, SourceKey::ClaudeUserSkills, "gone", SKILL_TEXT);
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+            let before = tree(&world.home.join(".claude"));
+            let plan = world
+                .service
+                .plan(Operation::DeleteDocument, &item)
+                .unwrap();
+            world
+                .faults
+                .arm(step, if crash { Fault::Crash } else { Fault::Fail });
+            let result = world.service.apply(&plan.id);
+            assert_eq!(result.is_err(), crash, "{step:?} crash={crash}");
+            let again = world.restarted();
+            again.service.recover();
+            assert!(again.leftovers().is_empty());
+            assert!(
+                fs::read_dir(world.home.join(".claude/skills/gone"))
+                    .map(|d| d
+                        .flatten()
+                        .all(|e| !e.file_name().to_string_lossy().ends_with(".tmp")))
+                    .unwrap_or(true),
+                "{step:?} crash={crash}: tombstone left"
+            );
+            let (history, _) = again.service.history(None, 50);
+            assert!(
+                history.iter().all(|c| c.outcome.is_some()),
+                "{step:?} crash={crash}"
+            );
+            if path.exists() {
+                assert_eq!(fs::read(&path).unwrap(), SKILL_TEXT.as_bytes(), "{step:?}");
+            } else {
+                // Gone: the sealed copy brings back the exact bytes and mode.
+                let change = history
+                    .iter()
+                    .find(|c| c.outcome.is_some_and(Outcome::changed_the_file))
+                    .unwrap_or_else(|| panic!("{step:?} crash={crash}: gone but unrecorded"));
+                let back = again.service.undo(&change.id).unwrap();
+                assert_eq!(
+                    again.service.apply(&back.id).unwrap().outcome,
+                    Outcome::Applied,
+                    "{step:?} crash={crash}"
+                );
+                assert_eq!(fs::read(&path).unwrap(), SKILL_TEXT.as_bytes());
+                assert_eq!(
+                    fs::metadata(&path).unwrap().permissions().mode() & 0o7777,
+                    0o640
+                );
+            }
+            let _ = &before;
+        }
+    }
+}
+
+#[test]
+fn codex_user_skills_are_listed_by_folder_name_and_never_read() {
+    let world = World::new(SETTINGS);
+    let (_, path) = document_fixture(&world, SourceKey::CodexUserSkills, "alpha", SKILL_TEXT);
+    fs::create_dir_all(world.home.join(".agents/skills/beta")).unwrap();
+    world.inventory.rescan();
+    let snapshot = world.inventory.snapshot();
+    let mut found: Vec<_> = snapshot
+        .inventory
+        .items
+        .iter()
+        .filter(|i| i.source == SourceKey::CodexUserSkills)
+        .map(|i| (i.kind, i.name.as_str().to_owned()))
+        .collect();
+    found.sort_by(|a, b| a.1.cmp(&b.1));
+    assert_eq!(
+        found,
+        vec![
+            (ItemKind::Skill, "alpha".to_owned()),
+            (ItemKind::Skill, "beta".to_owned())
+        ]
+    );
+    assert!(
+        snapshot
+            .inventory
+            .sources
+            .iter()
+            .any(|r| r.key == SourceKey::CodexUserSkills)
+    );
+    // Editing one goes through the same sealed transaction, with exact undo.
+    let item = item_id_for(SourceKey::CodexUserSkills, &["alpha"]);
+    let edited = SKILL_TEXT.replace("testing", "editing");
+    let plan = edit_document(&world, &item, SKILL_TEXT, &edited).unwrap();
+    let done = world.service.apply(&plan.id).unwrap();
+    assert_eq!(done.outcome, Outcome::Applied);
+    assert_eq!(fs::read(&path).unwrap(), edited.as_bytes());
+    let back = world.service.undo(&done.change).unwrap();
+    assert_eq!(
+        world.service.apply(&back.id).unwrap().outcome,
+        Outcome::Applied
+    );
+    assert_eq!(fs::read(&path).unwrap(), SKILL_TEXT.as_bytes());
+}

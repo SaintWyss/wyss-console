@@ -73,6 +73,9 @@ pub fn identity_of(parent: &Parent) -> Result<Identity, WriteError> {
 }
 
 impl Identity {
+    pub fn mode(&self) -> u32 {
+        self.mode
+    }
     pub fn is_owned_by_this_user(&self) -> bool {
         self.uid == geteuid().as_raw()
     }
@@ -254,6 +257,189 @@ pub fn replace(
     fsync(dirfd).map_err(|_| WriteError::AfterRename)
 }
 
+fn random_temporary(parent: &Parent) -> Result<OsString, WriteError> {
+    let mut random = [0_u8; 8];
+    getrandom::fill(&mut random).map_err(|_| WriteError::Failed)?;
+    Ok(OsString::from(format!(
+        ".{}.{}.tmp",
+        parent.name.to_string_lossy(),
+        random
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    )))
+}
+
+fn stepped(faults: &Faults, step: Step) -> Result<(), WriteError> {
+    faults.check(step).map_err(|injected| match injected {
+        Injected::Failed => WriteError::Failed,
+        Injected::Crashed => WriteError::Crashed,
+    })
+}
+
+/// Creates the file where nothing is. The new bytes are made complete under a temporary name
+/// and enter their name in one step that refuses to replace anything (`RENAME_NOREPLACE`, or
+/// a hard link where the file system cannot): whatever appeared at the name in the meantime
+/// is never touched, and the result is `Replaced`.
+pub fn create_new(
+    parent: &Parent,
+    bytes: &[u8],
+    mode: u32,
+    faults: &Faults,
+) -> Result<(), WriteError> {
+    let dirfd = parent.dir.as_raw_fd();
+    let temporary = random_temporary(parent)?;
+    let cleanup = |error: WriteError| {
+        if error != WriteError::Crashed {
+            let _ = unlinkat(
+                Some(dirfd),
+                temporary.as_os_str(),
+                UnlinkatFlags::NoRemoveDir,
+            );
+        }
+        error
+    };
+    stepped(faults, Step::TemporaryCreated)?;
+    let created = openat(
+        Some(dirfd),
+        temporary.as_os_str(),
+        OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+        Mode::from_bits_truncate(0o600),
+    )
+    .map_err(|_| WriteError::Failed)?;
+    // SAFETY: `openat` returned this descriptor just now and nothing else owns it.
+    let file = unsafe { OwnedFd::from_raw_fd(created) };
+    fchmodat(
+        Some(dirfd),
+        temporary.as_os_str(),
+        Mode::from_bits_truncate(mode & 0o7777),
+        FchmodatFlags::FollowSymlink,
+    )
+    .map_err(|_| cleanup(WriteError::Failed))?;
+    stepped(faults, Step::TemporaryWritten).map_err(cleanup)?;
+    let mut written = 0;
+    while written < bytes.len() {
+        match write(&file, &bytes[written..]) {
+            Ok(0) | Err(_) => return Err(cleanup(WriteError::Failed)),
+            Ok(count) => written += count,
+        }
+    }
+    stepped(faults, Step::TemporaryFlushed).map_err(cleanup)?;
+    fsync(file.as_raw_fd()).map_err(|_| cleanup(WriteError::Failed))?;
+    stepped(faults, Step::Renamed).map_err(cleanup)?;
+    #[cfg(test)]
+    seam::before_swap();
+    match renameat2(
+        Some(dirfd),
+        temporary.as_os_str(),
+        Some(dirfd),
+        parent.name.as_os_str(),
+        RenameFlags::RENAME_NOREPLACE,
+    ) {
+        Ok(()) => (),
+        Err(Errno::EEXIST) => return Err(cleanup(WriteError::Replaced)),
+        Err(Errno::EINVAL | Errno::ENOSYS | Errno::EOPNOTSUPP) => {
+            match nix::unistd::linkat(
+                Some(dirfd),
+                temporary.as_os_str(),
+                Some(dirfd),
+                parent.name.as_os_str(),
+                AtFlags::empty(),
+            ) {
+                Ok(()) => {
+                    let _ = unlinkat(
+                        Some(dirfd),
+                        temporary.as_os_str(),
+                        UnlinkatFlags::NoRemoveDir,
+                    );
+                }
+                Err(Errno::EEXIST) => return Err(cleanup(WriteError::Replaced)),
+                Err(_) => return Err(cleanup(WriteError::Failed)),
+            }
+        }
+        Err(_) => return Err(cleanup(WriteError::Failed)),
+    }
+    stepped(faults, Step::DirectoryFlushed).map_err(|error| match error {
+        WriteError::Failed => WriteError::AfterRename,
+        other => other,
+    })?;
+    fsync(dirfd).map_err(|_| WriteError::AfterRename)
+}
+
+/// Removes the file, if it is still the one that was read. The name is first moved to a
+/// temporary name in the same directory, so that the file looked at is the file removed: if
+/// it is not the one that was read (a provider wrote in the instant before), it is moved
+/// back, without replacing anything that has appeared at its name since.
+pub fn remove_file(parent: &Parent, expected: Identity, faults: &Faults) -> Result<(), WriteError> {
+    if !expected.is_owned_by_this_user() {
+        return Err(WriteError::NotOwner);
+    }
+    let dirfd = parent.dir.as_raw_fd();
+    let tombstone = random_temporary(parent)?;
+    match identity_of(parent) {
+        Ok(now) if now == expected => (),
+        Ok(_) | Err(_) => return Err(WriteError::Replaced),
+    }
+    stepped(faults, Step::Renamed)?;
+    #[cfg(test)]
+    seam::before_swap();
+    renameat2(
+        Some(dirfd),
+        parent.name.as_os_str(),
+        Some(dirfd),
+        tombstone.as_os_str(),
+        RenameFlags::RENAME_NOREPLACE,
+    )
+    .map_err(|_| WriteError::Failed)?;
+    if stepped(faults, Step::Exchanged) == Err(WriteError::Crashed) {
+        return Err(WriteError::Crashed);
+    }
+    let moved = fstatat(
+        Some(dirfd),
+        tombstone.as_os_str(),
+        AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map(|stat| identity(&stat));
+    if moved != Ok(expected) {
+        // Not the file that was read: put it back where it was.
+        let back = renameat2(
+            Some(dirfd),
+            tombstone.as_os_str(),
+            Some(dirfd),
+            parent.name.as_os_str(),
+            RenameFlags::RENAME_NOREPLACE,
+        );
+        return match back {
+            Ok(()) => Err(WriteError::Replaced),
+            // Something new is at the name: theirs stays there, the displaced file stays at
+            // the temporary name for recovery to keep, and nothing was lost.
+            Err(_) => Err(WriteError::Failed),
+        };
+    }
+    let _ = unlinkat(
+        Some(dirfd),
+        tombstone.as_os_str(),
+        UnlinkatFlags::NoRemoveDir,
+    );
+    stepped(faults, Step::DirectoryFlushed).map_err(|error| match error {
+        WriteError::Failed => WriteError::AfterRename,
+        other => other,
+    })?;
+    fsync(dirfd).map_err(|_| WriteError::AfterRename)
+}
+
+/// Removes an empty directory, by name, in the directory `parent` holds. Anything in it
+/// leaves it in place and returns `false`.
+pub fn remove_empty_directory(parent: &Parent) -> bool {
+    unlinkat(
+        Some(parent.dir.as_raw_fd()),
+        parent.name.as_os_str(),
+        UnlinkatFlags::RemoveDir,
+    )
+    .is_ok()
+        && fsync(parent.dir.as_raw_fd()).is_ok()
+}
+
 /// An advisory lock on one target, held for the length of an apply and released if the
 /// holder dies (07 §5.5). Two windows, or two processes, apply one after the other.
 pub struct TargetLock {
@@ -339,6 +525,22 @@ pub fn remove_leftover(parent: &Parent, name: &OsString) -> bool {
 /// the two so that nothing is lost on the way; ours, now at the leftover's name, is removed.
 pub fn put_back(parent: &Parent, name: &OsString) -> bool {
     let dirfd = parent.dir.as_raw_fd();
+    // The name is empty (a removal was cut short): the file simply goes back to it.
+    if fstatat(
+        Some(dirfd),
+        parent.name.as_os_str(),
+        AtFlags::AT_SYMLINK_NOFOLLOW,
+    ) == Err(Errno::ENOENT)
+    {
+        return renameat2(
+            Some(dirfd),
+            name.as_os_str(),
+            Some(dirfd),
+            parent.name.as_os_str(),
+            RenameFlags::RENAME_NOREPLACE,
+        )
+        .is_ok();
+    }
     let swapped = renameat2(
         Some(dirfd),
         name.as_os_str(),

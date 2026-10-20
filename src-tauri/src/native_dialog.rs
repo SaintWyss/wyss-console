@@ -38,6 +38,12 @@ fn on_gtk<T: Send + 'static>(
 fn operation_text(operation: Operation) -> &'static str {
     match operation {
         Operation::EditDocument => "Change an agent instruction file reviewed in the native editor",
+        Operation::CreateDocument => {
+            "Create a new agent instruction file or skill (none exists now)"
+        }
+        Operation::DeleteDocument => {
+            "Remove an agent instruction file or skill (kept encrypted for exact undo)"
+        }
         Operation::ParkHook => "Turn off a hook (remove it from the file and keep it here)",
         Operation::RestoreHook => "Turn a hook back on (put it back in the file)",
         Operation::DisableAllHooks => "Turn off every hook",

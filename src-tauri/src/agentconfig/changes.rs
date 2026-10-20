@@ -20,18 +20,19 @@ use super::model::{
     SourceFailure, writability,
 };
 use super::opencode_plan::{self, McpSpec};
-use super::place::{Parent, parent_for_write};
+use super::place::{CreateWalk, Parent, parent_for_create, parent_for_write, parent_of_directory};
 use super::plan::{
-    DiffLine, Drafted, PLAN_LIFETIME_SECONDS, PlanError, Prepared, draft_all_hooks, draft_park,
-    draft_restore, draft_skill, hash, is_exactly,
+    ABSENT, DiffLine, Drafted, PLAN_LIFETIME_SECONDS, PlanError, Prepared, draft_all_hooks,
+    draft_park, draft_restore, draft_skill, hash, is_exactly,
 };
 use super::reader::ConfigReader;
 use super::restore::{Protection, RestorationStore, RestoreError, Summary};
 use super::service::InventoryService;
 use super::vault::{EXPORT_ROUNDS, VaultError};
 use super::writer::{
-    TargetLock, WriteError, conflict_copy_beside, identity_of, keep_leftover, leftovers,
-    lock_target, put_back, read_leftover, remove_leftover, replace,
+    Identity, TargetLock, WriteError, conflict_copy_beside, create_new, identity_of, keep_leftover,
+    leftovers, lock_target, put_back, read_leftover, remove_empty_directory, remove_file,
+    remove_leftover, replace,
 };
 use serde::Serialize;
 use std::{
@@ -98,6 +99,8 @@ pub enum ChangeFailure {
     EntryGone,
     EntryChanged,
     AlreadyDone,
+    /// Something already has the name a new file would take; it is never replaced.
+    AlreadyExists,
     RestoreConflict,
     KeyStoreUnavailable,
     RecordUnreadable,
@@ -233,6 +236,7 @@ fn effect_of(operation: Operation, source: SourceKey) -> Effect {
     if matches!(
         source,
         SourceKey::ClaudeUserSkills
+            | SourceKey::CodexUserSkills
             | SourceKey::ClaudeUserRules
             | SourceKey::CodexUserRules
             | SourceKey::OpencodeUserRules
@@ -346,7 +350,7 @@ impl ChangeService {
     }
 
     fn path_for_draft(&self, source: SourceKey, drafted: &Drafted) -> Option<PathBuf> {
-        if let super::plan::Logical::Document(target) = &drafted.logical {
+        if let Some(target) = drafted.logical.document() {
             target.path(&lock(&self.environment)).ok()
         } else {
             self.path_of(source)
@@ -354,6 +358,15 @@ impl ChangeService {
     }
 
     fn read_document(&self, target: &DocumentTarget) -> Result<Vec<u8>, ChangeFailure> {
+        self.read_document_with_mode(target).map(|(bytes, _)| bytes)
+    }
+
+    /// The same, for the instruction file's bytes **and** its permission bits: a removal
+    /// keeps both so that the way back is exact.
+    fn read_document_with_mode(
+        &self,
+        target: &DocumentTarget,
+    ) -> Result<(Vec<u8>, u32), ChangeFailure> {
         let path = target.path(&lock(&self.environment))?;
         let file = self
             .reader
@@ -363,15 +376,43 @@ impl ChangeService {
         // Deliberately require the file and all ancestors to be real trusted places.
         let parent = parent_for_write(self.reader.roots(), &path, 0)
             .map_err(|_| ChangeFailure::NotWritable)?;
+        let identity = identity_of(&parent).map_err(|_| ChangeFailure::NotWritable)?;
         if file.trust() != PathTrust::Trusted
             || !file.links().is_empty()
             || parent.trust != PathTrust::Trusted
-            || !identity_of(&parent).is_ok_and(|i| i.is_owned_by_this_user())
+            || !identity.is_owned_by_this_user()
             || file.bytes().len() > document::MOST_BYTES
         {
             return Err(ChangeFailure::NotWritable);
         }
-        Ok(file.bytes().to_vec())
+        Ok((file.bytes().to_vec(), identity.mode() & 0o7777))
+    }
+
+    /// The file, or its absence: only a name nothing has is absent. A file that cannot be
+    /// trusted is an error, not an absence.
+    fn read_document_or_absent(
+        &self,
+        target: &DocumentTarget,
+    ) -> Result<Option<Vec<u8>>, ChangeFailure> {
+        let path = target.path(&lock(&self.environment))?;
+        match self.reader.read_file(&path) {
+            Err(SourceFailure::Missing) => Ok(None),
+            _ => self.read_document(target).map(Some),
+        }
+    }
+
+    /// Removes the empty folders a creation made or a removal leaves, deepest first, stopping
+    /// at the first that is not empty. A folder with anything in it is never touched.
+    fn remove_directories(&self, target: &DocumentTarget, count: usize) {
+        let folders = target.directories(&lock(&self.environment), count);
+        for folder in folders {
+            let Ok(parent) = parent_of_directory(self.reader.roots(), &folder) else {
+                return;
+            };
+            if parent.trust != PathTrust::Trusted || !remove_empty_directory(&parent) {
+                return;
+            }
+        }
     }
 
     /// Resolve the opaque item against raw names from the bounded inventory roots.
@@ -388,11 +429,12 @@ impl ChangeService {
                 vec!["AGENTS.md".to_owned(), "AGENTS.override.md".to_owned()]
             }
             SourceKey::OpencodeUserRules => vec!["AGENTS.md".to_owned()],
-            SourceKey::ClaudeUserSkills => Vec::new(),
+            SourceKey::ClaudeUserSkills | SourceKey::CodexUserSkills => Vec::new(),
             _ => return Err(ChangeFailure::NotSupported),
         };
         let directory = match found.source {
             SourceKey::ClaudeUserSkills => Some(env.claude_dir().join("skills")),
+            SourceKey::CodexUserSkills => Some(env.agents_skills_dir()),
             SourceKey::ClaudeUserRules => Some(env.claude_dir().join("rules")),
             _ => None,
         };
@@ -653,6 +695,33 @@ impl ChangeService {
                 ));
                 (target.source, document::draft(target, &bytes, &text)?)
             }
+            Authoring::CreateDocument { source, name, text } => {
+                let target = DocumentTarget { source, name };
+                target.check()?;
+                let path = target.path(&lock(&self.environment))?;
+                let missing = match parent_for_create(
+                    self.reader.roots(),
+                    &path,
+                    target.most_new_dirs(),
+                    false,
+                ) {
+                    Ok((_, missing)) => missing,
+                    Err(CreateWalk::Exists) => return Err(ChangeFailure::AlreadyExists),
+                    Err(CreateWalk::TooManyMissing) => return Err(ChangeFailure::NotSupported),
+                    Err(CreateWalk::Failure(_)) => return Err(ChangeFailure::NotWritable),
+                };
+                // Instructions may hold private data: no sealed record, no plan.
+                self.store.protection_for(true)?;
+                detail = Some(format!(
+                    "New instruction file: {}. {} bytes reviewed in the native editor. It does not exist now.",
+                    target.label(),
+                    text.len()
+                ));
+                (
+                    target.source,
+                    document::draft_create(target, &text, missing, 0o600)?,
+                )
+            }
             Authoring::AddHook(spec) => {
                 detail = Some(plain_detail("command", &spec.command));
                 let source = SourceKey::ClaudeUserSettings;
@@ -905,8 +974,32 @@ impl ChangeService {
                     },
                 )
             }
+            Operation::DeleteDocument => {
+                let target = self.document_target(target)?;
+                let (bytes, mode) = self.read_document_with_mode(&target)?;
+                let mut dirs = 0;
+                if target.owns_folder() {
+                    // A skill is a folder: it leaves only if the instructions are all it holds.
+                    let path = target.path(&lock(&self.environment))?;
+                    let folder = path.parent().ok_or(ChangeFailure::NotSupported)?;
+                    let listing = self
+                        .reader
+                        .list_directory(folder)
+                        .map_err(|_| ChangeFailure::NotWritable)?;
+                    if listing.entries.len() != 1 || !listing.links.is_empty() {
+                        return Err(ChangeFailure::NotSupported);
+                    }
+                    dirs = 1;
+                }
+                self.store.protection_for(true)?;
+                (
+                    target.source,
+                    document::draft_delete(target, &bytes, dirs, mode)?,
+                )
+            }
             // These carry text the user wrote, which only `plan_authored` accepts.
             Operation::EditDocument
+            | Operation::CreateDocument
             | Operation::AddHook
             | Operation::EditHook
             | Operation::AddMcp
@@ -951,8 +1044,11 @@ impl ChangeService {
                 let body = self.store.read(target)?;
                 if document::is_record(&body) {
                     let place = document::from_record(&body)?;
-                    let bytes = self.read_document(&place)?;
-                    (body.source, document::revert(&bytes, target, &body)?)
+                    let bytes = self.read_document_or_absent(&place)?;
+                    (
+                        body.source,
+                        document::revert(bytes.as_deref(), target, &body)?,
+                    )
                 } else {
                     let (_, bytes) = self.read_target(body.source)?;
                     (body.source, author::draft_revert(&bytes, target, &body)?)
@@ -1121,41 +1217,81 @@ impl ChangeService {
             return Ok(applied(Outcome::WriteFailed));
         };
 
-        // Read again under the lock: the plan was made on these bytes or on nothing.
-        let parent: Parent = match parent_for_write(
-            self.reader.roots(),
-            &path,
-            if matches!(drafted.logical, super::plan::Logical::Document(_)) {
-                0
-            } else {
-                self.bounds.link_hops
-            },
-        ) {
-            Ok(parent) if parent.trust == PathTrust::Trusted => parent,
-            Ok(_) | Err(_) => return Ok(applied(Outcome::WriteFailed)),
-        };
-        let Ok(before) = identity_of(&parent) else {
-            return Ok(applied(Outcome::ChangedOutside));
-        };
-        let current = match self.reader.read_file(&path) {
-            Ok(file) if file.trust() == PathTrust::Trusted => file,
-            Ok(_) => return Ok(applied(Outcome::WriteFailed)),
-            Err(SourceFailure::Missing) => return Ok(applied(Outcome::ChangedOutside)),
-            Err(_) => return Ok(applied(Outcome::WriteFailed)),
-        };
-        let after = identity_of(&parent).ok();
-        if after != Some(before) || hash(current.bytes()) != drafted.h0 {
-            return Ok(applied(Outcome::ChangedOutside));
-        }
-        if let Ok(listing) = self
-            .reader
-            .list_directory(parent.path.parent().unwrap_or(&parent.path))
-        {
-            let names: Vec<_> = listing.entries.iter().map(|e| e.name.clone()).collect();
-            if conflict_copy_beside(&names, &parent.name) {
-                return Ok(applied(Outcome::ConflictCopyPresent));
+        // Read again under the lock: the plan was made on these bytes, on nothing (a new
+        // file), or on a file that is about to leave.
+        let creating = match &drafted.logical {
+            super::plan::Logical::DocumentCreate { target, dirs, mode } => {
+                Some((target.clone(), *dirs, *mode))
             }
-        }
+            _ => None,
+        };
+        let (parent, before, current_bytes): (Option<Parent>, Option<Identity>, Vec<u8>) =
+            if let Some((target, dirs, _)) = &creating {
+                match parent_for_create(self.reader.roots(), &path, target.most_new_dirs(), false) {
+                    // The same folders are still missing: they are made later, as part of the change.
+                    Ok((None, missing)) if missing == *dirs => (None, None, Vec::new()),
+                    Ok((Some(parent), 0)) if *dirs == 0 => {
+                        if let Ok(listing) = self
+                            .reader
+                            .list_directory(parent.path.parent().unwrap_or(&parent.path))
+                        {
+                            let names: Vec<_> =
+                                listing.entries.iter().map(|e| e.name.clone()).collect();
+                            if conflict_copy_beside(&names, &parent.name) {
+                                return Ok(applied(Outcome::ConflictCopyPresent));
+                            }
+                        }
+                        (Some(parent), None, Vec::new())
+                    }
+                    Ok(_) | Err(CreateWalk::Exists) => {
+                        return Ok(applied(Outcome::ChangedOutside));
+                    }
+                    Err(_) => return Ok(applied(Outcome::WriteFailed)),
+                }
+            } else {
+                let parent: Parent = match parent_for_write(
+                    self.reader.roots(),
+                    &path,
+                    if drafted.logical.document().is_some() {
+                        0
+                    } else {
+                        self.bounds.link_hops
+                    },
+                ) {
+                    Ok(parent) if parent.trust == PathTrust::Trusted => parent,
+                    Ok(_) | Err(_) => return Ok(applied(Outcome::WriteFailed)),
+                };
+                let Ok(before) = identity_of(&parent) else {
+                    return Ok(applied(Outcome::ChangedOutside));
+                };
+                let current = match self.reader.read_file(&path) {
+                    Ok(file) if file.trust() == PathTrust::Trusted => file,
+                    Ok(_) => return Ok(applied(Outcome::WriteFailed)),
+                    Err(SourceFailure::Missing) => return Ok(applied(Outcome::ChangedOutside)),
+                    Err(_) => return Ok(applied(Outcome::WriteFailed)),
+                };
+                let after = identity_of(&parent).ok();
+                if after != Some(before) || hash(current.bytes()) != drafted.h0 {
+                    return Ok(applied(Outcome::ChangedOutside));
+                }
+                if let Ok(listing) = self
+                    .reader
+                    .list_directory(parent.path.parent().unwrap_or(&parent.path))
+                {
+                    let names: Vec<_> = listing.entries.iter().map(|e| e.name.clone()).collect();
+                    if conflict_copy_beside(&names, &parent.name) {
+                        return Ok(applied(Outcome::ConflictCopyPresent));
+                    }
+                    // A folder leaves with its file only if the file is all it holds.
+                    if let super::plan::Logical::DocumentRemove { dirs, .. } = &drafted.logical
+                        && *dirs > 0
+                        && listing.entries.len() != 1
+                    {
+                        return Ok(applied(Outcome::ChangedOutside));
+                    }
+                }
+                (Some(parent), Some(before), current.bytes().to_vec())
+            };
 
         // What an operation needs kept is decided before the intent, so the intent can
         // name it: a start after a crash finds the record by this identifier.
@@ -1256,20 +1392,53 @@ impl ChangeService {
         };
 
         // A restoration whose entry is already in the file writes nothing.
-        let writes_the_file = drafted.new_bytes != current.bytes();
-        if writes_the_file {
-            match replace(&parent, &drafted.new_bytes, before, &self.faults) {
-                // In place either way; the read-back below says what is there.
-                Ok(()) | Err(WriteError::AfterRename) => (),
-                Err(WriteError::Crashed) => return Err(ChangeFailure::Internal),
-                Err(WriteError::Replaced) => {
-                    undo_record();
-                    return finish(Outcome::ChangedOutside, None);
+        let outcome_of_write = match &drafted.logical {
+            super::plan::Logical::DocumentCreate { target, dirs, mode } => {
+                match parent_for_create(self.reader.roots(), &path, target.most_new_dirs(), true) {
+                    Ok((Some(parent), made)) if made == *dirs => {
+                        let result = create_new(&parent, &drafted.new_bytes, *mode, &self.faults);
+                        if matches!(result, Err(WriteError::Failed | WriteError::Replaced)) {
+                            self.remove_directories(target, made);
+                        }
+                        result
+                    }
+                    Ok((_, made)) => {
+                        self.remove_directories(target, made);
+                        Err(WriteError::Replaced)
+                    }
+                    Err(CreateWalk::Exists) => Err(WriteError::Replaced),
+                    Err(_) => Err(WriteError::Failed),
                 }
-                Err(WriteError::Failed | WriteError::NotOwner) => {
-                    undo_record();
-                    return finish(Outcome::WriteFailed, None);
+            }
+            super::plan::Logical::DocumentRemove { target, dirs } => match (&parent, before) {
+                (Some(parent), Some(before)) => {
+                    let result = remove_file(parent, before, &self.faults);
+                    if matches!(result, Ok(()) | Err(WriteError::AfterRename)) {
+                        self.remove_directories(target, *dirs);
+                    }
+                    result
                 }
+                _ => Err(WriteError::Failed),
+            },
+            _ if drafted.new_bytes != current_bytes => match (&parent, before) {
+                (Some(parent), Some(before)) => {
+                    replace(parent, &drafted.new_bytes, before, &self.faults)
+                }
+                _ => Err(WriteError::Failed),
+            },
+            _ => Ok(()),
+        };
+        match outcome_of_write {
+            // In place either way; the read-back below says what is there.
+            Ok(()) | Err(WriteError::AfterRename) => (),
+            Err(WriteError::Crashed) => return Err(ChangeFailure::Internal),
+            Err(WriteError::Replaced) => {
+                undo_record();
+                return finish(Outcome::ChangedOutside, None);
+            }
+            Err(WriteError::Failed | WriteError::NotOwner) => {
+                undo_record();
+                return finish(Outcome::WriteFailed, None);
             }
         }
 
@@ -1279,18 +1448,24 @@ impl ChangeService {
             Err(Injected::Failed) => Err(SourceFailure::Unreadable),
             Ok(()) => self.reader.read_file(&path),
         };
+        let removal = matches!(drafted.logical, super::plan::Logical::DocumentRemove { .. });
         let (verified, found) = match &read_back {
+            Err(SourceFailure::Missing) if removal => (true, Some(ABSENT.to_owned())),
+            Ok(_) if removal => (false, None),
             Ok(file) => {
                 let actual = hash(file.bytes());
                 let same = actual == drafted.h1
                     && match &drafted.logical {
-                        super::plan::Logical::Nothing | super::plan::Logical::Document(_) => true,
+                        super::plan::Logical::Nothing
+                        | super::plan::Logical::Document(_)
+                        | super::plan::Logical::DocumentCreate { .. }
+                        | super::plan::Logical::DocumentRemove { .. } => true,
                         super::plan::Logical::Toml(edit) => {
-                            super::codex_plan::is_exactly(current.bytes(), file.bytes(), edit)
+                            super::codex_plan::is_exactly(&current_bytes, file.bytes(), edit)
                         }
                         super::plan::Logical::CodexAuthor(edit) => {
                             match (
-                                std::str::from_utf8(current.bytes()),
+                                std::str::from_utf8(&current_bytes),
                                 std::str::from_utf8(file.bytes()),
                             ) {
                                 (Ok(before), Ok(after)) => {
@@ -1300,9 +1475,9 @@ impl ChangeService {
                             }
                         }
                         super::plan::Logical::Opencode(edit) => {
-                            opencode_plan::is_exactly(current.bytes(), file.bytes(), edit)
+                            opencode_plan::is_exactly(&current_bytes, file.bytes(), edit)
                         }
-                        other => is_exactly(current.bytes(), file.bytes(), other),
+                        other => is_exactly(&current_bytes, file.bytes(), other),
                     };
                 (same, Some(actual))
             }
@@ -1317,6 +1492,15 @@ impl ChangeService {
             return Err(ChangeFailure::Internal);
         }
         finish(Outcome::Applied, found)
+    }
+
+    /// What a file holds as a digest, or `absent` when there is no such file.
+    fn current_hash(&self, path: &std::path::Path) -> Option<String> {
+        match self.reader.read_file(path) {
+            Ok(file) => Some(hash(file.bytes())),
+            Err(SourceFailure::Missing) => Some(ABSENT.to_owned()),
+            Err(_) => None,
+        }
     }
 
     /// A page of changes, newest first.
@@ -1356,6 +1540,8 @@ impl ChangeService {
             // What the user wrote goes back to exactly what it replaced, while the file is as
             // the change left it; after that, it is theirs to turn off.
             Operation::EditDocument
+            | Operation::CreateDocument
+            | Operation::DeleteDocument
             | Operation::AddHook
             | Operation::EditHook
             | Operation::AddMcp
@@ -1504,8 +1690,15 @@ impl ChangeService {
         // provider's newer version, displaced by the swap in the instant before the crash.
         let mut put_back_for: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (key, path, item) in sources {
-            let Some(parent) =
-                parent_for_write(self.reader.roots(), &path, self.bounds.link_hops).ok()
+            // A file that is not there (a creation that did not finish, a removal that did) has
+            // its leftovers beside the name it would have.
+            let Some(parent) = parent_for_write(self.reader.roots(), &path, self.bounds.link_hops)
+                .ok()
+                .or_else(|| {
+                    parent_for_create(self.reader.roots(), &path, 0, false)
+                        .ok()
+                        .and_then(|(parent, _)| parent)
+                })
             else {
                 continue;
             };
@@ -1513,11 +1706,7 @@ impl ChangeService {
             if names.is_empty() {
                 continue;
             }
-            let target = self
-                .reader
-                .read_file(&path)
-                .ok()
-                .map(|file| hash(file.bytes()));
+            let target = self.current_hash(&path);
             let intents: Vec<&Entry> = unfinished
                 .iter()
                 .filter(|i| i.source == key && item.as_ref().is_none_or(|id| &i.item == id))
@@ -1573,9 +1762,30 @@ impl ChangeService {
                 })
                 .or_else(|| self.path_of(intent.source));
             let Some(path) = path else {
+                // An instruction file that had no record yet: the record is made before the
+                // first change to the disk, so nothing was changed and the intent can be closed.
+                let document_without_record = matches!(
+                    intent.operation,
+                    Operation::EditDocument | Operation::CreateDocument | Operation::DeleteDocument
+                ) && intent
+                    .record
+                    .as_ref()
+                    .is_none_or(|id| self.store.read(id).is_err());
+                if document_without_record {
+                    let entry = Entry {
+                        phase: Phase::Outcome,
+                        at: now(),
+                        h1: None,
+                        outcome: Some(Outcome::RecoveredNotApplied),
+                        ..intent
+                    };
+                    if self.journal.append(&entry, Step::OutcomeJournaled).is_ok() {
+                        repaired += 1;
+                    }
+                }
                 continue;
             };
-            let current = self.reader.read_file(&path).ok().map(|f| hash(f.bytes()));
+            let current = self.current_hash(&path);
             let outcome = if put_back_for.contains(&intent.id) {
                 Outcome::RecoveredProviderKept
             } else {
@@ -1590,6 +1800,8 @@ impl ChangeService {
                 (
                     Outcome::RecoveredNotApplied | Outcome::RecoveredProviderKept,
                     Operation::EditDocument
+                    | Operation::CreateDocument
+                    | Operation::DeleteDocument
                     | Operation::ParkHook
                     | Operation::ParkPlugin
                     | Operation::ParkMcp
@@ -1602,7 +1814,23 @@ impl ChangeService {
                     | Operation::EditMcp,
                     Some(record),
                 ) => {
+                    // A creation that stopped before the file was in place may have made
+                    // the empty folders that were to hold it: they go, so absence is whole.
+                    if intent.operation == Operation::CreateDocument
+                        && let Ok(body) = self.store.read(record)
+                        && let Ok(target) = document::from_record(&body)
+                    {
+                        self.remove_directories(&target, body.group);
+                    }
                     let _ = self.store.delete(record);
+                }
+                // The file is gone; the folder that held only it goes too, as it would have.
+                (Outcome::RecoveredApplied, Operation::DeleteDocument, Some(record)) => {
+                    if let Ok(body) = self.store.read(record)
+                        && let Ok(target) = document::from_record(&body)
+                    {
+                        self.remove_directories(&target, body.group);
+                    }
                 }
                 (Outcome::RecoveredApplied, Operation::RestoreHook, Some(record)) => {
                     let _ = self.store.mark(record, super::restore::State::Used);
@@ -1653,6 +1881,12 @@ pub enum Authoring {
         item: String,
         text: String,
         expected: String,
+    },
+    /// A new file where there is none: a provider folder and a checked name, never a path.
+    CreateDocument {
+        source: SourceKey,
+        name: String,
+        text: String,
     },
     AddHook(HookSpec),
     /// `expected` is the command the user was shown when they started: if the file holds
@@ -1709,6 +1943,7 @@ impl std::fmt::Debug for Authoring {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::EditDocument { .. } => "Authoring::EditDocument(..)",
+            Self::CreateDocument { .. } => "Authoring::CreateDocument(..)",
             Self::AddHook(_) => "Authoring::AddHook(..)",
             Self::EditHook { .. } => "Authoring::EditHook(..)",
             Self::AddMcp { .. } => "Authoring::AddMcp(..)",

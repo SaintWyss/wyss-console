@@ -4,6 +4,7 @@ import type {
   Effect,
   Effective,
   ItemKind,
+  NewDocumentKind,
   NotWritable,
   Operation,
   Outcome,
@@ -95,6 +96,7 @@ export const SOURCE_LABEL: Record<SourceKey, string> = {
   codex_user_config: 'User configuration',
   codex_user_hooks: 'User hooks file',
   codex_user_rules: 'User instructions',
+  codex_user_skills: 'User skills folder (~/.agents/skills)',
   codex_project_config: 'Project configuration',
   codex_project_rules: 'Project instructions',
   opencode_user_config: 'User configuration',
@@ -284,6 +286,9 @@ export function detailLines(projection: Projection | null): DetailLine[] {
 
 export const OPERATION_LABEL: Record<Operation, string> = {
   edit_document: 'Change this instruction file',
+  create_document: 'Create this instruction file',
+  delete_document:
+    'Delete this instruction file (kept encrypted, so it can be put back)',
   park_hook: 'Turn off this hook',
   restore_hook: 'Put this hook back',
   disable_all_hooks: 'Turn off every hook',
@@ -416,6 +421,8 @@ export const CHANGE_FAILURE_TEXT: Record<ConfigurationFailure, string> = {
   entry_changed:
     'The entry is not the one that was planned, or has a value this app does not know how to change.',
   already_done: 'It already is that way.',
+  already_exists:
+    'Something already has that name. It was not touched, and nothing was written.',
   restore_conflict:
     'A different entry is where this one would go. Nothing was written.',
   key_store_unavailable:
@@ -516,6 +523,17 @@ export const HOOK_EVENTS = [
   'SubagentStart',
 ] as const;
 
+/** What can be created where nothing exists, as the page offers it. */
+export const NEW_DOCUMENT_LABEL: Record<NewDocumentKind, string> = {
+  claude_skill: 'Claude Code skill',
+  claude_rule: 'Claude Code rule (rules/…)',
+  claude_memory: 'Claude Code CLAUDE.md',
+  codex_skill: 'Codex skill (~/.agents/skills)',
+  codex_agents: 'Codex AGENTS.md',
+  codex_override: 'Codex AGENTS.override.md',
+  opencode_agents: 'OpenCode AGENTS.md',
+};
+
 /** A name OpenCode may key an MCP server by, as the desktop checks it. */
 export const mcpNameOk = (name: string): boolean =>
   /^[A-Za-z0-9_-]{1,64}$/.test(name);
@@ -523,7 +541,7 @@ export const mcpNameOk = (name: string): boolean =>
 /** What the user can write for an item: change its command, or delete it. */
 export function authoringFor(item: ConfigItem): {
   edit: 'hook' | 'mcp' | 'document';
-  remove: 'park_mcp' | 'codex_park_mcp' | null;
+  remove: 'park_mcp' | 'codex_park_mcp' | 'delete_document' | null;
 } | null {
   if (item.not_writable !== 'not_in_this_phase') return null;
   if (
@@ -531,9 +549,10 @@ export function authoringFor(item: ConfigItem): {
       ['claude_user_rules', 'codex_user_rules', 'opencode_user_rules'].includes(
         item.source,
       )) ||
-    (item.kind === 'skill' && item.source === 'claude_user_skills')
+    (item.kind === 'skill' &&
+      ['claude_user_skills', 'codex_user_skills'].includes(item.source))
   )
-    return { edit: 'document', remove: null };
+    return { edit: 'document', remove: 'delete_document' };
   if (
     item.provider === 'claude_code' &&
     item.kind === 'hook' &&

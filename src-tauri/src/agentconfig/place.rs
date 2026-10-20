@@ -15,7 +15,7 @@ use super::roots::ApprovedRoots;
 use nix::{
     errno::Errno,
     fcntl::{AtFlags, OFlag, openat, readlinkat},
-    sys::stat::{Mode, SFlag, fstat, fstatat},
+    sys::stat::{Mode, SFlag, fstat, fstatat, mkdirat},
     unistd::geteuid,
 };
 use std::{
@@ -426,6 +426,167 @@ pub(crate) fn parent_for_write(
         dir,
         name: (*last).to_owned(),
         path: current,
+        trust,
+        shared_with_declared,
+    })
+}
+
+/// Why a place for a new file cannot be had.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CreateWalk {
+    Failure(SourceFailure),
+    /// Something already has the file's name: a file, a link (even a dangling one), a
+    /// directory. A new file never replaces it.
+    Exists,
+    /// More directories are missing than the kind of file may create.
+    TooManyMissing,
+}
+
+impl From<SourceFailure> for CreateWalk {
+    fn from(failure: SourceFailure) -> Self {
+        Self::Failure(failure)
+    }
+}
+
+/// Resolves the directory a **new** file goes in, as `parent_for_write` does for an existing
+/// one: from the root, one judged descriptor at a time, no link followed, nothing outside the
+/// approved roots. Up to `most_missing` trailing directories may be absent. With `make`
+/// they are created (0700, each judged after it is made) and the number made is returned;
+/// without it nothing is touched and the number that would be made is returned, with no
+/// parent. The name of the file must be free: anything at that name refuses.
+pub(crate) fn parent_for_create(
+    roots: &ApprovedRoots,
+    path: &Path,
+    most_missing: usize,
+    make: bool,
+) -> Result<(Option<Parent>, usize), CreateWalk> {
+    let me = geteuid().as_raw();
+    let all = names(path)?;
+    let Some((last, ancestors)) = all.split_last() else {
+        return Err(SourceFailure::Unsupported {
+            reason: UnsupportedReason::NotRegularFile,
+        }
+        .into());
+    };
+    let untrusted = |reason| CreateWalk::Failure(SourceFailure::UntrustedPath { reason });
+    if roots.holding(path).is_none() {
+        return Err(untrusted(UntrustedReason::OutsideRoots));
+    }
+    if is_credential_file(last) || roots.in_credential_directory(path, false) {
+        return Err(SourceFailure::CredentialFile.into());
+    }
+    let directory = OFlag::O_RDONLY | OFlag::O_DIRECTORY;
+    let mut dir = open_below(None, OsStr::new("/"), directory).map_err(open_failure)?;
+    let (first, mut shared_with_declared) = judge_dir(&dir, me, roots.declared())?;
+    let mut trust = first;
+    let mut made = 0_usize;
+    for (position, name) in ancestors.iter().enumerate() {
+        let next = match open_below(Some(&dir), name, directory) {
+            Ok(next) => next,
+            Err(Errno::ENOENT) => {
+                // This directory and every one below it are absent.
+                let absent = ancestors.len() - position;
+                if absent > most_missing {
+                    return Err(CreateWalk::TooManyMissing);
+                }
+                if !make {
+                    if fstat(dir.as_raw_fd()).map_or(true, |stat| stat.st_uid != me)
+                        || trust != PathTrust::Trusted
+                    {
+                        return Err(untrusted(UntrustedReason::WritableByOthers));
+                    }
+                    return Ok((None, absent));
+                }
+                if trust != PathTrust::Trusted
+                    || fstat(dir.as_raw_fd()).map_or(true, |stat| stat.st_uid != me)
+                {
+                    return Err(untrusted(UntrustedReason::WritableByOthers));
+                }
+                mkdirat(
+                    Some(dir.as_raw_fd()),
+                    *name,
+                    Mode::from_bits_truncate(0o700),
+                )
+                .map_err(|_| CreateWalk::Failure(SourceFailure::Unreadable))?;
+                made += 1;
+                open_below(Some(&dir), name, directory).map_err(open_failure)?
+            }
+            Err(Errno::ELOOP | Errno::ENOTDIR) => {
+                return Err(untrusted(if is_link(&dir, name) {
+                    UntrustedReason::AncestorLink
+                } else {
+                    UntrustedReason::AncestorNotDirectory
+                }));
+            }
+            Err(errno) => return Err(open_failure(errno).into()),
+        };
+        let (judged, declared_here) = judge_dir(&next, me, roots.declared())?;
+        trust = weaker(trust, judged);
+        shared_with_declared |= declared_here;
+        dir = next;
+    }
+    if trust != PathTrust::Trusted {
+        return Err(CreateWalk::Failure(SourceFailure::UntrustedPath {
+            reason: UntrustedReason::WritableByOthers,
+        }));
+    }
+    if fstat(dir.as_raw_fd()).map_or(true, |stat| stat.st_uid != me) {
+        return Err(untrusted(UntrustedReason::ForeignOwner));
+    }
+    match fstatat(Some(dir.as_raw_fd()), *last, AtFlags::AT_SYMLINK_NOFOLLOW) {
+        Ok(_) => return Err(CreateWalk::Exists),
+        Err(Errno::ENOENT) => (),
+        Err(_) => return Err(SourceFailure::Unreadable.into()),
+    }
+    Ok((
+        Some(Parent {
+            dir,
+            name: (*last).to_owned(),
+            path: path.to_owned(),
+            trust,
+            shared_with_declared,
+        }),
+        made,
+    ))
+}
+
+/// The directory that holds `dir_path` and the name of it, for removing an empty directory
+/// this module's callers made. Judged like every other place.
+pub(crate) fn parent_of_directory(
+    roots: &ApprovedRoots,
+    dir_path: &Path,
+) -> Result<Parent, SourceFailure> {
+    let me = geteuid().as_raw();
+    let all = names(dir_path)?;
+    let Some((last, ancestors)) = all.split_last() else {
+        return Err(SourceFailure::Unsupported {
+            reason: UnsupportedReason::NotRegularFile,
+        });
+    };
+    if roots.holding(dir_path).is_none() {
+        return Err(SourceFailure::UntrustedPath {
+            reason: UntrustedReason::OutsideRoots,
+        });
+    }
+    let directory = OFlag::O_RDONLY | OFlag::O_DIRECTORY;
+    let mut dir = open_below(None, OsStr::new("/"), directory).map_err(open_failure)?;
+    let (mut trust, mut shared_with_declared) = judge_dir(&dir, me, roots.declared())?;
+    for name in ancestors {
+        let next = open_below(Some(&dir), name, directory).map_err(|errno| match errno {
+            Errno::ELOOP | Errno::ENOTDIR => SourceFailure::UntrustedPath {
+                reason: UntrustedReason::AncestorLink,
+            },
+            other => open_failure(other),
+        })?;
+        let (judged, declared_here) = judge_dir(&next, me, roots.declared())?;
+        trust = weaker(trust, judged);
+        shared_with_declared |= declared_here;
+        dir = next;
+    }
+    Ok(Parent {
+        dir,
+        name: (*last).to_owned(),
+        path: dir_path.to_owned(),
         trust,
         shared_with_declared,
     })

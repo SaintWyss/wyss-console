@@ -21,6 +21,18 @@ export const SOURCE_CLASSES = [
 ] as const;
 export type SourceClass = (typeof SOURCE_CLASSES)[number];
 
+/** What the page may ask to create: a closed word. Names and text are typed in the desktop. */
+export const NEW_DOCUMENT_KINDS = [
+  'claude_skill',
+  'claude_rule',
+  'claude_memory',
+  'codex_skill',
+  'codex_agents',
+  'codex_override',
+  'opencode_agents',
+] as const;
+export type NewDocumentKind = (typeof NEW_DOCUMENT_KINDS)[number];
+
 export const SOURCE_KEYS = [
   'claude_managed_settings',
   'claude_user_settings',
@@ -37,6 +49,7 @@ export const SOURCE_KEYS = [
   'codex_user_config',
   'codex_user_hooks',
   'codex_user_rules',
+  'codex_user_skills',
   'codex_project_config',
   'codex_project_rules',
   'opencode_user_config',
@@ -207,6 +220,7 @@ export const CHANGE_FAILURES = [
   'entry_gone',
   'entry_changed',
   'already_done',
+  'already_exists',
   'restore_conflict',
   'key_store_unavailable',
   'record_unreadable',
@@ -231,6 +245,8 @@ export type ConfigurationFailure = (typeof CONFIGURATION_FAILURES)[number];
 
 export const OPERATIONS = [
   'edit_document',
+  'create_document',
+  'delete_document',
   'park_hook',
   'restore_hook',
   'disable_all_hooks',

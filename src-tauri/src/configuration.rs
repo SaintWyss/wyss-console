@@ -4,6 +4,7 @@
 use crate::agentconfig::author::HookSpec;
 use crate::agentconfig::changes::Authoring;
 use crate::agentconfig::changes::{Applied, ChangeFailure, ChangeService, PlanView};
+use crate::agentconfig::document::NewKind;
 use crate::agentconfig::opencode_plan::{McpSpec, mcp_name_ok};
 use crate::agentconfig::{
     Bounds, Change, Changes, Environment, Faults, Inventory, InventoryService, Operation,
@@ -435,6 +436,64 @@ async fn configuration_edit_document(
     }).await
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateDocument {
+    /// One of the closed words `NewKind` knows. Never a path, a name or text.
+    kind: String,
+}
+
+/// A new instruction file or skill where none exists. The page names only a kind; the
+/// name (where one is needed) and the text are typed in the desktop's own windows.
+#[tauri::command]
+async fn configuration_create_document(
+    app: AppHandle,
+    configuration: tauri::State<'_, Configuration>,
+    request: CreateDocument,
+) -> Result<PlanView, ConfigurationError> {
+    let changes = configuration.changes(&app)?;
+    blocking(move || {
+        let kind = NewKind::parse(&request.kind).ok_or_else(invalid)?;
+        let typed_name = match kind.fixed_name() {
+            Some(_) => String::new(),
+            None => {
+                let label = if kind.is_skill() {
+                    "Skill name (letters, digits, - _ . and spaces)"
+                } else {
+                    "File name under rules/ (for example review.md)"
+                };
+                text_form(
+                    &app,
+                    "Name the new file",
+                    "Nothing exists under this name now. The next window is for its text; nothing is written until you review a plan and confirm it separately.",
+                    vec![Field { label: label.to_owned(), initial: String::new(), multiline: false }],
+                )
+                .ok_or_else(cancelled)?
+                .remove(0)
+            }
+        };
+        let name = kind.name_from(&typed_name).ok_or_else(invalid)?;
+        let shown = if kind.is_skill() { format!("skills/{name}/SKILL.md") } else { name.clone() };
+        let typed = text_form(
+            &app,
+            "Write the new instruction file",
+            &format!("New file: {shown} in your account. It does not exist yet, and undoing the change removes it again. These instructions can change an agent's behaviour: review the full text here."),
+            vec![Field {
+                label: "Instructions (Markdown, at most 64 KiB)".to_owned(),
+                initial: kind.starting_text(&name),
+                multiline: true,
+            }],
+        )
+        .ok_or_else(cancelled)?;
+        Ok(changes.plan_authored(Authoring::CreateDocument {
+            source: kind.source(),
+            name,
+            text: typed[0].clone(),
+        })?)
+    })
+    .await
+}
+
 #[tauri::command]
 async fn configuration_author_hook(
     app: AppHandle,
@@ -723,6 +782,7 @@ const COMMANDS: &[&str] = &[
     "configuration_edit_document",
     "configuration_document_export",
     "configuration_document_import",
+    "configuration_create_document",
 ];
 
 /// What the desktop binary hands to the library: the commands, the state they read, and
@@ -747,7 +807,8 @@ pub fn extension() -> wyss_console::Extension {
             configuration_edit_mcp,
             configuration_edit_document,
             configuration_document_export,
-            configuration_document_import
+            configuration_document_import,
+            configuration_create_document
         ]),
         install: Box::new(|builder| builder.manage(Configuration::start())),
         on_exit: None,

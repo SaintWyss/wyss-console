@@ -67,6 +67,11 @@ impl Environment {
         self.home.join(".config/opencode")
     }
 
+    /// Where Codex looks for the account's own skills (not under `CODEX_HOME`).
+    pub(super) fn agents_skills_dir(&self) -> PathBuf {
+        self.home.join(".agents/skills")
+    }
+
     pub(super) fn codex_dir(&self) -> PathBuf {
         self.codex_home
             .clone()
@@ -95,6 +100,8 @@ pub enum SourceKey {
     CodexUserConfig,
     CodexUserHooks,
     CodexUserRules,
+    /// Skills Codex finds in the account's `~/.agents/skills` (checked through `skills/list`).
+    CodexUserSkills,
     CodexProjectConfig,
     CodexProjectRules,
     OpencodeUserConfig,
@@ -523,6 +530,7 @@ fn key_name(key: SourceKey) -> &'static str {
         SourceKey::CodexUserConfig => "codex_user_config",
         SourceKey::CodexUserHooks => "codex_user_hooks",
         SourceKey::CodexUserRules => "codex_user_rules",
+        SourceKey::CodexUserSkills => "codex_user_skills",
         SourceKey::CodexProjectConfig => "codex_project_config",
         SourceKey::CodexProjectRules => "codex_project_rules",
         SourceKey::OpencodeUserConfig => "opencode_user_config",

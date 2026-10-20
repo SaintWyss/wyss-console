@@ -2,7 +2,6 @@
 //! by the native editor and become ordinary, separately confirmed document-edit plans.
 //! Always passphrase-sealed in a domain distinct from restoration records/API credentials.
 use super::document::{MOST_BYTES, Target, valid_text};
-use super::inventory::SourceKey;
 use super::vault::{RecordKind, Sealed, open_with_passphrase, seal_with_passphrase};
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +23,7 @@ enum Kind {
 
 fn kind(target: &Target) -> Result<Kind, Error> {
     target.check().map_err(|_| Error::Invalid)?;
-    Ok(if target.source == SourceKey::ClaudeUserSkills {
+    Ok(if target.owns_folder() {
         Kind::Skill
     } else {
         Kind::Rule
@@ -120,6 +119,7 @@ pub fn open(target: &Target, bytes: &[u8], passphrase: &str) -> Result<String, E
 
 #[cfg(test)]
 mod tests {
+    use super::super::inventory::SourceKey;
     use super::*;
     fn rule() -> Target {
         Target {

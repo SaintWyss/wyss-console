@@ -13,6 +13,7 @@ import {
   type ConfigurationFailure,
   type History,
   type InventoryReply,
+  type NewDocumentKind,
   type Operation,
   type ParkedRecord,
   type Plan,
@@ -125,6 +126,14 @@ export function editDocument(item: string): Promise<Plan> {
   return checked(
     'configuration_edit_document',
     { request: { item } },
+    parsePlan,
+  );
+}
+/** A new instruction file or skill where none exists. The desktop asks for name and text. */
+export function createDocument(kind: NewDocumentKind): Promise<Plan> {
+  return checked(
+    'configuration_create_document',
+    { request: { kind } },
     parsePlan,
   );
 }

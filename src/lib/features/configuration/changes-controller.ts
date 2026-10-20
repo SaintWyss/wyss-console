@@ -2,6 +2,7 @@ import type {
   Applied,
   ConfigurationFailure,
   History,
+  NewDocumentKind,
   Operation,
   Outcome,
   ParkedRecord,
@@ -13,6 +14,7 @@ import {
   authorHook,
   authorMcp,
   editHook,
+  createDocument,
   editDocument,
   exportDocument,
   importDocument,
@@ -38,6 +40,7 @@ export interface ChangesClient {
   ): Promise<Plan>;
   editHook(item: string): Promise<Plan>;
   editDocument(item: string): Promise<Plan>;
+  createDocument(kind: NewDocumentKind): Promise<Plan>;
   exportDocument(item: string): Promise<boolean>;
   importDocument(item: string): Promise<Plan>;
   authorMcp(
@@ -59,6 +62,7 @@ const desktopClient: ChangesClient = {
   authorHook,
   editHook,
   editDocument,
+  createDocument,
   exportDocument,
   importDocument,
   authorMcp,

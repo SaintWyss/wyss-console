@@ -1,6 +1,10 @@
 <script lang="ts">
   import { PROVIDERS, type ConfigItem } from '../../contracts/configuration';
-  import { ITEM_KINDS } from '../../contracts/configuration';
+  import {
+    ITEM_KINDS,
+    NEW_DOCUMENT_KINDS,
+    type NewDocumentKind,
+  } from '../../contracts/configuration';
   import type { ChangesController, ChangesState } from './changes-controller';
   import type {
     ConfigurationController,
@@ -16,6 +20,7 @@
     STORAGE_LABEL,
     VERDICT_LABEL,
     HOOK_EVENTS,
+    NEW_DOCUMENT_LABEL,
     allHooksSwitch,
     authoringFor,
     changeFor,
@@ -86,7 +91,8 @@
 
   // What the user is about to write: a kind and a place. The text itself is typed in a
   // window of the desktop's own, never here.
-  let writing = $state<'hook' | 'mcp' | null>(null);
+  let writing = $state<'hook' | 'mcp' | 'document' | null>(null);
+  let documentKind = $state<NewDocumentKind>('claude_rule');
   let hookEvent = $state<string>('PreToolUse');
   let hookMatcher = $state('');
   let mcpName = $state('');
@@ -310,6 +316,13 @@
           onclick={() => (writing = writing === 'mcp' ? null : 'mcp')}
           >Add an MCP server…</button
         >
+        <button
+          type="button"
+          class="action chip"
+          aria-pressed={writing === 'document'}
+          onclick={() => (writing = writing === 'document' ? null : 'document')}
+          >New instruction file…</button
+        >
       {/if}
       {#if allHooks && changes.panel === 'items'}
         <button
@@ -325,10 +338,16 @@
     {#if writing && changes.panel === 'items'}
       <form
         class="configuration-plan"
-        aria-label={writing === 'hook' ? 'Add a hook' : 'Add an MCP server'}
+        aria-label={writing === 'hook'
+          ? 'Add a hook'
+          : writing === 'document'
+            ? 'New instruction file'
+            : 'Add an MCP server'}
         onsubmit={(event) => {
           event.preventDefault();
-          if (writing === 'hook')
+          if (writing === 'document')
+            changesController.author((c) => c.createDocument(documentKind));
+          else if (writing === 'hook')
             changesController.author((c) =>
               c.authorHook(hookEvent, hookMatcher.trim() || null, null),
             );
@@ -360,6 +379,21 @@
               maxlength="256"
               placeholder="Bash"
             />
+          </label>
+        {:else if writing === 'document'}
+          <p class="event-meta">
+            Creates a file that does not exist yet. The name (where one is
+            needed) and the text are typed next, in a separate window; nothing
+            is written until you review the plan and confirm it separately. Undo
+            removes it again.
+          </p>
+          <label
+            >What to create
+            <select bind:value={documentKind}>
+              {#each NEW_DOCUMENT_KINDS as kind (kind)}<option value={kind}
+                  >{NEW_DOCUMENT_LABEL[kind]}</option
+                >{/each}
+            </select>
           </label>
         {:else}
           <p class="event-meta">

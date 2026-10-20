@@ -53,6 +53,7 @@
     "allow-configuration-edit-document",
     "allow-configuration-document-export",
     "allow-configuration-document-import",
+    "allow-configuration-create-document",
     "allow-native-launcher",
     "allow-native-preview",
     "allow-native-start",

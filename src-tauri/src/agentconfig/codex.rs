@@ -17,7 +17,11 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 pub(super) fn roots(env: &Environment) -> Result<ApprovedRoots, InvalidRoot> {
-    let mut roots = vec![env.codex_dir(), env.system.join("codex")];
+    let mut roots = vec![
+        env.codex_dir(),
+        env.system.join("codex"),
+        env.agents_skills_dir(),
+    ];
     if let Some(project) = &env.project {
         roots.push(project.join(".codex"));
         roots.push(project.join("AGENTS.md"));
@@ -134,6 +138,7 @@ pub(super) fn read(reader: &ConfigReader, env: &Environment, sink: &mut Sink) {
             ),
         ],
     );
+    user_skills(reader, env, sink);
     if let Some(project) = &env.project {
         rule_files(
             sink,
@@ -142,6 +147,31 @@ pub(super) fn read(reader: &ConfigReader, env: &Environment, sink: &mut Sink) {
             &[("AGENTS.md".to_owned(), project.join("AGENTS.md"))],
         );
     }
+}
+
+/// The skills in `~/.agents/skills`: a folder each, named, never read. That Codex loads one
+/// is what `skills/list` says; here it is only what the files declare. A folder that does
+/// not exist is a source with nothing in it, not a failure.
+fn user_skills(reader: &ConfigReader, env: &Environment, sink: &mut Sink) {
+    let key = SourceKey::CodexUserSkills;
+    let Some(listing) = sink.directory_optional(reader, &env.agents_skills_dir(), key) else {
+        return;
+    };
+    let place = Place {
+        key,
+        trust: listing.trust,
+    };
+    for name in super::inventory::skill_directories(&listing) {
+        sink.push(place.item(
+            ItemKind::Skill,
+            &[name],
+            name,
+            Persisted::PresentEnabled,
+            Effective::NotVerifiable,
+            None,
+        ));
+    }
+    super::inventory::report_listing(sink, key, &listing, 0);
 }
 
 /// Whether the user's configuration marks `project` as trusted.

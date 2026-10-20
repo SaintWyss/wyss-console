@@ -127,6 +127,7 @@ fn main() {
             "configuration_edit_document",
             "configuration_document_export",
             "configuration_document_import",
+            "configuration_create_document",
             "native_launcher",
             "native_preview",
             "native_start",

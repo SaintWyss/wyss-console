@@ -60,6 +60,19 @@ pub struct DiffLine {
 pub enum Logical {
     /// A single provider-owned instruction file; checked by exact byte digest.
     Document(super::document::Target),
+    /// A new instruction file where nothing was: its mode, and how many directories (made
+    /// empty by this change) go with it.
+    DocumentCreate {
+        target: super::document::Target,
+        dirs: usize,
+        mode: u32,
+    },
+    /// An instruction file leaves, and so do `dirs` directories left empty by it. The bytes
+    /// and mode needed to bring it back are in the sealed record.
+    DocumentRemove {
+        target: super::document::Target,
+        dirs: usize,
+    },
     RemoveHook {
         event: String,
         group: usize,
@@ -164,6 +177,23 @@ impl std::fmt::Debug for Drafted {
     }
 }
 
+/// What the journal and a plan hold in place of a digest when there is no file. It is not a
+/// SHA-256 hex string, so an empty file (which has a real digest) can never be mistaken for
+/// an absent one.
+pub const ABSENT: &str = "absent";
+
+impl Logical {
+    /// The instruction file a plan is about, whatever it does to it.
+    pub fn document(&self) -> Option<&super::document::Target> {
+        match self {
+            Self::Document(target)
+            | Self::DocumentCreate { target, .. }
+            | Self::DocumentRemove { target, .. } => Some(target),
+            _ => None,
+        }
+    }
+}
+
 pub fn hash(bytes: &[u8]) -> String {
     ContentHash::of(bytes).hex()
 }
@@ -181,6 +211,8 @@ pub fn apply_logical(before: &Value, edit: &Logical) -> Option<Value> {
     match edit {
         Logical::Nothing => (),
         Logical::Document(_)
+        | Logical::DocumentCreate { .. }
+        | Logical::DocumentRemove { .. }
         | Logical::Toml(_)
         | Logical::Opencode(_)
         | Logical::CodexAuthor(_) => return None,

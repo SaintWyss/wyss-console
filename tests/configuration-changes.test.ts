@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- damage is done to arbitrary JSON */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  NEW_DOCUMENT_KINDS,
   parseApplied,
   parseConfigurationFailure,
   parseHistory,
@@ -73,7 +74,7 @@ describe('what the user can write', () => {
     ]) {
       expect(authoringFor(item({ source, kind: 'rule_file' }))).toEqual({
         edit: 'document',
-        remove: null,
+        remove: 'delete_document',
       });
       expect(
         authoringFor(
@@ -81,9 +82,17 @@ describe('what the user can write', () => {
         ),
       ).toBeNull();
     }
+    for (const source of ['claude_user_skills', 'codex_user_skills'])
+      expect(authoringFor(item({ source, kind: 'skill' }))).toEqual({
+        edit: 'document',
+        remove: 'delete_document',
+      });
+    // A Codex skill that is only a switch in config.toml has no file here to edit.
     expect(
-      authoringFor(item({ source: 'claude_user_skills', kind: 'skill' })),
-    ).toEqual({ edit: 'document', remove: null });
+      authoringFor(
+        item({ source: 'codex_user_config', kind: 'skill', provider: 'codex' }),
+      ),
+    ).toBeNull();
     expect(
       authoringFor(
         item({ source: 'codex_user_hooks', kind: 'hook', provider: 'codex' }),
@@ -285,6 +294,24 @@ describe('the changes controller', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(fake.calls).toEqual(['edit_document:' + 'a'.repeat(32)]);
     expect(states.at(-1)?.plan).not.toBeNull();
+  });
+  it('asks to create by a closed kind only: no name, path or text from the page, and no automatic apply', async () => {
+    for (const kind of NEW_DOCUMENT_KINDS) {
+      controller.author((c) => c.createDocument(kind));
+      await vi.advanceTimersByTimeAsync(0);
+      controller.cancel();
+    }
+    expect(fake.calls).toEqual(
+      NEW_DOCUMENT_KINDS.map((kind) => `create_document:${kind}`),
+    );
+    expect(fake.calls.some((c) => c.startsWith('apply'))).toBe(false);
+  });
+  it('plans a deletion by inventory ID through the ordinary plan and holds it for confirmation', async () => {
+    controller.draft('delete_document', 'a'.repeat(32));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.calls).toEqual(['plan:delete_document:' + 'a'.repeat(32)]);
+    expect(states.at(-1)?.plan).not.toBeNull();
+    expect(fake.calls.some((c) => c.startsWith('apply'))).toBe(false);
   });
   it('opens a template by selected inventory ID without applying it or granting anything', async () => {
     controller.author((c) => c.importDocument('a'.repeat(32)));
