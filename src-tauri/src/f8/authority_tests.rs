@@ -26,6 +26,7 @@ type Sent = Arc<Mutex<Vec<Vec<u8>>>>;
 struct Recorder {
     sent: Sent,
     exited: Arc<Mutex<bool>>,
+    refuse_critical: Arc<Mutex<bool>>,
 }
 impl Worker for Recorder {
     fn send(&mut self, frame: &[u8]) -> ControlResult<()> {
@@ -33,6 +34,9 @@ impl Worker for Recorder {
         Ok(())
     }
     fn send_critical(&mut self, frame: &[u8]) -> ControlResult<()> {
+        if *self.refuse_critical.lock().unwrap() {
+            return Err(E::CapacityExceeded);
+        }
         self.send(frame)
     }
     fn has_exited(&mut self) -> bool {
@@ -42,6 +46,7 @@ impl Worker for Recorder {
 struct Spawn {
     sent: Sent,
     exited: Arc<Mutex<bool>>,
+    refuse_critical: Arc<Mutex<bool>>,
 }
 impl Spawner for Spawn {
     fn spawn(
@@ -53,6 +58,7 @@ impl Spawner for Spawn {
             worker: Box::new(Recorder {
                 sent: self.sent.clone(),
                 exited: self.exited.clone(),
+                refuse_critical: self.refuse_critical.clone(),
             }),
         })
     }
@@ -66,6 +72,9 @@ struct Rig {
 }
 impl Rig {
     fn new() -> Self {
+        Self::with_capacity(1)
+    }
+    fn with_capacity(capacity: usize) -> Self {
         let mut source = f8_fixture::v7_with_sessions(1);
         let conn = migration::prepare(&mut source).unwrap().into_connection();
         let sessions: Vec<String> = conn
@@ -75,7 +84,7 @@ impl Rig {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        let registry = Registry::new(wire(AUTH)).unwrap();
+        let registry = Registry::new(wire(AUTH)).unwrap().with_test_limit(capacity);
         let engine = Engine::new(conn, wire(AUTH), registry, None).unwrap();
         Self {
             authority: Authority::new(engine),
@@ -83,6 +92,7 @@ impl Rig {
             spawn: Spawn {
                 sent: Arc::default(),
                 exited: Arc::default(),
+                refuse_critical: Arc::default(),
             },
             sessions,
         }
@@ -122,7 +132,10 @@ impl Rig {
     }
     /// Starts the first session's runtime over the wire and completes the provider handshake.
     fn ready(&mut self) -> (RuntimeRef, Value) {
-        let s = self.sessions[0].clone();
+        self.ready_for(0)
+    }
+    fn ready_for(&mut self, index: usize) -> (RuntimeRef, Value) {
+        let s = self.sessions[index].clone();
         let (g, r) = self.expect(&s);
         let reply = self.call(
             "runtime/start",
