@@ -146,3 +146,34 @@ fn an_unresponsive_child_is_killed_through_the_owned_handle_only() {
     other.kill().unwrap();
     other.wait().unwrap();
 }
+
+#[test]
+fn critical_approval_write_is_atomic_and_never_queued_after_backpressure() {
+    let mut w = worker("cat");
+    w.send_critical(b"approval item-1 accept").unwrap();
+    let frame = until(|| w.inbound(1).unwrap().into_iter().next());
+    assert_eq!(frame, b"approval item-1 accept".to_vec());
+    assert_eq!(w.buffered_outbound(), 0);
+    assert_eq!(w.send_critical(b"approval\nitem-1 accept"), Err(E::FrameTooLarge));
+    assert_eq!(w.send_critical(&vec![b'x'; 4096]), Err(E::FrameTooLarge));
+    finish(&mut w);
+
+    let mut blocked = worker("sleep 30");
+    let huge = vec![b'z'; 60_000];
+    for _ in 0..20 {
+        let _ = blocked.send(&huge);
+        if blocked.buffered_outbound() != 0 {
+            break;
+        }
+    }
+    assert!(blocked.buffered_outbound() > 0, "fixture must saturate the child pipe");
+    let queued = blocked.buffered_outbound();
+    let start = Instant::now();
+    assert_eq!(
+        blocked.send_critical(b"approval item-1 accept"),
+        Err(E::CapacityExceeded)
+    );
+    assert_eq!(blocked.buffered_outbound(), queued, "no approval was enqueued");
+    assert!(start.elapsed() < Duration::from_millis(500));
+    finish(&mut blocked);
+}
