@@ -530,3 +530,166 @@ fn a_dead_runtime_is_noticed_recovered_and_never_inherited() {
     assert_eq!(again.generation, reference.generation + 1);
     assert_eq!(rig.authority.engine().active_turn(&s), None);
 }
+
+#[test]
+fn reviewed_real_foreign_launch_cannot_mutate_another_sessions_turn_or_approval() {
+    let mut rig = Rig::with_capacity(2);
+    rig.hello();
+    let (a, fence_a) = rig.ready_for(0);
+    let (b, _fence_b) = rig.ready_for(1);
+    let session = rig.sessions[0].clone();
+    let granted = rig.call(
+        "executionLease/grant",
+        json!({"intent_id":uuid(),"session_id":session,"expected_session_revision":1,
+            "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence_a}),
+    );
+    assert_eq!(granted["result"]["kind"], "lease", "{granted}");
+    let started = rig.call(
+        "managedSession/turn/start",
+        json!({"intent_id":uuid(),"managed_session_id":session,"expected_session_revision":1,
+            "prompt":"isolated","runtime_fence":fence_a}),
+    );
+    let turn = ManagedTurnId::parse(
+        started["result"]["value"]["managed_turn_id"].as_str().unwrap(),
+    ).unwrap();
+    let head = |rig: &Rig| -> i64 {
+        rig.authority.engine().connection().query_row(
+            "SELECT count(*) FROM control_events", [], |r| r.get(0)
+        ).unwrap()
+    };
+    let before = head(&rig);
+    assert!(rig.authority.provider_turn_event(
+        &b, &turn, Some("foreign-turn"), TurnState::Running, None,
+    ).is_err());
+    assert_eq!(head(&rig), before, "valid launch B cannot progress A's turn");
+    rig.authority.provider_turn_event(
+        &a, &turn, Some("provider-a"), TurnState::Running, None,
+    ).unwrap();
+    let approved = rig.authority.provider_approval_request(
+        &a, ApprovalKind::CommandExecution, "owned-item", FP,
+        ApprovalStructure {
+            command_bytes: 12, cwd_bytes: 6, parsed_actions: 1, files: 0, diff_bytes: 0,
+        },
+    ).unwrap();
+    let pending_count = head(&rig);
+    // Duplicate provider IDs must not write a second record or invalidate the first.
+    assert!(rig.authority.provider_approval_request(
+        &a, ApprovalKind::CommandExecution, "owned-item", FP,
+        ApprovalStructure {
+            command_bytes: 12, cwd_bytes: 6, parsed_actions: 1, files: 0, diff_bytes: 0,
+        },
+    ).is_err());
+    assert_eq!(head(&rig), pending_count);
+    assert_eq!(rig.authority.engine().pending_approvals(&session), 1);
+    let respond = rig.call(
+        "managedTurn/approval/respond",
+        json!({"intent_id":uuid(),"managed_approval_id":approved.managed_approval_id,
+            "expected_revision":1,"decision":"accept","runtime_fence":fence_a}),
+    );
+    assert_eq!(respond["result"]["kind"], "approval_receipt", "{respond}");
+    let before_foreign_confirmation = head(&rig);
+    assert!(rig.authority.provider_approval_confirmed(
+        &b, &approved.managed_approval_id, "owned-item",
+    ).is_err());
+    assert_eq!(head(&rig), before_foreign_confirmation);
+    rig.authority.provider_approval_confirmed(
+        &a, &approved.managed_approval_id, "owned-item",
+    ).unwrap();
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
+
+#[test]
+fn reviewed_lost_pending_ticket_cannot_authorize_a_new_durable_accept() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (a, fence) = rig.ready();
+    let session = rig.sessions[0].clone();
+    let granted = rig.call(
+        "executionLease/grant",
+        json!({"intent_id":uuid(),"session_id":session,"expected_session_revision":1,
+            "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence}),
+    );
+    let lease = granted["result"]["value"]["lease_id"].as_str().unwrap().to_owned();
+    let started = rig.call(
+        "managedSession/turn/start",
+        json!({"intent_id":uuid(),"managed_session_id":session,"expected_session_revision":1,
+            "prompt":"pending","runtime_fence":fence}),
+    );
+    let turn = ManagedTurnId::parse(
+        started["result"]["value"]["managed_turn_id"].as_str().unwrap()
+    ).unwrap();
+    rig.authority.provider_turn_event(
+        &a, &turn, Some("p"), TurnState::Running, None,
+    ).unwrap();
+    let approval = rig.authority.provider_approval_request(
+        &a, ApprovalKind::CommandExecution, "pending-item", FP,
+        ApprovalStructure {
+            command_bytes: 12, cwd_bytes: 6, parsed_actions: 1, files: 0, diff_bytes: 0,
+        },
+    ).unwrap();
+    // The durable lease remains active, but volatile ticket ownership was lost.
+    rig.authority.engine_mut().lease_lost(&session, &lease);
+    let before: i64 = rig.authority.engine().connection().query_row(
+        "SELECT count(*) FROM control_events", [], |r| r.get(0),
+    ).unwrap();
+    let frames = rig.sent().len();
+    let reply = rig.call(
+        "managedTurn/approval/respond",
+        json!({"intent_id":uuid(),"managed_approval_id":approval.managed_approval_id,
+            "expected_revision":1,"decision":"accept","runtime_fence":fence}),
+    );
+    assert_eq!(code(&reply), "stale_revision", "{reply}");
+    let after: i64 = rig.authority.engine().connection().query_row(
+        "SELECT count(*) FROM control_events", [], |r| r.get(0),
+    ).unwrap();
+    assert_eq!(before, after);
+    assert_eq!(rig.sent().len(), frames, "lost live ticket is not dispatch authority");
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
+
+#[test]
+fn reviewed_all_provider_decisions_report_failed_critical_dispatch_as_errors() {
+    for decision in ["accept", "decline", "cancel"] {
+        let mut rig = Rig::new();
+        rig.hello();
+        let (from, fence) = rig.ready();
+        let session = rig.sessions[0].clone();
+        rig.call(
+            "executionLease/grant",
+            json!({"intent_id":uuid(),"session_id":session,"expected_session_revision":1,
+                "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence}),
+        );
+        let started = rig.call(
+            "managedSession/turn/start",
+            json!({"intent_id":uuid(),"managed_session_id":session,"expected_session_revision":1,
+                "prompt":"dispatch","runtime_fence":fence}),
+        );
+        let turn = ManagedTurnId::parse(
+            started["result"]["value"]["managed_turn_id"].as_str().unwrap(),
+        ).unwrap();
+        rig.authority.provider_turn_event(
+            &from, &turn, Some("p"), TurnState::Running, None,
+        ).unwrap();
+        let approval = rig.authority.provider_approval_request(
+            &from, ApprovalKind::CommandExecution, "item-1", FP,
+            ApprovalStructure {
+                command_bytes: 12, cwd_bytes: 6, parsed_actions: 1, files: 0, diff_bytes: 0,
+            },
+        ).unwrap();
+        *rig.spawn.refuse_critical.lock().unwrap() = true;
+        let sent = rig.sent().len();
+        let response = rig.call(
+            "managedTurn/approval/respond",
+            json!({"intent_id":uuid(),"managed_approval_id":approval.managed_approval_id,
+                "expected_revision":1,"decision":decision,"runtime_fence":fence}),
+        );
+        assert_ne!(code(&response), "<ok>", "{decision} falsely reported delivery: {response}");
+        assert_eq!(rig.sent().len(), sent, "no critical frame reached the test worker");
+        assert_eq!(
+            rig.authority.engine().runtime_view(&session).map(|(s, _)| s),
+            Some("stopping"),
+            "a failed critical transport must fence this runtime only"
+        );
+        validate_v8(rig.authority.engine().connection()).unwrap();
+    }
+}
