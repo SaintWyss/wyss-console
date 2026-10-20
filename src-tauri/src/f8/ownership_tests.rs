@@ -98,7 +98,7 @@ fn a_child_ignoring_eof_and_term_is_killed_and_reaped_through_the_owned_handle_o
 }
 
 #[test]
-fn a_reaped_or_mismatched_handle_never_signals_anything() {
+fn a_reaped_handle_never_signals_and_verify_detects_a_changed_start_time() {
     let mut other = bystander();
     let mut child = owned_sleep();
     child.verify().unwrap();

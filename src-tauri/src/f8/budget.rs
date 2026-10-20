@@ -32,8 +32,8 @@ pub fn classify(key: &str) -> Option<Enforcement> {
         | "turn_events"
         | "turn_events_per_second"
         | "turn_event_burst"
-        | "turn_wall_seconds"
         | "pending_approvals_per_runtime" => Enforced("f8::budget::Meter"),
+        "turn_wall_seconds" => Enforced("f8::budget::Meter via engine::poll"),
         "data_queue_events_per_runtime"
         | "data_queue_bytes_per_runtime"
         | "control_queue_events_per_runtime"
@@ -43,7 +43,8 @@ pub fn classify(key: &str) -> Option<Enforcement> {
         | "max_data_events_per_quantum"
         | "control_dispatch_deadline_ms" => Enforced("f8::scheduler"),
         "eof_grace_ms" | "term_grace_ms" => Enforced("f8::ownership"),
-        "hello_timeout_ms" | "provider_init_timeout_ms" => Enforced("f8::engine"),
+        "provider_init_timeout_ms" => Enforced("f8::engine::poll"),
+        "hello_timeout_ms" => NotProven,
         "owned_root_rss_soft_kib" | "aggregate_owned_roots_rss_soft_kib" => SoftObservation,
         "max_clients"
         | "provider_scratch_bytes"

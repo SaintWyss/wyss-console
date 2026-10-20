@@ -18,7 +18,7 @@ use nix::{
 };
 use std::{
     io::Write,
-    os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd},
+    os::fd::{AsRawFd, FromRawFd, OwnedFd},
     path::Path,
 };
 
@@ -84,21 +84,33 @@ impl StagingRoot {
                 E::StorageUnavailable
             }
         })?;
+        // From here the directory is ours: any failure removes exactly what was just created.
+        let rollback = |e: E| {
+            let _ = unlinkat(
+                Some(self.fd.as_raw_fd()),
+                name.as_str(),
+                UnlinkatFlags::RemoveDir,
+            );
+            e
+        };
         let dir = openat(
             Some(self.fd.as_raw_fd()),
             name.as_str(),
             OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_RDONLY | OFlag::O_CLOEXEC,
             Mode::empty(),
         )
-        .map_err(io)?;
+        .map_err(|_| rollback(E::StorageUnavailable))?;
         // SAFETY: a fresh descriptor returned by openat and owned by nobody else.
         let dir = unsafe { OwnedFd::from_raw_fd(dir) };
-        let st = fstat(dir.as_raw_fd()).map_err(io)?;
+        let st = fstat(dir.as_raw_fd()).map_err(|_| rollback(E::StorageUnavailable))?;
         if !is_dir(&st) || st.st_uid != uid() || st.st_mode & 0o077 != 0 {
-            return Err(E::UnsafePath);
+            return Err(rollback(E::UnsafePath));
         }
         Ok(LaunchStaging {
-            root: self.fd.try_clone().map_err(io)?,
+            root: self
+                .fd
+                .try_clone()
+                .map_err(|_| rollback(E::StorageUnavailable))?,
             dir,
             name,
             ino: (st.st_dev, st.st_ino),
@@ -146,11 +158,15 @@ impl LaunchStaging {
         })?;
         // SAFETY: a fresh descriptor returned by openat and owned by nobody else.
         let mut file = std::fs::File::from(unsafe { OwnedFd::from_raw_fd(fd) });
-        let st = fstat(file.as_raw_fd()).map_err(io)?;
+        let st = fstat(file.as_raw_fd()).map_err(|e| {
+            // Created exclusively just now, so it is ours to remove although never recorded.
+            let _ = unlinkat(Some(self.dir.as_raw_fd()), name, UnlinkatFlags::NoRemoveDir);
+            io(e)
+        })?;
+        self.files.push((name.to_owned(), (st.st_dev, st.st_ino)));
         if !is_reg(&st) || st.st_nlink != 1 || st.st_uid != uid() {
             return Err(E::UnsafePath);
         }
-        self.files.push((name.to_owned(), (st.st_dev, st.st_ino)));
         file.write_all(bytes).map_err(io)?;
         file.sync_all().map_err(io)?;
         nix::sys::stat::fchmod(file.as_raw_fd(), Mode::from_bits_truncate(0o400)).map_err(io)?;
@@ -174,26 +190,45 @@ impl LaunchStaging {
         }
         Ok((st.st_dev, st.st_ino, st.st_size))
     }
-    /// Removes exactly what this launch created, verifying identity first. Any mismatch leaves
-    /// the foreign entry untouched and reports `UnsafePath`; nothing outside is ever removed.
+    /// Removes the launch directory. Entries are unlinked through the pinned directory descriptor,
+    /// so nothing outside it can be touched even if a name was replaced or gained extra links
+    /// (a hard link or symlink is unlinked, never followed). A foreign entry is reported
+    /// (`UnsafePath`) but never a reason to leave the directory behind. The directory itself is
+    /// removed only if its name still refers to the inode this launch made.
     pub fn cleanup(mut self) -> ControlResult<()> {
-        let mut outcome = Ok(());
-        for (name, ino) in std::mem::take(&mut self.files) {
-            let same = fstatat(
+        let mut anomaly = false;
+        let known = std::mem::take(&mut self.files);
+        let mut entries = Vec::new();
+        let listing = openat(
+            Some(self.dir.as_raw_fd()),
+            ".",
+            OFlag::O_DIRECTORY | OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(io)?;
+        // The Dir owns `listing` from here (closed on drop, also if from_fd fails).
+        let mut dir = nix::dir::Dir::from_fd(listing).map_err(io)?;
+        for entry in dir.iter().flatten() {
+            let n = entry.file_name().to_string_lossy().into_owned();
+            if n != "." && n != ".." {
+                entries.push(n);
+            }
+        }
+        for name in entries {
+            let ours = known.iter().find(|(n, _)| *n == name).map(|(_, i)| *i);
+            let exact = fstatat(
                 Some(self.dir.as_raw_fd()),
                 name.as_str(),
                 nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
             )
-            .is_ok_and(|s| is_reg(&s) && s.st_nlink == 1 && (s.st_dev, s.st_ino) == ino);
-            if same {
-                let _ = unlinkat(
-                    Some(self.dir.as_raw_fd()),
-                    name.as_str(),
-                    UnlinkatFlags::NoRemoveDir,
-                );
-            } else {
-                outcome = Err(E::UnsafePath);
-            }
+            .is_ok_and(|s| is_reg(&s) && s.st_nlink == 1 && ours == Some((s.st_dev, s.st_ino)));
+            anomaly |= !exact;
+            anomaly |= unlinkat(
+                Some(self.dir.as_raw_fd()),
+                name.as_str(),
+                UnlinkatFlags::NoRemoveDir,
+            )
+            .is_err();
         }
         let same_dir = fstatat(
             Some(self.root.as_raw_fd()),
@@ -201,22 +236,14 @@ impl LaunchStaging {
             nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
         )
         .is_ok_and(|s| is_dir(&s) && (s.st_dev, s.st_ino) == self.ino);
-        if same_dir {
-            // Fails (ENOTEMPTY) rather than removing anything it did not create.
-            if unlinkat(
+        anomaly |= !same_dir
+            || unlinkat(
                 Some(self.root.as_raw_fd()),
                 self.name.as_str(),
                 UnlinkatFlags::RemoveDir,
             )
-            .is_err()
-            {
-                outcome = Err(E::UnsafePath);
-            }
-        } else {
-            outcome = Err(E::UnsafePath);
-        }
-        let _ = self.dir.as_fd();
-        outcome
+            .is_err();
+        if anomaly { Err(E::UnsafePath) } else { Ok(()) }
     }
 }
 

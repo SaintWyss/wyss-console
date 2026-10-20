@@ -93,6 +93,8 @@ struct Lane<T> {
     control_bytes: usize,
     /// A dispatched control item awaiting acknowledgement, with its dispatch time.
     unacked_since: Option<u64>,
+    /// Control items dispatched and not yet acknowledged.
+    unacked: usize,
     faulted: bool,
 }
 impl<T> Lane<T> {
@@ -103,6 +105,7 @@ impl<T> Lane<T> {
             control: VecDeque::new(),
             control_bytes: 0,
             unacked_since: None,
+            unacked: 0,
             faulted: false,
         }
     }
@@ -116,6 +119,22 @@ impl<T> Lane<T> {
     }
 }
 
+/// The real size of a queued item. A caller can never under-declare it: the declared byte count
+/// must be at least the item's own weight, so the memory ceiling cannot be dodged with zero.
+pub trait Weigh {
+    fn weight(&self) -> usize;
+}
+impl Weigh for Vec<u8> {
+    fn weight(&self) -> usize {
+        self.len()
+    }
+}
+impl Weigh for u64 {
+    fn weight(&self) -> usize {
+        0
+    }
+}
+
 pub struct Scheduler<T> {
     limits: Limits,
     lanes: BTreeMap<String, Lane<T>>,
@@ -123,7 +142,7 @@ pub struct Scheduler<T> {
     cursor: usize,
 }
 
-impl<T> Scheduler<T> {
+impl<T: Weigh> Scheduler<T> {
     pub fn new() -> ControlResult<Self> {
         Ok(Self {
             limits: Limits::load()?,
@@ -166,6 +185,9 @@ impl<T> Scheduler<T> {
         let lane = self.lanes.get_mut(key).ok_or(Refusal::UnknownRuntime)?;
         if lane.faulted {
             return Err(Refusal::Faulted);
+        }
+        if bytes < item.weight() {
+            return Err(Refusal::TooLarge);
         }
         match class {
             Class::Data => {
@@ -224,6 +246,7 @@ impl<T> Scheduler<T> {
                 lane.control_bytes -= bytes;
                 let waited = now_ms.saturating_sub(queued);
                 lane.unacked_since.get_or_insert(now_ms);
+                lane.unacked += 1;
                 out.push(Dispatch {
                     runtime: (*key).clone(),
                     class: Class::Control,
@@ -257,10 +280,13 @@ impl<T> Scheduler<T> {
         out
     }
 
-    /// The worker acknowledged its control dispatches.
-    pub fn ack(&mut self, key: &str) {
+    /// The worker acknowledged `count` control dispatches. The stall clock only stops when every
+    /// dispatched item is acknowledged, so an early ack cannot hide a later unacknowledged one;
+    /// after a partial ack the deadline restarts for the remainder.
+    pub fn ack(&mut self, key: &str, count: usize, now_ms: u64) {
         if let Some(l) = self.lanes.get_mut(key) {
-            l.unacked_since = None;
+            l.unacked = l.unacked.saturating_sub(count);
+            l.unacked_since = (l.unacked > 0).then_some(now_ms);
         }
     }
     /// Faults every runtime whose dispatched control item is unacknowledged past the contract
@@ -278,6 +304,7 @@ impl<T> Scheduler<T> {
             {
                 lane.faulted = true;
                 lane.unacked_since = None;
+                lane.unacked = 0;
                 faults.push(Fault {
                     runtime: key.clone(),
                     reason: FaultReason::WorkerStalled,

@@ -78,11 +78,12 @@ fn concurrent_launches_cannot_collide_and_b_is_unchanged_by_a_failed_a() {
     );
     // B notices the extra link (a tampering signal) and will not vouch for or delete the file.
     assert_eq!(b.identity("catalogue.json"), Err(E::UnsafePath));
-    // Cleaning A refuses to unlink what it did not create and leaves B alone.
+    // Cleaning A reports the foreign link but removes only entries inside A's own pinned
+    // directory: B's bytes survive, the extra link is gone, and B is whole again.
     assert!(a.cleanup().is_err());
     assert_eq!(fs::read(target.join("catalogue.json")).unwrap(), b"B-bytes");
-    assert!(b.cleanup().is_err());
-    assert_eq!(fs::read(target.join("catalogue.json")).unwrap(), b"B-bytes");
+    assert_eq!(b.identity("catalogue.json").unwrap(), before);
+    b.cleanup().unwrap();
     fs::remove_dir_all(path).unwrap();
 }
 
@@ -124,5 +125,18 @@ fn roots_and_names_are_validated() {
         Err(E::InvalidRequest)
     );
     a.cleanup().unwrap();
+    fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn a_provider_adding_links_inside_its_own_directory_cannot_block_cleanup() {
+    let (path, root) = root();
+    let mut a = root.create(&instance(7)).unwrap();
+    a.write_file("catalogue.json", b"x").unwrap();
+    let dir = path.join(instance(7).as_str());
+    fs::hard_link(dir.join("catalogue.json"), dir.join("extra")).unwrap();
+    // The anomaly is reported, but the directory is gone: no unremovable leftover to hold a slot.
+    assert!(a.cleanup().is_err());
+    assert!(!dir.exists());
     fs::remove_dir_all(path).unwrap();
 }

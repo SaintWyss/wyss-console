@@ -58,7 +58,7 @@ Inactive protocol codecs, offline V0–V7→V8 preparation/initial-image validat
 now exist: [code evidence and precise limits](acceptance/f8-code-2026-10-20.md). New-work V8 event replay,
 audit result validation, durable allocation/replay and production enforcement still remain. Non-audit
 result correlation is implemented, with explicit canonical-workspace context for binding creation.
-Qualified concurrency measurements and provider shared-state compatibility remain unproven; no live migration or guarantee change occurred.
+Inactive F8 now also has vocabulary-2 audit replay, a post-migration V8 validator, a durable allocator, owned-process lifecycle, budgets, scheduler, staging and a per-session engine with F8-01..F8-18 tests ([evidence](acceptance/f8-code-2026-10-20.md), [Codex shared state](research/f8-codex-shared-state-2026-10-20.md), [owner decision](research/f8-owner-decision-2026-10-20.md)). Not integrated or activated; V8 turn/approval writers, process-backed workers and provider concurrency remain open (capacity 1). Qualified concurrency measurements and provider shared-state compatibility remain unproven; no live migration or guarantee change occurred.
 See [F8 evidence](research/f8-runtime-decision-2026-10-20.md) and
 [adversarial specification](spec/f8-runtime-acceptance.md).
 

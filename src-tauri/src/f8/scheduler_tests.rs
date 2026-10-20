@@ -136,7 +136,7 @@ fn a_blocked_worker_is_faulted_alone_and_others_keep_progressing() {
     let out = s.tick(0);
     assert_eq!(out.len(), 3);
     // B acknowledges; A never does (blocked or crashed worker).
-    s.ack("b");
+    s.ack("b", 1, 0);
     assert!(
         s.check_stalls(l.control_deadline_ms).is_empty(),
         "exactly at the deadline is not past it"

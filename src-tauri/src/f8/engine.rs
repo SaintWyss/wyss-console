@@ -25,8 +25,14 @@ use crate::contracts::{
 use rusqlite::Connection;
 use std::{collections::BTreeMap, time::Instant};
 
+/// Largest frame the engine will hand to a worker (the contract's client frame bound).
+const MAX_OUTBOUND_FRAME: usize = 65_536;
+
 /// Sends already-authorized bytes to one runtime's provider connection. It performs no policy:
 /// the engine decides, immediately beforehand, whether anything may be written at all.
+/// **`send` must never block**: an implementation over a pipe must be non-blocking with a bounded
+/// buffer and return an error (back pressure) instead of waiting, because it runs on the thread
+/// which also drives every other runtime's cleanup.
 pub trait Worker: Send {
     fn send(&mut self, frame: &[u8]) -> ControlResult<()>;
 }
@@ -97,7 +103,8 @@ struct Live {
     worker: Box<dyn Worker>,
     child: Option<OwnedChild>,
     staging: Option<LaunchStaging>,
-    meter: Option<Meter>,
+    meter: Meter,
+    spawned_at: Instant,
     turn: Option<(String, String)>,
     /// Provider request id to pending approval, scoped to this very launch.
     approvals: BTreeMap<String, Pending>,
@@ -114,6 +121,9 @@ pub struct Engine {
     live: BTreeMap<String, Live>,
     staging: Option<StagingRoot>,
     scheduler: Scheduler<Vec<u8>>,
+    epoch: Instant,
+    /// Launch directories whose cleanup reported an anomaly (reported, never retried blindly).
+    staging_anomalies: usize,
     /// Exits whose audit record could not be written yet (storage failure): retried, never lost.
     unrecorded: Vec<(RuntimeRef, String, Option<String>)>,
     hook: Option<StageHook>,
@@ -133,6 +143,8 @@ impl Engine {
             live: BTreeMap::new(),
             staging,
             scheduler: Scheduler::new()?,
+            epoch: Instant::now(),
+            staging_anomalies: 0,
             unrecorded: Vec::new(),
             hook: None,
         })
@@ -147,8 +159,31 @@ impl Engine {
     pub fn connection(&self) -> &Connection {
         &self.conn
     }
-    pub fn scheduler_mut(&mut self) -> &mut Scheduler<Vec<u8>> {
+    #[cfg(test)]
+    pub(crate) fn scheduler_mut(&mut self) -> &mut Scheduler<Vec<u8>> {
         &mut self.scheduler
+    }
+    /// Queues work for one live launch (fence-checked). A full data lane is back pressure; an
+    /// overflowing control lane faults that runtime, which `poll` then stops.
+    pub fn enqueue(
+        &mut self,
+        to: &RuntimeRef,
+        class: super::scheduler::Class,
+        item: Vec<u8>,
+        now: Instant,
+    ) -> Result<(), super::scheduler::Refusal> {
+        self.check_current(to)
+            .map_err(|_| super::scheduler::Refusal::UnknownRuntime)?;
+        let bytes = item.len();
+        let ms = self.ms(now);
+        self.scheduler
+            .push(to.managed_session_id.as_str(), class, bytes, item, ms)
+    }
+    fn ms(&self, now: Instant) -> u64 {
+        u64::try_from(now.saturating_duration_since(self.epoch).as_millis()).unwrap_or(u64::MAX)
+    }
+    pub fn staging_anomalies(&self) -> usize {
+        self.staging_anomalies
     }
     fn stage(&mut self, stage: LaunchStage) -> ControlResult<()> {
         match self.hook.as_mut() {
@@ -222,9 +257,9 @@ impl Engine {
     }
 
     fn launch(&mut self, reference: &RuntimeRef, spawner: &mut dyn Spawner) -> ControlResult<()> {
-        self.registry.reserve(reference.clone())?;
         let session = reference.managed_session_id.as_str().to_owned();
         let result = (|| {
+            self.registry.reserve(reference.clone())?;
             self.stage(LaunchStage::AfterReservation)?;
             let mut staging = match &self.staging {
                 Some(root) => Some(root.create(&reference.runtime_instance_id)?),
@@ -246,7 +281,8 @@ impl Engine {
                 worker: spawned.worker,
                 child: spawned.child,
                 staging,
-                meter: None,
+                meter: Meter::new(self.ms(Instant::now()))?,
+                spawned_at: Instant::now(),
                 turn: None,
                 approvals: BTreeMap::new(),
                 attachment: None,
@@ -283,8 +319,10 @@ impl Engine {
     fn finish_unspawned(&mut self, session: &str) {
         if let Some(live) = self.live.remove(session) {
             let _ = self.registry.remove_after_reap(&live.reference);
-            if let Some(s) = live.staging {
-                let _ = s.cleanup();
+            if let Some(s) = live.staging
+                && s.cleanup().is_err()
+            {
+                self.staging_anomalies += 1;
             }
             self.scheduler.remove_runtime(session);
         }
@@ -345,14 +383,27 @@ impl Engine {
             .ok_or(E::StaleRevision)
     }
 
-    /// The attachment the runtime is currently attached with changed (workspace or profile).
+    /// The attachment changed (workspace or profile). The revision must strictly increase, and
+    /// everything admitted under the old context dies with it: the turn, its ticket and every
+    /// pending approval. Restoring an earlier value is a new, higher revision, never a revival.
     pub fn replace_attachment(
         &mut self,
         fence: &RuntimeFence,
         next: Attachment,
     ) -> ControlResult<()> {
+        let now = self.ms(Instant::now());
         let live = self.fenced_mut(fence)?;
+        if live
+            .attachment
+            .as_ref()
+            .is_some_and(|a| next.revision <= a.revision)
+        {
+            return Err(E::StaleRevision);
+        }
         live.attachment = Some(next);
+        live.turn = None;
+        live.approvals.clear();
+        live.meter = Meter::new(now)?;
         Ok(())
     }
     fn fenced_mut(&mut self, fence: &RuntimeFence) -> ControlResult<&mut Live> {
@@ -391,8 +442,6 @@ impl Engine {
         if live.attachment.as_ref() != Some(context) {
             return Err(E::GateDenied);
         }
-        let meter = Meter::new(now_ms)?;
-        live.meter = Some(meter);
         live.turn = Some((turn_id.to_owned(), lease.lease_id.clone()));
         Ok(TurnTicket {
             reference: live.reference.clone(),
@@ -400,6 +449,47 @@ impl Engine {
             lease_id: lease.lease_id.clone(),
             context: context.clone(),
         })
+    }
+
+    /// Ends the admitted turn: its ticket stops working and its approvals are discarded.
+    pub fn end_turn(&mut self, ticket: &TurnTicket) -> ControlResult<()> {
+        let now = self.ms(Instant::now());
+        self.check_current(&ticket.reference)?;
+        let live = self
+            .live
+            .get_mut(ticket.reference.managed_session_id.as_str())
+            .ok_or(E::StaleRevision)?;
+        if live.turn.as_ref().map(|t| &t.0) != Some(&ticket.turn_id) {
+            return Err(E::StaleRevision);
+        }
+        live.turn = None;
+        live.approvals.clear();
+        live.meter = Meter::new(now)?;
+        Ok(())
+    }
+
+    /// Revalidates, at this very moment, the launch, turn, lease and attachment of a ticket.
+    fn authorize(
+        &mut self,
+        ticket: &TurnTicket,
+        leases: &dyn LeaseView,
+        now_ms: u64,
+    ) -> ControlResult<&mut Live> {
+        self.check_current(&ticket.reference)?;
+        let session = ticket.reference.managed_session_id.as_str().to_owned();
+        let live = self.live.get_mut(&session).ok_or(E::StaleRevision)?;
+        if live.phase != Phase::Ready
+            || live.turn.as_ref().map(|t| (&t.0, &t.1)) != Some((&ticket.turn_id, &ticket.lease_id))
+        {
+            return Err(E::StaleRevision);
+        }
+        if !leases.active(&session, &ticket.lease_id, now_ms) {
+            return Err(E::GateDenied);
+        }
+        if live.attachment.as_ref() != Some(&ticket.context) {
+            return Err(E::GateDenied);
+        }
+        Ok(live)
     }
 
     /// Writes one frame to the provider of the ticket's launch after revalidating, at this very
@@ -411,23 +501,14 @@ impl Engine {
         leases: &dyn LeaseView,
         now_ms: u64,
     ) -> ControlResult<()> {
-        self.check_current(&ticket.reference)?;
-        let session = ticket.reference.managed_session_id.as_str().to_owned();
-        let live = self.live.get_mut(&session).ok_or(E::StaleRevision)?;
-        if live.turn.as_ref().map(|t| (&t.0, &t.1)) != Some((&ticket.turn_id, &ticket.lease_id)) {
-            return Err(E::StaleRevision);
+        if frame.len() > MAX_OUTBOUND_FRAME {
+            return Err(E::FrameTooLarge);
         }
-        if !leases.active(&session, &ticket.lease_id, now_ms) {
-            return Err(E::GateDenied);
-        }
-        if live.attachment.as_ref() != Some(&ticket.context) {
-            return Err(E::GateDenied);
-        }
-        live.worker.send(frame)
+        self.authorize(ticket, leases, now_ms)?.worker.send(frame)
     }
 
     /// One inbound provider event. It must come from the current launch; it is charged to that
-    /// launch's meter only; exceeding a budget stops that runtime alone.
+    /// launch's meter only (also outside a turn); exceeding a budget stops that runtime alone.
     pub fn provider_event(
         &mut self,
         from: &RuntimeRef,
@@ -439,8 +520,7 @@ impl Engine {
         let violation = self
             .live
             .get_mut(&session)
-            .and_then(|l| l.meter.as_mut())
-            .and_then(|m| m.charge_event(now_ms, bytes).err());
+            .and_then(|l| l.meter.charge_event(now_ms, bytes).err());
         if let Some(Violation { key }) = violation {
             self.begin_stop_internal(&session, "budget_exceeded", Some(key.to_owned()));
             return Err(E::CapacityExceeded);
@@ -465,45 +545,48 @@ impl Engine {
         if live.approvals.contains_key(request_id) {
             return Err(E::IntentConflict);
         }
-        if let Some(m) = live.meter.as_mut()
-            && m.approval_opened().is_err()
-        {
+        if live.meter.approval_opened().is_err() {
             return Err(E::CapacityExceeded);
         }
-        if live
-            .approvals
-            .insert(
-                request_id.to_owned(),
-                Pending {
-                    fingerprint: fingerprint.to_owned(),
-                },
-            )
-            .is_some()
-        {
-            return Err(E::IntentConflict);
-        }
+        live.approvals.insert(
+            request_id.to_owned(),
+            Pending {
+                fingerprint: fingerprint.to_owned(),
+            },
+        );
         Ok(())
     }
-    /// An approval answer from a client. It resolves only through the fence's own launch, and
-    /// only if the action fingerprint is the one that was requested.
+    /// A client decision on a pending approval. The frame is built here from the request and the
+    /// decision (never caller bytes), after the same revalidation as any write; the approval is
+    /// consumed only once the frame was actually delivered.
     pub fn answer_approval(
         &mut self,
-        fence: &RuntimeFence,
+        ticket: &TurnTicket,
+        leases: &dyn LeaseView,
+        now_ms: u64,
         request_id: &str,
         fingerprint: &str,
-        frame: &[u8],
+        decision: &str,
     ) -> ControlResult<()> {
-        self.registry.observe(&self.authority, fence)?;
-        let live = self.fenced_mut(fence)?;
+        if !matches!(decision, "accept" | "decline" | "cancel")
+            || request_id.is_empty()
+            || request_id.len() > 128
+            || !request_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+        {
+            return Err(E::InvalidRequest);
+        }
+        let live = self.authorize(ticket, leases, now_ms)?;
         let pending = live.approvals.get(request_id).ok_or(E::ApprovalNotFound)?;
         if pending.fingerprint != fingerprint {
             return Err(E::GateDenied);
         }
+        let frame = format!("approval {request_id} {decision}");
+        live.worker.send(frame.as_bytes())?;
         live.approvals.remove(request_id);
-        if let Some(m) = live.meter.as_mut() {
-            m.approval_closed();
-        }
-        live.worker.send(frame)
+        live.meter.approval_closed();
+        Ok(())
     }
     pub fn pending_approvals(&self, session: &str) -> usize {
         self.live.get(session).map_or(0, |l| l.approvals.len())
@@ -560,6 +643,41 @@ impl Engine {
     /// A reaped launch releases its slot, staging and queues, then its exit is recorded; if
     /// the record cannot be written it is retried later and the unknown stays visible.
     pub fn poll(&mut self, now: Instant) {
+        let now_ms = self.ms(now);
+        let init_timeout = super::budget::contract()
+            .ok()
+            .and_then(|c| c.get("provider_init_timeout_ms").copied())
+            .unwrap_or(10_000);
+        // Detect what no one reported: an unexpected child exit, a missed handshake deadline,
+        // a turn over its wall clock and a faulted or stalled scheduler lane. Each stops only
+        // the runtime concerned.
+        let mut verdicts: Vec<(String, &'static str, Option<String>)> = Vec::new();
+        for (session, live) in &mut self.live {
+            if live.phase == Phase::Stopping {
+                continue;
+            }
+            if let Some(child) = live.child.as_mut()
+                && matches!(child.try_wait(), Ok(Some(_)))
+            {
+                verdicts.push((session.clone(), "child_exited", None));
+            } else if live.phase == Phase::Spawned
+                && u64::try_from(now.saturating_duration_since(live.spawned_at).as_millis())
+                    .unwrap_or(u64::MAX)
+                    > init_timeout
+            {
+                verdicts.push((session.clone(), "handshake_timeout", None));
+            } else if let Err(v) = live.meter.check_wall(now_ms) {
+                verdicts.push((session.clone(), "budget_exceeded", Some(v.key.to_owned())));
+            } else if self.scheduler.is_faulted(session) {
+                verdicts.push((session.clone(), "transport_failed", None));
+            }
+        }
+        for fault in self.scheduler.check_stalls(now_ms) {
+            verdicts.push((fault.runtime, "transport_failed", None));
+        }
+        for (session, kind, budget) in verdicts {
+            self.begin_stop_internal(&session, kind, budget);
+        }
         let stopping: Vec<String> = self
             .live
             .iter()
@@ -581,8 +699,10 @@ impl Engine {
                 continue;
             };
             let _ = self.registry.remove_after_reap(&live.reference);
-            if let Some(s) = live.staging {
-                let _ = s.cleanup();
+            if let Some(s) = live.staging
+                && s.cleanup().is_err()
+            {
+                self.staging_anomalies += 1;
             }
             self.scheduler.remove_runtime(&session);
             let (kind, budget) = live.exit.unwrap_or_else(|| ("child_exited".into(), None));

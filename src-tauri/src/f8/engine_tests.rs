@@ -108,6 +108,7 @@ impl Spawner for Spawn {
 
 #[derive(Default)]
 struct Leases(Mutex<HashSet<(String, String)>>);
+const LEASE_EXPIRES_MS: u64 = 1_000_000;
 impl Leases {
     fn grant(&self, session: &str) -> LeaseClaim {
         let lease_id = uuid();
@@ -128,11 +129,13 @@ impl Leases {
     }
 }
 impl LeaseView for Leases {
-    fn active(&self, session: &str, lease: &str, _now_ms: u64) -> bool {
-        self.0
-            .lock()
-            .unwrap()
-            .contains(&(session.to_owned(), lease.to_owned()))
+    fn active(&self, session: &str, lease: &str, now_ms: u64) -> bool {
+        now_ms < LEASE_EXPIRES_MS
+            && self
+                .0
+                .lock()
+                .unwrap()
+                .contains(&(session.to_owned(), lease.to_owned()))
     }
 }
 
@@ -321,8 +324,8 @@ fn f8_02_identical_provider_request_ids_never_cross_sessions() {
     let mut sp = Spawn::new(&rig.frames);
     let (a, b) = (rig.sessions[0].clone(), rig.sessions[1].clone());
     let (ra, rb) = (rig.ready(&a, &mut sp), rig.ready(&b, &mut sp));
-    turn(&mut rig, &ra, 0);
-    turn(&mut rig, &rb, 0);
+    let (_, ta) = turn(&mut rig, &ra, 0);
+    let (_, tb) = turn(&mut rig, &rb, 0);
     rig.engine.approval_requested(&ra, "req-1", "fp-a").unwrap();
     rig.engine.approval_requested(&rb, "req-1", "fp-b").unwrap();
     // The same id twice in one runtime is a conflict; across runtimes it is simply distinct.
@@ -333,21 +336,31 @@ fn f8_02_identical_provider_request_ids_never_cross_sessions() {
     // A's answer can only carry A's fingerprint and only reaches A's worker.
     assert_eq!(
         rig.engine
-            .answer_approval(&ra.fence(), "req-1", "fp-b", b"no"),
+            .answer_approval(&ta, &rig.leases, 0, "req-1", "fp-b", "accept"),
         Err(E::GateDenied)
     );
+    // Only a closed decision vocabulary is accepted; arbitrary bytes can never be sent.
+    assert_eq!(
+        rig.engine
+            .answer_approval(&ta, &rig.leases, 0, "req-1", "fp-a", "rm -rf /"),
+        Err(E::InvalidRequest)
+    );
     rig.engine
-        .answer_approval(&ra.fence(), "req-1", "fp-a", b"yes-a")
+        .answer_approval(&ta, &rig.leases, 0, "req-1", "fp-a", "accept")
         .unwrap();
+    assert_eq!(
+        rig.frames.lock().unwrap().last().unwrap().1,
+        b"approval req-1 accept"
+    );
     assert_eq!((rig.frames_for(&a), rig.frames_for(&b)), (1, 0));
     assert_eq!(rig.engine.pending_approvals(&b), 1);
     assert_eq!(
         rig.engine
-            .answer_approval(&ra.fence(), "req-1", "fp-a", b"again"),
+            .answer_approval(&ta, &rig.leases, 0, "req-1", "fp-a", "accept"),
         Err(E::ApprovalNotFound)
     );
     rig.engine
-        .answer_approval(&rb.fence(), "req-1", "fp-b", b"yes-b")
+        .answer_approval(&tb, &rig.leases, 0, "req-1", "fp-b", "decline")
         .unwrap();
     assert_eq!(rig.frames_for(&b), 1);
 }
@@ -358,7 +371,7 @@ fn f8_03_stale_generation_traffic_is_refused_after_a_relaunch() {
     let mut sp = Spawn::new(&rig.frames);
     let a = rig.sessions[0].clone();
     let old = rig.ready(&a, &mut sp);
-    turn(&mut rig, &old, 0);
+    let (_, told) = turn(&mut rig, &old, 0);
     rig.engine.approval_requested(&old, "req-9", "fp").unwrap();
     let stop = rig.stop_request(&a, Some(old.runtime_instance_id.as_str()));
     rig.engine.stop(&stop, Instant::now()).unwrap();
@@ -373,7 +386,7 @@ fn f8_03_stale_generation_traffic_is_refused_after_a_relaunch() {
     );
     assert_eq!(
         rig.engine
-            .answer_approval(&old.fence(), "req-9", "fp", b"late"),
+            .answer_approval(&told, &rig.leases, 0, "req-9", "fp", "accept"),
         Err(E::StaleRevision)
     );
     assert_eq!(
@@ -410,9 +423,10 @@ fn f8_04_an_unknown_outcome_is_never_retried_through_a_new_generation() {
         ),
         (0, None, 0)
     );
+    let (_, tnew) = turn(&mut rig, &new, 0);
     assert_eq!(
         rig.engine
-            .answer_approval(&new.fence(), "req-1", "fp", b"retry"),
+            .answer_approval(&tnew, &rig.leases, 0, "req-1", "fp", "accept"),
         Err(E::ApprovalNotFound)
     );
     assert_eq!(rig.frames_for(&a), 0);
@@ -529,7 +543,29 @@ fn f8_07_capacity_is_a_fixed_immediate_refusal_including_stopping_slots() {
     // A stopping launch still consumes the slot until it is reaped.
     let live = engine.live.keys().next().unwrap().clone();
     let other = rig.sessions.iter().find(|s| **s != live).unwrap().clone();
-    engine.begin_stop_internal(&live, "stopped", None);
+    let (generation, revision): (i64, i64) = engine
+        .connection()
+        .query_row(
+            "SELECT generation,revision FROM managed_runtimes WHERE managed_session_id=?1",
+            [&live],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    let instance: String = engine
+        .connection()
+        .query_row(
+            "SELECT runtime_instance_id FROM managed_runtime_launches WHERE managed_session_id=?1",
+            [&live],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let real_stop = request(
+        "runtime/stop",
+        json!({"intent_id":uuid(),"adapter_id":"codex","runtime_kind":"codex",
+        "managed_session_id":live,"expected_generation":generation,"expected_revision":revision,
+        "expected_runtime_instance_id":instance}),
+    );
+    engine.stop(&real_stop, Instant::now()).unwrap();
     let mut sp = Spawn::new(&frames);
     let request_other = request(
         "runtime/start",
@@ -622,7 +658,7 @@ fn f8_09_a_flood_and_a_blocked_shutdown_cannot_delay_bs_control() {
             .find(|d| d.runtime == b && d.class == Class::Control)
             .expect("B's control every quantum");
         worst_wait = worst_wait.max(revoke.waited_ms);
-        rig.engine.scheduler_mut().ack(&b);
+        rig.engine.scheduler_mut().ack(&b, 1, tick * 10);
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(worst_wait, 0);
@@ -659,7 +695,7 @@ fn f8_10_a_budget_violation_stops_only_a_and_preserves_bs_approval() {
         Err(E::StaleRevision)
     );
     rig.engine
-        .answer_approval(&rb.fence(), "wait", "fp-b", b"accept")
+        .answer_approval(&tb, &rig.leases, 7, "wait", "fp-b", "accept")
         .unwrap();
     rig.engine.provider_event(&rb, 100, 7).unwrap();
     // The durable record names the exact budget key; the stream stays valid.
@@ -1065,51 +1101,190 @@ fn f8_18_a_workspace_or_profile_replaced_during_dispatch_writes_nothing() {
     let mut sp = Spawn::new(&rig.frames);
     let a = rig.sessions[0].clone();
     let r = rig.ready(&a, &mut sp);
-    let (_claim, ticket) = turn(&mut rig, &r, 0);
+    let (claim, ticket) = turn(&mut rig, &r, 0);
+    rig.engine.approval_requested(&r, "r1", "fp").unwrap();
     rig.engine
         .write_frame(&ticket, b"ok", &rig.leases, 1)
         .unwrap();
-    for next in [
-        Attachment {
-            workspace: "/other".into(),
-            ..attach()
-        },
-        Attachment {
-            profile: "codex_inference_v1".into(),
-            ..attach()
-        },
-        Attachment {
-            revision: 2,
-            ..attach()
-        },
-    ] {
-        rig.engine.replace_attachment(&r.fence(), next).unwrap();
-        assert_eq!(
-            rig.engine.write_frame(&ticket, b"blocked", &rig.leases, 2),
-            Err(E::GateDenied)
-        );
-        // Restoring the exact accepted context makes the same ticket valid again.
-        rig.engine.replace_attachment(&r.fence(), attach()).unwrap();
-    }
-    assert_eq!(rig.frames_for(&a), 1);
-    // A new admission under a changed context is refused outright.
-    rig.engine
-        .replace_attachment(
-            &r.fence(),
-            Attachment {
-                workspace: "/other".into(),
-                ..attach()
-            },
-        )
-        .unwrap();
-    let claim = rig.leases.grant(&a);
-    rig.engine.begin_stop_internal(&a, "stopped", None);
-    rig.drain();
-    assert!(
-        rig.engine
-            .admit_turn(&r.fence(), &claim, &attach(), &uuid(), &rig.leases, 0)
-            .is_err()
+    // A changed workspace/profile kills the turn, its ticket and its approvals for good.
+    let changed = Attachment {
+        workspace: "/other".into(),
+        revision: 2,
+        ..attach()
+    };
+    rig.engine.replace_attachment(&r.fence(), changed).unwrap();
+    assert_eq!(
+        rig.engine.write_frame(&ticket, b"blocked", &rig.leases, 2),
+        Err(E::StaleRevision)
     );
+    assert_eq!(
+        rig.engine
+            .answer_approval(&ticket, &rig.leases, 2, "r1", "fp", "accept"),
+        Err(E::StaleRevision)
+    );
+    assert_eq!(
+        (rig.engine.active_turn(&a), rig.engine.pending_approvals(&a)),
+        (None, 0)
+    );
+    // ABA: restoring the original value is a lower/equal revision and is refused, so the old
+    // ticket can never be revived by putting the old context back.
+    assert_eq!(
+        rig.engine.replace_attachment(&r.fence(), attach()),
+        Err(E::StaleRevision)
+    );
+    let back = Attachment {
+        revision: 3,
+        ..attach()
+    };
+    rig.engine
+        .replace_attachment(&r.fence(), back.clone())
+        .unwrap();
+    assert_eq!(
+        rig.engine
+            .write_frame(&ticket, b"still-dead", &rig.leases, 3),
+        Err(E::StaleRevision)
+    );
+    // A fresh admission under the exact current context works; the accepted context is checked.
+    let fresh = rig
+        .engine
+        .admit_turn(&r.fence(), &claim, &back, &uuid(), &rig.leases, 4)
+        .unwrap();
+    assert_eq!(
+        rig.engine
+            .admit_turn(&r.fence(), &claim, &attach(), &uuid(), &rig.leases, 4),
+        Err(E::ActiveTurnExists)
+    );
+    rig.engine
+        .write_frame(&fresh, b"new", &rig.leases, 5)
+        .unwrap();
+    assert_eq!(rig.frames_for(&a), 2);
+    rig.engine.end_turn(&fresh).unwrap();
+    assert_eq!(
+        rig.engine.write_frame(&fresh, b"after-end", &rig.leases, 6),
+        Err(E::StaleRevision)
+    );
+}
+
+#[test]
+fn review_answers_are_revalidated_closed_and_consumed_only_when_delivered() {
+    let mut rig = Rig::new(1, 0);
+    let mut sp = Spawn::new(&rig.frames);
+    let a = rig.sessions[0].clone();
+    let r = rig.ready(&a, &mut sp);
+    let (claim, t) = turn(&mut rig, &r, 0);
+    rig.engine.approval_requested(&r, "r1", "fp").unwrap();
+    // An expired lease (time passed) blocks writes; expiry is evaluated at write time.
+    assert_eq!(
+        rig.engine
+            .write_frame(&t, b"x", &rig.leases, LEASE_EXPIRES_MS),
+        Err(E::GateDenied)
+    );
+    // A revoked lease blocks the answer exactly as it blocks any write.
+    rig.leases.revoke(&claim);
+    assert_eq!(
+        rig.engine
+            .answer_approval(&t, &rig.leases, 1, "r1", "fp", "accept"),
+        Err(E::GateDenied)
+    );
+    assert_eq!(rig.frames_for(&a), 0);
+    assert_eq!(
+        rig.engine.pending_approvals(&a),
+        1,
+        "a refused answer does not consume it"
+    );
+    // Oversized frames never reach the worker.
+    let big = vec![0u8; 65_537];
+    assert_eq!(
+        rig.engine.write_frame(&t, &big, &rig.leases, 1),
+        Err(E::FrameTooLarge)
+    );
+}
+
+#[test]
+fn review_an_unexpected_child_exit_is_detected_and_released() {
+    let mut rig = Rig::new(1, 0);
+    let mut sp = Spawn::new(&rig.frames);
+    let a = rig.sessions[0].clone();
+    sp.script = Some("sleep 0.2".into());
+    let r = rig.ready(&a, &mut sp);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while rig.engine.is_live(&a) {
+        rig.engine.poll(Instant::now());
+        assert!(Instant::now() < deadline, "a dead child must be noticed");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(rig.engine.registry.active_slots(), 0);
+    assert_eq!(rig.engine.provider_event(&r, 1, 0), Err(E::StaleRevision));
+    validate_v8(rig.engine.connection()).unwrap();
+    // The next explicit start is a new generation; nothing restarted by itself.
+    let again = rig.ready(&a, &mut Spawn::new(&rig.frames));
+    assert_eq!(again.generation, r.generation + 1);
+}
+
+#[test]
+fn review_a_missed_handshake_deadline_releases_the_only_slot() {
+    let mut rig = Rig::new(1, 1);
+    let mut sp = Spawn::new(&rig.frames);
+    let (a, b) = (rig.sessions[0].clone(), rig.sessions[1].clone());
+    rig.start(&a, &mut sp).unwrap();
+    let later = Instant::now() + Duration::from_secs(11);
+    rig.engine.poll(later);
+    rig.engine.poll(later);
+    assert!(
+        !rig.engine.is_live(&a),
+        "no handshake within the contract deadline"
+    );
+    // B can now use the slot.
+    rig.start(&b, &mut sp).unwrap();
+}
+
+#[test]
+fn review_events_are_charged_outside_a_turn_and_wall_clock_is_polled() {
+    let mut rig = Rig::new(1, 0);
+    let mut sp = Spawn::new(&rig.frames);
+    let a = rig.sessions[0].clone();
+    let r = rig.ready(&a, &mut sp);
+    // No turn: a flood is still metered and stops the runtime.
+    let mut stopped = false;
+    for i in 0..2000u64 {
+        if rig.engine.provider_event(&r, 1, i / 100).is_err() {
+            stopped = true;
+            break;
+        }
+    }
+    assert!(stopped);
+    rig.drain();
+    // A silent provider with an open turn is stopped by the polled wall clock.
+    let r2 = rig.ready(&a, &mut Spawn::new(&rig.frames));
+    turn(&mut rig, &r2, 0);
+    rig.engine.poll(Instant::now() + Duration::from_secs(1801));
+    rig.drain();
+    assert!(!rig.engine.is_live(&a));
+}
+
+#[test]
+fn review_scheduler_faults_stop_only_that_runtime() {
+    let mut rig = Rig::new(2, 1);
+    let mut sp = Spawn::new(&rig.frames);
+    let (a, b) = (rig.sessions[0].clone(), rig.sessions[1].clone());
+    let (ra, _rb) = (rig.ready(&a, &mut sp), rig.ready(&b, &mut sp));
+    let now = Instant::now();
+    // Overflow A's reserved control lane: A is faulted and then stopped by poll; B is not.
+    let mut refused = None;
+    for _ in 0..16 {
+        refused = rig.engine.enqueue(&ra, Class::Control, vec![1], now).err();
+        if refused.is_some() {
+            break;
+        }
+    }
+    assert!(refused.is_some());
+    rig.engine.poll(now);
+    rig.drain();
+    assert!(!rig.engine.is_live(&a) && rig.engine.is_live(&b));
+    // Items cannot under-declare their size.
+    let mut s: Scheduler<Vec<u8>> = Scheduler::new().unwrap();
+    s.add_runtime("x").unwrap();
+    assert!(s.push("x", Class::Data, 0, vec![0; 10], 0).is_err());
 }
 
 use crate::contracts::identities::{AgentRuntimeInstanceId, ManagedSessionId};

@@ -6,6 +6,10 @@
 //! referring to the same process even if its PID number were reused, so a stale handle yields
 //! `ESRCH`, never a signal to an unrelated process that happens to share a path or number.
 //!
+//! `PR_SET_PDEATHSIG` is tied to the *thread* that forks, not the process: `spawn` must be called
+//! from a thread which lives as long as the authority (never a pool/blocking thread that can exit),
+//! otherwise the provider dies with that thread. This is a requirement on every caller.
+//!
 //! Containment is deliberately honest: `PR_SET_PDEATHSIG` covers the direct child only. A
 //! descendant which outlives or escapes its parent is *reported* (read-only count) but is never
 //! discovered into a signal target; `ContainmentPolicy::DescendantsContained` is refused because
@@ -124,6 +128,9 @@ impl OwnedChild {
                     return Err(std::io::Error::from_raw_os_error(libc::ECHILD));
                 }
                 nix::unistd::setsid().map_err(std::io::Error::from)?;
+                // No inherited descriptor (pidfd, staging, database) survives exec: everything
+                // above stdio is close-on-exec. Best effort on kernels without close_range.
+                let _ = libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 4u32);
                 nix::sys::signal::SigSet::empty()
                     .thread_set_mask()
                     .map_err(std::io::Error::from)?;
@@ -141,8 +148,11 @@ impl OwnedChild {
         } else {
             None
         };
+        // The pidfd refers to our child only if the child was still ours (unreaped) when it was
+        // opened; a child reaped by someone else could have let the PID number be reused.
+        let still_ours = matches!(child.try_wait(), Ok(None));
         let start = proc_start_ticks(pid);
-        let (Some(pidfd), Ok(start_ticks)) = (opened, start) else {
+        let (Some(pidfd), Ok(start_ticks), true) = (opened, start, still_ours) else {
             // Without an identity-stable handle the child cannot be safely owned: it was our
             // own unreaped child, so killing and reaping it through the handle we hold is exact.
             let _ = child.kill();
