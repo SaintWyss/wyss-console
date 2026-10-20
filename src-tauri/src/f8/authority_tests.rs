@@ -32,6 +32,9 @@ impl Worker for Recorder {
         self.sent.lock().unwrap().push(frame.to_vec());
         Ok(())
     }
+    fn send_critical(&mut self, frame: &[u8]) -> ControlResult<()> {
+        self.send(frame)
+    }
     fn has_exited(&mut self) -> bool {
         *self.exited.lock().unwrap()
     }
