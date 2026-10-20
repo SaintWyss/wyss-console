@@ -15,6 +15,10 @@ use super::{
 };
 use crate::contracts::{
     WireUuid,
+    control::Operation,
+    execution::{
+        ExecutionLease, LeaseState, RevocationReason, validate_scopes, validate_ttl,
+    },
     approval::{
         ApprovalDecision, ApprovalEffect, ApprovalKind, ApprovalReason, ApprovalReceipt,
         ApprovalState, ApprovalStructure, ManagedApprovalRecord, valid_fingerprint,
@@ -24,7 +28,7 @@ use crate::contracts::{
     turn::{ManagedTurnRecord, TurnReason, TurnState},
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
-use serde_json::json;
+use serde_json::{Value, json};
 use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
 
 const APPROVAL_TTL_SECONDS: i64 = crate::contracts::approval::APPROVAL_TTL_SECONDS;
@@ -507,6 +511,148 @@ impl<'c> Writer<'c> {
         Ok(n)
     }
 
+    // ----------------------------------------------------------------- leases
+
+    /// Durable lease grant, renewal and revocation (session grants; never launch capabilities).
+    /// An identical intent returns the original lease with no side effect. Losing a lease
+    /// (revoked or expired) interrupts the turns admitted under it and settles their approvals in
+    /// the same transaction, so no work outlives the grant that admitted it.
+    pub fn lease(&mut self, op: &Operation) -> ControlResult<ExecutionLease> {
+        let intent = match op {
+            Operation::LeaseGrant(p) => &p.intent_id,
+            Operation::LeaseRenew(p) => &p.intent_id,
+            Operation::LeaseRevoke(p) => &p.intent_id,
+            _ => return Err(E::InvalidRequest),
+        };
+        op.validate()?;
+        let mutation = serde_json::to_string(op).map_err(invalid)?;
+        let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
+        let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
+        if let Some((m, r)) = receipt(&tx, intent.as_str())? {
+            if m != mutation {
+                return Err(E::IntentConflict);
+            }
+            return serde_json::from_str(&r).map_err(invalid);
+        }
+        attest(&tx, &authority, &stream, &stamp(now)?)?;
+        let ids = (authority.as_str(), stream.as_str());
+        let (lease, kind) = match op {
+            Operation::LeaseGrant(p) => {
+                let (state, revision): (String, i64) = tx
+                    .query_row(
+                        "SELECT control_state,revision FROM managed_sessions WHERE session_id=?1",
+                        [p.session_id.as_str()],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .map_err(|_| E::SessionNotFound)?;
+                if state != "prepared" {
+                    return Err(E::InvalidTransition);
+                }
+                if revision as u64 != p.expected_session_revision {
+                    return Err(E::StaleRevision);
+                }
+                if let Some(active) = active_lease(&tx, p.session_id.as_str())? {
+                    if now >= lease_ts(&active.expires_at)? {
+                        expire_in(&tx, ids, active, now)?;
+                    } else {
+                        return Err(E::LeaseAlreadyActive);
+                    }
+                }
+                let mut scopes = p.scopes.clone();
+                scopes.sort();
+                let mut id = crate::control::store::uuid().as_str().to_owned();
+                while id == p.session_id.as_str() {
+                    id = crate::control::store::uuid().as_str().to_owned();
+                }
+                let at = stamp(now)?;
+                let lease: ExecutionLease = serde_json::from_value(json!({
+                    "lease_id":id,"session_id":p.session_id,"state":"active","scopes":scopes,"revision":1,
+                    "issued_at":at,"expires_at":stamp(now + Duration::seconds(i64::from(p.ttl_seconds)))?,
+                    "updated_at":at,"revocation_reason":null}))
+                .map_err(invalid)?;
+                (lease, "authority.execution_lease.granted")
+            }
+            Operation::LeaseRenew(p) => {
+                let mut l = read_lease(&tx, p.lease_id.as_str())?;
+                validate_ttl(p.ttl_seconds)?;
+                if l.state != LeaseState::Active || now >= lease_ts(&l.expires_at)? {
+                    return Err(E::InvalidTransition);
+                }
+                let open: String = tx
+                    .query_row("SELECT control_state FROM managed_sessions WHERE session_id=?1", [l.session_id.as_str()], |r| r.get(0))
+                    .map_err(db)?;
+                if open != "prepared" {
+                    return Err(E::InvalidTransition);
+                }
+                if l.revision != p.expected_revision {
+                    return Err(E::StaleRevision);
+                }
+                l.revision += 1;
+                l.updated_at = stamp(now)?.try_into().map_err(invalid)?;
+                l.expires_at = stamp(now + Duration::seconds(i64::from(p.ttl_seconds)))?.try_into().map_err(invalid)?;
+                (l, "authority.execution_lease.renewed")
+            }
+            Operation::LeaseRevoke(p) => {
+                let mut l = read_lease(&tx, p.lease_id.as_str())?;
+                if l.state != LeaseState::Active || now >= lease_ts(&l.expires_at)? {
+                    return Err(E::InvalidTransition);
+                }
+                if l.revision != p.expected_revision {
+                    return Err(E::StaleRevision);
+                }
+                l.revision += 1;
+                l.state = LeaseState::Revoked;
+                l.revocation_reason = Some(RevocationReason::UserRequest);
+                l.updated_at = stamp(now)?.try_into().map_err(invalid)?;
+                (l, "authority.execution_lease.revoked")
+            }
+            _ => return Err(E::InvalidRequest),
+        };
+        lease.validate()?;
+        write_lease(&tx, &lease)?;
+        lease_event(&tx, ids, &lease, Some(intent.as_str()), kind)?;
+        step(&mut self.fault, 0)?;
+        if lease.state == LeaseState::Revoked {
+            lose_lease_work(&tx, ids, &lease, TurnReason::LeaseRevoked, ApprovalReason::LeaseRevoked, now)?;
+        }
+        tx.execute(
+            "INSERT INTO processed_intents VALUES(?1,?2,?3)",
+            params![intent.as_str(), mutation, serde_json::to_string(&lease).map_err(invalid)?],
+        )
+        .map_err(db)?;
+        step(&mut self.fault, 1)?;
+        tx.commit().map_err(db)?;
+        Ok(lease)
+    }
+
+    /// Expires every active lease past its deadline, interrupting the work it admitted.
+    pub fn expire_leases(&mut self) -> ControlResult<usize> {
+        let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
+        let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
+        let due: Vec<String> = {
+            let mut q = tx
+                .prepare("SELECT lease_id FROM execution_leases WHERE state='active' ORDER BY lease_id")
+                .map_err(db)?;
+            q.query_map([], |r| r.get::<_, String>(0))
+                .map_err(db)?
+                .collect::<Result<_, _>>()
+                .map_err(db)?
+        };
+        let mut n = 0;
+        for id in due {
+            let l = read_lease(&tx, &id)?;
+            if now >= lease_ts(&l.expires_at)? {
+                if n == 0 {
+                    attest(&tx, &authority, &stream, &stamp(now)?)?;
+                }
+                expire_in(&tx, (&authority, &stream), l, now)?;
+                n += 1;
+            }
+        }
+        tx.commit().map_err(db)?;
+        Ok(n)
+    }
+
     // --------------------------------------------------------------- recovery
 
     /// Startup recovery by an authority instance. Everything stranded on a launch this instance
@@ -726,6 +872,7 @@ fn turn_event(
                 "lease_id":t.admitted_lease_id,"lease_revision":t.admitted_lease_revision,
                 "runtime_instance_id":t.runtime_instance_id,"state":t.state,"revision":t.revision,
                 "reason":t.terminal_reason,"generation":generation}),
+            version: 2,
         },
     )
 }
@@ -749,8 +896,126 @@ fn approval_event(
                 "runtime_instance_id":a.runtime_instance_id,"state":a.state,"revision":a.revision,
                 "decision":a.decision,"effect":a.effect,"reason":a.terminal_reason,
                 "action_fingerprint":a.action_fingerprint,"generation":generation}),
+            version: 2,
         },
     )
+}
+
+fn lease_ts(t: &crate::contracts::UtcTimestamp) -> ControlResult<OffsetDateTime> {
+    ts(&enum_text(t)?)
+}
+fn read_lease(tx: &Transaction<'_>, id: &str) -> ControlResult<ExecutionLease> {
+    let row: Option<(String, String, String, String, i64, String, String, String, Option<String>)> = tx
+        .query_row(
+            "SELECT lease_id,session_id,state,scopes,revision,issued_at,expires_at,updated_at,revocation_reason FROM execution_leases WHERE lease_id=?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)),
+        )
+        .optional()
+        .map_err(db)?;
+    let (lease_id, session_id, state, scopes, revision, issued_at, expires_at, updated_at, reason) =
+        row.ok_or(E::LeaseNotFound)?;
+    let scopes: Value = unique_json(scopes.as_bytes()).map_err(invalid)?;
+    let l: ExecutionLease = serde_json::from_value(json!({"lease_id":lease_id,"session_id":session_id,
+        "state":state,"scopes":scopes,"revision":revision,"issued_at":issued_at,"expires_at":expires_at,
+        "updated_at":updated_at,"revocation_reason":reason}))
+    .map_err(invalid)?;
+    l.validate()?;
+    validate_scopes(&l.scopes)?;
+    Ok(l)
+}
+fn active_lease(tx: &Transaction<'_>, session: &str) -> ControlResult<Option<ExecutionLease>> {
+    let id: Option<String> = tx
+        .query_row(
+            "SELECT lease_id FROM execution_leases WHERE session_id=?1 AND state='active'",
+            [session],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(db)?;
+    id.map(|id| read_lease(tx, &id)).transpose()
+}
+fn write_lease(tx: &Transaction<'_>, l: &ExecutionLease) -> ControlResult<()> {
+    tx.execute(
+        "INSERT INTO execution_leases VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(lease_id) DO UPDATE SET state=excluded.state,revision=excluded.revision,expires_at=excluded.expires_at,updated_at=excluded.updated_at,revocation_reason=excluded.revocation_reason",
+        params![l.lease_id.as_str(), l.session_id.as_str(), enum_text(&l.state)?,
+            serde_json::to_string(&l.scopes).map_err(invalid)?, l.revision as i64, enum_text(&l.issued_at)?,
+            enum_text(&l.expires_at)?, enum_text(&l.updated_at)?, l.revocation_reason.map(|r| enum_text(&r)).transpose()?],
+    )
+    .map_err(db)?;
+    Ok(())
+}
+/// Lease events keep their baseline payload shape and version.
+fn lease_event(
+    tx: &Transaction<'_>,
+    (authority, stream): (&str, &str),
+    l: &ExecutionLease,
+    correlation: Option<&str>,
+    kind: &str,
+) -> ControlResult<u64> {
+    let mut payload = json!({"lease_id":l.lease_id,"scopes":l.scopes,"lease_state":l.state,
+        "revision":l.revision,"expires_at":l.expires_at});
+    if let Some(reason) = l.revocation_reason {
+        payload["revocation_reason"] = json!(reason);
+    }
+    append(
+        tx,
+        (authority, stream, &enum_text(&l.updated_at)?),
+        Draft { session: Some(l.session_id.as_str()), kind, correlation, payload, version: 1 },
+    )
+}
+fn expire_in(
+    tx: &Transaction<'_>,
+    ids: (&str, &str),
+    mut l: ExecutionLease,
+    now: OffsetDateTime,
+) -> ControlResult<()> {
+    l.state = LeaseState::Expired;
+    l.revision += 1;
+    l.updated_at = stamp(now)?.try_into().map_err(invalid)?;
+    write_lease(tx, &l)?;
+    lease_event(tx, ids, &l, None, "authority.execution_lease.expired")?;
+    lose_lease_work(tx, ids, &l, TurnReason::LeaseExpired, ApprovalReason::LeaseExpired, now)
+}
+/// Work admitted under a lost lease ends with it: approvals first, then the turns interrupted.
+fn lose_lease_work(
+    tx: &Transaction<'_>,
+    ids: (&str, &str),
+    lease: &ExecutionLease,
+    turn_reason: TurnReason,
+    approval_reason: ApprovalReason,
+    now: OffsetDateTime,
+) -> ControlResult<()> {
+    let turns: Vec<String> = {
+        let mut q = tx
+            .prepare("SELECT t.managed_turn_id FROM managed_turns t JOIN managed_turn_launches l ON l.managed_turn_id=t.managed_turn_id WHERE t.admitted_lease_id=?1 AND t.state IN ('starting','running') ORDER BY t.managed_turn_id")
+            .map_err(db)?;
+        q.query_map([lease.lease_id.as_str()], |r| r.get::<_, String>(0))
+            .map_err(db)?
+            .collect::<Result<_, _>>()
+            .map_err(db)?
+    };
+    for id in turns {
+        settle_in(tx, ids, Some(&id), approval_reason, now)?;
+        let mut t = read_turn(tx, &id)?;
+        let generation = sidecar(tx, "managed_turn_launches", "managed_turn_id", &id)?
+            .ok_or(E::StorageIncompatible)?
+            .1;
+        let at = stamp(now.max(ts(&enum_text(&t.updated_at)?)?))?;
+        t.state = TurnState::Interrupted;
+        t.revision += 1;
+        t.updated_at = at.clone().try_into().map_err(invalid)?;
+        t.terminal_at = Some(at.clone().try_into().map_err(invalid)?);
+        t.terminal_reason = Some(turn_reason);
+        t.validate()?;
+        tx.execute(
+            "UPDATE managed_turns SET state='interrupted',revision=?2,updated_at=?3,terminal_at=?3,terminal_reason=?4 WHERE managed_turn_id=?1",
+            params![id, t.revision as i64, at, enum_text(&turn_reason)?],
+        )
+        .map_err(db)?;
+        turn_event(tx, ids, &t, generation, None, "interrupted")?;
+    }
+    Ok(())
 }
 
 /// Settles undecided and unconfirmed approvals (all, or those of one turn). Caller attested.

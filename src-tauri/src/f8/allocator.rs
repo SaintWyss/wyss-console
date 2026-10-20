@@ -301,6 +301,7 @@ impl<'c> Allocator<'c> {
                 correlation: Some(&intent),
                 payload: json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":desired_text,
                     "revision":next_revision,"generation":new_generation,"runtime_instance_id":new_instance}),
+                version: 2,
             },
         )?;
         step(&mut self.fault, 2)?;
@@ -426,6 +427,7 @@ impl<'c> Allocator<'c> {
                 kind,
                 correlation: None,
                 payload: payload(&desired)?,
+                version: 2,
             },
         )?;
         step(&mut self.fault, 0)?;
@@ -550,6 +552,7 @@ pub(super) fn attest(tx: &Transaction<'_>, authority: &str, stream: &str, now: &
             kind: audit::STARTED,
             correlation: None,
             payload: json!({"predecessor_instance_id": predecessor}),
+            version: 2,
         },
     )?;
     Ok(())
@@ -625,6 +628,9 @@ pub(super) struct Draft<'a> {
     pub kind: &'a str,
     pub correlation: Option<&'a str>,
     pub payload: Value,
+    /// Payload schema version: 2 for generation-aware events, 1 for baseline-vocabulary kinds
+    /// (sessions, leases) which keep their original shape.
+    pub version: u64,
 }
 pub(super) fn append(
     tx: &Transaction<'_>,
@@ -636,6 +642,7 @@ pub(super) fn append(
         kind,
         correlation,
         payload,
+        version,
     } = d;
     let head: String = tx
         .query_row(
@@ -650,7 +657,7 @@ pub(super) fn append(
         .checked_add(1)
         .ok_or(E::CapacityExceeded)?;
     let id = crate::control::store::uuid().as_str().to_owned();
-    let value = json!({"schema_version":1,"event_id":id,"event_type":kind,"payload_schema_version":2,
+    let value = json!({"schema_version":1,"event_id":id,"event_type":kind,"payload_schema_version":version,
         "timestamp":now,"stream_id":stream,"sequence":next.to_string(),"session_id":session,
         "source":{"component":"wyss_control","instance_id":authority},
         "correlation_id":correlation,"causation_id":null,"payload":payload,

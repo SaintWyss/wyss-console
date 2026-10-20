@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::Value;
+use crate::contracts::control::Operation;
 use crate::{
     contracts::approval::ApprovalStructure,
     control::f8_fixture,
@@ -321,4 +322,98 @@ fn crash_recovery_marks_stranded_work_lost_without_replay_or_inheritance() {
         Some(E::InvalidTransition)
     );
     let _ = accepted;
+}
+
+fn revoke_op(lease: &str, rev: u64) -> Operation {
+    Operation::LeaseRevoke(crate::contracts::execution::LeaseRevoke {
+        intent_id: wire(&uuid()),
+        lease_id: crate::contracts::identities::ExecutionLeaseId::parse(lease).unwrap(),
+        expected_revision: rev,
+    })
+}
+fn grant_op(session: &str, scopes: Vec<crate::contracts::execution::ExecutionScope>) -> Operation {
+    Operation::LeaseGrant(crate::contracts::execution::LeaseGrant {
+        intent_id: wire(&uuid()),
+        session_id: crate::contracts::identities::ManagedSessionId::parse(session).unwrap(),
+        expected_session_revision: 1,
+        scopes,
+        ttl_seconds: 600,
+    })
+}
+
+#[test]
+fn durable_leases_grant_renew_revoke_and_replay() {
+    use crate::contracts::execution::ExecutionScope as S;
+    let mut w = world();
+    // The session already has an active lease (the fixture's).
+    assert_eq!(
+        Writer::new(&mut w.conn, wire(A)).unwrap().lease(&grant_op(&w.session, vec![S::TurnStart])).err(),
+        Some(E::LeaseAlreadyActive)
+    );
+    let revoke = revoke_op(&w.lease, 1);
+    let revoked = Writer::new(&mut w.conn, wire(A)).unwrap().lease(&revoke).unwrap();
+    assert_eq!((revoked.state, revoked.revision), (LeaseState::Revoked, 2));
+    // Exact replay returns the original; any change under the same intent conflicts.
+    let before = rows(&w.conn);
+    assert_eq!(Writer::new(&mut w.conn, wire(A)).unwrap().lease(&revoke).unwrap(), revoked);
+    assert_eq!(rows(&w.conn), before);
+    validate_v8(&w.conn).unwrap();
+    let grant = grant_op(&w.session, vec![S::TurnStart, S::SessionCreate]);
+    let lease = Writer::new(&mut w.conn, wire(A)).unwrap().lease(&grant).unwrap();
+    assert_eq!(lease.scopes, vec![S::SessionCreate, S::TurnStart]);
+    let Operation::LeaseGrant(g) = &grant else { unreachable!() };
+    let mut changed = g.clone();
+    changed.ttl_seconds = 601;
+    assert_eq!(
+        Writer::new(&mut w.conn, wire(A)).unwrap().lease(&Operation::LeaseGrant(changed)).err(),
+        Some(E::IntentConflict)
+    );
+    let renew = |rev, ttl| Operation::LeaseRenew(crate::contracts::execution::LeaseRenew {
+        intent_id: wire(&uuid()),
+        lease_id: lease.lease_id.clone(),
+        expected_revision: rev,
+        ttl_seconds: ttl,
+    });
+    assert_eq!(Writer::new(&mut w.conn, wire(A)).unwrap().lease(&renew(2, 60)).err(), Some(E::StaleRevision));
+    let renewed = Writer::new(&mut w.conn, wire(A)).unwrap().lease(&renew(1, 60)).unwrap();
+    assert_eq!(renewed.revision, 2);
+    validate_v8(&w.conn).unwrap();
+}
+
+#[test]
+fn losing_a_lease_ends_its_turns_and_approvals_in_the_same_transaction() {
+    let mut w = world();
+    let t = running_turn(&mut w);
+    Writer::new(&mut w.conn, wire(A)).unwrap()
+        .open_approval(&t.managed_turn_id, ApprovalKind::CommandExecution, "item-1", FP, structure()).unwrap();
+    Writer::new(&mut w.conn, wire(A)).unwrap().lease(&revoke_op(&w.lease, 1)).unwrap();
+    let (turn, reason): (String, String) = w.conn
+        .query_row("SELECT state,terminal_reason FROM managed_turns WHERE managed_turn_id=?1", [t.managed_turn_id.as_str()], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!((turn.as_str(), reason.as_str()), ("interrupted", "lease_revoked"));
+    let (approval, reason): (String, String) = w.conn
+        .query_row("SELECT state,terminal_reason FROM managed_approvals", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!((approval.as_str(), reason.as_str()), ("invalidated", "lease_revoked"));
+    validate_v8(&w.conn).unwrap();
+    // The lost lease can never admit anything again.
+    assert_eq!(
+        Writer::new(&mut w.conn, wire(A)).unwrap().admit_turn(&w.launch, &intent(1), &w.lease).err(),
+        Some(E::GateDenied)
+    );
+}
+
+#[test]
+fn an_expired_lease_is_settled_by_the_clock_not_by_hope() {
+    let mut w = world();
+    let t = running_turn(&mut w);
+    Writer::new(&mut w.conn, wire(A)).unwrap()
+        .open_approval(&t.managed_turn_id, ApprovalKind::CommandExecution, "item-1", FP, structure()).unwrap();
+    assert_eq!(Writer::new(&mut w.conn, wire(A)).unwrap().expire_leases().unwrap(), 0);
+    let later = OffsetDateTime::now_utc() + Duration::hours(3);
+    assert_eq!(Writer::new(&mut w.conn, wire(A)).unwrap().with_clock(move || later).expire_leases().unwrap(), 1);
+    let (turn, reason): (String, String) = w.conn
+        .query_row("SELECT state,terminal_reason FROM managed_turns WHERE managed_turn_id=?1", [t.managed_turn_id.as_str()], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!((turn.as_str(), reason.as_str()), ("interrupted", "lease_expired"));
+    let approval: String = w.conn.query_row("SELECT state FROM managed_approvals", [], |r| r.get(0)).unwrap();
+    assert_eq!(approval, "expired");
+    validate_v8(&w.conn).unwrap();
 }
