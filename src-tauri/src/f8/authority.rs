@@ -347,14 +347,17 @@ impl Authority {
             // A failed write is not proof that zero bytes/effects reached the
             // provider. Never claim a definitive no-effect failure or resend.
             let authority = self.authority();
-            Writer::new(self.engine.connection_mut(), authority)?
-                .transition_turn(
+            let recorded = Writer::new(self.engine.connection_mut(), authority)
+                .and_then(|mut w| w.transition_turn(
                     &record.managed_turn_id,
                     None,
                     TurnState::Indeterminate,
                     Some(TurnReason::DispatchUnknown),
-                )?;
+                ));
+            // Cleanup is mandatory even when SQLite refuses the indeterminate
+            // journal record. A later reaped-runtime recovery reconciles it.
             self.engine.transport_failed(&ticket.reference);
+            recorded?;
             return Err(E::ExternalEffectUnknown);
         }
         self.tickets
