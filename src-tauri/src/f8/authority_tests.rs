@@ -853,3 +853,59 @@ fn review_inbound_scheduler_dispatches_only_from_its_owned_runtime() {
     assert_eq!(rig.authority.engine().reference(&session_b), Some(b));
     validate_v8(rig.authority.engine().connection()).unwrap();
 }
+
+#[test]
+fn review_ambiguous_turn_start_send_never_claims_definitive_no_effect() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (_launch, fence) = rig.ready();
+    let session = rig.sessions[0].clone();
+    rig.call("executionLease/grant", json!({
+        "intent_id":uuid(),"session_id":session,"expected_session_revision":1,
+        "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence
+    }));
+    *rig.spawn.ambiguous_send.lock().unwrap() = true;
+    let reply = rig.call("managedSession/turn/start", json!({
+        "intent_id":uuid(),"managed_session_id":session,
+        "expected_session_revision":1,"prompt":"may-have-reached-provider",
+        "runtime_fence":fence
+    }));
+    assert_eq!(code(&reply), "external_effect_unknown", "{reply}");
+    let (state, reason): (String, String) = rig.authority.engine().connection().query_row(
+        "SELECT state,terminal_reason FROM managed_turns ORDER BY created_at DESC LIMIT 1",
+        [], |r| Ok((r.get(0)?,r.get(1)?))
+    ).unwrap();
+    assert_eq!((state.as_str(), reason.as_str()),
+        ("indeterminate", "dispatch_unknown"));
+    assert_eq!(rig.authority.engine().runtime_view(&session).map(|r|r.0),Some("stopping"));
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
+
+#[test]
+fn review_provider_interrupt_send_failure_does_not_report_success() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (launch, fence) = rig.ready();
+    let session = rig.sessions[0].clone();
+    rig.call("executionLease/grant", json!({
+        "intent_id":uuid(),"session_id":session,"expected_session_revision":1,
+        "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence
+    }));
+    let started = rig.call("managedSession/turn/start", json!({
+        "intent_id":uuid(),"managed_session_id":session,
+        "expected_session_revision":1,"prompt":"running-work","runtime_fence":fence
+    }));
+    let turn_id = started["result"]["value"]["managed_turn_id"].as_str().unwrap().to_owned();
+    rig.authority.provider_turn_event(
+        &launch, &ManagedTurnId::parse(&turn_id).unwrap(),
+        Some("provider-running"), TurnState::Running, None
+    ).unwrap();
+    *rig.spawn.ambiguous_send.lock().unwrap() = true;
+    let response = rig.call("managedSession/turn/cancel", json!({
+        "intent_id":uuid(),"managed_turn_id":turn_id,
+        "expected_revision":2,"runtime_fence":fence
+    }));
+    assert_eq!(code(&response), "external_effect_unknown", "{response}");
+    assert_eq!(rig.authority.engine().runtime_view(&session).map(|r|r.0),Some("stopping"));
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
