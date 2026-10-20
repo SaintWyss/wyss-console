@@ -262,6 +262,22 @@ fn full_conversation_start_lease_turn_approval_cancel_and_audit() {
 
     // The provider runs the turn and asks for one approval.
     let turn_ref = ManagedTurnId::parse(&turn_id).unwrap();
+    let alien = RuntimeRef {
+        managed_session_id: crate::contracts::identities::ManagedSessionId::parse(&rig.sessions[1]).unwrap(),
+        ..reference.clone()
+    };
+    let before_foreign: i64 = rig.authority.engine().connection().query_row(
+        "SELECT count(*) FROM control_events", [], |r| r.get(0)
+    ).unwrap();
+    // The original writer checks that the turn belongs to this authority, not that
+    // this inbound worker is the launch that owns the turn.
+    assert!(rig.authority.provider_turn_event(
+        &alien, &turn_ref, Some("foreign-turn"), TurnState::Running, None
+    ).is_err());
+    let after_foreign: i64 = rig.authority.engine().connection().query_row(
+        "SELECT count(*) FROM control_events", [], |r| r.get(0)
+    ).unwrap();
+    assert_eq!(before_foreign, after_foreign, "a foreign provider event must not persist");
     rig.authority
         .provider_turn_event(
             &reference,
@@ -308,8 +324,21 @@ fn full_conversation_start_lease_turn_approval_cancel_and_audit() {
     let again = respond(&mut rig, &decide, 1, fence.clone());
     assert_eq!(again["result"]["value"], ok["result"]["value"]);
     assert_eq!(rig.sent().len(), before + 1);
+    let before_confirm: i64 = rig.authority.engine().connection().query_row(
+        "SELECT count(*) FROM control_events", [], |r| r.get(0)
+    ).unwrap();
+    assert!(rig.authority.provider_approval_confirmed(
+        &alien, &approval.managed_approval_id, "item-1"
+    ).is_err());
+    assert!(rig.authority.provider_approval_confirmed(
+        &reference, &approval.managed_approval_id, "wrong-item"
+    ).is_err());
+    let after_confirm: i64 = rig.authority.engine().connection().query_row(
+        "SELECT count(*) FROM control_events", [], |r| r.get(0)
+    ).unwrap();
+    assert_eq!(before_confirm, after_confirm, "foreign acknowledgements cannot confirm effects");
     rig.authority
-        .provider_approval_confirmed(&approval.managed_approval_id)
+        .provider_approval_confirmed(&reference, &approval.managed_approval_id, "item-1")
         .unwrap();
 
     // Cancel an active turn once; cancelling the ended turn returns it with no dispatch.
