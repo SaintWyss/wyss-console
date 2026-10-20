@@ -44,6 +44,9 @@ impl Worker for FakeWorker {
             .push((self.session.clone(), frame.to_vec()));
         Ok(())
     }
+    fn send_critical(&mut self, frame: &[u8]) -> ControlResult<()> {
+        self.send(frame)
+    }
     fn has_exited(&mut self) -> bool {
         self.child
             .as_mut()
