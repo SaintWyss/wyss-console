@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-20 — Remote gateway core, no transport (F10a foundations)
+
+- Host-side decisions of the remote design as code with tests and no listener: grants and profiles
+  (LP4 and `terminal.write` refused), device states, QR-secret pairing, per-request check with one-word
+  refusals, step-up binding, limiter, content-free audit, revocation (ADR 0049). Unreviewed and
+  unreachable; the signature scheme and the transport are undecided (DN-05).
+
 ## 2026-10-20 — Idle cost of the host and the terminal pull (P1 increment, P1 still open)
 
 - A host with one idle terminal woke 243 times a second (0.65 % of a core): its accept loop polled every

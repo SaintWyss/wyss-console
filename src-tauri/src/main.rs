@@ -19,6 +19,10 @@ mod host;
 mod native;
 #[cfg(target_os = "linux")]
 mod native_dialog;
+// The remote gateway's core (F10a foundations, ADR 0049): decisions with no transport. Nothing
+// constructs it outside its tests, and it is not in the library the authority links.
+#[cfg(target_os = "linux")]
+mod remote;
 
 fn main() {
     // The host (F9): the same executable, started apart from any window, owns the terminals.
