@@ -123,6 +123,39 @@ impl Worker for ProcessWorker {
         self.out.push_back(b'\n');
         self.flush()
     }
+    fn send_critical(&mut self, frame: &[u8]) -> ControlResult<()> {
+        if let Some(e) = self.failed {
+            return Err(e);
+        }
+        // Linux guarantees atomic pipe writes up to PIPE_BUF (4096 bytes).
+        // An approval must never sit in our own deferred output queue: an
+        // intervening revocation could otherwise leave a stale executable frame.
+        if frame.len() > 4095 || frame.contains(&b'\n') {
+            return Err(E::FrameTooLarge);
+        }
+        if !self.out.is_empty() {
+            return Err(E::CapacityExceeded);
+        }
+        let mut payload = Vec::with_capacity(frame.len() + 1);
+        payload.extend_from_slice(frame);
+        payload.push(b'\n');
+        let Some(stdin) = self.child.stdin() else {
+            return Err(E::TransportError);
+        };
+        match stdin.write(&payload) {
+            Ok(n) if n == payload.len() => Ok(()),
+            Ok(0) => Err(E::CapacityExceeded),
+            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) => {
+                Err(E::CapacityExceeded)
+            }
+            // A partial critical write cannot be retried safely. The parser may
+            // have received a prefix; fence the worker and require owned cleanup.
+            Ok(_) | Err(_) => {
+                self.failed = Some(E::TransportError);
+                Err(E::TransportError)
+            }
+        }
+    }
     fn flush(&mut self) -> ControlResult<()> {
         if let Some(e) = self.failed {
             return Err(e);
