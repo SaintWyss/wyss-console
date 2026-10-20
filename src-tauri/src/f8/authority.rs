@@ -29,6 +29,27 @@ use std::{collections::BTreeMap, time::Instant};
 const NIL: &str = "00000000-0000-4000-8000-000000000000";
 const PAGE_BYTES: usize = 65_536 - 1024;
 
+/// Strict internal adapter-normalized provider notifications. This is NOT the
+/// upstream Codex JSON-RPC protocol: a separately reviewed adapter must translate
+/// genuine Codex messages into this vocabulary before live integration.
+#[derive(serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum ProviderNotice {
+    TurnRunning { managed_turn_id: ManagedTurnId, provider_turn_id: String },
+    TurnCompleted { managed_turn_id: ManagedTurnId, provider_turn_id: String },
+    TurnFailed { managed_turn_id: ManagedTurnId },
+    ApprovalRequired {
+        approval_kind: ApprovalKind,
+        provider_item_id: String,
+        action_fingerprint: String,
+        structure: ApprovalStructure,
+    },
+    ApprovalConfirmed {
+        managed_approval_id: crate::contracts::identities::ManagedApprovalId,
+        provider_item_id: String,
+    },
+}
+
 /// Per-connection state: the authority instance observed in the handshake.
 #[derive(Default)]
 pub struct Client {
@@ -690,6 +711,49 @@ impl Authority {
             .map(|_| ())
     }
 
+    /// Drain the bounded scheduler and attribute every normalized frame to the
+    /// independently owned worker that produced it. An unknown frame is refused,
+    /// never treated as proof of execution authority or silently accumulated.
+    fn route_provider_frames(&mut self, now: Instant) {
+        let dispatched = self.engine.dispatch(now);
+        for frame in dispatched {
+            let Some(from) = self.engine.reference(&frame.runtime) else {
+                continue;
+            };
+            if frame.class != super::scheduler::Class::Data {
+                // No adapter mapping exists for generic control frames yet.
+                self.engine.transport_failed(&from);
+                continue;
+            }
+            let notice = unique_json(&frame.item)
+                .and_then(|v| serde_json::from_value::<ProviderNotice>(v)
+                    .map_err(|_| E::InvalidRequest));
+            let result = match notice {
+                Ok(ProviderNotice::TurnRunning { managed_turn_id, provider_turn_id }) =>
+                    self.provider_turn_event(&from, &managed_turn_id,
+                        Some(&provider_turn_id), TurnState::Running, None),
+                Ok(ProviderNotice::TurnCompleted { managed_turn_id, provider_turn_id }) =>
+                    self.provider_turn_event(&from, &managed_turn_id,
+                        Some(&provider_turn_id), TurnState::Completed, Some(TurnReason::Completed)),
+                Ok(ProviderNotice::TurnFailed { managed_turn_id }) =>
+                    self.provider_turn_event(&from, &managed_turn_id, None,
+                        TurnState::Failed, Some(TurnReason::ProviderFailed)),
+                Ok(ProviderNotice::ApprovalRequired { approval_kind, provider_item_id,
+                    action_fingerprint, structure }) =>
+                    self.provider_approval_request(&from, approval_kind,
+                        &provider_item_id, &action_fingerprint, structure).map(|_| ()),
+                Ok(ProviderNotice::ApprovalConfirmed { managed_approval_id, provider_item_id }) =>
+                    self.provider_approval_confirmed(&from, &managed_approval_id, &provider_item_id),
+                Err(e) => Err(e),
+            };
+            if result.is_err() {
+                // A malformed or cross-session provider message faults that runtime
+                // alone. The fence is known from the owned worker, never from JSON.
+                self.engine.transport_failed(&from);
+            }
+        }
+    }
+
     /// Periodic duty, outside any request: expire leases and approvals (and tell the engine),
     /// drive process lifecycles, and record work stranded by launches that ended.
     pub fn tick(&mut self, now: Instant) -> ControlResult<()> {
@@ -714,6 +778,7 @@ impl Authority {
         }
         Writer::new(self.engine.connection_mut(), authority.clone())?.expire_approvals()?;
         self.engine.poll(now);
+        self.route_provider_frames(now);
         if self.engine.take_ended() > 0 {
             self.recovery_pending = true;
         }
