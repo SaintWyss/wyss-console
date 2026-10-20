@@ -556,6 +556,7 @@ impl Authority {
             .ok_or(E::GateDenied)?
             .to_owned();
         let turn = ManagedTurnId::parse(&turn).map_err(|_| E::InternalError)?;
+        self.engine.can_request_approval(from, provider_item_id)?;
         let authority = self.authority();
         let record = Writer::new(self.engine.connection_mut(), authority.clone())?.open_approval(
             &turn,
@@ -568,6 +569,10 @@ impl Authority {
             .engine
             .approval_requested(from, provider_item_id, action_fingerprint)
         {
+            // Only an unexpected post-write admission failure reaches here.
+            // This runtime is inconsistent; fail the launch closed rather than
+            // silently destroying other approvals while continuing to execute.
+            self.engine.transport_failed(from);
             let _ = Writer::new(self.engine.connection_mut(), authority)?
                 .settle_approvals(Some(&turn), ApprovalReason::Unsupported);
             return Err(e);
