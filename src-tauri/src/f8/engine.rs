@@ -680,6 +680,29 @@ impl Engine {
         Ok(())
     }
 
+    /// Nonmutating admission check, used before a durable approval is opened.
+    /// Duplicate IDs and approval-budget exhaustion must not write an audit event
+    /// or terminalize unrelated pending approvals on this turn.
+    pub fn can_request_approval(
+        &self,
+        from: &RuntimeRef,
+        request_id: &str,
+    ) -> ControlResult<()> {
+        self.check_current(from)?;
+        let live = self
+            .live
+            .get(from.managed_session_id.as_str())
+            .ok_or(E::StaleRevision)?;
+        if live.phase != Phase::Ready || live.turn.is_none() {
+            return Err(E::GateDenied);
+        }
+        if live.approvals.contains_key(request_id) {
+            return Err(E::IntentConflict);
+        }
+        let mut budget = live.meter.clone();
+        budget.approval_opened().map_err(|_| E::CapacityExceeded)
+    }
+
     /// A provider approval request. Correlation is `(this launch, provider request id)`, never
     /// the request id alone, so identical ids on two runtimes can never cross.
     pub fn approval_requested(
@@ -688,18 +711,10 @@ impl Engine {
         request_id: &str,
         fingerprint: &str,
     ) -> ControlResult<()> {
-        self.check_current(from)?;
+        self.can_request_approval(from, request_id)?;
         let session = from.managed_session_id.as_str();
         let live = self.live.get_mut(session).ok_or(E::StaleRevision)?;
-        if live.turn.is_none() {
-            return Err(E::GateDenied);
-        }
-        if live.approvals.contains_key(request_id) {
-            return Err(E::IntentConflict);
-        }
-        if live.meter.approval_opened().is_err() {
-            return Err(E::CapacityExceeded);
-        }
+        live.meter.approval_opened().map_err(|_| E::CapacityExceeded)?;
         live.approvals.insert(
             request_id.to_owned(),
             Pending {
