@@ -8,9 +8,14 @@ use super::{
     protocol::RuntimeRef,
     registry::Registry,
     staging::LaunchStaging,
+    writers::Writer,
 };
 use crate::{
-    contracts::{WireUuid, control::ControlResult},
+    contracts::{
+        WireUuid,
+        control::{ControlResult, ExecutionScope, LeaseGrant, Operation},
+        identities::ManagedSessionId,
+    },
     control::f8_fixture,
 };
 use rusqlite::Connection;
@@ -36,20 +41,68 @@ struct Facade {
     client: Client,
 }
 impl Facade {
-    /// One prepared session with an active lease and one completed legacy turn, then `hello`.
+    /// The V8 image of `v7_with_sessions(1)`: a completed legacy turn whose lease is revoked, plus
+    /// one extra prepared session. The authority is then greeted with `authority/hello`.
     fn new() -> Self {
-        let mut source = f8_fixture::v7_with_sessions(1);
+        Self::over(f8_fixture::v7_with_sessions(1))
+    }
+    /// Migrates `source` to V8 with a client that has not yet said hello.
+    fn cold(mut source: Connection) -> Self {
         let conn = migration::prepare(&mut source).unwrap().into_connection();
         let auth = WireUuid::try_from(AUTH.to_owned()).unwrap();
         let engine = Engine::new(conn, auth.clone(), Registry::new(auth).unwrap(), None).unwrap();
-        let mut f = Self {
+        Self {
             authority: Authority::new(engine),
             client: Client::default(),
-        };
+        }
+    }
+    /// Migrates `source` to V8 and greets the authority with `authority/hello`.
+    fn over(source: Connection) -> Self {
+        let mut f = Self::cold(source);
         let hello = f.raw(json!({"schema_version":2,"request_id":uuid(),
             "method":"authority/hello","params":{"protocol_version":2,"client_instance_id":uuid()}}));
         assert_eq!(hello["result"]["kind"], "hello", "{hello}");
         f
+    }
+    /// The V8 image of `v7_with_sessions(2)` whose last two prepared sessions each hold one active
+    /// lease of `ttl_seconds`. Migration refuses an active lease, so the grants follow it, through
+    /// the same V8 writer the authority uses. The fence check lives in the authority route, which
+    /// this fixture does not exercise, and no runtime is launched.
+    fn with_active_leases(ttl_seconds: u32) -> Self {
+        let mut f = Self::over(f8_fixture::v7_with_sessions(2));
+        let auth = WireUuid::try_from(AUTH.to_owned()).unwrap();
+        for session in f.sessions_in_order().into_iter().skip(1) {
+            let grant = Operation::LeaseGrant(LeaseGrant {
+                intent_id: WireUuid::try_from(uuid()).unwrap(),
+                session_id: ManagedSessionId::parse(&session).unwrap(),
+                expected_session_revision: 1,
+                scopes: vec![
+                    ExecutionScope::SessionCreate,
+                    ExecutionScope::SessionResume,
+                    ExecutionScope::TurnStart,
+                ],
+                ttl_seconds,
+            });
+            Writer::new(f.authority.engine_mut().connection_mut(), auth.clone())
+                .unwrap()
+                .lease(&grant)
+                .unwrap();
+        }
+        f
+    }
+    fn head(&self) -> String {
+        self.conn()
+            .query_row(
+                "SELECT last_sequence FROM authority_metadata WHERE id=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+    fn leases(&self) -> Vec<String> {
+        self.column(
+            "SELECT lease_id||'|'||session_id||'|'||state||'|'||revision||'|'||expires_at||'|'||updated_at FROM execution_leases ORDER BY lease_id",
+        )
     }
     fn raw(&mut self, v: Value) -> Value {
         let bytes = serde_json::to_vec(&v).unwrap();
@@ -306,4 +359,236 @@ fn execution_gate_status_is_observational_and_never_grants_or_renews() {
         "the gate must not renew, revive or grant"
     );
     assert_eq!(f.changes(), before, "executionGate/status must not write");
+}
+
+#[test]
+fn authority_status_matches_storage_and_refuses_bad_correlation_before_and_after_hello() {
+    let mut f = Facade::new();
+    let (head, leases_before, before) = (f.head(), f.leases(), f.changes());
+
+    let status = f.call("authority/status", json!({}));
+    assert_eq!(status["result"]["kind"], "status", "{status}");
+    let v = &status["result"]["value"];
+    assert_eq!(v["protocol_version"], 2);
+    assert_eq!(v["authority_instance_id"], AUTH);
+    assert_eq!(v["storage_schema_version"], 8);
+    assert_eq!(
+        v["stream_id"],
+        f.column("SELECT stream_id FROM authority_metadata WHERE id=1")[0]
+    );
+    assert_ne!(head, "0", "fixture must have committed events");
+    assert_eq!(v["last_sequence"], head.as_str(), "{status}");
+    let count = |state: &str| -> i64 {
+        f.conn()
+            .query_row(
+                "SELECT count(*) FROM managed_sessions WHERE control_state=?1",
+                [state],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(v["prepared_count"], count("prepared"), "{status}");
+    assert_eq!(v["closed_count"], count("closed"), "{status}");
+    assert_eq!(v["prepared_count"], 2);
+    assert_eq!(v["closed_count"], 0);
+
+    let wrong = f.raw(json!({"schema_version":2,"request_id":uuid(),
+        "authority_instance_id":"00000000-0000-4000-8000-0000000000ff",
+        "method":"authority/status","params":{}}));
+    assert_eq!(code(&wrong), "correlation_error", "{wrong}");
+
+    // Before hello no operation is answered.
+    let mut cold = Facade::cold(f8_fixture::v7_with_sessions(0));
+    let refused = cold.raw(json!({"schema_version":2,"request_id":uuid(),
+        "authority_instance_id":AUTH,"method":"authority/status","params":{}}));
+    assert_eq!(code(&refused), "handshake_required", "{refused}");
+
+    assert_eq!(
+        f.head(),
+        head,
+        "authority/status must not advance the audit head"
+    );
+    assert_eq!(f.leases(), leases_before);
+    assert_eq!(f.changes(), before, "authority/status must not write");
+}
+
+#[test]
+fn runtime_status_of_a_prepared_session_reports_no_runtime_and_refuses_unknown_targets() {
+    let mut f = Facade::new();
+    let session = f.prepare();
+    let (head, before) = (f.head(), f.changes());
+    let target =
+        |s: &str| json!({"adapter_id":"codex","runtime_kind":"codex","managed_session_id":s});
+
+    let status = f.call("runtime/status", target(&session));
+    assert_eq!(status["result"]["kind"], "runtime_status", "{status}");
+    let v = &status["result"]["value"];
+    assert_eq!(v["managed_session_id"], session);
+    assert_eq!(v["desired_state"], "stopped");
+    assert_eq!(v["actual_state"], "stopped");
+    assert_eq!(v["generation"], 0);
+    // No managed_runtimes row exists. runtime/start compares expected_revision against the stored
+    // revision, which is 0 for an absent row, so status must report that same 0.
+    assert_eq!(v["revision"], 0, "{status}");
+    assert!(v["runtime_instance_id"].is_null(), "{status}");
+    assert!(v["runtime_identity"].is_null(), "{status}");
+    assert_eq!(v["compatibility"], "unknown");
+
+    let unknown = f.call("runtime/status", target(&uuid()));
+    assert_eq!(code(&unknown), "session_not_found", "{unknown}");
+    let malformed = f.call("runtime/status", target("not-a-uuid"));
+    assert_eq!(code(&malformed), "invalid_request", "{malformed}");
+    let absent = f.call(
+        "runtime/status",
+        json!({"adapter_id":"codex","runtime_kind":"codex"}),
+    );
+    assert_eq!(code(&absent), "invalid_request", "{absent}");
+
+    assert_eq!(
+        f.head(),
+        head,
+        "runtime/status must not advance the audit head"
+    );
+    assert_eq!(f.changes(), before, "runtime/status must not write");
+}
+
+#[test]
+fn lease_get_returns_stored_records_including_historical_revoked_ones() {
+    let mut f = Facade::new();
+    let rows = f.column("SELECT lease_id FROM execution_leases ORDER BY lease_id");
+    assert_eq!(rows.len(), 1, "fixture carries exactly one revoked lease");
+    let (leases, before) = (f.leases(), f.changes());
+
+    let got = f.call("executionLease/get", json!({"lease_id":rows[0]}));
+    assert_eq!(got["result"]["kind"], "lease", "{got}");
+    let v = &got["result"]["value"];
+    let row = f.conn().query_row(
+        "SELECT session_id,state,revision,issued_at,expires_at,updated_at,revocation_reason,scopes FROM execution_leases WHERE lease_id=?1",
+        [&rows[0]],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, Option<String>>(6)?,
+                r.get::<_, String>(7)?,
+            ))
+        },
+    ).unwrap();
+    assert_eq!(v["lease_id"], rows[0]);
+    assert_eq!(v["session_id"], row.0);
+    assert_eq!(
+        v["state"], row.1,
+        "historical revoked state must stay readable: {got}"
+    );
+    assert_eq!(v["revision"], row.2);
+    assert_eq!(v["issued_at"], row.3.as_str());
+    assert_eq!(v["expires_at"], row.4.as_str());
+    assert_eq!(v["updated_at"], row.5.as_str());
+    assert_eq!(
+        v["revocation_reason"],
+        row.6.map_or(Value::Null, Value::from)
+    );
+    let scopes: Value = serde_json::from_str(&row.7).unwrap();
+    assert_eq!(v["scopes"], scopes);
+
+    let unknown = f.call("executionLease/get", json!({"lease_id":uuid()}));
+    assert_eq!(code(&unknown), "lease_not_found", "{unknown}");
+    let malformed = f.call("executionLease/get", json!({"lease_id":"not-a-uuid"}));
+    assert_eq!(code(&malformed), "invalid_request", "{malformed}");
+
+    assert_eq!(
+        f.leases(),
+        leases,
+        "executionLease/get must not touch lease rows"
+    );
+    assert_eq!(f.changes(), before, "executionLease/get must not write");
+}
+
+#[test]
+fn lease_active_isolates_sessions_and_never_reports_a_time_expired_lease_as_usable() {
+    // One second is the shortest grant the contract allows; the read must see it expire by time.
+    let mut f = Facade::with_active_leases(1);
+    let sessions = f.sessions_in_order();
+    assert_eq!(sessions.len(), 3);
+    let lease_of = |f: &Facade, s: &str| {
+        f.column(&format!(
+            "SELECT lease_id FROM execution_leases WHERE session_id='{s}' AND state='active'"
+        ))
+    };
+    // sessions[0] carries the fixture's revoked lease; sessions[1] and [2] hold active ones.
+    let (legacy, a, b) = (
+        sessions[0].clone(),
+        sessions[1].clone(),
+        sessions[2].clone(),
+    );
+    assert!(lease_of(&f, &legacy).is_empty());
+    let (lease_a, lease_b) = (lease_of(&f, &a)[0].clone(), lease_of(&f, &b)[0].clone());
+    assert_ne!(lease_a, lease_b);
+    let bare = f.prepare();
+    let (before, rows_before) = (f.changes(), f.leases());
+
+    let active_a = f.call("executionLease/active", json!({"session_id":a}));
+    assert_eq!(active_a["result"]["kind"], "active_lease", "{active_a}");
+    assert_eq!(
+        active_a["result"]["value"]["lease_id"], lease_a,
+        "{active_a}"
+    );
+    assert_eq!(active_a["result"]["value"]["session_id"], a, "{active_a}");
+    assert_eq!(active_a["result"]["value"]["state"], "active");
+    let active_b = f.call("executionLease/active", json!({"session_id":b}));
+    assert_eq!(
+        active_b["result"]["value"]["lease_id"], lease_b,
+        "{active_b}"
+    );
+    assert_ne!(
+        active_a["result"]["value"]["lease_id"], lease_b,
+        "session A exposed B's lease"
+    );
+
+    let none = f.call("executionLease/active", json!({"session_id":bare}));
+    assert!(
+        none["result"]["value"].is_null(),
+        "a session without a lease reads none: {none}"
+    );
+    let revoked_only = f.call("executionLease/active", json!({"session_id":legacy}));
+    assert!(
+        revoked_only["result"]["value"].is_null(),
+        "a revoked lease is not active: {revoked_only}"
+    );
+    // Protocol 1 answers no lease for an unknown session rather than refusing; protocol 2 matches it.
+    let unknown = f.call("executionLease/active", json!({"session_id":uuid()}));
+    assert_eq!(unknown["result"]["kind"], "active_lease", "{unknown}");
+    assert!(unknown["result"]["value"].is_null(), "{unknown}");
+    let malformed = f.call("executionLease/active", json!({"session_id":"not-a-uuid"}));
+    assert_eq!(code(&malformed), "invalid_request", "{malformed}");
+
+    // Real time passes; the stored row stays 'active' because nothing wrote it.
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    let expired = f.call("executionLease/active", json!({"session_id":a}));
+    assert!(
+        expired["result"]["value"].is_null(),
+        "a time-expired lease is not usable: {expired}"
+    );
+    let get = f.call("executionLease/get", json!({"lease_id":lease_a}));
+    assert_eq!(get["result"]["value"]["state"], "expired", "{get}");
+    assert_eq!(
+        get["result"]["value"]["revision"], 1,
+        "stored revision is not fabricated: {get}"
+    );
+    assert_eq!(
+        lease_of(&f, &a),
+        vec![lease_a.clone()],
+        "the stored row is still active; expiry is a projection"
+    );
+
+    assert_eq!(
+        f.leases(),
+        rows_before,
+        "lease reads must not renew, revoke or grant"
+    );
+    assert_eq!(f.changes(), before, "lease reads must not write");
 }

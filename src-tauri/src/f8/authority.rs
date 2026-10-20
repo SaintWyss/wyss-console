@@ -223,13 +223,17 @@ impl Authority {
             }
             O::RuntimeStatus(_) => self.runtime_status(request),
             O::LeaseGrant(_) | O::LeaseRenew(_) | O::LeaseRevoke(_) => self.lease_op(request),
+            // Reads project time expiry exactly as protocol 1 does; the stored row is never changed.
             O::LeaseGet(p) => {
                 let l = super::writers::read_lease(self.engine.connection(), p.lease_id.as_str())?;
-                lease_value(&l)
+                lease_value(&l.effective_at(time::OffsetDateTime::now_utc())?)
             }
             O::LeaseActive(p) => {
                 let l =
-                    super::writers::active_lease(self.engine.connection(), p.session_id.as_str())?;
+                    super::writers::active_lease(self.engine.connection(), p.session_id.as_str())?
+                        .map(|l| l.effective_at(time::OffsetDateTime::now_utc()))
+                        .transpose()?
+                        .filter(|l| l.state == crate::contracts::execution::LeaseState::Active);
                 Ok(json!({"kind":"active_lease","value":l}))
             }
             O::TurnStart(p) => self.turn_start(request, p),
@@ -270,6 +274,8 @@ impl Authority {
             return Err(E::InvalidRequest);
         };
         let s = session.as_str();
+        // A status for a session that was never prepared would invent a stopped runtime for it.
+        super::operations::session(self.engine.connection(), s)?;
         let row: Option<(String, i64, i64)> = self
             .engine
             .connection()
@@ -286,7 +292,7 @@ impl Authority {
             Some((phase, id)) => (*phase, id.clone()),
             None => ("stopped", None),
         };
-        let mut value = json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":desired,
+        let value = json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":desired,
             "revision":revision.max(0),"actual_state":actual,
             "runtime_instance_id":identity.as_ref().map(|i| i.runtime_instance_id.clone()),
             "runtime_version":identity.as_ref().map(|i| i.observed_version.clone()),
@@ -295,11 +301,6 @@ impl Authority {
             "outbound_methods":{"initialize":0,"initialized":0,"model_list":0},
             "managed_session_id":s,"generation":generation,
             "runtime_identity":identity,"budget_failure":null});
-        if revision == 0 {
-            // A never-allocated runtime has no desired-state record to report.
-            value["revision"] = json!(1);
-            value["desired_state"] = json!("stopped");
-        }
         Ok(json!({"kind":"runtime_status","value":value}))
     }
 
