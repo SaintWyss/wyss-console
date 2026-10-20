@@ -37,19 +37,35 @@ def main():
             head = f"label={label} app={app.pid} web={web} loadavg={' '.join(open('/proc/loadavg').read().split()[:3])}"
             print(head)
             jobs = []
-            for who, pid in (("web", web), ("app", app.pid)):
-                path = f"{out}/{label}.{who}.txt"
-                jobs.append((who, path, subprocess.Popen(
-                    [sys.executable, "-I", f"{here}/threads.py", str(pid), secs],
-                    stdout=open(path, "w"))))
-            for _, _, job in jobs:
-                job.wait()
+            try:
+                for who, pid in (("web", web), ("app", app.pid)):
+                    path = f"{out}/{label}.{who}.txt"
+                    with open(path, "w") as sink:
+                        jobs.append((who, path, subprocess.Popen(
+                            [sys.executable, "-I", f"{here}/threads.py", str(pid), secs],
+                            stdout=sink)))
+                for _, _, job in jobs:
+                    job.wait()
+            finally:
+                # Helpers are this run's own unreaped children: on an error or an interrupt they
+                # are ended through their own handles, never by looking for them.
+                for _, _, job in jobs:
+                    if job.poll() is None:
+                        job.terminate()
+                        try:
+                            job.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            job.kill()
+                            job.wait()
             lines = [head]
             for who, path, _ in jobs:
-                last = open(path).read().strip().splitlines()[-1]
+                with open(path) as done:
+                    rows = done.read().strip().splitlines()
+                last = rows[-1] if rows else "no output"
                 print(f"{who}:  {last}")
                 lines.append(f"{who}:  {last}")
-            open(f"{out}/{label}.txt", "w").write("\n".join(lines) + "\n")
+            with open(f"{out}/{label}.txt", "w") as summary:
+                summary.write("\n".join(lines) + "\n")
     return 0
 
 

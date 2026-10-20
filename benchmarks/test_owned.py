@@ -118,6 +118,19 @@ class OwnedTests(Base):
         finally:
             signal.signal(signal.SIGCHLD, old)
 
+    def test_ignoring_sigchld_is_refused_because_linux_then_reaps_children_itself(self):
+        old = signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+        try:
+            with self.assertRaises(RuntimeError):
+                Owned([self.exe, "300"], self.exe)
+        finally:
+            signal.signal(signal.SIGCHLD, old)
+
+    def test_the_default_sigchld_disposition_still_works(self):
+        self.assertEqual(signal.getsignal(signal.SIGCHLD), signal.SIG_DFL)
+        with Owned([self.exe, "300"], self.exe) as o:
+            self.assertTrue(os.path.exists(f"/proc/{o.pid}"))
+
     def test_a_process_that_already_exited_is_not_signalled_again(self):
         with Owned([self.exe, "0"], self.exe) as o:
             o.proc.wait()

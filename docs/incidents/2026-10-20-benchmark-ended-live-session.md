@@ -65,3 +65,11 @@ an error or a second interrupt; the lint missed `kill -- "$X"`, `kill -s`, `kill
 Popen fallback assumes nobody else reaps the child (now refused when a SIGCHLD handler exists); the lint
 missed `process.kill` and `command kill`/`/bin/kill`. All fixed, each with a test that fails on the earlier
 code. The residual assumption is documented in `owned.py`: this class is the only reaper of its child.
+
+## Follow-up: SIGCHLD ignored, and measurement helpers
+
+- `Owned` now requires SIGCHLD at its default disposition. `SIG_IGN` was accepted before, but on Linux it
+  makes the kernel reap children at once, which frees the PID while the class still holds it. Test:
+  `test_ignoring_sigchld_is_refused…`; the default path is covered by `test_the_default_sigchld_disposition_still_works`.
+- `idle_ab.py`: the `threads.py` helpers are its own unreaped children and are now ended, on error or
+  interrupt, only through their own `Popen` handles; output files are closed with `with`. No benchmark was rerun.

@@ -17,7 +17,7 @@ How the guarantees are kept:
 * Descendants are *adopted* by pidfd after the same kind of check, and only adopted ones are ever
   signalled. Anything else that remains is reported, not touched.
 * This class must be the only code that reaps its child (no SIGCHLD handler, no `waitpid(-1)`):
-  that is what keeps the PID from being reused, and the constructor refuses a SIGCHLD handler.
+  that is what keeps the PID from being reused, and the constructor refuses any SIGCHLD disposition but the default (a handler or SIG_IGN).
 * `with Owned(...)` ends the process on every exit: normal, exception, timeout, SIGINT, SIGTERM.
 
 Nothing here reads a process list to decide whom to end.
@@ -51,10 +51,11 @@ class Owned:
         self.adopted = {}
         self.leftovers = []
         self._old = {}
-        if signal.getsignal(signal.SIGCHLD) not in (signal.SIG_DFL, signal.SIG_IGN):
+        if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
             # The unreaped-child guarantee (and the fallback through Popen) needs this to be the
-            # only code that reaps its children.
-            raise RuntimeError("a SIGCHLD handler could reap the child behind this class's back")
+            # only code that reaps its children. A handler could reap; SIG_IGN makes Linux
+            # auto-reap, which frees the PID for reuse while we still hold it.
+            raise RuntimeError("SIGCHLD is not at its default: the child could be reaped behind this class's back")
         self._install_handlers()  # before the launch: no gap in which an interrupt leaves it loose
         try:
             self.proc = subprocess.Popen(
