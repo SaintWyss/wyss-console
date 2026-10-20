@@ -1075,6 +1075,12 @@ fn f8_16_audit_storage_full_fails_closed_and_the_unknown_stays_visible() {
             .observe(&wire(AUTH), &reference.fence())
             .is_err()
     );
+    // A rejected namespace attestation must never be committed as a ready event.
+    let ready_events: i64 = rig.engine.connection().query_row(
+        "SELECT count(*) FROM control_events WHERE json_extract(envelope,'$.event_type')='authority.runtime.instance_ready'",
+        [], |r| r.get(0),
+    ).unwrap();
+    assert_eq!(ready_events, 0, "unsafe containment cannot emit durable ready");
     rig.drain();
     assert!(!rig.engine.is_live(&a));
     assert_eq!(
