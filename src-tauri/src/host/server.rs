@@ -6,8 +6,10 @@ use super::{
     core::HostCore,
     protocol::{Answer, HostError, Request, read_frame, write_frame},
 };
+use nix::poll::{PollFd, PollFlags, poll};
 use std::{
     io,
+    os::fd::AsFd,
     os::unix::{
         fs::{DirBuilderExt, FileTypeExt, PermissionsExt},
         net::{UnixListener, UnixStream},
@@ -115,7 +117,11 @@ pub fn run(listener: UnixListener, core: Arc<HostCore>, idle_exit: Duration) {
                 if core.idle_for().is_some_and(|idle| idle >= idle_exit) {
                     break;
                 }
-                thread::sleep(Duration::from_millis(5));
+                // Wait for a connection instead of asking again every few milliseconds: a host
+                // with nothing to do woke about 190 times a second for nothing (P1). The quarter
+                // second only bounds how long a stop request or the idle exit can go unnoticed.
+                let mut ready = [PollFd::new(listener.as_fd(), PollFlags::POLLIN)];
+                let _ = poll(&mut ready, 250_u16);
             }
             Err(_) => thread::sleep(Duration::from_millis(50)),
         }

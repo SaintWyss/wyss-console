@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-20 — Idle cost of the host and the terminal pull (P1 increment, P1 still open)
+
+- A host with one idle terminal woke 243 times a second (0.65 % of a core): its accept loop polled every
+  5 ms and its pump every few ms. It waits now (about 14 wake-ups a second), and the page's output pull
+  is a one-second long poll instead of three asks a second. Measured before/after in
+  `docs/acceptance/p1-2026-10-20.md`, with the backend baseline (throughput, echo latency, memory per
+  terminal, runaway output) over three runs. No budget is declared passed.
+
 ## 2026-10-20 — Models view, catalogue offers, `model/rerouted`, native effort (F6 increment)
 
 - **Models** view: what the managed runtime offers (default, efforts, replacement marking,

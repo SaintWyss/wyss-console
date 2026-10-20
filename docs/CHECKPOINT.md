@@ -60,6 +60,13 @@ this computer (the installed authority is older and replacing it interrupts mana
 host keeps working with an older host through feature negotiation. Managed model choice is not
 built (SG-12, DN-42).
 
+## P1 increment (2026-10-20)
+
+Backend baseline over three runs, an idle-wake-up optimization of the host and the page's output pull
+(`docs/acceptance/p1-2026-10-20.md`). **P1 stays open.** The host change is not running: the installed
+host is the older one (replacing it ends the owner's terminals), so it applies at the next install and
+host restart. Rule learned: never end a process found by name; only the PID of one's own launch, verified.
+
 ## Next unblocked engineering
 
 Finish F5 absent-aware creation/deletion, Codex skill inventory/authoring and remaining

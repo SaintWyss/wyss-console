@@ -608,7 +608,6 @@ fn profile_error(error: crate::native::profile::ProfileError) -> HostError {
 /// ended and been drained.
 fn pump(terminals: &TerminalService, id: &TerminalId, entry: &Entry) {
     let mut ack = None;
-    let mut idle = Duration::from_millis(4);
     loop {
         match terminals.read(id, ack.as_ref()) {
             Ok(out) => {
@@ -632,11 +631,11 @@ fn pump(terminals: &TerminalService, id: &TerminalId, entry: &Entry) {
                     // Its last bytes are in the ring; the reader holds nothing more.
                     return;
                 }
-                if had {
-                    idle = Duration::from_millis(4);
-                } else {
-                    std::thread::sleep(idle);
-                    idle = (idle * 2).min(Duration::from_millis(40));
+                // Nothing came: wait for the terminal to have something (or to end), once,
+                // instead of asking again every few milliseconds. A second at most, so that
+                // whatever is only visible to a read (its status) is never older than that.
+                if !had {
+                    let _ = terminals.wait_for_output(id, Duration::from_secs(1));
                 }
             }
             Err(error) => {

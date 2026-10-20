@@ -1,5 +1,7 @@
 //! Local human terminal resources only; no managed-agent authority or durable state.
 
+#[cfg(test)]
+mod bench_tests;
 mod buffer;
 pub mod contracts;
 #[cfg(test)]
@@ -368,6 +370,28 @@ impl TerminalService {
         drop(state);
         runtime.wake();
         Ok(output)
+    }
+    /// Waits until the terminal has output to read, has finished or `timeout` has passed,
+    /// whichever comes first. It reads and acknowledges nothing: a caller that would otherwise
+    /// ask again and again at an interval asks once, after this (P1: an idle host polled).
+    pub fn wait_for_output(&self, id: &TerminalId, timeout: Duration) -> Result<(), TerminalError> {
+        let runtime = self.runtime(id)?;
+        let deadline = Instant::now() + timeout;
+        let mut state = lock(&runtime.shared.data);
+        // `remaining` is the capacity minus what is unread: full capacity means nothing to read.
+        while state.output.remaining() == OUTPUT_CAPACITY && !state.completed && !state.output.eof {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            state = runtime
+                .shared
+                .changed
+                .wait_timeout(state, left)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+        Ok(())
     }
     pub fn close(&self, id: &TerminalId) -> Result<TerminalInfo, TerminalError> {
         let runtime = self.runtime(id)?;

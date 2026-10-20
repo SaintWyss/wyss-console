@@ -13,6 +13,8 @@ export interface TerminalViewState {
 }
 const INPUT_CAPACITY = 64 * 1024;
 const WRITE_LIMIT = 4096;
+/** An empty answer that took at least this long was a wait the desktop made for us (host_read). */
+const LONG_POLL_SEEN_MS = 500;
 
 /** One local human-terminal owner. No command interpretation or domain authority. */
 export class TerminalController {
@@ -252,7 +254,11 @@ export class TerminalController {
     try {
       while (!this.stopped && this.id) {
         // Next pull returns the previous ACK only after renderer write resolves.
+        const asked = Date.now();
         const batch = await desktop.readTerminalOutput(this.id);
+        // The desktop waits for output before it answers empty; an answer that took this long
+        // came from a wait, and there is no interval left to pace.
+        const waited = Date.now() - asked >= LONG_POLL_SEEN_MS;
         if (this.stopped) return;
         this.info = batch.status;
         if (batch.eof || batch.status.state !== 'running') {
@@ -277,8 +283,10 @@ export class TerminalController {
           this.publish({ truncated: batch.truncated });
           return;
         }
-        if (batch.data.length) idle = 10;
+        if (batch.data.length || waited) idle = 10;
         else {
+          // An answer that came at once is paced as before, so a desktop that does not wait
+          // is not asked in a tight loop.
           idle = Math.min(idle * 2, 320);
           await this.sleep(idle);
         }

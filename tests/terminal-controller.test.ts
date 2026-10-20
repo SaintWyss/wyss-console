@@ -265,6 +265,25 @@ describe('real IPC bridge plus terminal lifecycle controller', () => {
     await flush();
     expect(count('terminal_read_output')).toBe(before + 1);
   });
+  it('does not pace a pull the desktop already waited for, and still paces one that came back at once', async () => {
+    // A desktop that waits a second for output before answering empty: the page asks again at
+    // once, so at rest it asks about once a second and not three times.
+    handle = (command) =>
+      command === 'terminal_read_output'
+        ? new Promise((resolve) => setTimeout(() => resolve(output()), 1000))
+        : command === 'terminal_write'
+          ? 1
+          : info;
+    await controller.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    const waiting = count('terminal_read_output');
+    expect(waiting).toBeGreaterThanOrEqual(9);
+    expect(waiting).toBeLessThanOrEqual(11);
+    // Input still reaches the program at once, and the pending pull is not made to wait for it.
+    render.text('x');
+    await flush();
+    expect(count('terminal_write')).toBe(1);
+  });
   it('drains all exit batches, disables input, stops polling and never respawns', async () => {
     let reads = 0;
     handle = (command) =>

@@ -21,3 +21,20 @@ visibility and three sessions of repeated five-minute windows; M05 needs two min
 M18 needs the full authority/runtime boundary. Independent-session medians, p95 and
 confidence intervals, startup-to-drawn-prompt, input/render latency, throughput, panes and
 reconnect measurements still need their own procedures (architecture 15).
+
+## Backend measurements (in-process, release)
+
+`src-tauri/src/terminal/bench_tests.rs` measures the terminal **backend** (M06, M08, M09, M10, M14)
+with the real PTY and service, with no window, WebKit or renderer. All `#[ignore]`; run by hand:
+
+```sh
+WYSS_BENCH_OUT=out.json cargo test --release --lib terminal::bench_tests -- \
+  --ignored --nocapture --test-threads=1
+python3 -I benchmarks/aggregate.py out-run1.json out-run2.json out-run3.json
+```
+
+They generate the corpora of architecture 15 §11.2 from a fixed seed in a private temporary file
+that they remove by its exact path, and record the machine's state (load, memory, swap, power).
+Nothing is dropped from a sample list. `threads.py` reads one process's threads (processor time and
+wake-ups); `idle-ab.sh` compares two builds of the GUI idle on an isolated display. Neither starts
+or ends anything but the process it launched itself.

@@ -570,3 +570,85 @@ fn real_handoff_between_two_installed_agents() {
     let _ = thread.join();
     let _ = fs::remove_dir_all(root);
 }
+
+/// Voluntary context switches of one thread of this process: every time it went to sleep and was
+/// woken. An idle thread that polls shows its poll rate here; one that waits shows almost none.
+fn wakeups(tid: &str) -> Option<u64> {
+    fs::read_to_string(format!("/proc/self/task/{tid}/status"))
+        .ok()?
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("voluntary_ctxt_switches:")?
+                .trim()
+                .parse()
+                .ok()
+        })
+}
+fn threads_named(prefix: &str) -> Vec<String> {
+    fs::read_dir("/proc/self/task")
+        .unwrap()
+        .flatten()
+        .filter(|t| {
+            fs::read_to_string(t.path().join("comm"))
+                .is_ok_and(|name| name.trim_end().starts_with(prefix))
+        })
+        .map(|t| t.file_name().to_string_lossy().into_owned())
+        .collect()
+}
+
+/// P1, measured on this computer: a host holding one idle terminal woke its accept loop about 190
+/// times a second (a 5 ms sleep) and its pump about 25 times a second (a backoff capped at 40 ms),
+/// for nothing: 0.65 % of a core and 243 wake-ups a second at rest, with nobody attached. It now
+/// waits for a connection and for output instead of asking again.
+#[test]
+fn a_host_with_an_idle_terminal_waits_instead_of_polling() {
+    let dirs = World::directories();
+    let socket = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("wyss-host-{}", uuid::Uuid::new_v4().simple()))
+        .join("host.sock");
+    let core = HostCore::new(Some(World::open(&dirs.0, &dirs.1, &dirs.2)));
+    core.use_shell(dirs.2.join("bash"));
+    let listener = server::bind(&socket).ok().expect("bind");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let c = core.clone();
+    let thread = std::thread::spawn(move || {
+        tx.send(nix::unistd::gettid().as_raw().to_string()).unwrap();
+        server::run(listener, c, Duration::from_secs(600));
+    });
+    let accept = rx.recv().unwrap();
+    let client = Remote::at(socket.clone());
+    let id = client.call("term_create", json!({"size": size()})).unwrap()["terminal_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // The shell has started and printed what it prints; from here on nothing happens.
+    read_until(&client, &id, "$");
+    std::thread::sleep(Duration::from_secs(2));
+    let pumps = threads_named("wyss-pump");
+    let ptys = threads_named("wyss-pty");
+    assert!(!pumps.is_empty() && !ptys.is_empty());
+    let all = |tids: &[String]| tids.iter().filter_map(|t| wakeups(t)).sum::<u64>();
+    let before = (wakeups(&accept).unwrap(), all(&pumps), all(&ptys));
+    let window = 4.0;
+    std::thread::sleep(Duration::from_secs(4));
+    let after = (wakeups(&accept).unwrap(), all(&pumps), all(&ptys));
+    let rate = |a: u64, b: u64| (b - a) as f64 / window;
+    let (accept_rate, pump_rate, pty_rate) = (
+        rate(before.0, after.0),
+        rate(before.1, after.1),
+        rate(before.2, after.2),
+    );
+    println!(
+        "idle wake-ups per second: accept {accept_rate:.1}, pump {pump_rate:.1}, pty {pty_rate:.1}"
+    );
+    let _ = client.call("term_close", json!({"terminal_id": id}));
+    let _ = client.call("shutdown", Value::Null);
+    let _ = thread.join();
+    let _ = fs::remove_dir_all(socket.parent().unwrap());
+    let _ = fs::remove_dir_all(dirs.0.parent().unwrap());
+    assert!(accept_rate < 8.0, "the accept loop polls: {accept_rate}/s");
+    assert!(pump_rate < 4.0, "the pump polls: {pump_rate}/s");
+    // The PTY worker still looks at its child a few times a second, to see it exit.
+    assert!(pty_rate < 12.0, "the PTY worker polls: {pty_rate}/s");
+}

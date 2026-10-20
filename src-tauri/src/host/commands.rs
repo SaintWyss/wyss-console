@@ -186,6 +186,12 @@ pub async fn terminal_redraw(
     blocking(move || link.call("term_redraw", json!({"terminal_id": request.terminal_id}))).await
 }
 
+/// How long a read that finds nothing new waits for something before it answers empty. The page
+/// used to ask again every 320 ms at rest, three times a second per terminal, through the webview,
+/// the desktop and the host; now it asks once and is answered when there is output, or after this
+/// (P1). Below the host's own bound, and well below the call timeout.
+const LONG_POLL_MS: u64 = 1000;
+
 #[tauri::command]
 pub async fn terminal_read_output(
     link: State<'_, HostLink>,
@@ -221,7 +227,7 @@ pub async fn terminal_read_output(
     let answer = blocking(move || {
         link.call(
             "term_read",
-            json!({"terminal_id": terminal_id, "from": committed, "wait_ms": 0}),
+            json!({"terminal_id": terminal_id, "from": committed, "wait_ms": LONG_POLL_MS}),
         )
     })
     .await?;
