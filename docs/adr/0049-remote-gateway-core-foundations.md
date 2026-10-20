@@ -27,8 +27,9 @@ tests construct the gateway.
 
 No signature scheme: every signature check goes through `StepUpVerifier`, and the tests use an HMAC
 stand-in that is plainly not one (the build has no asymmetric-crypto crate and none is added without
-the owner's OK). No short-code pairing (needs a PAKE). No listener, no TLS, no relay (DN-05). Not
-independently reviewed, so **not a protection**: it is unreviewed code that nothing calls.
+the owner's OK). No short-code pairing (needs a PAKE). No listener, no TLS, no relay (DN-05).
+The foundations have received the two independent reviews below; they remain unreachable and are
+**not production authentication**. The signature/transport integration has not been implemented or reviewed.
 
 ## Evidence
 
@@ -67,5 +68,7 @@ the earlier code; one is declined with its reason.
   (`device_revoked`, `device_suspended`…) are the design's (16 §5.2.7) and are for the holder of the
   device; device ids are 128 random bits, so telling them apart needs an id the prober already has.
 
-The gateway remains unreachable and unreviewed by anyone but these two passes; the signature scheme and
-the transport are still undecided (DN-05).
+The gateway remains unreachable. These two passes review its policy foundations; production authentication
+and transport remain undecided (DN-05). See the
+[authentication decision preparation](../research/f10-authentication-decision-2026-10-20.md): standard
+cryptography candidates only, no added dependency, listener, transport or real-device enrollment.
