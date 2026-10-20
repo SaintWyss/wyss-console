@@ -171,7 +171,7 @@ impl OwnedChild {
             Err(_) => {
                 // No safe signal target has been established. Retain the owned
                 // handle for nonblocking reaping rather than guessing a PID.
-                enqueue_reap(child, permit);
+                enqueue_reap(child, permit, true, None);
                 return Err(E::InternalError);
             }
         };
@@ -206,7 +206,7 @@ impl OwnedChild {
                     };
                 }
             }
-            enqueue_reap(child, permit);
+            enqueue_reap(child, permit, true, start.ok());
             return Err(E::InternalError);
         }
         let pidfd = opened.ok_or(E::InternalError)?;
@@ -447,6 +447,10 @@ impl Drop for ReapPermit {
 struct ReapJob {
     child: Child,
     _permit: ReapPermit,
+    /// A failed initial pin may be transient. Retry only while the same
+    /// still-unreaped child can be tied to its observed start timestamp.
+    pin_and_kill: bool,
+    expected_start: Option<u64>,
 }
 
 fn reap_permit() -> ControlResult<ReapPermit> {
@@ -472,7 +476,35 @@ fn reap_permit() -> ControlResult<ReapPermit> {
                     drop(queued);
                     scanning.retain_mut(|job| match job.child.try_wait() {
                         Ok(Some(_)) => false,
-                        Ok(None) => true,
+                        Ok(None) => {
+                            if job.pin_and_kill {
+                                if let Some(expected) = job.expected_start {
+                                    let pid = i32::try_from(job.child.id()).ok();
+                                    if let Some(pid) = pid {
+                                        // A pidfd is acquired only while this process is
+                                        // still our waitable child, and verified again before
+                                        // signalling. A numeric PID is never a signal target.
+                                        if proc_start_ticks(pid).ok() == Some(expected) {
+                                            let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+                                            if fd >= 0 {
+                                                let fd = unsafe { OwnedFd::from_raw_fd(fd as i32) };
+                                                if proc_start_ticks(pid).ok() == Some(expected) {
+                                                    let sent = unsafe { libc::syscall(
+                                                        libc::SYS_pidfd_send_signal,
+                                                        fd.as_raw_fd(), libc::SIGKILL,
+                                                        std::ptr::null::<libc::siginfo_t>(), 0,
+                                                    ) };
+                                                    if sent == 0 {
+                                                        job.pin_and_kill = false;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            true
+                        },
                         // An external SIGCHLD collector has already reaped this
                         // child. Never signal a stale numeric PID; release the slot.
                         Err(e) if e.raw_os_error() == Some(libc::ECHILD) => false,
@@ -508,10 +540,10 @@ fn reserve_slot(reaper: &Arc<Reaper>) -> ControlResult<ReapPermit> {
 /// The global reaper was started and a slot reserved before spawn. Both the
 /// producer vector and scanner are bounded by the same lifetime permit limit.
 /// Lock hold time includes only a push, never a blocking wait.
-fn enqueue_reap(child: Child, permit: ReapPermit) {
+fn enqueue_reap(child: Child, permit: ReapPermit, pin_and_kill: bool, expected_start: Option<u64>) {
     let reaper = Arc::clone(&permit.0);
     let mut pending = reaper.queue.lock().unwrap_or_else(|e| e.into_inner());
-    pending.push(ReapJob { child, _permit: permit });
+    pending.push(ReapJob { child, _permit: permit, pin_and_kill, expected_start });
     drop(pending);
     reaper.wake.notify_one();
 }
@@ -526,7 +558,7 @@ impl Drop for OwnedChild {
         let _ = self.signal(libc::SIGKILL);
         if let (Some(mut child), Some(permit)) = (self.child.take(), self.reap_permit.take()) {
             if !matches!(child.try_wait(), Ok(Some(_))) {
-                enqueue_reap(child, permit);
+                enqueue_reap(child, permit, false, None);
             }
         }
     }
