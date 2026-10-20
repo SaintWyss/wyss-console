@@ -151,6 +151,13 @@ impl Log {
                 json!("approval_timeout"),
                 false,
             ),
+            "invalidated" => (
+                "invalidated",
+                "none",
+                Value::Null,
+                json!("runtime_lost"),
+                false,
+            ),
             other => panic!("{other}"),
         };
         self.raw(&format!("authority.managed_approval.{name}"), Some(s), intent.then_some(CORR), 2,
@@ -421,7 +428,7 @@ fn work_requires_the_current_live_launch_of_the_owning_authority() {
     l.desired(S1, false, 2, 1, None, AUTH)
         .turn(S1, T1, (I1, 1), "admitted", 1, AUTH);
     assert!(l.replay().is_err(), "desired stopped");
-    // Not ready is still a reserved launch; admission needs the same live launch.
+    // A reserved launch which was never attested ready cannot admit work.
     let mut l = Log::new();
     l.prepared(S1).desired(S1, true, 1, 1, Some(I1), AUTH).turn(
         S1,
@@ -431,7 +438,7 @@ fn work_requires_the_current_live_launch_of_the_owning_authority() {
         1,
         AUTH,
     );
-    l.replay().unwrap();
+    assert!(l.replay().is_err());
 }
 
 #[test]
@@ -742,4 +749,215 @@ fn one_mutation_intent_produces_exactly_one_runtime_event() {
         l.replay().is_err(),
         "an intent replayed as a second state change"
     );
+}
+
+fn folds(events: &[Value]) -> Result<AuditReplay, E> {
+    events.iter().try_fold(AuditReplay::default(), |mut r, e| {
+        r.observe(e)?;
+        Ok(r)
+    })
+}
+/// A baseline-shaped (payload version 1) turn event, as an old writer would produce.
+fn v1_turn(l: &mut Log, name: &str, id: &str, rev: u64) {
+    let state = if name == "admitted" { "starting" } else { name };
+    l.raw(
+        &format!("authority.managed_turn.{name}"),
+        Some(S1),
+        Some(CORR),
+        1,
+        json!({"managed_turn_id":id,"codex_turn_id":null,"lease_id":LEASE,"lease_revision":1,
+            "runtime_instance_id":I3,"state":state,"revision":rev,"reason":null}),
+        AUTH,
+    );
+}
+
+#[test]
+fn review_baseline_work_cannot_start_after_generation_aware_events() {
+    // Before the first generation-aware event baseline work is ordinary history.
+    let mut ok = Log::new();
+    ok.prepared(S1);
+    v1_turn(&mut ok, "admitted", T1, 1);
+    v1_turn(&mut ok, "running", T1, 2);
+    ok.replay().unwrap();
+    // Afterwards any baseline runtime, turn or approval event is refused.
+    let mut l = Log::live();
+    v1_turn(&mut l, "admitted", T2, 1);
+    assert!(l.replay().is_err(), "baseline turn after V8 started");
+    let mut l = Log::live();
+    l.raw(
+        "authority.managed_approval.requested",
+        Some(S1),
+        None,
+        1,
+        json!({"managed_approval_id":AP1,"managed_turn_id":T1,"kind":"command_execution","lease_id":LEASE,
+            "lease_revision":1,"runtime_instance_id":I1,"state":"pending","revision":1,"decision":null,
+            "effect":"none","reason":null,"action_fingerprint":FP}),
+        AUTH,
+    );
+    assert!(l.replay().is_err(), "baseline approval after V8 started");
+    // A baseline approval must follow a known turn of the same session, starting at requested.
+    let mut l = Log::new();
+    l.prepared(S1).raw(
+        "authority.managed_approval.requested",
+        Some(S1),
+        None,
+        1,
+        json!({"managed_approval_id":AP1,"managed_turn_id":T1,"kind":"command_execution","lease_id":LEASE,
+            "lease_revision":1,"runtime_instance_id":I1,"state":"pending","revision":1,"decision":null,
+            "effect":"none","reason":null,"action_fingerprint":FP}),
+        AUTH,
+    );
+    assert!(l.replay().is_err(), "approval for an unknown turn");
+}
+
+#[test]
+fn review_a_successor_cannot_progress_a_predecessors_launch_and_recovery_is_visible() {
+    // The predecessor crashed with work in flight: no exit was (or could be) written.
+    let mut base = Log::live();
+    base.turn(S1, T1, (I1, 1), "admitted", 1, AUTH)
+        .turn(S1, T1, (I1, 1), "running", 2, AUTH)
+        .approval(S1, (AP1, T1), (I1, 1), "requested", 1, AUTH);
+    let r = base.replay().unwrap();
+    // Seen by the successor, the in-flight work is unresolved even though nothing exited.
+    assert_eq!(
+        r.unresolved_for(AUTH2),
+        Unresolved {
+            turns: vec![T1.into()],
+            approvals: vec![AP1.into()]
+        }
+    );
+    assert_eq!(r.unresolved_for(AUTH), Unresolved::default());
+    // The successor cannot progress, answer or retain it ...
+    for name in ["running", "completed"] {
+        let mut l = Log::new();
+        l.events = base.events.clone();
+        l.turn(S1, T1, (I1, 1), name, 3, AUTH2);
+        assert!(l.replay().is_err(), "{name}");
+    }
+    let mut l = Log::new();
+    l.events = base.events.clone();
+    l.approval(S1, (AP1, T1), (I1, 1), "accepted", 2, AUTH2);
+    assert!(l.replay().is_err());
+    let mut l = Log::new();
+    l.events = base.events.clone();
+    l.desired(S1, true, 2, 1, Some(I1), AUTH2);
+    assert!(l.replay().is_err(), "retaining a predecessor's launch");
+    // ... but it can record the loss, after which the predecessor can never write again.
+    let mut l = Log::new();
+    l.events = base.events.clone();
+    l.approval(S1, (AP1, T1), (I1, 1), "invalidated", 2, AUTH2)
+        .turn(S1, T1, (I1, 1), "indeterminate", 3, AUTH2);
+    assert_eq!(
+        l.replay().unwrap().unresolved_for(AUTH2),
+        Unresolved::default()
+    );
+    let mut forged = Log::new();
+    forged.events = base.events.clone();
+    forged
+        .turn(S1, T1, (I1, 1), "failed", 3, AUTH2)
+        .turn(S1, T1, (I1, 1), "completed", 4, AUTH);
+    assert!(
+        forged.replay().is_err(),
+        "a retired authority writing again exposes a forged successor"
+    );
+}
+
+#[test]
+fn review_ready_requires_a_compatible_launch_and_an_open_session() {
+    for word in ["incompatible", "degraded", "unknown"] {
+        let mut v = Log::live().events[3].clone();
+        v["payload"]["compatibility"] = json!(word);
+        assert!(validate_event(&v).is_err(), "{word}");
+    }
+    let mut l = Log::new();
+    l.prepared(S1)
+        .desired(S1, true, 1, 1, Some(I1), AUTH)
+        .closed(S1)
+        .ready(S1, I1, 1, AUTH);
+    assert!(l.replay().is_err(), "ready after the session closed");
+}
+
+#[test]
+fn review_transition_tables_match_the_sql_triggers() {
+    let mut l = Log::live();
+    l.turn(S1, T1, (I1, 1), "admitted", 1, AUTH)
+        .turn(S1, T1, (I1, 1), "running", 2, AUTH)
+        .approval(S1, (AP1, T1), (I1, 1), "requested", 1, AUTH)
+        .approval(S1, (AP1, T1), (I1, 1), "indeterminate", 2, AUTH);
+    assert!(l.replay().is_err(), "pending cannot become indeterminate");
+    let mut l = Log::live();
+    l.turn(S1, T1, (I1, 1), "admitted", 1, AUTH)
+        .turn(S1, T1, (I1, 1), "completed", 2, AUTH);
+    assert!(
+        l.replay().is_err(),
+        "starting cannot complete without running"
+    );
+    let mut l = Log::live();
+    l.turn(S1, T1, (I1, 1), "admitted", 1, AUTH)
+        .turn(S1, T1, (I1, 1), "running", 2, AUTH)
+        .turn(S1, T1, (I1, 1), "running", 3, AUTH);
+    assert!(l.replay().is_err(), "running twice");
+}
+
+#[test]
+fn review_identity_domains_are_disjoint_across_the_whole_stream() {
+    // An instance equal to another session, and a session equal to an existing instance.
+    let mut l = Log::live();
+    l.desired(S2, true, 1, 1, Some(S1), AUTH);
+    assert!(l.replay().is_err(), "instance reusing a session id");
+    let mut l = Log::live();
+    l.prepared(I1);
+    assert!(l.replay().is_err(), "session reusing an instance id");
+    let mut l = Log::new();
+    l.prepared(AUTH2).raw(
+        "authority.managed_session.prepared",
+        Some(S1),
+        Some(CORR),
+        1,
+        json!({"adapter_id":"codex","runtime_kind":"codex","control_state":"prepared","revision":1}),
+        AUTH2,
+    );
+    assert!(
+        l.replay().is_err() || folds(&l.events).is_err(),
+        "authority sharing a session id"
+    );
+    let mut l = Log::live();
+    l.desired(S2, true, 1, 1, Some(AUTH), AUTH);
+    assert!(l.replay().is_err(), "instance reusing the authority id");
+}
+
+#[test]
+fn review_wire_events_are_canonical_and_within_the_durable_bound() {
+    let l = Log::live();
+    let mut shouting = l.events[2].clone();
+    let corr = shouting["correlation_id"].as_str().unwrap().to_uppercase();
+    shouting["correlation_id"] = json!(corr);
+    assert!(validate_event(&shouting).is_err(), "uppercase correlation");
+    let mut shouting = l.events[3].clone();
+    shouting["event_id"] = json!("00000000-0000-4000-8000-00000000AB01");
+    assert!(validate_event(&shouting).is_err(), "uppercase event id");
+    let mut t = Log::live();
+    t.turn(S1, T1, (I1, 1), "admitted", 1, AUTH);
+    let mut shouting = t.events[4].clone();
+    shouting["payload"]["managed_turn_id"] = json!("00000000-0000-4000-8000-0000000000AB");
+    assert!(validate_event(&shouting).is_err(), "uppercase turn id");
+    let mut big = l.events[3].clone();
+    big["padding"] = json!("x".repeat(2100));
+    assert!(validate_event(&big).is_err(), "unknown and oversized");
+    let mut padded = l.events[3].clone();
+    padded["payload"]["runtime_version"] = json!(format!("1.{}", "1".repeat(2100)));
+    assert!(validate_event(&padded).is_err(), "over the durable bound");
+    validate_event(&l.events[3]).unwrap();
+}
+
+#[test]
+fn review_a_refusal_poisons_the_replay() {
+    let l = Log::live();
+    let mut r = AuditReplay::default();
+    for e in &l.events[..2] {
+        r.observe(e).unwrap();
+    }
+    assert!(r.observe(&l.events[3]).is_err());
+    // The valid next event no longer folds: nothing continues past a refusal.
+    assert!(r.observe(&l.events[2]).is_err());
 }

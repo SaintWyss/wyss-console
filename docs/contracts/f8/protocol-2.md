@@ -150,7 +150,10 @@ receipts have revision expected+1 and the requested desired state; stop retains 
 retains it for the same launch or increments exactly one (first allocation is 1). Exact-intent replay
 uses its original request expectations. These clarify the candidate; no approved V1 contract changes.
 
-Audit vocabulary-2 result validation is still unsupported in this module. All non-audit methods
+Audit results are decoded by `f8/audit.rs`: per-event vocabulary-1/2 validation, page correlation
+(stream, cursor, limit, exact contiguity, unique event IDs) and stateful `AuditReplay` (sole-writer
+authority succession, disjoint session/instance/authority domains, launch attribution, once-only
+ready/exit, closed turn/approval transition tables, 128/4096 lifetime limits). All non-audit methods
 now have result-kind/record correlation. Binding-create success requires the independently accepted
 canonical workspace via `correlate_binding_create`; generic correlation refuses without that context.
 Closed-session no-op returns revision 2 unchanged, as in the baseline. Do not use partial codecs to enable a V8 client/server. See the

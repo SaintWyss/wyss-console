@@ -37,6 +37,27 @@ impl Registry {
             generations: BTreeMap::new(),
         })
     }
+    /// Restart: prime anti-reuse history from the durable allocator. Nothing becomes live and
+    /// no entry is restored: every previous launch is dead to this process.
+    pub fn with_history(
+        authority: WireUuid,
+        used: impl IntoIterator<Item = String>,
+        generations: impl IntoIterator<Item = (String, u64)>,
+    ) -> ControlResult<Self> {
+        let mut registry = Self::new(authority)?;
+        for instance in used {
+            super::protocol::canonical(&instance)?;
+            registry.used.insert(instance);
+        }
+        for (session, generation) in generations {
+            super::protocol::canonical(&session)?;
+            registry.generations.insert(session, generation);
+        }
+        if registry.used.len() > 4096 || registry.generations.len() > 128 {
+            return Err(E::CapacityExceeded);
+        }
+        Ok(registry)
+    }
     /// Call only AFTER the corresponding durable allocation commits. Does not allocate a process.
     /// Production capacity remains one; no constructor takes a larger client-selected bound.
     pub fn reserve(&mut self, reference: RuntimeRef) -> ControlResult<()> {

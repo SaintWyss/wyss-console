@@ -336,7 +336,7 @@ pub(super) fn canonical(s: &str) -> ControlResult<()> {
         Ok(())
     }
 }
-fn canonical_ids(v: &Value) -> ControlResult<()> {
+pub(super) fn canonical_ids(v: &Value) -> ControlResult<()> {
     match v {
         Value::Object(m) => {
             for (k, v) in m {

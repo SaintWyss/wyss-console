@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 const MAX_RUNTIME_ROWS: usize = 128;
 const MAX_LAUNCH_ROWS: usize = 4096;
 const MAX_GENERATION: u64 = i64::MAX as u64;
+const MAX_EVENT_BYTES: usize = 2048;
 
 fn bad() -> E {
     E::StorageIncompatible
@@ -83,6 +84,17 @@ const APPROVAL_KINDS: [&str; 8] = [
 /// Unknown event types and unknown payload versions are refused (closed vocabulary).
 pub fn validate_event(v: &Value) -> ControlResult<Vocabulary> {
     EventEnvelopeV1::from_value(v.clone()).map_err(|_| E::InvalidRequest)?;
+    // Every identifier is canonical (case, hyphens) and the durable size bound holds on the wire too.
+    super::protocol::canonical_ids(v).map_err(|_| bad())?;
+    for key in ["event_id", "correlation_id", "causation_id"] {
+        if let Some(id) = v[key].as_str() {
+            canonical(id).map_err(|_| bad())?;
+        }
+    }
+    canonical_source(v)?;
+    if serde_json::to_vec(v).map_err(|_| bad())?.len() > MAX_EVENT_BYTES {
+        return Err(bad());
+    }
     let kind = text(v, "event_type")?;
     uuid_text(v, "event_id")?;
     uuid_text(v, "stream_id")?;
@@ -214,8 +226,13 @@ fn runtime_v2(v: &Value, kind: &str) -> ControlResult<()> {
             {
                 return Err(bad());
             }
-            serde_json::from_value::<CompatibilityState>(p["compatibility"].clone())
-                .map_err(|_| bad())?;
+            // The baseline writer only ever publishes a compatible launch as ready.
+            if serde_json::from_value::<CompatibilityState>(p["compatibility"].clone())
+                .map_err(|_| bad())?
+                != CompatibilityState::Compatible
+            {
+                return Err(bad());
+            }
         }
         _ => {
             exact(
@@ -350,6 +367,24 @@ struct Approval {
     fingerprint: String,
 }
 
+/// One runtime mutation as the stream recorded it, with the state it replaced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Intent {
+    pub session: String,
+    pub revision: u64,
+    pub generation: u64,
+    pub running: bool,
+    pub prev_generation: u64,
+    /// The launch the mutation found live (desired running), else none.
+    pub prev_instance: Option<String>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Domain {
+    Session,
+    Instance,
+    Authority,
+}
+
 /// Work the log leaves unresolved on a launch that is gone: recovery must mark it
 /// indeterminate and may never resume, answer or complete it.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -371,7 +406,17 @@ pub struct AuditReplay {
     turns: HashMap<String, Turn>,
     approvals: HashMap<String, Approval>,
     /// Mutation intent (the event's correlation) to the runtime state it produced.
-    intents: HashMap<String, (String, u64, u64, bool)>,
+    intents: HashMap<String, Intent>,
+    /// Baseline runtime mutation intents (null session), with the revision they produced.
+    legacy_intents: HashMap<String, u64>,
+    /// Sessions, launch instances and authorities are three disjoint identity domains.
+    domains: HashMap<String, Domain>,
+    /// Authority instances are a sole-writer sequence: once another one wrote, a predecessor
+    /// can never write again, so a forged "successor" is detected by the owner's next event.
+    writer: Option<String>,
+    retired: HashSet<String>,
+    /// A refusal leaves the replay unusable; callers cannot keep folding past it.
+    poisoned: bool,
     pub historical: u64,
     pub attributed: u64,
 }
@@ -389,7 +434,32 @@ impl AuditReplay {
         Ok(())
     }
     pub fn observe(&mut self, v: &Value) -> ControlResult<()> {
+        if self.poisoned {
+            return Err(bad());
+        }
+        self.poisoned = true;
+        self.fold(v)?;
+        self.poisoned = false;
+        Ok(())
+    }
+    fn claim(&mut self, id: &str, domain: Domain) -> ControlResult<()> {
+        match self.domains.insert(id.to_owned(), domain) {
+            Some(old) if old != domain => Err(bad()),
+            _ => Ok(()),
+        }
+    }
+    fn fold(&mut self, v: &Value) -> ControlResult<()> {
         let vocabulary = validate_event(v)?;
+        let source = canonical_source(v)?.to_owned();
+        if self.retired.contains(&source) {
+            return Err(bad());
+        }
+        if self.writer.as_deref() != Some(source.as_str()) {
+            if let Some(old) = self.writer.replace(source.clone()) {
+                self.retired.insert(old);
+            }
+            self.claim(&source, Domain::Authority)?;
+        }
         let stream = text(v, "stream_id")?;
         let sequence: u64 = text(v, "sequence")?.parse().map_err(|_| bad())?;
         if self.stream.get_or_insert_with(|| stream.to_owned()) != stream
@@ -414,17 +484,35 @@ impl AuditReplay {
         self.historical += 1;
         let kind = text(v, "event_type")?;
         let p = &v["payload"];
-        if kind.starts_with("authority.runtime.") && self.v2_started {
-            // Once generation-aware events exist, a baseline runtime event is a forgery.
+        if self.v2_started
+            && [
+                "authority.runtime.",
+                "authority.managed_turn.",
+                "authority.managed_approval.",
+            ]
+            .iter()
+            .any(|prefix| kind.starts_with(prefix))
+        {
+            // The quiescent migration leaves no unfinished baseline work. After the first
+            // generation-aware event, any baseline-shaped runtime, turn or approval event is
+            // a forgery: it could only have been written for work no one can resume.
             return Err(bad());
+        }
+        if kind == "authority.runtime.desired_state_changed" {
+            let intent = text(v, "correlation_id")?.to_owned();
+            if self
+                .legacy_intents
+                .insert(intent, positive(p, "revision")?)
+                .is_some()
+            {
+                return Err(bad());
+            }
         }
         match kind {
             "authority.managed_session.prepared" => {
-                if self
-                    .sessions
-                    .insert(uuid_text(v, "session_id")?.to_owned(), false)
-                    .is_some()
-                {
+                let session = uuid_text(v, "session_id")?.to_owned();
+                self.claim(&session, Domain::Session)?;
+                if self.sessions.insert(session, false).is_some() {
                     return Err(bad());
                 }
             }
@@ -482,8 +570,16 @@ impl AuditReplay {
                 let turn = uuid_text(p, "managed_turn_id")?;
                 let session = uuid_text(v, "session_id")?;
                 let next = approval_head(v, session, turn, None)?;
+                match self.turns.get(turn) {
+                    Some(t) if t.session == session => (),
+                    _ => return Err(bad()),
+                }
                 match self.approvals.get(id) {
-                    None if next.revision != 1 => return Err(bad()),
+                    None if next.revision != 1
+                        || kind != "authority.managed_approval.requested" =>
+                    {
+                        return Err(bad());
+                    }
                     Some(old) if old.launch.is_some() || !approval_step(old, &next, kind) => {
                         return Err(bad());
                     }
@@ -517,33 +613,27 @@ impl AuditReplay {
             return Err(bad());
         }
         let source = canonical_source(v)?;
-        let live = self.live(&session, &instance);
+        let authorized = self.live_for(&session, &instance, source);
         let name = kind.rsplit('.').next().unwrap_or_default();
-        let own_authority = source == launch.authority;
         if kind.starts_with("authority.managed_turn.") {
-            self.turn_event(
-                v,
-                name,
-                (&session, &instance, generation),
-                live && own_authority,
-            )
+            self.turn_event(v, name, (&session, &instance, generation), authorized)
         } else {
-            self.approval_event(
-                v,
-                name,
-                (&session, &instance, generation),
-                live && own_authority,
-            )
+            self.approval_event(v, name, (&session, &instance, generation), authorized)
         }
     }
 
-    /// A launch is live only while it is the session's current, unexited, running generation.
-    fn live(&self, session: &str, instance: &str) -> bool {
+    /// A launch is live for `writer` only while it is the session's current, attested,
+    /// unexited, running generation which that very authority reserved. For any other writer
+    /// the launch is history: it can only be observed as lost, never progressed.
+    fn live_for(&self, session: &str, instance: &str, writer: &str) -> bool {
         self.runtimes.get(session).is_some_and(|r| {
             r.desired_running
                 && !r.closed
                 && r.instance.as_deref() == Some(instance)
-                && self.launches.get(instance).is_some_and(|l| !l.exited)
+                && self
+                    .launches
+                    .get(instance)
+                    .is_some_and(|l| l.ready && !l.exited && l.authority == writer)
         })
     }
 
@@ -560,6 +650,10 @@ impl AuditReplay {
             let (prev_rev, prev_gen, prev_instance) = previous.as_ref().map_or((0, 0, None), |r| {
                 (r.revision, r.generation, r.instance.clone())
             });
+            let found_live = previous
+                .as_ref()
+                .filter(|r| r.desired_running)
+                .and_then(|r| r.instance.clone());
             if revision != prev_rev + 1 || generation < prev_gen || generation > prev_gen + 1 {
                 return Err(bad());
             }
@@ -573,6 +667,7 @@ impl AuditReplay {
                 if !running || self.launches.contains_key(&i) || i == session {
                     return Err(bad());
                 }
+                self.claim(&i, Domain::Instance)?;
                 if self.launches.len() >= MAX_LAUNCH_ROWS {
                     return Err(E::CapacityExceeded);
                 }
@@ -594,7 +689,10 @@ impl AuditReplay {
                 if running {
                     let i = prev_instance.clone().ok_or_else(bad)?;
                     if instance.as_deref() != Some(i.as_str())
-                        || self.launches.get(&i).is_none_or(|l| l.exited)
+                        || self
+                            .launches
+                            .get(&i)
+                            .is_none_or(|l| l.exited || l.authority != source)
                     {
                         return Err(bad());
                     }
@@ -612,7 +710,17 @@ impl AuditReplay {
             canonical(&intent).map_err(|_| bad())?;
             if self
                 .intents
-                .insert(intent, (session.to_owned(), revision, generation, running))
+                .insert(
+                    intent,
+                    Intent {
+                        session: session.to_owned(),
+                        revision,
+                        generation,
+                        running,
+                        prev_generation: prev_gen,
+                        prev_instance: found_live,
+                    },
+                )
                 .is_some()
             {
                 return Err(bad());
@@ -643,6 +751,7 @@ impl AuditReplay {
             let current = self.runtimes.get(session);
             if launch.ready
                 || launch.exited
+                || self.sessions.get(session).copied().unwrap_or(true)
                 || !current.is_some_and(|r| {
                     r.desired_running
                         && r.generation == generation
@@ -727,7 +836,19 @@ impl AuditReplay {
                     if revision != t.revision || state != t.state {
                         return Err(bad());
                     }
-                } else if revision != t.revision + 1 || name == "admitted" {
+                } else if revision != t.revision + 1
+                    || name == "admitted"
+                    || !matches!(
+                        (t.state.as_str(), state.as_str()),
+                        (
+                            "starting",
+                            "running" | "failed" | "interrupted" | "indeterminate"
+                        ) | (
+                            "running",
+                            "completed" | "failed" | "interrupted" | "indeterminate"
+                        )
+                    )
+                {
                     return Err(bad());
                 } else {
                     t.revision = revision;
@@ -826,14 +947,25 @@ impl AuditReplay {
             })
             .collect()
     }
-    /// Intent to (session, revision, generation, desired running) for every runtime mutation.
-    pub fn intents(&self) -> &HashMap<String, (String, u64, u64, bool)> {
+    /// Every generation-aware runtime mutation the stream recorded.
+    pub fn intents(&self) -> &HashMap<String, Intent> {
         &self.intents
     }
-    /// Non-terminal turns and pending approvals whose launch is no longer live. Read-only.
+    /// Baseline runtime mutations (intent to the revision they produced).
+    pub fn legacy_intents(&self) -> &HashMap<String, u64> {
+        &self.legacy_intents
+    }
+    /// Unresolved work as seen by the stream's last writer.
     pub fn unresolved(&self) -> Unresolved {
-        let gone =
-            |o: &Option<(String, u64)>, s: &str| o.as_ref().is_some_and(|(i, _)| !self.live(s, i));
+        self.unresolved_for(self.writer.as_deref().unwrap_or_default())
+    }
+    /// Non-terminal turns and pending approvals whose launch `current` does not own and
+    /// cannot progress: a launch of a predecessor authority is never live. Read-only.
+    pub fn unresolved_for(&self, current: &str) -> Unresolved {
+        let gone = |o: &Option<(String, u64)>, s: &str| {
+            o.as_ref()
+                .is_some_and(|(i, _)| !self.live_for(s, i, current))
+        };
         let mut out = Unresolved::default();
         for (id, t) in &self.turns {
             if !terminal_turn(&t.state) && gone(&t.launch, &t.session) {
@@ -879,7 +1011,10 @@ fn approval_step(old: &Approval, next: &Approval, kind: &str) -> bool {
         && next.turn == old.turn
         && next.fingerprint == old.fingerprint
         && match old.state.as_str() {
-            "pending" => name != "requested" && name != "confirmed",
+            "pending" => matches!(
+                name,
+                "accepted" | "declined" | "cancelled" | "expired" | "invalidated"
+            ),
             "accepted" => {
                 old.effect == "dispatched" && matches!(name, "confirmed" | "indeterminate")
             }

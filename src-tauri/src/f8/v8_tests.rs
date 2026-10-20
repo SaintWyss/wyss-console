@@ -449,6 +449,26 @@ fn tampering_with_runtime_launch_sidecar_event_receipt_or_schema_is_refused() {
             }),
         ),
         (
+            "forged baseline-shaped receipt",
+            Box::new(|_| {
+                let id = uuid();
+                let mutation = json!({"method":"runtime/start","params":{"intent_id":id,"adapter_id":"codex",
+                    "runtime_kind":"codex","expected_revision":0}});
+                let result = json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":"running",
+                    "revision":1,"created_at":"2026-10-20T10:00:00Z","updated_at":"2026-10-20T10:00:00Z"});
+                format!("INSERT INTO processed_intents VALUES('{id}','{mutation}','{result}')")
+            }),
+        ),
+        (
+            "receipt fence rewritten",
+            Box::new(|w| {
+                format!(
+                    "UPDATE processed_intents SET mutation=json_set(mutation,'$.params.expected_generation',1) WHERE intent_id='{}'",
+                    w.intent
+                )
+            }),
+        ),
+        (
             "extra object",
             Box::new(|_| "CREATE TABLE shadow(x INTEGER)".into()),
         ),
@@ -504,4 +524,30 @@ fn commit_validated_rolls_back_everything_on_a_refusal() {
     commit_validated(&mut w.conn, |_| Ok(())).unwrap();
     validate_v8(&w.conn).unwrap();
     let _ = (&w.stream,);
+}
+
+#[test]
+fn unassigned_unfinished_work_is_refused_directly() {
+    let w = with_work();
+    unassigned_work_is_finished(&w.conn).unwrap();
+    // Legacy (sidecar-less) records must be finished history, never live work.
+    let legacy_turn: String = w
+        .conn
+        .query_row(
+            "SELECT managed_turn_id FROM managed_turns WHERE managed_turn_id NOT IN (SELECT managed_turn_id FROM managed_turn_launches)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    tamper(
+        &w.conn,
+        &format!(
+            "UPDATE managed_turns SET state='running',terminal_at=NULL,terminal_reason=NULL WHERE managed_turn_id='{legacy_turn}'"
+        ),
+    );
+    assert_eq!(
+        unassigned_work_is_finished(&w.conn),
+        Err(E::StorageIncompatible)
+    );
+    assert!(validate_v8(&w.conn).is_err());
 }

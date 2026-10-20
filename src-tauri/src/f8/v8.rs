@@ -170,6 +170,7 @@ pub fn validate_v8(c: &Connection) -> ControlResult<V8Summary> {
     if mismatched != 0 {
         return Err(bad());
     }
+    unassigned_work_is_finished(c)?;
     operations(c, &launches)?;
     runtime_receipts(c, &replay)?;
     Ok(V8Summary {
@@ -243,6 +244,21 @@ fn sidecars(
     Ok(seen.len())
 }
 
+/// The migration is quiescent, so unassigned (sidecar-less) history is always finished. An
+/// unassigned unfinished record is an attempt to smuggle work past the launch fences.
+fn unassigned_work_is_finished(c: &Connection) -> ControlResult<()> {
+    let open: i64 = c
+        .query_row(
+            "SELECT (SELECT count(*) FROM managed_turns t WHERE t.state IN ('starting','running') AND NOT EXISTS(SELECT 1 FROM managed_turn_launches l WHERE l.managed_turn_id=t.managed_turn_id)) + (SELECT count(*) FROM managed_approvals a WHERE a.state='pending' AND NOT EXISTS(SELECT 1 FROM managed_approval_launches l WHERE l.managed_approval_id=a.managed_approval_id)) + (SELECT count(*) FROM managed_session_operations o WHERE o.state IN ('reserved','dispatching') AND NOT EXISTS(SELECT 1 FROM managed_operation_launches l WHERE l.operation_id=o.operation_id))",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(invalid)?;
+    if open != 0 {
+        return Err(bad());
+    }
+    Ok(())
+}
 fn operations(
     c: &Connection,
     launches: &BTreeMap<String, (String, u64, String)>,
@@ -300,13 +316,17 @@ fn runtime_receipts(c: &Connection, replay: &AuditReplay) -> ControlResult<()> {
         if !matches!(m["method"].as_str(), Some("runtime/start" | "runtime/stop")) {
             continue;
         }
-        let Some((session, revision, generation, running)) = replay.intents().get(&id) else {
-            // Unassigned baseline receipt: original shape only.
+        let Some(intent) = replay.intents().get(&id) else {
+            // Unassigned baseline receipt: original shape, and only for a mutation the stream
+            // recorded under that very intent, producing that very revision.
             let op: v1::Operation = serde_json::from_value(m).map_err(invalid)?;
             op.validate().map_err(invalid)?;
             let record: v1::RuntimeControlRecord =
                 serde_json::from_str(&result).map_err(invalid)?;
             record.validate()?;
+            if replay.legacy_intents().get(&id) != Some(&record.revision) {
+                return Err(bad());
+            }
             continue;
         };
         let envelope = serde_json::json!({
@@ -330,20 +350,17 @@ fn runtime_receipts(c: &Connection, replay: &AuditReplay) -> ControlResult<()> {
         else {
             return Err(bad());
         };
-        let consistent_generation = if start {
-            expected_generation == generation
-                || expected_generation.checked_add(1) == Some(*generation)
-        } else {
-            expected_generation == generation
-        };
+        // The receipt's expectations are exactly the state the stream says it found.
+        let fenced_instance = instance.as_ref().map(|i| i.as_str().to_owned());
         if mutation.intent_id.as_str() != id
-            || target.as_str() != session
-            || *running != start
-            || !consistent_generation
-            || mutation.expected_revision.and_then(|n| n.checked_add(1)) != Some(*revision)
-            || instance
+            || target.as_str() != intent.session
+            || intent.running != start
+            || *expected_generation != intent.prev_generation
+            || mutation.expected_revision.and_then(|n| n.checked_add(1)) != Some(intent.revision)
+            || (!start && fenced_instance != intent.prev_instance)
+            || fenced_instance
                 .as_ref()
-                .is_some_and(|i| launches.get(i.as_str()).is_none_or(|l| &l.0 != session))
+                .is_some_and(|i| launches.get(i).is_none_or(|l| l.0 != intent.session))
         {
             return Err(bad());
         }
@@ -352,14 +369,14 @@ fn runtime_receipts(c: &Connection, replay: &AuditReplay) -> ControlResult<()> {
         if o.remove("managed_session_id")
             .as_ref()
             .and_then(Value::as_str)
-            != Some(session)
-            || o.remove("generation").and_then(|g| g.as_u64()) != Some(*generation)
+            != Some(&intent.session)
+            || o.remove("generation").and_then(|g| g.as_u64()) != Some(intent.generation)
         {
             return Err(bad());
         }
         let record: v1::RuntimeControlRecord = serde_json::from_value(value).map_err(invalid)?;
         record.validate()?;
-        if record.revision != *revision
+        if record.revision != intent.revision
             || (record.desired_state == v1::DesiredState::Running) != start
         {
             return Err(bad());
