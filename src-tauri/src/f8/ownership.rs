@@ -131,6 +131,16 @@ impl OwnedChild {
         // Fail before spawning if the bounded reaper cannot retain the child on
         // exceptional exit, identity verification failure, or blocked reap.
         let permit = reap_permit()?;
+        // Fail before any spawn on a kernel that cannot supply pidfds. This
+        // preflight is not proof that a later allocation cannot fail under
+        // resource pressure; the reaper retains ownership on that path.
+        let self_pidfd = unsafe {
+            libc::syscall(libc::SYS_pidfd_open, nix::unistd::getpid().as_raw(), 0)
+        };
+        if self_pidfd < 0 {
+            return Err(E::Unsupported);
+        }
+        let self_pidfd = unsafe { OwnedFd::from_raw_fd(self_pidfd as i32) };
         let expected_parent = nix::unistd::getpid();
         // SAFETY: the closure performs only async-signal-safe syscalls after fork and builds
         // an OS error on failure. SIGKILL cannot be masked, and comparing the parent closes the
@@ -153,6 +163,9 @@ impl OwnedChild {
             });
         }
         let mut child = command.spawn().map_err(|_| E::ProviderRejected)?;
+        // Free the preflight descriptor before opening the owned child's pidfd
+        // so we do not use an extra slot during the critical pinning operation.
+        drop(self_pidfd);
         let pid = match i32::try_from(child.id()) {
             Ok(pid) => pid,
             Err(_) => {
