@@ -23,8 +23,8 @@ use std::{
     },
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus},
     sync::{
-        OnceLock,
-        mpsc::{self, RecvTimeoutError, SyncSender, TrySendError},
+        Arc, Condvar, Mutex, OnceLock,
+        atomic::{AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -96,6 +96,7 @@ impl Default for Grace {
 pub struct OwnedChild {
     // Option permits handing an unreaped child to the asynchronous reaper from Drop.
     child: Option<Child>,
+    reap_permit: Option<ReapPermit>,
     pidfd: OwnedFd,
     pid: i32,
     start_ticks: u64,
@@ -127,6 +128,9 @@ impl OwnedChild {
         if policy == ContainmentPolicy::DescendantsContained {
             verify_namespace_launch(command)?;
         }
+        // Fail before spawning if the bounded reaper cannot retain the child on
+        // exceptional exit, identity verification failure, or blocked reap.
+        let permit = reap_permit()?;
         let expected_parent = nix::unistd::getpid();
         // SAFETY: the closure performs only async-signal-safe syscalls after fork and builds
         // an OS error on failure. SIGKILL cannot be masked, and comparing the parent closes the
@@ -149,7 +153,14 @@ impl OwnedChild {
             });
         }
         let mut child = command.spawn().map_err(|_| E::ProviderRejected)?;
-        let pid = i32::try_from(child.id()).map_err(|_| E::InternalError)?;
+        let pid = match i32::try_from(child.id()) {
+            Ok(pid) => pid,
+            Err(_) => {
+                let _ = child.kill();
+                enqueue_reap(child, permit);
+                return Err(E::InternalError);
+            }
+        };
         // The child is unreaped, so its PID cannot have been reused yet.
         // SAFETY: plain syscall with integer arguments; the returned descriptor is owned below.
         let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
@@ -164,16 +175,18 @@ impl OwnedChild {
         let still_ours = matches!(child.try_wait(), Ok(None));
         let start = proc_start_ticks(pid);
         let (Some(pidfd), Ok(start_ticks), true) = (opened, start, still_ours) else {
-            // Without an identity-stable handle the child cannot be safely owned: it was our
-            // own unreaped child, so killing and reaping it through the handle we hold is exact.
+            // Child is still our direct spawn. A failed pidfd/identity preflight
+            // cannot justify synchronous wait on the authority writer thread.
+            // The bounded background reaper holds the Child until actual reap.
             let _ = child.kill();
-            let _ = child.wait();
+            enqueue_reap(child, permit);
             return Err(E::InternalError);
         };
         let stdin = child.stdin.take();
         Ok((
             Self {
                 child: Some(child),
+                reap_permit: Some(permit),
                 pidfd,
                 pid,
                 start_ticks,
@@ -385,55 +398,80 @@ fn verify_namespace_launch(command: &Command) -> ControlResult<()> {
     Ok(())
 }
 
-/// Last-resort child reaping is separate from the sole-writer runtime. A stuck child
-/// cannot cause OwnedChild::drop to block another session's requests or shutdown.
-fn orphan_reaper() -> Option<&'static SyncSender<Child>> {
-    static REAPER: OnceLock<Option<SyncSender<Child>>> = OnceLock::new();
-    REAPER
-        .get_or_init(|| {
-            // The durable contract caps launch attempts at 4096; if all slots are
-            // occupied the sender refuses immediately instead of blocking the writer.
-            let (sender, receiver) = mpsc::sync_channel::<Child>(4096);
-            let runner = std::thread::Builder::new()
-                .name("wyss-f8-owned-reaper".into())
-                .spawn(move || {
-                    let mut pending = Vec::<Child>::new();
-                    loop {
-                        match receiver.recv_timeout(Duration::from_millis(50)) {
-                            Ok(child) => pending.push(child),
-                            Err(RecvTimeoutError::Timeout) => (),
-                            Err(RecvTimeoutError::Disconnected) if pending.is_empty() => break,
-                            Err(RecvTimeoutError::Disconnected) => (),
-                        }
-                        while let Ok(child) = receiver.try_recv() {
-                            pending.push(child);
-                        }
-                        // Never call Child::wait on a process that may be in uninterruptible
-                        // sleep. Keep the handle and periodically try again.
-                        pending.retain_mut(|child| !matches!(child.try_wait(), Ok(Some(_))));
-                    }
-                });
-            runner.ok().map(|_| sender)
-        })
-        .as_ref()
+/// A process must reserve one of the fixed lifetime reaping slots BEFORE it can spawn.
+/// Reap ownership therefore never depends on creating a new thread under memory pressure.
+const REAPER_LIMIT: usize = 4096;
+
+struct Reaper {
+    slots: AtomicUsize,
+    queue: Mutex<Vec<ReapJob>>,
+    wake: Condvar,
 }
 
-fn handoff_for_reap(child: Child) {
-    let unsent = match orphan_reaper() {
-        Some(sender) => match sender.try_send(child) {
-            Ok(()) => return,
-            Err(TrySendError::Full(child) | TrySendError::Disconnected(child)) => child,
-        },
-        None => child,
-    };
-    // Emergency bounded-time handoff (thread creation can fail under resource pressure).
-    // Neither this fallback nor the normal reaper blocks Drop.
-    let _ = std::thread::Builder::new()
-        .name("wyss-f8-owned-reap-fallback".into())
-        .spawn(move || {
-            let mut child = unsent;
-            let _ = child.wait();
+struct ReapPermit(Arc<Reaper>);
+impl Drop for ReapPermit {
+    fn drop(&mut self) {
+        self.0.slots.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+struct ReapJob {
+    child: Child,
+    _permit: ReapPermit,
+}
+
+fn reap_permit() -> ControlResult<ReapPermit> {
+    static REAPER: OnceLock<Option<Arc<Reaper>>> = OnceLock::new();
+    let reaper = REAPER.get_or_init(|| {
+        let reaper = Arc::new(Reaper {
+            slots: AtomicUsize::new(0),
+            queue: Mutex::new(Vec::with_capacity(REAPER_LIMIT)),
+            wake: Condvar::new(),
         });
+        let worker = Arc::clone(&reaper);
+        let started = std::thread::Builder::new()
+            .name("wyss-f8-owned-reaper".into())
+            .spawn(move || {
+                let mut scanning = Vec::<ReapJob>::with_capacity(REAPER_LIMIT);
+                loop {
+                    // No OS wait, disk I/O or child polling under the writer-facing lock.
+                    let mut queued = worker.queue.lock().unwrap_or_else(|e| e.into_inner());
+                    while queued.is_empty() && scanning.is_empty() {
+                        queued = worker.wake.wait(queued).unwrap_or_else(|e| e.into_inner());
+                    }
+                    scanning.extend(queued.drain(..));
+                    drop(queued);
+                    scanning.retain_mut(|job| !matches!(job.child.try_wait(), Ok(Some(_))));
+                    if !scanning.is_empty() {
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                }
+            });
+        started.ok().map(|_| reaper)
+    }).as_ref().ok_or(E::InternalError)?;
+    let mut count = reaper.slots.load(Ordering::Acquire);
+    loop {
+        if count >= REAPER_LIMIT {
+            return Err(E::CapacityExceeded);
+        }
+        match reaper.slots.compare_exchange_weak(
+            count, count + 1, Ordering::AcqRel, Ordering::Acquire,
+        ) {
+            Ok(_) => return Ok(ReapPermit(Arc::clone(reaper))),
+            Err(next) => count = next,
+        }
+    }
+}
+
+/// The global reaper was started and a slot reserved before spawn. Both the
+/// producer vector and scanner are bounded by the same lifetime permit limit.
+/// Lock hold time includes only a push, never a blocking wait.
+fn enqueue_reap(child: Child, permit: ReapPermit) {
+    let reaper = Arc::clone(&permit.0);
+    let mut pending = reaper.queue.lock().unwrap_or_else(|e| e.into_inner());
+    pending.push(ReapJob { child, _permit: permit });
+    drop(pending);
+    reaper.wake.notify_one();
 }
 
 impl Drop for OwnedChild {
@@ -442,11 +480,11 @@ impl Drop for OwnedChild {
         if self.exit.is_some() {
             return;
         }
-        // The pidfd refers only to this handle's unreaped child.
+        // Signal exactly the pinned child; no process-name or PID lookup.
         let _ = self.signal(libc::SIGKILL);
-        if let Some(mut child) = self.child.take() {
+        if let (Some(mut child), Some(permit)) = (self.child.take(), self.reap_permit.take()) {
             if !matches!(child.try_wait(), Ok(Some(_))) {
-                handoff_for_reap(child);
+                enqueue_reap(child, permit);
             }
         }
     }
