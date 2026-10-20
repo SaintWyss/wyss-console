@@ -112,13 +112,27 @@ impl Registry {
         e.phase = Phase::Initializing;
         Ok(())
     }
-    /// Records an independently observed handshake, not a client/provider assertion of execution authority.
-    pub fn ready(&mut self, identity: RuntimeIdentity) -> ControlResult<()> {
+    /// Check registry readiness before writing the immutable durable ready event.
+    /// No transient identity is published by this preflight.
+    pub fn check_ready(&self, identity: &RuntimeIdentity) -> ControlResult<()> {
         identity.validate()?;
-        let e = self.entry_mut(&identity.reference())?;
-        if e.phase != Phase::Initializing {
+        if identity.authority_instance_id != self.authority {
+            return Err(E::CorrelationError);
+        }
+        let entry = self
+            .entries
+            .get(identity.managed_session_id.as_str())
+            .filter(|e| e.reference == identity.reference())
+            .ok_or(E::StaleRevision)?;
+        if entry.phase != Phase::Initializing {
             return Err(E::InvalidTransition);
         }
+        Ok(())
+    }
+    /// Records an independently observed handshake, not a client/provider assertion of execution authority.
+    pub fn ready(&mut self, identity: RuntimeIdentity) -> ControlResult<()> {
+        self.check_ready(&identity)?;
+        let e = self.entry_mut(&identity.reference())?;
         e.phase = Phase::Ready;
         e.identity = Some(identity);
         Ok(())
