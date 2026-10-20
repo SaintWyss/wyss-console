@@ -110,12 +110,25 @@ pub fn validate_event(v: &Value) -> ControlResult<Vocabulary> {
         Some(2) => {
             common(v)?;
             if kind == DELIVERY {
-                exact(&v["payload"], &["managed_approval_id", "runtime_instance_id", "generation", "delivery"])?;
+                exact(
+                    &v["payload"],
+                    &[
+                        "managed_approval_id",
+                        "runtime_instance_id",
+                        "generation",
+                        "delivery",
+                    ],
+                )?;
                 uuid_text(&v["payload"], "managed_approval_id")?;
                 uuid_text(&v["payload"], "runtime_instance_id")?;
                 positive(&v["payload"], "generation")?;
-                serde_json::from_value::<crate::contracts::approval::ApprovalDelivery>(v["payload"]["delivery"].clone()).map_err(|_| bad())?;
-                if !v["correlation_id"].is_null() { return Err(bad()); }
+                serde_json::from_value::<crate::contracts::approval::ApprovalDelivery>(
+                    v["payload"]["delivery"].clone(),
+                )
+                .map_err(|_| bad())?;
+                if !v["correlation_id"].is_null() {
+                    return Err(bad());
+                }
             } else if RUNTIME_V2.contains(&kind) {
                 runtime_v2(v, kind)?;
             } else if kind
@@ -138,7 +151,6 @@ pub fn validate_event(v: &Value) -> ControlResult<Vocabulary> {
 /// A new authority instance announces itself, naming the instance it succeeds.
 pub const STARTED: &str = "authority.instance.started";
 pub const DELIVERY: &str = "authority.approval_delivery.changed";
-
 
 fn started_shape(v: &Value) -> ControlResult<()> {
     if v["persistence"] != "durable"
@@ -705,14 +717,22 @@ impl AuditReplay {
                 return Err(bad());
             }
             let legal = match self.deliveries.get(id).map(String::as_str) {
-                None => next == "decision_accepted" && matches!(a.state.as_str(), "accepted" | "declined" | "cancelled"),
+                None => {
+                    next == "decision_accepted"
+                        && matches!(a.state.as_str(), "accepted" | "declined" | "cancelled")
+                }
                 Some("decision_accepted") => matches!(next, "kernel_accepted" | "indeterminate"),
-                Some("kernel_accepted") => matches!(next, "provider_consumed" | "effect_confirmed" | "indeterminate"),
+                Some("kernel_accepted") => matches!(
+                    next,
+                    "provider_consumed" | "effect_confirmed" | "indeterminate"
+                ),
                 Some("provider_consumed") => matches!(next, "effect_confirmed" | "indeterminate"),
                 _ => false,
             };
-            if !legal || (next != "indeterminate" && !authorized)
-                || (next == "effect_confirmed" && a.effect != "confirmed") {
+            if !legal
+                || (next != "indeterminate" && !authorized)
+                || (next == "effect_confirmed" && a.effect != "confirmed")
+            {
                 return Err(bad());
             }
             self.deliveries.insert(id.to_owned(), next.to_owned());
@@ -1057,7 +1077,9 @@ impl AuditReplay {
     pub fn legacy_intents(&self) -> &HashMap<String, u64> {
         &self.legacy_intents
     }
-    pub fn deliveries(&self) -> &BTreeMap<String, String> { &self.deliveries }
+    pub fn deliveries(&self) -> &BTreeMap<String, String> {
+        &self.deliveries
+    }
     /// Unresolved work as seen by the stream's last writer.
     pub fn unresolved(&self) -> Unresolved {
         self.unresolved_for(self.writer.as_deref().unwrap_or_default())

@@ -16,7 +16,9 @@ use super::{
 };
 use crate::contracts::{
     WireUuid,
-    approval::{ApprovalDecision, ApprovalDelivery, ApprovalKind, ApprovalReason, ApprovalStructure},
+    approval::{
+        ApprovalDecision, ApprovalDelivery, ApprovalKind, ApprovalReason, ApprovalStructure,
+    },
     control::{self as v1, ControlError as E, ControlResult, unique_json},
     identities::ManagedTurnId,
     turn::{TurnReason, TurnState},
@@ -35,16 +37,46 @@ const PAGE_BYTES: usize = 65_536 - 1024;
 #[derive(serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum ProviderNotice {
-    RuntimeReady { observed_version: String, workspace: String, profile: String, revision: u64 },
-    Content { managed_turn_id: ManagedTurnId, provider_turn_id: String, text: String },
-    BindingConfirmed { operation_id: WireUuid, provider_thread_id: String },
-    Models { models: Vec<crate::contracts::agent_adapter::AgentModelDescriptorV1>, offers: Vec<v1::ModelOffer>, complete: bool },
-    ApprovalItemConsumed { provider_item_id: String },
-    ApprovalItemConfirmed { provider_item_id: String },
-    TurnInterrupted { managed_turn_id: ManagedTurnId },
-    TurnRunning { managed_turn_id: ManagedTurnId, provider_turn_id: String },
-    TurnCompleted { managed_turn_id: ManagedTurnId, provider_turn_id: String },
-    TurnFailed { managed_turn_id: ManagedTurnId },
+    RuntimeReady {
+        observed_version: String,
+        workspace: String,
+        profile: String,
+        revision: u64,
+    },
+    Content {
+        managed_turn_id: ManagedTurnId,
+        provider_turn_id: String,
+        text: String,
+    },
+    BindingConfirmed {
+        operation_id: WireUuid,
+        provider_thread_id: String,
+    },
+    Models {
+        models: Vec<crate::contracts::agent_adapter::AgentModelDescriptorV1>,
+        offers: Vec<v1::ModelOffer>,
+        complete: bool,
+    },
+    ApprovalItemConsumed {
+        provider_item_id: String,
+    },
+    ApprovalItemConfirmed {
+        provider_item_id: String,
+    },
+    TurnInterrupted {
+        managed_turn_id: ManagedTurnId,
+    },
+    TurnRunning {
+        managed_turn_id: ManagedTurnId,
+        provider_turn_id: String,
+    },
+    TurnCompleted {
+        managed_turn_id: ManagedTurnId,
+        provider_turn_id: String,
+    },
+    TurnFailed {
+        managed_turn_id: ManagedTurnId,
+    },
     ApprovalRequired {
         approval_kind: ApprovalKind,
         provider_item_id: String,
@@ -317,7 +349,9 @@ impl Authority {
         request: &Request,
         p: &crate::contracts::turn::TurnStart,
     ) -> ControlResult<Value> {
-        let Target::Fenced(fence) = request.target() else { return Err(E::InvalidRequest); };
+        let Target::Fenced(fence) = request.target() else {
+            return Err(E::InvalidRequest);
+        };
         let session = fence.managed_session_id.as_str().to_owned();
         let intent = TurnIntent {
             intent_id: p.intent_id.clone(),
@@ -325,21 +359,38 @@ impl Authority {
             prompt_fingerprint: format!("{:x}", Sha256::digest(p.prompt.as_bytes())),
             prompt_byte_length: p.prompt.len(),
         };
-        let replay: bool = self.engine.connection().query_row("SELECT EXISTS(SELECT 1 FROM processed_intents WHERE intent_id=?1)", [p.intent_id.as_str()], |r|r.get(0)).map_err(|_|E::StorageUnavailable)?;
+        let replay: bool = self
+            .engine
+            .connection()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM processed_intents WHERE intent_id=?1)",
+                [p.intent_id.as_str()],
+                |r| r.get(0),
+            )
+            .map_err(|_| E::StorageUnavailable)?;
         let authority = self.authority();
         if replay {
-            let reference = RuntimeRef { schema:2,authority_instance_id:authority.clone(),managed_session_id:fence.managed_session_id.clone(),
-                runtime_instance_id:fence.runtime_instance_id.clone().ok_or(E::InvalidRequest)?,generation:fence.generation };
-            let (record,fresh) = Writer::new(self.engine.connection_mut(),authority)?.admit_turn_ex(&reference,&intent,"")?;
-            if fresh { return Err(E::InternalError); }
+            let reference = RuntimeRef {
+                schema: 2,
+                authority_instance_id: authority.clone(),
+                managed_session_id: fence.managed_session_id.clone(),
+                runtime_instance_id: fence.runtime_instance_id.clone().ok_or(E::InvalidRequest)?,
+                generation: fence.generation,
+            };
+            let (record, fresh) = Writer::new(self.engine.connection_mut(), authority)?
+                .admit_turn_ex(&reference, &intent, "")?;
+            if fresh {
+                return Err(E::InternalError);
+            }
             return Ok(json!({"kind":"turn","value":record}));
         }
         self.engine.observe_fence(fence)?;
         let reference = self.engine.reference(&session).ok_or(E::StaleRevision)?;
-        let lease = super::writers::active_lease(self.engine.connection(), &session)?.ok_or(E::GateDenied)?;
+        let lease = super::writers::active_lease(self.engine.connection(), &session)?
+            .ok_or(E::GateDenied)?;
         super::operations::require_bound_launch(&self.engine, fence)?;
         let attachment = self.engine.attachment(&session).ok_or(E::GateDenied)?;
-        self.engine.preflight(fence,&attachment)?;
+        self.engine.preflight(fence, &attachment)?;
         let (record, fresh) = Writer::new(self.engine.connection_mut(), authority.clone())?
             .admit_turn_ex(&reference, &intent, lease.lease_id.as_str())?;
         if !fresh {
@@ -369,17 +420,23 @@ impl Authority {
             serde_json::to_vec(&json!({"method":"turn/start","turn":record.managed_turn_id,
             "input":p.prompt}))
             .map_err(|_| E::InternalError)?;
-        if self.engine.write_frame(&ticket, &frame, &snapshot, 0).is_err() {
+        if self
+            .engine
+            .write_frame(&ticket, &frame, &snapshot, 0)
+            .is_err()
+        {
             // A failed write is not proof that zero bytes/effects reached the
             // provider. Never claim a definitive no-effect failure or resend.
             let authority = self.authority();
-            let recorded = Writer::new(self.engine.connection_mut(), authority)
-                .and_then(|mut w| w.transition_turn(
-                    &record.managed_turn_id,
-                    None,
-                    TurnState::Indeterminate,
-                    Some(TurnReason::DispatchUnknown),
-                ));
+            let recorded =
+                Writer::new(self.engine.connection_mut(), authority).and_then(|mut w| {
+                    w.transition_turn(
+                        &record.managed_turn_id,
+                        None,
+                        TurnState::Indeterminate,
+                        Some(TurnReason::DispatchUnknown),
+                    )
+                });
             // Cleanup is mandatory even when SQLite refuses the indeterminate
             // journal record. A later reaped-runtime recovery reconciles it.
             self.engine.transport_failed(&ticket.reference);
@@ -431,10 +488,15 @@ impl Authority {
         }
         // A new cancellation requires the observed live launch BEFORE durable mutation.
         // Exact already-committed intent replays and terminal turns need no live process.
-        let replay: bool = self.engine.connection().query_row(
-            "SELECT EXISTS(SELECT 1 FROM processed_intents WHERE intent_id=?1)",
-            [p.intent_id.as_str()], |r| r.get(0),
-        ).map_err(|_| E::StorageUnavailable)?;
+        let replay: bool = self
+            .engine
+            .connection()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM processed_intents WHERE intent_id=?1)",
+                [p.intent_id.as_str()],
+                |r| r.get(0),
+            )
+            .map_err(|_| E::StorageUnavailable)?;
         let active: bool = self.engine.connection().query_row(
             "SELECT state IN ('starting','running') FROM managed_turns WHERE managed_turn_id=?1",
             [p.managed_turn_id.as_str()], |r| r.get(0),
@@ -458,12 +520,11 @@ impl Authority {
                 let snapshot = lease_snapshot(self.engine.connection(), &session, &ticket.lease_id);
                 // A buffered write is only queued, not proof that the provider
                 // processed the interrupt. Refusals must never be silently hidden.
-                if self.engine.write_frame(
-                    &ticket,
-                    b"{\"method\":\"turn/interrupt\"}",
-                    &snapshot,
-                    0,
-                ).is_err() {
+                if self
+                    .engine
+                    .write_frame(&ticket, b"{\"method\":\"turn/interrupt\"}", &snapshot, 0)
+                    .is_err()
+                {
                     self.engine.transport_failed(&ticket.reference);
                     return Err(E::ExternalEffectUnknown);
                 }
@@ -479,7 +540,9 @@ impl Authority {
         now: Instant,
     ) -> ControlResult<Value> {
         let _ = now;
-        let Target::Fenced(fence) = request.target() else { return Err(E::InvalidRequest); };
+        let Target::Fenced(fence) = request.target() else {
+            return Err(E::InvalidRequest);
+        };
         let session = fence.managed_session_id.as_str().to_owned();
         let row: Option<(String, String, String, String)> = self
             .engine
@@ -492,14 +555,26 @@ impl Authority {
             .optional()
             .map_err(|_| E::StorageUnavailable)?;
         let (turn, item, owner, durable_fingerprint) = row.ok_or(E::ApprovalNotFound)?;
-        if owner != session { return Err(E::GateDenied); }
+        if owner != session {
+            return Err(E::GateDenied);
+        }
         let (instance,generation): (String,i64) = self.engine.connection().query_row(
             "SELECT runtime_instance_id,generation FROM managed_approval_launches WHERE managed_approval_id=?1",
             [p.managed_approval_id.as_str()], |r| Ok((r.get(0)?,r.get(1)?))).map_err(|_| E::ApprovalNotFound)?;
-        if fence.runtime_instance_id.as_ref().map(|i|i.as_str()) != Some(instance.as_str())
-            || fence.generation != generation as u64 { return Err(E::StaleRevision); }
-        let replay: bool = self.engine.connection().query_row(
-            "SELECT EXISTS(SELECT 1 FROM processed_intents WHERE intent_id=?1)", [p.intent_id.as_str()], |r|r.get(0)).map_err(|_|E::StorageUnavailable)?;
+        if fence.runtime_instance_id.as_ref().map(|i| i.as_str()) != Some(instance.as_str())
+            || fence.generation != generation as u64
+        {
+            return Err(E::StaleRevision);
+        }
+        let replay: bool = self
+            .engine
+            .connection()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM processed_intents WHERE intent_id=?1)",
+                [p.intent_id.as_str()],
+                |r| r.get(0),
+            )
+            .map_err(|_| E::StorageUnavailable)?;
         if !replay {
             self.engine.observe_fence(fence)?;
         }
@@ -524,7 +599,9 @@ impl Authority {
                 return Err(E::StaleRevision);
             }
         }
-        if !replay && p.decision == ApprovalDecision::Accept { self.engine.approval_action_confined(fence,&item)?; }
+        if !replay && p.decision == ApprovalDecision::Accept {
+            self.engine.approval_action_confined(fence, &item)?;
+        }
         let authority = self.authority();
         let decided = Writer::new(self.engine.connection_mut(), authority.clone())?
             .decide_approval(
@@ -575,11 +652,20 @@ impl Authority {
                     return Err(E::TransportError);
                 }
                 #[cfg(test)]
-                if let Some(inject) = self.post_approval_write.take() { inject(self.engine.connection_mut()); }
-                let recorded = Writer::new(self.engine.connection_mut(), authority)
-                    .and_then(|mut writer| writer.record_delivery(&p.managed_approval_id, ApprovalDelivery::KernelAccepted));
+                if let Some(inject) = self.post_approval_write.take() {
+                    inject(self.engine.connection_mut());
+                }
+                let recorded =
+                    Writer::new(self.engine.connection_mut(), authority).and_then(|mut writer| {
+                        writer.record_delivery(
+                            &p.managed_approval_id,
+                            ApprovalDelivery::KernelAccepted,
+                        )
+                    });
                 if let Err(e) = recorded {
-                    if let Some(reference) = self.engine.reference(&session) { self.engine.transport_failed(&reference); }
+                    if let Some(reference) = self.engine.reference(&session) {
+                        self.engine.transport_failed(&reference);
+                    }
                     return Err(e);
                 }
                 Ok(json!({"kind":"approval_receipt","value":receipt}))
@@ -765,22 +851,48 @@ impl Authority {
             .map(|_| ())
     }
 
-    fn approval_for_item(&self, from: &RuntimeRef, item: &str) -> ControlResult<crate::contracts::identities::ManagedApprovalId> {
+    fn approval_for_item(
+        &self,
+        from: &RuntimeRef,
+        item: &str,
+    ) -> ControlResult<crate::contracts::identities::ManagedApprovalId> {
         self.engine.observe_fence(&from.fence())?;
-        let turn = self.engine.active_turn(from.managed_session_id.as_str()).ok_or(E::TurnNotFound)?;
+        let turn = self
+            .engine
+            .active_turn(from.managed_session_id.as_str())
+            .ok_or(E::TurnNotFound)?;
         let id: String = self.engine.connection().query_row(
             "SELECT a.managed_approval_id FROM managed_approvals a JOIN managed_approval_launches l USING(managed_approval_id) WHERE a.managed_session_id=?1 AND a.managed_turn_id=?2 AND a.provider_item_id=?3 AND l.runtime_instance_id=?4 AND l.generation=?5",
             rusqlite::params![from.managed_session_id.as_str(),turn,item,from.runtime_instance_id.as_str(),from.generation as i64], |r|r.get(0)).map_err(|_|E::ApprovalNotFound)?;
-        crate::contracts::identities::ManagedApprovalId::parse(&id).map_err(|_|E::StorageIncompatible)
+        crate::contracts::identities::ManagedApprovalId::parse(&id)
+            .map_err(|_| E::StorageIncompatible)
     }
-    fn provider_content(&mut self, from: &RuntimeRef, turn: &ManagedTurnId, provider_turn: &str, text:&str) -> ControlResult<()> {
+    fn provider_content(
+        &mut self,
+        from: &RuntimeRef,
+        turn: &ManagedTurnId,
+        provider_turn: &str,
+        text: &str,
+    ) -> ControlResult<()> {
         self.engine.observe_fence(&from.fence())?;
-        if text.len()>262_144 || self.engine.active_turn(from.managed_session_id.as_str()) != Some(turn.as_str()) { return Err(E::CorrelationError); }
-        let record = super::writers::read_turn_record(self.engine.connection(),turn.as_str())?;
-        if record.state != TurnState::Running || record.managed_session_id != from.managed_session_id
+        if text.len() > 262_144
+            || self.engine.active_turn(from.managed_session_id.as_str()) != Some(turn.as_str())
+        {
+            return Err(E::CorrelationError);
+        }
+        let record = super::writers::read_turn_record(self.engine.connection(), turn.as_str())?;
+        if record.state != TurnState::Running
+            || record.managed_session_id != from.managed_session_id
             || record.runtime_instance_id != from.runtime_instance_id
-            || record.codex_turn_id.as_ref().map(|p|p.as_str()) != Some(provider_turn) { return Err(E::CorrelationError); }
-        self.streams.push(&record,crate::contracts::turn::StreamKind::AssistantMessageDelta,Some(text));
+            || record.codex_turn_id.as_ref().map(|p| p.as_str()) != Some(provider_turn)
+        {
+            return Err(E::CorrelationError);
+        }
+        self.streams.push(
+            &record,
+            crate::contracts::turn::StreamKind::AssistantMessageDelta,
+            Some(text),
+        );
         Ok(())
     }
 
@@ -798,41 +910,130 @@ impl Authority {
                 self.engine.transport_failed(&from);
                 continue;
             }
-            let notice = unique_json(&frame.item)
-                .and_then(|v| serde_json::from_value::<ProviderNotice>(v)
-                    .map_err(|_| E::InvalidRequest));
-            if self.engine.provider_exited(&from) && matches!(&notice,
-                Ok(ProviderNotice::RuntimeReady { .. } | ProviderNotice::BindingConfirmed { .. }
-                    | ProviderNotice::Models { .. } | ProviderNotice::ApprovalRequired { .. })) {
+            let notice = unique_json(&frame.item).and_then(|v| {
+                serde_json::from_value::<ProviderNotice>(v).map_err(|_| E::InvalidRequest)
+            });
+            if self.engine.provider_exited(&from)
+                && matches!(
+                    &notice,
+                    Ok(ProviderNotice::RuntimeReady { .. }
+                        | ProviderNotice::BindingConfirmed { .. }
+                        | ProviderNotice::Models { .. }
+                        | ProviderNotice::ApprovalRequired { .. })
+                )
+            {
                 self.engine.transport_failed(&from);
                 continue;
             }
             let result = match notice {
-                Ok(ProviderNotice::RuntimeReady { observed_version,workspace,profile,revision }) => self.engine.complete_handshake(&from,&observed_version,Attachment { workspace,profile,revision }).map(|_|()),
-                Ok(ProviderNotice::BindingConfirmed { operation_id,provider_thread_id }) => super::operations::confirm_binding(&mut self.engine,&from,&operation_id,&provider_thread_id),
-                Ok(ProviderNotice::Models { models,offers,complete }) => self.engine.record_models(&from,models,offers,complete),
-                Ok(ProviderNotice::Content { managed_turn_id,provider_turn_id,text }) => self.provider_content(&from,&managed_turn_id,&provider_turn_id,&text),
-                Ok(ProviderNotice::ApprovalItemConsumed { provider_item_id }) => self.approval_for_item(&from,&provider_item_id).and_then(|id| {
-                    let authority=self.authority(); Writer::new(self.engine.connection_mut(),authority)?.record_delivery(&id,ApprovalDelivery::ProviderConsumed)
-                }),
-                Ok(ProviderNotice::ApprovalItemConfirmed { provider_item_id }) => self.approval_for_item(&from,&provider_item_id).and_then(|id| self.provider_approval_confirmed(&from,&id,&provider_item_id)),
-                Ok(ProviderNotice::TurnInterrupted { managed_turn_id }) => self.provider_turn_event(&from,&managed_turn_id,None,TurnState::Interrupted,Some(TurnReason::UserCancel)),
-                Ok(ProviderNotice::TurnRunning { managed_turn_id, provider_turn_id }) =>
-                    self.provider_turn_event(&from, &managed_turn_id,
-                        Some(&provider_turn_id), TurnState::Running, None),
-                Ok(ProviderNotice::TurnCompleted { managed_turn_id, provider_turn_id }) =>
-                    self.provider_turn_event(&from, &managed_turn_id,
-                        Some(&provider_turn_id), TurnState::Completed, Some(TurnReason::Completed)),
-                Ok(ProviderNotice::TurnFailed { managed_turn_id }) =>
-                    self.provider_turn_event(&from, &managed_turn_id, None,
-                        TurnState::Failed, Some(TurnReason::ProviderFailed)),
-                Ok(ProviderNotice::ApprovalRequired { approval_kind, provider_item_id,
-                    action_fingerprint, structure, action }) => {
-                    self.provider_approval_request(&from, approval_kind,&provider_item_id,&action_fingerprint,structure)
-                        .and_then(|_| match action {Some(action)=>self.engine.hold_approval_action(&from,&provider_item_id,action),None=>Ok(())})
-                },
-                Ok(ProviderNotice::ApprovalConfirmed { managed_approval_id, provider_item_id }) =>
-                    self.provider_approval_confirmed(&from, &managed_approval_id, &provider_item_id),
+                Ok(ProviderNotice::RuntimeReady {
+                    observed_version,
+                    workspace,
+                    profile,
+                    revision,
+                }) => self
+                    .engine
+                    .complete_handshake(
+                        &from,
+                        &observed_version,
+                        Attachment {
+                            workspace,
+                            profile,
+                            revision,
+                        },
+                    )
+                    .map(|_| ()),
+                Ok(ProviderNotice::BindingConfirmed {
+                    operation_id,
+                    provider_thread_id,
+                }) => super::operations::confirm_binding(
+                    &mut self.engine,
+                    &from,
+                    &operation_id,
+                    &provider_thread_id,
+                ),
+                Ok(ProviderNotice::Models {
+                    models,
+                    offers,
+                    complete,
+                }) => self.engine.record_models(&from, models, offers, complete),
+                Ok(ProviderNotice::Content {
+                    managed_turn_id,
+                    provider_turn_id,
+                    text,
+                }) => self.provider_content(&from, &managed_turn_id, &provider_turn_id, &text),
+                Ok(ProviderNotice::ApprovalItemConsumed { provider_item_id }) => self
+                    .approval_for_item(&from, &provider_item_id)
+                    .and_then(|id| {
+                        let authority = self.authority();
+                        Writer::new(self.engine.connection_mut(), authority)?
+                            .record_delivery(&id, ApprovalDelivery::ProviderConsumed)
+                    }),
+                Ok(ProviderNotice::ApprovalItemConfirmed { provider_item_id }) => self
+                    .approval_for_item(&from, &provider_item_id)
+                    .and_then(|id| self.provider_approval_confirmed(&from, &id, &provider_item_id)),
+                Ok(ProviderNotice::TurnInterrupted { managed_turn_id }) => self
+                    .provider_turn_event(
+                        &from,
+                        &managed_turn_id,
+                        None,
+                        TurnState::Interrupted,
+                        Some(TurnReason::UserCancel),
+                    ),
+                Ok(ProviderNotice::TurnRunning {
+                    managed_turn_id,
+                    provider_turn_id,
+                }) => self.provider_turn_event(
+                    &from,
+                    &managed_turn_id,
+                    Some(&provider_turn_id),
+                    TurnState::Running,
+                    None,
+                ),
+                Ok(ProviderNotice::TurnCompleted {
+                    managed_turn_id,
+                    provider_turn_id,
+                }) => self.provider_turn_event(
+                    &from,
+                    &managed_turn_id,
+                    Some(&provider_turn_id),
+                    TurnState::Completed,
+                    Some(TurnReason::Completed),
+                ),
+                Ok(ProviderNotice::TurnFailed { managed_turn_id }) => self.provider_turn_event(
+                    &from,
+                    &managed_turn_id,
+                    None,
+                    TurnState::Failed,
+                    Some(TurnReason::ProviderFailed),
+                ),
+                Ok(ProviderNotice::ApprovalRequired {
+                    approval_kind,
+                    provider_item_id,
+                    action_fingerprint,
+                    structure,
+                    action,
+                }) => self
+                    .provider_approval_request(
+                        &from,
+                        approval_kind,
+                        &provider_item_id,
+                        &action_fingerprint,
+                        structure,
+                    )
+                    .and_then(|_| match action {
+                        Some(action) => {
+                            self.engine
+                                .hold_approval_action(&from, &provider_item_id, action)
+                        }
+                        None => Ok(()),
+                    }),
+                Ok(ProviderNotice::ApprovalConfirmed {
+                    managed_approval_id,
+                    provider_item_id,
+                }) => {
+                    self.provider_approval_confirmed(&from, &managed_approval_id, &provider_item_id)
+                }
                 Err(e) => Err(e),
             };
             if result.is_err() {
@@ -848,26 +1049,26 @@ impl Authority {
     pub fn tick(&mut self, now: Instant) -> ControlResult<()> {
         let authority = self.authority();
         let housekeeping = (|| -> ControlResult<()> {
-        let expired: Vec<(String, String)> = {
-            let mut q = self
+            let expired: Vec<(String, String)> = {
+                let mut q = self
                 .engine
                 .connection()
                 .prepare("SELECT session_id,lease_id FROM execution_leases WHERE state='active' AND expires_at<=?1")
                 .map_err(|_| E::StorageUnavailable)?;
-            let at = time::OffsetDateTime::now_utc()
-                .format(&time::format_description::well_known::Rfc3339)
-                .map_err(|_| E::InternalError)?;
-            q.query_map([at], |r| Ok((r.get(0)?, r.get(1)?)))
-                .map_err(|_| E::StorageUnavailable)?
-                .collect::<Result<_, _>>()
-                .map_err(|_| E::StorageUnavailable)?
-        };
-        Writer::new(self.engine.connection_mut(), authority.clone())?.expire_leases()?;
-        for (session, lease) in expired {
-            self.lease_lost(&session, &lease);
-        }
-        Writer::new(self.engine.connection_mut(), authority.clone())?.expire_approvals()?;
-        Ok(())
+                let at = time::OffsetDateTime::now_utc()
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .map_err(|_| E::InternalError)?;
+                q.query_map([at], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(|_| E::StorageUnavailable)?
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| E::StorageUnavailable)?
+            };
+            Writer::new(self.engine.connection_mut(), authority.clone())?.expire_leases()?;
+            for (session, lease) in expired {
+                self.lease_lost(&session, &lease);
+            }
+            Writer::new(self.engine.connection_mut(), authority.clone())?.expire_approvals()?;
+            Ok(())
         })();
         // Lifecycle progress must never depend on SQLite accepting an unrelated expiry write.
         self.engine.poll(now);

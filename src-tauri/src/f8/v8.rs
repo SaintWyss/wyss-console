@@ -175,14 +175,23 @@ pub fn validate_v8(c: &Connection) -> ControlResult<V8Summary> {
     operations(c, &launches)?;
     runtime_receipts(c, &replay)?;
     let mut deliveries = BTreeMap::new();
-    let mut q = c.prepare("SELECT managed_approval_id,state FROM managed_approval_delivery").map_err(invalid)?;
-    for row in q.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?))).map_err(invalid)? {
+    let mut q = c
+        .prepare("SELECT managed_approval_id,state FROM managed_approval_delivery")
+        .map_err(invalid)?;
+    for row in q
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(invalid)?
+    {
         let (id, state) = row.map_err(invalid)?;
         deliveries.insert(id, state);
     }
-    if &deliveries != replay.deliveries() { return Err(bad()); }
+    if &deliveries != replay.deliveries() {
+        return Err(bad());
+    }
     let missing: i64 = c.query_row("SELECT count(*) FROM managed_approvals a JOIN managed_approval_launches l USING(managed_approval_id) WHERE a.decision IS NOT NULL AND NOT EXISTS(SELECT 1 FROM managed_approval_delivery d WHERE d.managed_approval_id=a.managed_approval_id)", [], |r|r.get(0)).map_err(invalid)?;
-    if missing != 0 { return Err(bad()); }
+    if missing != 0 {
+        return Err(bad());
+    }
     Ok(V8Summary {
         events,
         runtimes: rows.len(),

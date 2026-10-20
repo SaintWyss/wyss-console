@@ -1526,8 +1526,15 @@ fn a_spawner_that_only_claims_containment_is_caught_at_the_handshake() {
     let started = rig.engine.start(&r, &mut sp).unwrap();
     let reference = reference(&started);
     assert_eq!(
-        rig.engine
-            .complete_handshake(&reference, "0.159.0", Attachment {workspace:"/tmp".into(),profile:"codex_local_tools_v1".into(),revision:1}),
+        rig.engine.complete_handshake(
+            &reference,
+            "0.159.0",
+            Attachment {
+                workspace: "/tmp".into(),
+                profile: "codex_local_tools_v1".into(),
+                revision: 1
+            }
+        ),
         Err(E::Unsupported)
     );
     assert!(
@@ -1541,7 +1548,10 @@ fn a_spawner_that_only_claims_containment_is_caught_at_the_handshake() {
         "SELECT count(*) FROM control_events WHERE json_extract(envelope,'$.event_type')='authority.runtime.instance_ready'",
         [], |r| r.get(0),
     ).unwrap();
-    assert_eq!(ready_events, 0, "unproved namespace cannot be durably ready");
+    assert_eq!(
+        ready_events, 0,
+        "unproved namespace cannot be durably ready"
+    );
     rig.drain();
     assert!(!rig.engine.is_live(&a));
     validate_v8(rig.engine.connection()).unwrap();
@@ -1568,28 +1578,52 @@ fn a_verified_namespace_launch_is_ready_and_its_descendants_die_with_it() {
         std::thread::sleep(Duration::from_millis(10));
     }
     rig.engine
-        .complete_handshake(&reference, "0.159.0", Attachment {workspace:"/tmp".into(),profile:"codex_local_tools_v1".into(),revision:1})
+        .complete_handshake(
+            &reference,
+            "0.159.0",
+            Attachment {
+                workspace: "/tmp".into(),
+                profile: "codex_local_tools_v1".into(),
+                revision: 1,
+            },
+        )
         .unwrap();
-    assert!(rig.engine.live[&a].worker.descendants() >= 2);
+    // The background `sleep`s are forked by the shell after the ready event; poll with a
+    // deadline rather than sampling once, so the assertion is not a race under load.
+    let end = Instant::now() + Duration::from_secs(10);
+    while rig.engine.live[&a].worker.descendants() < 2 {
+        assert!(Instant::now() < end, "namespace descendants never appeared");
+        std::thread::sleep(Duration::from_millis(10));
+    }
     let stop = rig.stop_request(&a, Some(reference.runtime_instance_id.as_str()));
     rig.engine.stop(&stop, Instant::now()).unwrap();
     rig.drain();
     validate_v8(rig.engine.connection()).unwrap();
 }
 
-
 #[test]
 fn inference_launch_cannot_elevate_profile_during_handshake_or_reattach() {
-    let mut rig=Rig::new(1,0);
-    let a=rig.sessions[0].clone();let mut sp=Spawn::new(&rig.frames);
-    let request=rig.start_request(&a,&uuid());
-    let started=rig.engine.start(&request,&mut sp).unwrap();
-    let r=reference(&started);
-    let elevated=Attachment{profile:"codex_local_tools_v1".into(),..attach()};
+    let mut rig = Rig::new(1, 0);
+    let a = rig.sessions[0].clone();
+    let mut sp = Spawn::new(&rig.frames);
+    let request = rig.start_request(&a, &uuid());
+    let started = rig.engine.start(&request, &mut sp).unwrap();
+    let r = reference(&started);
+    let elevated = Attachment {
+        profile: "codex_local_tools_v1".into(),
+        ..attach()
+    };
     let before=rig.engine.connection().query_row("SELECT count(*) FROM control_events WHERE json_extract(envelope,'$.event_type')='authority.runtime.instance_ready'",[],|r|r.get::<_,i64>(0)).unwrap();
-    assert_eq!(rig.engine.complete_handshake(&r,"0.159.0",elevated.clone()),Err(E::GateDenied));
+    assert_eq!(
+        rig.engine
+            .complete_handshake(&r, "0.159.0", elevated.clone()),
+        Err(E::GateDenied)
+    );
     assert_eq!(rig.engine.connection().query_row("SELECT count(*) FROM control_events WHERE json_extract(envelope,'$.event_type')='authority.runtime.instance_ready'",[],|r|r.get::<_,i64>(0)).unwrap(),before);
     rig.engine.poll(Instant::now());
-    let ready=rig.ready(&a,&mut sp);
-    assert_eq!(rig.engine.replace_attachment(&ready.fence(),elevated),Err(E::GateDenied));
+    let ready = rig.ready(&a, &mut sp);
+    assert_eq!(
+        rig.engine.replace_attachment(&ready.fence(), elevated),
+        Err(E::GateDenied)
+    );
 }

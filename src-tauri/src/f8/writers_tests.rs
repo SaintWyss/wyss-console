@@ -470,8 +470,12 @@ fn approval_lifecycle_accept_confirm_decline_and_single_pending() {
         .err(),
         Some(E::IntentConflict)
     );
-    assert_eq!(wr.confirm_approval(&a.managed_approval_id).err(), Some(E::GateDenied));
-    wr.record_delivery(&a.managed_approval_id, ApprovalDelivery::KernelAccepted).unwrap();
+    assert_eq!(
+        wr.confirm_approval(&a.managed_approval_id).err(),
+        Some(E::GateDenied)
+    );
+    wr.record_delivery(&a.managed_approval_id, ApprovalDelivery::KernelAccepted)
+        .unwrap();
     let confirmed = wr.confirm_approval(&a.managed_approval_id).unwrap();
     assert_eq!(confirmed.effect, ApprovalEffect::Confirmed);
     assert_eq!(
@@ -611,7 +615,10 @@ fn f8_16_approval_outcome_fails_closed_when_audit_storage_fails() {
     else {
         panic!("fresh after storage returns")
     };
-    Writer::new(&mut w.conn, wire(A)).unwrap().record_delivery(&a.managed_approval_id, ApprovalDelivery::KernelAccepted).unwrap();
+    Writer::new(&mut w.conn, wire(A))
+        .unwrap()
+        .record_delivery(&a.managed_approval_id, ApprovalDelivery::KernelAccepted)
+        .unwrap();
     // The answer went out but its confirmation cannot be recorded: the unknown effect is kept.
     w.conn.execute_batch("CREATE TEMP TRIGGER f8_storage_full BEFORE INSERT ON main.control_events BEGIN SELECT RAISE(ABORT,'database or disk is full'); END").unwrap();
     assert!(
@@ -923,70 +930,211 @@ fn an_expired_lease_is_settled_by_the_clock_not_by_hope() {
 fn replayed_turn_intent_cannot_be_retargeted_to_a_new_launch() {
     let mut w = world();
     let original_intent = intent(1);
-    let original = Writer::new(&mut w.conn, wire(A)).unwrap()
-        .admit_turn(&w.launch, &original_intent, &w.lease).unwrap();
-    Allocator::new(&mut w.conn, wire(A)).unwrap()
-        .record_exit(&w.launch, "child_exited", false, None).unwrap();
-    Writer::new(&mut w.conn, wire(A)).unwrap().recover().unwrap();
-    let request = Request::parse(&serde_json::to_vec(&json!({
+    let original = Writer::new(&mut w.conn, wire(A))
+        .unwrap()
+        .admit_turn(&w.launch, &original_intent, &w.lease)
+        .unwrap();
+    Allocator::new(&mut w.conn, wire(A))
+        .unwrap()
+        .record_exit(&w.launch, "child_exited", false, None)
+        .unwrap();
+    Writer::new(&mut w.conn, wire(A))
+        .unwrap()
+        .recover()
+        .unwrap();
+    let request = Request::parse(
+        &serde_json::to_vec(&json!({
         "schema_version":2,"request_id":uuid(),"authority_instance_id":A,
         "method":"runtime/start","params":{"intent_id":uuid(),"adapter_id":"codex",
         "runtime_kind":"codex","managed_session_id":w.session,
-        "expected_generation":1,"expected_revision":1}})).unwrap()).unwrap();
-    let out = Allocator::new(&mut w.conn, wire(A)).unwrap()
-        .start(&request, &Admission { live:None, slot_available:true }).unwrap();
-    let replacement = RuntimeRef { schema:2, authority_instance_id:wire(A),
-        managed_session_id:out.managed_session_id, runtime_instance_id:out.runtime_instance_id.unwrap(),
-        generation:out.generation };
-    Allocator::new(&mut w.conn, wire(A)).unwrap()
-        .record_ready(&replacement,"0.159.0","compatible").unwrap();
+        "expected_generation":1,"expected_revision":1}}))
+        .unwrap(),
+    )
+    .unwrap();
+    let out = Allocator::new(&mut w.conn, wire(A))
+        .unwrap()
+        .start(
+            &request,
+            &Admission {
+                live: None,
+                slot_available: true,
+            },
+        )
+        .unwrap();
+    let replacement = RuntimeRef {
+        schema: 2,
+        authority_instance_id: wire(A),
+        managed_session_id: out.managed_session_id,
+        runtime_instance_id: out.runtime_instance_id.unwrap(),
+        generation: out.generation,
+    };
+    Allocator::new(&mut w.conn, wire(A))
+        .unwrap()
+        .record_ready(&replacement, "0.159.0", "compatible")
+        .unwrap();
     let before = rows(&w.conn);
-    assert_eq!(Writer::new(&mut w.conn, wire(A)).unwrap()
-        .admit_turn(&replacement, &original_intent, &w.lease).err(), Some(E::IntentConflict));
+    assert_eq!(
+        Writer::new(&mut w.conn, wire(A))
+            .unwrap()
+            .admit_turn(&replacement, &original_intent, &w.lease)
+            .err(),
+        Some(E::IntentConflict)
+    );
     assert_eq!(rows(&w.conn), before);
-    assert_eq!(Writer::new(&mut w.conn, wire(A)).unwrap()
-        .admit_turn(&w.launch, &original_intent, &w.lease).unwrap(), original);
+    assert_eq!(
+        Writer::new(&mut w.conn, wire(A))
+            .unwrap()
+            .admit_turn(&w.launch, &original_intent, &w.lease)
+            .unwrap(),
+        original
+    );
     validate_v8(&w.conn).unwrap();
 }
 
 #[test]
 fn delivery_evidence_separates_decision_kernel_provider_and_external_effect() {
-    let mut w=world();let turn=running_turn(&mut w);
-    let approval=Writer::new(&mut w.conn,wire(A)).unwrap().open_approval(&turn.managed_turn_id,ApprovalKind::CommandExecution,"delivery-item",FP,structure()).unwrap();
-    let id=wire(&uuid());
-    Writer::new(&mut w.conn,wire(A)).unwrap().decide_approval(&approval.managed_approval_id,&id,1,ApprovalDecision::Accept,FP).unwrap();
-    assert_eq!(read_delivery(&w.conn,approval.managed_approval_id.as_str()).unwrap(),Some(ApprovalDelivery::DecisionAccepted));
-    assert_eq!(Writer::new(&mut w.conn,wire(A)).unwrap().confirm_approval(&approval.managed_approval_id).err(),Some(E::GateDenied));
+    let mut w = world();
+    let turn = running_turn(&mut w);
+    let approval = Writer::new(&mut w.conn, wire(A))
+        .unwrap()
+        .open_approval(
+            &turn.managed_turn_id,
+            ApprovalKind::CommandExecution,
+            "delivery-item",
+            FP,
+            structure(),
+        )
+        .unwrap();
+    let id = wire(&uuid());
+    Writer::new(&mut w.conn, wire(A))
+        .unwrap()
+        .decide_approval(
+            &approval.managed_approval_id,
+            &id,
+            1,
+            ApprovalDecision::Accept,
+            FP,
+        )
+        .unwrap();
+    assert_eq!(
+        read_delivery(&w.conn, approval.managed_approval_id.as_str()).unwrap(),
+        Some(ApprovalDelivery::DecisionAccepted)
+    );
+    assert_eq!(
+        Writer::new(&mut w.conn, wire(A))
+            .unwrap()
+            .confirm_approval(&approval.managed_approval_id)
+            .err(),
+        Some(E::GateDenied)
+    );
     validate_v8(&w.conn).unwrap();
-    let before=rows(&w.conn);
+    let before = rows(&w.conn);
     w.conn.execute_batch("CREATE TEMP TRIGGER reject_delivery_audit BEFORE INSERT ON main.control_events WHEN json_extract(NEW.envelope,'$.event_type')='authority.approval_delivery.changed' BEGIN SELECT RAISE(ABORT,'delivery audit full'); END;").unwrap();
-    assert!(Writer::new(&mut w.conn,wire(A)).unwrap().record_delivery(&approval.managed_approval_id,ApprovalDelivery::KernelAccepted).is_err());
-    w.conn.execute_batch("DROP TRIGGER temp.reject_delivery_audit").unwrap();
-    assert_eq!(rows(&w.conn),before,"audit refusal rolls back delivery evidence");
-    Writer::new(&mut w.conn,wire(A)).unwrap().record_delivery(&approval.managed_approval_id,ApprovalDelivery::KernelAccepted).unwrap();
-    assert_eq!(read_delivery(&w.conn,approval.managed_approval_id.as_str()).unwrap(),Some(ApprovalDelivery::KernelAccepted));
-    Writer::new(&mut w.conn,wire(A)).unwrap().record_delivery(&approval.managed_approval_id,ApprovalDelivery::ProviderConsumed).unwrap();
-    assert_eq!(read_delivery(&w.conn,approval.managed_approval_id.as_str()).unwrap(),Some(ApprovalDelivery::ProviderConsumed));
-    assert_eq!(read_approval(&w.conn.unchecked_transaction().unwrap(),approval.managed_approval_id.as_str()).unwrap().effect,ApprovalEffect::Dispatched,"provider consumption alone cannot confirm execution");
-    Writer::new(&mut w.conn,wire(A)).unwrap().confirm_approval(&approval.managed_approval_id).unwrap();
-    assert_eq!(read_delivery(&w.conn,approval.managed_approval_id.as_str()).unwrap(),Some(ApprovalDelivery::EffectConfirmed));
+    assert!(
+        Writer::new(&mut w.conn, wire(A))
+            .unwrap()
+            .record_delivery(
+                &approval.managed_approval_id,
+                ApprovalDelivery::KernelAccepted
+            )
+            .is_err()
+    );
+    w.conn
+        .execute_batch("DROP TRIGGER temp.reject_delivery_audit")
+        .unwrap();
+    assert_eq!(
+        rows(&w.conn),
+        before,
+        "audit refusal rolls back delivery evidence"
+    );
+    Writer::new(&mut w.conn, wire(A))
+        .unwrap()
+        .record_delivery(
+            &approval.managed_approval_id,
+            ApprovalDelivery::KernelAccepted,
+        )
+        .unwrap();
+    assert_eq!(
+        read_delivery(&w.conn, approval.managed_approval_id.as_str()).unwrap(),
+        Some(ApprovalDelivery::KernelAccepted)
+    );
+    Writer::new(&mut w.conn, wire(A))
+        .unwrap()
+        .record_delivery(
+            &approval.managed_approval_id,
+            ApprovalDelivery::ProviderConsumed,
+        )
+        .unwrap();
+    assert_eq!(
+        read_delivery(&w.conn, approval.managed_approval_id.as_str()).unwrap(),
+        Some(ApprovalDelivery::ProviderConsumed)
+    );
+    assert_eq!(
+        read_approval(
+            &w.conn.unchecked_transaction().unwrap(),
+            approval.managed_approval_id.as_str()
+        )
+        .unwrap()
+        .effect,
+        ApprovalEffect::Dispatched,
+        "provider consumption alone cannot confirm execution"
+    );
+    Writer::new(&mut w.conn, wire(A))
+        .unwrap()
+        .confirm_approval(&approval.managed_approval_id)
+        .unwrap();
+    assert_eq!(
+        read_delivery(&w.conn, approval.managed_approval_id.as_str()).unwrap(),
+        Some(ApprovalDelivery::EffectConfirmed)
+    );
     validate_v8(&w.conn).unwrap();
 }
 
 #[test]
 fn decline_or_cancel_delivery_loss_is_recovered_and_never_redispatched() {
-    for decision in [ApprovalDecision::Decline,ApprovalDecision::Cancel] {
-        let mut w=world();let turn=running_turn(&mut w);
-        let approval=Writer::new(&mut w.conn,wire(A)).unwrap().open_approval(&turn.managed_turn_id,ApprovalKind::CommandExecution,"delivery-item",FP,structure()).unwrap();
-        let id=wire(&uuid());
-        Writer::new(&mut w.conn,wire(A)).unwrap().decide_approval(&approval.managed_approval_id,&id,1,decision,FP).unwrap();
-        Allocator::new(&mut w.conn,wire(A)).unwrap().record_exit(&w.launch,"child_exited",false,None).unwrap();
-        Writer::new(&mut w.conn,wire(A)).unwrap().recover().unwrap();
-        assert_eq!(read_delivery(&w.conn,approval.managed_approval_id.as_str()).unwrap(),Some(ApprovalDelivery::Indeterminate));
-        let before=rows(&w.conn);
-        assert!(matches!(Writer::new(&mut w.conn,wire(A)).unwrap().decide_approval(&approval.managed_approval_id,&id,1,decision,FP).unwrap(),Decided::Replayed(_)));
-        Writer::new(&mut w.conn,wire(A)).unwrap().recover().unwrap();
-        assert_eq!(rows(&w.conn),before);
+    for decision in [ApprovalDecision::Decline, ApprovalDecision::Cancel] {
+        let mut w = world();
+        let turn = running_turn(&mut w);
+        let approval = Writer::new(&mut w.conn, wire(A))
+            .unwrap()
+            .open_approval(
+                &turn.managed_turn_id,
+                ApprovalKind::CommandExecution,
+                "delivery-item",
+                FP,
+                structure(),
+            )
+            .unwrap();
+        let id = wire(&uuid());
+        Writer::new(&mut w.conn, wire(A))
+            .unwrap()
+            .decide_approval(&approval.managed_approval_id, &id, 1, decision, FP)
+            .unwrap();
+        Allocator::new(&mut w.conn, wire(A))
+            .unwrap()
+            .record_exit(&w.launch, "child_exited", false, None)
+            .unwrap();
+        Writer::new(&mut w.conn, wire(A))
+            .unwrap()
+            .recover()
+            .unwrap();
+        assert_eq!(
+            read_delivery(&w.conn, approval.managed_approval_id.as_str()).unwrap(),
+            Some(ApprovalDelivery::Indeterminate)
+        );
+        let before = rows(&w.conn);
+        assert!(matches!(
+            Writer::new(&mut w.conn, wire(A))
+                .unwrap()
+                .decide_approval(&approval.managed_approval_id, &id, 1, decision, FP)
+                .unwrap(),
+            Decided::Replayed(_)
+        ));
+        Writer::new(&mut w.conn, wire(A))
+            .unwrap()
+            .recover()
+            .unwrap();
+        assert_eq!(rows(&w.conn), before);
         validate_v8(&w.conn).unwrap();
     }
 }

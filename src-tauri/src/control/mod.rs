@@ -17,9 +17,9 @@ pub(crate) mod store;
 pub(crate) mod turn_stream;
 mod turns;
 mod watch;
-pub use server::run_from_environment;
 #[cfg(target_os = "linux")]
 pub use server::F8Transport;
+pub use server::run_from_environment;
 #[cfg(test)]
 mod tests;
 

@@ -921,16 +921,33 @@ struct F8Socket {
 #[cfg(target_os = "linux")]
 impl<S: crate::f8::engine::Spawner> F8Transport<S> {
     pub fn new(service: crate::f8::service::Service<S>) -> Self {
-        Self { service, clients: Vec::new() }
+        Self {
+            service,
+            clients: Vec::new(),
+        }
     }
-    pub fn service(&self) -> &crate::f8::service::Service<S> { &self.service }
-    pub fn service_mut(&mut self) -> &mut crate::f8::service::Service<S> { &mut self.service }
+    pub fn service(&self) -> &crate::f8::service::Service<S> {
+        &self.service
+    }
+    pub fn service_mut(&mut self) -> &mut crate::f8::service::Service<S> {
+        &mut self.service
+    }
     pub fn attach(&mut self, stream: UnixStream, now: Instant) -> ControlResult<()> {
-        if self.clients.len() >= MAX_CLIENTS { return Err(ControlError::CapacityExceeded); }
+        if self.clients.len() >= MAX_CLIENTS {
+            return Err(ControlError::CapacityExceeded);
+        }
         peer(&stream)?;
-        stream.set_nonblocking(true).map_err(|_| ControlError::TransportError)?;
-        self.clients.push(F8Socket { stream, client: Default::default(), input: Vec::new(),
-            output: Vec::new(), written: 0, deadline: now + HELLO_TIMEOUT });
+        stream
+            .set_nonblocking(true)
+            .map_err(|_| ControlError::TransportError)?;
+        self.clients.push(F8Socket {
+            stream,
+            client: Default::default(),
+            input: Vec::new(),
+            output: Vec::new(),
+            written: 0,
+            deadline: now + HELLO_TIMEOUT,
+        });
         Ok(())
     }
     /// At most one request/response per connection and one engine scheduling quantum.
@@ -941,14 +958,23 @@ impl<S: crate::f8::engine::Spawner> F8Transport<S> {
         while index < self.clients.len() {
             let client = &mut self.clients[index];
             let result = (|| -> ControlResult<()> {
-                if now >= client.deadline { return Err(ControlError::Timeout); }
+                if now >= client.deadline {
+                    return Err(ControlError::Timeout);
+                }
                 if client.output.is_empty() {
                     // Read only enough for this frame; a pipelined request remains in the
                     // kernel. Partial/oversized JSON is never handed to the authority.
-                    let need = if client.input.len() < 4 { 4 } else {
-                        let n = u32::from_be_bytes(client.input[..4].try_into().expect("header")) as usize;
-                        if n == 0 { return Err(ControlError::InvalidRequest); }
-                        if n > MAX_FRAME { return Err(ControlError::FrameTooLarge); }
+                    let need = if client.input.len() < 4 {
+                        4
+                    } else {
+                        let n = u32::from_be_bytes(client.input[..4].try_into().expect("header"))
+                            as usize;
+                        if n == 0 {
+                            return Err(ControlError::InvalidRequest);
+                        }
+                        if n > MAX_FRAME {
+                            return Err(ControlError::FrameTooLarge);
+                        }
                         n + 4
                     };
                     let mut scratch = [0u8; 8192];
@@ -956,16 +982,29 @@ impl<S: crate::f8::engine::Spawner> F8Transport<S> {
                     match client.stream.read(&mut scratch[..left]) {
                         Ok(0) => return Err(ControlError::TransportError),
                         Ok(n) => client.input.extend_from_slice(&scratch[..n]),
-                        Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => (),
+                        Err(e)
+                            if matches!(
+                                e.kind(),
+                                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                            ) => {}
                         Err(_) => return Err(ControlError::TransportError),
                     }
                     if client.input.len() >= 4 {
-                        let n = u32::from_be_bytes(client.input[..4].try_into().expect("header")) as usize;
-                        if n == 0 || n > MAX_FRAME { return Err(ControlError::FrameTooLarge); }
+                        let n = u32::from_be_bytes(client.input[..4].try_into().expect("header"))
+                            as usize;
+                        if n == 0 || n > MAX_FRAME {
+                            return Err(ControlError::FrameTooLarge);
+                        }
                         if client.input.len() == n + 4 {
-                            let answer = self.service.exchange(&mut client.client, &client.input[4..], now);
-                            if answer.is_empty() || answer.len() > MAX_FRAME { return Err(ControlError::InternalError); }
-                            client.output.extend_from_slice(&(answer.len() as u32).to_be_bytes());
+                            let answer =
+                                self.service
+                                    .exchange(&mut client.client, &client.input[4..], now);
+                            if answer.is_empty() || answer.len() > MAX_FRAME {
+                                return Err(ControlError::InternalError);
+                            }
+                            client
+                                .output
+                                .extend_from_slice(&(answer.len() as u32).to_be_bytes());
                             client.output.extend_from_slice(&answer);
                             client.input.clear();
                             client.deadline = now + WRITE_TIMEOUT;
@@ -976,18 +1015,30 @@ impl<S: crate::f8::engine::Spawner> F8Transport<S> {
                     match client.stream.write(&client.output[client.written..]) {
                         Ok(0) => return Err(ControlError::TransportError),
                         Ok(n) => client.written += n,
-                        Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => (),
+                        Err(e)
+                            if matches!(
+                                e.kind(),
+                                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                            ) => {}
                         Err(_) => return Err(ControlError::TransportError),
                     }
                     if client.written == client.output.len() {
-                        client.output.clear(); client.written = 0; client.deadline = now + READ_TIMEOUT;
+                        client.output.clear();
+                        client.written = 0;
+                        client.deadline = now + READ_TIMEOUT;
                     }
                 }
                 Ok(())
             })();
-            if result.is_err() { self.clients.swap_remove(index); } else { index += 1; }
+            if result.is_err() {
+                self.clients.swap_remove(index);
+            } else {
+                index += 1;
+            }
         }
         Ok(())
     }
-    pub fn client_count(&self) -> usize { self.clients.len() }
+    pub fn client_count(&self) -> usize {
+        self.clients.len()
+    }
 }

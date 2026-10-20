@@ -16,8 +16,9 @@ use super::{
 use crate::contracts::{
     WireUuid,
     approval::{
-        ApprovalDecision, ApprovalDelivery, ApprovalEffect, ApprovalKind, ApprovalReason, ApprovalReceipt,
-        ApprovalState, ApprovalStructure, ManagedApprovalRecord, valid_fingerprint,
+        ApprovalDecision, ApprovalDelivery, ApprovalEffect, ApprovalKind, ApprovalReason,
+        ApprovalReceipt, ApprovalState, ApprovalStructure, ManagedApprovalRecord,
+        valid_fingerprint,
     },
     control::Operation,
     control::{ControlError as E, ControlResult, unique_json},
@@ -147,12 +148,22 @@ impl<'c> Writer<'c> {
             }
             let previous: ManagedTurnRecord = serde_json::from_str(&r).map_err(invalid)?;
             let owner: String = tx.query_row("SELECT authority_instance_id FROM managed_runtime_launches WHERE runtime_instance_id=?1", [launch.runtime_instance_id.as_str()], |r|r.get(0)).map_err(|_|E::IntentConflict)?;
-            if owner != launch.authority_instance_id.as_str() || owner != authority
+            if owner != launch.authority_instance_id.as_str()
+                || owner != authority
                 || previous.managed_session_id != launch.managed_session_id
                 || previous.runtime_instance_id != launch.runtime_instance_id
-                || sidecar(&tx, "managed_turn_launches", "managed_turn_id", previous.managed_turn_id.as_str())?
-                    != Some((launch.runtime_instance_id.as_str().to_owned(), launch.generation))
-            { return Err(E::IntentConflict); }
+                || sidecar(
+                    &tx,
+                    "managed_turn_launches",
+                    "managed_turn_id",
+                    previous.managed_turn_id.as_str(),
+                )? != Some((
+                    launch.runtime_instance_id.as_str().to_owned(),
+                    launch.generation,
+                ))
+            {
+                return Err(E::IntentConflict);
+            }
             return Ok((previous, false));
         }
         require_live(&tx, launch, &authority)?;
@@ -640,7 +651,14 @@ impl<'c> Writer<'c> {
             &enum_text(&a.state)?,
         )?;
         step(&mut self.fault, 1)?;
-        delivery_in(&tx, (&authority, &stream), &a, generation, ApprovalDelivery::DecisionAccepted, now)?;
+        delivery_in(
+            &tx,
+            (&authority, &stream),
+            &a,
+            generation,
+            ApprovalDelivery::DecisionAccepted,
+            now,
+        )?;
         tx.execute(
             "INSERT INTO processed_intents VALUES(?1,?2,?3)",
             params![
@@ -676,9 +694,18 @@ impl<'c> Writer<'c> {
         if a.effect == ApprovalEffect::Confirmed {
             return Ok(a);
         }
-        if !owner_live(&tx, a.managed_session_id.as_str(), &instance, generation, &authority)?
-            || !matches!(read_delivery(&tx, approval.as_str())?, Some(ApprovalDelivery::KernelAccepted | ApprovalDelivery::ProviderConsumed))
-        { return Err(E::GateDenied); }
+        if !owner_live(
+            &tx,
+            a.managed_session_id.as_str(),
+            &instance,
+            generation,
+            &authority,
+        )? || !matches!(
+            read_delivery(&tx, approval.as_str())?,
+            Some(ApprovalDelivery::KernelAccepted | ApprovalDelivery::ProviderConsumed)
+        ) {
+            return Err(E::GateDenied);
+        }
         attest(&tx, &authority, &stream, &stamp(now)?)?;
         a.effect = ApprovalEffect::Confirmed;
         bump(&mut a, now)?;
@@ -691,23 +718,55 @@ impl<'c> Writer<'c> {
             None,
             "confirmed",
         )?;
-        delivery_in(&tx, (&authority, &stream), &a, generation, ApprovalDelivery::EffectConfirmed, now)?;
+        delivery_in(
+            &tx,
+            (&authority, &stream),
+            &a,
+            generation,
+            ApprovalDelivery::EffectConfirmed,
+            now,
+        )?;
         tx.commit().map_err(db)?;
         Ok(a)
     }
 
     /// Record only observed milestones; a successful critical atomic write proves kernel acceptance,
     /// while provider consumption and external completion require separate owned-provider notices.
-    pub fn record_delivery(&mut self, approval: &ManagedApprovalId, state: ApprovalDelivery) -> ControlResult<()> {
-        if !matches!(state, ApprovalDelivery::KernelAccepted | ApprovalDelivery::ProviderConsumed) { return Err(E::InvalidRequest); }
+    pub fn record_delivery(
+        &mut self,
+        approval: &ManagedApprovalId,
+        state: ApprovalDelivery,
+    ) -> ControlResult<()> {
+        if !matches!(
+            state,
+            ApprovalDelivery::KernelAccepted | ApprovalDelivery::ProviderConsumed
+        ) {
+            return Err(E::InvalidRequest);
+        }
         let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
         let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
         let a = read_approval(&tx, approval.as_str())?;
-        let (instance,generation) = sidecar(&tx,"managed_approval_launches","managed_approval_id",approval.as_str())?.ok_or(E::InvalidTransition)?;
-        if !owner_live(&tx,a.managed_session_id.as_str(),&instance,generation,&authority)? { return Err(E::GateDenied); }
-        if read_delivery(&tx,approval.as_str())? == Some(state) { return Ok(()); }
+        let (instance, generation) = sidecar(
+            &tx,
+            "managed_approval_launches",
+            "managed_approval_id",
+            approval.as_str(),
+        )?
+        .ok_or(E::InvalidTransition)?;
+        if !owner_live(
+            &tx,
+            a.managed_session_id.as_str(),
+            &instance,
+            generation,
+            &authority,
+        )? {
+            return Err(E::GateDenied);
+        }
+        if read_delivery(&tx, approval.as_str())? == Some(state) {
+            return Ok(());
+        }
         attest(&tx, &authority, &stream, &stamp(now)?)?;
-        delivery_in(&tx, (&authority,&stream), &a, generation, state, now)?;
+        delivery_in(&tx, (&authority, &stream), &a, generation, state, now)?;
         tx.commit().map_err(db)
     }
 
@@ -954,17 +1013,31 @@ impl<'c> Writer<'c> {
         let stranded = replay.unresolved_for(&authority);
         let unconfirmed: Vec<String> = {
             let mut q = tx.prepare("SELECT managed_approval_id FROM managed_approval_delivery WHERE state IN ('decision_accepted','kernel_accepted','provider_consumed') ORDER BY managed_approval_id").map_err(db)?;
-            q.query_map([], |r|r.get(0)).map_err(db)?.collect::<Result<_,_>>().map_err(db)?
+            q.query_map([], |r| r.get(0))
+                .map_err(db)?
+                .collect::<Result<_, _>>()
+                .map_err(db)?
         };
         let mut lost_deliveries = Vec::new();
         for id in unconfirmed {
-            let a = read_approval(&tx,&id)?;
-            let (instance,generation)=sidecar(&tx,"managed_approval_launches","managed_approval_id",&id)?.ok_or(E::StorageIncompatible)?;
-            if !owner_live(&tx,a.managed_session_id.as_str(),&instance,generation,&authority)? {
-                lost_deliveries.push((a,generation));
+            let a = read_approval(&tx, &id)?;
+            let (instance, generation) =
+                sidecar(&tx, "managed_approval_launches", "managed_approval_id", &id)?
+                    .ok_or(E::StorageIncompatible)?;
+            if !owner_live(
+                &tx,
+                a.managed_session_id.as_str(),
+                &instance,
+                generation,
+                &authority,
+            )? {
+                lost_deliveries.push((a, generation));
             }
         }
-        if stranded.turns.is_empty() && stranded.approvals.is_empty() && lost_deliveries.is_empty() { return Ok((0,0)); }
+        if stranded.turns.is_empty() && stranded.approvals.is_empty() && lost_deliveries.is_empty()
+        {
+            return Ok((0, 0));
+        }
         attest(&tx, &authority, &stream, &stamp(now)?)?;
         let mut approvals = 0;
         for id in &stranded.approvals {
@@ -991,11 +1064,11 @@ impl<'c> Writer<'c> {
                 None,
                 &enum_text(&a.state)?,
             )?;
-            delivery_unknown_in(&tx, (&authority,&stream), &a, generation, now)?;
+            delivery_unknown_in(&tx, (&authority, &stream), &a, generation, now)?;
             approvals += 1;
         }
-        for (a,generation) in lost_deliveries {
-            delivery_unknown_in(&tx,(&authority,&stream),&a,generation,now)?;
+        for (a, generation) in lost_deliveries {
+            delivery_unknown_in(&tx, (&authority, &stream), &a, generation, now)?;
         }
         let mut turns = 0;
         for id in &stranded.turns {
@@ -1031,30 +1104,81 @@ impl<'c> Writer<'c> {
     }
 }
 
-pub fn read_turn_record(c:&Connection,id:&str)->ControlResult<ManagedTurnRecord> {
-    read_turn(c,id)
+pub fn read_turn_record(c: &Connection, id: &str) -> ControlResult<ManagedTurnRecord> {
+    read_turn(c, id)
 }
 
 /// V8 delivery is authoritative. The legacy approval effect=dispatched is only a conservative
 /// durable may-dispatch reservation and MUST NOT be interpreted as kernel/provider delivery.
 pub fn read_delivery(c: &Connection, approval: &str) -> ControlResult<Option<ApprovalDelivery>> {
-    let state: Option<String> = c.query_row("SELECT state FROM managed_approval_delivery WHERE managed_approval_id=?1", [approval], |r|r.get(0)).optional().map_err(db)?;
-    state.map(|s| serde_json::from_value(json!(s)).map_err(invalid)).transpose()
+    let state: Option<String> = c
+        .query_row(
+            "SELECT state FROM managed_approval_delivery WHERE managed_approval_id=?1",
+            [approval],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(db)?;
+    state
+        .map(|s| serde_json::from_value(json!(s)).map_err(invalid))
+        .transpose()
 }
-fn delivery_in(tx: &Transaction<'_>, ids: (&str,&str), a: &ManagedApprovalRecord, generation:u64, state:ApprovalDelivery, now:OffsetDateTime) -> ControlResult<()> {
+fn delivery_in(
+    tx: &Transaction<'_>,
+    ids: (&str, &str),
+    a: &ManagedApprovalRecord,
+    generation: u64,
+    state: ApprovalDelivery,
+    now: OffsetDateTime,
+) -> ControlResult<()> {
     let word = enum_text(&state)?;
     if state == ApprovalDelivery::DecisionAccepted {
-        tx.execute("INSERT INTO managed_approval_delivery VALUES(?1,?2)",params![a.managed_approval_id.as_str(),word]).map_err(db)?;
+        tx.execute(
+            "INSERT INTO managed_approval_delivery VALUES(?1,?2)",
+            params![a.managed_approval_id.as_str(), word],
+        )
+        .map_err(db)?;
     } else {
-        if tx.execute("UPDATE managed_approval_delivery SET state=?2 WHERE managed_approval_id=?1",params![a.managed_approval_id.as_str(),word]).map_err(db)? != 1 { return Err(E::InvalidTransition); }
+        if tx
+            .execute(
+                "UPDATE managed_approval_delivery SET state=?2 WHERE managed_approval_id=?1",
+                params![a.managed_approval_id.as_str(), word],
+            )
+            .map_err(db)?
+            != 1
+        {
+            return Err(E::InvalidTransition);
+        }
     }
-    append(tx,(ids.0,ids.1,&stamp(now)?),Draft { session:Some(a.managed_session_id.as_str()),kind:super::audit::DELIVERY,correlation:None,version:2,
-        payload:json!({"managed_approval_id":a.managed_approval_id,"runtime_instance_id":a.runtime_instance_id,"generation":generation,"delivery":state}) })?;
+    append(
+        tx,
+        (ids.0, ids.1, &stamp(now)?),
+        Draft {
+            session: Some(a.managed_session_id.as_str()),
+            kind: super::audit::DELIVERY,
+            correlation: None,
+            version: 2,
+            payload: json!({"managed_approval_id":a.managed_approval_id,"runtime_instance_id":a.runtime_instance_id,"generation":generation,"delivery":state}),
+        },
+    )?;
     Ok(())
 }
-fn delivery_unknown_in(tx:&Transaction<'_>,ids:(&str,&str),a:&ManagedApprovalRecord,generation:u64,now:OffsetDateTime)->ControlResult<()> {
-    if matches!(read_delivery(tx,a.managed_approval_id.as_str())?, Some(ApprovalDelivery::DecisionAccepted|ApprovalDelivery::KernelAccepted|ApprovalDelivery::ProviderConsumed)) {
-        delivery_in(tx,ids,a,generation,ApprovalDelivery::Indeterminate,now)?;
+fn delivery_unknown_in(
+    tx: &Transaction<'_>,
+    ids: (&str, &str),
+    a: &ManagedApprovalRecord,
+    generation: u64,
+    now: OffsetDateTime,
+) -> ControlResult<()> {
+    if matches!(
+        read_delivery(tx, a.managed_approval_id.as_str())?,
+        Some(
+            ApprovalDelivery::DecisionAccepted
+                | ApprovalDelivery::KernelAccepted
+                | ApprovalDelivery::ProviderConsumed
+        )
+    ) {
+        delivery_in(tx, ids, a, generation, ApprovalDelivery::Indeterminate, now)?;
     }
     Ok(())
 }

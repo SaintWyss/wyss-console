@@ -690,10 +690,10 @@ impl Drop for OwnedChild {
         }
         // Signal exactly the pinned child; no process-name or PID lookup.
         let _ = self.signal(libc::SIGKILL);
-        if let (Some(mut child), Some(permit)) = (self.child.take(), self.reap_permit.take()) {
-            if !matches!(child.try_wait(), Ok(Some(_))) {
-                enqueue_reap(child, permit);
-            }
+        if let (Some(mut child), Some(permit)) = (self.child.take(), self.reap_permit.take())
+            && !matches!(child.try_wait(), Ok(Some(_)))
+        {
+            enqueue_reap(child, permit);
         }
     }
 }
