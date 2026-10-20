@@ -770,6 +770,18 @@ impl Engine {
         Ok(outcome)
     }
 
+    /// Stop only a launch whose connection has failed while dispatching a durable
+    /// provider decision. No unrelated session or generation is affected.
+    pub fn transport_failed(&mut self, from: &RuntimeRef) {
+        if self.check_current(from).is_ok() {
+            self.begin_stop_internal(
+                from.managed_session_id.as_str(),
+                "transport_failed",
+                None,
+            );
+        }
+    }
+
     /// Marks the launch stopping: its approvals are invalidated (never inherited), its queued
     /// work is discarded, and the owned lifecycle starts. This never blocks.
     fn begin_stop_internal(&mut self, session: &str, kind: &str, budget: Option<String>) {
