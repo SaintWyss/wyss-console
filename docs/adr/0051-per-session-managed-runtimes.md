@@ -1,6 +1,6 @@
 # ADR 0051: One managed runtime per session, with bounded concurrency (DN-08 = A, F8)
 
-Status: **Proposed.** Independently reviewed design; not owner-accepted, no implementation. Written so that the review the roadmap
+Status: **Proposed.** Independently reviewed design; not owner-accepted, no active implementation. Written so that the review the roadmap
 requires has something exact to review. Nothing here changes the running authority, its schema (V7) or any
 accepted guarantee. Extends ADRs 0012 and 0015; reconciles RC-03 (`33-CROSS-DOMAIN-RECONCILIATION.md`).
 Date: 2026-10-20
@@ -170,3 +170,11 @@ measurements and implementation-level adversarial/security review remain require
 stays 1 until separate compatibility/resource evidence supports an owner-approved increase.
 **Reviewed implementation contract candidate; NOT_PROVEN; not approved for production.** Design review is not review of implemented F8 security;
 F8 remains **NOT_PROVEN**.
+
+## Inactive implementation continuation
+
+[Protocol, offline migration and registry code evidence](../acceptance/f8-code-2026-10-20.md)
+records the implemented foundations, adversarial tests and focused independent code review.
+This does not approve integration: complete V8 event replay/validators, durable allocation/replay,
+scheduling, lease/approval enforcement, process ownership and provider compatibility remain open.
+The running protocol-1/schema-7 authority and its single-runtime bound are unchanged.

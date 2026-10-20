@@ -9,9 +9,9 @@ mod mediation;
 // The safe-path rules are the authority's; the desktop's installer follows the same ones.
 pub(crate) mod paths;
 mod runtime;
-mod schema;
+pub(crate) mod schema;
 mod server;
-mod store;
+pub(crate) mod store;
 mod turn_stream;
 mod turns;
 mod watch;

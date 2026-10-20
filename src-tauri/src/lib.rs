@@ -31,3 +31,6 @@ pub use desktop::Extension;
 pub fn run_with(authority_digest: Option<&'static str>, extension: Extension) {
     desktop::run(authority_digest, Some(extension));
 }
+
+/// Inactive F8 engineering modules; never registered with the desktop or authority server.
+pub mod f8;

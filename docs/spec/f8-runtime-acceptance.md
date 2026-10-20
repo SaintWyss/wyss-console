@@ -81,3 +81,13 @@ provide ten passing ordinary unit tests. This is a bounded implementation input,
 The independent follow-up reviewed candidate design surfaces and found no new blockers after four
 corrections; it did not execute tests or providers. Owner approval and implementation security review
 are still required; no production security guarantee is changed.
+
+## Inactive implementation evidence
+
+[Code acceptance record](../acceptance/f8-code-2026-10-20.md): seventeen additional tests now exercise
+real strict codecs, observational registry/replay cache and offline migration preparation. Migration
+fixtures use canonical session receipts, runtime history and revoked leases where supported. Every
+V0–V7 failure boundary asserts the hook is reached and source rows/schema/version unchanged. A valid
+active lease passes canonical verification then refuses at the quiescence guard. This supersedes
+reference-only coverage for those slices; installed V8, new-work replay, full method/result
+correlation, scheduler, durable replay and provider concurrency remain unproven.

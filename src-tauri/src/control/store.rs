@@ -51,6 +51,43 @@ pub(crate) struct Store {
     pub(super) execution_available: bool,
 }
 impl Store {
+    /// Read-only canonical validation for an offline in-memory image. No open/migrate,
+    /// vocabulary update, journal configuration or runtime reconciliation occurs.
+    pub(crate) fn validate_offline_connection(conn: Connection) -> ControlResult<Connection> {
+        if conn.path() != Some("") {
+            return Err(ControlError::UnsafePath);
+        }
+        let (version, stream, head, vocabulary): (i64, String, String, i64) = conn.query_row(
+            "SELECT schema_version,stream_id,last_sequence,event_vocabulary FROM authority_metadata WHERE id=1",
+            [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).map_err(invalid)?;
+        if version != 7 || vocabulary < 1 {
+            return Err(ControlError::StorageIncompatible);
+        }
+        let store = Self {
+            conn,
+            instance: uuid(),
+            stream: WireUuid::try_from(stream).map_err(invalid)?,
+            clock: std::sync::Arc::new(leases::SystemClock),
+            execution_available: false,
+        };
+        store.verify(&head, vocabulary > i64::from(events::VOCABULARY))?;
+        Ok(store.conn)
+    }
+    #[cfg(test)]
+    pub(crate) fn in_memory_fixture() -> Self {
+        let mut conn = Connection::open_in_memory().unwrap();
+        schema::migrate(&mut conn).unwrap();
+        let stream: String = conn
+            .query_row("SELECT stream_id FROM authority_metadata", [], |r| r.get(0))
+            .unwrap();
+        Self {
+            conn,
+            instance: uuid(),
+            stream: WireUuid::try_from(stream).unwrap(),
+            clock: std::sync::Arc::new(leases::SystemClock),
+            execution_available: true,
+        }
+    }
     pub fn open(path: &Path, instance: WireUuid) -> ControlResult<Self> {
         paths::private_file(path)?;
         for suffix in ["-wal", "-shm", "-journal"] {

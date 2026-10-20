@@ -1,7 +1,8 @@
 # F8 candidate implementation contracts, revision 1
 
 **Proposed, not owner-accepted, not enabled.** These artifacts freeze a bounded candidate for
-implementation review; they are not production migration code or installed concurrency acceptance.
+implementation review; they are not installed concurrency acceptance. Inactive implementation now
+exists in `src-tauri/src/f8/`; see [code evidence and limits](../../acceptance/f8-code-2026-10-20.md).
 No file in this directory is loaded by the authority. Provider shared-state safety and concurrency
 at 2/4 remain NOT_PROVEN/NOT_RUN, so active runtime capacity stays 1.
 
@@ -102,8 +103,9 @@ cancel a legitimate workload, a residual product risk requiring owner acceptance
   double count shared roots or infer ownership from process enumeration. Hard tree containment
   and provider auth/cache/session compatibility still require separate proof before concurrency.
 
-Full canonical SQL validation, production protocol serializers/parsers, fair scheduler, owned
-cleanup and real provider tests are future implementation requirements. Passing a request/routing
+Canonical legacy/immediate-migration validation and partial protocol codecs are now implemented
+offline. New-work V8 canonical/event replay, complete result correlation, production integration, fair
+scheduler, owned cleanup and real provider tests are still future implementation requirements. Passing a request/routing
 oracle does not prove those implementations or the live authority boundary.
 
 ## Independent contract review

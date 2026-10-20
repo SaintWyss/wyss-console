@@ -138,3 +138,18 @@ Validators must join canonical rows/sidecars in the same writer transaction, rej
 attribution, and account for the unchanged 2 KiB event bound before advancing the stream head.
 A post-crash writer must not fabricate a historical exit observation. The old reader refuses V8,
 so vocabulary-2 events cannot be interpreted accidentally by the legacy executable.
+
+## Inactive implementation clarifications
+
+`src-tauri/src/f8/protocol.rs` implements strict request parsing/serialization and partial response
+codecs, not server activation. Binding-status adds required `runtime_identity` (nullable, present
+exactly when bound-attached), checked against its existing session/instance. Model cursors keep the
+baseline `{runtime_instance_id,index}` shape, index <=50; they must match the enclosing live identity
+and explicit request generation/instance. No cursor can select a launch by itself. Runtime-control
+receipts have revision expected+1 and the requested desired state; stop retains generation, start
+retains it for the same launch or increments exactly one (first allocation is 1). Exact-intent replay
+uses its original request expectations. These clarify the candidate; no approved V1 contract changes.
+
+Audit vocabulary-2 result validation and non-runtime successful method/result correlation are still
+unsupported in this module. Do not use partial codecs to enable a V8 client/server. See the
+[implementation evidence](../../acceptance/f8-code-2026-10-20.md) for the remaining boundaries.
