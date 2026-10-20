@@ -10,6 +10,8 @@ pub mod engine;
 pub mod migration;
 #[cfg(target_os = "linux")]
 pub mod ownership;
+#[cfg(target_os = "linux")]
+pub mod process_worker;
 pub mod protocol;
 pub mod registry;
 pub mod scheduler;

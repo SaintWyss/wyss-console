@@ -7,7 +7,7 @@ use crate::{
     control::f8_fixture,
     f8::{
         migration,
-        ownership::{ContainmentPolicy, Grace},
+        ownership::{ContainmentPolicy, Grace, OwnedChild},
         scheduler::Class,
         v8::validate_v8,
     },
@@ -34,6 +34,7 @@ fn wire(s: &str) -> WireUuid {
 struct FakeWorker {
     session: String,
     frames: Frames,
+    child: Option<OwnedChild>,
 }
 impl Worker for FakeWorker {
     fn send(&mut self, frame: &[u8]) -> ControlResult<()> {
@@ -43,11 +44,36 @@ impl Worker for FakeWorker {
             .push((self.session.clone(), frame.to_vec()));
         Ok(())
     }
+    fn has_exited(&mut self) -> bool {
+        self.child
+            .as_mut()
+            .is_some_and(|c| matches!(c.try_wait(), Ok(Some(_))))
+    }
+    fn begin_stop(&mut self, now: Instant) {
+        if let Some(c) = self.child.as_mut() {
+            c.begin_stop(now);
+        }
+    }
+    fn poll_stop(&mut self, now: Instant) -> StopState {
+        match self.child.as_mut().map(|c| c.poll_stop(now)) {
+            None | Some(Ok(crate::f8::ownership::Progress::Reaped(_))) => StopState::Reaped,
+            Some(Ok(crate::f8::ownership::Progress::Stuck)) | Some(Err(_)) => StopState::Stuck,
+            Some(Ok(_)) => StopState::Pending,
+        }
+    }
+    fn descendants(&self) -> usize {
+        self.child.as_ref().map_or(0, OwnedChild::descendant_count)
+    }
+    fn pid_for_diagnostics(&self) -> Option<i32> {
+        self.child.as_ref().map(OwnedChild::pid_for_diagnostics)
+    }
 }
 struct Spawn {
     frames: Frames,
     spawned: usize,
     script: Option<String>,
+    /// Use the real process-backed worker (bounded, non-blocking pipes) for the script.
+    process: bool,
     fail: bool,
     catalogue: bool,
     grace: Grace,
@@ -58,6 +84,7 @@ impl Spawn {
             frames: frames.clone(),
             spawned: 0,
             script: None,
+            process: false,
             fail: false,
             catalogue: false,
             grace: Grace {
@@ -84,6 +111,13 @@ impl Spawner for Spawn {
         if self.fail {
             return Err(E::ProviderRejected);
         }
+        if let (true, Some(script)) = (self.process, &self.script) {
+            let mut c = Command::new("/bin/sh");
+            c.arg("-c").arg(script.as_str());
+            return Ok(Spawned {
+                worker: Box::new(crate::f8::process_worker::ProcessWorker::spawn(&mut c, self.grace)?),
+            });
+        }
         let child = match &self.script {
             Some(script) => {
                 let mut c = Command::new("/bin/sh");
@@ -100,8 +134,8 @@ impl Spawner for Spawn {
             worker: Box::new(FakeWorker {
                 session: launch.managed_session_id.as_str().to_owned(),
                 frames: self.frames.clone(),
+                child,
             }),
-            child,
         })
     }
 }
@@ -1043,19 +1077,10 @@ fn f8_17_only_the_owned_child_is_signalled_and_descendants_are_reported_not_kill
         marker.display()
     ));
     let r = rig.ready(&a, &mut sp);
-    let child_pid = rig.engine.live[&a]
-        .child
-        .as_ref()
-        .unwrap()
-        .pid_for_diagnostics();
+    let child_pid = rig.engine.live[&a].worker.pid_for_diagnostics().unwrap();
     assert!((0..200).any(|_| {
         std::thread::sleep(Duration::from_millis(10));
-        rig.engine.live[&a]
-            .child
-            .as_ref()
-            .unwrap()
-            .descendant_count()
-            >= 1
+        rig.engine.live[&a].worker.descendants() >= 1
             && marker.exists()
             && !std::fs::read_to_string(&marker)
                 .unwrap_or_default()
@@ -1288,3 +1313,112 @@ fn review_scheduler_faults_stop_only_that_runtime() {
 }
 
 use crate::contracts::identities::{AgentRuntimeInstanceId, ManagedSessionId};
+
+fn settle(rig: &mut Rig, mut done: impl FnMut(&mut Rig) -> bool) {
+    let end = Instant::now() + Duration::from_secs(15);
+    while !done(rig) {
+        rig.engine.poll(Instant::now());
+        assert!(Instant::now() < end, "timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn process_worker_frames_flow_through_the_real_meter_and_scheduler() {
+    let mut rig = Rig::new(2, 1);
+    let (a, b) = (rig.sessions[0].clone(), rig.sessions[1].clone());
+    let mut sp = Spawn::new(&rig.frames);
+    sp.process = true;
+    sp.script = Some("cat".into());
+    let ra = rig.ready(&a, &mut sp);
+    let (_claim, ticket) = turn(&mut rig, &ra, 0);
+    rig.engine.write_frame(&ticket, b"ping", &rig.leases, 1).unwrap();
+    let mut got = Vec::new();
+    settle(&mut rig, |r| {
+        got.extend(r.engine.dispatch(Instant::now()));
+        !got.is_empty()
+    });
+    assert_eq!((got[0].runtime.as_str(), got[0].item.as_slice()), (a.as_str(), &b"ping"[..]));
+    // An unrelated runtime saw nothing of it.
+    assert!(rig.engine.dispatch(Instant::now()).iter().all(|d| d.runtime != b));
+}
+
+#[test]
+fn a_flooding_process_is_stopped_alone_with_its_exact_budget_key() {
+    let mut rig = Rig::new(2, 1);
+    let (a, b) = (rig.sessions[0].clone(), rig.sessions[1].clone());
+    let mut sp = Spawn::new(&rig.frames);
+    sp.process = true;
+    sp.script = Some("yes aaaa".into());
+    let _ra = rig.ready(&a, &mut sp);
+    sp.script = Some("cat".into());
+    let rb = rig.ready(&b, &mut sp);
+    let (_cb, tb) = turn(&mut rig, &rb, 0);
+    rig.engine.approval_requested(&rb, "keep", "fp").unwrap();
+    settle(&mut rig, |r| {
+        let _ = r.engine.dispatch(Instant::now());
+        !r.engine.is_live(&a)
+    });
+    // B is untouched: still live, turn and approval intact, and it can still be written.
+    assert!(rig.engine.is_live(&b));
+    assert_eq!((rig.engine.active_turn(&b).is_some(), rig.engine.pending_approvals(&b)), (true, 1));
+    rig.engine.write_frame(&tb, b"still", &rig.leases, 2).unwrap();
+    let key: Option<String> = rig.engine.connection().query_row(
+        "SELECT json_extract(envelope,'$.payload.budget_failure') FROM control_events WHERE json_extract(envelope,'$.event_type')='authority.runtime.instance_exited' ORDER BY sequence DESC LIMIT 1",
+        [], |r| r.get(0)).unwrap();
+    assert!(matches!(key.as_deref(), Some("turn_events_per_second" | "turn_events" | "turn_output_bytes")), "{key:?}");
+    validate_v8(rig.engine.connection()).unwrap();
+}
+
+#[test]
+fn protocol_violations_and_unexpected_exits_of_real_processes_stop_only_that_runtime() {
+    for (script, expected) in [
+        ("head -c 300000 /dev/zero | tr '\\0' a; echo; sleep 30", "protocol_failed"),
+        ("sleep 0.2", "child_exited"),
+    ] {
+        let mut rig = Rig::new(1, 0);
+        let a = rig.sessions[0].clone();
+        let mut sp = Spawn::new(&rig.frames);
+        sp.process = true;
+        sp.script = Some(script.into());
+        rig.ready(&a, &mut sp);
+        settle(&mut rig, |r| !r.engine.is_live(&a));
+        let kind: String = rig.engine.connection().query_row(
+            "SELECT json_extract(envelope,'$.payload.exit_kind') FROM control_events WHERE json_extract(envelope,'$.event_type')='authority.runtime.instance_exited' ORDER BY sequence DESC LIMIT 1",
+            [], |r| r.get(0)).unwrap();
+        assert_eq!(kind, expected);
+        assert_eq!(rig.engine.registry.active_slots(), 0);
+        validate_v8(rig.engine.connection()).unwrap();
+    }
+}
+
+#[test]
+fn a_process_that_never_reads_cannot_block_the_writer_and_is_still_stopped() {
+    let mut rig = Rig::new(2, 1);
+    let (a, b) = (rig.sessions[0].clone(), rig.sessions[1].clone());
+    let mut sp = Spawn::new(&rig.frames);
+    sp.process = true;
+    sp.script = Some("trap '' TERM; sleep 30".into());
+    let ra = rig.ready(&a, &mut sp);
+    sp.script = Some("cat".into());
+    let rb = rig.ready(&b, &mut sp);
+    let (_ca, ta) = turn(&mut rig, &ra, 0);
+    let (_cb, tb) = turn(&mut rig, &rb, 0);
+    let big = vec![b'q'; 60_000];
+    let started = Instant::now();
+    let mut refused = false;
+    for _ in 0..20 {
+        if rig.engine.write_frame(&ta, &big, &rig.leases, 3) == Err(E::CapacityExceeded) {
+            refused = true;
+            break;
+        }
+    }
+    assert!(refused && started.elapsed() < Duration::from_secs(2));
+    // B keeps working while A is being stopped and killed through its owned handle.
+    rig.engine.begin_stop_internal(&a, "stopped", None);
+    settle(&mut rig, |r| {
+        r.engine.write_frame(&tb, b"b-ok", &r.leases, 4).unwrap();
+        !r.engine.is_live(&a)
+    });
+    assert!(rig.engine.is_live(&b));
+}

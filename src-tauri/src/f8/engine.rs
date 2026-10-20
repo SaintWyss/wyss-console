@@ -12,7 +12,6 @@
 use super::{
     allocator::{Admission, Allocator, Outcome},
     budget::{Meter, Violation},
-    ownership::{OwnedChild, Progress},
     protocol::{Request, RuntimeFence, RuntimeIdentity, RuntimeRef},
     registry::Registry,
     scheduler::Scheduler,
@@ -35,12 +34,45 @@ const MAX_OUTBOUND_FRAME: usize = 65_536;
 /// which also drives every other runtime's cleanup.
 pub trait Worker: Send {
     fn send(&mut self, frame: &[u8]) -> ControlResult<()>;
+    /// Pushes buffered outbound bytes without blocking.
+    fn flush(&mut self) -> ControlResult<()> {
+        Ok(())
+    }
+    /// At most `max_frames` complete inbound frames, never blocking. Bytes not consumed stay
+    /// in the (bounded) pipe, which is the back pressure on the provider.
+    fn inbound(&mut self, _max_frames: usize) -> ControlResult<Vec<Vec<u8>>> {
+        Ok(Vec::new())
+    }
+    /// The underlying process ended without being asked to.
+    fn has_exited(&mut self) -> bool {
+        false
+    }
+    /// Starts the bounded owned stop (EOF, TERM, KILL through the owned handle only).
+    fn begin_stop(&mut self, _now: Instant) {}
+    /// One non-blocking step of the stop; `Reaped` is the only proof the process is gone.
+    fn poll_stop(&mut self, _now: Instant) -> StopState {
+        StopState::Reaped
+    }
+    /// Read-only count of live descendants of the owned process (reported, never signalled).
+    fn descendants(&self) -> usize {
+        0
+    }
+    /// Diagnostics only; never an input to any decision.
+    fn pid_for_diagnostics(&self) -> Option<i32> {
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopState {
+    Pending,
+    Reaped,
+    /// Even SIGKILL could not be reaped: the slot stays consumed, the process is not abandoned.
+    Stuck,
 }
 
 pub struct Spawned {
     pub worker: Box<dyn Worker>,
-    /// The owned child, when the worker is a process. Absent only for in-memory test workers.
-    pub child: Option<OwnedChild>,
 }
 /// Creates the worker for a launch the allocator already reserved. The engine never spawns
 /// anything for a launch that has no committed reservation.
@@ -101,7 +133,6 @@ struct Live {
     reference: RuntimeRef,
     phase: Phase,
     worker: Box<dyn Worker>,
-    child: Option<OwnedChild>,
     staging: Option<LaunchStaging>,
     meter: Meter,
     spawned_at: Instant,
@@ -124,6 +155,7 @@ pub struct Engine {
     epoch: Instant,
     /// Launch directories whose cleanup reported an anomaly (reported, never retried blindly).
     staging_anomalies: usize,
+    stuck: usize,
     /// Exits whose audit record could not be written yet (storage failure): retried, never lost.
     unrecorded: Vec<(RuntimeRef, String, Option<String>)>,
     hook: Option<StageHook>,
@@ -145,6 +177,7 @@ impl Engine {
             scheduler: Scheduler::new()?,
             epoch: Instant::now(),
             staging_anomalies: 0,
+            stuck: 0,
             unrecorded: Vec::new(),
             hook: None,
         })
@@ -181,6 +214,10 @@ impl Engine {
     }
     fn ms(&self, now: Instant) -> u64 {
         u64::try_from(now.saturating_duration_since(self.epoch).as_millis()).unwrap_or(u64::MAX)
+    }
+    /// Polls which found a stop that even SIGKILL could not reap (the slot stays consumed).
+    pub fn stuck_polls(&self) -> usize {
+        self.stuck
     }
     pub fn staging_anomalies(&self) -> usize {
         self.staging_anomalies
@@ -279,7 +316,6 @@ impl Engine {
                 reference: reference.clone(),
                 phase: Phase::Spawned,
                 worker: spawned.worker,
-                child: spawned.child,
                 staging,
                 meter: Meter::new(self.ms(Instant::now()))?,
                 spawned_at: Instant::now(),
@@ -300,11 +336,8 @@ impl Engine {
             if self.live.contains_key(&session) {
                 // An owned child already spawned is stopped through its handle, not abandoned.
                 self.begin_stop_internal(&session, "spawn_failed", None);
-                if self.live.get(&session).is_some_and(|l| l.child.is_none()) {
-                    let reference = self.live[&session].reference.clone();
-                    self.finish_unspawned(&session);
-                    self.record_end(&reference, "spawn_failed", None);
-                }
+                // A worker with nothing to reap completes at once; a process finishes in `poll`.
+                self.poll(Instant::now());
             } else {
                 // Reserved in the registry but never spawned: release the slot, nothing to reap.
                 let _ = self.registry.stopping(reference);
@@ -313,19 +346,6 @@ impl Engine {
             }
         }
         result
-    }
-
-    /// A launch with no process handle has nothing to reap.
-    fn finish_unspawned(&mut self, session: &str) {
-        if let Some(live) = self.live.remove(session) {
-            let _ = self.registry.remove_after_reap(&live.reference);
-            if let Some(s) = live.staging
-                && s.cleanup().is_err()
-            {
-                self.staging_anomalies += 1;
-            }
-            self.scheduler.remove_runtime(session);
-        }
     }
 
     /// The provider attested its handshake. Publishing ready requires the durable readiness
@@ -632,9 +652,7 @@ impl Engine {
         live.approvals.clear();
         live.exit = Some((kind.to_owned(), budget));
         let reference = live.reference.clone();
-        if let Some(child) = live.child.as_mut() {
-            child.begin_stop(Instant::now());
-        }
+        live.worker.begin_stop(Instant::now());
         let _ = self.registry.stopping(&reference);
         self.scheduler.cancel_data(session);
     }
@@ -656,9 +674,7 @@ impl Engine {
             if live.phase == Phase::Stopping {
                 continue;
             }
-            if let Some(child) = live.child.as_mut()
-                && matches!(child.try_wait(), Ok(Some(_)))
-            {
+            if live.worker.has_exited() {
                 verdicts.push((session.clone(), "child_exited", None));
             } else if live.phase == Phase::Spawned
                 && u64::try_from(now.saturating_duration_since(live.spawned_at).as_millis())
@@ -672,6 +688,7 @@ impl Engine {
                 verdicts.push((session.clone(), "transport_failed", None));
             }
         }
+        self.pump(now_ms, &mut verdicts);
         for fault in self.scheduler.check_stalls(now_ms) {
             verdicts.push((fault.runtime, "transport_failed", None));
         }
@@ -688,12 +705,13 @@ impl Engine {
             let Some(live) = self.live.get_mut(&session) else {
                 continue;
             };
-            let reaped = match live.child.as_mut() {
-                None => true,
-                Some(child) => matches!(child.poll_stop(now), Ok(Progress::Reaped(_))),
-            };
-            if !reaped {
-                continue;
+            match live.worker.poll_stop(now) {
+                StopState::Reaped => (),
+                StopState::Pending => continue,
+                StopState::Stuck => {
+                    self.stuck += 1;
+                    continue;
+                }
             }
             let Some(live) = self.live.remove(&session) else {
                 continue;
@@ -712,6 +730,66 @@ impl Engine {
         for (reference, kind, budget) in queued {
             self.record_end(&reference, &kind, budget);
         }
+    }
+    /// Moves bytes for every running worker, bounded per call: flushes outbound buffers and
+    /// reads inbound frames only while that runtime's data lane has room, so a slow consumer
+    /// leaves bytes in the provider's own pipe (back pressure) instead of growing a queue.
+    /// Each frame is charged to its runtime's meter before it is queued.
+    fn pump(&mut self, now_ms: u64, verdicts: &mut Vec<(String, &'static str, Option<String>)>) {
+        const FRAMES_PER_POLL: usize = 16;
+        let sessions: Vec<String> = self
+            .live
+            .iter()
+            .filter(|(_, l)| l.phase != Phase::Stopping)
+            .map(|(s, _)| s.clone())
+            .collect();
+        for session in sessions {
+            if verdicts.iter().any(|(s, _, _)| *s == session) {
+                continue;
+            }
+            let room = self.scheduler
+                .data_room(&session, 262_144)
+                .min(FRAMES_PER_POLL);
+            let Some(live) = self.live.get_mut(&session) else {
+                continue;
+            };
+            if live.worker.flush().is_err() {
+                verdicts.push((session, "transport_failed", None));
+                continue;
+            }
+            let frames = if room == 0 {
+                Ok(Vec::new())
+            } else {
+                live.worker.inbound(room)
+            };
+            let frames = match frames {
+                Ok(f) => f,
+                Err(_) => {
+                    verdicts.push((session, "protocol_failed", None));
+                    continue;
+                }
+            };
+            for frame in frames {
+                if let Err(v) = live.meter.charge_event(now_ms, frame.len() as u64) {
+                    verdicts.push((session.clone(), "budget_exceeded", Some(v.key.to_owned())));
+                    break;
+                }
+                let bytes = frame.len();
+                if self
+                    .scheduler
+                    .push(&session, super::scheduler::Class::Data, bytes, frame, now_ms)
+                    .is_err()
+                {
+                    verdicts.push((session.clone(), "transport_failed", None));
+                    break;
+                }
+            }
+        }
+    }
+    /// Delivers one scheduling quantum of queued provider frames (control first, then fair data).
+    pub fn dispatch(&mut self, now: Instant) -> Vec<super::scheduler::Dispatch<Vec<u8>>> {
+        let ms = self.ms(now);
+        self.scheduler.tick(ms)
     }
     fn record_end(&mut self, reference: &RuntimeRef, kind: &str, budget: Option<String>) {
         let expected = kind == "stopped";

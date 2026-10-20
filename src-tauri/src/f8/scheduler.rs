@@ -323,6 +323,17 @@ impl<T: Weigh> Scheduler<T> {
             n
         })
     }
+    /// How many more data items of up to `item_max` bytes this runtime's lane can certainly take
+    /// right now (0 when full, faulted, or too few bytes remain for one maximal item).
+    pub fn data_room(&self, key: &str, item_max: usize) -> usize {
+        self.lanes.get(key).map_or(0, |l| {
+            if l.faulted || self.limits.data_bytes.saturating_sub(l.data_bytes) < item_max {
+                0
+            } else {
+                self.limits.data_events.saturating_sub(l.data.len())
+            }
+        })
+    }
     pub fn is_faulted(&self, key: &str) -> bool {
         self.lanes.get(key).is_some_and(|l| l.faulted)
     }
