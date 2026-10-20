@@ -38,6 +38,7 @@
     mayHoldSecret,
     outcomeText,
     outcomeTone,
+    matchingName,
     visibleItems,
   } from './present';
 
@@ -66,12 +67,16 @@
 
   const reply = $derived(configuration.reply);
   const allHooks = $derived(allHooksSwitch(reply?.inventory.items ?? []));
+  let query = $state('');
   const items = $derived(
     reply
-      ? visibleItems(
-          reply.inventory.items,
-          configuration.provider,
-          configuration.kind,
+      ? matchingName(
+          visibleItems(
+            reply.inventory.items,
+            configuration.provider,
+            configuration.kind,
+          ),
+          query,
         )
       : [],
   );
@@ -93,6 +98,7 @@
   // window of the desktop's own, never here.
   let writing = $state<'hook' | 'mcp' | 'document' | null>(null);
   let documentKind = $state<NewDocumentKind>('claude_rule');
+  let documentFromTemplate = $state(false);
   let hookEvent = $state<string>('PreToolUse');
   let hookMatcher = $state('');
   let mcpName = $state('');
@@ -346,7 +352,9 @@
         onsubmit={(event) => {
           event.preventDefault();
           if (writing === 'document')
-            changesController.author((c) => c.createDocument(documentKind));
+            changesController.author((c) =>
+              c.createDocument(documentKind, documentFromTemplate),
+            );
           else if (writing === 'hook')
             changesController.author((c) =>
               c.authorHook(hookEvent, hookMatcher.trim() || null, null),
@@ -394,6 +402,10 @@
                   >{NEW_DOCUMENT_LABEL[kind]}</option
                 >{/each}
             </select>
+          </label>
+          <label class="configuration-check"
+            ><input type="checkbox" bind:checked={documentFromTemplate} />
+            Start from a sealed template (asks for the file and its passphrase)
           </label>
         {:else}
           <p class="event-meta">
@@ -604,6 +616,17 @@
         {/each}
       </div>
 
+      <label class="configuration-search"
+        >Search by name
+        <input
+          type="search"
+          bind:value={query}
+          maxlength="128"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="review"
+        />
+      </label>
       <div class="configuration-main" bind:this={main}>
         {#if selected}
           <aside class="configuration-detail" aria-label="Details">
@@ -623,6 +646,9 @@
               <dd>
                 {#if selectedChange}
                   You can do it here, with a plan you confirm.
+                {:else if selectedAuthoring}
+                  You can change it here: you review the text in a separate
+                  window, then confirm a plan.
                 {:else}
                   {NOT_WRITABLE_LABEL[selected.not_writable]}
                 {/if}

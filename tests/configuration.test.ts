@@ -11,6 +11,7 @@ import {
   kindCounts,
   mayHoldSecret,
   outcomeText,
+  matchingName,
   visibleItems,
 } from '../src/lib/features/configuration/present';
 import fixture from './fixtures/configuration-inventory-v1.json';
@@ -188,6 +189,22 @@ describe('presentation', () => {
       ['empty', 'none'],
     ]);
     expect(detailLines(null)).toEqual([]);
+  });
+
+  it('searches names without case, spaces at the edges or a hidden match on anything else', () => {
+    const all = parsed.items;
+    expect(matchingName(all, '')).toHaveLength(all.length);
+    expect(matchingName(all, '   ')).toHaveLength(all.length);
+    const first = all[0]!;
+    const needle = ` ${first.name.slice(0, 4).toUpperCase()} `;
+    const found = matchingName(all, needle);
+    expect(found).toContain(first);
+    expect(
+      found.every((i) =>
+        i.name.toLowerCase().includes(needle.trim().toLowerCase()),
+      ),
+    ).toBe(true);
+    expect(matchingName(all, 'no such name \u0001 anywhere')).toEqual([]);
   });
 
   it('filters by agent and kind and counts what a filter leaves', () => {

@@ -11,7 +11,7 @@ use crate::agentconfig::{
     SecretToolStore, Summary, Vault,
 };
 use crate::native_dialog::{
-    Field, GtkConfirm, choose_file, choose_file_titled, passphrase, text_form,
+    Field, GtkConfirm, choose_file, choose_file_titled, passphrase, text_form, text_form_labeled,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
@@ -441,6 +441,9 @@ async fn configuration_edit_document(
 pub struct CreateDocument {
     /// One of the closed words `NewKind` knows. Never a path, a name or text.
     kind: String,
+    /// Start from a passphrase-sealed template the user chooses in a native window.
+    #[serde(default)]
+    from_template: bool,
 }
 
 /// A new instruction file or skill where none exists. The page names only a kind; the
@@ -462,17 +465,32 @@ async fn configuration_create_document(
                 } else {
                     "File name under rules/ (for example review.md)"
                 };
-                text_form(
+                text_form_labeled(
                     &app,
                     "Name the new file",
                     "Nothing exists under this name now. The next window is for its text; nothing is written until you review a plan and confirm it separately.",
                     vec![Field { label: label.to_owned(), initial: String::new(), multiline: false }],
+                    "Continue",
                 )
                 .ok_or_else(cancelled)?
                 .remove(0)
             }
         };
-        let name = kind.name_from(&typed_name).ok_or_else(invalid)?;
+        // A name that cannot be a file of this kind is refused before a second window opens.
+        let name = kind.checked_name(&typed_name).ok_or_else(invalid)?;
+        // Nothing is typed into a window for a file that cannot be made: a name already taken
+        // (a file, a link, a folder) or a place that cannot be trusted is said at once.
+        changes.check_new_document(kind.source(), &name)?;
+        let initial = if request.from_template {
+            let path = choose_file_titled(&app, false, "", "Choose an instruction template")
+                .ok_or_else(cancelled)?;
+            let bytes = read_small_file(&path)
+                .map_err(|()| ConfigurationError::Change(ChangeFailure::ImportInvalid))?;
+            let secret = passphrase(&app, false).ok_or_else(cancelled)?;
+            changes.open_new_document_template(kind.source(), &name, &bytes, &secret)?
+        } else {
+            kind.starting_text(&name)
+        };
         let shown = if kind.is_skill() { format!("skills/{name}/SKILL.md") } else { name.clone() };
         let typed = text_form(
             &app,
@@ -480,7 +498,7 @@ async fn configuration_create_document(
             &format!("New file: {shown} in your account. It does not exist yet, and undoing the change removes it again. These instructions can change an agent's behaviour: review the full text here."),
             vec![Field {
                 label: "Instructions (Markdown, at most 64 KiB)".to_owned(),
-                initial: kind.starting_text(&name),
+                initial,
                 multiline: true,
             }],
         )

@@ -438,6 +438,14 @@ function digest(value: unknown, field: string): string {
   return value;
 }
 
+/**
+ * What a journal line holds for a file: its SHA-256, or the word `absent` when there was no
+ * file (a creation's before, a deletion's after). An empty file has a real digest.
+ */
+function fileState(value: unknown, field: string): string {
+  return value === 'absent' ? value : digest(value, field);
+}
+
 function parseTrust(value: unknown): PathTrust {
   const raw = value as Record<string, unknown> | null;
   if (raw?.trust === 'trusted') {
@@ -803,8 +811,8 @@ export function parseHistory(value: unknown): History {
         operation: member(c.operation, OPERATIONS, 'history'),
         item: text(c.item, 'history'),
         risk: member(c.risk, RISKS, 'history'),
-        h0: digest(c.h0, 'history'),
-        h1: opt(c.h1, (v) => digest(v, 'history')),
+        h0: fileState(c.h0, 'history'),
+        h1: opt(c.h1, (v) => fileState(v, 'history')),
         outcome: opt(c.outcome, (v) => member(v, OUTCOMES, 'history')),
         record: opt(c.record, (v) => ident(v, 'history')),
         undoes: opt(c.undoes, (v) => ident(v, 'history')),

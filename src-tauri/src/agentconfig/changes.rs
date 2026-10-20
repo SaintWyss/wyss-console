@@ -495,6 +495,47 @@ impl ChangeService {
             .map_err(|_| ChangeFailure::ImportInvalid)
     }
 
+    /// Whether `target` can be created now, before anyone types its text: the name is one the
+    /// kind allows, nothing has it, and its place can be trusted. Returns how many folders the
+    /// creation would make. The plan makes the same check again; this one only saves effort.
+    fn survey_new_document(&self, target: &DocumentTarget) -> Result<usize, ChangeFailure> {
+        target.check()?;
+        let path = target.path(&lock(&self.environment))?;
+        match parent_for_create(self.reader.roots(), &path, target.most_new_dirs(), false) {
+            Ok((_, missing)) => Ok(missing),
+            Err(CreateWalk::Exists) => Err(ChangeFailure::AlreadyExists),
+            Err(CreateWalk::TooManyMissing) => Err(ChangeFailure::NotSupported),
+            Err(CreateWalk::Failure(_)) => Err(ChangeFailure::NotWritable),
+        }
+    }
+
+    /// The same check for the desktop's window, before it opens the editor for the text.
+    pub fn check_new_document(&self, source: SourceKey, name: &str) -> Result<(), ChangeFailure> {
+        self.survey_new_document(&DocumentTarget {
+            source,
+            name: name.to_owned(),
+        })
+        .map(|_| ())
+    }
+
+    /// Opens a template for a file that does not exist yet: the text goes to the native editor
+    /// and nowhere else; nothing is planned, written or granted by opening it.
+    pub fn open_new_document_template(
+        &self,
+        source: SourceKey,
+        name: &str,
+        bytes: &[u8],
+        passphrase: &str,
+    ) -> Result<String, ChangeFailure> {
+        let target = DocumentTarget {
+            source,
+            name: name.to_owned(),
+        };
+        target.check()?;
+        super::instruction_template::open(&target, bytes, passphrase)
+            .map_err(|_| ChangeFailure::ImportInvalid)
+    }
+
     /// The file a plan is made on: read through the approved roots, and writable only if it
     /// is this user's, in a place nobody else can change.
     fn read_target(&self, key: SourceKey) -> Result<(PathBuf, Vec<u8>), ChangeFailure> {
@@ -697,19 +738,7 @@ impl ChangeService {
             }
             Authoring::CreateDocument { source, name, text } => {
                 let target = DocumentTarget { source, name };
-                target.check()?;
-                let path = target.path(&lock(&self.environment))?;
-                let missing = match parent_for_create(
-                    self.reader.roots(),
-                    &path,
-                    target.most_new_dirs(),
-                    false,
-                ) {
-                    Ok((_, missing)) => missing,
-                    Err(CreateWalk::Exists) => return Err(ChangeFailure::AlreadyExists),
-                    Err(CreateWalk::TooManyMissing) => return Err(ChangeFailure::NotSupported),
-                    Err(CreateWalk::Failure(_)) => return Err(ChangeFailure::NotWritable),
-                };
+                let missing = self.survey_new_document(&target)?;
                 // Instructions may hold private data: no sealed record, no plan.
                 self.store.protection_for(true)?;
                 detail = Some(format!(

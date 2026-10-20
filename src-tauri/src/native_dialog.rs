@@ -318,8 +318,20 @@ pub fn text_form(
     intro: &str,
     fields: Vec<Field>,
 ) -> Option<Vec<String>> {
+    text_form_labeled(app, title, intro, fields, "Write it")
+}
+
+/// The same window with its own word on the accepting button: a step that only asks a name
+/// does not say "Write it".
+pub fn text_form_labeled(
+    app: &AppHandle,
+    title: &str,
+    intro: &str,
+    fields: Vec<Field>,
+    accept: &str,
+) -> Option<Vec<String>> {
     use gtk::prelude::*;
-    let (title, intro) = (title.to_owned(), intro.to_owned());
+    let (title, intro, accept) = (title.to_owned(), intro.to_owned(), accept.to_owned());
     on_gtk(app, move |parent| {
         let dialog = gtk::Dialog::builder().modal(true).title(&title).build();
         if let Some(parent) = &parent {
@@ -327,7 +339,7 @@ pub fn text_form(
         }
         dialog.set_default_size(560, -1);
         dialog.add_button("Cancel", gtk::ResponseType::Cancel);
-        dialog.add_button("Write it", gtk::ResponseType::Accept);
+        dialog.add_button(&accept, gtk::ResponseType::Accept);
         let content = dialog.content_area();
         content.set_spacing(8);
         let heading = gtk::Label::new(Some(&intro));

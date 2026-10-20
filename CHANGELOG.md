@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-20 — Create and delete instruction files and skills (F5 increment)
+
+- **New instruction file…** creates a Claude Code skill/rule/`CLAUDE.md`, a Codex skill
+  (`~/.agents/skills`)/`AGENTS.md`/override or an OpenCode `AGENTS.md`, optionally from a sealed
+  template; **Delete…** removes one. Absence is a journal state distinct from an empty file; creation
+  never replaces anything; deletion re-checks identity; undo restores exact bytes, mode and absence;
+  an interrupted create/delete is repaired at start (ADR 0047).
+- Codex skills in `~/.agents/skills` are listed and editable (verified through Codex's own
+  `skills/list`, which discovers a created skill and stops listing a deleted one).
+- Search by name in the Configuration view; history shows file-less digests; clearer wording.
+
 ## 2026-10-19 — Native instruction-file editing and templates (F5 increments)
 
 - Passphrase-sealed instruction templates, native import review and separate reversible

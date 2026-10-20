@@ -130,10 +130,13 @@ export function editDocument(item: string): Promise<Plan> {
   );
 }
 /** A new instruction file or skill where none exists. The desktop asks for name and text. */
-export function createDocument(kind: NewDocumentKind): Promise<Plan> {
+export function createDocument(
+  kind: NewDocumentKind,
+  fromTemplate = false,
+): Promise<Plan> {
   return checked(
     'configuration_create_document',
-    { request: { kind } },
+    { request: { kind, from_template: fromTemplate } },
     parsePlan,
   );
 }

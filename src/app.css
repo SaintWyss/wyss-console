@@ -2206,6 +2206,24 @@ html[data-glass='transparent'] .shell {
 .configuration-plan p {
   margin: 0;
 }
+.configuration-plan label {
+  font-size: 12.5px;
+}
+.configuration-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.configuration-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+}
+.configuration-search input {
+  flex: 1 1 auto;
+  max-width: 360px;
+}
 .configuration-warning {
   font-size: 12.5px;
   color: var(--warn);

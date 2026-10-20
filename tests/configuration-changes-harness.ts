@@ -95,8 +95,8 @@ export class FakeChanges {
         this.check();
         return this.plan;
       },
-      createDocument: async (kind: string) => {
-        this.calls.push(`create_document:${kind}`);
+      createDocument: async (kind: string, fromTemplate = false) => {
+        this.calls.push(`create_document:${kind}:${fromTemplate}`);
         this.check();
         return this.plan;
       },

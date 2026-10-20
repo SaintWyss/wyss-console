@@ -188,6 +188,17 @@ export function visibleItems(
   );
 }
 
+/** Items whose name contains `query`, ignoring case and surrounding spaces; no query keeps all. */
+export function matchingName(
+  items: readonly ConfigItem[],
+  query: string,
+): ConfigItem[] {
+  const needle = query.trim().toLowerCase();
+  return needle === ''
+    ? [...items]
+    : items.filter((item) => item.name.toLowerCase().includes(needle));
+}
+
 /** How many items of each kind a provider filter leaves, for the filter's labels. */
 export function kindCounts(
   items: readonly ConfigItem[],

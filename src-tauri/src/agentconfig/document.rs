@@ -491,6 +491,19 @@ impl NewKind {
         }
     }
 
+    /// The name from what was typed, only if it is one this kind of file can have: a name with a
+    /// separator, a dot at its start or an odd character is refused here, not later.
+    pub fn checked_name(self, typed: &str) -> Option<String> {
+        let name = self.name_from(typed)?;
+        Target {
+            source: self.source(),
+            name: name.clone(),
+        }
+        .check()
+        .ok()
+        .map(|()| name)
+    }
+
     /// What the editor starts with. A skill needs the front matter the provider reads.
     pub fn starting_text(self, name: &str) -> String {
         if self.is_skill() {
@@ -498,5 +511,65 @@ impl NewKind {
         } else {
             String::new()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_kind_is_a_closed_word_and_every_name_it_makes_passes_the_target_check() {
+        for word in [
+            "claude_skill",
+            "claude_rule",
+            "claude_memory",
+            "codex_skill",
+            "codex_agents",
+            "codex_override",
+            "opencode_agents",
+        ] {
+            let kind = NewKind::parse(word).unwrap();
+            let name = kind.name_from("review").unwrap();
+            let target = Target {
+                source: kind.source(),
+                name,
+            };
+            assert!(target.check().is_ok(), "{word}");
+            if kind.is_skill() {
+                assert!(skill_text_ok(
+                    &kind
+                        .starting_text("review")
+                        .replace("description: \n", "description: when reviewing\n")
+                ));
+            }
+        }
+        for word in ["", "CLAUDE.md", "../x", "claude_settings", "claude_skill "] {
+            assert!(NewKind::parse(word).is_none(), "{word:?}");
+        }
+        // Typed text can never choose the file of a fixed kind.
+        let kind = NewKind::parse("claude_memory").unwrap();
+        assert_eq!(kind.name_from("../../etc/passwd").unwrap(), "CLAUDE.md");
+        // A rule's typed name gets its extension and its folder, and no more.
+        let rule = NewKind::parse("claude_rule").unwrap();
+        assert_eq!(rule.name_from(" a ").unwrap(), "rules/a.md");
+        assert_eq!(rule.name_from("a.md").unwrap(), "rules/a.md");
+        let bad = Target {
+            source: SourceKey::ClaudeUserRules,
+            name: rule.name_from("../x").unwrap(),
+        };
+        assert!(bad.check().is_err());
+        for typed in ["../x", "a/b", ".h", "wyss/console/f5b", "", "a\0b", " "] {
+            assert!(rule.checked_name(typed).is_none(), "{typed:?}");
+            let skill = NewKind::parse("claude_skill").unwrap();
+            assert!(skill.checked_name(typed).is_none(), "{typed:?}");
+        }
+        assert_eq!(rule.checked_name("review").unwrap(), "rules/review.md");
+    }
+
+    #[test]
+    fn absent_is_not_the_digest_of_an_empty_file() {
+        assert_ne!(ABSENT, hash(b""));
+        assert!(!ABSENT.bytes().all(|b| b.is_ascii_hexdigit()));
     }
 }

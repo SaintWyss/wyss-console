@@ -302,9 +302,35 @@ describe('the changes controller', () => {
       controller.cancel();
     }
     expect(fake.calls).toEqual(
-      NEW_DOCUMENT_KINDS.map((kind) => `create_document:${kind}`),
+      NEW_DOCUMENT_KINDS.map((kind) => `create_document:${kind}:false`),
     );
     expect(fake.calls.some((c) => c.startsWith('apply'))).toBe(false);
+  });
+  it('reads a history line whose file was absent, and still refuses a malformed digest', () => {
+    const history = damaged(changes.history);
+    history.changes[0].h0 = 'absent';
+    history.changes[0].h1 = 'absent';
+    const parsed = parseHistory(history);
+    expect([parsed.changes[0]?.h0, parsed.changes[0]?.h1]).toEqual([
+      'absent',
+      'absent',
+    ]);
+    for (const bad of [
+      '',
+      'Absent',
+      'absent ',
+      'a'.repeat(63),
+      'x'.repeat(64),
+    ]) {
+      const wrong = damaged(changes.history);
+      wrong.changes[0].h0 = bad;
+      expect(() => parseHistory(wrong)).toThrow();
+    }
+  });
+  it('can start a creation from a sealed template without sending any text', async () => {
+    controller.author((c) => c.createDocument('claude_rule', true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.calls).toEqual(['create_document:claude_rule:true']);
   });
   it('plans a deletion by inventory ID through the ordinary plan and holds it for confirmation', async () => {
     controller.draft('delete_document', 'a'.repeat(32));

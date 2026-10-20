@@ -40,7 +40,7 @@ export interface ChangesClient {
   ): Promise<Plan>;
   editHook(item: string): Promise<Plan>;
   editDocument(item: string): Promise<Plan>;
-  createDocument(kind: NewDocumentKind): Promise<Plan>;
+  createDocument(kind: NewDocumentKind, fromTemplate?: boolean): Promise<Plan>;
   exportDocument(item: string): Promise<boolean>;
   importDocument(item: string): Promise<Plan>;
   authorMcp(

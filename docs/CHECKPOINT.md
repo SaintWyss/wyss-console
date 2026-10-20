@@ -22,11 +22,13 @@ Recheck both heads and `git status` before writing or pushing.
 
 ## Active
 
-Product completion authorised by Santiago on 2026-10-19. F5 existing user instruction-file
-editing and passphrase-sealed instruction templates are implemented (ADR 0045/0046;
-`docs/acceptance/f5-instruction-editing-2026-10-19.md`). Native edit/import apply and exact undo passed in the normal environment. Creation/deletion, Codex skill authoring, project authoring and hook/MCP templates
-remain engineering work. Preserve the accepted provider writers and Managed authority guarantees.
-See `docs/acceptance/remaining-roadmap-2026-10-19.md` for the remaining scope.
+Product completion authorised by Santiago on 2026-10-19. F5 user instruction-file editing,
+passphrase-sealed templates (ADR 0045/0046) and now **absent-aware creation/deletion of
+instruction files and skills, including Codex skills in `~/.agents/skills`** (ADR 0047,
+`docs/acceptance/f5-create-delete-2026-10-20.md`) are implemented and accepted in the real
+window. Project-level authoring (no project selection yet for the configuration engine) and
+hook/MCP templates remain engineering work. Preserve the accepted provider writers and Managed
+authority guarantees. See `docs/acceptance/remaining-roadmap-2026-10-19.md`.
 
 ## Installed/runtime state at this milestone
 
