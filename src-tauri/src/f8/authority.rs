@@ -322,10 +322,19 @@ impl Authority {
             serde_json::to_vec(&json!({"method":"turn/start","turn":record.managed_turn_id,
             "input":p.prompt}))
             .map_err(|_| E::InternalError)?;
-        if let Err(e) = self.engine.write_frame(&ticket, &frame, &snapshot, 0) {
-            let _ = self.engine.end_turn(&ticket);
-            self.fail_turn(&record.managed_turn_id)?;
-            return Err(e);
+        if self.engine.write_frame(&ticket, &frame, &snapshot, 0).is_err() {
+            // A failed write is not proof that zero bytes/effects reached the
+            // provider. Never claim a definitive no-effect failure or resend.
+            let authority = self.authority();
+            Writer::new(self.engine.connection_mut(), authority)?
+                .transition_turn(
+                    &record.managed_turn_id,
+                    None,
+                    TurnState::Indeterminate,
+                    Some(TurnReason::DispatchUnknown),
+                )?;
+            self.engine.transport_failed(&ticket.reference);
+            return Err(E::ExternalEffectUnknown);
         }
         self.tickets
             .insert(record.managed_turn_id.as_str().to_owned(), ticket);
