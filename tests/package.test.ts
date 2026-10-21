@@ -44,7 +44,7 @@ it('bundles no installer, no updater and no signing claim', () => {
   // The window is granted exactly what it was.
   expect(
     (tauriConfig.app.security as { capabilities: string[] }).capabilities,
-  ).toEqual(['main']);
+  ).toEqual(['main', 'f8']);
 });
 
 it('opens in a window wide enough for a full-width shell greeting', () => {

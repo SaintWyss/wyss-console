@@ -71,6 +71,9 @@ pub enum F8Failure {
     Uncertain,
     /// The intent was already used for something else.
     Conflict,
+    /// The user did not allow it in the confirmation window of the desktop, or that window
+    /// could not be shown. Nothing was sent to the authority.
+    NotConfirmed,
     Internal,
 }
 

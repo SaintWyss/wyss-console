@@ -378,7 +378,7 @@ fn every_payload_the_window_parses_keeps_the_shape_of_the_committed_fixture() {
 
 /// Retries an intent while the authority is still working on the same one, as the window does.
 #[track_caller]
-fn settled<T>(mut ask: impl FnMut() -> Result<T, F8Error>) -> T {
+pub(crate) fn settled<T>(mut ask: impl FnMut() -> Result<T, F8Error>) -> T {
     eventually(|| match ask() {
         Ok(value) => Some(value),
         Err(e) if e.code == F8Failure::Busy => None,
@@ -388,7 +388,7 @@ fn settled<T>(mut ask: impl FnMut() -> Result<T, F8Error>) -> T {
 
 /// A session of the native fixture with a ready runtime, an active lease and an attached
 /// binding: the state in which the window can start a turn.
-fn native_session(h: &NativeHarness) -> (ManagedSessionId, FenceView, SessionDetail) {
+pub(crate) fn native_session(h: &NativeHarness) -> (ManagedSessionId, FenceView, SessionDetail) {
     let session = h.gui.prepare(uuid()).unwrap().id;
     let row = h.gui.session(session.clone()).unwrap().session;
     h.gui
@@ -429,7 +429,7 @@ fn native_session(h: &NativeHarness) -> (ManagedSessionId, FenceView, SessionDet
 }
 
 /// A turn that has proposed an action and waits for the window to decide it.
-fn native_turn(
+pub(crate) fn native_turn(
     h: &NativeHarness,
     fence: &FenceView,
     detail: &SessionDetail,

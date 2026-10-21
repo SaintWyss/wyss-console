@@ -60,7 +60,8 @@
           : 'Codex wants to change files',
   );
   const DOING = {
-    accept: 'Asking the authority to accept it…',
+    accept:
+      'Waiting for your Allow in the confirmation window, then asking the authority…',
     decline: 'Asking the authority to decline it…',
     cancel: 'Asking the authority to cancel it…',
   } as const;

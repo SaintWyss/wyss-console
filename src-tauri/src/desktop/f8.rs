@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::State;
 
 use super::workspace::WorkspaceSelections;
+mod confirm;
 pub use crate::{
     contracts::control::{ApprovalDecision, ExecutionScope},
     f8::gui::{
@@ -32,6 +33,7 @@ use crate::{
     },
     sessions::AgentMode,
 };
+pub use confirm::{F8Confirm, GtkConfirmer};
 
 /// Intents admitted at once. They run one at a time on the control link.
 const MAX_INTENTS: usize = 2;
@@ -350,12 +352,29 @@ pub async fn f8_models(
     })
     .await
 }
+/// A lease that lets a runtime propose to run commands or change files is allowed by the
+/// user in the desktop's own window first; one that only starts turns is not.
 #[tauri::command]
 pub async fn f8_lease_grant(
     service: State<'_, F8Gui>,
+    confirm: State<'_, F8Confirm>,
     request: GrantRequest,
 ) -> Result<LeaseReceipt, F8Error> {
+    let confirm = confirm.inner().clone();
     blocking(INTENT, service.inner().clone(), move |s| {
+        if confirm::acts(&request.scopes) {
+            let prompt = confirm::lease_prompt(
+                false,
+                &request.fence.session,
+                Some(&request.scopes),
+                request.ttl_seconds,
+            );
+            confirm::allow(
+                &confirm,
+                &format!("{}|grant|{}", request.intent_id.as_str(), prompt.body),
+                &prompt,
+            )?;
+        }
         s.lease_grant(
             request.intent_id,
             request.fence,
@@ -366,12 +385,26 @@ pub async fn f8_lease_grant(
     })
     .await
 }
+/// Extending a lease keeps what it allows alive, so it is allowed the same way.
 #[tauri::command]
 pub async fn f8_lease_renew(
     service: State<'_, F8Gui>,
+    confirm: State<'_, F8Confirm>,
     request: RenewRequest,
 ) -> Result<LeaseReceipt, F8Error> {
+    let confirm = confirm.inner().clone();
     blocking(INTENT, service.inner().clone(), move |s| {
+        let prompt = confirm::lease_prompt(true, &request.fence.session, None, request.ttl_seconds);
+        confirm::allow(
+            &confirm,
+            &format!(
+                "{}|renew|{}|{}",
+                request.intent_id.as_str(),
+                request.lease_id.as_str(),
+                prompt.body
+            ),
+            &prompt,
+        )?;
         s.lease_renew(
             request.intent_id,
             request.fence,
@@ -503,14 +536,27 @@ async fn decide_in(
     })
     .await
 }
-/// Asks the authority to accept this one approval. Which decision a command means is fixed
-/// here: the window cannot send one as data.
+/// Asks the authority to accept this one approval, once the user has allowed, in the
+/// desktop's own window, exactly what the authority holds for it. Which decision a command
+/// means is fixed here: the window cannot send one as data.
 #[tauri::command]
 pub async fn f8_approval_accept(
     service: State<'_, F8Gui>,
+    confirm: State<'_, F8Confirm>,
     request: DecideRequest,
 ) -> Result<DecisionReceipt, F8Error> {
-    decide_in(service.inner().clone(), request, ApprovalDecision::Accept).await
+    let confirm = confirm.inner().clone();
+    blocking(INTENT, service.inner().clone(), move |s| {
+        confirm::accept(
+            &s,
+            &confirm,
+            request.intent_id,
+            request.fence,
+            request.approval_id,
+            request.expected_revision,
+        )
+    })
+    .await
 }
 /// A refusal of this one action. The turn goes on as the provider and the authority decide.
 #[tauri::command]

@@ -10,6 +10,8 @@ pub mod budget;
 pub mod dev;
 #[cfg(target_os = "linux")]
 pub mod engine;
+#[cfg(all(any(feature = "f8-dev", feature = "f8-fixture"), target_os = "linux"))]
+pub mod fixture;
 #[cfg(target_os = "linux")]
 pub mod gui;
 #[cfg(target_os = "linux")]

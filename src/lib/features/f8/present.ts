@@ -160,6 +160,8 @@ const FAILURE: Record<F8FailureCode, string> = {
   uncertain:
     'The authority could not confirm what the runtime did. Nothing is sent again by itself.',
   conflict: 'That request was already used for something else.',
+  not_confirmed:
+    'It was not allowed in the confirmation window, so nothing was sent.',
   internal:
     'Something unexpected happened. Nothing is assumed to have changed.',
 };

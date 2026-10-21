@@ -50,14 +50,26 @@ fn main() {
     // Set by the packaging command, which builds the authority first: a build made any
     // other way has no authority of its own to install.
     let digest = option_env!("WYSS_AUTHORITY_SHA256");
+    // Protocol 2 is selected by the command line alone: `--f8-authority <directory>`. Without
+    // it the interface is inactive and nothing is sent to any authority but the installed one.
     #[cfg(target_os = "linux")]
-    wyss_console::run_with(
-        digest,
-        configuration::extension()
-            .merge(host::commands::extension())
-            .merge(native::extension())
-            .merge(credentials::commands::extension()),
-    );
+    {
+        let f8 =
+            wyss_console::f8_from_arguments(std::env::args_os().skip(1)).unwrap_or_else(|error| {
+                eprintln!("wyss-console: {error}");
+                std::process::exit(2);
+            });
+        wyss_console::run_with_f8(
+            digest,
+            Some(
+                configuration::extension()
+                    .merge(host::commands::extension())
+                    .merge(native::extension())
+                    .merge(credentials::commands::extension()),
+            ),
+            f8,
+        );
+    }
     #[cfg(not(target_os = "linux"))]
     wyss_console::run(digest);
 }

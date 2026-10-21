@@ -10,6 +10,8 @@ mod events;
 mod f8;
 mod glass;
 mod lifecycle;
+#[cfg(target_os = "linux")]
+pub mod select;
 mod sessions;
 mod settings;
 mod terminal;
@@ -127,6 +129,14 @@ pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>,
     // Makes an authority available where none answers. It follows the observer above
     // and never stands in for it: connected is what the observer says.
     let bootstrap = lifecycle::start(&authority, authority_digest);
+    // The confirmation of what lets a managed runtime act: the toolkit's own window, which
+    // learns of the application once it exists.
+    #[cfg(target_os = "linux")]
+    let gtk_confirm = Arc::new(f8::GtkConfirmer::default());
+    #[cfg(target_os = "linux")]
+    let f8_confirm = f8::F8Confirm::new(gtk_confirm.clone());
+    #[cfg(not(target_os = "linux"))]
+    let (gtk_confirm, f8_confirm) = ((), ());
     type Handler = Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync>;
     let ours: Handler = Box::new(tauri::generate_handler![
         get_app_info,
@@ -228,10 +238,17 @@ pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>,
         None => builder,
     };
     builder
-        .setup(|app| open_main_window(app))
+        .setup(move |app| {
+            #[cfg(target_os = "linux")]
+            gtk_confirm.attach(app.handle().clone());
+            #[cfg(not(target_os = "linux"))]
+            let _ = &gtk_confirm;
+            open_main_window(app)
+        })
         .manage(TerminalService::default())
-        // Inactive here: only Rust code that owns a connector makes protocol 2 reachable.
+        // Inactive unless the command line named an authority (`select`): the window cannot.
         .manage(f8_gui)
+        .manage(f8_confirm)
         // Read-only and independent: no terminal operation waits on, or learns of, it.
         .manage(authority)
         .manage(bootstrap)

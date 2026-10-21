@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "f8",
-  "description": "Managed runtimes of protocol 2 (F8): reads and product intents for sessions, runtimes, leases, bindings, turns, approvals and the durable history. None names a control method, a process or a path; a decision on an approval is three commands, never a field. Enabled only by a configuration that lists it: the installed one lists `main` alone.",
+  "description": "Managed runtimes of protocol 2 (F8): reads and product intents for sessions, runtimes, leases, bindings, turns, approvals and the durable history. None names a control method, a process or a path; a decision on an approval is three commands, never a field. The commands answer `inactive` and send nothing unless the desktop was started with `--f8-authority`, which a window cannot do; accepting an approval and granting or renewing a lease that lets a runtime act each need the user's Allow in a native window first (finding W1).",
   "windows": ["main"],
   "permissions": [
     "allow-f8-reconnect",

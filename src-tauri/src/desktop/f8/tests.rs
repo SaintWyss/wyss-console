@@ -243,16 +243,35 @@ fn every_request_the_window_sends_is_one_its_command_accepts() {
 }
 
 #[test]
-fn the_installed_entry_points_never_reach_the_local_activation_boundary() {
+fn only_the_command_line_selects_an_authority_and_the_entry_points_name_no_connector() {
+    // `main.rs` hands the arguments to the one function that reads them. It never builds a
+    // connector, an in-process application or a fixture itself, and the authority binary has
+    // no way to be a client of anything.
     for (name, source) in [
         ("main.rs", include_str!("../../main.rs")),
         ("wyss-control.rs", include_str!("../../bin/wyss-control.rs")),
     ] {
-        for forbidden in ["run_with_f8", "F8Gui::local", "SocketConnector", "f8::dev"] {
+        for forbidden in [
+            "F8Gui::local",
+            "SocketConnector",
+            "HandleConnector",
+            "f8::dev",
+            "f8::fixture",
+            "FixtureSpawner",
+        ] {
             assert!(
                 !source.contains(forbidden),
                 "{name} must not reference {forbidden}"
             );
         }
     }
+    assert!(include_str!("../../main.rs").contains("f8_from_arguments(std::env::args_os()"));
+    // Nothing else reads the selection: no environment variable names an authority, a socket
+    // or a protocol.
+    let select = include_str!("../select.rs");
+    assert!(!select.contains("env::var"));
+    // The fixture runtime is not reachable from any build the package is made of.
+    let manifest = include_str!("../../../Cargo.toml");
+    assert!(manifest.contains("f8-fixture = []"));
+    assert!(manifest.contains("required-features = [\"f8-fixture\"]"));
 }

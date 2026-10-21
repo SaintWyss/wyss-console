@@ -17,10 +17,29 @@ impl PreparedMigration {
     pub fn validate(&self) -> ControlResult<()> {
         validate_migrated(&self.connection)
     }
-    /// The image, for tests and for the development-only local application.
-    #[cfg(any(test, feature = "f8-dev"))]
+    /// The image, for tests.
+    #[cfg(test)]
     pub(super) fn into_connection(self) -> Connection {
         self.connection
+    }
+    /// Writes the image to a file that does not exist yet, private to this user. It never
+    /// replaces anything: a path that exists in any form is refused, and so is a failure
+    /// half way (`VACUUM INTO` writes a complete file or none). This is how a rehearsal, or a
+    /// fresh isolated authority, gets its durable image; it is not a way to replace an
+    /// installed store.
+    pub fn write_new_image(&self, path: &std::path::Path) -> ControlResult<()> {
+        use std::os::unix::fs::PermissionsExt;
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => return Err(E::UnsafePath),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(_) => return Err(E::UnsafePath),
+        }
+        let text = path.to_str().ok_or(E::UnsafePath)?;
+        self.connection
+            .execute("VACUUM INTO ?1", [text])
+            .map_err(db)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|_| E::UnsafePath)
     }
     pub fn metadata(&self) -> ControlResult<(String, String)> {
         self.connection
@@ -35,6 +54,12 @@ impl PreparedMigration {
 
 pub fn prepare(source: &mut Connection) -> ControlResult<PreparedMigration> {
     prepare_with(source, |_| Ok(()))
+}
+/// A protocol-2 image with no history: the migration of an empty current-schema store.
+pub fn fresh() -> ControlResult<PreparedMigration> {
+    let mut source = Connection::open_in_memory().map_err(db)?;
+    schema::migrate(&mut source)?;
+    prepare(&mut source)
 }
 /// Failure hook runs after every candidate SQL statement and after validation, before commit.
 /// It is useful for fault injection; it never receives a connection or process capability.

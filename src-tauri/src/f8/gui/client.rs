@@ -18,7 +18,7 @@ use crate::{
     },
     control::{
         framing::{read_frame, write_frame},
-        paths::runtime_product,
+        paths::{private_dir, runtime_product},
         peer,
         store::uuid,
     },
@@ -66,8 +66,16 @@ impl Connector for SocketConnector {
         connect_private(&self.root)
     }
 }
+/// Connects to the authority's socket by way of a directory this process has already opened
+/// and checked, so that the directory cannot be swapped between the check and the connect: the
+/// path handed to `connect` is `/proc/self/fd/<that directory>/control.sock`. What remains is
+/// the socket entry itself, in a directory only this user can write to, which the peer
+/// credentials of the connection then check. The path also stays short whatever the
+/// runtime directory is.
 fn connect_private(root: &Path) -> ControlResult<UnixStream> {
-    let path = runtime_product(root, false)?.join(SOCKET);
+    let product = runtime_product(root, false)?;
+    let directory = private_dir(&product)?;
+    let path = PathBuf::from(format!("/proc/self/fd/{}/{SOCKET}", directory.as_raw_fd()));
     let metadata = std::fs::symlink_metadata(&path).map_err(|_| E::TransportError)?;
     if !metadata.file_type().is_socket()
         || metadata.uid() != geteuid().as_raw()
@@ -123,6 +131,15 @@ pub struct Answer {
     pub projection: Projection,
 }
 
+/// Whether an authority speaks what this desktop speaks: protocol 2, storage schema 8, and the
+/// very version of the product this desktop is. A desktop and an authority of different
+/// versions are not assumed to agree on anything the protocol does not state.
+pub(crate) fn compatible(status: &AuthorityStatus) -> bool {
+    status.protocol_version == 2
+        && status.storage_schema_version == 8
+        && status.service_version == env!("CARGO_PKG_VERSION")
+}
+
 /// One greeted connection. It is used by one thread at a time.
 pub struct F8Client {
     stream: UnixStream,
@@ -151,10 +168,7 @@ impl F8Client {
         let ResultValue::Hello(status) = response.outcome().clone()? else {
             return Err(E::CorrelationError);
         };
-        if status.protocol_version != 2
-            || status.storage_schema_version != 8
-            || status.authority_instance_id != authority
-        {
+        if !compatible(&status) || status.authority_instance_id != authority {
             return Err(E::ProtocolVersionUnsupported);
         }
         Ok(Self {
@@ -242,5 +256,113 @@ impl Connector for HandleConnector {
         let (owned, client) = UnixStream::pair().map_err(|_| E::TransportError)?;
         self.0.attach(owned)?;
         Ok(client)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::control::store::uuid;
+    use std::{
+        fs::{self, DirBuilder},
+        os::unix::{
+            fs::{DirBuilderExt, PermissionsExt},
+            net::UnixListener,
+        },
+    };
+
+    fn status(version: &str, protocol: u8, schema: u8) -> AuthorityStatus {
+        AuthorityStatus {
+            protocol_version: protocol,
+            authority_instance_id: uuid(),
+            service_version: version.into(),
+            storage_schema_version: schema,
+            stream_id: uuid(),
+            last_sequence: None,
+            prepared_count: 0,
+            closed_count: 0,
+        }
+    }
+
+    #[test]
+    fn only_this_version_of_protocol_2_with_schema_8_is_compatible() {
+        let here = env!("CARGO_PKG_VERSION");
+        assert!(compatible(&status(here, 2, 8)));
+        assert!(!compatible(&status(here, 1, 7)), "protocol 1");
+        assert!(!compatible(&status(here, 2, 7)), "schema 7");
+        assert!(!compatible(&status(here, 3, 8)), "protocol 3");
+        assert!(
+            !compatible(&status("0.0.1", 2, 8)),
+            "another product version"
+        );
+        assert!(!compatible(&status("", 2, 8)));
+    }
+
+    struct Root(PathBuf);
+    impl Root {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!("wyss-sc-{}", uuid().as_str()));
+            DirBuilder::new().mode(0o700).create(&root).unwrap();
+            DirBuilder::new()
+                .mode(0o700)
+                .create(root.join("wyss-console"))
+                .unwrap();
+            Self(root)
+        }
+        fn socket(&self) -> PathBuf {
+            self.0.join("wyss-console").join(SOCKET)
+        }
+    }
+    impl Drop for Root {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn it_connects_to_a_private_socket_of_this_user_and_to_nothing_else() {
+        let root = Root::new();
+        // Nothing listens: the link is down, not unsafe.
+        assert_eq!(
+            SocketConnector::new(&root.0).connect().unwrap_err(),
+            E::TransportError
+        );
+        let listener = UnixListener::bind(root.socket()).unwrap();
+        fs::set_permissions(root.socket(), fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(SocketConnector::new(&root.0).connect().is_ok());
+        drop(listener);
+        fs::remove_file(root.socket()).unwrap();
+
+        // A socket others can use is not this authority's.
+        let _open = UnixListener::bind(root.socket()).unwrap();
+        fs::set_permissions(root.socket(), fs::Permissions::from_mode(0o666)).unwrap();
+        assert_eq!(
+            SocketConnector::new(&root.0).connect().unwrap_err(),
+            E::UnsafePath
+        );
+    }
+
+    #[test]
+    fn a_link_in_place_of_the_socket_or_of_the_directory_is_refused() {
+        let root = Root::new();
+        let real = root.0.join("elsewhere.sock");
+        let _listener = UnixListener::bind(&real).unwrap();
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o600)).unwrap();
+        std::os::unix::fs::symlink(&real, root.socket()).unwrap();
+        assert_eq!(
+            SocketConnector::new(&root.0).connect().unwrap_err(),
+            E::UnsafePath
+        );
+        // The product directory itself as a link, or open to others.
+        fs::remove_file(root.socket()).unwrap();
+        fs::set_permissions(
+            root.0.join("wyss-console"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        assert_eq!(
+            SocketConnector::new(&root.0).connect().unwrap_err(),
+            E::UnsafePath
+        );
     }
 }

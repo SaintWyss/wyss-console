@@ -4,7 +4,6 @@ import { expect, it } from 'vitest';
 import main from '../src-tauri/capabilities/main.json';
 import f8 from '../src-tauri/capabilities/f8.json';
 import config from '../src-tauri/tauri.conf.json';
-import overlay from '../src-tauri/tauri.f8.conf.json';
 
 const read = (path: string) =>
   readFileSync(join(__dirname, '..', 'src-tauri', path), 'utf8');
@@ -30,17 +29,16 @@ it('registers, declares and grants the same twenty-four commands', () => {
   expect(granted).toEqual(handlers.map(permission).sort());
 });
 
-it('grants the installed window one read of the interface and nothing of the rest', () => {
+it('splits the interface across the two capabilities the installed configuration lists', () => {
   expect(main.permissions.filter((p) => p.startsWith('allow-f8-'))).toEqual([
     'allow-f8-state',
   ]);
-  // The rest is a capability the installed configuration does not list.
-  expect(config.app.security.capabilities).toEqual(['main']);
+  // The rest is its own capability, listed beside `main` in the one configuration. The
+  // commands answer `inactive` until the desktop is started with `--f8-authority`, which a
+  // window cannot do (see the Rust test of the entry points).
+  expect(config.app.security.capabilities).toEqual(['main', 'f8']);
   expect(f8.permissions).not.toContain('allow-f8-state');
   expect(f8.windows).toEqual(['main']);
-  // A configuration that activates it lists both, and changes nothing else.
-  expect(overlay.app.security.capabilities).toEqual(['main', 'f8']);
-  expect(Object.keys(overlay.app)).toEqual(['security']);
 });
 
 it('names no control method, process, path or generic call in what it grants', () => {

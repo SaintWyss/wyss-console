@@ -10,6 +10,8 @@ pub(crate) mod f8_fixture;
 pub(crate) mod framing;
 mod gate;
 mod mediation;
+#[cfg(target_os = "linux")]
+pub mod serve;
 // The safe-path rules are the authority's; the desktop's installer follows the same ones.
 pub(crate) mod paths;
 mod runtime;

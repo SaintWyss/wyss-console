@@ -5,16 +5,23 @@ use wyss_console::contracts::control::ControlError;
 const EXIT_WILL_NOT_START: i32 = 2;
 
 fn main() {
-    if std::env::args_os().len() != 1 {
-        eprintln!("wyss-control: invalid_request");
-        std::process::exit(EXIT_WILL_NOT_START);
-    }
-    if let Err(error) = wyss_console::control::run_from_environment() {
+    let arguments = std::env::args_os().skip(1);
+    // No arguments: the installed protocol-1 authority. Arguments: protocol 2, which the
+    // caller asked for by name and which never falls back to protocol 1.
+    let started = if arguments.len() == 0 {
+        wyss_console::control::run_from_environment()
+    } else {
+        wyss_console::control::serve::run_from_arguments(arguments)
+    };
+    if let Err(error) = started {
         eprintln!("wyss-control: {error}");
         std::process::exit(
             if matches!(
                 error,
-                ControlError::AlreadyRunning | ControlError::UnsafePath
+                ControlError::AlreadyRunning
+                    | ControlError::UnsafePath
+                    | ControlError::InvalidRequest
+                    | ControlError::StorageIncompatible
             ) {
                 EXIT_WILL_NOT_START
             } else {

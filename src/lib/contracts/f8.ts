@@ -54,6 +54,7 @@ export const F8_FAILURES = [
   'rejected',
   'uncertain',
   'conflict',
+  'not_confirmed',
   'internal',
 ] as const;
 export type F8FailureCode = (typeof F8_FAILURES)[number];

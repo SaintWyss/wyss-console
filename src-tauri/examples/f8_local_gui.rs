@@ -2,8 +2,7 @@
 //! is a fixture child (not Codex). For looking at the window; development only.
 //!
 //! ```text
-//! TAURI_CONFIG='{"app":{"security":{"capabilities":["main","f8"]}}}' \
-//!   cargo run --example f8_local_gui --features f8-dev -- <private directory>
+//! cargo run --example f8_local_gui --features f8-dev -- <private directory>
 //! ```
 //! The directory holds the application's durable image and the fixture's workspace.
 fn main() {
