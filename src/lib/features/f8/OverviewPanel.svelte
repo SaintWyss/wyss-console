@@ -248,7 +248,7 @@
         {/each}
       </ul>
       <p class="composer-note">
-        Ends <time datetime={lease.expires_at}
+        Valid until <time datetime={lease.expires_at}
           >{localClock(lease.expires_at)}</time
         >. When it ends or is revoked, a turn that runs under it ends, and so
         does the approval it waits on.

@@ -2935,11 +2935,33 @@ li.native-row .native-note {
 .rt-own {
   flex: 0 1 auto;
 }
-/* Not enough room for two columns: the list sits above the session it belongs to. */
+/* Not enough room for two columns: the list sits above the session it belongs to, and the
+   whole of it scrolls as one page instead of in panes too small to read in. */
 @container (max-width: 760px) {
   .runtimes-body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(96px, 30%) minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding-right: 2px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--glass-line-strong) transparent;
+  }
+  .runtimes-list {
+    flex: none;
+    max-height: 34dvh;
+  }
+  .runtimes-detail {
+    flex: none;
+    overflow: visible;
+  }
+  .rt-panel,
+  .rt-conversation {
+    flex: none;
+    overflow: visible;
+  }
+  .rt-conversation .agent-transcript {
+    flex: none;
+    overflow: visible;
   }
   .rt-head {
     flex-wrap: wrap;

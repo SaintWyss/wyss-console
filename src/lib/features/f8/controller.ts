@@ -1211,7 +1211,11 @@ export class F8Controller {
       try {
         const detail = await this.client.readApproval(id, index, null);
         if (token !== this.approvalToken || !this.approval) return;
-        if (detail.file)
+        // The file that was asked for, once: anything else is not this approval's change set.
+        if (
+          detail.file?.index === index &&
+          !this.approval.files.some((f) => f.index === index)
+        )
           this.approval = {
             ...this.approval,
             files: [...this.approval.files, fileCard(detail.file)],
@@ -1267,7 +1271,7 @@ export class F8Controller {
       try {
         const detail = await this.client.readApproval(id, index, null);
         if (token !== this.approvalToken || !this.approval) return;
-        if (detail.file) {
+        if (detail.file?.index === index && !have.has(index)) {
           have.add(index);
           this.approval = {
             ...this.approval,

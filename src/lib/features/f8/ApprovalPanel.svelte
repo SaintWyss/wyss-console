@@ -144,13 +144,9 @@
 
   {#if pending}
     <p class="approval-deadline">
-      {#if expired}
-        Its time ran out at
-      {:else}
-        Waits until
-      {/if}
-      <time datetime={record.expires_at}>{localClock(record.expires_at)}</time>.
-      The authority checks the action again before anything runs.
+      {expired ? 'Its time ran out at' : 'Waits until'}
+      <time datetime={record.expires_at}>{localClock(record.expires_at)}</time>
+      — the authority checks the action again before anything runs.
     </p>
   {:else if reason}
     <p class="approval-note">{reason}</p>

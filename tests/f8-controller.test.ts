@@ -805,3 +805,35 @@ describe('models and history', () => {
     void never;
   });
 });
+
+describe('a change set', () => {
+  it('takes only the file that was asked for, once, whatever the authority answers', async () => {
+    const r = make();
+    const raw: Raw = copy(real.approval);
+    raw.approval.kind = 'file_change';
+    raw.command = null;
+    raw.files = 3;
+    raw.file = {
+      index: 0,
+      path: 'a.txt',
+      kind: 'update',
+      move_path: null,
+      bytes: 1,
+      offset: 0,
+      chunk: 'x',
+      next: null,
+    };
+    // Every read is answered with the first file: the others were asked for and never given.
+    r.client.readApproval.mockResolvedValue(parseApprovalDetail(raw));
+    const live = detailWith(real.attached, (d) => {
+      d.turns = [copy(real.reading.turn)];
+      d.approval = copy(raw);
+    });
+    r.client.session.mockResolvedValue(live);
+    await r.open();
+    await settle();
+    expect(r.state.approval?.files.map((f) => f.index)).toEqual([0]);
+    await r.controller.moreFiles();
+    expect(r.state.approval?.files.map((f) => f.index)).toEqual([0]);
+  });
+});
