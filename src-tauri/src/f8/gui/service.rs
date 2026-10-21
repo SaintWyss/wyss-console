@@ -77,6 +77,9 @@ const KEEP_SESSIONS: usize = 64;
 const MODEL_PAGES: usize = 4;
 /// Workspaces remembered by intent, so a retry names the folder the first attempt did.
 const KEEP_WORKSPACES: usize = 16;
+/// How long a connection may rest and still be used. The authority drops one that is silent
+/// for five seconds (its read timeout); this is well inside that.
+const REUSE_LIMIT: Duration = Duration::from_secs(2);
 /// The largest integer a JavaScript number holds exactly.
 const JS_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const FIRST_DELAY: Duration = Duration::from_millis(250);
@@ -91,6 +94,8 @@ enum Role {
 
 struct Link {
     client: Option<F8Client>,
+    /// When the connection last carried an exchange, answered or refused.
+    last_used: Option<Instant>,
     state: Connection,
     fault: Option<Fault>,
     failures: u32,
@@ -100,6 +105,7 @@ impl Link {
     fn new() -> Self {
         Self {
             client: None,
+            last_used: None,
             state: Connection::Waiting,
             fault: None,
             failures: 0,
@@ -266,6 +272,16 @@ impl F8Gui {
             return Err(F8Error::new(F8Failure::Unavailable));
         }
         let mut link = lock(self.link(role));
+        // The authority closes a connection that has asked for nothing for a while, and a
+        // window is idle most of the time. A connection that rested longer than that is let
+        // go and made again, instead of failing the next thing the user does.
+        if link.client.is_some()
+            && link
+                .last_used
+                .is_none_or(|used| used.elapsed() > REUSE_LIMIT)
+        {
+            link.client = None;
+        }
         if link.client.is_none() {
             if link.retry_at.is_some_and(|at| Instant::now() < at) {
                 return Err(F8Error {
@@ -300,7 +316,9 @@ impl F8Gui {
             .client
             .as_mut()
             .ok_or(F8Error::new(F8Failure::Internal))?;
-        match work(client) {
+        let outcome = work(client);
+        link.last_used = Some(Instant::now());
+        match outcome {
             Ok(value) => Ok(value),
             Err(error) => {
                 if error.broken() {

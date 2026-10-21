@@ -496,3 +496,83 @@ fn a_native_runtime_reports_what_it_was_asked_to_be_and_why_it_ended_when_it_did
         F8Failure::Stale | F8Failure::PermissionDenied
     ));
 }
+
+#[test]
+fn the_window_shows_and_decides_native_command_and_file_approvals_accept_decline_and_cancel() {
+    use crate::contracts::control::{FileChangeKind, TurnState};
+    for scenario in ["approval_command", "approval_file"] {
+        for decision in [
+            ApprovalDecision::Accept,
+            ApprovalDecision::Decline,
+            ApprovalDecision::Cancel,
+        ] {
+            let h = NativeHarness::start(scenario);
+            let (_, fence, attached) = native_session(&h);
+            let (turn, approval) = native_turn(&h, &fence, &attached);
+            // What is shown to the person who decides is the whole action, as the authority
+            // presents it: a command with its directory, or a file with a page of its diff.
+            if scenario == "approval_command" {
+                let command = approval.command.as_ref().unwrap();
+                assert_eq!(command.command, "printf WYSS_FIXTURE_COMMAND");
+                assert_eq!(command.cwd, h.workspace);
+            } else {
+                assert_eq!(approval.files, Some(1));
+                let file = approval.file.as_ref().unwrap();
+                assert!(file.path.ends_with("wyss-fixture-probe.txt"));
+                assert_eq!(file.kind, FileChangeKind::Add);
+                assert_eq!(file.chunk, "+WYSS_FIXTURE_PATCH\n");
+                assert_eq!(file.next, None);
+            }
+            assert!(approval.approval.decidable);
+            let intent = uuid();
+            let ask = || {
+                h.gui.approval_respond(
+                    intent.clone(),
+                    fence.clone(),
+                    approval.approval.id.clone(),
+                    approval.approval.revision,
+                    decision,
+                )
+            };
+            let receipt = settled(ask);
+            let state = match decision {
+                ApprovalDecision::Accept => ApprovalState::Accepted,
+                ApprovalDecision::Decline => ApprovalState::Declined,
+                ApprovalDecision::Cancel => ApprovalState::Cancelled,
+            };
+            assert_eq!(receipt.state, state, "{scenario} {decision:?}");
+            // Asking again with the same identity is the same decision, answered the same.
+            assert_eq!(settled(ask).state, state);
+            let ended = eventually(|| {
+                let r = h.gui.turn(turn.clone(), None, false).ok()?;
+                r.turn.turn.state.terminal().then_some(r)
+            });
+            let expected = if decision == ApprovalDecision::Cancel {
+                TurnState::Interrupted
+            } else {
+                TurnState::Completed
+            };
+            assert_eq!(ended.turn.turn.state, expected, "{scenario} {decision:?}");
+            // The effect happened exactly when, and only when, it was accepted.
+            let record = |name: &str| {
+                std::fs::read_to_string(h.root().join(name))
+                    .unwrap_or_default()
+                    .lines()
+                    .count()
+            };
+            assert_eq!(record("decisions"), 1, "{scenario} {decision:?}");
+            let effects = record(if scenario == "approval_file" {
+                "mutations"
+            } else {
+                "executions"
+            });
+            assert_eq!(effects, usize::from(decision == ApprovalDecision::Accept));
+            let after = h
+                .gui
+                .approval(approval.approval.id.clone(), None, None)
+                .unwrap();
+            assert_eq!(after.approval.state, state);
+            assert!(!after.approval.decidable);
+        }
+    }
+}

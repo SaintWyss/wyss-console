@@ -451,3 +451,27 @@ fn shutdown_stops_every_runtime_even_those_that_ignore_it_and_leaves_a_valid_ima
     validate_v8(&Connection::open(&db).unwrap()).unwrap();
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn a_window_that_rested_longer_than_the_authority_waits_is_not_failed_by_it() {
+    let app = App::start(Options {
+        limit: 1,
+        ..Options::default()
+    });
+    let id = app.session();
+    assert!(app.gui.session(id.clone()).is_ok());
+    let first = app.gui.stats().connections;
+    // Past the authority's read timeout, with the window's connection long since closed by it.
+    std::thread::sleep(Duration::from_millis(5600));
+    assert!(app.gui.session(id.clone()).is_ok());
+    assert!(
+        app.gui.stats().connections > first,
+        "a fresh connection was made"
+    );
+    // A burst of calls shares one connection.
+    let used = app.gui.stats().connections;
+    for _ in 0..10 {
+        app.gui.session(id.clone()).unwrap();
+    }
+    assert_eq!(app.gui.stats().connections, used);
+}

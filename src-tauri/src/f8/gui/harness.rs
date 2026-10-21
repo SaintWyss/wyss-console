@@ -133,6 +133,10 @@ impl NativeHarness {
             _root: root,
         }
     }
+    /// Where the fixture runtime keeps the record of what it was told to do.
+    pub fn root(&self) -> &std::path::Path {
+        &self._root.0
+    }
     pub fn stop(&mut self) -> ControlResult<()> {
         self.gui.shutdown();
         self.handle.shutdown();

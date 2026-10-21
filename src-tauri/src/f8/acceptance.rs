@@ -253,6 +253,8 @@ struct App {
     /// Where the durable image lives, when it is a file.
     db: PathBuf,
     cleanup: bool,
+    /// The thread that runs the application, for the measurement of its own CPU.
+    tid: Arc<AtomicUsize>,
     run: Option<JoinHandle<ControlResult<()>>>,
 }
 impl App {
@@ -318,10 +320,14 @@ impl App {
                 spawner,
             )
             .unwrap();
+            let tid = Arc::new(AtomicUsize::new(0));
+            let mine = tid.clone();
             let run = std::thread::spawn(move || {
+                mine.store(nix::unistd::gettid().as_raw() as usize, Ordering::Release);
                 run_selected(LocalSelection::PreparedProtocol2(Box::new(application)))
             });
             return Self {
+                tid,
                 gui: F8Gui::local(HandleConnector(handle.clone())),
                 handle,
                 knobs,
@@ -357,10 +363,14 @@ impl App {
         let (application, handle) = PreparedApplication::with_test_transport(F8Transport::new(
             Service::new(Authority::new(engine), spawner),
         ));
+        let tid = Arc::new(AtomicUsize::new(0));
+        let mine = tid.clone();
         let run = std::thread::spawn(move || {
+            mine.store(nix::unistd::gettid().as_raw() as usize, Ordering::Release);
             run_selected(LocalSelection::PreparedProtocol2(Box::new(application)))
         });
         Self {
+            tid,
             gui: F8Gui::local(HandleConnector(handle.clone())),
             handle,
             knobs,
@@ -2831,3 +2841,6 @@ fn a_binding_created_by_a_runtime_that_did_not_survive_is_uncertain_and_is_aband
 
 #[path = "acceptance_system.rs"]
 mod system;
+
+#[path = "acceptance_resources.rs"]
+mod resources;
