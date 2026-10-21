@@ -1,0 +1,1504 @@
+{
+  "approval": {
+    "approval": {
+      "decidable": true,
+      "decision": null,
+      "ended_at": null,
+      "expires_at": "2026-10-21T21:19:21.123230344Z",
+      "id": "0bf4ff07-3159-41e9-8171-1e4e4ea38b66",
+      "kind": "command_execution",
+      "reason": null,
+      "requested_at": "2026-10-21T21:14:22.05533391Z",
+      "revision": 1,
+      "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+      "state": "pending",
+      "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+    },
+    "command": {
+      "command": "printf WYSS_FIXTURE_COMMAND",
+      "cwd": "/tmp/wyss-native-local-e8069df9-1d3e-49d3-a79b-1c954f0a9baa/repo/work"
+    },
+    "file": null,
+    "files": null,
+    "workspace": "/tmp/wyss-native-local-e8069df9-1d3e-49d3-a79b-1c954f0a9baa/repo/work"
+  },
+  "audit": {
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "page": {
+      "events": [
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:22.485263055Z",
+          "category": "turn",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": "completed"
+          },
+          "kind": "turn_completed",
+          "security": false,
+          "sequence": "22",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:22.483842552Z",
+          "category": "authority",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "other",
+          "security": false,
+          "sequence": "21",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": null
+        },
+        {
+          "approval": "0bf4ff07-3159-41e9-8171-1e4e4ea38b66",
+          "at": "2026-10-21T21:14:22.483842552Z",
+          "category": "approval",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": "confirmed",
+            "approval_kind": "command_execution",
+            "approval_reason": "client_decision",
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "approval_confirmed",
+          "security": false,
+          "sequence": "20",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:22.435004218Z",
+          "category": "authority",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "other",
+          "security": false,
+          "sequence": "19",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": null
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:22.433304168Z",
+          "category": "authority",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "other",
+          "security": false,
+          "sequence": "18",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": null
+        },
+        {
+          "approval": "0bf4ff07-3159-41e9-8171-1e4e4ea38b66",
+          "at": "2026-10-21T21:14:22.433304168Z",
+          "category": "approval",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": "dispatched",
+            "approval_kind": "command_execution",
+            "approval_reason": "client_decision",
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "approval_accepted",
+          "security": false,
+          "sequence": "17",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+        },
+        {
+          "approval": "0bf4ff07-3159-41e9-8171-1e4e4ea38b66",
+          "at": "2026-10-21T21:14:22.05533391Z",
+          "category": "approval",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": "none",
+            "approval_kind": "command_execution",
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "approval_requested",
+          "security": false,
+          "sequence": "16",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:22.004723641Z",
+          "category": "turn",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "turn_running",
+          "security": false,
+          "sequence": "15",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:21.979951761Z",
+          "category": "turn",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "turn_admitted",
+          "security": false,
+          "sequence": "14",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:21.350748376Z",
+          "category": "session",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "session_bound",
+          "security": false,
+          "sequence": "13",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": null
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:21.123230344Z",
+          "category": "lease",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": "2026-10-21T21:19:21.123230344Z",
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": [
+              "session_create",
+              "session_resume",
+              "turn_start",
+              "command_execute",
+              "file_change"
+            ],
+            "turn_reason": null
+          },
+          "kind": "lease_granted",
+          "security": true,
+          "sequence": "12",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": null
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:20.194360956Z",
+          "category": "runtime",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": "0.159.0",
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "runtime_ready",
+          "security": false,
+          "sequence": "11",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": null
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:20.016196655Z",
+          "category": "runtime",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": "running",
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "runtime_desired",
+          "security": false,
+          "sequence": "10",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": null
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:19.310393265Z",
+          "category": "session",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "session_prepared",
+          "security": false,
+          "sequence": "9",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "turn": null
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:19.310393265Z",
+          "category": "authority",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "other",
+          "security": false,
+          "sequence": "8",
+          "session": null,
+          "turn": null
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:19.081896006Z",
+          "category": "lease",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": "2026-10-21T22:14:19.079189443Z",
+            "revocation": "user_request",
+            "runtime_version": null,
+            "scopes": [
+              "session_create",
+              "session_resume",
+              "turn_start"
+            ],
+            "turn_reason": null
+          },
+          "kind": "lease_revoked",
+          "security": true,
+          "sequence": "7",
+          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+          "turn": null
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:19.081568043Z",
+          "category": "turn",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": "completed"
+          },
+          "kind": "turn_completed",
+          "security": false,
+          "sequence": "6",
+          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+          "turn": "a6c191a7-c257-4012-8aa8-aaff26de42ab"
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:19.081188086Z",
+          "category": "turn",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "turn_running",
+          "security": false,
+          "sequence": "5",
+          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+          "turn": "a6c191a7-c257-4012-8aa8-aaff26de42ab"
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:19.080717961Z",
+          "category": "turn",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "turn_admitted",
+          "security": false,
+          "sequence": "4",
+          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+          "turn": "a6c191a7-c257-4012-8aa8-aaff26de42ab"
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:19.080281693Z",
+          "category": "session",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "session_bound",
+          "security": false,
+          "sequence": "3",
+          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+          "turn": null
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:19.079189443Z",
+          "category": "lease",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": "2026-10-21T22:14:19.079189443Z",
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": [
+              "session_create",
+              "session_resume",
+              "turn_start"
+            ],
+            "turn_reason": null
+          },
+          "kind": "lease_granted",
+          "security": true,
+          "sequence": "2",
+          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+          "turn": null
+        },
+        {
+          "approval": null,
+          "at": "2026-10-21T21:14:19.078735097Z",
+          "category": "session",
+          "disposition": "normal",
+          "facts": {
+            "approval_effect": null,
+            "approval_kind": null,
+            "approval_reason": null,
+            "desired": null,
+            "exit": null,
+            "expected": null,
+            "expires_at": null,
+            "revocation": null,
+            "runtime_version": null,
+            "scopes": null,
+            "turn_reason": null
+          },
+          "kind": "session_prepared",
+          "security": false,
+          "sequence": "1",
+          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+          "turn": null
+        }
+      ],
+      "gap": false,
+      "head": "22",
+      "older": null,
+      "schema_version": 1,
+      "stream": "e3ff787a-e831-47b5-ad27-69f635291f42"
+    },
+    "schema_version": 1
+  },
+  "binding_receipt": {
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "schema_version": 1,
+    "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+    "workspace": "/tmp/wyss-native-local-e8069df9-1d3e-49d3-a79b-1c954f0a9baa/repo/work"
+  },
+  "decision_receipt": {
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "id": "0bf4ff07-3159-41e9-8171-1e4e4ea38b66",
+    "schema_version": 1,
+    "state": "accepted"
+  },
+  "failure": {
+    "code": "stale",
+    "retry": false,
+    "retry_in_ms": null
+  },
+  "lease_receipt": {
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "lease": {
+      "expires_at": "2026-10-21T21:19:21.123230344Z",
+      "id": "ad207084-e4be-4a11-9841-55b3ea3e690b",
+      "issued_at": "2026-10-21T21:14:21.123230344Z",
+      "revision": 1,
+      "revocation": null,
+      "scopes": [
+        "session_create",
+        "session_resume",
+        "turn_start",
+        "command_execute",
+        "file_change"
+      ],
+      "state": "active"
+    },
+    "schema_version": 1
+  },
+  "models": {
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "complete": true,
+    "entries": [
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": true,
+        "model_id": "model-0",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-1",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-2",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-3",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-4",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-5",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-6",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-7",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-8",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-9",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-10",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-11",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-12",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-13",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-14",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-15",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-16",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-17",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-18",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-19",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-20",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-21",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-22",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-23",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-24",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-25",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-26",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-27",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-28",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-29",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-30",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-31",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-32",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-33",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-34",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-35",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-36",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-37",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-38",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-39",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-40",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-41",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-42",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-43",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      },
+      {
+        "default_effort": "medium",
+        "display_name": "Synthetic model",
+        "efforts": [
+          "medium"
+        ],
+        "is_default": false,
+        "model_id": "model-44",
+        "provider_id": null,
+        "replaced_by": null,
+        "retires_at": null
+      }
+    ],
+    "fence": {
+      "generation": 1,
+      "instance": "22bb67f9-4d5b-4b33-a44b-290eeaba2988",
+      "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19"
+    },
+    "observed": null,
+    "schema_version": 1,
+    "version": "0.159.0"
+  },
+  "runtime_receipt": {
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "desired": "running",
+    "generation": 1,
+    "revision": 1,
+    "schema_version": 1,
+    "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19"
+  },
+  "session_attached": {
+    "approval": null,
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "binding": {
+      "attached_instance": "22bb67f9-4d5b-4b33-a44b-290eeaba2988",
+      "mode": "local_tools_v1",
+      "observed_model": null,
+      "operation": null,
+      "state": "bound_attached",
+      "workspace": "/tmp/wyss-native-local-e8069df9-1d3e-49d3-a79b-1c954f0a9baa/repo/work"
+    },
+    "gates": [
+      {
+        "action": "turn_start",
+        "reason": "allowed"
+      },
+      {
+        "action": "command_execute",
+        "reason": "allowed"
+      },
+      {
+        "action": "file_change",
+        "reason": "allowed"
+      }
+    ],
+    "lease": {
+      "expires_at": "2026-10-21T21:19:21.123230344Z",
+      "id": "ad207084-e4be-4a11-9841-55b3ea3e690b",
+      "issued_at": "2026-10-21T21:14:21.123230344Z",
+      "revision": 1,
+      "revocation": null,
+      "scopes": [
+        "session_create",
+        "session_resume",
+        "turn_start",
+        "command_execute",
+        "file_change"
+      ],
+      "state": "active"
+    },
+    "schema_version": 1,
+    "session": {
+      "created_at": "2026-10-21T21:14:19.310393265Z",
+      "id": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+      "position": "9",
+      "revision": 1,
+      "runtime": {
+        "actual": "ready",
+        "budget_failure": null,
+        "desired": "running",
+        "diagnostic": null,
+        "fence": {
+          "generation": 1,
+          "instance": "22bb67f9-4d5b-4b33-a44b-290eeaba2988",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19"
+        },
+        "generation": 1,
+        "instance": "22bb67f9-4d5b-4b33-a44b-290eeaba2988",
+        "model_count": 45,
+        "profile": "codex_local_tools_v1",
+        "revision": 1,
+        "version": "0.159.0",
+        "workspace": "/tmp/wyss-native-local-e8069df9-1d3e-49d3-a79b-1c954f0a9baa/repo/work"
+      },
+      "state": "prepared",
+      "updated_at": "2026-10-21T21:14:19.310393265Z"
+    },
+    "turns": [],
+    "turns_partial": false
+  },
+  "session_ready": {
+    "approval": null,
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "binding": {
+      "attached_instance": null,
+      "mode": null,
+      "observed_model": null,
+      "operation": null,
+      "state": "unbound",
+      "workspace": null
+    },
+    "gates": [
+      {
+        "action": "turn_start",
+        "reason": "lease_missing"
+      },
+      {
+        "action": "command_execute",
+        "reason": "lease_missing"
+      },
+      {
+        "action": "file_change",
+        "reason": "lease_missing"
+      }
+    ],
+    "lease": null,
+    "schema_version": 1,
+    "session": {
+      "created_at": "2026-10-21T21:14:19.310393265Z",
+      "id": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+      "position": "9",
+      "revision": 1,
+      "runtime": {
+        "actual": "ready",
+        "budget_failure": null,
+        "desired": "running",
+        "diagnostic": null,
+        "fence": {
+          "generation": 1,
+          "instance": "22bb67f9-4d5b-4b33-a44b-290eeaba2988",
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19"
+        },
+        "generation": 1,
+        "instance": "22bb67f9-4d5b-4b33-a44b-290eeaba2988",
+        "model_count": 45,
+        "profile": "codex_local_tools_v1",
+        "revision": 1,
+        "version": "0.159.0",
+        "workspace": "/tmp/wyss-native-local-e8069df9-1d3e-49d3-a79b-1c954f0a9baa/repo/work"
+      },
+      "state": "prepared",
+      "updated_at": "2026-10-21T21:14:19.310393265Z"
+    },
+    "turns": [],
+    "turns_partial": false
+  },
+  "session_receipt": {
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "id": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+    "schema_version": 1
+  },
+  "session_stopped": {
+    "approval": null,
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "binding": {
+      "attached_instance": null,
+      "mode": null,
+      "observed_model": null,
+      "operation": null,
+      "state": "unbound",
+      "workspace": null
+    },
+    "gates": [
+      {
+        "action": "turn_start",
+        "reason": "lease_missing"
+      },
+      {
+        "action": "command_execute",
+        "reason": "lease_missing"
+      },
+      {
+        "action": "file_change",
+        "reason": "lease_missing"
+      }
+    ],
+    "lease": null,
+    "schema_version": 1,
+    "session": {
+      "created_at": "2026-10-21T21:14:19.310393265Z",
+      "id": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+      "position": "9",
+      "revision": 1,
+      "runtime": {
+        "actual": "stopped",
+        "budget_failure": null,
+        "desired": "stopped",
+        "diagnostic": null,
+        "fence": {
+          "generation": 0,
+          "instance": null,
+          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19"
+        },
+        "generation": 0,
+        "instance": null,
+        "model_count": 0,
+        "profile": null,
+        "revision": 0,
+        "version": null,
+        "workspace": null
+      },
+      "state": "prepared",
+      "updated_at": "2026-10-21T21:14:19.310393265Z"
+    },
+    "turns": [],
+    "turns_partial": false
+  },
+  "sessions": {
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "capacity": 2,
+    "head": "9",
+    "older": null,
+    "schema_version": 1,
+    "sessions": [
+      {
+        "created_at": "2026-10-21T21:14:19.310393265Z",
+        "id": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+        "position": "9",
+        "revision": 1,
+        "runtime": {
+          "actual": "stopped",
+          "budget_failure": null,
+          "desired": "stopped",
+          "diagnostic": null,
+          "fence": {
+            "generation": 0,
+            "instance": null,
+            "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19"
+          },
+          "generation": 0,
+          "instance": null,
+          "model_count": 0,
+          "profile": null,
+          "revision": 0,
+          "version": null,
+          "workspace": null
+        },
+        "state": "prepared",
+        "updated_at": "2026-10-21T21:14:19.310393265Z"
+      },
+      {
+        "created_at": "2026-10-21T21:14:19.078735097Z",
+        "id": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+        "position": "1",
+        "revision": 1,
+        "runtime": {
+          "actual": "stopped",
+          "budget_failure": null,
+          "desired": "stopped",
+          "diagnostic": null,
+          "fence": {
+            "generation": 0,
+            "instance": null,
+            "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1"
+          },
+          "generation": 0,
+          "instance": null,
+          "model_count": 0,
+          "profile": null,
+          "revision": 0,
+          "version": null,
+          "workspace": null
+        },
+        "state": "prepared",
+        "updated_at": "2026-10-21T21:14:19.078735097Z"
+      }
+    ]
+  },
+  "state": {
+    "active": true,
+    "authority": {
+      "closed_count": 0,
+      "instance_id": "00000000-0000-4000-8000-0000000000a1",
+      "last_sequence": "7",
+      "prepared_count": 1,
+      "protocol_version": 2,
+      "service_version": "0.2.0",
+      "storage_schema_version": 8,
+      "stream_id": "e3ff787a-e831-47b5-ad27-69f635291f42"
+    },
+    "epoch": 0,
+    "link": {
+      "fault": null,
+      "retry_in_ms": null,
+      "state": "connected"
+    },
+    "schema_version": 1
+  },
+  "state_inactive": {
+    "active": false,
+    "authority": null,
+    "epoch": 0,
+    "link": {
+      "fault": null,
+      "retry_in_ms": null,
+      "state": "stopped"
+    },
+    "schema_version": 1
+  },
+  "turn_reading": {
+    "approval": {
+      "expires_at": "2026-10-21T21:19:21.123230344Z",
+      "id": "0bf4ff07-3159-41e9-8171-1e4e4ea38b66",
+      "kind": "command_execution"
+    },
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "events": [
+      {
+        "kind": "text",
+        "sequence": "1",
+        "text": "ASSISTANT_SENTINEL"
+      }
+    ],
+    "gap": false,
+    "more": false,
+    "next": "1",
+    "schema_version": 1,
+    "turn": {
+      "generation": 1,
+      "live": true,
+      "turn": {
+        "cancellable": true,
+        "ended_at": null,
+        "id": "758383f5-4bc4-41d5-bc47-747427bade4e",
+        "output": true,
+        "reason": null,
+        "revision": 2,
+        "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+        "started_at": "2026-10-21T21:14:21.979951761Z",
+        "state": "running",
+        "updated_at": "2026-10-21T21:14:22.004723641Z"
+      }
+    }
+  },
+  "turn_receipt": {
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "id": "758383f5-4bc4-41d5-bc47-747427bade4e",
+    "schema_version": 1
+  },
+  "watch": {
+    "authority": "00000000-0000-4000-8000-0000000000a1",
+    "changed": true,
+    "head": "23",
+    "schema_version": 1,
+    "stream": "e3ff787a-e831-47b5-ad27-69f635291f42"
+  }
+}

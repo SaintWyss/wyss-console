@@ -386,6 +386,18 @@ impl Engine {
             .flatten();
         Some((phase, identity))
     }
+    /// What the session's live launch was asked to be: the workspace of a local-tools launch
+    /// (none for inference) and how many models it listed. Nothing here attests anything.
+    pub fn launch_facts(&self, session: &str) -> Option<(Option<String>, usize)> {
+        self.live.get(session).map(|live| {
+            (
+                live.requested_workspace.clone(),
+                live.models
+                    .as_ref()
+                    .map_or(0, |(models, _, _)| models.len()),
+            )
+        })
+    }
     /// The lease admitting the session's turn was lost: the in-memory turn and approvals end.
     pub fn lease_lost(&mut self, session: &str, lease_id: &str) {
         let now = self.ms(Instant::now());

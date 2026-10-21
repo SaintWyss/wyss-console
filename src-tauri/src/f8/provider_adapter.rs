@@ -873,7 +873,7 @@ mod native_approvals;
 
 #[cfg(test)]
 #[path = "native_process_tests.rs"]
-mod native_process_tests;
+pub(crate) mod native_process_tests;
 
 #[cfg(test)]
 mod tests {

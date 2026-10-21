@@ -1,7 +1,7 @@
 //! The window's service against a real prepared application: every call crosses the
 //! protocol-2 transport, the authority, the engine and an owned fixture process.
 use super::{
-    harness::{Harness, eventually},
+    harness::{Harness, NativeHarness, eventually},
     *,
 };
 use crate::{
@@ -13,6 +13,7 @@ use crate::{
     },
     control::store::uuid,
     sessions::AgentMode,
+    turns::ApprovalDetail,
 };
 
 const ALL: [ExecutionScope; 5] = [
@@ -23,9 +24,9 @@ const ALL: [ExecutionScope; 5] = [
     ExecutionScope::FileChange,
 ];
 
-fn ready(h: &Harness, id: &ManagedSessionId) -> SessionDetail {
+fn ready(gui: &F8Gui, id: &ManagedSessionId) -> SessionDetail {
     eventually(|| {
-        let detail = h.gui.session(id.clone()).ok()?;
+        let detail = gui.session(id.clone()).ok()?;
         (detail.session.runtime.actual == ActualState::Ready
             && detail.session.runtime.instance.is_some())
         .then_some(detail)
@@ -75,7 +76,7 @@ fn the_window_drives_a_session_from_prepare_to_a_decided_approval_and_a_stopped_
         )
         .unwrap();
     assert_eq!(started.generation, 1);
-    let detail = ready(&h, &session);
+    let detail = ready(&h.gui, &session);
     let fence = detail.session.runtime.fence.clone();
     assert_eq!(fence.generation, 1);
 
@@ -179,4 +180,319 @@ fn the_window_drives_a_session_from_prepare_to_a_decided_approval_and_a_stopped_
     });
     let audit = h.gui.audit_latest().unwrap();
     assert!(!audit.page.events.is_empty());
+}
+
+/// The shape of a value: its keys and the kinds of its leaves, not the leaves.
+fn shape(value: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value as V;
+    match value {
+        V::Null => V::Null,
+        V::Bool(_) => "bool".into(),
+        V::Number(_) => "number".into(),
+        V::String(_) => "string".into(),
+        V::Array(items) => V::Array(items.first().map(shape).into_iter().collect()),
+        V::Object(map) => V::Object(map.iter().map(|(k, v)| (k.clone(), shape(v))).collect()),
+    }
+}
+/// Two shapes agree when every key is on both sides and every leaf has the same kind. A null
+/// stands for "not present in this reading" and agrees with anything; an empty list too.
+fn agree(a: &serde_json::Value, b: &serde_json::Value, path: &str) -> Result<(), String> {
+    use serde_json::Value as V;
+    match (a, b) {
+        (V::Null, _) | (_, V::Null) => Ok(()),
+        (V::Array(x), V::Array(y)) => match (x.first(), y.first()) {
+            (Some(x), Some(y)) => agree(x, y, &format!("{path}[]")),
+            _ => Ok(()),
+        },
+        (V::Object(x), V::Object(y)) => {
+            let keys = |m: &serde_json::Map<String, V>| m.keys().cloned().collect::<Vec<_>>();
+            if keys(x) != keys(y) {
+                return Err(format!("{path}: keys {:?} vs {:?}", keys(x), keys(y)));
+            }
+            x.iter()
+                .try_for_each(|(k, v)| agree(v, &y[k], &format!("{path}.{k}")))
+        }
+        (x, y) if std::mem::discriminant(x) == std::mem::discriminant(y) => Ok(()),
+        (x, y) => Err(format!("{path}: {x} vs {y}")),
+    }
+}
+
+const FIXTURE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../tests/fixtures/f8-gui-v1.json"
+);
+
+#[test]
+fn every_payload_the_window_parses_keeps_the_shape_of_the_committed_fixture() {
+    use serde_json::{Value, json, to_value};
+    let h = NativeHarness::start("approval_command");
+    let mut got = serde_json::Map::new();
+    let mut put = |name: &str, value: Value| {
+        got.insert(name.to_owned(), value);
+    };
+    put(
+        "state_inactive",
+        to_value(F8Gui::inactive().state()).unwrap(),
+    );
+    put("state", to_value(h.gui.state()).unwrap());
+    let prepared = h.gui.prepare(uuid()).unwrap();
+    put("session_receipt", to_value(&prepared).unwrap());
+    let session = prepared.id;
+    put("sessions", to_value(h.gui.sessions(None).unwrap()).unwrap());
+    let stopped = h.gui.session(session.clone()).unwrap();
+    put("session_stopped", to_value(&stopped).unwrap());
+    let started = h
+        .gui
+        .runtime_start(
+            uuid(),
+            session.clone(),
+            stopped.session.runtime.revision,
+            stopped.session.runtime.generation,
+            AgentMode::LocalTools,
+            Some(h.workspace.clone()),
+        )
+        .unwrap();
+    put("runtime_receipt", to_value(started).unwrap());
+    let detail = ready(&h.gui, &session);
+    put("session_ready", to_value(&detail).unwrap());
+    let fence = detail.session.runtime.fence.clone();
+    put(
+        "models",
+        to_value(h.gui.models(fence.clone()).unwrap()).unwrap(),
+    );
+    let lease = h
+        .gui
+        .lease_grant(
+            uuid(),
+            fence.clone(),
+            detail.session.revision,
+            ALL.to_vec(),
+            300,
+        )
+        .unwrap();
+    put("lease_receipt", to_value(&lease).unwrap());
+    let intent = uuid();
+    let bound = eventually(|| {
+        match h.gui.binding_create(
+            intent.clone(),
+            fence.clone(),
+            detail.session.revision,
+            h.workspace.clone(),
+        ) {
+            Ok(receipt) => Some(receipt),
+            Err(e) if e.code == F8Failure::Busy => None,
+            Err(e) => panic!("{e:?}"),
+        }
+    });
+    put("binding_receipt", to_value(bound).unwrap());
+    let attached = eventually(|| {
+        let d = h.gui.session(session.clone()).ok()?;
+        (d.binding.state == BindingState::BoundAttached).then_some(d)
+    });
+    put("session_attached", to_value(&attached).unwrap());
+    // The runtime's own preflight may still be running: the same intent is asked again.
+    let intent = uuid();
+    let turn = eventually(|| {
+        match h.gui.turn_start(
+            intent.clone(),
+            fence.clone(),
+            attached.session.revision,
+            "approve".into(),
+        ) {
+            Ok(receipt) => Some(receipt),
+            Err(e) if e.code == F8Failure::Busy => None,
+            Err(e) => panic!("{e:?}"),
+        }
+    });
+    put("turn_receipt", to_value(&turn).unwrap());
+    let reading = eventually(|| {
+        let r = h.gui.turn(turn.id.clone(), None, true).ok()?;
+        r.approval.is_some().then_some(r)
+    });
+    put("turn_reading", to_value(&reading).unwrap());
+    let notice = reading.approval.unwrap();
+    let approval = h.gui.approval(notice.id.clone(), None, None).unwrap();
+    put("approval", to_value(&approval).unwrap());
+    let decision = uuid();
+    let decided = eventually(|| {
+        match h.gui.approval_respond(
+            decision.clone(),
+            fence.clone(),
+            notice.id.clone(),
+            approval.approval.revision,
+            ApprovalDecision::Accept,
+        ) {
+            Ok(receipt) => Some(receipt),
+            Err(e) if e.code == F8Failure::Busy => None,
+            Err(e) => panic!("{e:?}"),
+        }
+    });
+    put("decision_receipt", to_value(decided).unwrap());
+    let audit = h.gui.audit_latest().unwrap();
+    put("audit", to_value(&audit).unwrap());
+    let stream = audit.page.stream.clone();
+    let head = audit.page.head;
+    h.gui.prepare(uuid()).unwrap();
+    put(
+        "watch",
+        to_value(h.gui.audit_wait(stream, head, 1_000).unwrap()).unwrap(),
+    );
+    put(
+        "failure",
+        to_value(
+            h.gui
+                .prepare(uuid())
+                .and(h.gui.close(
+                    uuid(),
+                    FenceView {
+                        session: session.clone(),
+                        generation: 99,
+                        instance: None,
+                    },
+                    1,
+                ))
+                .unwrap_err(),
+        )
+        .unwrap(),
+    );
+    let got = Value::Object(got);
+    if std::env::var_os("WYSS_F8_WRITE_FIXTURES").is_some() {
+        std::fs::write(FIXTURE, serde_json::to_string_pretty(&got).unwrap() + "\n").unwrap();
+    }
+    let committed: Value = serde_json::from_str(
+        &std::fs::read_to_string(FIXTURE).expect("tests/fixtures/f8-gui-v1.json is committed"),
+    )
+    .unwrap();
+    for (name, value) in got.as_object().unwrap() {
+        let reference = committed
+            .get(name)
+            .unwrap_or_else(|| panic!("fixture {name}"));
+        agree(&shape(value), &shape(reference), name)
+            .unwrap_or_else(|why| panic!("the window's payload {name} drifted: {why}"));
+    }
+    assert_eq!(
+        json!(committed.as_object().unwrap().len()),
+        json!(got.as_object().unwrap().len())
+    );
+}
+
+/// Retries an intent while the authority is still working on the same one, as the window does.
+#[track_caller]
+fn settled<T>(mut ask: impl FnMut() -> Result<T, F8Error>) -> T {
+    eventually(|| match ask() {
+        Ok(value) => Some(value),
+        Err(e) if e.code == F8Failure::Busy => None,
+        Err(e) => panic!("{e:?}"),
+    })
+}
+
+/// A session of the native fixture with a ready runtime, an active lease and an attached
+/// binding: the state in which the window can start a turn.
+fn native_session(h: &NativeHarness) -> (ManagedSessionId, FenceView, SessionDetail) {
+    let session = h.gui.prepare(uuid()).unwrap().id;
+    let row = h.gui.session(session.clone()).unwrap().session;
+    h.gui
+        .runtime_start(
+            uuid(),
+            session.clone(),
+            row.runtime.revision,
+            row.runtime.generation,
+            AgentMode::LocalTools,
+            Some(h.workspace.clone()),
+        )
+        .unwrap();
+    let ready = ready(&h.gui, &session);
+    let fence = ready.session.runtime.fence.clone();
+    h.gui
+        .lease_grant(
+            uuid(),
+            fence.clone(),
+            ready.session.revision,
+            ALL.to_vec(),
+            300,
+        )
+        .unwrap();
+    let intent = uuid();
+    settled(|| {
+        h.gui.binding_create(
+            intent.clone(),
+            fence.clone(),
+            ready.session.revision,
+            h.workspace.clone(),
+        )
+    });
+    let attached = eventually(|| {
+        let d = h.gui.session(session.clone()).ok()?;
+        (d.binding.state == BindingState::BoundAttached).then_some(d)
+    });
+    (session, fence, attached)
+}
+
+/// A turn that has proposed an action and waits for the window to decide it.
+fn native_turn(
+    h: &NativeHarness,
+    fence: &FenceView,
+    detail: &SessionDetail,
+) -> (crate::contracts::identities::ManagedTurnId, ApprovalDetail) {
+    let intent = uuid();
+    let turn = settled(|| {
+        h.gui.turn_start(
+            intent.clone(),
+            fence.clone(),
+            detail.session.revision,
+            "work".into(),
+        )
+    })
+    .id;
+    let notice = eventually(|| h.gui.turn(turn.clone(), None, true).ok()?.approval);
+    (turn, h.gui.approval(notice.id, None, None).unwrap())
+}
+
+#[test]
+fn a_native_runtime_reports_what_it_was_asked_to_be_and_why_it_ended_when_it_did_not_mean_to() {
+    use crate::contracts::control::{RuntimeDiagnostic, RuntimeSafetyProfile};
+    let h = NativeHarness::start("approval_command_crash_after");
+    let (session, fence, attached) = native_session(&h);
+    let runtime = &attached.session.runtime;
+    assert_eq!(
+        runtime.profile,
+        Some(RuntimeSafetyProfile::CodexLocalToolsV1)
+    );
+    assert!(
+        runtime
+            .workspace
+            .as_deref()
+            .is_some_and(|w| w.ends_with("/repo/work"))
+    );
+    assert!(runtime.model_count > 0);
+    let (_, approval) = native_turn(&h, &fence, &attached);
+    // Accepting makes the fixture runtime exit without a word: the authority did not mean it.
+    let decision = uuid();
+    settled(|| {
+        h.gui.approval_respond(
+            decision.clone(),
+            fence.clone(),
+            approval.approval.id.clone(),
+            approval.approval.revision,
+            ApprovalDecision::Accept,
+        )
+    });
+    let failed = eventually(|| {
+        let d = h.gui.session(session.clone()).ok()?;
+        (d.session.runtime.actual == ActualState::Failed).then_some(d)
+    });
+    assert_eq!(
+        failed.session.runtime.diagnostic,
+        Some(RuntimeDiagnostic::ChildExited)
+    );
+    assert_eq!(failed.session.runtime.fence.instance, None);
+    assert_eq!(failed.session.runtime.profile, None);
+    // The fence the window held is stale now: nothing is decided against a launch that is gone.
+    let stale = h
+        .gui
+        .turn_start(uuid(), fence, failed.session.revision, "again".into());
+    assert!(matches!(
+        stale.unwrap_err().code,
+        F8Failure::Stale | F8Failure::PermissionDenied
+    ));
 }

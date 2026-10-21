@@ -9,7 +9,7 @@ use crate::f8::{
 };
 use std::{fs, os::unix::fs::PermissionsExt, process::Command, time::Duration};
 
-struct Root(PathBuf);
+pub(crate) struct Root(pub(crate) PathBuf);
 impl Drop for Root {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
@@ -347,7 +347,7 @@ fn local_tools_cannot_use_the_inference_factory() {
     ));
 }
 
-fn local_fixture_plan(
+pub(crate) fn local_fixture_plan(
     scenario: &str,
 ) -> (Root, Attachment, crate::f8::launcher::NativeLocalToolsPlan) {
     let (root, attachment, plan) = local_fixture_plan_result(scenario);

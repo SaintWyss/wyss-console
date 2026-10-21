@@ -296,20 +296,70 @@ impl Authority {
             .map_err(|_| E::StorageUnavailable)?;
         let (desired, revision, generation) = row.unwrap_or(("stopped".into(), 0, 0));
         let view = self.engine.runtime_view(s);
-        let (actual, identity) = match &view {
+        let (mut actual, identity) = match &view {
             Some((phase, id)) => (*phase, id.clone()),
             None => ("stopped", None),
         };
-        let value = json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":desired,
+        // What the live launch was asked to be, and what it listed once it is ready.
+        let launch = self.engine.launch_facts(s);
+        let (profile, workspace, models) = match &launch {
+            Some((Some(root), listed)) => {
+                (Some("codex_local_tools_v1"), Some(root.clone()), *listed)
+            }
+            Some((None, listed)) => (Some("codex_inference_v1"), None, *listed),
+            None => (None, None, 0),
+        };
+        let models = if actual == "ready" { models } else { 0 };
+        // A runtime that was meant to run and whose launch ended unexpectedly says why, from
+        // the durable record of that exit. Nothing about a missing record is invented.
+        let (mut diagnostic, mut budget) = (None, None);
+        if launch.is_none() && desired == "running" && generation > 0 {
+            if let Some((kind, key)) = self.unexpected_exit(s, generation)? {
+                actual = "failed";
+                diagnostic = Some(kind);
+                budget = key;
+            }
+        }
+        let mut value = json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":desired,
             "revision":revision.max(0),"actual_state":actual,
             "runtime_instance_id":identity.as_ref().map(|i| i.runtime_instance_id.clone()),
             "runtime_version":identity.as_ref().map(|i| i.observed_version.clone()),
             "compatibility":if identity.is_some() { "compatible" } else { "unknown" },
-            "model_count":0,"diagnostic":null,
+            "model_count":models,"diagnostic":diagnostic,
             "outbound_methods":{"initialize":0,"initialized":0,"model_list":0},
             "managed_session_id":s,"generation":generation,
-            "runtime_identity":identity,"budget_failure":null});
+            "runtime_identity":identity,"budget_failure":budget});
+        if let Some(profile) = profile {
+            value["runtime_safety_profile"] = json!(profile);
+        }
+        if let Some(root) = workspace {
+            value["workspace_root"] = json!(root);
+        }
         Ok(json!({"kind":"runtime_status","value":value}))
+    }
+
+    /// The closed exit word, and the closed budget key for a budget exit, of the newest
+    /// unexpected exit of one generation of a session.
+    fn unexpected_exit(
+        &self,
+        session: &str,
+        generation: i64,
+    ) -> ControlResult<Option<(String, Option<String>)>> {
+        self.engine
+            .connection()
+            .query_row(
+                "SELECT json_extract(envelope,'$.payload.exit_kind'), json_extract(envelope,'$.payload.budget_failure')
+                 FROM control_events
+                 WHERE json_extract(envelope,'$.event_type')='authority.runtime.instance_exited'
+                   AND json_extract(envelope,'$.session_id')=?1
+                   AND json_extract(envelope,'$.payload.generation')=?2
+                   AND json_extract(envelope,'$.payload.expected')=0
+                 ORDER BY sequence DESC LIMIT 1",
+                rusqlite::params![session, generation],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+            )
+            .optional()
+            .map_err(|_| E::StorageUnavailable)
     }
 
     /// The fence names the live attested launch, or the request refuses before anything changes.
