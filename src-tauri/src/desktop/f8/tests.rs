@@ -275,3 +275,73 @@ fn only_the_command_line_selects_an_authority_and_the_entry_points_name_no_conne
     assert!(manifest.contains("f8-fixture = []"));
     assert!(manifest.contains("required-features = [\"f8-fixture\"]"));
 }
+
+/// The framework itself, with the access-control list the build resolved from the real
+/// configuration and capabilities: the commands of the interface are granted to the `main`
+/// window and to no other window, and a command the build did not declare is not reachable.
+#[test]
+fn the_resolved_acl_grants_the_interface_to_the_main_window_and_to_no_other() {
+    use tauri::{
+        WebviewWindowBuilder,
+        ipc::{CallbackFn, InvokeBody},
+        test::{INVOKE_KEY, get_ipc_response, mock_builder},
+        webview::InvokeRequest,
+    };
+    let app = mock_builder()
+        .manage(F8Gui::inactive())
+        .manage(WorkspaceSelections::default())
+        .invoke_handler(tauri::generate_handler![
+            f8_state,
+            f8_sessions,
+            f8_session_prepare
+        ])
+        .build(tauri::generate_context!())
+        .expect("the application builds with the real configuration");
+    let ask = |label: &str, cmd: &str, body: Value| {
+        use tauri::Manager;
+        let window = match app.get_webview_window(label) {
+            Some(window) => window,
+            None => WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap(),
+        };
+        get_ipc_response(
+            &window,
+            InvokeRequest {
+                cmd: cmd.into(),
+                callback: CallbackFn(0),
+                error: CallbackFn(1),
+                url: "tauri://localhost".parse().unwrap(),
+                body: InvokeBody::Json(body),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+        )
+    };
+    // Granted to `main`: the command runs (inactive, so it answers that, but it is reached).
+    let state = ask("main", "f8_state", json!({})).expect("main may read the state");
+    assert_eq!(
+        state.deserialize::<Value>().unwrap()["active"],
+        json!(false)
+    );
+    let sessions = ask("main", "f8_sessions", json!({"request": {}}));
+    assert!(
+        sessions.is_err(),
+        "inactive: the command is reached and refuses"
+    );
+    let refused = serde_json::to_value(sessions.unwrap_err()).unwrap();
+    assert_eq!(refused["code"], json!("inactive"));
+    // Another window gets the framework's own refusal, not the command's.
+    for command in ["f8_state", "f8_sessions", "f8_session_prepare"] {
+        let denied = ask("intruder", command, json!({"request": {}})).unwrap_err();
+        let text = denied.to_string();
+        assert!(
+            text.contains("not allowed") || text.contains("not found") || text.contains("scope"),
+            "{command}: {text}"
+        );
+        assert!(
+            !text.contains("inactive"),
+            "{command} must not reach the command: {text}"
+        );
+    }
+}
