@@ -1265,6 +1265,9 @@ impl Authority {
         if self.recovery_pending {
             // Keep the recovery edge set on any SQLite/audit failure; next tick retries.
             Writer::new(self.engine.connection_mut(), authority)?.recover()?;
+            // A binding the lost runtime was creating or resuming is uncertain, not pending: it
+            // is recorded as such so it can be seen, and abandoned, instead of waiting forever.
+            super::operations::recover_bindings(&mut self.engine)?;
             let live: Vec<String> = self.tickets.keys().cloned().collect();
             for turn in live {
                 let state: Option<String> = self

@@ -81,6 +81,7 @@ for line in sys.stdin:
         continue
     v=json.loads(line)
     if v['method'] in ('thread/start','thread/resume'):
+        if behavior.get('crash_on_thread'): os._exit(9)
         emit(dict(kind='binding_confirmed',operation_id=v['operation_id'],provider_thread_id=v.get('thread_id') or 'fixture-'+v['operation_id']))
     elif v['method']=='turn/start':
         active=v['turn']
@@ -382,6 +383,8 @@ struct Raw {
     stream: UnixStream,
     authority: Option<String>,
     stop: AtomicBool,
+    /// Every method this client sent, and whether the authority answered it with a result.
+    log: Arc<Mutex<Vec<(String, bool)>>>,
 }
 impl Raw {
     fn connect(handle: &ApplicationHandle) -> Self {
@@ -392,6 +395,7 @@ impl Raw {
             stream: client,
             authority: None,
             stop: AtomicBool::new(false),
+            log: Arc::default(),
         }
     }
     fn exchange(&mut self, bytes: &[u8]) -> Value {
@@ -421,7 +425,12 @@ impl Raw {
                     .unwrap_or_else(|| uuid().as_str().to_owned())
             );
         }
-        self.exchange(&serde_json::to_vec(&request).unwrap())
+        let answer = self.exchange(&serde_json::to_vec(&request).unwrap());
+        self.log
+            .lock()
+            .unwrap()
+            .push((method.to_owned(), answer["error"].is_null()));
+        answer
     }
     fn code(answer: &Value) -> Option<&str> {
         answer["error"]["code"].as_str()
@@ -2270,4 +2279,495 @@ fn f8_18_a_workspace_or_profile_replaced_during_dispatch_writes_nothing() {
     );
     assert!(app.frames(&s.id, 3).is_empty());
     assert_eq!(app.sent(&s.id, 1, "approval"), 0);
+}
+
+// ------------------------------------------------------------------------ the 29 methods
+
+/// The call is answered with a result, asking again while the authority is still working on
+/// the very same request.
+fn ok(raw: &mut Raw, method: &str, params: Value) -> Value {
+    eventually(|| {
+        let answer = raw.send(method, params.clone());
+        match Raw::code(&answer) {
+            Some("runtime_operation_in_progress") => None,
+            Some(code) => panic!("{method} was refused as {code}: {answer}"),
+            None => Some(answer),
+        }
+    })
+}
+fn value(answer: &Value) -> &Value {
+    &answer["result"]["value"]
+}
+
+#[test]
+fn all_29_methods_are_answered_and_refused_through_the_transport() {
+    let app = App::start(Options {
+        limit: 2,
+        tools: true,
+        ..Options::default()
+    });
+    let mut raw = app.raw();
+    let log = raw.log.clone();
+    let hello = raw.hello();
+    assert_eq!(value(&hello)["protocol_version"], 2);
+    let status = ok(&mut raw, "authority/status", json!({}));
+    assert_eq!(value(&status)["storage_schema_version"], 8);
+
+    // Sessions.
+    let prepared = ok(
+        &mut raw,
+        "managedSession/prepare",
+        json!({"intent_id":uuid().as_str(),"adapter_id":"codex","runtime_kind":"codex"}),
+    );
+    let session = value(&prepared)["managed_session_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    ok(
+        &mut raw,
+        "managedSession/get",
+        json!({"managed_session_id":session}),
+    );
+    let listed = ok(
+        &mut raw,
+        "managedSession/list",
+        json!({"after":null,"limit":50}),
+    );
+    assert!(value(&listed)["sessions"].as_array().unwrap().len() >= 2);
+
+    // Runtime.
+    let workspace = app.workspace();
+    let target = json!({"adapter_id":"codex","runtime_kind":"codex","managed_session_id":session});
+    ok(
+        &mut raw,
+        "runtime/start",
+        json!({"intent_id":uuid().as_str(),"adapter_id":"codex","runtime_kind":"codex",
+        "managed_session_id":session,"expected_revision":0,"expected_generation":0,
+        "safety_profile":"codex_local_tools_v1","workspace_root":workspace}),
+    );
+    let live = eventually(|| {
+        let status = ok(&mut raw, "runtime/status", target.clone());
+        (value(&status)["actual_state"] == "ready").then_some(status)
+    });
+    let identity = &value(&live)["runtime_identity"];
+    let fence = json!({"managed_session_id":session,"generation":identity["generation"],
+        "runtime_instance_id":identity["runtime_instance_id"]});
+    // The fixture child lists no models; the listing answers that it is not there to read.
+    let models = raw.send(
+        "runtime/model/list",
+        json!({"adapter_id":"codex","runtime_kind":"codex",
+        "managed_session_id":session,"expected_generation":identity["generation"],
+        "expected_runtime_instance_id":identity["runtime_instance_id"],"cursor":null,"limit":20}),
+    );
+    assert_eq!(
+        Raw::code(&models),
+        Some("runtime_operation_in_progress"),
+        "{models}"
+    );
+
+    // Leases and the gate.
+    let lease = ok(
+        &mut raw,
+        "executionLease/grant",
+        json!({"intent_id":uuid().as_str(),"session_id":session,
+        "expected_session_revision":1,"scopes":["session_create","session_resume","turn_start","command_execute","file_change"],
+        "ttl_seconds":300,"runtime_fence":fence}),
+    );
+    let lease_id = value(&lease)["lease_id"].as_str().unwrap().to_owned();
+    ok(&mut raw, "executionLease/get", json!({"lease_id":lease_id}));
+    let active = ok(
+        &mut raw,
+        "executionLease/active",
+        json!({"session_id":session}),
+    );
+    assert_eq!(value(&active)["lease_id"], lease_id.as_str());
+    ok(
+        &mut raw,
+        "executionLease/renew",
+        json!({"intent_id":uuid().as_str(),"lease_id":lease_id,
+        "expected_revision":1,"ttl_seconds":600,"runtime_fence":fence}),
+    );
+    ok(
+        &mut raw,
+        "executionGate/status",
+        json!({"session_id":session,"action":"turn_start"}),
+    );
+
+    // Binding.
+    ok(
+        &mut raw,
+        "managedSession/runtime/create",
+        json!({"intent_id":uuid().as_str(),"managed_session_id":session,
+        "expected_session_revision":1,"workspace_root":workspace,"runtime_fence":fence}),
+    );
+    let bound = eventually(|| {
+        let r = ok(
+            &mut raw,
+            "managedSession/runtime/status",
+            json!({"managed_session_id":session}),
+        );
+        (value(&r)["state"] == "bound_attached").then_some(r)
+    });
+    assert_eq!(value(&bound)["attachment_profile"], "local_tools_v1");
+
+    // A turn, its stream, its approval and its end.
+    let turn = ok(
+        &mut raw,
+        "managedSession/turn/start",
+        json!({"intent_id":uuid().as_str(),
+        "managed_session_id":session,"expected_session_revision":1,"prompt":"approve","runtime_fence":fence}),
+    );
+    let turn_id = value(&turn)["managed_turn_id"].as_str().unwrap().to_owned();
+    ok(
+        &mut raw,
+        "managedSession/turn/status",
+        json!({"managed_turn_id":turn_id}),
+    );
+    let pending = eventually(|| {
+        let r = ok(
+            &mut raw,
+            "managedTurn/approval/pending",
+            json!({"managed_turn_id":turn_id}),
+        );
+        value(&r).is_object().then_some(r)
+    });
+    let approval_id = value(&pending)["approval"]["managed_approval_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let events = eventually(|| {
+        let r = ok(
+            &mut raw,
+            "managedSession/turn/events",
+            json!({"managed_turn_id":turn_id,"after_sequence":null,"limit":50}),
+        );
+        (!value(&r)["events"].as_array().unwrap().is_empty()).then_some(r)
+    });
+    assert!(events.to_string().contains("fixture stream"));
+    let shown = ok(
+        &mut raw,
+        "managedTurn/approval/status",
+        json!({"managed_approval_id":approval_id}),
+    );
+    assert_eq!(value(&shown)["acceptable"], true);
+    ok(
+        &mut raw,
+        "managedTurn/approval/respond",
+        json!({"intent_id":uuid().as_str(),"managed_approval_id":approval_id,
+        "expected_revision":1,"decision":"decline","runtime_fence":fence}),
+    );
+    ok(
+        &mut raw,
+        "managedSession/turn/cancel",
+        json!({"intent_id":uuid().as_str(),"managed_turn_id":turn_id,
+        "expected_revision":2,"runtime_fence":fence}),
+    );
+    eventually(|| {
+        let r = ok(
+            &mut raw,
+            "managedSession/turn/status",
+            json!({"managed_turn_id":turn_id}),
+        );
+        (value(&r)["turn"]["state"] == "interrupted").then_some(())
+    });
+
+    // The durable record.
+    let stream = value(&status)["stream_id"].as_str().unwrap().to_owned();
+    let read = ok(
+        &mut raw,
+        "audit/read",
+        json!({"stream_id":stream,"after_sequence":null,"limit":50}),
+    );
+    assert!(!value(&read)["events"].as_array().unwrap().is_empty());
+    let head = value(&ok(&mut raw, "authority/status", json!({})))["last_sequence"].clone();
+    ok(
+        &mut raw,
+        "audit/watch",
+        json!({"stream_id":stream,"after_sequence":null,"limit":5,"wait_ms":0}),
+    );
+    let _ = head;
+
+    // A new launch of the runtime, and the binding resumed on it under the lease that is held.
+    let status = ok(&mut raw, "runtime/status", target.clone());
+    ok(
+        &mut raw,
+        "runtime/stop",
+        json!({"intent_id":uuid().as_str(),"adapter_id":"codex","runtime_kind":"codex",
+            "managed_session_id":session,"expected_revision":value(&status)["revision"],
+            "expected_generation":identity["generation"],
+            "expected_runtime_instance_id":identity["runtime_instance_id"]}),
+    );
+    let stopped = eventually(|| {
+        let r = ok(&mut raw, "runtime/status", target.clone());
+        (value(&r)["actual_state"] == "stopped").then_some(r)
+    });
+    ok(
+        &mut raw,
+        "runtime/start",
+        json!({"intent_id":uuid().as_str(),"adapter_id":"codex","runtime_kind":"codex",
+            "managed_session_id":session,"expected_revision":value(&stopped)["revision"],
+            "expected_generation":value(&stopped)["generation"],
+            "safety_profile":"codex_local_tools_v1","workspace_root":workspace}),
+    );
+    let again = eventually(|| {
+        let r = ok(&mut raw, "runtime/status", target.clone());
+        (value(&r)["actual_state"] == "ready").then_some(r)
+    });
+    let identity = &value(&again)["runtime_identity"];
+    assert_eq!(identity["generation"], 2);
+    let fence = json!({"managed_session_id":session,"generation":identity["generation"],
+        "runtime_instance_id":identity["runtime_instance_id"]});
+    ok(
+        &mut raw,
+        "managedSession/runtime/resume",
+        json!({"intent_id":uuid().as_str(),"managed_session_id":session,
+            "expected_session_revision":1,"runtime_fence":fence}),
+    );
+    eventually(|| {
+        let r = ok(
+            &mut raw,
+            "managedSession/runtime/status",
+            json!({"managed_session_id":session}),
+        );
+        (value(&r)["state"] == "bound_attached").then_some(())
+    });
+
+    // Ending: revoke, stop, close.
+    let now = ok(&mut raw, "executionLease/get", json!({"lease_id":lease_id}));
+    ok(
+        &mut raw,
+        "executionLease/revoke",
+        json!({"intent_id":uuid().as_str(),"lease_id":lease_id,
+            "expected_revision":value(&now)["revision"]}),
+    );
+    let status = ok(&mut raw, "runtime/status", target.clone());
+    ok(
+        &mut raw,
+        "runtime/stop",
+        json!({"intent_id":uuid().as_str(),"adapter_id":"codex","runtime_kind":"codex",
+            "managed_session_id":session,"expected_revision":value(&status)["revision"],
+            "expected_generation":identity["generation"],
+            "expected_runtime_instance_id":identity["runtime_instance_id"]}),
+    );
+    let stopped = eventually(|| {
+        let r = ok(&mut raw, "runtime/status", target.clone());
+        (value(&r)["actual_state"] == "stopped").then_some(r)
+    });
+    ok(
+        &mut raw,
+        "managedSession/close",
+        json!({"intent_id":uuid().as_str(),"managed_session_id":session,
+            "expected_revision":1,"runtime_fence":{"managed_session_id":session,
+            "generation":value(&stopped)["generation"],"runtime_instance_id":null}}),
+    );
+
+    // A binding whose creation the runtime did not survive is uncertain, and is abandoned.
+    app.knobs
+        .queue
+        .lock()
+        .unwrap()
+        .push_back(json!({"crash_on_thread": true}));
+    let other = ok(
+        &mut raw,
+        "managedSession/prepare",
+        json!({"intent_id":uuid().as_str(),"adapter_id":"codex","runtime_kind":"codex"}),
+    );
+    let other = value(&other)["managed_session_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let other_target =
+        json!({"adapter_id":"codex","runtime_kind":"codex","managed_session_id":other});
+    ok(
+        &mut raw,
+        "runtime/start",
+        json!({"intent_id":uuid().as_str(),"adapter_id":"codex","runtime_kind":"codex",
+        "managed_session_id":other,"expected_revision":0,"expected_generation":0,
+        "safety_profile":"codex_local_tools_v1","workspace_root":workspace}),
+    );
+    let live = eventually(|| {
+        let r = ok(&mut raw, "runtime/status", other_target.clone());
+        (value(&r)["actual_state"] == "ready").then_some(r)
+    });
+    let identity = &value(&live)["runtime_identity"];
+    let fence = json!({"managed_session_id":other,"generation":identity["generation"],"runtime_instance_id":identity["runtime_instance_id"]});
+    ok(
+        &mut raw,
+        "executionLease/grant",
+        json!({"intent_id":uuid().as_str(),"session_id":other,"expected_session_revision":1,
+        "scopes":["session_create"],"ttl_seconds":300,"runtime_fence":fence}),
+    );
+    let create = json!({"intent_id":uuid().as_str(),"managed_session_id":other,"expected_session_revision":1,
+        "workspace_root":workspace,"runtime_fence":fence});
+    raw.send("managedSession/runtime/create", create);
+    let uncertain = eventually(|| {
+        let r = ok(
+            &mut raw,
+            "managedSession/runtime/status",
+            json!({"managed_session_id":other}),
+        );
+        (value(&r)["state"] == "indeterminate").then_some(r)
+    });
+    let operation = value(&uncertain)["operation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let dead = eventually(|| {
+        let r = ok(&mut raw, "runtime/status", other_target.clone());
+        matches!(
+            value(&r)["actual_state"].as_str(),
+            Some("failed" | "stopped")
+        )
+        .then_some(r)
+    });
+    ok(
+        &mut raw,
+        "managedSession/runtime/abandon",
+        json!({"intent_id":uuid().as_str(),"managed_session_id":other,
+        "operation_id":operation,"runtime_fence":{"managed_session_id":other,"generation":value(&dead)["generation"],"runtime_instance_id":null}}),
+    );
+    let after = ok(
+        &mut raw,
+        "managedSession/runtime/status",
+        json!({"managed_session_id":other}),
+    );
+    assert_eq!(value(&after)["state"], "unbound");
+
+    // Every method also refuses what is not its shape: unknown keys are never ignored.
+    for method in crate::contracts::control::METHODS {
+        if method == "authority/hello" {
+            continue;
+        }
+        let refused = raw.send(method, json!({"unknown":1}));
+        assert!(
+            matches!(Raw::code(&refused), Some("invalid_request")),
+            "{method}: {refused}"
+        );
+    }
+
+    // The ledger: every one of the 29 was answered with a result and was refused as well.
+    let log = log.lock().unwrap();
+    for method in crate::contracts::control::METHODS {
+        let answered = log.iter().any(|(m, ok)| m == method && *ok);
+        let refused = log.iter().any(|(m, ok)| m == method && !*ok);
+        // The listing of models can only be refused by the fixture; its answer is below.
+        if method == "runtime/model/list" {
+            assert!(refused, "{method} was never refused");
+            continue;
+        }
+        assert!(answered, "{method} was never answered with a result");
+        assert!(
+            refused || method == "authority/hello",
+            "{method} was never refused"
+        );
+    }
+}
+
+#[test]
+fn the_model_listing_is_answered_for_the_launch_that_made_it_and_for_no_other() {
+    use crate::f8::gui::harness::NativeHarness;
+    let h = NativeHarness::start("approval_command");
+    let mut raw = Raw::connect(&h.handle);
+    raw.hello();
+    let session = value(&ok(
+        &mut raw,
+        "managedSession/prepare",
+        json!({"intent_id":uuid().as_str(),"adapter_id":"codex","runtime_kind":"codex"}),
+    ))["managed_session_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    ok(
+        &mut raw,
+        "runtime/start",
+        json!({"intent_id":uuid().as_str(),"adapter_id":"codex","runtime_kind":"codex",
+        "managed_session_id":session,"expected_revision":0,"expected_generation":0,
+        "safety_profile":"codex_local_tools_v1","workspace_root":h.workspace}),
+    );
+    let target = json!({"adapter_id":"codex","runtime_kind":"codex","managed_session_id":session});
+    let live = eventually(|| {
+        let r = ok(&mut raw, "runtime/status", target.clone());
+        (value(&r)["actual_state"] == "ready").then_some(r)
+    });
+    let identity = value(&live)["runtime_identity"].clone();
+    let page = |cursor: Value, instance: &Value| {
+        json!({"adapter_id":"codex","runtime_kind":"codex","managed_session_id":session,
+            "expected_generation":identity["generation"],"expected_runtime_instance_id":instance,
+            "cursor":cursor,"limit":20})
+    };
+    let first = ok(
+        &mut raw,
+        "runtime/model/list",
+        page(Value::Null, &identity["runtime_instance_id"]),
+    );
+    assert_eq!(value(&first)["models"].as_array().unwrap().len(), 20);
+    assert_eq!(
+        value(&first)["runtime_instance_id"],
+        identity["runtime_instance_id"]
+    );
+    assert_eq!(value(&live)["model_count"], 45);
+    let next = value(&first)["next"].clone();
+    let second = ok(
+        &mut raw,
+        "runtime/model/list",
+        page(next.clone(), &identity["runtime_instance_id"]),
+    );
+    assert_eq!(value(&second)["models"].as_array().unwrap().len(), 20);
+    // A cursor made for one launch is refused for another instance, and so is a stale launch.
+    let foreign = json!(uuid().as_str());
+    let crossed = raw.send("runtime/model/list", page(next, &foreign));
+    assert_refused(&crossed, &["invalid_request", "stale_revision"]);
+    let stale = raw.send("runtime/model/list", page(Value::Null, &foreign));
+    assert_refused(&stale, &["stale_revision"]);
+}
+
+#[test]
+fn a_binding_created_by_a_runtime_that_did_not_survive_is_uncertain_and_is_abandoned_through_the_window()
+ {
+    let app = App::start(Options {
+        limit: 1,
+        tools: true,
+        ..Options::default()
+    });
+    app.knobs
+        .queue
+        .lock()
+        .unwrap()
+        .push_back(json!({"crash_on_thread": true}));
+    let id = app.session();
+    let ready = app.ready(&id, AgentMode::LocalTools);
+    let fence = ready.session.runtime.fence.clone();
+    app.gui
+        .lease_grant(
+            uuid(),
+            fence.clone(),
+            ready.session.revision,
+            ALL.to_vec(),
+            300,
+        )
+        .unwrap();
+    // The runtime dies as it is asked to create the thread. The answer is not a success.
+    let created = app.gui.binding_create(
+        uuid(),
+        fence.clone(),
+        ready.session.revision,
+        app.workspace(),
+    );
+    assert!(created.is_err(), "{created:?}");
+    // The binding is not left waiting for a provider that is gone: it is uncertain, and the
+    // window is given the operation to discard.
+    let uncertain = app.until(&id, |d| d.binding.state == BindingState::Indeterminate);
+    let operation = uncertain
+        .binding
+        .operation
+        .clone()
+        .expect("the operation to abandon");
+    assert_eq!(uncertain.session.runtime.actual, ActualState::Failed);
+    app.gui
+        .binding_abandon(uuid(), uncertain.session.runtime.fence.clone(), operation)
+        .unwrap();
+    let clean = app.until(&id, |d| d.binding.state == BindingState::Unbound);
+    assert!(clean.binding.operation.is_none());
+    assert_eq!(app.events("binding_indeterminate"), 1);
+    assert_eq!(app.events("binding_abandoned"), 1);
 }
