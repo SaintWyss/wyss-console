@@ -4,21 +4,28 @@ Este documento prepara una decisión del dueño. **Nada de lo que sigue fue ejec
 autorizado.** El entorno instalado sigue en protocolo 1 y SQLite V7; ADR 0051 sigue _Proposed_.
 Fuente completa no es producción lista.
 
-## Qué falta además de la autorización
+## Qué está hecho y qué falta además de la autorización
 
-El binario instalado selecciona `LocalSelection::InstalledProtocol1` y no existe ningún camino
-en el código de producción que construya un `PreparedApplication` instalado ni un `Connector` de
-ventana (`run_with_f8` y el ejemplo `f8_local_gui` son sólo de desarrollo, tras `f8-dev`).
-Activar exige, por lo tanto, **un cambio de código separado y revisado** que:
+**Hecho (2026-10-21, ver [instalación](f8-installation-2026-10-21.md)):** el código de producción ya
+tiene el cableado de protocolo 2 y está instalado, inerte:
 
-1. abra la base instalada migrada con `migration::prepare` y entregue el `PreparedApplication`
-   a `run_selected(PreparedProtocol2)` en el proceso `wyss-control`;
-2. cree el listener local del socket de protocolo 2 con permisos privados;
-3. construya en la ventana un `SocketConnector` hacia ese socket y llame a `run_with_f8`;
-4. habilite la capacidad `f8` (overlay `tauri.f8.conf.json`) sólo en esa compilación.
+- `wyss-control --protocol 2 --runtime-root D --state-root D [--create | --migrate-copy COPIA]` sirve
+  una base V8 propia (`authority.sqlite3`) en un socket privado; sin argumentos sigue siendo protocolo 1.
+- `wyss-console --f8-authority <runtime-root>` es la única forma de activar la interfaz de la ventana
+  (conector de socket con verificación de versión y de esquema, sin TOCTOU de directorio).
+- Las capacidades `main` + `f8` están listadas en `tauri.conf.json`; sin el flag todo responde `inactive`.
+- W1: aceptar una aprobación y conceder/renovar un lease que ejecuta exigen **Permitir** en una ventana GTK.
 
-Ese cambio debe pasar su propia revisión independiente antes de cualquier instalación. La
-capacidad `main` instalada hoy sólo concede `allow-f8-state` (informa `active:false`).
+**Falta, además de la autorización:**
+
+1. **Un runtime real.** La autoridad de producción usa `NoRuntime`: prepara sesiones y leases pero no inicia
+   ningún runtime. Ensamblar el `NativeLocalToolsPlan` de producción (hoy sólo existe en pruebas) y un
+   `Spawner` real es un cambio de código separado, con revisión independiente, y lanza Codex autenticado
+   (no autorizado).
+2. Un servicio `systemd --user` para la autoridad de protocolo 2 y un lanzador que pase `--f8-authority`:
+   no se crearon (crearlos es parte de la activación).
+3. Que el protocolo 1 deje de escribir esa base: protocolo 1 y 2 usan archivos distintos, pero la
+   migración significa que la V7 deja de ser la fuente (ver Migración y Rollback).
 
 ## Precondiciones (todas)
 
@@ -70,11 +77,10 @@ Debe estar autorizado por Santiago, con tiempo de inactividad.
 5. Criterio de abandono: cualquier `unavailable` sostenido, deriva de recuentos o fallo de
    auditoría → detener y ejecutar el rollback.
 
-## Qué hizo y qué no hizo esta entrega sobre el entorno instalado
+## Qué hizo y qué no hizo la entrega de instalación (2026-10-21)
 
-La configuración base del repositorio (`tauri.conf.json`) sigue listando sólo la capacidad `main`
-y el código de producción selecciona protocolo 1. Todas las pruebas y las capturas de la
-ventana usaron bases temporales aisladas, un display anidado propio y un fixture sin
-credenciales. No se reinició ninguna ventana, autoridad ni host de terminal instalados, no se
-abrió ni migró la base instalada, no se tocaron credenciales ni ajustes, y no se lanzó Codex
-autenticado.
+Instaló el paquete (`--keep-host`, sin interrumpir la GUI, el host ni la autoridad abiertos), respaldó
+el estado y ensayó la migración V7→V8 sobre **una copia** del respaldo. No migró ni abrió la base viva,
+no reinició ninguna autoridad ni host, no tocó credenciales ni ajustes, no lanzó Codex y no creó
+ningún servicio ni lanzador de protocolo 2. Las pruebas de ventana usaron una base V8 temporal, un display
+anidado propio y un runtime de fixture.

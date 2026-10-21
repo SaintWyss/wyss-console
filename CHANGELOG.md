@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-21 — F8: installed wiring, W1 native confirmation, candidate validation (still not activated)
+
+- `wyss-control --protocol 2 …` serves a V8 image of its own on a private socket (no arguments is still
+  protocol 1; never falls back); `wyss-console --f8-authority <dir>` is the only way the window becomes
+  active; version, schema and socket-directory checks on connect; `main` + `f8` capabilities listed.
+- W1: accepting an approval and granting/renewing an executing lease need **Allow** in a native GTK window
+  that shows what the authority holds (fail closed, inert for a moment, bidi-safe).
+- `wyss-f8-fixture` (feature `f8-fixture`, never packaged) for isolated validation; real-process tests
+  for both authorities; the resolved ACL is tested against the framework.
+- Package installed over the previous one with `--keep-host`; installed store, authority and sessions untouched.
+  Authority in production has no runtime (`NoRuntime`): Codex is not launched.
+
 ## 2026-10-21 — F8: protocol-2 window and integrated acceptance (inactive, not activated)
 
 - New **Runtimes** window (sessions, runtime lifecycle, leases, bindings, turns with live

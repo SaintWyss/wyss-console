@@ -296,3 +296,29 @@ fn killing_the_authority_leaves_no_runtime_child_and_the_history_recovers() {
     );
     candidate.stop(Signal::SIGTERM);
 }
+
+#[test]
+fn revoking_the_lease_ends_the_turn_and_the_approval_that_waited_on_it() {
+    let mut candidate = Candidate::new();
+    candidate.start(true);
+    let gui = candidate.gui();
+    let (session, _, turn, approval) = until_approval(&gui, &candidate.workspace());
+    let detail = gui.session(session.clone()).unwrap();
+    let lease = detail.lease.expect("a lease is active").clone();
+    let revoked = gui
+        .lease_revoke(id(), lease.id.clone(), lease.revision)
+        .unwrap();
+    assert_ne!(
+        format!("{:?}", revoked.lease.state),
+        format!("{:?}", lease.state),
+        "the lease changed state"
+    );
+    let ended = eventually(|| {
+        let r = gui.turn(turn.clone(), None, false).ok()?;
+        r.turn.turn.state.terminal().then_some(r)
+    });
+    assert_eq!(ended.turn.turn.state, TurnState::Interrupted);
+    let after = gui.approval(approval, None, None).unwrap();
+    assert!(!after.approval.decidable, "nothing is left to decide");
+    candidate.stop(Signal::SIGTERM);
+}
