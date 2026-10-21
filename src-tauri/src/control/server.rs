@@ -1005,6 +1005,8 @@ impl<S: crate::f8::engine::Spawner> F8Transport<S> {
         self.service.tick(now)?;
         let mut index = 0;
         while index < self.clients.len() {
+            // Counted per client, so a watch released earlier in this quantum frees its slot.
+            let held = self.clients.iter().filter(|c| c.watch.is_some()).count();
             let client = &mut self.clients[index];
             let result = (|| -> ControlResult<()> {
                 if let Some((deadline, after)) =
@@ -1071,6 +1073,15 @@ impl<S: crate::f8::engine::Spawner> F8Transport<S> {
                             let answer = self.service.exchange(&mut client.client, &request, now);
                             client.input.clear();
                             match held_watch(&request, &answer, now) {
+                                // Watchers take at most half the slots, as protocol 1 does, so
+                                // control operations always find a connection to arrive on.
+                                Some(_) if held >= super::watch::MAX_WATCHERS => {
+                                    let refusal = self
+                                        .service
+                                        .authority()
+                                        .refusal(&request, ControlError::CapacityExceeded);
+                                    queue(client, &refusal, now)?;
+                                }
                                 Some(watch) => client.watch = Some(watch),
                                 None => queue(client, &answer, now)?,
                             }

@@ -67,6 +67,7 @@ struct Peer {
     sock: UnixStream,
     buf: Vec<u8>,
     closed: bool,
+    largest: usize,
 }
 impl Peer {
     fn connect(t: &mut F8Transport<NoSpawn>, now: Instant) -> Self {
@@ -77,6 +78,7 @@ impl Peer {
             sock,
             buf: Vec::new(),
             closed: false,
+            largest: 0,
         }
     }
     fn send(&mut self, request: &Value) {
@@ -109,6 +111,7 @@ impl Peer {
             if self.buf.len() < 4 + n {
                 break;
             }
+            self.largest = self.largest.max(4 + n);
             out.push(serde_json::from_slice(&self.buf[4..4 + n]).unwrap());
             self.buf.drain(..4 + n);
         }
@@ -392,4 +395,160 @@ fn a_pending_watch_never_delays_another_clients_ordinary_operation() {
     assert_eq!(status.len(), 1, "{status:?}");
     assert_eq!(status[0]["result"]["kind"], "status");
     assert!(watcher.frames().is_empty(), "the watch is still waiting");
+}
+
+/// Opens `n` audit watches on fresh clients, each waiting up to `wait_ms` past `after`.
+fn hold_watchers(
+    t: &mut F8Transport<NoSpawn>,
+    now: Instant,
+    n: usize,
+    after: u64,
+    wait_ms: u32,
+) -> Vec<Peer> {
+    let (id, _) = stream(t);
+    let mut held = Vec::new();
+    for _ in 0..n {
+        let mut p = greeted(t, now);
+        p.send(&audit_page(&id, json!(after.to_string()), 5, Some(wait_ms)));
+        tick(t, now);
+        held.push(p);
+    }
+    held
+}
+
+fn prepare_request() -> Value {
+    request(
+        "managedSession/prepare",
+        json!({"intent_id":uuid(),"adapter_id":"codex","runtime_kind":"codex"}),
+    )
+}
+
+#[test]
+fn four_watchers_wait_and_a_fifth_is_refused_as_capacity_exceeded() {
+    let mut t = server();
+    let t0 = Instant::now();
+    let (id, head) = stream(&t);
+    let mut held = hold_watchers(&mut t, t0, 4, head, 5_000);
+    for p in held.iter_mut() {
+        assert!(
+            p.frames().is_empty(),
+            "held watchers wait without an answer"
+        );
+    }
+
+    let mut fifth = greeted(&mut t, t0);
+    let before = (changes(&t), stream(&t).1);
+    let attempt = audit_page(&id, json!(head.to_string()), 5, Some(5_000));
+    let attempt_id = attempt["request_id"].clone();
+    fifth.send(&attempt);
+    tick(&mut t, t0);
+    let refused = fifth.frames();
+    assert_eq!(refused.len(), 1, "{refused:?}");
+    assert_eq!(
+        refused[0]["error"]["code"], "capacity_exceeded",
+        "{refused:?}"
+    );
+    assert_eq!(refused[0]["request_id"], attempt_id, "{refused:?}");
+    assert_eq!(refused[0]["authority_instance_id"], AUTH, "{refused:?}");
+    assert_eq!(
+        (changes(&t), stream(&t).1),
+        before,
+        "a refused watch writes nothing"
+    );
+    assert_eq!(t.client_count(), 5);
+
+    // The refused connection stays usable for ordinary requests.
+    fifth.send(&request("authority/status", json!({})));
+    tick(&mut t, t0);
+    assert_eq!(fifth.frames()[0]["result"]["kind"], "status");
+    for p in held.iter_mut() {
+        assert!(p.frames().is_empty(), "the four watchers still wait");
+    }
+}
+
+#[test]
+fn control_operations_run_while_every_watcher_slot_is_held() {
+    let mut t = server();
+    let t0 = Instant::now();
+    let (_, head) = stream(&t);
+    let mut held = hold_watchers(&mut t, t0, 4, head, 5_000);
+
+    let mut control = greeted(&mut t, t0);
+    control.send(&request("authority/status", json!({})));
+    tick(&mut t, t0);
+    assert_eq!(control.frames()[0]["result"]["kind"], "status");
+
+    control.send(&prepare_request());
+    tick(&mut t, t0 + Duration::from_millis(10));
+    let prepared = control.frames();
+    assert_eq!(prepared.len(), 1, "{prepared:?}");
+    assert_eq!(prepared[0]["result"]["kind"], "session", "{prepared:?}");
+
+    // The one durable commit wakes each held watcher exactly once.
+    tick(&mut t, t0 + Duration::from_millis(20));
+    for p in held.iter_mut() {
+        let answers = p.frames();
+        assert_eq!(answers.len(), 1, "{answers:?}");
+        assert_eq!(sequences(&answers[0])[0], head + 1);
+    }
+}
+
+#[test]
+fn a_disconnect_releases_its_slot_for_a_new_watch_that_then_completes() {
+    let mut t = server();
+    let t0 = Instant::now();
+    let (_, head) = stream(&t);
+    let mut held = hold_watchers(&mut t, t0, 4, head, 5_000);
+    drop(held.remove(0));
+    tick(&mut t, t0 + Duration::from_millis(5));
+    assert_eq!(t.client_count(), 3, "three watchers remain connected");
+
+    let (id, _) = stream(&t);
+    let mut admitted = greeted(&mut t, t0 + Duration::from_millis(6));
+    admitted.send(&audit_page(&id, json!(head.to_string()), 5, Some(5_000)));
+    tick(&mut t, t0 + Duration::from_millis(7));
+    assert!(admitted.frames().is_empty(), "admitted, not refused");
+
+    let mut writer = greeted(&mut t, t0 + Duration::from_millis(8));
+    writer.send(&prepare_request());
+    tick(&mut t, t0 + Duration::from_millis(10));
+    assert_eq!(writer.frames().len(), 1);
+    tick(&mut t, t0 + Duration::from_millis(20));
+    let completed = admitted.frames();
+    assert_eq!(completed.len(), 1, "{completed:?}");
+    assert_eq!(sequences(&completed[0])[0], head + 1);
+}
+
+#[test]
+fn a_timeout_releases_its_slot_and_the_next_watch_is_held_again() {
+    let mut t = server();
+    let t0 = Instant::now();
+    let (id, head) = stream(&t);
+    let mut held = hold_watchers(&mut t, t0, 3, head, 5_000);
+    let mut short = greeted(&mut t, t0);
+    short.send(&audit_page(&id, json!(head.to_string()), 5, Some(1_000)));
+    tick(&mut t, t0);
+    assert!(short.frames().is_empty());
+
+    let mut late = greeted(&mut t, t0);
+    let refused = audit_page(&id, json!(head.to_string()), 5, Some(5_000));
+    late.send(&refused);
+    tick(&mut t, t0);
+    assert_eq!(late.frames()[0]["error"]["code"], "capacity_exceeded");
+
+    tick(&mut t, t0 + Duration::from_millis(1_001));
+    let timed_out = short.frames();
+    assert_eq!(timed_out.len(), 1, "{timed_out:?}");
+    assert!(sequences(&timed_out[0]).is_empty());
+    assert!(timed_out[0]["result"]["value"]["next"].is_null());
+
+    late.send(&audit_page(&id, json!(head.to_string()), 5, Some(5_000)));
+    tick(&mut t, t0 + Duration::from_millis(1_002));
+    assert!(
+        late.frames().is_empty(),
+        "the freed slot holds the next watch"
+    );
+    for p in held.iter_mut() {
+        assert!(p.frames().is_empty());
+    }
 }

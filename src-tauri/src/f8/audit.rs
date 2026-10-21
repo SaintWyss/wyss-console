@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 const MAX_RUNTIME_ROWS: usize = 128;
 const MAX_LAUNCH_ROWS: usize = 4096;
 const MAX_GENERATION: u64 = i64::MAX as u64;
-const MAX_EVENT_BYTES: usize = 2048;
+pub(super) const MAX_EVENT_BYTES: usize = 2048;
 
 fn bad() -> E {
     E::StorageIncompatible

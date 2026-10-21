@@ -30,6 +30,10 @@ use std::{collections::BTreeMap, time::Instant};
 
 const NIL: &str = "00000000-0000-4000-8000-000000000000";
 const PAGE_BYTES: usize = 65_536 - 1024;
+// A page of durable events within its byte budget, plus the response envelope, always fits one frame,
+// and any single admitted event fits the budget.
+const _: () = assert!(super::audit::MAX_EVENT_BYTES < PAGE_BYTES);
+const _: () = assert!(PAGE_BYTES + 1024 <= crate::contracts::control::MAX_FRAME);
 
 /// Strict internal adapter-normalized provider notifications. This is NOT the
 /// upstream Codex JSON-RPC protocol: a separately reviewed adapter must translate
@@ -672,6 +676,11 @@ impl Authority {
                 Ok(json!({"kind":"approval_receipt","value":receipt}))
             }
         }
+    }
+
+    /// A protocol-2 refusal for a request the transport declines to hold. Nothing is written.
+    pub fn refusal(&self, request: &[u8], e: E) -> Vec<u8> {
+        self.fail(&request_id_of(request), e)
     }
 
     /// Whether the durable stream holds an event after `after`. A read only: it wakes a pending
