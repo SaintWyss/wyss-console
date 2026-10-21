@@ -1810,3 +1810,350 @@ fn a_stopped_launch_closes_only_with_its_exact_generation_and_no_instance() {
     );
     validate_v8(rig.authority.engine().connection()).unwrap();
 }
+
+/// Everything an explicit stop could change, as text: the runtime row, launch sidecars, turns,
+/// approvals, receipts, the audit stream and its head.
+fn stop_state(c: &rusqlite::Connection, s: &str) -> String {
+    c.query_row(
+        "SELECT coalesce((SELECT desired_state||':'||revision||':'||generation FROM managed_runtimes WHERE managed_session_id=?1),'')||'|'||\
+         (SELECT count(*) FROM managed_runtime_launches)||'|'||\
+         (SELECT coalesce(group_concat(managed_turn_id||':'||state||':'||revision,';'),'') FROM (SELECT * FROM managed_turns ORDER BY managed_turn_id))||'|'||\
+         (SELECT coalesce(group_concat(managed_approval_id||':'||state||':'||revision,';'),'') FROM (SELECT * FROM managed_approvals ORDER BY managed_approval_id))||'|'||\
+         (SELECT count(*) FROM processed_intents)||'|'||(SELECT count(*) FROM control_events)||'|'||\
+         (SELECT last_sequence FROM authority_metadata WHERE id=1)",
+        [s],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+fn explicit_stop(
+    rig_expect: (u64, u64),
+    reference: &RuntimeRef,
+    s: &str,
+    revision_bump: u64,
+) -> Value {
+    json!({"intent_id":uuid(),"adapter_id":"codex","runtime_kind":"codex",
+        "managed_session_id":s,"expected_generation":rig_expect.0,
+        "expected_revision":rig_expect.1 + revision_bump,
+        "expected_runtime_instance_id":reference.runtime_instance_id})
+}
+
+/// A live, bound launch with one running turn, on the first session.
+fn running_turn(rig: &mut Rig) -> (RuntimeRef, Value, String) {
+    let s = rig.sessions[0].clone();
+    let (reference, fence) = rig.ready();
+    let grant = rig.call(
+        "executionLease/grant",
+        json!({"intent_id":uuid(),"session_id":s,"expected_session_revision":1,
+        "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence}),
+    );
+    assert_eq!(grant["result"]["kind"], "lease", "{grant}");
+    rig.bind(&reference);
+    let turn = rig.call(
+        "managedSession/turn/start",
+        json!({"intent_id":uuid(),"managed_session_id":s,
+        "expected_session_revision":1,"prompt":"work","runtime_fence":fence}),
+    );
+    let turn_id = turn["result"]["value"]["managed_turn_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    rig.authority
+        .provider_turn_event(
+            &reference,
+            &ManagedTurnId::parse(&turn_id).unwrap(),
+            Some("provider-turn"),
+            TurnState::Running,
+            None,
+        )
+        .unwrap();
+    (reference, fence, turn_id)
+}
+
+#[test]
+fn explicit_stop_is_refused_while_a_turn_runs_and_changes_no_state() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (reference, _, _) = running_turn(&mut rig);
+    let s = rig.sessions[0].clone();
+    let before = stop_state(rig.authority.engine().connection(), &s);
+    let live_before = rig.authority.engine().active_turn(&s).map(str::to_owned);
+    assert!(live_before.is_some());
+
+    let stop = rig.call(
+        "runtime/stop",
+        explicit_stop(rig.expect(&s), &reference, &s, 0),
+    );
+    assert_eq!(code(&stop), "active_turn_exists", "{stop}");
+    assert_eq!(
+        stop_state(rig.authority.engine().connection(), &s),
+        before,
+        "no durable change"
+    );
+    assert_eq!(
+        rig.authority.engine().active_turn(&s).map(str::to_owned),
+        live_before,
+        "the live ticket is intact"
+    );
+    assert_eq!(
+        rig.authority.engine().reference(&s),
+        Some(reference),
+        "the launch is untouched"
+    );
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
+
+#[test]
+fn a_successor_without_live_state_still_refuses_a_stop_while_the_durable_turn_runs() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (reference, _, _) = running_turn(&mut rig);
+    let s = rig.sessions[0].clone();
+    let path = std::env::temp_dir().join(format!("wyss-f8-stop-{}.sqlite3", uuid()));
+    rig.authority
+        .engine()
+        .connection()
+        .execute("VACUUM INTO ?1", [path.to_str().unwrap()])
+        .unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let auth = wire(AUTH);
+    let engine = crate::f8::engine::Engine::new(
+        conn,
+        auth.clone(),
+        crate::f8::registry::Registry::new(auth).unwrap(),
+        None,
+    )
+    .unwrap();
+    let mut successor = Authority::new(engine);
+    let mut client = Client::default();
+    let hello = send_to(
+        &mut successor,
+        &mut client,
+        &mut rig.spawn,
+        json!({"schema_version":2,"request_id":uuid(),
+        "method":"authority/hello","params":{"protocol_version":2,"client_instance_id":uuid()}}),
+    );
+    assert_eq!(hello["result"]["kind"], "hello", "{hello}");
+    assert!(
+        successor.engine().active_turn(&s).is_none(),
+        "no live ticket in the successor"
+    );
+
+    let (_, revision) = rig.expect(&s);
+    let before = stop_state(successor.engine().connection(), &s);
+    let stop = send_to(
+        &mut successor,
+        &mut client,
+        &mut rig.spawn,
+        json!({"schema_version":2,"request_id":uuid(),"authority_instance_id":AUTH,
+        "method":"runtime/stop",
+        "params":{"intent_id":uuid(),"adapter_id":"codex","runtime_kind":"codex",
+            "managed_session_id":s,"expected_generation":reference.generation,
+            "expected_revision":revision,
+            "expected_runtime_instance_id":reference.runtime_instance_id}}),
+    );
+    assert_eq!(code(&stop), "active_turn_exists", "{stop}");
+    assert_eq!(
+        stop_state(successor.engine().connection(), &s),
+        before,
+        "no durable change"
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn explicit_stop_is_refused_while_a_pending_approval_waits_on_its_turn() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (reference, fence, _turn, approval) = live_approval(&mut rig, 600, "item-1");
+    let s = rig.sessions[0].clone();
+    let before = stop_state(rig.authority.engine().connection(), &s);
+
+    let stop = rig.call(
+        "runtime/stop",
+        explicit_stop(rig.expect(&s), &reference, &s, 0),
+    );
+    assert_eq!(code(&stop), "active_turn_exists", "{stop}");
+    assert_eq!(
+        stop_state(rig.authority.engine().connection(), &s),
+        before,
+        "approval untouched"
+    );
+    let status = rig.call(
+        "managedTurn/approval/status",
+        json!({"managed_approval_id":approval.managed_approval_id}),
+    );
+    assert_eq!(
+        status["result"]["value"]["approval"]["state"], "pending",
+        "{status}"
+    );
+    assert_eq!(status["result"]["value"]["acceptable"], true, "{status}");
+    let _ = fence;
+}
+
+/// A live, bound launch whose one turn has completed on the provider's word.
+fn completed_turn(rig: &mut Rig) -> RuntimeRef {
+    let (reference, _, turn_id) = running_turn(rig);
+    rig.authority
+        .provider_turn_event(
+            &reference,
+            &ManagedTurnId::parse(&turn_id).unwrap(),
+            Some("provider-turn"),
+            TurnState::Completed,
+            Some(crate::contracts::turn::TurnReason::Completed),
+        )
+        .unwrap();
+    reference
+}
+
+#[test]
+fn explicit_stop_after_a_completed_turn_is_exact_replayable_and_reaps_cleanly() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let reference = completed_turn(&mut rig);
+    let s = rig.sessions[0].clone();
+    let params = explicit_stop(rig.expect(&s), &reference, &s, 0);
+    let conn_state = |rig: &Rig| stop_state(rig.authority.engine().connection(), &s);
+
+    let stop = rig.call("runtime/stop", params.clone());
+    assert_eq!(stop["result"]["kind"], "runtime_control", "{stop}");
+    assert_eq!(
+        stop["result"]["value"]["desired_state"], "stopped",
+        "{stop}"
+    );
+    validate_v8(rig.authority.engine().connection()).unwrap();
+
+    let before = conn_state(&rig);
+    let replay = rig.call("runtime/stop", params.clone());
+    assert_eq!(
+        replay["result"]["value"], stop["result"]["value"],
+        "exact replay"
+    );
+    assert_eq!(conn_state(&rig), before, "a replay has no effect");
+
+    *rig.spawn.exited.lock().unwrap() = true;
+    rig.authority.tick(Instant::now()).unwrap();
+    assert!(
+        rig.authority.engine().reference(&s).is_none(),
+        "the stopped launch is reaped"
+    );
+    validate_v8(rig.authority.engine().connection()).unwrap();
+
+    let reaped = conn_state(&rig);
+    let late = rig.call("runtime/stop", params.clone());
+    assert_eq!(
+        late["result"]["value"], stop["result"]["value"],
+        "replay after the exit"
+    );
+    assert_eq!(
+        conn_state(&rig),
+        reaped,
+        "replay after the exit writes nothing"
+    );
+
+    let mut changed = params.clone();
+    changed["expected_revision"] = json!(params["expected_revision"].as_u64().unwrap() + 1);
+    assert_eq!(code(&rig.call("runtime/stop", changed)), "intent_conflict");
+    assert_eq!(
+        conn_state(&rig),
+        reaped,
+        "a conflicting replay writes nothing"
+    );
+}
+
+#[test]
+fn a_failed_stop_transaction_leaves_no_partial_stop_and_no_receipt() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let reference = completed_turn(&mut rig);
+    let s = rig.sessions[0].clone();
+    let params = explicit_stop(rig.expect(&s), &reference, &s, 0);
+    let before = stop_state(rig.authority.engine().connection(), &s);
+
+    rig.authority
+        .engine()
+        .connection()
+        .execute_batch(
+            "CREATE TRIGGER stop_fault BEFORE INSERT ON processed_intents \
+             BEGIN SELECT RAISE(ABORT,'injected fault'); END;",
+        )
+        .unwrap();
+    let failed = rig.call("runtime/stop", params.clone());
+    assert_ne!(code(&failed), "<ok>", "{failed}");
+    assert_eq!(
+        stop_state(rig.authority.engine().connection(), &s),
+        before,
+        "no partial stop"
+    );
+    assert_eq!(
+        rig.authority.engine().reference(&s),
+        Some(reference.clone()),
+        "the launch is still live"
+    );
+    rig.authority
+        .engine()
+        .connection()
+        .execute_batch("DROP TRIGGER stop_fault;")
+        .unwrap();
+    validate_v8(rig.authority.engine().connection()).unwrap();
+
+    let retried = rig.call("runtime/stop", params);
+    assert_eq!(retried["result"]["kind"], "runtime_control", "{retried}");
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
+
+#[test]
+fn mandatory_shutdowns_still_contain_a_runtime_with_an_active_turn() {
+    // An unexpected worker exit.
+    let mut rig = Rig::new();
+    rig.hello();
+    let (_, _, turn_id) = running_turn(&mut rig);
+    let s = rig.sessions[0].clone();
+    *rig.spawn.exited.lock().unwrap() = true;
+    rig.authority.tick(Instant::now()).unwrap();
+    assert!(
+        rig.authority.engine().reference(&s).is_none(),
+        "the exited launch is contained"
+    );
+    let state: String = rig
+        .authority
+        .engine()
+        .connection()
+        .query_row(
+            "SELECT state FROM managed_turns WHERE managed_turn_id=?1",
+            [&turn_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_ne!(
+        state, "completed",
+        "a shutdown is never recorded as a successful turn"
+    );
+    validate_v8(rig.authority.engine().connection()).unwrap();
+
+    // A failed transport while the provider decision is in flight.
+    let mut rig = Rig::new();
+    rig.hello();
+    let (reference, _, turn_id) = running_turn(&mut rig);
+    let s = rig.sessions[0].clone();
+    rig.authority.engine_mut().transport_failed(&reference);
+    *rig.spawn.exited.lock().unwrap() = true;
+    rig.authority.tick(Instant::now()).unwrap();
+    assert!(
+        rig.authority.engine().reference(&s).is_none(),
+        "the failed transport is contained"
+    );
+    let state: String = rig
+        .authority
+        .engine()
+        .connection()
+        .query_row(
+            "SELECT state FROM managed_turns WHERE managed_turn_id=?1",
+            [&turn_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_ne!(state, "completed");
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}

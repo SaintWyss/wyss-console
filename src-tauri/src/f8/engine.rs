@@ -965,7 +965,12 @@ impl Engine {
             live: None,
             slot_available: self.registry.has_free_slot(),
         };
-        let outcome = self.allocator()?.stop(request, &admission)?;
+        // A refused stop returns here, before any in-memory teardown: tickets, approvals and queued
+        // data stay as they are. Replay precedence is the allocator's: it answers before this check.
+        let live_turn = self.active_turn(&session).is_some();
+        let outcome = self
+            .allocator()?
+            .stop_guarded(request, &admission, live_turn)?;
         if !outcome.replayed {
             self.begin_stop_internal(&session, "stopped", None);
         }

@@ -107,10 +107,20 @@ impl<'c> Allocator<'c> {
     /// Reserve a new launch generation, or retain the live one. Exact replays return the
     /// original receipt before any capacity, state or registry check.
     pub fn start(&mut self, request: &Request, admission: &Admission) -> ControlResult<Outcome> {
-        self.mutate(request, admission, true)
+        self.mutate(request, admission, true, false)
     }
+    /// An explicit stop with no live turn observed. The durable turn ledger is checked either way.
     pub fn stop(&mut self, request: &Request, admission: &Admission) -> ControlResult<Outcome> {
-        self.mutate(request, admission, false)
+        self.mutate(request, admission, false, false)
+    }
+    /// An explicit stop that also knows whether the engine holds a live turn for the session.
+    pub fn stop_guarded(
+        &mut self,
+        request: &Request,
+        admission: &Admission,
+        live_turn: bool,
+    ) -> ControlResult<Outcome> {
+        self.mutate(request, admission, false, live_turn)
     }
 
     fn mutate(
@@ -118,6 +128,7 @@ impl<'c> Allocator<'c> {
         request: &Request,
         admission: &Admission,
         start: bool,
+        live_turn: bool,
     ) -> ControlResult<Outcome> {
         let (mutation, instance_expectation) = match (request.operation(), start) {
             (v1::Operation::RuntimeStart(m), true) | (v1::Operation::RuntimeStop(m), false) => {
@@ -246,6 +257,18 @@ impl<'c> Allocator<'c> {
                 (next, Some(fresh), true, true)
             }
         } else {
+            // An explicit stop never interrupts a turn. The durable ledger decides, so a stale or
+            // missing in-memory registry cannot admit it. Mandatory shutdowns never reach here.
+            let turn_open: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM managed_turns WHERE managed_session_id=?1 AND state IN ('starting','running'))",
+                    [&session],
+                    |r| r.get(0),
+                )
+                .map_err(db)?;
+            if live_turn || turn_open {
+                return Err(E::ActiveTurnExists);
+            }
             // A stop fences the launch it observed: a concrete instance must be the current one,
             // and null means explicitly "no launch", never a wildcard.
             let expected = expected_instance.as_ref().map(|i| i.as_str().to_owned());

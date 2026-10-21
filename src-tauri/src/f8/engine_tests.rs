@@ -441,8 +441,9 @@ fn f8_03_stale_generation_traffic_is_refused_after_a_relaunch() {
     let old = rig.ready(&a, &mut sp);
     let (_, told) = turn(&mut rig, &old, 0);
     rig.engine.approval_requested(&old, "req-9", "fp").unwrap();
-    let stop = rig.stop_request(&a, Some(old.runtime_instance_id.as_str()));
-    rig.engine.stop(&stop, Instant::now()).unwrap();
+    // The turn is still running, so an explicit stop is refused by design (TASK 06). The launch is
+    // torn down by a mandatory fail-closed shutdown instead, which is what this scenario exercises.
+    rig.engine.transport_failed(&old);
     rig.drain();
     let new = rig.ready(&a, &mut sp);
     assert_eq!(new.generation, old.generation + 1);
