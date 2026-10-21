@@ -315,6 +315,19 @@ impl DeferredProcessWorker {
         let pending = PendingOwnedSpawn::spawn(command, policy, grace)?;
         Ok(Self::pending(pending, grace, policy))
     }
+    /// Host-prepared isolation launch. Ownership and capacity use the same
+    /// deferred path as inference; protocol input cannot construct this value.
+    #[allow(dead_code)] // TASK 07A prerequisite; native local-tools stays disabled.
+    pub(crate) fn spawn_isolated(
+        mut launch: crate::adapters::codex::probe::isolation::IsolationLaunch,
+        grace: Grace,
+        policy: ContainmentPolicy,
+    ) -> ControlResult<Self> {
+        launch.pipe_stdio();
+        let pending = PendingOwnedSpawn::spawn_isolated(launch, policy, grace)?;
+        Ok(Self::pending(pending, grace, policy))
+    }
+
     fn pending(pending: PendingOwnedSpawn, grace: Grace, policy: ContainmentPolicy) -> Self {
         Self {
             pending: Some(pending),

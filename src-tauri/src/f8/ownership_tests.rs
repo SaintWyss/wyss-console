@@ -711,3 +711,362 @@ fn pidfd_receiver_rejects_missing_duplicate_and_mismatched_rights_without_retent
         assert!(pending.received_pin.is_none());
     }
 }
+
+#[test]
+fn authorized_isolation_descriptor_is_readable_after_exec() {
+    let root = std::env::temp_dir().join(format!("wyss-f8-grant-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let source = root.join("grant");
+    std::fs::write(&source, b"trusted-grant\n").unwrap();
+    let grant = std::fs::File::open(&source).unwrap();
+    let fd = grant.as_raw_fd();
+    let command = sh(&format!("cat /proc/self/fd/{fd}"));
+    let grant: OwnedFd = grant.into();
+    let launch =
+        crate::adapters::codex::probe::isolation::IsolationLaunch::fixture(command, vec![grant]);
+    let mut pending =
+        PendingOwnedSpawn::spawn_isolated(launch, ContainmentPolicy::DirectChildOnly, quick())
+            .unwrap();
+    let mut owned = None;
+    wait_for(|| match pending.poll(Instant::now()) {
+        Some(Ok((child, _))) => {
+            owned = Some(child);
+            true
+        }
+        Some(Err(e)) => panic!("grant launch refused: {e:?}"),
+        None => false,
+    });
+    let mut child = owned.unwrap();
+    let mut observed = String::new();
+    child
+        .take_stdout()
+        .unwrap()
+        .read_to_string(&mut observed)
+        .unwrap();
+    assert_eq!(drive(&mut child).0, Progress::Reaped(0));
+    assert_eq!(observed, "trusted-grant\n");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+// Duplicate before enqueueing: only this owned duplicate appears in launch argv.
+fn grant_duplicate(file: &std::fs::File) -> OwnedFd {
+    let raw = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 128) };
+    assert!(raw >= 128);
+    unsafe { OwnedFd::from_raw_fd(raw) }
+}
+
+#[test]
+fn exec_grants_do_not_authorize_unapproved_fds_or_recycled_source_numbers() {
+    let root = std::env::temp_dir().join(format!("wyss-f8-grants-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("grant"), b"original-inode\n").unwrap();
+    std::fs::write(root.join("unrelated"), b"SUBSTITUTED\n").unwrap();
+    let original = std::fs::File::open(root.join("grant")).unwrap();
+    let replacement = std::fs::File::open(root.join("unrelated")).unwrap();
+    let grant = grant_duplicate(&original);
+    let unapproved = grant_duplicate(&replacement);
+    // Simulate reuse of the original source's number while its independent,
+    // trusted duplicate remains alive. dup3 atomically replaces our own FD;
+    // there is no free-number race with other test threads.
+    assert_eq!(
+        unsafe {
+            libc::dup3(
+                replacement.as_raw_fd(),
+                original.as_raw_fd(),
+                libc::O_CLOEXEC,
+            )
+        },
+        original.as_raw_fd()
+    );
+    assert_eq!(
+        unsafe { libc::fcntl(unapproved.as_raw_fd(), libc::F_SETFD, 0) },
+        0
+    );
+    let command = sh(&format!(
+        "if cat /proc/self/fd/{} 2>/dev/null; then exit 90; fi; cat /proc/self/fd/{}",
+        unapproved.as_raw_fd(),
+        grant.as_raw_fd(),
+    ));
+    let launch =
+        crate::adapters::codex::probe::isolation::IsolationLaunch::fixture(command, vec![grant]);
+    drop(original);
+    let mut pending =
+        PendingOwnedSpawn::spawn_isolated(launch, ContainmentPolicy::DirectChildOnly, quick())
+            .unwrap();
+    let mut owned = None;
+    wait_for(|| match pending.poll(Instant::now()) {
+        Some(Ok((child, _))) => {
+            owned = Some(child);
+            true
+        }
+        Some(Err(e)) => panic!("unexpected refusal: {e:?}"),
+        None => false,
+    });
+    let mut child = owned.unwrap();
+    let mut observed = String::new();
+    child
+        .take_stdout()
+        .unwrap()
+        .read_to_string(&mut observed)
+        .unwrap();
+    assert_eq!(drive(&mut child).0, Progress::Reaped(0));
+    assert_eq!(observed, "original-inode\n");
+    println!(
+        "post-exec: authorized=original-inode; unapproved=unreadable; substituted source=not inherited"
+    );
+    drop(pending);
+    drop(unapproved);
+    drop(replacement);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn closed_exec_grant_refuses_payload_and_releases_capacity_only_after_reap() {
+    let root = std::env::temp_dir().join(format!("wyss-f8-closed-grant-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let marker = root.join("executed");
+    let grant = grant_duplicate(&std::fs::File::open("/dev/null").unwrap());
+    let fd = grant.as_raw_fd();
+    let mut command = sh(&format!("touch '{}'", marker.display()));
+    // Fault injection in the fork's private descriptor table. The parent's
+    // OwnedFd remains valid; Rust ownership is never violated in this test.
+    unsafe {
+        command.pre_exec(move || {
+            libc::close(fd);
+            Ok(())
+        });
+    }
+    let reaper = Arc::new(Reaper {
+        slots: AtomicUsize::new(0),
+        queue: Mutex::new(Vec::new()),
+        wake: Condvar::new(),
+    });
+    let mut pending = PendingOwnedSpawn::start_with_grants(
+        command,
+        reserve_slot(&reaper).unwrap(),
+        quick(),
+        false,
+        Duration::from_secs(5),
+        Duration::from_millis(100),
+        vec![grant],
+    )
+    .unwrap();
+    assert_eq!(reaper.slots.load(Ordering::Acquire), 1);
+    wait_for(|| match pending.poll(Instant::now()) {
+        Some(Err(E::ProviderRejected)) => true,
+        None => false,
+        _ => panic!("closed grant must fail before exec"),
+    });
+    assert!(pending.finished());
+    assert_eq!(reaper.slots.load(Ordering::Acquire), 0);
+    assert!(!marker.exists());
+    drop(pending);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn cancelled_and_failed_grant_spawns_release_grants_and_reaper_permits() {
+    use std::os::unix::net::UnixStream;
+    for cancelled in [false, true] {
+        let (peer, grant) = UnixStream::pair().unwrap();
+        peer.set_nonblocking(true).unwrap();
+        let grant: OwnedFd = grant.into();
+        let reaper = Arc::new(Reaper {
+            slots: AtomicUsize::new(0),
+            queue: Mutex::new(Vec::new()),
+            wake: Condvar::new(),
+        });
+        let mut command = Command::new(if cancelled {
+            "/bin/sleep"
+        } else {
+            "/nonexistent/wyss-f8-exec"
+        });
+        command.arg("30");
+        let mut pending = PendingOwnedSpawn::start_with_grants(
+            command,
+            reserve_slot(&reaper).unwrap(),
+            quick(),
+            false,
+            Duration::from_secs(5),
+            Duration::from_millis(150),
+            vec![grant],
+        )
+        .unwrap();
+        wait_for(|| {
+            assert!(pending.poll(Instant::now()).is_none());
+            pending.refusal_pin.is_some()
+        });
+        let pin = Arc::clone(pending.refusal_pin.as_ref().unwrap());
+        if cancelled {
+            pending.cancel();
+        }
+        assert!(!pending.finished());
+        assert_eq!(reaper.slots.load(Ordering::Acquire), 1);
+        wait_for(|| match pending.poll(Instant::now()) {
+            Some(Err(E::ProviderRejected)) => true,
+            None => false,
+            _ => panic!("cancelled or failed exec must not succeed"),
+        });
+        assert_eq!(reaper.slots.load(Ordering::Acquire), 0);
+        // Stable kernel identity proves the child has terminated, without a PID lookup.
+        let mut pollfd = libc::pollfd {
+            fd: pin.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        assert_eq!(unsafe { libc::poll(&mut pollfd, 1, 0) }, 1);
+        assert_ne!(pollfd.revents & libc::POLLIN, 0);
+        drop(pending);
+        // Socket EOF is kernel evidence that no queued command, child or parent
+        // owner still retains the grant (no fragile global descriptor counts).
+        let mut peer = peer;
+        wait_for(|| match peer.read(&mut [0u8; 1]) {
+            Ok(0) => true,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => false,
+            other => panic!("unexpected grant state: {other:?}"),
+        });
+    }
+}
+
+#[test]
+fn invalid_unsealed_grant_is_rejected_before_enqueueing_payload() {
+    let grant = grant_duplicate(&std::fs::File::open("/dev/null").unwrap());
+    assert_eq!(
+        unsafe { libc::fcntl(grant.as_raw_fd(), libc::F_SETFD, 0) },
+        0
+    );
+    let launch = crate::adapters::codex::probe::isolation::IsolationLaunch::fixture(
+        sh("exit 99"),
+        vec![grant],
+    );
+    assert_eq!(
+        PendingOwnedSpawn::spawn_isolated(launch, ContainmentPolicy::DirectChildOnly, quick(),)
+            .err(),
+        Some(E::InvalidRequest)
+    );
+}
+
+#[test]
+fn an_earlier_pre_exec_hook_cannot_authorize_a_plain_command_descriptor() {
+    let grant = grant_duplicate(&std::fs::File::open("/dev/null").unwrap());
+    let fd = grant.as_raw_fd();
+    let mut command = sh(&format!(
+        "if cat /proc/self/fd/{fd} 2>/dev/null; then echo leaked; else echo sealed; fi"
+    ));
+    unsafe {
+        command.pre_exec(move || {
+            if libc::fcntl(grant.as_raw_fd(), libc::F_SETFD, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let (mut child, _) =
+        OwnedChild::spawn(&mut command, ContainmentPolicy::DirectChildOnly, quick()).unwrap();
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .unwrap()
+        .read_to_string(&mut output)
+        .unwrap();
+    assert_eq!(drive(&mut child).0, Progress::Reaped(0));
+    assert_eq!(output, "sealed\n");
+}
+
+#[test]
+fn failure_of_the_blanket_cloexec_sweep_prevents_payload_exec() {
+    let root = std::env::temp_dir().join(format!("wyss-f8-sweep-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let marker = root.join("executed");
+    let mut command = sh(&format!("touch '{}'", marker.display()));
+    let (mut probe, installed) = std::os::unix::net::UnixStream::pair().unwrap();
+    // Install a tiny seccomp filter ONLY in the forked child. It makes the real
+    // close_range syscall return ENOSYS; all other syscalls remain allowed.
+    let mut filter = [
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        }, // LD syscall nr
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 1,
+            k: libc::SYS_close_range as u32,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: libc::SECCOMP_RET_ERRNO | libc::ENOSYS as u32,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: libc::SECCOMP_RET_ALLOW,
+        },
+    ];
+    unsafe {
+        command.pre_exec(move || {
+            let program = libc::sock_fprog {
+                len: filter.len() as u16,
+                filter: filter.as_mut_ptr(),
+            };
+            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0
+                || libc::prctl(libc::PR_SET_SECCOMP, libc::SECCOMP_MODE_FILTER, &program) != 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 4u32) != -1
+                || *libc::__errno_location() != libc::ENOSYS
+                || libc::write(installed.as_raw_fd(), b"1".as_ptr().cast(), 1) != 1
+            {
+                return Err(std::io::Error::from_raw_os_error(libc::EIO));
+            }
+            Ok(())
+        });
+    }
+    assert_eq!(
+        OwnedChild::spawn(&mut command, ContainmentPolicy::DirectChildOnly, quick()).err(),
+        Some(E::ProviderRejected)
+    );
+    drop(command);
+    let mut evidence = Vec::new();
+    probe.read_to_end(&mut evidence).unwrap();
+    assert_eq!(evidence, b"1", "seccomp must actually deny close_range");
+    assert!(!marker.exists());
+    std::fs::remove_dir(root).unwrap();
+}
+
+#[test]
+fn cancellation_before_gate_ack_never_executes_or_retains_a_grant() {
+    use std::os::unix::net::UnixStream;
+    let root = std::env::temp_dir().join(format!("wyss-f8-grant-cancel-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let marker = root.join("executed");
+    let (mut peer, grant) = UnixStream::pair().unwrap();
+    peer.set_nonblocking(true).unwrap();
+    let launch = crate::adapters::codex::probe::isolation::IsolationLaunch::fixture(
+        sh(&format!("touch '{}'", marker.display())),
+        vec![grant.into()],
+    );
+    let mut pending =
+        PendingOwnedSpawn::spawn_isolated(launch, ContainmentPolicy::DirectChildOnly, quick())
+            .unwrap();
+    pending.cancel();
+    wait_for(|| match pending.poll(Instant::now()) {
+        Some(Err(E::ProviderRejected)) => true,
+        None => false,
+        _ => panic!("cancelled gate cannot authorize exec"),
+    });
+    assert!(!marker.exists());
+    drop(pending);
+    wait_for(|| match peer.read(&mut [0u8; 1]) {
+        Ok(0) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => false,
+        other => panic!("grant leaked: {other:?}"),
+    });
+    std::fs::remove_dir(root).unwrap();
+}

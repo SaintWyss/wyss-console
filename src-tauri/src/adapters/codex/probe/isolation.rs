@@ -10,7 +10,7 @@ use std::{
     env, fs,
     io::Write,
     os::{
-        fd::AsRawFd,
+        fd::{AsRawFd, OwnedFd},
         unix::{
             fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
             process::CommandExt,
@@ -138,6 +138,31 @@ fn credential(home: &Path) -> ProbeResult<Option<Credential>> {
         dev: m.dev(),
         ino: m.ino(),
     }))
+}
+
+/// Host-prepared command and exact, owned grant duplicates. No deserialization or
+/// raw-FD constructor: only this trusted isolation module can authorize inheritance.
+/// The command is private so argv/grant correspondence cannot be changed afterwards.
+pub(crate) struct IsolationLaunch {
+    command: Command,
+    grants: Vec<OwnedFd>,
+}
+impl IsolationLaunch {
+    pub(crate) fn pipe_stdio(&mut self) {
+        self.command
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+    }
+
+    pub(crate) fn into_parts(self) -> (Command, Vec<OwnedFd>) {
+        (self.command, self.grants)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture(command: Command, grants: Vec<OwnedFd>) -> Self {
+        Self { command, grants }
+    }
 }
 
 pub(crate) struct Isolation {
@@ -343,6 +368,35 @@ impl Isolation {
             &inherited,
         )
     }
+    /// Prerequisite for a future F8 local-tools launcher; does not enable that profile.
+    /// Unlike the protocol-1 command, F8 applies its blanket CLOEXEC sweep first.
+    #[allow(dead_code)]
+    pub(super) fn f8_command(
+        &self,
+        executable: &Path,
+        args: Vec<String>,
+        cwd: &Path,
+        grants: &Grants<'_>,
+    ) -> ProbeResult<IsolationLaunch> {
+        let home_dir = env::var_os("HOME").map(|h| PathBuf::from(h).join(".codex"));
+        let inherited: Vec<_> = env::vars_os().map(|(key, _)| key).collect();
+        let mut held = Vec::new();
+        let command = self.launch_inner(
+            executable,
+            args,
+            cwd,
+            grants,
+            &user_home()?,
+            home_dir,
+            &inherited,
+            Some(&mut held),
+        )?;
+        Ok(IsolationLaunch {
+            command,
+            grants: held,
+        })
+    }
+
     /// `command` with the process environment made explicit.
     #[allow(clippy::too_many_arguments)]
     fn launch(
@@ -354,6 +408,23 @@ impl Isolation {
         user: &Path,
         home_dir: Option<PathBuf>,
         inherited: &[std::ffi::OsString],
+    ) -> ProbeResult<Command> {
+        self.launch_inner(
+            executable, args, cwd, grants, user, home_dir, inherited, None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn launch_inner(
+        &self,
+        executable: &Path,
+        args: Vec<String>,
+        cwd: &Path,
+        grants: &Grants<'_>,
+        user: &Path,
+        home_dir: Option<PathBuf>,
+        inherited: &[std::ffi::OsString],
+        f8_grants: Option<&mut Vec<OwnedFd>>,
     ) -> ProbeResult<Command> {
         let bwrap = fs::symlink_metadata(BWRAP).map_err(|_| ProbeError::RuntimeUnavailable)?;
         if !bwrap.is_file() || bwrap.uid() != 0 || bwrap.mode() & 0o022 != 0 {
@@ -472,13 +543,17 @@ impl Isolation {
             // SAFETY: after fork, one async-signal-safe syscall on a descriptor this
             // closure keeps open. Only the launcher inherits it; it stays close-on-exec in
             // the authority, so no other child ever receives it.
-            unsafe {
-                command.pre_exec(move || {
-                    if nix::libc::fcntl(own.as_raw_fd(), nix::libc::F_SETFD, 0) == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
+            if let Some(held) = f8_grants {
+                held.push(own.into());
+            } else {
+                unsafe {
+                    command.pre_exec(move || {
+                        if nix::libc::fcntl(own.as_raw_fd(), nix::libc::F_SETFD, 0) == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
             }
         }
         // Last of the namespace, so nothing mounted before can cover it: an empty private

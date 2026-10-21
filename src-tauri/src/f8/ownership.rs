@@ -443,6 +443,29 @@ impl PendingOwnedSpawn {
         )
     }
 
+    /// Only the host isolation builder can supply grants. Plain Command launches
+    /// have no inheritance authorization, regardless of argv or earlier hooks.
+    #[allow(dead_code)] // TASK 07A prerequisite; native local-tools stays disabled.
+    pub(crate) fn spawn_isolated(
+        launch: crate::adapters::codex::probe::isolation::IsolationLaunch,
+        policy: ContainmentPolicy,
+        grace: Grace,
+    ) -> ControlResult<Self> {
+        let (command, grants) = launch.into_parts();
+        if policy == ContainmentPolicy::DescendantsContained {
+            verify_namespace_launch(&command)?;
+        }
+        Self::start_with_grants(
+            command,
+            reap_permit()?,
+            grace,
+            false,
+            Duration::from_secs(3),
+            Duration::ZERO,
+            grants,
+        )
+    }
+
     #[cfg(test)]
     pub(crate) fn fixture(
         command: Command,
@@ -469,6 +492,36 @@ impl PendingOwnedSpawn {
         timeout: Duration,
         reply_delay: Duration,
     ) -> ControlResult<Self> {
+        Self::start_with_grants(
+            command,
+            permit,
+            grace,
+            fail_pin,
+            timeout,
+            reply_delay,
+            Vec::new(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn start_with_grants(
+        command: Command,
+        permit: ReapPermit,
+        grace: Grace,
+        fail_pin: bool,
+        timeout: Duration,
+        reply_delay: Duration,
+        grants: Vec<OwnedFd>,
+    ) -> ControlResult<Self> {
+        // Owned duplicates stay alive in the command's closure, including while
+        // queued, cancelled or returned for fixture reuse. No borrowed raw number
+        // can be closed/recycled by the grant's original owner before fork.
+        for grant in &grants {
+            let flags = unsafe { libc::fcntl(grant.as_raw_fd(), libc::F_GETFD) };
+            if grant.as_raw_fd() < 3 || flags < 0 || flags & libc::FD_CLOEXEC == 0 {
+                return Err(E::InvalidRequest);
+            }
+        }
         use std::os::unix::net::UnixStream;
         let coordinator = spawn_coordinator()?;
         let (parent, gate) = UnixStream::pair().map_err(|_| E::InternalError)?;
@@ -499,7 +552,17 @@ impl PendingOwnedSpawn {
                     return Err(std::io::Error::from_raw_os_error(libc::ECHILD));
                 }
                 nix::unistd::setsid().map_err(std::io::Error::from)?;
-                let _ = libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 4u32);
+                // Fail closed if the kernel cannot seal unrelated descriptors.
+                if libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 4u32) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                // Only owned, host-authorized grants survive the blanket sweep.
+                // Iteration and fcntl use no allocator, locks or runtime services.
+                for grant in &grants {
+                    if libc::fcntl(grant.as_raw_fd(), libc::F_SETFD, 0) < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                }
                 nix::sys::signal::SigSet::empty()
                     .thread_set_mask()
                     .map_err(std::io::Error::from)?;

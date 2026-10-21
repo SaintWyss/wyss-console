@@ -1065,3 +1065,70 @@ fn a_working_directory_that_is_not_a_private_place_apart_keeps_the_profile_off()
     assert!(with_catalog(Some(&catalog)).is_err());
     assert!(with_catalog(None).is_ok());
 }
+
+#[test]
+fn f8_owned_grant_crosses_exec_and_is_consumed_by_the_real_namespace_launcher() {
+    use crate::f8::{
+        engine::{StopState, Worker},
+        ownership::{ContainmentPolicy, Grace},
+        process_worker::DeferredProcessWorker,
+    };
+    use std::time::{Duration, Instant};
+    let t = Temp::new();
+    let (i, user, _) = t.layout();
+    let credential = credential(&user).unwrap().unwrap();
+    let mut grants = Vec::new();
+    let command = i
+        .launch_inner(
+            Path::new("/bin/sh"),
+            vec![
+                "-c".into(),
+                // Only a synthetic credential in the test's own private directory.
+                "cat \"$CODEX_HOME/auth.json\"; printf '\\n'; if test ! -e \"$WYSS_TEST_FD\"; then echo grant-consumed; else echo grant-leaked; fi".into(),
+            ],
+            &place_of(&i),
+            &Grants {
+                masked: &i.layers().unwrap(),
+                catalog: None,
+                credential: Some(&credential),
+            },
+            &user,
+            None,
+            &[],
+            Some(&mut grants),
+        )
+        .unwrap();
+    assert_eq!(grants.len(), 1);
+    let fd = grants[0].as_raw_fd();
+    let mut command = command;
+    command.env("WYSS_TEST_FD", format!("/proc/self/fd/{fd}"));
+    let launch = IsolationLaunch { command, grants };
+    // Remove the source owner before enqueueing: the launch owns a distinct FD.
+    drop(credential);
+    let mut worker = DeferredProcessWorker::spawn_isolated(
+        launch,
+        Grace::default(),
+        ContainmentPolicy::DirectChildOnly,
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut frames = Vec::new();
+    while !worker.has_exited() {
+        frames.extend(worker.inbound(16).unwrap());
+        assert!(
+            Instant::now() < deadline,
+            "namespace launch must be bounded"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    frames.extend(worker.inbound(16).unwrap());
+    assert_eq!(
+        frames,
+        [b"FIXTURE-CREDENTIAL".to_vec(), b"grant-consumed".to_vec()]
+    );
+    worker.begin_stop(Instant::now());
+    assert_eq!(worker.poll_stop(Instant::now()), StopState::Reaped);
+    println!(
+        "post-exec bwrap: synthetic validated inode mounted; source owner dropped before spawn"
+    );
+}
