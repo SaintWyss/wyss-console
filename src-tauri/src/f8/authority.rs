@@ -26,7 +26,10 @@ use crate::contracts::{
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, time::Instant};
+use std::{
+    collections::BTreeMap,
+    time::{Duration, Instant},
+};
 
 const NIL: &str = "00000000-0000-4000-8000-000000000000";
 const PAGE_BYTES: usize = 65_536 - 1024;
@@ -107,6 +110,8 @@ pub struct Authority {
     tickets: BTreeMap<String, TurnTicket>,
     /// Retry audit-backed recovery until its transaction actually commits.
     recovery_pending: bool,
+    /// When the durable expiry of leases and approvals is next looked for.
+    housekeeping_at: Option<Instant>,
     streams: crate::control::turn_stream::Streams,
     #[cfg(test)]
     post_approval_write: Option<fn(&mut Connection)>,
@@ -152,6 +157,7 @@ impl Authority {
             tickets: BTreeMap::new(),
             // A successor must reconcile previous authority work even with no local exits.
             recovery_pending: true,
+            housekeeping_at: None,
             streams: Default::default(),
             #[cfg(test)]
             post_approval_write: None,
@@ -1236,7 +1242,16 @@ impl Authority {
     /// drive process lifecycles, and record work stranded by launches that ended.
     pub fn tick(&mut self, now: Instant) -> ControlResult<()> {
         let authority = self.authority();
+        // Expiry is projected by the clock wherever it is read, so recording it durably does not
+        // need the supervisor's cadence: a quarter of a second is a tenth of the work at rest.
+        let due = self.housekeeping_at.is_none_or(|at| now >= at);
+        if due {
+            self.housekeeping_at = Some(now + HOUSEKEEPING_INTERVAL);
+        }
         let housekeeping = (|| -> ControlResult<()> {
+            if !due {
+                return Ok(());
+            }
             let expired: Vec<(String, String)> = {
                 let mut q = self
                 .engine
@@ -1305,6 +1320,9 @@ fn runtime_control(o: &super::allocator::Outcome) -> Value {
 fn lease_value(l: &crate::contracts::execution::ExecutionLease) -> ControlResult<Value> {
     Ok(json!({"kind":"lease","value":l}))
 }
+
+/// How often the durable expiry of leases and approvals is recorded.
+const HOUSEKEEPING_INTERVAL: Duration = Duration::from_millis(250);
 
 #[cfg(test)]
 #[path = "authority_tests.rs"]

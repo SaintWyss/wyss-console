@@ -250,3 +250,25 @@ fn the_table_of_what_the_application_costs() {
     let ended = (fds(), threads(), status_kib("/proc/self/status", "VmRSS:"));
     eprintln!("F8-TABLE after the runtime stopped fds/threads/rssKiB {ended:?}");
 }
+
+#[test]
+#[ignore = "manual measurement: the cost of one supervisor tick of an idle authority"]
+fn the_cost_of_one_idle_tick() {
+    let mut source = f8_fixture::v7_with_sessions(2);
+    let connection = migration::prepare(&mut source).unwrap().into_connection();
+    let authority = WireUuid::try_from(AUTH.to_owned()).unwrap();
+    let engine = Engine::new(
+        connection,
+        authority.clone(),
+        Registry::new(authority).unwrap(),
+        None,
+    )
+    .unwrap();
+    let mut authority = Authority::new(engine);
+    authority.tick(Instant::now()).unwrap();
+    let started = Instant::now();
+    for _ in 0..4000 {
+        authority.tick(Instant::now()).unwrap();
+    }
+    eprintln!("F8-TICK {:?} per idle tick", started.elapsed() / 4000);
+}
