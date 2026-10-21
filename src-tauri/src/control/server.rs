@@ -908,6 +908,8 @@ mod expiry_wait_tests {
 pub struct F8Transport<S: crate::f8::engine::Spawner> {
     service: crate::f8::service::Service<S>,
     clients: Vec<F8Socket>,
+    /// Requests answered so far. The application loop reads it to know a client is talking.
+    served: u64,
 }
 #[cfg(target_os = "linux")]
 struct F8Socket {
@@ -972,7 +974,12 @@ impl<S: crate::f8::engine::Spawner> F8Transport<S> {
         Self {
             service,
             clients: Vec::new(),
+            served: 0,
         }
+    }
+    /// How many requests this transport has answered.
+    pub fn served(&self) -> u64 {
+        self.served
     }
     pub fn service(&self) -> &crate::f8::service::Service<S> {
         &self.service
@@ -1036,54 +1043,68 @@ impl<S: crate::f8::engine::Spawner> F8Transport<S> {
                 }
                 if client.watch.is_none() && client.output.is_empty() {
                     // Read only enough for this frame; a pipelined request remains in the
-                    // kernel. Partial/oversized JSON is never handed to the authority.
-                    let need = if client.input.len() < 4 {
-                        4
-                    } else {
-                        let n = u32::from_be_bytes(client.input[..4].try_into().expect("header"))
-                            as usize;
-                        if n == 0 {
-                            return Err(ControlError::InvalidRequest);
+                    // kernel. Partial/oversized JSON is never handed to the authority. A peer
+                    // that has already sent the header and the rest of its frame is read in
+                    // this same quantum: the header alone would otherwise cost a whole one.
+                    for _ in 0..2 {
+                        let need = if client.input.len() < 4 {
+                            4
+                        } else {
+                            let n =
+                                u32::from_be_bytes(client.input[..4].try_into().expect("header"))
+                                    as usize;
+                            if n == 0 {
+                                return Err(ControlError::InvalidRequest);
+                            }
+                            if n > MAX_FRAME {
+                                return Err(ControlError::FrameTooLarge);
+                            }
+                            n + 4
+                        };
+                        let mut scratch = [0u8; 8192];
+                        let left = (need - client.input.len()).min(scratch.len());
+                        match client.stream.read(&mut scratch[..left]) {
+                            Ok(0) => return Err(ControlError::TransportError),
+                            Ok(n) => client.input.extend_from_slice(&scratch[..n]),
+                            Err(e)
+                                if matches!(
+                                    e.kind(),
+                                    std::io::ErrorKind::WouldBlock
+                                        | std::io::ErrorKind::Interrupted
+                                ) =>
+                            {
+                                break;
+                            }
+                            Err(_) => return Err(ControlError::TransportError),
                         }
-                        if n > MAX_FRAME {
-                            return Err(ControlError::FrameTooLarge);
-                        }
-                        n + 4
-                    };
-                    let mut scratch = [0u8; 8192];
-                    let left = (need - client.input.len()).min(scratch.len());
-                    match client.stream.read(&mut scratch[..left]) {
-                        Ok(0) => return Err(ControlError::TransportError),
-                        Ok(n) => client.input.extend_from_slice(&scratch[..n]),
-                        Err(e)
-                            if matches!(
-                                e.kind(),
-                                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-                            ) => {}
-                        Err(_) => return Err(ControlError::TransportError),
-                    }
-                    if client.input.len() >= 4 {
-                        let n = u32::from_be_bytes(client.input[..4].try_into().expect("header"))
-                            as usize;
-                        if n == 0 || n > MAX_FRAME {
-                            return Err(ControlError::FrameTooLarge);
-                        }
-                        if client.input.len() == n + 4 {
-                            let request = client.input[4..].to_vec();
-                            let answer = self.service.exchange(&mut client.client, &request, now);
-                            client.input.clear();
-                            match held_watch(&request, &answer, now) {
-                                // Watchers take at most half the slots, as protocol 1 does, so
-                                // control operations always find a connection to arrive on.
-                                Some(_) if held >= super::watch::MAX_WATCHERS => {
-                                    let refusal = self
-                                        .service
-                                        .authority()
-                                        .refusal(&request, ControlError::CapacityExceeded);
-                                    queue(client, &refusal, now)?;
+                        if client.input.len() >= 4 {
+                            let n =
+                                u32::from_be_bytes(client.input[..4].try_into().expect("header"))
+                                    as usize;
+                            if n == 0 || n > MAX_FRAME {
+                                return Err(ControlError::FrameTooLarge);
+                            }
+                            if client.input.len() == n + 4 {
+                                let request = client.input[4..].to_vec();
+                                self.served += 1;
+                                let answer =
+                                    self.service.exchange(&mut client.client, &request, now);
+                                client.input.clear();
+                                match held_watch(&request, &answer, now) {
+                                    // Watchers take at most half the slots, as protocol 1
+                                    // does, so control operations always find a connection
+                                    // to arrive on.
+                                    Some(_) if held >= super::watch::MAX_WATCHERS => {
+                                        let refusal = self
+                                            .service
+                                            .authority()
+                                            .refusal(&request, ControlError::CapacityExceeded);
+                                        queue(client, &refusal, now)?;
+                                    }
+                                    Some(watch) => client.watch = Some(watch),
+                                    None => queue(client, &answer, now)?,
                                 }
-                                Some(watch) => client.watch = Some(watch),
-                                None => queue(client, &answer, now)?,
+                                break;
                             }
                         }
                     }

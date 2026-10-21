@@ -207,7 +207,10 @@ pub struct RuntimeView {
     pub actual: ActualState,
     /// Revision of the desired state: what a start or a stop is asked against.
     pub revision: u64,
+    /// The generation counter, as far as a number the window can hold exactly goes.
     pub generation: u64,
+    /// The counter is at its end: the authority will start no further launch for this session.
+    pub exhausted: bool,
     /// The identity published once the process was attested; null before and after.
     pub instance: Option<AgentRuntimeInstanceId>,
     pub version: Option<String>,

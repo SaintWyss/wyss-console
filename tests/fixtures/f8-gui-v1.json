@@ -4,23 +4,23 @@
       "decidable": true,
       "decision": null,
       "ended_at": null,
-      "expires_at": "2026-10-21T21:19:21.123230344Z",
-      "id": "0bf4ff07-3159-41e9-8171-1e4e4ea38b66",
+      "expires_at": "2026-10-21T21:51:32.147159392Z",
+      "id": "5c70aaf1-c283-487d-8c2b-1b7ecd42a361",
       "kind": "command_execution",
       "reason": null,
-      "requested_at": "2026-10-21T21:14:22.05533391Z",
+      "requested_at": "2026-10-21T21:46:33.076791816Z",
       "revision": 1,
-      "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+      "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
       "state": "pending",
-      "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+      "turn": "227ee610-70be-4e77-8733-fc71f81a405c"
     },
     "command": {
       "command": "printf WYSS_FIXTURE_COMMAND",
-      "cwd": "/tmp/wyss-native-local-e8069df9-1d3e-49d3-a79b-1c954f0a9baa/repo/work"
+      "cwd": "/tmp/wyss-native-local-7cb9559c-c20d-4413-9501-a96cadfe0908/repo/work"
     },
     "file": null,
     "files": null,
-    "workspace": "/tmp/wyss-native-local-e8069df9-1d3e-49d3-a79b-1c954f0a9baa/repo/work"
+    "workspace": "/tmp/wyss-native-local-7cb9559c-c20d-4413-9501-a96cadfe0908/repo/work"
   },
   "audit": {
     "authority": "00000000-0000-4000-8000-0000000000a1",
@@ -28,7 +28,7 @@
       "events": [
         {
           "approval": null,
-          "at": "2026-10-21T21:14:22.485263055Z",
+          "at": "2026-10-21T21:46:33.506081918Z",
           "category": "turn",
           "disposition": "normal",
           "facts": {
@@ -47,12 +47,12 @@
           "kind": "turn_completed",
           "security": false,
           "sequence": "22",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
-          "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
+          "turn": "227ee610-70be-4e77-8733-fc71f81a405c"
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:22.483842552Z",
+          "at": "2026-10-21T21:46:33.504690724Z",
           "category": "authority",
           "disposition": "normal",
           "facts": {
@@ -71,12 +71,12 @@
           "kind": "other",
           "security": false,
           "sequence": "21",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
           "turn": null
         },
         {
-          "approval": "0bf4ff07-3159-41e9-8171-1e4e4ea38b66",
-          "at": "2026-10-21T21:14:22.483842552Z",
+          "approval": "5c70aaf1-c283-487d-8c2b-1b7ecd42a361",
+          "at": "2026-10-21T21:46:33.504690724Z",
           "category": "approval",
           "disposition": "normal",
           "facts": {
@@ -95,12 +95,12 @@
           "kind": "approval_confirmed",
           "security": false,
           "sequence": "20",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
-          "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
+          "turn": "227ee610-70be-4e77-8733-fc71f81a405c"
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:22.435004218Z",
+          "at": "2026-10-21T21:46:33.45588909Z",
           "category": "authority",
           "disposition": "normal",
           "facts": {
@@ -119,12 +119,12 @@
           "kind": "other",
           "security": false,
           "sequence": "19",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
           "turn": null
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:22.433304168Z",
+          "at": "2026-10-21T21:46:33.453963801Z",
           "category": "authority",
           "disposition": "normal",
           "facts": {
@@ -143,12 +143,12 @@
           "kind": "other",
           "security": false,
           "sequence": "18",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
           "turn": null
         },
         {
-          "approval": "0bf4ff07-3159-41e9-8171-1e4e4ea38b66",
-          "at": "2026-10-21T21:14:22.433304168Z",
+          "approval": "5c70aaf1-c283-487d-8c2b-1b7ecd42a361",
+          "at": "2026-10-21T21:46:33.453963801Z",
           "category": "approval",
           "disposition": "normal",
           "facts": {
@@ -167,12 +167,12 @@
           "kind": "approval_accepted",
           "security": false,
           "sequence": "17",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
-          "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
+          "turn": "227ee610-70be-4e77-8733-fc71f81a405c"
         },
         {
-          "approval": "0bf4ff07-3159-41e9-8171-1e4e4ea38b66",
-          "at": "2026-10-21T21:14:22.05533391Z",
+          "approval": "5c70aaf1-c283-487d-8c2b-1b7ecd42a361",
+          "at": "2026-10-21T21:46:33.076791816Z",
           "category": "approval",
           "disposition": "normal",
           "facts": {
@@ -191,12 +191,12 @@
           "kind": "approval_requested",
           "security": false,
           "sequence": "16",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
-          "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
+          "turn": "227ee610-70be-4e77-8733-fc71f81a405c"
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:22.004723641Z",
+          "at": "2026-10-21T21:46:33.026385686Z",
           "category": "turn",
           "disposition": "normal",
           "facts": {
@@ -215,12 +215,12 @@
           "kind": "turn_running",
           "security": false,
           "sequence": "15",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
-          "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
+          "turn": "227ee610-70be-4e77-8733-fc71f81a405c"
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:21.979951761Z",
+          "at": "2026-10-21T21:46:33.001635557Z",
           "category": "turn",
           "disposition": "normal",
           "facts": {
@@ -239,12 +239,12 @@
           "kind": "turn_admitted",
           "security": false,
           "sequence": "14",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
-          "turn": "758383f5-4bc4-41d5-bc47-747427bade4e"
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
+          "turn": "227ee610-70be-4e77-8733-fc71f81a405c"
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:21.350748376Z",
+          "at": "2026-10-21T21:46:32.37352778Z",
           "category": "session",
           "disposition": "normal",
           "facts": {
@@ -263,12 +263,12 @@
           "kind": "session_bound",
           "security": false,
           "sequence": "13",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
           "turn": null
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:21.123230344Z",
+          "at": "2026-10-21T21:46:32.147159392Z",
           "category": "lease",
           "disposition": "normal",
           "facts": {
@@ -278,7 +278,7 @@
             "desired": null,
             "exit": null,
             "expected": null,
-            "expires_at": "2026-10-21T21:19:21.123230344Z",
+            "expires_at": "2026-10-21T21:51:32.147159392Z",
             "revocation": null,
             "runtime_version": null,
             "scopes": [
@@ -293,12 +293,12 @@
           "kind": "lease_granted",
           "security": true,
           "sequence": "12",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
           "turn": null
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:20.194360956Z",
+          "at": "2026-10-21T21:46:31.22247896Z",
           "category": "runtime",
           "disposition": "normal",
           "facts": {
@@ -317,12 +317,12 @@
           "kind": "runtime_ready",
           "security": false,
           "sequence": "11",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
           "turn": null
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:20.016196655Z",
+          "at": "2026-10-21T21:46:31.041866682Z",
           "category": "runtime",
           "disposition": "normal",
           "facts": {
@@ -341,12 +341,12 @@
           "kind": "runtime_desired",
           "security": false,
           "sequence": "10",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
           "turn": null
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:19.310393265Z",
+          "at": "2026-10-21T21:46:30.33979785Z",
           "category": "session",
           "disposition": "normal",
           "facts": {
@@ -365,12 +365,12 @@
           "kind": "session_prepared",
           "security": false,
           "sequence": "9",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
           "turn": null
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:19.310393265Z",
+          "at": "2026-10-21T21:46:30.33979785Z",
           "category": "authority",
           "disposition": "normal",
           "facts": {
@@ -394,7 +394,7 @@
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:19.081896006Z",
+          "at": "2026-10-21T21:46:30.0438514Z",
           "category": "lease",
           "disposition": "normal",
           "facts": {
@@ -404,7 +404,7 @@
             "desired": null,
             "exit": null,
             "expected": null,
-            "expires_at": "2026-10-21T22:14:19.079189443Z",
+            "expires_at": "2026-10-21T22:46:30.039707332Z",
             "revocation": "user_request",
             "runtime_version": null,
             "scopes": ["session_create", "session_resume", "turn_start"],
@@ -413,12 +413,12 @@
           "kind": "lease_revoked",
           "security": true,
           "sequence": "7",
-          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+          "session": "deac0257-bca4-4a5a-8b63-38741bdc344e",
           "turn": null
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:19.081568043Z",
+          "at": "2026-10-21T21:46:30.043333694Z",
           "category": "turn",
           "disposition": "normal",
           "facts": {
@@ -437,12 +437,12 @@
           "kind": "turn_completed",
           "security": false,
           "sequence": "6",
-          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
-          "turn": "a6c191a7-c257-4012-8aa8-aaff26de42ab"
+          "session": "deac0257-bca4-4a5a-8b63-38741bdc344e",
+          "turn": "40c80f69-d5f2-453e-bec8-1958db190b77"
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:19.081188086Z",
+          "at": "2026-10-21T21:46:30.042805929Z",
           "category": "turn",
           "disposition": "normal",
           "facts": {
@@ -461,12 +461,12 @@
           "kind": "turn_running",
           "security": false,
           "sequence": "5",
-          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
-          "turn": "a6c191a7-c257-4012-8aa8-aaff26de42ab"
+          "session": "deac0257-bca4-4a5a-8b63-38741bdc344e",
+          "turn": "40c80f69-d5f2-453e-bec8-1958db190b77"
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:19.080717961Z",
+          "at": "2026-10-21T21:46:30.042104561Z",
           "category": "turn",
           "disposition": "normal",
           "facts": {
@@ -485,12 +485,12 @@
           "kind": "turn_admitted",
           "security": false,
           "sequence": "4",
-          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
-          "turn": "a6c191a7-c257-4012-8aa8-aaff26de42ab"
+          "session": "deac0257-bca4-4a5a-8b63-38741bdc344e",
+          "turn": "40c80f69-d5f2-453e-bec8-1958db190b77"
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:19.080281693Z",
+          "at": "2026-10-21T21:46:30.041591926Z",
           "category": "session",
           "disposition": "normal",
           "facts": {
@@ -509,12 +509,12 @@
           "kind": "session_bound",
           "security": false,
           "sequence": "3",
-          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+          "session": "deac0257-bca4-4a5a-8b63-38741bdc344e",
           "turn": null
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:19.079189443Z",
+          "at": "2026-10-21T21:46:30.039707332Z",
           "category": "lease",
           "disposition": "normal",
           "facts": {
@@ -524,7 +524,7 @@
             "desired": null,
             "exit": null,
             "expected": null,
-            "expires_at": "2026-10-21T22:14:19.079189443Z",
+            "expires_at": "2026-10-21T22:46:30.039707332Z",
             "revocation": null,
             "runtime_version": null,
             "scopes": ["session_create", "session_resume", "turn_start"],
@@ -533,12 +533,12 @@
           "kind": "lease_granted",
           "security": true,
           "sequence": "2",
-          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+          "session": "deac0257-bca4-4a5a-8b63-38741bdc344e",
           "turn": null
         },
         {
           "approval": null,
-          "at": "2026-10-21T21:14:19.078735097Z",
+          "at": "2026-10-21T21:46:30.039022749Z",
           "category": "session",
           "disposition": "normal",
           "facts": {
@@ -557,7 +557,7 @@
           "kind": "session_prepared",
           "security": false,
           "sequence": "1",
-          "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+          "session": "deac0257-bca4-4a5a-8b63-38741bdc344e",
           "turn": null
         }
       ],
@@ -565,19 +565,19 @@
       "head": "22",
       "older": null,
       "schema_version": 1,
-      "stream": "e3ff787a-e831-47b5-ad27-69f635291f42"
+      "stream": "1f161e60-72d8-4fe3-8a8c-2fc1e90aecd9"
     },
     "schema_version": 1
   },
   "binding_receipt": {
     "authority": "00000000-0000-4000-8000-0000000000a1",
     "schema_version": 1,
-    "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
-    "workspace": "/tmp/wyss-native-local-e8069df9-1d3e-49d3-a79b-1c954f0a9baa/repo/work"
+    "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
+    "workspace": "/tmp/wyss-native-local-7cb9559c-c20d-4413-9501-a96cadfe0908/repo/work"
   },
   "decision_receipt": {
     "authority": "00000000-0000-4000-8000-0000000000a1",
-    "id": "0bf4ff07-3159-41e9-8171-1e4e4ea38b66",
+    "id": "5c70aaf1-c283-487d-8c2b-1b7ecd42a361",
     "schema_version": 1,
     "state": "accepted"
   },
@@ -589,9 +589,9 @@
   "lease_receipt": {
     "authority": "00000000-0000-4000-8000-0000000000a1",
     "lease": {
-      "expires_at": "2026-10-21T21:19:21.123230344Z",
-      "id": "ad207084-e4be-4a11-9841-55b3ea3e690b",
-      "issued_at": "2026-10-21T21:14:21.123230344Z",
+      "expires_at": "2026-10-21T21:51:32.147159392Z",
+      "id": "22caa2d5-2e5e-4a00-b62e-38398f311b13",
+      "issued_at": "2026-10-21T21:46:32.147159392Z",
       "revision": 1,
       "revocation": null,
       "scopes": [
@@ -1062,8 +1062,8 @@
     ],
     "fence": {
       "generation": 1,
-      "instance": "22bb67f9-4d5b-4b33-a44b-290eeaba2988",
-      "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19"
+      "instance": "75ee1a13-8059-4e6e-b242-dc88ea53cdc0",
+      "session": "db50ad3a-9c70-45b4-8f63-8125979729ba"
     },
     "observed": null,
     "schema_version": 1,
@@ -1075,18 +1075,18 @@
     "generation": 1,
     "revision": 1,
     "schema_version": 1,
-    "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19"
+    "session": "db50ad3a-9c70-45b4-8f63-8125979729ba"
   },
   "session_attached": {
     "approval": null,
     "authority": "00000000-0000-4000-8000-0000000000a1",
     "binding": {
-      "attached_instance": "22bb67f9-4d5b-4b33-a44b-290eeaba2988",
+      "attached_instance": "75ee1a13-8059-4e6e-b242-dc88ea53cdc0",
       "mode": "local_tools_v1",
       "observed_model": null,
       "operation": null,
       "state": "bound_attached",
-      "workspace": "/tmp/wyss-native-local-e8069df9-1d3e-49d3-a79b-1c954f0a9baa/repo/work"
+      "workspace": "/tmp/wyss-native-local-7cb9559c-c20d-4413-9501-a96cadfe0908/repo/work"
     },
     "gates": [
       {
@@ -1103,9 +1103,9 @@
       }
     ],
     "lease": {
-      "expires_at": "2026-10-21T21:19:21.123230344Z",
-      "id": "ad207084-e4be-4a11-9841-55b3ea3e690b",
-      "issued_at": "2026-10-21T21:14:21.123230344Z",
+      "expires_at": "2026-10-21T21:51:32.147159392Z",
+      "id": "22caa2d5-2e5e-4a00-b62e-38398f311b13",
+      "issued_at": "2026-10-21T21:46:32.147159392Z",
       "revision": 1,
       "revocation": null,
       "scopes": [
@@ -1119,8 +1119,8 @@
     },
     "schema_version": 1,
     "session": {
-      "created_at": "2026-10-21T21:14:19.310393265Z",
-      "id": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+      "created_at": "2026-10-21T21:46:30.33979785Z",
+      "id": "db50ad3a-9c70-45b4-8f63-8125979729ba",
       "position": "9",
       "revision": 1,
       "runtime": {
@@ -1128,21 +1128,22 @@
         "budget_failure": null,
         "desired": "running",
         "diagnostic": null,
+        "exhausted": false,
         "fence": {
           "generation": 1,
-          "instance": "22bb67f9-4d5b-4b33-a44b-290eeaba2988",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19"
+          "instance": "75ee1a13-8059-4e6e-b242-dc88ea53cdc0",
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba"
         },
         "generation": 1,
-        "instance": "22bb67f9-4d5b-4b33-a44b-290eeaba2988",
+        "instance": "75ee1a13-8059-4e6e-b242-dc88ea53cdc0",
         "model_count": 45,
         "profile": "codex_local_tools_v1",
         "revision": 1,
         "version": "0.159.0",
-        "workspace": "/tmp/wyss-native-local-e8069df9-1d3e-49d3-a79b-1c954f0a9baa/repo/work"
+        "workspace": "/tmp/wyss-native-local-7cb9559c-c20d-4413-9501-a96cadfe0908/repo/work"
       },
       "state": "prepared",
-      "updated_at": "2026-10-21T21:14:19.310393265Z"
+      "updated_at": "2026-10-21T21:46:30.33979785Z"
     },
     "turns": [],
     "turns_partial": false
@@ -1175,8 +1176,8 @@
     "lease": null,
     "schema_version": 1,
     "session": {
-      "created_at": "2026-10-21T21:14:19.310393265Z",
-      "id": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+      "created_at": "2026-10-21T21:46:30.33979785Z",
+      "id": "db50ad3a-9c70-45b4-8f63-8125979729ba",
       "position": "9",
       "revision": 1,
       "runtime": {
@@ -1184,28 +1185,29 @@
         "budget_failure": null,
         "desired": "running",
         "diagnostic": null,
+        "exhausted": false,
         "fence": {
           "generation": 1,
-          "instance": "22bb67f9-4d5b-4b33-a44b-290eeaba2988",
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19"
+          "instance": "75ee1a13-8059-4e6e-b242-dc88ea53cdc0",
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba"
         },
         "generation": 1,
-        "instance": "22bb67f9-4d5b-4b33-a44b-290eeaba2988",
+        "instance": "75ee1a13-8059-4e6e-b242-dc88ea53cdc0",
         "model_count": 45,
         "profile": "codex_local_tools_v1",
         "revision": 1,
         "version": "0.159.0",
-        "workspace": "/tmp/wyss-native-local-e8069df9-1d3e-49d3-a79b-1c954f0a9baa/repo/work"
+        "workspace": "/tmp/wyss-native-local-7cb9559c-c20d-4413-9501-a96cadfe0908/repo/work"
       },
       "state": "prepared",
-      "updated_at": "2026-10-21T21:14:19.310393265Z"
+      "updated_at": "2026-10-21T21:46:30.33979785Z"
     },
     "turns": [],
     "turns_partial": false
   },
   "session_receipt": {
     "authority": "00000000-0000-4000-8000-0000000000a1",
-    "id": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+    "id": "db50ad3a-9c70-45b4-8f63-8125979729ba",
     "schema_version": 1
   },
   "session_stopped": {
@@ -1236,8 +1238,8 @@
     "lease": null,
     "schema_version": 1,
     "session": {
-      "created_at": "2026-10-21T21:14:19.310393265Z",
-      "id": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+      "created_at": "2026-10-21T21:46:30.33979785Z",
+      "id": "db50ad3a-9c70-45b4-8f63-8125979729ba",
       "position": "9",
       "revision": 1,
       "runtime": {
@@ -1245,10 +1247,11 @@
         "budget_failure": null,
         "desired": "stopped",
         "diagnostic": null,
+        "exhausted": false,
         "fence": {
           "generation": 0,
           "instance": null,
-          "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19"
+          "session": "db50ad3a-9c70-45b4-8f63-8125979729ba"
         },
         "generation": 0,
         "instance": null,
@@ -1259,7 +1262,7 @@
         "workspace": null
       },
       "state": "prepared",
-      "updated_at": "2026-10-21T21:14:19.310393265Z"
+      "updated_at": "2026-10-21T21:46:30.33979785Z"
     },
     "turns": [],
     "turns_partial": false
@@ -1272,8 +1275,8 @@
     "schema_version": 1,
     "sessions": [
       {
-        "created_at": "2026-10-21T21:14:19.310393265Z",
-        "id": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
+        "created_at": "2026-10-21T21:46:30.33979785Z",
+        "id": "db50ad3a-9c70-45b4-8f63-8125979729ba",
         "position": "9",
         "revision": 1,
         "runtime": {
@@ -1281,10 +1284,11 @@
           "budget_failure": null,
           "desired": "stopped",
           "diagnostic": null,
+          "exhausted": false,
           "fence": {
             "generation": 0,
             "instance": null,
-            "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19"
+            "session": "db50ad3a-9c70-45b4-8f63-8125979729ba"
           },
           "generation": 0,
           "instance": null,
@@ -1295,11 +1299,11 @@
           "workspace": null
         },
         "state": "prepared",
-        "updated_at": "2026-10-21T21:14:19.310393265Z"
+        "updated_at": "2026-10-21T21:46:30.33979785Z"
       },
       {
-        "created_at": "2026-10-21T21:14:19.078735097Z",
-        "id": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1",
+        "created_at": "2026-10-21T21:46:30.039022749Z",
+        "id": "deac0257-bca4-4a5a-8b63-38741bdc344e",
         "position": "1",
         "revision": 1,
         "runtime": {
@@ -1307,10 +1311,11 @@
           "budget_failure": null,
           "desired": "stopped",
           "diagnostic": null,
+          "exhausted": false,
           "fence": {
             "generation": 0,
             "instance": null,
-            "session": "3e8d3cbe-d909-4f03-9da2-c0f79b4464f1"
+            "session": "deac0257-bca4-4a5a-8b63-38741bdc344e"
           },
           "generation": 0,
           "instance": null,
@@ -1321,7 +1326,7 @@
           "workspace": null
         },
         "state": "prepared",
-        "updated_at": "2026-10-21T21:14:19.078735097Z"
+        "updated_at": "2026-10-21T21:46:30.039022749Z"
       }
     ]
   },
@@ -1335,7 +1340,7 @@
       "protocol_version": 2,
       "service_version": "0.2.0",
       "storage_schema_version": 8,
-      "stream_id": "e3ff787a-e831-47b5-ad27-69f635291f42"
+      "stream_id": "1f161e60-72d8-4fe3-8a8c-2fc1e90aecd9"
     },
     "epoch": 0,
     "link": {
@@ -1358,8 +1363,8 @@
   },
   "turn_reading": {
     "approval": {
-      "expires_at": "2026-10-21T21:19:21.123230344Z",
-      "id": "0bf4ff07-3159-41e9-8171-1e4e4ea38b66",
+      "expires_at": "2026-10-21T21:51:32.147159392Z",
+      "id": "5c70aaf1-c283-487d-8c2b-1b7ecd42a361",
       "kind": "command_execution"
     },
     "authority": "00000000-0000-4000-8000-0000000000a1",
@@ -1380,20 +1385,20 @@
       "turn": {
         "cancellable": true,
         "ended_at": null,
-        "id": "758383f5-4bc4-41d5-bc47-747427bade4e",
+        "id": "227ee610-70be-4e77-8733-fc71f81a405c",
         "output": true,
         "reason": null,
         "revision": 2,
-        "session": "ffeb3f0a-b656-4732-a522-ad4f80accb19",
-        "started_at": "2026-10-21T21:14:21.979951761Z",
+        "session": "db50ad3a-9c70-45b4-8f63-8125979729ba",
+        "started_at": "2026-10-21T21:46:33.001635557Z",
         "state": "running",
-        "updated_at": "2026-10-21T21:14:22.004723641Z"
+        "updated_at": "2026-10-21T21:46:33.026385686Z"
       }
     }
   },
   "turn_receipt": {
     "authority": "00000000-0000-4000-8000-0000000000a1",
-    "id": "758383f5-4bc4-41d5-bc47-747427bade4e",
+    "id": "227ee610-70be-4e77-8733-fc71f81a405c",
     "schema_version": 1
   },
   "watch": {
@@ -1401,6 +1406,6 @@
     "changed": true,
     "head": "23",
     "schema_version": 1,
-    "stream": "e3ff787a-e831-47b5-ad27-69f635291f42"
+    "stream": "1f161e60-72d8-4fe3-8a8c-2fc1e90aecd9"
   }
 }

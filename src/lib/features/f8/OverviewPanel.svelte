@@ -129,6 +129,12 @@
     {#if runtime.budget_failure}
       <p class="rt-alert" role="note">{budgetText(runtime.budget_failure)}</p>
     {/if}
+    {#if runtime.exhausted}
+      <p class="rt-alert" role="note">
+        This session has used every launch the authority allows it. No further
+        runtime is started for it; a new session can be created.
+      </p>
+    {/if}
 
     {#if confirming === 'stop'}
       <div class="close-confirm" role="group" aria-label="Confirm stop">
@@ -189,7 +195,9 @@
         <button
           type="button"
           class="action primary"
-          disabled={!acts || (mode === 'local_tools' && folder === null)}
+          disabled={!acts ||
+            runtime.exhausted ||
+            (mode === 'local_tools' && folder === null)}
           onclick={() => controller.startRuntime()}>Start runtime</button
         >
       </div>

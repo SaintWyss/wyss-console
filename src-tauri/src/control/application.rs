@@ -222,6 +222,8 @@ impl<S: Spawner> PreparedApplication<S> {
     pub fn run(mut self) -> ControlResult<()> {
         let mut failure = None;
         let mut shutdown_at = None;
+        let mut served = self.transport.served();
+        let mut busy_until = Instant::now();
         loop {
             let now = Instant::now();
             if let Err(error) = self.poll(now) {
@@ -244,10 +246,26 @@ impl<S: Spawner> PreparedApplication<S> {
                     return Err(failure.unwrap_or(E::Timeout));
                 }
             }
-            std::thread::sleep(SUPERVISOR_INTERVAL.saturating_sub(now.elapsed()));
+            // A client that is talking is answered within a few milliseconds; once it falls
+            // silent the loop is back at its supervision interval, and nothing is polled faster
+            // than that while nobody asks.
+            if self.transport.served() != served {
+                served = self.transport.served();
+                busy_until = now + BUSY_WINDOW;
+            }
+            let interval = if now < busy_until {
+                BUSY_INTERVAL
+            } else {
+                SUPERVISOR_INTERVAL
+            };
+            std::thread::sleep(interval.saturating_sub(now.elapsed()));
         }
     }
 }
+
+/// While a client is talking, and for this long after, the loop polls at `BUSY_INTERVAL`.
+const BUSY_WINDOW: Duration = Duration::from_millis(300);
+const BUSY_INTERVAL: Duration = Duration::from_millis(4);
 
 struct NeverSpawn;
 impl Spawner for NeverSpawn {

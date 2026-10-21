@@ -75,12 +75,13 @@ for line in sys.stdin:
     if line.startswith('approval '):
         _,item,decision=line.strip().split(' ')
         if decision=='accept' and behavior.get('crash_on_accept'): os._exit(9)
+        time.sleep(float(behavior.get('approval_delay_ms',0))/1000)
         emit(dict(kind='approval_item_consumed',provider_item_id=item))
         if decision=='accept': emit(dict(kind='approval_item_confirmed',provider_item_id=item))
         continue
     v=json.loads(line)
     if v['method'] in ('thread/start','thread/resume'):
-        emit(dict(kind='binding_confirmed',operation_id=v['operation_id'],provider_thread_id='fixture-'+v['operation_id']))
+        emit(dict(kind='binding_confirmed',operation_id=v['operation_id'],provider_thread_id=v.get('thread_id') or 'fixture-'+v['operation_id']))
     elif v['method']=='turn/start':
         active=v['turn']
         emit(dict(kind='turn_running',managed_turn_id=active,provider_turn_id='provider-'+active))
@@ -120,6 +121,8 @@ struct Knobs {
     grace_ms: Arc<AtomicUsize>,
     /// The launch-stage fault fires once while set, then disarms itself.
     stage_fires: Arc<AtomicBool>,
+    /// The next launch was asked for in Inference: its child is bare and reports that profile.
+    inference: Arc<AtomicBool>,
 }
 
 struct AppSpawner {
@@ -167,7 +170,12 @@ impl Spawner for AppSpawner {
         };
         let (_, fingerprint, structure) = action.metadata("fixture-item")?;
         let (_, second_fingerprint, second_structure) = action.metadata("fixture-item-2")?;
-        let mut command = if self.tools {
+        // A launch can be asked to run bare, whatever the application's profile: its child is
+        // then a direct child with a real PID, and nothing contains its descendants.
+        let tools = self.tools
+            && behavior.get("direct") != Some(&json!(true))
+            && !self.knobs.inference.swap(false, Ordering::AcqRel);
+        let mut command = if tools {
             let mut command = Command::new("/usr/bin/bwrap");
             command.args([
                 "--unshare-pid",
@@ -185,7 +193,7 @@ impl Spawner for AppSpawner {
         command
             .args(["-u", "-c", SCRIPT])
             .arg(&self.workspace)
-            .arg(if self.tools {
+            .arg(if tools {
                 "codex_local_tools_v1"
             } else {
                 "codex_inference_v1"
@@ -207,7 +215,7 @@ impl Spawner for AppSpawner {
                     term: Duration::from_millis(grace_ms),
                     kill: Duration::from_millis(grace_ms * 5),
                 },
-                if self.tools {
+                if tools {
                     ContainmentPolicy::DescendantsContained
                 } else {
                     ContainmentPolicy::DirectChildOnly
@@ -468,6 +476,9 @@ impl App {
     }
     fn ready(&self, id: &ManagedSessionId, mode: AgentMode) -> SessionDetail {
         let row = self.gui.session(id.clone()).unwrap().session;
+        self.knobs
+            .inference
+            .store(mode == AgentMode::Inference, Ordering::Release);
         self.gui
             .runtime_start(
                 uuid(),
@@ -788,6 +799,9 @@ impl App {
     /// Starts the runtime of a session again, as a new launch.
     fn relaunch(&self, id: &ManagedSessionId, mode: AgentMode) -> SessionDetail {
         let row = self.gui.session(id.clone()).unwrap().session;
+        self.knobs
+            .inference
+            .store(mode == AgentMode::Inference, Ordering::Release);
         self.gui
             .runtime_start(
                 uuid(),
@@ -1708,4 +1722,552 @@ fn f8_11_a_second_action_proposed_while_one_is_pending_is_never_a_second_pending
         approval.approval.reason.map(|r| format!("{r:?}")),
         Some("RuntimeLost".into())
     );
+}
+
+// ---------------------------------------------------------------------------------- F8-13
+
+#[test]
+fn f8_13_a_crash_at_every_launch_stage_never_reuses_a_generation_or_fabricates_ready() {
+    for stage in [
+        LaunchStage::AfterReservation,
+        LaunchStage::AfterSpawn,
+        LaunchStage::AfterHandshake,
+    ] {
+        let app = App::start(Options {
+            limit: 1,
+            stage_fault: Some(stage),
+            ..Options::default()
+        });
+        let a = app.session();
+        let row = app.gui.session(a.clone()).unwrap().session;
+        let started = app.gui.runtime_start(
+            uuid(),
+            a.clone(),
+            row.runtime.revision,
+            row.runtime.generation,
+            AgentMode::Inference,
+            None,
+        );
+        match stage {
+            // The reservation and the spawn failed under the caller; the handshake fails later.
+            LaunchStage::AfterReservation | LaunchStage::AfterSpawn => {
+                assert!(started.is_err(), "{stage:?}")
+            }
+            LaunchStage::AfterHandshake => assert!(started.is_ok(), "{stage:?}"),
+        }
+        // It ends without ever having been ready, on its own, and its generation is spent.
+        let ended = app.until(&a, |d| {
+            matches!(
+                d.session.runtime.actual,
+                ActualState::Stopped | ActualState::Failed
+            ) && d.session.runtime.generation == 1
+        });
+        assert_ne!(
+            ended.session.runtime.actual,
+            ActualState::Ready,
+            "{stage:?}"
+        );
+        std::thread::sleep(Duration::from_millis(400));
+        assert_eq!(
+            app.gui.session(a.clone()).unwrap().session.runtime.actual != ActualState::Ready,
+            true,
+            "{stage:?}"
+        );
+        assert_eq!(app.events("runtime_ready"), 0, "{stage:?}");
+        // No implicit restart; and an owned child that was spawned is stopped, not abandoned.
+        let spawned = match stage {
+            LaunchStage::AfterReservation => 0,
+            _ => 1,
+        };
+        assert_eq!(
+            app.knobs.spawns.load(Ordering::Acquire),
+            spawned,
+            "{stage:?}"
+        );
+        if let Some(pid) = app.pid_file(&a, 1, "pid") {
+            eventually(|| (!alive(pid)).then_some(()));
+        }
+        // The next explicit start consumes the next generation with a brand-new identity.
+        let again = app.relaunch(&a, AgentMode::Inference);
+        assert_eq!(again.session.runtime.generation, 2, "{stage:?}");
+        assert_ne!(
+            again.session.runtime.instance,
+            ended.session.runtime.instance
+        );
+        assert_eq!(app.events("runtime_ready"), 1, "{stage:?}");
+    }
+}
+
+// ---------------------------------------------------------------------------------- F8-14
+
+#[test]
+fn f8_14_generation_overflow_refuses_without_spawning_and_replay_is_unchanged() {
+    let app = App::start(Options {
+        limit: 1,
+        seed: Some(Box::new(|c| {
+            // The counter of the newest seeded session is at the end of the range. The trigger
+            // that guards the counter is put back as it was.
+            let session: String = c
+                .query_row(
+                    "SELECT session_id FROM managed_sessions ORDER BY created_sequence DESC LIMIT 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let trigger: String = c
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='managed_runtimes_transition'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            c.execute_batch("DROP TRIGGER managed_runtimes_transition")
+                .unwrap();
+            c.execute(
+                "INSERT INTO managed_runtimes(managed_session_id,adapter_id,runtime_kind,desired_state,revision,generation,created_at,updated_at) VALUES(?1,'codex','codex','stopped',1,9223372036854775807,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
+                [&session],
+            )
+            .unwrap();
+            c.execute_batch(&trigger).unwrap();
+        })),
+        ..Options::default()
+    });
+    let mut raw = app.raw();
+    raw.hello();
+    // An ordinary session starts, and its receipt is kept to be replayed.
+    let fresh = app.session();
+    let first = start_params(&fresh);
+    let receipt = raw.send("runtime/start", first.clone());
+    assert!(receipt["error"].is_null(), "{receipt}");
+    let ready = app.until(&fresh, |d| d.session.runtime.actual == ActualState::Ready);
+    app.gui
+        .runtime_stop(
+            uuid(),
+            ready.session.runtime.fence.clone(),
+            ready.session.runtime.revision,
+        )
+        .unwrap();
+    app.until(&fresh, |d| d.session.runtime.actual == ActualState::Stopped);
+    // The seeded session is the newest of the list, and the window is told its counter is at
+    // its end instead of being handed a number it cannot hold.
+    let listed = app.gui.sessions(None).unwrap();
+    let exhausted = listed
+        .sessions
+        .iter()
+        .find(|s| s.runtime.exhausted)
+        .expect("a session whose counter is at its end");
+    assert_eq!(exhausted.runtime.generation, 9_007_199_254_740_991);
+    let (spawns, head) = (app.knobs.spawns.load(Ordering::Acquire), app.head());
+    let overflow = raw.send(
+        "runtime/start",
+        json!({"intent_id":uuid().as_str(),"adapter_id":"codex","runtime_kind":"codex",
+            "managed_session_id":exhausted.id.as_str(),"expected_revision":1,
+            "expected_generation":9223372036854775807u64}),
+    );
+    assert_eq!(
+        Raw::code(&overflow),
+        Some("capacity_exceeded"),
+        "{overflow}"
+    );
+    assert_eq!(
+        app.knobs.spawns.load(Ordering::Acquire),
+        spawns,
+        "refused without a spawn"
+    );
+    assert_eq!(app.head(), head, "refused without a trace");
+    // The earlier receipt replays unchanged, with nothing done again.
+    let again = raw.send("runtime/start", first);
+    assert_eq!(again["result"], receipt["result"], "{again}");
+    assert_eq!(app.knobs.spawns.load(Ordering::Acquire), spawns);
+    assert_eq!(app.head(), head);
+}
+
+// ---------------------------------------------------------------------------------- F8-15
+
+#[test]
+fn f8_15_a_exiting_with_a_stuck_stop_never_blocks_b_or_the_writer() {
+    let app = App::start(Options {
+        limit: 2,
+        tools: true,
+        ..Options::default()
+    });
+    app.knobs.grace_ms.store(600, Ordering::Release);
+    app.knobs
+        .queue
+        .lock()
+        .unwrap()
+        .push_back(json!({"direct": true, "ignore_term": true, "ignore_eof": true}));
+    let a = app.up(AgentMode::Inference);
+    let b = app.up(AgentMode::LocalTools);
+    let (turn_b, approval_b) = app.waiting(&b);
+    let a_now = app.gui.session(a.id.clone()).unwrap();
+    app.gui
+        .runtime_stop(
+            uuid(),
+            a_now.session.runtime.fence.clone(),
+            a_now.session.runtime.revision,
+        )
+        .unwrap();
+    let mut raw = app.raw();
+    raw.hello();
+    // While A's stop escalates, B keeps its state, its turn and its approval, and the single
+    // writer answers within the dispatch deadline.
+    let mut worst = Duration::ZERO;
+    let mut stuck = 0;
+    loop {
+        worst = worst.max(worst_latency(&mut raw, &b.id, 4));
+        let state = app
+            .gui
+            .session(a.id.clone())
+            .unwrap()
+            .session
+            .runtime
+            .actual;
+        if state == ActualState::Stopping {
+            stuck += 1;
+        }
+        if state == ActualState::Stopped {
+            break;
+        }
+        assert!(
+            app.gui
+                .session(b.id.clone())
+                .unwrap()
+                .session
+                .runtime
+                .actual
+                == ActualState::Ready,
+            "B keeps running while A stops"
+        );
+    }
+    assert!(
+        stuck >= 3,
+        "A's stop really was stuck for a while ({stuck})"
+    );
+    assert!(worst < Duration::from_millis(250), "B waited {worst:?}");
+    let still = app
+        .gui
+        .approval(approval_b.approval.id.clone(), None, None)
+        .unwrap();
+    assert!(still.approval.decidable);
+    let accepted = settled(|| app.decide(&b, &approval_b, ApprovalDecision::Accept));
+    assert_eq!(accepted.state, ApprovalState::Accepted);
+    assert!(
+        !app.gui
+            .turn(turn_b, None, false)
+            .unwrap()
+            .turn
+            .turn
+            .state
+            .terminal()
+    );
+}
+
+// ---------------------------------------------------------------------------------- F8-16
+
+#[test]
+fn f8_16_audit_storage_full_fails_closed_at_admission_readiness_and_approval() {
+    let app = App::start(Options {
+        limit: 1,
+        ..Options::default()
+    });
+    // At admission: nothing is reserved, spawned or held.
+    let a = app.session();
+    let row = app.gui.session(a.clone()).unwrap().session;
+    app.knobs.audit_full.store(true, Ordering::Release);
+    let head = app.head();
+    let refused = app.gui.runtime_start(
+        uuid(),
+        a.clone(),
+        row.runtime.revision,
+        row.runtime.generation,
+        AgentMode::Inference,
+        None,
+    );
+    assert!(refused.is_err(), "{refused:?}");
+    assert_eq!(app.knobs.spawns.load(Ordering::Acquire), 0);
+    assert_eq!(app.head(), head);
+    assert_eq!(
+        app.gui
+            .session(a.clone())
+            .unwrap()
+            .session
+            .runtime
+            .generation,
+        0
+    );
+    app.knobs.audit_full.store(false, Ordering::Release);
+
+    // At readiness: the start is accepted, then the disk fills before the runtime is attested.
+    app.gui
+        .runtime_start(
+            uuid(),
+            a.clone(),
+            row.runtime.revision,
+            row.runtime.generation,
+            AgentMode::Inference,
+            None,
+        )
+        .unwrap();
+    app.knobs.audit_full.store(true, Ordering::Release);
+    std::thread::sleep(Duration::from_millis(800));
+    let pid = app.pid_file(&a, 1, "pid");
+    let held = app.gui.session(a.clone()).unwrap();
+    // Never reported ready; its cleanup still completes (the child is gone), the exit that
+    // could not be recorded is retried, not lost.
+    assert_ne!(held.session.runtime.actual, ActualState::Ready);
+    if let Some(pid) = pid {
+        eventually(|| (!alive(pid)).then_some(()));
+    }
+    app.knobs.audit_full.store(false, Ordering::Release);
+    let after = app.until(&a, |d| {
+        matches!(
+            d.session.runtime.actual,
+            ActualState::Stopped | ActualState::Failed
+        ) && app.events("runtime_exited") == 1
+    });
+    assert_eq!(app.events("runtime_ready"), 0);
+    assert!(after.session.runtime.generation >= 1);
+}
+
+#[test]
+fn f8_16_a_decision_that_cannot_be_recorded_is_never_written_to_the_provider() {
+    let app = App::start(Options {
+        limit: 1,
+        tools: true,
+        ..Options::default()
+    });
+    app.knobs
+        .queue
+        .lock()
+        .unwrap()
+        .push_back(json!({"approval_delay_ms": 600}));
+    let s = app.up(AgentMode::LocalTools);
+    let (_, approval) = app.waiting(&s);
+    // The audit table refuses: the decision is not recorded, so it is not sent.
+    app.knobs.audit_full.store(true, Ordering::Release);
+    let refused = app.decide(&s, &approval, ApprovalDecision::Accept);
+    assert!(refused.is_err(), "{refused:?}");
+    assert_eq!(app.sent(&s.id, 1, "approval"), 0);
+    app.knobs.audit_full.store(false, Ordering::Release);
+    let still = app
+        .gui
+        .approval(approval.approval.id.clone(), None, None)
+        .unwrap();
+    assert_eq!(still.approval.state, ApprovalState::Pending);
+    assert!(still.approval.decidable);
+    // Recorded and sent, then the audit fills before the provider's confirmation arrives: the
+    // outcome is not invented, and nothing is sent again.
+    let decision = uuid();
+    settled(|| {
+        app.gui.approval_respond(
+            decision.clone(),
+            s.fence.clone(),
+            approval.approval.id.clone(),
+            approval.approval.revision,
+            ApprovalDecision::Accept,
+        )
+    });
+    app.knobs.audit_full.store(true, Ordering::Release);
+    std::thread::sleep(Duration::from_millis(1200));
+    let mut raw = app.raw();
+    raw.hello();
+    let unknown = raw.send(
+        "managedTurn/approval/status",
+        json!({"managed_approval_id": approval.approval.id.as_str()}),
+    );
+    assert_ne!(
+        unknown["result"]["value"]["approval"]["effect"], "confirmed",
+        "a confirmation that could not be recorded is not shown as recorded: {unknown}"
+    );
+    assert_ne!(
+        unknown["result"]["value"]["delivery"], "effect_confirmed",
+        "{unknown}"
+    );
+    assert_eq!(app.sent(&s.id, 1, "approval"), 1);
+    app.knobs.audit_full.store(false, Ordering::Release);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(app.sent(&s.id, 1, "approval"), 1, "never sent again");
+}
+
+// ---------------------------------------------------------------------------------- F8-17
+
+#[test]
+fn f8_17_only_the_owned_child_is_signalled_and_descendants_are_reported_not_killed() {
+    let app = App::start(Options {
+        limit: 1,
+        ..Options::default()
+    });
+    app.knobs.grace_ms.store(100, Ordering::Release);
+    // A process unrelated to the authority, running the very same executable as the child.
+    let mut bystander = Command::new("/usr/bin/python3")
+        .args(["-c", "import time; time.sleep(60)"])
+        .spawn()
+        .unwrap();
+    // The child ignores EOF and TERM, and starts a descendant of its own. Both announce their
+    // PID to files this test named: no process is ever found by name, by the code under test
+    // or by the test.
+    app.knobs.queue.lock().unwrap().push_back(json!({
+        "direct": true, "ignore_term": true, "ignore_eof": true, "grandchild": true}));
+    let a = app.session();
+    let ready = app.ready(&a, AgentMode::Inference);
+    let child = eventually(|| app.pid_file(&a, 1, "pid"));
+    let grandchild = eventually(|| app.pid_file(&a, 1, "grandchild"));
+    assert!(alive(child) && alive(grandchild));
+    app.gui
+        .runtime_stop(
+            uuid(),
+            ready.session.runtime.fence.clone(),
+            ready.session.runtime.revision,
+        )
+        .unwrap();
+    app.until(&a, |d| d.session.runtime.actual == ActualState::Stopped);
+    // The owned child is gone, signalled through its verified lifecycle even though it ignored
+    // EOF and TERM. The unrelated process is untouched. The descendant, which nobody owns, is
+    // reported as left behind and is not hunted down.
+    assert!(!alive(child));
+    assert!(bystander.try_wait().unwrap().is_none());
+    assert!(
+        alive(grandchild),
+        "a descendant the authority does not own is not killed"
+    );
+    // This test cleans up exactly the two processes whose PIDs it was told.
+    let pinned = |pid: u32| unsafe { nix::libc::syscall(nix::libc::SYS_pidfd_open, pid as i32, 0) };
+    let fd = pinned(grandchild);
+    assert!(fd >= 0);
+    // SAFETY: signals only the descendant this test pinned through its pidfd, then closes it.
+    unsafe {
+        nix::libc::syscall(
+            nix::libc::SYS_pidfd_send_signal,
+            fd as i32,
+            nix::libc::SIGKILL,
+            std::ptr::null::<nix::libc::siginfo_t>(),
+            0,
+        );
+        nix::libc::close(fd as i32);
+    }
+    bystander.kill().unwrap();
+    bystander.wait().unwrap();
+}
+
+#[test]
+fn f8_17_a_profile_that_runs_tools_is_refused_where_descendants_are_not_contained() {
+    // Containment is claimed by the spawner of an application started for tools. This one
+    // claims none: Local Tools is refused before anything is reserved, spawned or recorded.
+    let app = App::start(Options {
+        limit: 1,
+        tools: false,
+        ..Options::default()
+    });
+    let a = app.session();
+    let row = app.gui.session(a.clone()).unwrap().session;
+    let head = app.head();
+    let refused = app.gui.runtime_start(
+        uuid(),
+        a.clone(),
+        row.runtime.revision,
+        row.runtime.generation,
+        AgentMode::LocalTools,
+        Some(app.workspace()),
+    );
+    assert!(refused.is_err(), "{refused:?}");
+    assert_eq!(app.knobs.spawns.load(Ordering::Acquire), 0);
+    assert_eq!(app.head(), head);
+    assert_eq!(app.gui.session(a).unwrap().session.runtime.generation, 0);
+}
+
+// ---------------------------------------------------------------------------------- F8-18
+
+#[test]
+fn f8_18_a_workspace_or_profile_replaced_during_dispatch_writes_nothing() {
+    let app = App::start(Options {
+        limit: 1,
+        tools: true,
+        ..Options::default()
+    });
+    let s = app.up(AgentMode::LocalTools);
+    let (turn, approval) = app.waiting(&s);
+    // The profile is replaced: the runtime that ran Local Tools is stopped, and an Inference
+    // runtime takes its place. The binding was made for the other profile.
+    app.wind_down(&s, &turn);
+    let inference = app.relaunch(&s.id, AgentMode::Inference);
+    assert_eq!(inference.session.runtime.generation, 2);
+    // The session is attached again, and now in the profile of the runtime it is attached to:
+    // the profile of the earlier attachment is not carried over.
+    let resume_intent = uuid();
+    settled(|| {
+        app.gui.binding_resume(
+            resume_intent.clone(),
+            inference.session.runtime.fence.clone(),
+            inference.session.revision,
+        )
+    });
+    let attached = app.until(&s.id, |d| d.binding.state == BindingState::BoundAttached);
+    assert_eq!(
+        attached.binding.mode,
+        Some(crate::contracts::control::AttachmentProfile::InferenceOnlyV1)
+    );
+    // What Local Tools allowed is not allowed here: no command and no file change, though the
+    // lease still carries the scopes.
+    for gate in &attached.gates {
+        if gate.action != ExecutionScope::TurnStart {
+            assert_eq!(
+                gate.reason,
+                crate::contracts::control::GateReason::LocalToolsProfileMissing,
+                "{gate:?}"
+            );
+        }
+    }
+    // The old ticket and the old approval are dead: nothing is written for them to the new child.
+    let old = app.decide(&s, &approval, ApprovalDecision::Accept);
+    assert!(old.is_err(), "{old:?}");
+    assert_eq!(app.sent(&s.id, 1, "approval"), 0);
+    assert_eq!(app.sent(&s.id, 2, "approval"), 0);
+    assert_eq!(app.sent(&s.id, 2, "turn/start"), 0);
+    // Every frame the new child got is the attachment it was given, and nothing else.
+    for line in app.frames(&s.id, 2) {
+        let frame: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(frame["method"], "thread/resume", "{line}");
+    }
+    // The workspace is replaced: the runtime is asked to be isolated for one folder and reports
+    // another. It is never ready, and is stopped as unproven.
+    let other = app.dir.parent().unwrap().join("other-workspace");
+    std::fs::create_dir(&other).unwrap();
+    let now = app.gui.session(s.id.clone()).unwrap();
+    app.gui
+        .runtime_stop(
+            uuid(),
+            now.session.runtime.fence.clone(),
+            now.session.runtime.revision,
+        )
+        .unwrap();
+    app.until(&s.id, |d| d.session.runtime.actual == ActualState::Stopped);
+    let row = app.gui.session(s.id.clone()).unwrap().session;
+    app.gui
+        .runtime_start(
+            uuid(),
+            s.id.clone(),
+            row.runtime.revision,
+            row.runtime.generation,
+            AgentMode::LocalTools,
+            Some(other.to_str().unwrap().to_owned()),
+        )
+        .unwrap();
+    let rejected = app.until(&s.id, |d| {
+        d.session.runtime.generation == 3
+            && matches!(
+                d.session.runtime.actual,
+                ActualState::Failed | ActualState::Stopped
+            )
+    });
+    assert_eq!(
+        rejected
+            .session
+            .runtime
+            .diagnostic
+            .map(|d| format!("{d:?}")),
+        Some("SafetyUnproven".into())
+    );
+    assert!(app.frames(&s.id, 3).is_empty());
+    assert_eq!(app.sent(&s.id, 1, "approval"), 0);
 }

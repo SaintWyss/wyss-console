@@ -798,7 +798,8 @@ export class F8Controller {
     const row = this.detail?.session;
     if (!row) return;
     const { mode, workspace } = this.composer;
-    if (mode === 'local_tools' && workspace === null) return;
+    if (row.runtime.exhausted || (mode === 'local_tools' && workspace === null))
+      return;
     const id = this.mint();
     const { revision, generation } = row.runtime;
     const folder = mode === 'local_tools' ? workspace : null;

@@ -77,6 +77,8 @@ const KEEP_SESSIONS: usize = 64;
 const MODEL_PAGES: usize = 4;
 /// Workspaces remembered by intent, so a retry names the folder the first attempt did.
 const KEEP_WORKSPACES: usize = 16;
+/// The largest integer a JavaScript number holds exactly.
+const JS_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const FIRST_DELAY: Duration = Duration::from_millis(250);
 const DELAY_LIMIT: Duration = Duration::from_secs(5);
 
@@ -1334,7 +1336,12 @@ fn runtime_view(
     if observed != *session {
         return Err(broken());
     }
+    // A counter at its end is larger than a number the window holds exactly. It is shown at
+    // the largest one that is, and said to be exhausted: no start will be asked against it.
+    let exhausted = generation >= i64::MAX as u64;
+    let generation = generation.min(JS_SAFE_INTEGER);
     Ok(RuntimeView {
+        exhausted,
         fence: FenceView {
             session: session.clone(),
             generation,

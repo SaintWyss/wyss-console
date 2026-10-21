@@ -207,6 +207,8 @@ export interface RuntimeInfo {
   actual: ActualState;
   revision: number;
   generation: number;
+  /** The generation counter is at its end: no further launch is started for this session. */
+  exhausted: boolean;
   instance: AgentRuntimeInstanceId | null;
   version: string | null;
   profile: RuntimeProfile | null;
@@ -546,6 +548,7 @@ function parseRuntime(value: unknown, session: ManagedSessionId): RuntimeInfo {
       'actual',
       'revision',
       'generation',
+      'exhausted',
       'instance',
       'version',
       'profile',
@@ -594,6 +597,7 @@ function parseRuntime(value: unknown, session: ManagedSessionId): RuntimeInfo {
     actual,
     revision: count(v.revision, 'revision'),
     generation,
+    exhausted: flag(v.exhausted, 'exhausted'),
     instance,
     version,
     profile,
