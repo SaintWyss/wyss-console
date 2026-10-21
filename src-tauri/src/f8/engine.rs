@@ -200,6 +200,7 @@ pub struct Engine {
     staging_anomalies: usize,
     stuck: usize,
     ended: usize,
+    shutting_down: bool,
     /// Exits whose audit record could not be written yet (storage failure): retried, never lost.
     unrecorded: Vec<(RuntimeRef, String, Option<String>)>,
     hook: Option<StageHook>,
@@ -223,6 +224,7 @@ impl Engine {
             staging_anomalies: 0,
             stuck: 0,
             ended: 0,
+            shutting_down: false,
             unrecorded: Vec::new(),
             hook: None,
         })
@@ -418,10 +420,15 @@ impl Engine {
     /// Mandatory safety shutdown bypasses the explicit-stop admission guard. The owned
     /// workers and their capacity remain retained until their nonblocking reap completes.
     pub fn shutdown(&mut self) {
+        self.shutting_down = true;
         let sessions: Vec<_> = self.live.keys().cloned().collect();
         for session in sessions {
             self.begin_stop_internal(&session, "transport_failed", None);
         }
+    }
+    /// The authority itself is ending: what is lost with its runtimes is lost to that.
+    pub fn shutting_down(&self) -> bool {
+        self.shutting_down
     }
     pub fn cleanup_complete(&self) -> bool {
         self.live.is_empty() && self.unrecorded.is_empty()

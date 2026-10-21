@@ -1014,6 +1014,11 @@ impl<'c> Writer<'c> {
     /// provider message is replayed, no exit is invented, no lease or grant is carried over.
     /// Returns (approvals, turns) recorded.
     pub fn recover(&mut self) -> ControlResult<(usize, usize)> {
+        self.recover_as(false)
+    }
+    /// As `recover`, naming a launch of this very authority that is gone as lost with the
+    /// authority's own shutdown (`shutdown`) or as a runtime lost on its own.
+    pub fn recover_as(&mut self, shutdown: bool) -> ControlResult<(usize, usize)> {
         let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
         let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
         let mut replay = AuditReplay::with_boundary(super::migration::verify_boundary(&tx)?);
@@ -1073,10 +1078,10 @@ impl<'c> Writer<'c> {
             if a.state == ApprovalState::Indeterminate {
                 a.effect = ApprovalEffect::Unknown;
             }
-            a.terminal_reason = Some(if lost {
-                ApprovalReason::RuntimeLost
-            } else {
-                ApprovalReason::AuthorityRestarted
+            a.terminal_reason = Some(match (lost, shutdown) {
+                (true, true) => ApprovalReason::AuthorityShutdown,
+                (true, false) => ApprovalReason::RuntimeLost,
+                (false, _) => ApprovalReason::AuthorityRestarted,
             });
             bump(&mut a, now)?;
             update_approval(&tx, &a)?;
@@ -1101,10 +1106,10 @@ impl<'c> Writer<'c> {
                 sidecar(&tx, "managed_turn_launches", "managed_turn_id", id)?
                     .ok_or(E::StorageIncompatible)?;
             let lost = launched_by(&tx, &instance, &authority)?;
-            let reason = if lost {
-                TurnReason::RuntimeFailed
-            } else {
-                TurnReason::AuthorityRestarted
+            let reason = match (lost, shutdown) {
+                (true, true) => TurnReason::AuthorityShutdown,
+                (true, false) => TurnReason::RuntimeFailed,
+                (false, _) => TurnReason::AuthorityRestarted,
             };
             let at = stamp(now.max(ts(&enum_text(&t.updated_at)?)?))?;
             t.state = TurnState::Indeterminate;

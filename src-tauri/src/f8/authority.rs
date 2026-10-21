@@ -339,7 +339,9 @@ impl Authority {
     }
 
     /// The closed exit word, and the closed budget key for a budget exit, of the newest
-    /// unexpected exit of one generation of a session.
+    /// unexpected exit of one generation of a session, when this very authority recorded it.
+    /// What a predecessor recorded is history: the runtime is not running, and that is all this
+    /// authority can say of it.
     fn unexpected_exit(
         &self,
         session: &str,
@@ -354,8 +356,9 @@ impl Authority {
                    AND json_extract(envelope,'$.session_id')=?1
                    AND json_extract(envelope,'$.payload.generation')=?2
                    AND json_extract(envelope,'$.payload.expected')=0
+                   AND json_extract(envelope,'$.source.instance_id')=?3
                  ORDER BY sequence DESC LIMIT 1",
-                rusqlite::params![session, generation],
+                rusqlite::params![session, generation, self.authority().as_str()],
                 |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
             )
             .optional()
@@ -1264,7 +1267,8 @@ impl Authority {
         housekeeping?;
         if self.recovery_pending {
             // Keep the recovery edge set on any SQLite/audit failure; next tick retries.
-            Writer::new(self.engine.connection_mut(), authority)?.recover()?;
+            let shutdown = self.engine.shutting_down();
+            Writer::new(self.engine.connection_mut(), authority)?.recover_as(shutdown)?;
             // A binding the lost runtime was creating or resuming is uncertain, not pending: it
             // is recorded as such so it can be seen, and abandoned, instead of waiting forever.
             super::operations::recover_bindings(&mut self.engine)?;

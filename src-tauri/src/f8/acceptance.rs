@@ -234,6 +234,13 @@ struct Options {
     stage_fault: Option<LaunchStage>,
     /// Seeds the V8 image before the application owns it.
     seed: Option<Box<dyn FnOnce(&Connection)>>,
+    /// A durable, file-backed image opened the way the application opens one: with the
+    /// production constructor, which validates it and recovers what a predecessor left.
+    file: bool,
+    /// The directory of an earlier application, whose image and logs this one continues.
+    root: Option<PathBuf>,
+    /// The identity of this authority instance, when it is not the fixture's.
+    authority: Option<String>,
 }
 
 struct App {
@@ -243,26 +250,39 @@ struct App {
     /// Workspace of the runtimes, and where their frame logs and staging live.
     dir: PathBuf,
     staging: PathBuf,
+    /// Where the durable image lives, when it is a file.
+    db: PathBuf,
+    cleanup: bool,
     run: Option<JoinHandle<ControlResult<()>>>,
 }
 impl App {
     fn start(options: Options) -> Self {
-        let dir = std::env::temp_dir().join(format!("wyss-f8-accept-{}", uuid().as_str()));
-        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let dir = options.root.clone().unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("wyss-f8-accept-{}", uuid().as_str()))
+        });
         let staging = dir.join("staging");
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&staging)
-            .unwrap();
         let workspace = dir.join("workspace");
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&workspace)
-            .unwrap();
+        for path in [&dir, &staging, &workspace] {
+            if !path.exists() {
+                std::fs::DirBuilder::new().mode(0o700).create(path).unwrap();
+            }
+        }
+        let db = dir.join("authority.sqlite3");
         let knobs = Knobs::default();
         knobs.grace_ms.store(50, Ordering::Release);
-        let mut source = f8_fixture::v7_with_sessions(2);
-        let connection = migration::prepare(&mut source).unwrap().into_connection();
+        let connection = if options.file {
+            if !db.exists() {
+                let mut source = f8_fixture::v7_with_sessions(2);
+                let seeded = migration::prepare(&mut source).unwrap().into_connection();
+                seeded
+                    .execute("VACUUM INTO ?1", [db.to_str().unwrap()])
+                    .unwrap();
+            }
+            Connection::open(&db).unwrap()
+        } else {
+            let mut source = f8_fixture::v7_with_sessions(2);
+            migration::prepare(&mut source).unwrap().into_connection()
+        };
         if let Some(seed) = options.seed {
             seed(&connection);
         }
@@ -279,7 +299,39 @@ impl App {
                 },
             ))
             .unwrap();
-        let authority = WireUuid::try_from(AUTH.to_owned()).unwrap();
+        let authority =
+            WireUuid::try_from(options.authority.clone().unwrap_or_else(|| AUTH.to_owned()))
+                .unwrap();
+        let spawner = AppSpawner {
+            workspace: workspace.clone(),
+            tools: options.tools,
+            dir: dir.clone(),
+            knobs: knobs.clone(),
+        };
+        if options.file {
+            let (application, handle) = PreparedApplication::new(
+                connection,
+                authority,
+                options
+                    .staging
+                    .then(|| StagingRoot::open(&staging).unwrap()),
+                spawner,
+            )
+            .unwrap();
+            let run = std::thread::spawn(move || {
+                run_selected(LocalSelection::PreparedProtocol2(Box::new(application)))
+            });
+            return Self {
+                gui: F8Gui::local(HandleConnector(handle.clone())),
+                handle,
+                knobs,
+                dir: workspace,
+                staging,
+                db,
+                cleanup: true,
+                run: Some(run),
+            };
+        }
         let mut engine = Engine::new(
             connection,
             authority.clone(),
@@ -302,16 +354,9 @@ impl App {
                 }
             });
         }
-        let (application, handle) =
-            PreparedApplication::with_test_transport(F8Transport::new(Service::new(
-                Authority::new(engine),
-                AppSpawner {
-                    workspace: workspace.clone(),
-                    tools: options.tools,
-                    dir: dir.clone(),
-                    knobs: knobs.clone(),
-                },
-            )));
+        let (application, handle) = PreparedApplication::with_test_transport(F8Transport::new(
+            Service::new(Authority::new(engine), spawner),
+        ));
         let run = std::thread::spawn(move || {
             run_selected(LocalSelection::PreparedProtocol2(Box::new(application)))
         });
@@ -321,8 +366,18 @@ impl App {
             knobs,
             dir: workspace,
             staging,
+            db,
+            cleanup: true,
             run: Some(run),
         }
+    }
+    /// Ends the application as its owner does and answers where its directory is, for the
+    /// next application to continue from. Nothing is deleted.
+    fn retire(mut self) -> PathBuf {
+        self.cleanup = false;
+        let result = self.stop();
+        assert_eq!(result, Ok(()), "an application ends cleanly");
+        self.dir.parent().unwrap().to_owned()
     }
     fn workspace(&self) -> String {
         self.dir.to_str().unwrap().to_owned()
@@ -373,7 +428,9 @@ impl App {
 impl Drop for App {
     fn drop(&mut self) {
         let _ = self.stop();
-        let _ = std::fs::remove_dir_all(self.dir.parent().unwrap());
+        if self.cleanup {
+            let _ = std::fs::remove_dir_all(self.dir.parent().unwrap());
+        }
     }
 }
 
@@ -2771,3 +2828,6 @@ fn a_binding_created_by_a_runtime_that_did_not_survive_is_uncertain_and_is_aband
     assert_eq!(app.events("binding_indeterminate"), 1);
     assert_eq!(app.events("binding_abandoned"), 1);
 }
+
+#[path = "acceptance_system.rs"]
+mod system;
