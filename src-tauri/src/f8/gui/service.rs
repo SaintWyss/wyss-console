@@ -1228,7 +1228,6 @@ impl F8Gui {
             Ok(AuditView {
                 schema_version: SCHEMA_VERSION,
                 authority: client.authority().clone(),
-                generations: Vec::new(),
                 page,
             })
         })

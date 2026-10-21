@@ -233,7 +233,7 @@ const OBSERVED_REROUTE = [
   'reroute_reason',
   'rerouted_turn',
 ] as const;
-function parseObservedModel(value: unknown): ObservedModel | null {
+export function parseObservedModel(value: unknown): ObservedModel | null {
   if (value === null) return null;
   if (typeof value !== 'object' || Array.isArray(value))
     throw invalid('observed_model');

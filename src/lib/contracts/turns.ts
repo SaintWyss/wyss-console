@@ -271,7 +271,7 @@ function turnId(value: unknown): ManagedTurnId {
   }
 }
 
-function parseSummary(value: unknown): TurnSummary {
+export function parseTurnSummary(value: unknown): TurnSummary {
   const v = record(
     value,
     [
@@ -310,7 +310,7 @@ function parseSummary(value: unknown): TurnSummary {
   };
 }
 
-function parseEvent(value: unknown): TurnEvent {
+export function parseTurnEvent(value: unknown): TurnEvent {
   const v = record(value, ['sequence', 'kind', 'text'], 'event');
   const kind = member(v.kind, TURN_EVENT_KINDS, 'kind');
   let text: string | null = null;
@@ -331,7 +331,7 @@ function parseEvent(value: unknown): TurnEvent {
   return { sequence: sequence(v.sequence, 'sequence'), kind, text };
 }
 
-function parseApproval(value: unknown): ApprovalNotice {
+export function parseApprovalNotice(value: unknown): ApprovalNotice {
   const v = record(value, ['id', 'kind', 'expires_at'], 'approval');
   let id: ManagedApprovalId;
   try {
@@ -354,10 +354,10 @@ export function parseTurnView(value: unknown): TurnView {
     'view',
   );
   if (v.schema_version !== 2) throw invalid('schema_version');
-  const turn = parseSummary(v.turn);
+  const turn = parseTurnSummary(v.turn);
   if (!Array.isArray(v.events) || v.events.length > TURN_EVENTS_LIMIT)
     throw invalid('events');
-  const events = v.events.map(parseEvent);
+  const events = v.events.map(parseTurnEvent);
   // In stream order, each position once.
   for (let i = 1; i < events.length; i++)
     if (BigInt(events[i].sequence) <= BigInt(events[i - 1].sequence))
@@ -366,7 +366,7 @@ export function parseTurnView(value: unknown): TurnView {
   // The cursor of the next reading is where this one ends.
   const last = events.at(-1);
   if (last && next !== last.sequence) throw invalid('next');
-  const approval = v.approval === null ? null : parseApproval(v.approval);
+  const approval = v.approval === null ? null : parseApprovalNotice(v.approval);
   // A turn that ended waits on nothing.
   if (approval && turnEnded(turn.state)) throw invalid('approval');
   return {
@@ -444,7 +444,7 @@ export function parseTurnList(value: unknown): TurnList {
   const facts = parseFacts(v.session);
   if (!Array.isArray(v.turns) || v.turns.length > TURN_LIST_LIMIT)
     throw invalid('turns');
-  const turns = v.turns.map(parseSummary);
+  const turns = v.turns.map(parseTurnSummary);
   // Every turn is this session's, and each is listed once.
   if (turns.some((t) => t.session.toLowerCase() !== facts.id.toLowerCase()))
     throw invalid('turns');
@@ -483,7 +483,7 @@ export function parseTurnHistory(value: unknown): TurnHistory {
   const owner = session(v.session);
   if (!Array.isArray(v.turns) || v.turns.length > TURN_LIST_LIMIT)
     throw invalid('turns');
-  const turns = v.turns.map(parseSummary);
+  const turns = v.turns.map(parseTurnSummary);
   // Every turn is the session's, each is listed once, and none of them is running: a turn
   // that has not ended is the newest of its session and belongs to the list, not to history.
   if (turns.some((t) => t.session.toLowerCase() !== owner.toLowerCase()))

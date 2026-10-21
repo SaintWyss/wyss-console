@@ -13,6 +13,8 @@
   import { CredentialsController } from './lib/features/credentials/controller';
   import CredentialsView from './lib/features/credentials/CredentialsView.svelte';
   import { EventsController } from './lib/features/events/controller';
+  import { F8Controller } from './lib/features/f8/controller';
+  import RuntimesView from './lib/features/f8/RuntimesView.svelte';
   import { ModelsController } from './lib/features/models/controller';
   import ModelsView from './lib/features/models/ModelsView.svelte';
   import { NativeController } from './lib/features/native/controller';
@@ -47,7 +49,7 @@
     pendingAuthority,
     type AuthorityObservation,
   } from './lib/shell/authority';
-  import { NAV_ITEMS, type ViewId } from './lib/shell/nav';
+  import { navItems, type ViewId } from './lib/shell/nav';
   import {
     idleRuntime,
     summarizeRuntime,
@@ -126,13 +128,23 @@
   });
   let settings = $state(settingsController.state());
   const defaultFilter = $derived(settings.preferences.events.default_filter);
+  // Managed runtimes of protocol 2. Whether the interface exists is the desktop's answer,
+  // asked once: the installed desktop answers inactive and shows nothing of it.
+  const f8Controller = new F8Controller((next) => {
+    f8 = next;
+  });
+  let f8 = $state(f8Controller.state());
+  const items = $derived(navItems(f8.gate === 'active'));
   let opened = false;
   let navigated = false;
-  const current = $derived(NAV_ITEMS.find((item) => item.id === activeView));
+  const current = $derived(items.find((item) => item.id === activeView));
 
   // Sessions are read only while their view is shown.
   $effect(() => {
     agentController.setVisible(activeView === 'agents');
+  });
+  $effect(() => {
+    f8Controller.setVisible(activeView === 'runtimes');
   });
   // Approvals are read while their view is shown or a turn is being followed: an
   // approval exists only for a turn that runs. Nothing is read for them otherwise.
@@ -199,6 +211,7 @@
   onMount(() => {
     let active = true;
     settingsController.start();
+    void f8Controller.start();
     void getAppInfo().then(
       (info) => {
         if (active) version = info.version;
@@ -231,6 +244,7 @@
       modelsController.dispose();
       credentialsController.dispose();
       settingsController.dispose();
+      f8Controller.dispose();
     };
   });
 
@@ -313,6 +327,7 @@
     active={activeView}
     onselect={go}
     waiting={approvals.pending?.length ?? 0}
+    {items}
   />
   <main class="content">
     {#if notice}
@@ -348,6 +363,13 @@
       {approvalsController}
       onsessions={() => go('sessions')}
     />
+    {#if f8.gate === 'active'}
+      <RuntimesView
+        visible={activeView === 'runtimes'}
+        {f8}
+        controller={f8Controller}
+      />
+    {/if}
     <ApprovalsView
       visible={activeView === 'approvals'}
       {approvals}

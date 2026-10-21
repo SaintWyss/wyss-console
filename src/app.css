@@ -424,7 +424,8 @@ button:focus-visible {
 .events-feature[hidden],
 .configuration-feature[hidden],
 .settings-feature[hidden],
-.native-feature[hidden] {
+.native-feature[hidden],
+.runtimes-feature[hidden] {
   display: none;
 }
 .workspace-toolbar {
@@ -699,7 +700,8 @@ button:focus-visible {
 .agent-feature .action,
 .approvals-feature .action,
 .events-feature .action,
-.settings-feature .action {
+.settings-feature .action,
+.runtimes-feature .action {
   flex-shrink: 0;
   min-height: 36px;
   padding: 0 14px;
@@ -711,21 +713,24 @@ button:focus-visible {
 .agent-feature .action:hover:not(:disabled),
 .approvals-feature .action:hover:not(:disabled),
 .events-feature .action:hover:not(:disabled),
-.settings-feature .action:hover:not(:disabled) {
+.settings-feature .action:hover:not(:disabled),
+.runtimes-feature .action:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
 }
 .sessions-feature .action:disabled,
 .agent-feature .action:disabled,
 .approvals-feature .action:disabled,
 .events-feature .action:disabled,
-.settings-feature .action:disabled {
+.settings-feature .action:disabled,
+.runtimes-feature .action:disabled {
   opacity: 0.5;
 }
 .sessions-feature .action.primary,
 .agent-feature .action.primary,
 .approvals-feature .action.primary,
 .events-feature .action.primary,
-.settings-feature .action.primary {
+.settings-feature .action.primary,
+.runtimes-feature .action.primary {
   border-color: rgba(95, 212, 245, 0.35);
   background: var(--accent-soft);
   color: var(--accent-strong);
@@ -735,14 +740,16 @@ button:focus-visible {
 .agent-feature .action.primary:hover:not(:disabled),
 .approvals-feature .action.primary:hover:not(:disabled),
 .events-feature .action.primary:hover:not(:disabled),
-.settings-feature .action.primary:hover:not(:disabled) {
+.settings-feature .action.primary:hover:not(:disabled),
+.runtimes-feature .action.primary:hover:not(:disabled) {
   background: rgba(95, 212, 245, 0.22);
 }
 .sessions-feature .action.danger,
 .agent-feature .action.danger,
 .approvals-feature .action.danger,
 .events-feature .action.danger,
-.settings-feature .action.danger {
+.settings-feature .action.danger,
+.runtimes-feature .action.danger {
   border-color: rgba(248, 113, 113, 0.3);
   background: rgba(248, 113, 113, 0.1);
   color: var(--error-text);
@@ -752,7 +759,8 @@ button:focus-visible {
 .agent-feature .action.danger:hover:not(:disabled),
 .approvals-feature .action.danger:hover:not(:disabled),
 .events-feature .action.danger:hover:not(:disabled),
-.settings-feature .action.danger:hover:not(:disabled) {
+.settings-feature .action.danger:hover:not(:disabled),
+.runtimes-feature .action.danger:hover:not(:disabled) {
   background: rgba(248, 113, 113, 0.18);
 }
 .sessions-status {
@@ -1918,7 +1926,8 @@ html[data-glass='transparent'] .shell {
 }
 
 /* Settings: the desktop's own preferences, and what the authority is, read-only */
-.settings-feature {
+.settings-feature,
+.runtimes-feature {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -2668,4 +2677,281 @@ li.native-row .native-note {
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.5;
+}
+
+/* Managed runtimes (protocol 2): one list, one detail with sections. It reuses the
+   session list, the pills, the transcript and the composer; only the frame is its own. */
+.runtimes-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 290px) minmax(0, 1fr);
+  gap: 12px;
+}
+.runtimes-list {
+  min-width: 0;
+}
+.runtimes-detail {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.03);
+}
+.rt-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.rt-head h3 {
+  margin: 0;
+  font-size: 15px;
+  white-space: nowrap;
+}
+.rt-id {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+.rt-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+  scrollbar-width: none;
+}
+.rt-tabs button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+.rt-tabs button:hover {
+  color: var(--text);
+}
+.rt-tabs button[aria-selected='true'] {
+  color: var(--text);
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+}
+.rt-panel {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-line-strong) transparent;
+}
+.rt-overview,
+.rt-models,
+.rt-history {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rt-next {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--accent-strong);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+.rt-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.02);
+}
+.rt-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.rt-card h4 {
+  margin: 0;
+  font-size: 13px;
+}
+.rt-alert {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--warn);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: var(--radius-sm);
+  background: rgba(251, 191, 36, 0.08);
+}
+.rt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rt-chips li {
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid var(--glass-line);
+  border-radius: 999px;
+}
+.rt-chips li.default {
+  color: var(--accent-strong);
+  border-color: rgba(95, 212, 245, 0.35);
+}
+.rt-gates {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rt-gates li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 13px;
+}
+.rt-gates .fact-note {
+  flex-basis: 100%;
+  font-size: 12px;
+}
+.rt-scopes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.rt-scopes legend {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--faint);
+}
+.rt-scopes .mode-option {
+  flex-basis: auto;
+}
+.rt-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.rt-select select {
+  min-height: 36px;
+  padding: 0 8px;
+  color: var(--text);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.06);
+  font: inherit;
+  font-size: 13px;
+}
+.rt-select select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.rt-conversation {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rt-conversation .agent-transcript {
+  min-height: 160px;
+}
+.rt-turns {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.rt-turns .action {
+  min-height: 32px;
+}
+.rt-turns .action[aria-pressed='true'] {
+  border-color: rgba(95, 212, 245, 0.35);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.rt-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rt-model {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.02);
+}
+.rt-model-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.rt-model-id {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.rt-own {
+  flex: 0 1 auto;
+}
+/* Not enough room for two columns: the list sits above the session it belongs to. */
+@container (max-width: 760px) {
+  .runtimes-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(96px, 30%) minmax(0, 1fr);
+  }
+  .rt-head {
+    flex-wrap: wrap;
+  }
+  .rt-id {
+    flex-basis: 100%;
+    order: 3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rt-tabs button,
+  .runtimes-feature .action {
+    transition: none;
+  }
 }

@@ -79,7 +79,7 @@ function name(value: unknown, field: string): string | null {
   return value;
 }
 
-function parseEntry(value: unknown): CatalogueEntry {
+export function parseCatalogueEntry(value: unknown): CatalogueEntry {
   const v = record(
     value,
     [
@@ -160,7 +160,7 @@ export function parseModelCatalogue(value: unknown): ModelCatalogue {
     throw invalid('read_at');
   if (!Array.isArray(v.entries) || v.entries.length > 100)
     throw invalid('entries');
-  const entries = v.entries.map(parseEntry);
+  const entries = v.entries.map(parseCatalogueEntry);
   // A runtime that is not ready lists nothing and claims nothing about a list.
   if (state === 'not_ready' && (entries.length > 0 || v.complete !== null))
     throw invalid('state');

@@ -1,22 +1,25 @@
 <script lang="ts">
-  import { NAV_ITEMS, type ViewId } from './nav';
+  import { NAV_ITEMS, type NavItem, type ViewId } from './nav';
 
   let {
     active,
     onselect,
     waiting = 0,
+    items = NAV_ITEMS,
   }: {
     active: ViewId;
     onselect: (id: ViewId) => void;
     /** Approvals waiting for a decision. Shown on their own item. */
     waiting?: number;
+    /** What the sidebar offers. Runtimes is in it only while protocol 2 is active. */
+    items?: readonly NavItem[];
   } = $props();
 </script>
 
 <nav class="sidebar" aria-label="Primary">
   <p class="nav-section">Workspace</p>
   <ul>
-    {#each NAV_ITEMS as item (item.id)}
+    {#each items as item (item.id)}
       <li>
         <button
           type="button"

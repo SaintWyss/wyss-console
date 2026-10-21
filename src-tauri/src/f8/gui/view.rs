@@ -416,15 +416,7 @@ pub struct ModelsView {
 pub struct AuditView {
     pub schema_version: u8,
     pub authority: WireUuid,
-    #[serde(flatten)]
     pub page: EventsPage,
-    /// Runtime events carry the generation they are about, for the rows that have one.
-    pub generations: Vec<GenerationMark>,
-}
-#[derive(Debug, Clone, Serialize)]
-pub struct GenerationMark {
-    pub sequence: Sequence,
-    pub generation: u64,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct WatchView {

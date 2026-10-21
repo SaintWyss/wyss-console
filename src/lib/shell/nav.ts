@@ -3,6 +3,7 @@ export type ViewId =
   | 'workspace'
   | 'sessions'
   | 'agents'
+  | 'runtimes'
   | 'approvals'
   | 'events'
   | 'configuration'
@@ -88,3 +89,21 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: 'M4 7h9M17 7h3M4 17h3M11 17h9M13 7a2 2 0 1 0 4 0 2 2 0 1 0-4 0M7 17a2 2 0 1 0 4 0 2 2 0 1 0-4 0',
   },
 ];
+
+/**
+ * Managed runtimes of protocol 2. Offered only when the desktop says the interface is
+ * active; the installed desktop never does, so the item does not exist there.
+ */
+export const RUNTIMES_NAV_ITEM: NavItem = {
+  id: 'runtimes',
+  label: 'Runtimes',
+  subtitle: 'One isolated runtime per managed session',
+  icon: 'M4 6h16v5H4zM4 13h16v5H4zM7.5 8.5h.01M7.5 15.5h.01M11 8.5h6M11 15.5h6',
+};
+
+/** The navigation, with Runtimes after Agents when the interface is active. */
+export function navItems(runtimes: boolean): readonly NavItem[] {
+  if (!runtimes) return NAV_ITEMS;
+  const at = NAV_ITEMS.findIndex((item) => item.id === 'agents') + 1;
+  return [...NAV_ITEMS.slice(0, at), RUNTIMES_NAV_ITEM, ...NAV_ITEMS.slice(at)];
+}
