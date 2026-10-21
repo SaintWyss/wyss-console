@@ -32,5 +32,5 @@ pub fn run_with(authority_digest: Option<&'static str>, extension: Extension) {
     desktop::run(authority_digest, Some(extension));
 }
 
-/// Inactive F8 engineering modules; never registered with the desktop or authority server.
+/// F8 implementation behind an inactive local application selection; installed startup stays v1.
 pub mod f8;

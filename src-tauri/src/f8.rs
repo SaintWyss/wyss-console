@@ -9,6 +9,8 @@ pub mod budget;
 #[cfg(target_os = "linux")]
 pub mod engine;
 #[cfg(target_os = "linux")]
+pub mod launcher;
+#[cfg(target_os = "linux")]
 pub mod migration;
 #[cfg(target_os = "linux")]
 pub mod operations;
@@ -50,6 +52,8 @@ mod process_integration_tests;
 #[path = "f8/read_tests.rs"]
 mod read_tests;
 
+#[cfg(all(test, target_os = "linux"))]
+mod application_tests;
 #[cfg(test)]
 mod lifecycle_tests;
 

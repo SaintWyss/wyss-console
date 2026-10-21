@@ -400,6 +400,17 @@ impl Engine {
     pub fn take_ended(&mut self) -> usize {
         std::mem::take(&mut self.ended)
     }
+    /// Mandatory safety shutdown bypasses the explicit-stop admission guard. The owned
+    /// workers and their capacity remain retained until their nonblocking reap completes.
+    pub fn shutdown(&mut self) {
+        let sessions: Vec<_> = self.live.keys().cloned().collect();
+        for session in sessions {
+            self.begin_stop_internal(&session, "transport_failed", None);
+        }
+    }
+    pub fn cleanup_complete(&self) -> bool {
+        self.live.is_empty() && self.unrecorded.is_empty()
+    }
     #[cfg(test)]
     pub(crate) fn scheduler_mut(&mut self) -> &mut Scheduler<Vec<u8>> {
         &mut self.scheduler
@@ -1093,7 +1104,6 @@ impl Engine {
                 self.staging_anomalies += 1;
             }
             self.scheduler.remove_runtime(&session);
-            self.ended += 1;
             let (kind, budget) = live.exit.unwrap_or_else(|| ("child_exited".into(), None));
             self.record_end(&live.reference, &kind, budget);
         }
@@ -1187,6 +1197,10 @@ impl Engine {
         if recorded.is_err() {
             self.unrecorded
                 .push((reference.clone(), kind.to_owned(), budget));
+        } else {
+            // Recovery observes committed exits, not just a reap edge. In particular a
+            // successful audit retry must wake reconciliation of the stranded turn.
+            self.ended = self.ended.saturating_add(1);
         }
     }
     pub fn unrecorded_exits(&self) -> usize {

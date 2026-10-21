@@ -2157,3 +2157,198 @@ fn mandatory_shutdowns_still_contain_a_runtime_with_an_active_turn() {
     assert_ne!(state, "completed");
     validate_v8(rig.authority.engine().connection()).unwrap();
 }
+
+#[test]
+fn review_exit_audit_retry_reconciles_stranded_work() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (launch, fence) = rig.ready();
+    let session = rig.sessions[0].clone();
+    rig.call(
+        "executionLease/grant",
+        json!({
+            "intent_id":uuid(),"session_id":session,"expected_session_revision":1,
+            "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence
+        }),
+    );
+    rig.bind(&launch);
+    let started = rig.call(
+        "managedSession/turn/start",
+        json!({
+            "intent_id":uuid(),"managed_session_id":session,
+            "expected_session_revision":1,"prompt":"recovery-check","runtime_fence":fence
+        }),
+    );
+    let turn_id = started["result"]["value"]["managed_turn_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let turn = ManagedTurnId::parse(&turn_id).unwrap();
+    rig.authority
+        .provider_turn_event(
+            &launch,
+            &turn,
+            Some("provider-recovery"),
+            TurnState::Running,
+            None,
+        )
+        .unwrap();
+    // The child is reaped, but its durable exit event cannot be recorded yet.
+    rig.authority
+        .engine()
+        .connection()
+        .execute_batch(
+            "CREATE TEMP TRIGGER f8_fail_recover BEFORE INSERT ON main.control_events
+         WHEN json_extract(NEW.envelope,'$.event_type')='authority.runtime.instance_exited'
+         BEGIN SELECT RAISE(ABORT,'injected recovery storage refusal'); END;",
+        )
+        .unwrap();
+    *rig.spawn.exited.lock().unwrap() = true;
+    rig.authority.tick(Instant::now()).unwrap();
+    assert_eq!(rig.authority.engine().unrecorded_exits(), 1);
+    rig.authority
+        .engine()
+        .connection()
+        .execute_batch("DROP TRIGGER temp.f8_fail_recover")
+        .unwrap();
+    rig.authority.tick(Instant::now()).unwrap();
+    assert!(!rig.authority.recovery_pending);
+    let state: String = rig
+        .authority
+        .engine()
+        .connection()
+        .query_row(
+            "SELECT state FROM managed_turns WHERE managed_turn_id=?1",
+            [&turn_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(state, "indeterminate");
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
+
+#[test]
+fn review_lease_replay_preserves_original_fence_after_runtime_loss() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (launch, fence) = rig.ready();
+    let session = rig.sessions[0].clone();
+    let params = json!({"intent_id":uuid(),"session_id":session,"expected_session_revision":1,
+        "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence});
+    let original = rig.call("executionLease/grant", params.clone());
+    assert_eq!(code(&original), "<ok>", "{original}");
+    rig.authority.engine_mut().transport_failed(&launch);
+    rig.authority.tick(Instant::now()).unwrap();
+    let replay = rig.call("executionLease/grant", params.clone());
+    assert_eq!(replay["result"], original["result"], "{replay}");
+    let mut changed = params;
+    changed["runtime_fence"]["generation"] = json!(launch.generation + 1);
+    assert_eq!(
+        code(&rig.call("executionLease/grant", changed)),
+        "intent_conflict"
+    );
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
+
+#[test]
+fn review_record_replay_checks_the_original_fence_before_live_admission() {
+    for approval in [false, true] {
+        let mut rig = Rig::new();
+        rig.hello();
+        let (launch, fence, turn) = running_turn(&mut rig);
+        let (method, mut params) = if approval {
+            let a = rig.action_approval(&launch, "replay-bound-item");
+            (
+                "managedTurn/approval/respond",
+                json!({"intent_id":uuid(),
+                "managed_approval_id":a.managed_approval_id,"expected_revision":1,
+                "decision":"decline","runtime_fence":fence}),
+            )
+        } else {
+            (
+                "managedSession/turn/cancel",
+                json!({"intent_id":uuid(),
+                "managed_turn_id":turn,"expected_revision":2,"runtime_fence":fence}),
+            )
+        };
+        let original = rig.call(method, params.clone());
+        assert_eq!(code(&original), "<ok>", "{method}: {original}");
+        let writes = rig.sent().len();
+        rig.authority.engine_mut().transport_failed(&launch);
+        rig.authority.tick(Instant::now()).unwrap();
+        let changes = rig.authority.engine().connection().total_changes();
+        let replay = rig.call(method, params.clone());
+        assert_eq!(replay["result"], original["result"], "{method}: {replay}");
+        params["runtime_fence"]["generation"] = json!(launch.generation + 1);
+        assert_eq!(
+            code(&rig.call(method, params)),
+            "intent_conflict",
+            "{method}"
+        );
+        assert_eq!(rig.sent().len(), writes, "replay must never redispatch");
+        assert_eq!(rig.authority.engine().connection().total_changes(), changes);
+        validate_v8(rig.authority.engine().connection()).unwrap();
+    }
+}
+
+#[test]
+fn review_turn_start_exact_replay_survives_authority_succession_without_dispatch() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (launch, fence, turn) = running_turn(&mut rig);
+    let (intent, raw): (String, String) = rig.authority.engine().connection().query_row(
+        "SELECT intent_id,result FROM processed_intents WHERE json_extract(result,'$.managed_turn_id')=?1",
+        [&turn], |r| Ok((r.get(0)?, r.get(1)?)),
+    ).unwrap();
+    let original: Value = serde_json::from_str(&raw).unwrap();
+    let conn = migration::clone_database(rig.authority.engine().connection()).unwrap();
+    let auth = wire(&uuid());
+    let engine = Engine::new(
+        conn,
+        auth.clone(),
+        Registry::new(auth.clone()).unwrap(),
+        None,
+    )
+    .unwrap();
+    let mut successor = Authority::new(engine);
+    let mut client = Client::default();
+    let hello = send_to(
+        &mut successor,
+        &mut client,
+        &mut rig.spawn,
+        json!({"schema_version":2,"request_id":uuid(),"method":"authority/hello",
+            "params":{"protocol_version":2,"client_instance_id":uuid()}}),
+    );
+    assert_eq!(hello["result"]["kind"], "hello", "{hello}");
+    successor.tick(Instant::now()).unwrap();
+    let changes = successor.engine().connection().total_changes();
+    let sent = rig.sent().len();
+    let mut params = json!({"intent_id":intent,"managed_session_id":launch.managed_session_id,
+        "expected_session_revision":1,"prompt":"work","runtime_fence":fence});
+    let replay = send_to(
+        &mut successor,
+        &mut client,
+        &mut rig.spawn,
+        json!({"schema_version":2,"request_id":uuid(),"authority_instance_id":auth,
+            "method":"managedSession/turn/start","params":params}),
+    );
+    assert_eq!(replay["result"]["value"], original, "{replay}");
+    params["runtime_fence"]["generation"] = json!(launch.generation + 1);
+    let conflict = send_to(
+        &mut successor,
+        &mut client,
+        &mut rig.spawn,
+        json!({"schema_version":2,"request_id":uuid(),"authority_instance_id":auth,
+            "method":"managedSession/turn/start","params":params}),
+    );
+    assert_eq!(code(&conflict), "intent_conflict", "{conflict}");
+    assert_eq!(rig.sent().len(), sent);
+    assert_eq!(successor.engine().connection().total_changes(), changes);
+    assert!(
+        successor
+            .engine()
+            .reference(launch.managed_session_id.as_str())
+            .is_none()
+    );
+    validate_v8(successor.engine().connection()).unwrap();
+}

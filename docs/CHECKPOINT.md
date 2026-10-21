@@ -1,25 +1,25 @@
 # Checkpoint
 
-Current continuation: 2026-10-20, `main`, worktree `~/Github_repos/wyss-console-rama-4`, private
+Current continuation: 2026-10-21, `integrate/f8-final`, worktree `~/Github_repos/wyss-console-rama-4`, private
 `origin/main`. Recheck actual Git heads/status before writing or pushing. No public release.
 The other worktree and all unrelated pending work are preserved.
 
 ## Implementation and acceptance are different states
 
-| Block                                                          | Implementation                                     | Real acceptance / next requirement                                                                                   |
-| -------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| F1/F2                                                          | Implemented                                        | Accepted; `acceptance/f1-f2a-2026-10-19.md`, `f2b-owner-decisions.md`                                                |
-| F3 native sessions/profiles                                    | Implemented                                        | Accepted baseline; `acceptance/f3-2026-10-19.md`, ADR 0035                                                           |
-| F9 persistent host                                             | Implemented                                        | Accepted baseline; ADR 0036; preserve live terminals across GUI upgrades                                             |
-| F14/F11a/F13 baseline                                          | Implemented                                        | Historical acceptance in `acceptance/f14-f11a-f13-closure-2026-10-19.md`                                             |
-| F4a inventory/switches                                         | Implemented                                        | Baseline accepted; `acceptance/f4a-f5-f6-f1b-2026-10-19.md`                                                          |
-| F5 account hooks/MCP/instruction edits/templates/create/delete | Implemented                                        | Baseline real acceptance; ADRs 0042–0047 and linked acceptance records                                               |
-| F5 project files and hook/MCP templates                        | Implemented, ADR 0050                              | Native authoring/Undo and template roundtrip PASS; confirmed template apply NOT_RUN; provider consumption NOT_PROVEN |
-| F6 models/catalogue/reroute/native effort                      | Implemented, ADR 0048                              | Partial installed-provider acceptance; old host/authority lack new behaviour                                         |
-| F8 per-session runtimes                                        | Inactive code foundations; ADR 0051 Proposed       | Protocol/registry/offline V8 code and tests reviewed; production enforcement NOT_PROVEN; owner has not accepted      |
-| P1                                                             | Backend baseline and idle optimization implemented | Partial measurements; visual matrix NOT_RUN; no canonical budget pass                                                |
-| F10 gateway                                                    | Reviewed unreachable foundations, ADR 0049         | Authentication decision preparation only; no transport/listener/device enrollment                                    |
-| F1b / B1 / G-INF                                               | Research and reviewed pure contracts               | Isolation/provider claims remain partial or NOT_PROVEN; no production B1 worker                                      |
+| Block                                                          | Implementation                                                     | Real acceptance / next requirement                                                                                   |
+| -------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| F1/F2                                                          | Implemented                                                        | Accepted; `acceptance/f1-f2a-2026-10-19.md`, `f2b-owner-decisions.md`                                                |
+| F3 native sessions/profiles                                    | Implemented                                                        | Accepted baseline; `acceptance/f3-2026-10-19.md`, ADR 0035                                                           |
+| F9 persistent host                                             | Implemented                                                        | Accepted baseline; ADR 0036; preserve live terminals across GUI upgrades                                             |
+| F14/F11a/F13 baseline                                          | Implemented                                                        | Historical acceptance in `acceptance/f14-f11a-f13-closure-2026-10-19.md`                                             |
+| F4a inventory/switches                                         | Implemented                                                        | Baseline accepted; `acceptance/f4a-f5-f6-f1b-2026-10-19.md`                                                          |
+| F5 account hooks/MCP/instruction edits/templates/create/delete | Implemented                                                        | Baseline real acceptance; ADRs 0042–0047 and linked acceptance records                                               |
+| F5 project files and hook/MCP templates                        | Implemented, ADR 0050                                              | Native authoring/Undo and template roundtrip PASS; confirmed template apply NOT_RUN; provider consumption NOT_PROVEN |
+| F6 models/catalogue/reroute/native effort                      | Implemented, ADR 0048                                              | Partial installed-provider acceptance; old host/authority lack new behaviour                                         |
+| F8 per-session runtimes                                        | Inactive application integration and V8 writers; ADR 0051 Proposed | See f8-final-2026-10-21.md; native tools/GUI and complete integrated acceptance remain open; no installed activation |
+| P1                                                             | Backend baseline and idle optimization implemented                 | Partial measurements; visual matrix NOT_RUN; no canonical budget pass                                                |
+| F10 gateway                                                    | Reviewed unreachable foundations, ADR 0049                         | Authentication decision preparation only; no transport/listener/device enrollment                                    |
+| F1b / B1 / G-INF                                               | Research and reviewed pure contracts                               | Isolation/provider claims remain partial or NOT_PROVEN; no production B1 worker                                      |
 
 Authoritative record of this continuation:
 [engineering acceptance and preservation](acceptance/engineering-2026-10-20.md).
@@ -47,20 +47,25 @@ selection as unimplemented, said gateway had no second review, or used old insta
 
 ## Current engineering decisions
 
-F8 candidate ADR 0051 now targets **V7→V8**; V7 already exists. Both active-turn and pending-approval
-indexes, all transient routing and private per-launch provider/catalogue state need scoping. Candidate
-protocol 2 refuses ambiguous v1 targeting. Explicit-only recovery and fresh leases after runtime loss
-are proposed changes needing owner acceptance. Independent design review found seven issues and
-checked corrections. Focused code review now covers the inactive codec, offline migration preparation
-and observational registry; review of the extended execution core remains future work. Exact SQL, protocol 2 shapes, routing and numeric budgets are now in the
-[reviewed candidate contracts](contracts/f8/README.md), with ten executable reference/SQL tests.
-Inactive protocol codecs, offline V0–V7→V8 preparation/initial-image validators and registry foundations
-now exist: [code evidence and precise limits](acceptance/f8-code-2026-10-20.md). New-work V8 event replay,
-audit result validation, durable allocation/replay and production enforcement still remain. Non-audit
-result correlation is implemented, with explicit canonical-workspace context for binding creation.
-Inactive F8 now also has vocabulary-2 audit replay, a post-migration V8 validator, a durable allocator, owned-process lifecycle, budgets, scheduler, staging and a per-session engine with F8-01..F8-18 tests ([evidence](acceptance/f8-code-2026-10-20.md), [Codex shared state](research/f8-codex-shared-state-2026-10-20.md), [owner decision](research/f8-owner-decision-2026-10-20.md)). Not integrated or activated; V8 turn/approval writers, process-backed workers and provider concurrency remain open (capacity 1). Qualified concurrency measurements and provider shared-state compatibility remain unproven; no live migration or guarantee change occurred.
-See [F8 evidence](research/f8-runtime-decision-2026-10-20.md) and
-[adversarial specification](spec/f8-runtime-acceptance.md).
+F8 execution continues on the private integration branch, based on `172a1c4`; `main` remains
+`1117217` until mandatory integration and security gates pass. All 29 protocol-2 methods route through
+`authority.rs` or `operations.rs`; V8 durable writers, process workers, bindings and reads exist.
+The local application selector now composes a validated prepared V8 image, one registry/writer,
+F8 transport and supervised service. Native inference uses DeferredProcessWorker and the native
+Codex adapter; the installed entry point still explicitly selects protocol 1. No installed database
+is opened by the prepared-F8 constructor and no listener or environment activation switch was added.
+
+Cold reviews found and corrected recovery/replay, native normalization and spawn ownership defects.
+Pending spawn and timeout retain capacity/staging until reap. The child transfers its self-pidfd
+before exec, avoiding parental acquisition by a recyclable child PID. See the
+[execution and precise remaining gates](acceptance/f8-final-2026-10-21.md),
+[independent security evidence](acceptance/f8-security-review-2026-10-21.md) and
+[29-method source matrix](acceptance/f8-protocol2-method-matrix.md).
+Native local-tools/critical approval translation and coordinated GUI protocol-2 state remain
+unaccepted source/integration gaps. Normalized tool fixtures do not prove the native provider.
+Capacity stays one; multiprocess credential refresh, real provider, installed migration and owner
+acceptance remain separate NOT_PROVEN gates. Historical installed observations below are not current
+process identities or cleanup targets.
 
 F10 authentication preparation recommends standard authenticated TLS plus standard WebAuthn user
 verification for further review; no custom production signing protocol and no dependencies added.

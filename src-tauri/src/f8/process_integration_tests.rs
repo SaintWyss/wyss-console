@@ -5,7 +5,7 @@ use super::{
     engine::{Attachment, Containment, Engine, Spawned, Spawner, StopState, Worker},
     migration,
     ownership::{ContainmentPolicy, Grace},
-    process_worker::ProcessWorker,
+    process_worker::DeferredProcessWorker,
     protocol::RuntimeRef,
     registry::Registry,
     service::Service,
@@ -16,7 +16,7 @@ use crate::{
         WireUuid,
         control::{ControlResult, unique_json},
     },
-    control::{F8Transport, f8_fixture},
+    control::{F8Transport, application::PreparedApplication, f8_fixture},
 };
 use serde_json::{Value, json};
 use std::{
@@ -60,7 +60,7 @@ for line in sys.stdin:
 "#;
 // Only this explicit test wrapper opts into the normalized fixture's synthetic safety
 // proof. ProcessWorker itself cannot approve an unverified provider preflight.
-struct FixtureWorker(ProcessWorker);
+struct FixtureWorker(DeferredProcessWorker);
 impl Worker for FixtureWorker {
     fn preflight(&mut self, _: &Attachment) -> ControlResult<()> {
         Ok(())
@@ -130,8 +130,8 @@ impl Spawner for FixtureSpawner {
             })
             .arg(json!({"fingerprint":fingerprint,"structure":structure}).to_string());
         Ok(Spawned {
-            worker: Box::new(FixtureWorker(ProcessWorker::spawn_with(
-                &mut command,
+            worker: Box::new(FixtureWorker(DeferredProcessWorker::spawn(
+                command,
                 Grace {
                     eof: Duration::from_millis(20),
                     term: Duration::from_millis(20),
@@ -146,11 +146,13 @@ impl Spawner for FixtureSpawner {
         })
     }
 }
-type Transport = F8Transport<FixtureSpawner>;
 fn id() -> String {
     crate::control::store::uuid().as_str().to_owned()
 }
-fn poll_until(t: &mut Transport, mut condition: impl FnMut(&Transport) -> bool) {
+pub(crate) fn poll_until<S: Spawner>(
+    t: &mut PreparedApplication<S>,
+    mut condition: impl FnMut(&PreparedApplication<S>) -> bool,
+) {
     let until = Instant::now() + Duration::from_secs(5);
     while !condition(t) {
         t.poll(Instant::now()).unwrap();
@@ -158,7 +160,12 @@ fn poll_until(t: &mut Transport, mut condition: impl FnMut(&Transport) -> bool) 
         std::thread::sleep(Duration::from_millis(1));
     }
 }
-fn call(t: &mut Transport, c: &mut UnixStream, method: &str, params: Value) -> Value {
+pub(crate) fn call<S: Spawner>(
+    t: &mut PreparedApplication<S>,
+    c: &mut UnixStream,
+    method: &str,
+    params: Value,
+) -> Value {
     let mut request = json!({"schema_version":2,"request_id":id(),"method":method,"params":params});
     if method != "authority/hello" {
         request["authority_instance_id"] = json!(AUTH);
@@ -205,16 +212,17 @@ fn owned_process_control_transport_binding_stream_cancel_relaunch_and_session_is
         None,
     )
     .unwrap();
-    let mut transport = F8Transport::new(Service::new(
-        Authority::new(engine),
-        FixtureSpawner {
-            workspace: workspace.clone(),
-            tools: true,
-        },
-    ));
+    let (mut transport, application) =
+        PreparedApplication::with_test_transport(F8Transport::new(Service::new(
+            Authority::new(engine),
+            FixtureSpawner {
+                workspace: workspace.clone(),
+                tools: true,
+            },
+        )));
     let (owned, mut socket) = UnixStream::pair().unwrap();
     socket.set_nonblocking(true).unwrap();
-    transport.attach(owned, Instant::now()).unwrap();
+    application.attach(owned).unwrap();
     assert!(
         call(
             &mut transport,

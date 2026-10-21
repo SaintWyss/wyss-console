@@ -149,7 +149,6 @@ impl<'c> Writer<'c> {
             let previous: ManagedTurnRecord = serde_json::from_str(&r).map_err(invalid)?;
             let owner: String = tx.query_row("SELECT authority_instance_id FROM managed_runtime_launches WHERE runtime_instance_id=?1", [launch.runtime_instance_id.as_str()], |r|r.get(0)).map_err(|_|E::IntentConflict)?;
             if owner != launch.authority_instance_id.as_str()
-                || owner != authority
                 || previous.managed_session_id != launch.managed_session_id
                 || previous.runtime_instance_id != launch.runtime_instance_id
                 || sidecar(
@@ -802,6 +801,25 @@ impl<'c> Writer<'c> {
     /// (revoked or expired) interrupts the turns admitted under it and settles their approvals in
     /// the same transaction, so no work outlives the grant that admitted it.
     pub fn lease(&mut self, op: &Operation) -> ControlResult<ExecutionLease> {
+        op.validate()?;
+        let mutation = serde_json::to_string(op).map_err(invalid)?;
+        self.lease_canonical(op, mutation)
+    }
+
+    /// Protocol-2 receipts retain the immutable launch fence as part of the intent.
+    pub fn lease_request(
+        &mut self,
+        request: &super::protocol::Request,
+    ) -> ControlResult<ExecutionLease> {
+        let mutation = String::from_utf8(request.canonical_intent()?).map_err(invalid)?;
+        self.lease_canonical(request.operation(), mutation)
+    }
+
+    fn lease_canonical(
+        &mut self,
+        op: &Operation,
+        mutation: String,
+    ) -> ControlResult<ExecutionLease> {
         let intent = match op {
             Operation::LeaseGrant(p) => &p.intent_id,
             Operation::LeaseRenew(p) => &p.intent_id,
@@ -809,7 +827,6 @@ impl<'c> Writer<'c> {
             _ => return Err(E::InvalidRequest),
         };
         op.validate()?;
-        let mutation = serde_json::to_string(op).map_err(invalid)?;
         let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
         let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
         if let Some((m, r)) = receipt(&tx, intent.as_str())? {

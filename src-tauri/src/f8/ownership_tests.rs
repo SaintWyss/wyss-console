@@ -292,8 +292,30 @@ fn a_pid_namespace_takes_every_descendant_down_with_the_owned_child() {
     let (mut child, _) =
         OwnedChild::spawn(&mut c, ContainmentPolicy::DescendantsContained, quick()).unwrap();
     let mut out = child.take_stdout().unwrap();
+    let flags = nix::fcntl::fcntl(out.as_raw_fd(), nix::fcntl::FcntlArg::F_GETFL).unwrap();
+    nix::fcntl::fcntl(
+        out.as_raw_fd(),
+        nix::fcntl::FcntlArg::F_SETFL(
+            nix::fcntl::OFlag::from_bits_truncate(flags) | nix::fcntl::OFlag::O_NONBLOCK,
+        ),
+    )
+    .unwrap();
     let mut buf = [0u8; 16];
-    wait_for(|| out.read(&mut buf).is_ok_and(|n| n > 0) || true);
+    let mut ready = Vec::new();
+    wait_for(|| {
+        match out.read(&mut buf) {
+            Ok(0) => panic!("namespace payload exited before reporting ready"),
+            Ok(n) => ready.extend_from_slice(&buf[..n]),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) => {}
+            Err(e) => panic!("namespace payload readiness read failed: {e}"),
+        }
+        ready.ends_with(b"\n")
+    });
+    assert_eq!(ready, b"ready\n");
     // The payload lives in another PID namespace: observed, not assumed.
     wait_for(|| child.namespace_contained() && child.descendant_count() >= 3);
     // Pin everything under the owned launcher by pidfd (the test's own artifacts) ...
@@ -512,4 +534,180 @@ fn ownership_resource_diagnostics_for_reused_command_and_idle_threads() {
         2,
         "one spawn coordinator and one reaper only"
     );
+}
+
+#[test]
+fn pending_timeout_retains_owner_and_permit_until_delayed_handoff_is_reaped() {
+    let reaper = Arc::new(Reaper {
+        slots: AtomicUsize::new(0),
+        queue: Mutex::new(Vec::new()),
+        wake: Condvar::new(),
+    });
+    let mut pending = PendingOwnedSpawn::start(
+        sh("exec sleep 30"),
+        reserve_slot(&reaper).unwrap(),
+        quick(),
+        false,
+        Duration::from_secs(5),
+        Duration::from_millis(250),
+    )
+    .unwrap();
+    wait_for(|| {
+        assert!(pending.poll(Instant::now()).is_none());
+        pending.refusal_pin.is_some()
+    });
+    let timed_out = pending.deadline + Duration::from_millis(1);
+    assert!(pending.poll(timed_out).is_none());
+    assert_eq!(pending.failure(), Some(E::ProviderRejected));
+    assert!(!pending.finished());
+    assert_eq!(reaper.slots.load(Ordering::Acquire), 1);
+    wait_for(|| match pending.poll(timed_out) {
+        Some(Err(E::ProviderRejected)) => true,
+        None => false,
+        _ => panic!("a timed-out spawn must not become a successful launch"),
+    });
+    assert!(pending.finished());
+    assert_eq!(reaper.slots.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn pending_failed_pin_never_executes_payload_and_completes_only_after_spawn_failure() {
+    let root = std::env::temp_dir().join(format!("wyss-f8-pending-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let marker = root.join("executed");
+    let mut pending = PendingOwnedSpawn::fixture(
+        sh(&format!("touch '{}'; exec sleep 30", marker.display())),
+        quick(),
+        true,
+        Duration::from_secs(5),
+        Duration::ZERO,
+    )
+    .unwrap();
+    wait_for(|| match pending.poll(Instant::now()) {
+        Some(Err(E::ProviderRejected)) => true,
+        None => false,
+        _ => panic!("an unpinned payload must never become executable"),
+    });
+    assert!(pending.finished());
+    assert!(!marker.exists());
+    std::fs::remove_dir(root).unwrap();
+}
+
+#[test]
+fn child_transferred_pidfd_has_exact_identity_cloexec_and_survives_reap_without_retargeting() {
+    let mut pending = PendingOwnedSpawn::fixture(
+        sh("exec sleep 30"),
+        quick(),
+        false,
+        Duration::from_secs(5),
+        Duration::from_millis(100),
+    )
+    .unwrap();
+    wait_for(|| {
+        assert!(pending.poll(Instant::now()).is_none());
+        pending.refusal_pin.is_some()
+    });
+    let fd = Arc::clone(pending.refusal_pin.as_ref().unwrap());
+    let sender = i32::from_ne_bytes(pending.pid_bytes);
+    let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", fd.as_raw_fd())).unwrap();
+    assert_eq!(
+        info.lines()
+            .find_map(|line| line.strip_prefix("Pid:")?.trim().parse::<i32>().ok()),
+        Some(sender)
+    );
+    let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
+    assert!(flags >= 0 && flags & libc::FD_CLOEXEC != 0);
+    let mut owned = None;
+    wait_for(|| match pending.poll(Instant::now()) {
+        Some(Ok((child, _))) => {
+            owned = Some(child);
+            true
+        }
+        None => false,
+        Some(Err(error)) => panic!("self-pidfd transfer failed: {error:?}"),
+    });
+    let mut child = owned.unwrap();
+    assert_eq!(child.pid_for_diagnostics(), sender);
+    assert_eq!(fd.as_raw_fd(), child.pidfd.as_raw_fd());
+    assert!(matches!(drive(&mut child).0, Progress::Reaped(_)));
+    // The transferred handle is permanently bound to that dead child, even
+    // after its numeric PID becomes available for reuse.
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            fd.as_raw_fd(),
+            0,
+            std::ptr::null::<libc::siginfo_t>(),
+            0,
+        )
+    };
+    assert_eq!(result, -1);
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+}
+
+#[test]
+fn pidfd_receiver_rejects_missing_duplicate_and_mismatched_rights_without_retention() {
+    use std::os::unix::net::UnixStream;
+    for (rights, reported) in [
+        (0usize, std::process::id() as i32),
+        (2, std::process::id() as i32),
+        (1, i32::MAX),
+    ] {
+        let (parent, sender) = UnixStream::pair().unwrap();
+        let (_reply, result) = mpsc::sync_channel(1);
+        let mut pending = PendingOwnedSpawn {
+            result,
+            parent,
+            pin: Arc::new(Mutex::new(None)),
+            refusal_pin: None,
+            received_pin: None,
+            pid_bytes: [0; std::mem::size_of::<i32>()],
+            received: 0,
+            refused: false,
+            deadline: Instant::now() + Duration::from_secs(5),
+            failure: None,
+            child: None,
+            original: None,
+            finished: true,
+        };
+        let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, libc::getpid(), 0) };
+        assert!(raw >= 0);
+        let fd = unsafe { OwnedFd::from_raw_fd(raw as i32) };
+        let bytes = reported.to_ne_bytes();
+        let mut iov = libc::iovec {
+            iov_base: bytes.as_ptr().cast_mut().cast(),
+            iov_len: bytes.len(),
+        };
+        let mut control = [0usize; 8];
+        let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1;
+        if rights > 0 {
+            msg.msg_control = control.as_mut_ptr().cast();
+            msg.msg_controllen =
+                unsafe { libc::CMSG_SPACE((rights * std::mem::size_of::<i32>()) as u32) } as usize;
+            unsafe {
+                let header = libc::CMSG_FIRSTHDR(&msg);
+                (*header).cmsg_level = libc::SOL_SOCKET;
+                (*header).cmsg_type = libc::SCM_RIGHTS;
+                (*header).cmsg_len =
+                    libc::CMSG_LEN((rights * std::mem::size_of::<i32>()) as u32) as usize;
+                for index in 0..rights {
+                    std::ptr::write_unaligned(
+                        libc::CMSG_DATA(header).cast::<i32>().add(index),
+                        fd.as_raw_fd(),
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            unsafe { libc::sendmsg(sender.as_raw_fd(), &msg, libc::MSG_NOSIGNAL) },
+            bytes.len() as isize
+        );
+        assert!(matches!(pending.receive_pin(), Err(E::ProviderRejected)));
+        assert!(pending.received_pin.is_none());
+    }
 }

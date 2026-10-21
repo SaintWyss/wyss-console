@@ -1394,7 +1394,10 @@ fn a_flooding_process_is_stopped_alone_with_its_exact_budget_key() {
     let (a, b) = (rig.sessions[0].clone(), rig.sessions[1].clone());
     let mut sp = Spawn::new(&rig.frames);
     sp.process = true;
-    sp.script = Some("yes aaaa".into());
+    // Back pressure or a busy test host can keep tiny `yes` frames below the rate
+    // ceiling indefinitely. Large valid frames also reach the unchanged byte budget,
+    // so stopping this real flood does not depend on exceeding a wall-clock event rate.
+    sp.script = Some("exec /usr/bin/python3 -u -c 'import sys; line=\"a\"*131072+\"\\n\"; exec(\"while True: sys.stdout.write(line); sys.stdout.flush()\")'".into());
     let _ra = rig.ready(&a, &mut sp);
     sp.script = Some("cat".into());
     let rb = rig.ready(&b, &mut sp);

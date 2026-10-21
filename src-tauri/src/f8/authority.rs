@@ -7,8 +7,8 @@
 //! request, checked against the registry (live work) or the immutable sidecar (history) before
 //! any state changes; leases, approvals and cancellation re-run their gates at the moment of the
 //! effect; a provider answer is sent only after its durable decision committed and the engine
-//! revalidated the ticket. Methods which still need a schema-8 port (session prepare/close,
-//! bindings, model catalogue, turn/approval reads, gate query) answer `unsupported`.
+//! revalidated the ticket. All 29 protocol methods route here or through `operations.rs`. Native provider support is a
+//! separate adapter boundary and may refuse unproved profiles without weakening authority checks.
 use super::{
     engine::{Attachment, Engine, LeaseClaim, LeaseView, Spawner, TurnTicket},
     protocol::{Request, Response, RuntimeFence, RuntimeRef, Target, encode},
@@ -320,6 +320,31 @@ impl Authority {
     }
 
     fn lease_op(&mut self, request: &Request) -> ControlResult<Value> {
+        // Resolve exact receipts before consulting the current runtime. A receipt never
+        // regrants a lease, and a different fence under the same intent is a conflict.
+        let intent = match request.operation() {
+            v1::Operation::LeaseGrant(p) => p.intent_id.as_str(),
+            v1::Operation::LeaseRenew(p) => p.intent_id.as_str(),
+            v1::Operation::LeaseRevoke(p) => p.intent_id.as_str(),
+            _ => return Err(E::InvalidRequest),
+        };
+        let previous: Option<(String, String)> = self
+            .engine
+            .connection()
+            .query_row(
+                "SELECT mutation,result FROM processed_intents WHERE intent_id=?1",
+                [intent],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|_| E::StorageUnavailable)?;
+        if let Some((mutation, value)) = previous {
+            if mutation.as_bytes() != request.canonical_intent()? {
+                return Err(E::IntentConflict);
+            }
+            let lease = serde_json::from_str(&value).map_err(|_| E::StorageIncompatible)?;
+            return lease_value(&lease);
+        }
         // Grant and renewal are launch-fenced (protocol 2). Revocation deliberately is not: a
         // grant must stay revocable when its runtime is gone.
         let revoke = matches!(request.operation(), v1::Operation::LeaseRevoke(_));
@@ -336,8 +361,7 @@ impl Authority {
             }
         }
         let authority = self.authority();
-        let lease =
-            Writer::new(self.engine.connection_mut(), authority)?.lease(request.operation())?;
+        let lease = Writer::new(self.engine.connection_mut(), authority)?.lease_request(request)?;
         if lease.state != crate::contracts::execution::LeaseState::Active {
             let session = lease.session_id.as_str().to_owned();
             self.lease_lost(&session, lease.lease_id.as_str());
@@ -375,9 +399,21 @@ impl Authority {
             .map_err(|_| E::StorageUnavailable)?;
         let authority = self.authority();
         if replay {
+            // Receipt replay reads the allocating authority from immutable launch history;
+            // succession never grants the successor permission to execute that old launch.
+            let instance = fence
+                .runtime_instance_id
+                .as_ref()
+                .ok_or(E::InvalidRequest)?;
+            let owner: String = self.engine.connection().query_row(
+                "SELECT authority_instance_id FROM managed_runtime_launches WHERE managed_session_id=?1 AND runtime_instance_id=?2 AND generation=?3",
+                rusqlite::params![fence.managed_session_id.as_str(), instance.as_str(), fence.generation as i64],
+                |r| r.get(0),
+            ).map_err(|_| E::IntentConflict)?;
             let reference = RuntimeRef {
                 schema: 2,
-                authority_instance_id: authority.clone(),
+                authority_instance_id: WireUuid::try_from(owner)
+                    .map_err(|_| E::StorageIncompatible)?,
                 managed_session_id: fence.managed_session_id.clone(),
                 runtime_instance_id: fence.runtime_instance_id.clone().ok_or(E::InvalidRequest)?,
                 generation: fence.generation,
@@ -465,11 +501,69 @@ impl Authority {
             .map(|_| ())
     }
 
+    /// Legacy writer receipts already bind these operations to immutable sidecars. Reconstruct
+    /// that original fence before admission so exact historical replay remains readable, while
+    /// a changed fence or operation cannot masquerade as the original intent.
+    fn replay_record_intent(
+        &self,
+        request: &Request,
+        intent: &str,
+        table: &str,
+        key: &str,
+    ) -> ControlResult<Option<Value>> {
+        let previous: Option<(String, String)> = self
+            .engine
+            .connection()
+            .query_row(
+                "SELECT mutation,result FROM processed_intents WHERE intent_id=?1",
+                [intent],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|_| E::StorageUnavailable)?;
+        let Some((mutation, result)) = previous else {
+            return Ok(None);
+        };
+        let mut original = unique_json(mutation.as_bytes()).map_err(|_| E::StorageIncompatible)?;
+        let proposed = unique_json(&request.canonical_intent()?)?;
+        if original["method"] != proposed["method"] {
+            return Err(E::IntentConflict);
+        }
+        let id = original["params"][key]
+            .as_str()
+            .ok_or(E::StorageIncompatible)?;
+        let sql = format!(
+            "SELECT managed_session_id,generation,runtime_instance_id FROM {table} WHERE {key}=?1"
+        );
+        let (session, generation, instance): (String, i64, String) = self
+            .engine
+            .connection()
+            .query_row(&sql, [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(|_| E::StorageIncompatible)?;
+        let generation = u64::try_from(generation).map_err(|_| E::StorageIncompatible)?;
+        original["params"]["runtime_fence"] = json!({"managed_session_id":session,
+            "generation":generation,"runtime_instance_id":instance});
+        if original != proposed {
+            return Err(E::IntentConflict);
+        }
+        Ok(Some(
+            unique_json(result.as_bytes()).map_err(|_| E::StorageIncompatible)?,
+        ))
+    }
+
     fn turn_cancel(
         &mut self,
         request: &Request,
         p: &crate::contracts::turn::TurnCancel,
     ) -> ControlResult<Value> {
+        if let Some(record) = self.replay_record_intent(
+            request,
+            p.intent_id.as_str(),
+            "managed_turn_launches",
+            "managed_turn_id",
+        )? {
+            return Ok(json!({"kind":"turn","value":record}));
+        }
         let Target::Fenced(fence) = request.target() else {
             return Err(E::InvalidRequest);
         };
@@ -545,6 +639,14 @@ impl Authority {
         now: Instant,
     ) -> ControlResult<Value> {
         let _ = now;
+        if let Some(receipt) = self.replay_record_intent(
+            request,
+            p.intent_id.as_str(),
+            "managed_approval_launches",
+            "managed_approval_id",
+        )? {
+            return Ok(json!({"kind":"approval_receipt","value":receipt}));
+        }
         let Target::Fenced(fence) = request.target() else {
             return Err(E::InvalidRequest);
         };

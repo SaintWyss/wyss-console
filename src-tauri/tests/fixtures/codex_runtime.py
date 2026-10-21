@@ -271,7 +271,12 @@ for line in sys.stdin:
         params = message['params']
         posture = ('workspace-write', 'untrusted') if local else ('read-only', 'never')
         if method == 'thread/start' and not local:
-            assert set(params) == {'cwd', 'ephemeral'} and params['ephemeral'] is False
+            # Both frozen stable shapes are encoded in adapters/codex/protocol.rs:
+            # the legacy minimal start and F8's explicitly clamped inference start.
+            # The shared config/posture assertions below verify every clamp.
+            assert set(params) in ({'cwd', 'ephemeral'},
+                                   {'cwd', 'ephemeral', 'config', 'sandbox', 'approvalPolicy'})
+            assert params['ephemeral'] is False
             thread_id = 'opaque-' + str(len((root / 'methods').read_text().splitlines()))
         elif method == 'thread/start':
             assert set(params) == {'cwd', 'ephemeral', 'config', 'sandbox', 'approvalPolicy'} and params['ephemeral'] is False
@@ -292,6 +297,13 @@ for line in sys.stdin:
                 (root / 'trust-roots').write_text(json.dumps(sorted(projects)))
             else:
                 assert params['config']['mcp_servers']['fixture_mcp']['enabled'] is False
+                disabled = {key: False for key in flags if key.startswith('features.') or key in (
+                    'cloud.skills.enabled', 'skills.include_instructions',
+                    'tools.experimental_request_user_input.enabled', 'tools.update_plan.enabled')}
+                assert params['config'] == {**disabled, 'web_search': 'disabled',
+                                           'agents.enabled': False,
+                                           'default_permissions': ':read-only',
+                                           'mcp_servers': {'fixture_mcp': {'enabled': False}}}
         if method == 'thread/resume':
             assert threads[thread_id]['durable'] and not threads[thread_id]['archived']
         assert Path(params['cwd']).is_absolute()

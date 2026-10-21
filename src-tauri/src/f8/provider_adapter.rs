@@ -16,7 +16,7 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     path::PathBuf,
     time::Instant,
 };
@@ -64,6 +64,7 @@ pub struct NativeCodexWorker<W: Worker> {
     preflight_pending: bool,
     proof: bool,
     known_mcp: Option<BTreeSet<String>>,
+    normalized: VecDeque<Vec<u8>>,
 }
 fn codec<T>(r: std::result::Result<T, codex::CodecError>) -> ControlResult<T> {
     r.map_err(|_| E::InvalidRequest)
@@ -79,6 +80,19 @@ impl<W: Worker> NativeCodexWorker<W> {
         catalog: PathBuf,
         version: String,
     ) -> ControlResult<Self> {
+        Self::inference_retaining(worker, session, instance, attachment, catalog, version)
+            .map_err(|(error, _worker)| error)
+    }
+    /// Preserve the owned worker on validation or initialize-write failure so the
+    /// supervisor can contain and reap it through its bounded lifecycle.
+    pub fn inference_retaining(
+        worker: W,
+        session: ManagedSessionId,
+        instance: AgentRuntimeInstanceId,
+        attachment: Attachment,
+        catalog: PathBuf,
+        version: String,
+    ) -> std::result::Result<Self, (E, W)> {
         if attachment.profile != "codex_inference_v1"
             || attachment.revision == 0
             || version.is_empty()
@@ -88,7 +102,7 @@ impl<W: Worker> NativeCodexWorker<W> {
                 .all(|s| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit()))
             || !catalog.is_absolute()
         {
-            return Err(E::InvalidRequest);
+            return Err((E::InvalidRequest, worker));
         }
         let mut this = Self {
             worker,
@@ -108,6 +122,7 @@ impl<W: Worker> NativeCodexWorker<W> {
             preflight_pending: false,
             proof: false,
             known_mcp: None,
+            normalized: VecDeque::new(),
         };
         let request = ClientOperation::Initialize {
             client_info: ClientInfo {
@@ -117,7 +132,9 @@ impl<W: Worker> NativeCodexWorker<W> {
             },
             experimental_api: false,
         };
-        this.request(request, Pending::Initialize)?;
+        if let Err(error) = this.request(request, Pending::Initialize) {
+            return Err((error, this.worker));
+        }
         Ok(this)
     }
     fn id(&mut self) -> ControlResult<CodexRequestId> {
@@ -259,9 +276,15 @@ impl<W: Worker> NativeCodexWorker<W> {
                     })
                     .collect();
                 let models: Vec<_> = models.into_iter().map(|m| m.model).collect();
-                let mut notices = vec![
-                    json!({"kind":"models","models":models,"offers":offers,"complete":next_cursor.is_none()}),
-                ];
+                // Match the engine's snapshot admission before publishing readiness:
+                // a one-frame quantum must never expose Ready for a catalogue that
+                // the following quantum would reject.
+                if models.iter().any(|model| model.validate().is_err())
+                    || offers.iter().any(|offer| !offer.valid())
+                {
+                    return Err(E::InvalidRequest);
+                }
+                let mut notices = Vec::new();
                 if !self.ready {
                     if !self.config_verified || !self.hooks_verified {
                         return Err(E::GateDenied);
@@ -273,6 +296,9 @@ impl<W: Worker> NativeCodexWorker<W> {
                         "revision":self.attachment.revision}),
                     );
                 }
+                // The engine admits model snapshots only after this launch's
+                // durable readiness edge. Both still require validated discovery.
+                notices.push(json!({"kind":"models","models":models,"offers":offers,"complete":next_cursor.is_none()}));
                 Ok(notices)
             }
             Pending::Binding {
@@ -334,6 +360,15 @@ impl<W: Worker> NativeCodexWorker<W> {
                 self.binding_confirmed(operation, thread)
             }
             Pending::Turn { managed } => {
+                // A turn/start result can carry the same item list as a lifecycle
+                // notification. Do not let normalization erase executable surfaces
+                // that the inference profile would reject in a notification.
+                if safety::external_action_candidate(
+                    "turn/started",
+                    message.result().ok_or(E::InvalidRequest)?,
+                ) {
+                    return Err(E::GateDenied);
+                }
                 let observation = codec(codex::normalize_response(
                     message,
                     &request_id,
@@ -381,6 +416,12 @@ impl<W: Worker> NativeCodexWorker<W> {
                 {
                     return Err(E::CorrelationError);
                 }
+                // Both turn/start's response and turn/started report the same
+                // lifecycle edge. Publish it once; the durable writer correctly
+                // refuses a second Running -> Running transition.
+                if outcome == TurnOutcome::InProgress && provider.as_ref() == Some(&turn_id) {
+                    return Ok(Vec::new());
+                }
                 *provider = Some(turn_id.clone());
                 let notice = match outcome {
                     TurnOutcome::InProgress => {
@@ -411,6 +452,9 @@ impl<W: Worker> NativeCodexWorker<W> {
             CodexObservation::Item(_) | CodexObservation::SuppressedPrivateReasoning => {
                 Ok(Vec::new())
             }
+            // The inference classifier has already accepted these metadata-only
+            // notifications. The normalizer also checks any stable thread identity.
+            CodexObservation::UnknownNotification { .. } => Ok(Vec::new()),
             CodexObservation::Session { .. }
                 if self.pending.values().any(|p| {
                     matches!(
@@ -561,8 +605,16 @@ impl<W: Worker> Worker for NativeCodexWorker<W> {
         self.worker.flush()
     }
     fn inbound(&mut self, max_frames: usize) -> ControlResult<Vec<Vec<u8>>> {
+        if max_frames == 0 {
+            return Ok(Vec::new());
+        }
+        if !self.normalized.is_empty() {
+            return Ok(self
+                .normalized
+                .drain(..max_frames.min(self.normalized.len()))
+                .collect());
+        }
         let frames = self.worker.inbound(max_frames.min(16))?;
-        let mut normalized = Vec::new();
         for frame in frames {
             let message = codec(WireMessage::parse(&frame, Direction::ServerToClient))?;
             let events = if matches!(
@@ -571,23 +623,63 @@ impl<W: Worker> Worker for NativeCodexWorker<W> {
             ) {
                 self.response(&message)?
             } else {
-                if !self.ready {
-                    return Err(E::InvalidTransition);
-                }
                 // Existing inference isolation classifier rejects requests, tools, hooks,
                 // MCP and unknown executable surfaces before the normalizer sees them.
                 codec(safety::notification(&message))?;
+                if !self.ready {
+                    // The pinned fixture emits connection metadata before initialize's
+                    // response. It cannot attest readiness, binding or executable work.
+                    if matches!(
+                        message.method(),
+                        Some(
+                            "remoteControl/status/changed"
+                                | "account/updated"
+                                | "account/rateLimits/updated"
+                        )
+                    ) {
+                        continue;
+                    }
+                    return Err(E::InvalidTransition);
+                }
+                // Some validated metadata methods are deliberately not normalized into
+                // stable observations. They still belong to this connection's thread,
+                // including the materialization interval before binding is published.
+                let expected_thread = self.binding.as_ref().map(|b| &b.thread_id).or_else(|| {
+                    self.pending.values().find_map(|p| match p {
+                        Pending::Archive { thread, .. } | Pending::Unarchive { thread, .. } => {
+                            Some(thread)
+                        }
+                        Pending::Binding {
+                            expected: Some(thread),
+                            ..
+                        } => Some(thread),
+                        _ => None,
+                    })
+                });
+                if let Some(expected) = expected_thread
+                    && let Some(thread) = message.params().and_then(|p| p.get("threadId"))
+                    && thread.as_str() != Some(expected.as_str())
+                {
+                    return Err(E::CorrelationError);
+                }
                 let observation = codec(codex::normalize_inbound(&message, self.binding.as_ref()))?;
                 self.translate(observation, None)?
             };
             for value in events {
-                if normalized.len() >= max_frames {
+                // One native response can expand into models plus runtime-ready.
+                // Retain the bounded remainder rather than faulting a healthy worker
+                // when the scheduler supplies a one-frame quantum.
+                if self.normalized.len() >= 32 {
                     return Err(E::CapacityExceeded);
                 }
-                normalized.push(serde_json::to_vec(&value).map_err(|_| E::InternalError)?);
+                self.normalized
+                    .push_back(serde_json::to_vec(&value).map_err(|_| E::InternalError)?);
             }
         }
-        Ok(normalized)
+        Ok(self
+            .normalized
+            .drain(..max_frames.min(self.normalized.len()))
+            .collect())
     }
     fn has_exited(&mut self) -> bool {
         self.worker.has_exited()
@@ -610,6 +702,10 @@ impl<W: Worker> Worker for NativeCodexWorker<W> {
 }
 
 #[cfg(test)]
+#[path = "native_process_tests.rs"]
+mod native_process_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::{
@@ -620,9 +716,13 @@ mod tests {
     struct Fixture {
         sent: Arc<Mutex<Vec<Vec<u8>>>>,
         inbound: VecDeque<Vec<u8>>,
+        reject_send: bool,
     }
     impl Worker for Fixture {
         fn send(&mut self, frame: &[u8]) -> ControlResult<()> {
+            if self.reject_send {
+                return Err(E::TransportError);
+            }
             self.sent.lock().unwrap().push(frame.to_vec());
             Ok(())
         }
@@ -723,5 +823,175 @@ mod tests {
             w.send_critical(b"approval item-A accept"),
             Err(E::Unsupported)
         );
+    }
+    #[test]
+    fn native_materialization_metadata_is_consumed_and_thread_fenced() {
+        for method in ["thread/archived", "thread/unarchived"] {
+            let mut w = bound();
+            w.worker.inbound.push_back(
+                serde_json::to_vec(&json!({
+                    "method":method,"params":{"threadId":"thread-A"}
+                }))
+                .unwrap(),
+            );
+            assert!(w.inbound(1).unwrap().is_empty());
+            w.worker.inbound.push_back(
+                serde_json::to_vec(&json!({
+                    "method":method,"params":{"threadId":"thread-B"}
+                }))
+                .unwrap(),
+            );
+            assert!(w.inbound(1).is_err());
+        }
+        let mut w = bound();
+        w.binding = None;
+        w.pending.insert(
+            "archive".into(),
+            Pending::Archive {
+                operation: "operation".into(),
+                thread: CodexThreadId::parse("thread-A").unwrap(),
+            },
+        );
+        w.worker.inbound.push_back(
+            br#"{"method":"thread/archived","params":{"threadId":"thread-B"}}"#.to_vec(),
+        );
+        assert_eq!(w.inbound(1), Err(E::CorrelationError));
+    }
+    #[test]
+    fn native_metadata_consumption_does_not_allow_unknown_methods() {
+        let mut w = bound();
+        w.worker
+            .inbound
+            .push_back(br#"{"method":"unknown/effect","params":{"threadId":"thread-A"}}"#.to_vec());
+        assert!(w.inbound(1).is_err());
+    }
+    #[test]
+    fn native_readiness_expansion_respects_one_frame_budget_without_loss() {
+        let mut w = worker();
+        w.config_verified = true;
+        w.hooks_verified = true;
+        w.pending.clear();
+        w.pending.insert("models".into(), Pending::Models);
+        w.worker
+            .inbound
+            .push_back(br#"{"id":"models","result":{"data":[],"nextCursor":null}}"#.to_vec());
+        let first = w.inbound(1).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&first[0]).unwrap()["kind"],
+            "runtime_ready"
+        );
+        let second = w.inbound(1).unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&second[0]).unwrap()["kind"],
+            "models"
+        );
+        assert!(w.inbound(1).unwrap().is_empty());
+    }
+    #[test]
+    fn native_invalid_model_offers_never_publish_readiness() {
+        for excessive_efforts in [true, false] {
+            let mut w = worker();
+            w.config_verified = true;
+            w.hooks_verified = true;
+            w.pending.clear();
+            w.pending.insert("models".into(), Pending::Models);
+            let efforts: Vec<_> = (0..if excessive_efforts { 17 } else { 1 })
+                .map(|index| json!({"reasoningEffort":format!("effort{index}"),"description":"Fixture"}))
+                .collect();
+            w.worker.inbound.push_back(serde_json::to_vec(&json!({
+                "id":"models","result":{"data":[{
+                    "id":"fixture","model":"fixture","displayName":"Fixture",
+                    "description":"Fixture","hidden":false,"isDefault":true,
+                    "defaultReasoningEffort":if excessive_efforts { "effort0" } else { "invalid effort" },
+                    "supportedReasoningEfforts":efforts
+                }],"nextCursor":null}
+            })).unwrap());
+            assert_eq!(w.inbound(1), Err(E::InvalidRequest));
+            assert!(!w.ready);
+            assert!(w.normalized.is_empty());
+            assert!(w.inbound(1).unwrap().is_empty());
+        }
+    }
+    #[test]
+    fn native_turn_response_cannot_hide_an_executed_action() {
+        let mut w = bound();
+        w.pending.insert(
+            "turn".into(),
+            Pending::Turn {
+                managed: "00000000-0000-4000-8000-000000000003".into(),
+            },
+        );
+        w.worker.inbound.push_back(
+            serde_json::to_vec(&json!({
+                "id":"turn","result":{"turn":{"id":"turn-A","status":"completed",
+                "items":[{"id":"action","type":"commandExecution","command":"true",
+                "cwd":"/work","commandActions":[],"status":"completed","exitCode":0}]}}
+            }))
+            .unwrap(),
+        );
+        assert_eq!(w.inbound(1), Err(E::GateDenied));
+        assert!(w.turn.is_some());
+    }
+    #[test]
+    fn native_turn_start_response_and_notification_publish_one_running_edge() {
+        for response_first in [true, false] {
+            let mut w = bound();
+            w.turn.as_mut().unwrap().1 = None;
+            w.pending.insert(
+                "start".into(),
+                Pending::Turn {
+                    managed: "00000000-0000-4000-8000-000000000003".into(),
+                },
+            );
+            let turn = json!({"id":"turn-A","status":"inProgress","items":[]});
+            let response =
+                serde_json::to_vec(&json!({"id":"start","result":{"turn":turn}})).unwrap();
+            let notice = serde_json::to_vec(
+                &json!({"method":"turn/started","params":{"threadId":"thread-A","turn":turn}}),
+            )
+            .unwrap();
+            if response_first {
+                w.worker.inbound.extend([response, notice]);
+            } else {
+                w.worker.inbound.extend([notice, response]);
+            }
+            let frames = w.inbound(16).unwrap();
+            assert_eq!(frames.len(), 1);
+            assert_eq!(
+                serde_json::from_slice::<Value>(&frames[0]).unwrap()["kind"],
+                "turn_running"
+            );
+        }
+    }
+    #[test]
+    fn retaining_constructor_returns_owned_worker_for_every_failure() {
+        for invalid_profile in [true, false] {
+            let w = worker();
+            let mut fixture = w.worker;
+            let identity = Arc::clone(&fixture.sent);
+            fixture.reject_send = !invalid_profile;
+            let mut attachment = w.attachment;
+            if invalid_profile {
+                attachment.profile = "unsupported".into();
+            }
+            match NativeCodexWorker::inference_retaining(
+                fixture, w.session, w.instance, attachment, w.catalog, w.version,
+            ) {
+                Ok(_) => panic!("expected refusal"),
+                Err((error, owned)) => {
+                    assert_eq!(
+                        error,
+                        if invalid_profile {
+                            E::InvalidRequest
+                        } else {
+                            E::TransportError
+                        }
+                    );
+                    assert!(Arc::ptr_eq(&identity, &owned.sent));
+                }
+            }
+        }
     }
 }

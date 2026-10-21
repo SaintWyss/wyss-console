@@ -1,7 +1,6 @@
 # ADR 0051: One managed runtime per session, with bounded concurrency (DN-08 = A, F8)
 
-Status: **Proposed.** Independently reviewed design; not owner-accepted, no active implementation. Written so that the review the roadmap
-requires has something exact to review. Nothing here changes the running authority, its schema (V7) or any
+Status: **Proposed.** Independently reviewed design; not owner-accepted, inactive implementation with application wiring under validation. Owner acceptance remains open. Nothing here changes the running authority, its schema (V7) or any
 accepted guarantee. Extends ADRs 0012 and 0015; reconciles RC-03 (`33-CROSS-DOMAIN-RECONCILIATION.md`).
 Date: 2026-10-20
 
@@ -171,10 +170,22 @@ stays 1 until separate compatibility/resource evidence supports an owner-approve
 **Reviewed implementation contract candidate; NOT_PROVEN; not approved for production.** Design review is not review of implemented F8 security;
 F8 remains **NOT_PROVEN**.
 
-## Inactive implementation continuation
+## Inactive implementation continuation, 2026-10-21
 
-[Protocol, offline migration and registry code evidence](../acceptance/f8-code-2026-10-20.md)
-records the implemented foundations, adversarial tests and focused independent code review.
-This does not approve integration: complete V8 event replay/validators, durable allocation/replay,
-scheduling, lease/approval enforcement, process ownership and provider compatibility remain open.
-The running protocol-1/schema-7 authority and its single-runtime bound are unchanged.
+Protocol-2 parsing/routing, all 29 method handlers, V8 validation and durable writers, allocation,
+replay, per-launch engine state, cooperative audit/watch, process-backed workers and native inference
+translation now exist. The application can construct and supervise an explicitly supplied prepared
+V8 authority through its local selection boundary. The installed binary continues selecting protocol
+1/schema 7. No installed migration or activation is enabled by this continuation.
+
+The [execution report](../acceptance/f8-final-2026-10-21.md),
+[method matrix](../acceptance/f8-protocol2-method-matrix.md) and
+[security review](../acceptance/f8-security-review-2026-10-21.md) supersede earlier claims that V8
+writers, workers or authority routes were unimplemented. Native local-tools/approval translation,
+coordinated GUI protocol-2 state and complete application-level acceptance remain explicit gates.
+The new self-pidfd transfer addresses the process identity acquisition finding; its review and
+regressions do not attest provider compatibility or owner acceptance. Active capacity remains one.
+
+SOURCE_COMPLETE, INTEGRATION_TESTED, INDEPENDENTLY_REVIEWED, REAL_PROVIDER_ACCEPTED,
+INSTALLED_MIGRATION_ACCEPTED and OWNER_APPROVED are independent gates. No implementation status
+in this ADR grants Santiago's acceptance or authority to migrate the installed service.

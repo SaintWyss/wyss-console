@@ -195,3 +195,144 @@ fn eof_during_a_frame_is_a_transport_failure() {
     assert_eq!(worker.failure(), Some(E::TransportError));
     finish(&mut worker);
 }
+
+#[test]
+fn deferred_process_worker_returns_before_spawn_and_preserves_round_trip() {
+    let mut command = Command::new("/bin/cat");
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let pending = PendingOwnedSpawn::fixture(
+        command,
+        quick(),
+        false,
+        Duration::from_secs(5),
+        Duration::from_millis(150),
+    )
+    .unwrap();
+    let mut worker =
+        DeferredProcessWorker::pending(pending, quick(), ContainmentPolicy::DirectChildOnly);
+    assert!(worker.pending.is_some());
+    worker.send(b"initialization").unwrap();
+    assert_eq!(
+        worker.send_critical(b"approval item accept"),
+        Err(E::CapacityExceeded)
+    );
+    let frame = until(|| {
+        worker.flush().unwrap();
+        worker.inbound(1).unwrap().into_iter().next()
+    });
+    assert_eq!(frame, b"initialization");
+    worker.begin_stop(Instant::now());
+    until(|| (worker.poll_stop(Instant::now()) == StopState::Reaped).then_some(()));
+}
+
+#[test]
+fn deferred_timeout_keeps_engine_slot_and_staging_until_reap() {
+    use crate::{
+        contracts::WireUuid,
+        control::f8_fixture,
+        f8::{
+            engine::{Engine, Spawned, Spawner},
+            migration,
+            protocol::{Request, RuntimeRef},
+            registry::Registry,
+            staging::{LaunchStaging, StagingRoot},
+        },
+    };
+    use serde_json::json;
+    use std::os::unix::fs::DirBuilderExt;
+    struct Delayed;
+    impl Spawner for Delayed {
+        fn spawn(
+            &mut self,
+            _: &RuntimeRef,
+            staging: Option<&mut LaunchStaging>,
+        ) -> ControlResult<Spawned> {
+            staging.unwrap().write_file("catalog.json", b"{}").unwrap();
+            let mut command = Command::new("/bin/cat");
+            command
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            let pending = PendingOwnedSpawn::fixture(
+                command,
+                quick(),
+                false,
+                Duration::ZERO,
+                Duration::from_millis(250),
+            )?;
+            Ok(Spawned {
+                worker: Box::new(DeferredProcessWorker::pending(
+                    pending,
+                    quick(),
+                    ContainmentPolicy::DirectChildOnly,
+                )),
+            })
+        }
+    }
+    let root = std::env::temp_dir().join(format!("wyss-f8-deferred-{}", uuid::Uuid::new_v4()));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&root)
+        .unwrap();
+    let mut source = f8_fixture::v7_with_sessions(1);
+    let conn = migration::prepare(&mut source).unwrap().into_connection();
+    let sessions: Vec<String> = conn
+        .prepare("SELECT session_id FROM managed_sessions ORDER BY created_sequence")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let auth = WireUuid::try_from("00000000-0000-4000-8000-0000000000a1".to_owned()).unwrap();
+    let mut engine = Engine::new(
+        conn,
+        auth.clone(),
+        Registry::new(auth.clone()).unwrap(),
+        Some(StagingRoot::open(&root).unwrap()),
+    )
+    .unwrap();
+    let request = |engine: &Engine, session: &str| {
+        let (generation, revision): (i64, i64) = engine
+            .connection()
+            .query_row(
+                "SELECT generation,revision FROM managed_runtimes WHERE managed_session_id=?1",
+                [session],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or((0, 0));
+        Request::parse(&serde_json::to_vec(&json!({"schema_version":2,"request_id":uuid::Uuid::new_v4().to_string(),
+            "authority_instance_id":auth,"method":"runtime/start","params":{
+                "intent_id":uuid::Uuid::new_v4().to_string(),"adapter_id":"codex","runtime_kind":"codex",
+                "managed_session_id":session,"expected_generation":generation,"expected_revision":revision
+            }})).unwrap()).unwrap()
+    };
+    let outcome = engine
+        .start(&request(&engine, &sessions[0]), &mut Delayed)
+        .unwrap();
+    let staging = root.join(outcome.runtime_instance_id.unwrap().as_str());
+    engine.poll(Instant::now());
+    assert!(
+        engine.is_live(&sessions[0]),
+        "spawn timeout must retain the live cleanup owner"
+    );
+    assert!(
+        staging.join("catalog.json").exists(),
+        "staging cannot be cleaned before reap"
+    );
+    assert!(matches!(
+        engine.start(&request(&engine, &sessions[1]), &mut Delayed),
+        Err(E::CapacityExceeded)
+    ));
+    until(|| {
+        engine.poll(Instant::now());
+        (!engine.is_live(&sessions[0])).then_some(())
+    });
+    assert!(
+        !staging.exists(),
+        "only a proved reap permits staging cleanup"
+    );
+    std::fs::remove_dir(root).unwrap();
+}

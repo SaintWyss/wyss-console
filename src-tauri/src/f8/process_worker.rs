@@ -9,7 +9,7 @@
 //! Lifecycle (EOF, TERM, KILL, reap) is the owned handle's, never a PID or name.
 use super::{
     engine::{Containment, StopState, Worker},
-    ownership::{ContainmentPolicy, Grace, OwnedChild, Progress},
+    ownership::{ContainmentPolicy, Grace, OwnedChild, PendingOwnedSpawn, Progress},
 };
 use crate::contracts::control::{ControlError as E, ControlResult};
 use nix::fcntl::{FcntlArg, OFlag, fcntl};
@@ -52,8 +52,9 @@ fn nonblocking(fd: i32) -> ControlResult<()> {
 }
 
 impl ProcessWorker {
-    /// Spawns the command as an owned child with piped stdio. The caller picks the program and
-    /// arguments; this type adds no environment, shell or credential.
+    /// Legacy synchronous fixture API. Application spawners use DeferredProcessWorker
+    /// so outstanding spawn cleanup cannot escape the engine's runtime capacity.
+    /// The caller picks the program and arguments; no environment or credential is added.
     pub fn spawn(command: &mut Command, grace: Grace) -> ControlResult<Self> {
         Self::spawn_with(command, grace, ContainmentPolicy::DirectChildOnly)
     }
@@ -67,13 +68,27 @@ impl ProcessWorker {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let (mut child, _) = OwnedChild::spawn(command, policy, grace)?;
-        let stdout = child.take_stdout().ok_or(E::TransportError)?;
-        let stderr = child.take_stderr().ok_or(E::TransportError)?;
-        let stdin_fd = child.stdin().ok_or(E::TransportError)?.as_raw_fd();
-        nonblocking(stdin_fd)?;
-        nonblocking(stdout.as_raw_fd())?;
-        nonblocking(stderr.as_raw_fd())?;
+        let (child, _) = OwnedChild::spawn(command, policy, grace)?;
+        Self::from_owned(child, policy).map_err(|(error, _child)| error)
+    }
+
+    fn from_owned(
+        mut child: OwnedChild,
+        policy: ContainmentPolicy,
+    ) -> Result<Self, (E, Box<OwnedChild>)> {
+        let pipes = (|| {
+            let stdout = child.take_stdout().ok_or(E::TransportError)?;
+            let stderr = child.take_stderr().ok_or(E::TransportError)?;
+            let stdin_fd = child.stdin().ok_or(E::TransportError)?.as_raw_fd();
+            nonblocking(stdin_fd)?;
+            nonblocking(stdout.as_raw_fd())?;
+            nonblocking(stderr.as_raw_fd())?;
+            Ok((stdout, stderr))
+        })();
+        let (stdout, stderr) = match pipes {
+            Ok(pipes) => pipes,
+            Err(error) => return Err((error, Box::new(child))),
+        };
         Ok(Self {
             child,
             stdout,
@@ -269,6 +284,214 @@ impl Worker for ProcessWorker {
     }
     fn pid_for_diagnostics(&self) -> Option<i32> {
         Some(self.child.pid_for_diagnostics())
+    }
+}
+
+/// Application process worker: reserving ownership returns immediately, while
+/// spawn, gate pinning and refused-child cleanup advance cooperatively. A failed
+/// initialization retains this worker (and the engine slot) until reap proof.
+pub struct DeferredProcessWorker {
+    pending: Option<PendingOwnedSpawn>,
+    worker: Option<ProcessWorker>,
+    cleanup: Option<OwnedChild>,
+    queued: VecDeque<Vec<u8>>,
+    queued_bytes: usize,
+    failed: Option<E>,
+    stopped_at: Option<Instant>,
+    complete: bool,
+    policy: ContainmentPolicy,
+    grace: Grace,
+}
+impl DeferredProcessWorker {
+    pub fn spawn(
+        mut command: Command,
+        grace: Grace,
+        policy: ContainmentPolicy,
+    ) -> ControlResult<Self> {
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let pending = PendingOwnedSpawn::spawn(command, policy, grace)?;
+        Ok(Self::pending(pending, grace, policy))
+    }
+    fn pending(pending: PendingOwnedSpawn, grace: Grace, policy: ContainmentPolicy) -> Self {
+        Self {
+            pending: Some(pending),
+            worker: None,
+            cleanup: None,
+            queued: VecDeque::new(),
+            queued_bytes: 0,
+            failed: None,
+            stopped_at: None,
+            complete: false,
+            policy,
+            grace,
+        }
+    }
+    fn advance(&mut self, now: Instant) {
+        let outcome = self.pending.as_mut().and_then(|pending| {
+            let outcome = pending.poll(now);
+            self.failed = self.failed.or(pending.failure());
+            outcome
+        });
+        if let Some(outcome) = outcome {
+            self.pending.take();
+            match outcome {
+                Ok((child, _)) => match ProcessWorker::from_owned(child, self.policy) {
+                    Ok(mut worker) => {
+                        if self.stopped_at.is_some() {
+                            worker.begin_stop(now);
+                        }
+                        self.worker = Some(worker);
+                    }
+                    Err((error, mut child)) => {
+                        self.failed = Some(error);
+                        child.begin_stop(now);
+                        self.cleanup = Some(*child);
+                    }
+                },
+                Err(error) => {
+                    self.failed = Some(error);
+                    self.complete = true;
+                }
+            }
+        }
+        if self.failed.is_some() || self.stopped_at.is_some() {
+            self.queued.clear();
+            self.queued_bytes = 0;
+        }
+    }
+}
+impl Worker for DeferredProcessWorker {
+    fn send(&mut self, frame: &[u8]) -> ControlResult<()> {
+        self.advance(Instant::now());
+        if let Some(error) = self.failed {
+            return Err(error);
+        }
+        if self.stopped_at.is_some() {
+            return Err(E::TransportError);
+        }
+        if frame.len() > OUTBOUND_FRAME_MAX || frame.contains(&b'\n') {
+            return Err(E::FrameTooLarge);
+        }
+        if self.queued_bytes + frame.len() + 1 > OUTBOUND_BUFFER_MAX {
+            return Err(E::CapacityExceeded);
+        }
+        self.queued.push_back(frame.to_vec());
+        self.queued_bytes += frame.len() + 1;
+        self.flush()
+    }
+    fn send_critical(&mut self, frame: &[u8]) -> ControlResult<()> {
+        self.advance(Instant::now());
+        if let Some(error) = self.failed {
+            return Err(error);
+        }
+        if self.stopped_at.is_some() {
+            return Err(E::TransportError);
+        }
+        if !self.queued.is_empty() {
+            return Err(E::CapacityExceeded);
+        }
+        self.worker
+            .as_mut()
+            .ok_or(E::CapacityExceeded)?
+            .send_critical(frame)
+    }
+    fn flush(&mut self) -> ControlResult<()> {
+        self.advance(Instant::now());
+        if let Some(error) = self.failed {
+            return Err(error);
+        }
+        if self.stopped_at.is_some() {
+            return Err(E::TransportError);
+        }
+        let Some(worker) = &mut self.worker else {
+            return Ok(());
+        };
+        // Bound the number of small initialization frames moved per quantum.
+        for _ in 0..16 {
+            let Some(frame) = self.queued.front() else {
+                break;
+            };
+            match worker.send(frame) {
+                Ok(()) => {
+                    self.queued_bytes -= frame.len() + 1;
+                    self.queued.pop_front();
+                }
+                Err(E::CapacityExceeded) => break,
+                Err(error) => {
+                    self.failed = Some(error);
+                    return Err(error);
+                }
+            }
+        }
+        worker.flush()
+    }
+    fn inbound(&mut self, max_frames: usize) -> ControlResult<Vec<Vec<u8>>> {
+        self.advance(Instant::now());
+        if let Some(error) = self.failed {
+            return Err(error);
+        }
+        match &mut self.worker {
+            Some(worker) => worker.inbound(max_frames),
+            None => Ok(Vec::new()),
+        }
+    }
+    fn has_exited(&mut self) -> bool {
+        self.advance(Instant::now());
+        self.complete || self.worker.as_mut().is_some_and(Worker::has_exited)
+    }
+    fn begin_stop(&mut self, now: Instant) {
+        self.stopped_at.get_or_insert(now);
+        if let Some(pending) = &mut self.pending {
+            pending.cancel();
+        }
+        self.advance(now);
+        if let Some(worker) = &mut self.worker {
+            worker.begin_stop(now);
+        }
+        if let Some(child) = &mut self.cleanup {
+            child.begin_stop(now);
+        }
+    }
+    fn poll_stop(&mut self, now: Instant) -> StopState {
+        self.advance(now);
+        if self.complete {
+            return StopState::Reaped;
+        }
+        if let Some(worker) = &mut self.worker {
+            return worker.poll_stop(now);
+        }
+        if let Some(child) = &mut self.cleanup {
+            return match child.poll_stop(now) {
+                Ok(Progress::Reaped(_)) => {
+                    self.complete = true;
+                    StopState::Reaped
+                }
+                Ok(Progress::Pending(_)) => StopState::Pending,
+                Ok(Progress::Stuck) | Err(_) => StopState::Stuck,
+            };
+        }
+        if self.stopped_at.is_some_and(|at| {
+            now.saturating_duration_since(at) >= self.grace.eof + self.grace.term + self.grace.kill
+        }) {
+            StopState::Stuck
+        } else {
+            StopState::Pending
+        }
+    }
+    fn containment(&mut self) -> Containment {
+        self.advance(Instant::now());
+        self.worker
+            .as_mut()
+            .map_or(Containment::DirectChildOnly, Worker::containment)
+    }
+    fn descendants(&self) -> usize {
+        self.worker.as_ref().map_or(0, Worker::descendants)
+    }
+    fn pid_for_diagnostics(&self) -> Option<i32> {
+        self.worker.as_ref().and_then(Worker::pid_for_diagnostics)
     }
 }
 

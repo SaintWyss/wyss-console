@@ -120,7 +120,10 @@ fn proc_start_ticks(pid: i32) -> ControlResult<u64> {
 }
 
 impl OwnedChild {
-    /// Spawns and takes ownership. The caller configures stdio and arguments beforehand.
+    /// Legacy synchronous fixture API, bounded by the spawn deadline. The caller
+    /// configures stdio and arguments beforehand. Application spawners must use
+    /// PendingOwnedSpawn through DeferredProcessWorker so timeout cleanup retains
+    /// runtime capacity and staging until reap is proved.
     pub fn spawn(
         command: &mut Command,
         policy: ContainmentPolicy,
@@ -378,176 +381,450 @@ fn gated_spawn_timed(
     timeout: Duration,
     reply_delay: Duration,
 ) -> ControlResult<(OwnedChild, ContainmentReport)> {
-    use std::os::unix::net::UnixStream;
-    let coordinator = spawn_coordinator()?;
-    let (parent, gate) = UnixStream::pair().map_err(|_| E::InternalError)?;
-    let pin = Arc::new(Mutex::new(None::<Pin>));
-    let owned_pin = Arc::clone(&pin);
-    let (reply, result) = mpsc::sync_channel(1);
     let placeholder = Command::new(command.get_program());
-    let mut moved = std::mem::replace(command, placeholder);
-    // SAFETY: only raw, async-signal-safe read/write/getpid calls execute after fork.
-    // The coordinator retains the socket until spawn returns. On command reuse
-    // the completed closure skips its expired descriptor using the atomic flag.
-    let parent_fd = parent.as_raw_fd();
-    let gate_fd = gate.as_raw_fd();
-    let expected_parent = nix::unistd::getpid();
-    let used = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let gate_used = Arc::clone(&used);
-    unsafe {
-        moved.pre_exec(move || {
-            if gate_used.load(Ordering::Acquire) {
-                return Ok(());
-            }
-            // The fork inherits both endpoints. Close the parent endpoint in
-            // the child so caller timeout/refusal produces EOF on the gate.
-            libc::close(parent_fd);
-            nix::sys::prctl::set_pdeathsig(nix::sys::signal::Signal::SIGKILL)
-                .map_err(std::io::Error::from)?;
-            if nix::unistd::getppid() != expected_parent {
-                return Err(std::io::Error::from_raw_os_error(libc::ECHILD));
-            }
-            nix::unistd::setsid().map_err(std::io::Error::from)?;
-            let _ = libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 4u32);
-            nix::sys::signal::SigSet::empty()
-                .thread_set_mask()
-                .map_err(std::io::Error::from)?;
-            let pid = libc::getpid().to_ne_bytes();
-            if libc::write(gate_fd, pid.as_ptr().cast(), pid.len()) != pid.len() as isize {
-                return Err(std::io::Error::from_raw_os_error(libc::EIO));
-            }
-            let mut ack = 0u8;
-            loop {
-                let n = libc::read(gate_fd, (&mut ack as *mut u8).cast(), 1);
-                if n == 1 && ack == 1 {
-                    return Ok(());
-                }
-                if n < 0 && *libc::__errno_location() == libc::EINTR {
-                    continue;
-                }
-                return Err(std::io::Error::from_raw_os_error(libc::ECANCELED));
-            }
-        });
-    }
-    let job: SpawnJob = Box::new(move || {
-        let spawned = moved.spawn();
-        if !reply_delay.is_zero() {
-            std::thread::sleep(reply_delay);
-        }
-        used.store(true, Ordering::Release);
-        drop(gate);
-        let outcome = spawned
-            .map_err(|_| E::ProviderRejected)
-            .and_then(|mut child| {
-                let pinned = owned_pin.lock().unwrap_or_else(|e| e.into_inner()).take();
-                let Some(pinned) = pinned else {
-                    // A successful exec requires the parent to have stored the pin.
-                    // Preserve ownership even if an internal invariant is violated.
-                    enqueue_reap(child, permit);
-                    return Err(E::InternalError);
-                };
-                let stdin = child.stdin.take();
-                Ok((
-                    OwnedChild {
-                        child: Some(child),
-                        reap_permit: Some(permit),
-                        pidfd: pinned.fd,
-                        pid: pinned.pid,
-                        start_ticks: pinned.start,
-                        stage: Stage::Running,
-                        stage_since: Instant::now(),
-                        grace,
-                        exit: None,
-                        reaped_elsewhere: false,
-                        stdin,
-                    },
-                    ContainmentReport {
-                        direct_child_pdeathsig: true,
-                        own_session: true,
-                        descendants_contained: false,
-                    },
-                ))
-            });
-        // If the caller timed out or unwound, dropping an OwnedChild here still
-        // kills only its pinned process and transfers reap to the bounded reaper.
-        let _ = reply.send((moved, outcome));
-    });
-    coordinator.try_send(job).map_err(|_| E::CapacityExceeded)?;
-    let deadline = Instant::now() + timeout;
-    let mut refusal_pin: Option<Arc<OwnedFd>> = None;
-    let mut pid_bytes = [0u8; std::mem::size_of::<i32>()];
-    let mut received = 0;
-    let mut refused = false;
+    let moved = std::mem::replace(command, placeholder);
+    let mut pending =
+        PendingOwnedSpawn::start(moved, permit, grace, fail_pin, timeout, reply_delay)?;
     loop {
-        match result.try_recv() {
-            Ok((original, outcome)) => {
+        if let Some(outcome) = pending.poll(Instant::now()) {
+            if let Some(original) = pending.original.take() {
                 *command = original;
-                return outcome;
             }
-            Err(mpsc::TryRecvError::Disconnected) => return Err(E::InternalError),
-            Err(mpsc::TryRecvError::Empty) => (),
+            return outcome;
         }
-        if Instant::now() >= deadline {
-            if let Some(fd) = refusal_pin {
-                // Handoff may have reached exec while the coordinator is delayed.
-                // Revoke only this pinned child before reporting a refused launch.
-                let _ = unsafe {
-                    libc::syscall(
-                        libc::SYS_pidfd_send_signal,
-                        fd.as_raw_fd(),
-                        libc::SIGKILL,
-                        std::ptr::null::<libc::siginfo_t>(),
-                        0,
-                    )
-                };
-            }
+        // Legacy fixture-only synchronous API remains bounded. Production
+        // spawners must retain PendingOwnedSpawn through the deferred worker.
+        if Instant::now() >= pending.deadline {
+            pending.cancel();
             return Err(E::ProviderRejected);
         }
-        if !refused && received < pid_bytes.len() {
-            let n = unsafe {
-                libc::recv(
-                    parent.as_raw_fd(),
-                    pid_bytes[received..].as_mut_ptr().cast(),
-                    pid_bytes.len() - received,
-                    libc::MSG_DONTWAIT,
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+type SpawnReply = (Command, ControlResult<(OwnedChild, ContainmentReport)>);
+
+/// A launched or queued child remains owned, and consumes its caller's runtime slot,
+/// until this operation supplies an owned child or proves a refused child was reaped.
+/// All polling is non-blocking. A deadline is a failure notification, never reap proof.
+pub struct PendingOwnedSpawn {
+    result: mpsc::Receiver<SpawnReply>,
+    parent: std::os::unix::net::UnixStream,
+    pin: Arc<Mutex<Option<Pin>>>,
+    refusal_pin: Option<Arc<OwnedFd>>,
+    received_pin: Option<OwnedFd>,
+    pid_bytes: [u8; std::mem::size_of::<i32>()],
+    received: usize,
+    refused: bool,
+    deadline: Instant,
+    failure: Option<E>,
+    child: Option<OwnedChild>,
+    original: Option<Command>,
+    finished: bool,
+}
+impl PendingOwnedSpawn {
+    pub fn spawn(command: Command, policy: ContainmentPolicy, grace: Grace) -> ControlResult<Self> {
+        if policy == ContainmentPolicy::DescendantsContained {
+            verify_namespace_launch(&command)?;
+        }
+        let permit = reap_permit()?;
+        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, nix::unistd::getpid().as_raw(), 0) };
+        if fd < 0 {
+            return Err(E::Unsupported);
+        }
+        drop(unsafe { OwnedFd::from_raw_fd(fd as i32) });
+        Self::start(
+            command,
+            permit,
+            grace,
+            false,
+            Duration::from_secs(3),
+            Duration::ZERO,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture(
+        command: Command,
+        grace: Grace,
+        fail_pin: bool,
+        timeout: Duration,
+        reply_delay: Duration,
+    ) -> ControlResult<Self> {
+        Self::start(
+            command,
+            reap_permit()?,
+            grace,
+            fail_pin,
+            timeout,
+            reply_delay,
+        )
+    }
+
+    fn start(
+        command: Command,
+        permit: ReapPermit,
+        grace: Grace,
+        fail_pin: bool,
+        timeout: Duration,
+        reply_delay: Duration,
+    ) -> ControlResult<Self> {
+        use std::os::unix::net::UnixStream;
+        let coordinator = spawn_coordinator()?;
+        let (parent, gate) = UnixStream::pair().map_err(|_| E::InternalError)?;
+        let pin = Arc::new(Mutex::new(None::<Pin>));
+        let owned_pin = Arc::clone(&pin);
+        let (reply, result) = mpsc::sync_channel(1);
+        let mut moved = command;
+        // SAFETY: post-fork work uses stack storage and raw syscall/C socket
+        // operations only; no allocation, locks or Rust runtime synchronization.
+        // The coordinator retains the socket until spawn returns. On command reuse
+        // the completed closure skips its expired descriptor using the atomic flag.
+        let parent_fd = parent.as_raw_fd();
+        let gate_fd = gate.as_raw_fd();
+        let expected_parent = nix::unistd::getpid();
+        let used = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let gate_used = Arc::clone(&used);
+        unsafe {
+            moved.pre_exec(move || {
+                if gate_used.load(Ordering::Acquire) {
+                    return Ok(());
+                }
+                // The fork inherits both endpoints. Close the parent endpoint in
+                // the child so caller timeout/refusal produces EOF on the gate.
+                libc::close(parent_fd);
+                nix::sys::prctl::set_pdeathsig(nix::sys::signal::Signal::SIGKILL)
+                    .map_err(std::io::Error::from)?;
+                if nix::unistd::getppid() != expected_parent {
+                    return Err(std::io::Error::from_raw_os_error(libc::ECHILD));
+                }
+                nix::unistd::setsid().map_err(std::io::Error::from)?;
+                let _ = libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 4u32);
+                nix::sys::signal::SigSet::empty()
+                    .thread_set_mask()
+                    .map_err(std::io::Error::from)?;
+                // Acquire identity from the process itself, before it can be
+                // killed/reaped and its numeric PID reused. SCM_RIGHTS transfers
+                // this exact kernel reference; the parent never opens by child PID.
+                if fail_pin {
+                    return Err(std::io::Error::from_raw_os_error(libc::EMFILE));
+                }
+                let self_fd = libc::syscall(libc::SYS_pidfd_open, libc::getpid(), 0);
+                if self_fd < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                let pid = libc::getpid().to_ne_bytes();
+                let mut iov = libc::iovec {
+                    iov_base: pid.as_ptr().cast_mut().cast(),
+                    iov_len: pid.len(),
+                };
+                // usize storage provides cmsghdr alignment without allocation.
+                let mut control = [0usize; 8];
+                let mut msg: libc::msghdr = std::mem::zeroed();
+                msg.msg_iov = &mut iov;
+                msg.msg_iovlen = 1;
+                msg.msg_control = control.as_mut_ptr().cast();
+                msg.msg_controllen = libc::CMSG_SPACE(std::mem::size_of::<i32>() as u32) as usize;
+                let cmsg = libc::CMSG_FIRSTHDR(&msg);
+                (*cmsg).cmsg_level = libc::SOL_SOCKET;
+                (*cmsg).cmsg_type = libc::SCM_RIGHTS;
+                (*cmsg).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<i32>() as u32) as usize;
+                std::ptr::write_unaligned(libc::CMSG_DATA(cmsg).cast::<i32>(), self_fd as i32);
+                let sent = loop {
+                    let n = libc::sendmsg(gate_fd, &msg, libc::MSG_NOSIGNAL);
+                    if n < 0 && *libc::__errno_location() == libc::EINTR {
+                        continue;
+                    }
+                    break n;
+                };
+                libc::close(self_fd as i32);
+                if sent != pid.len() as isize {
+                    return Err(std::io::Error::from_raw_os_error(libc::EIO));
+                }
+                let mut ack = 0u8;
+                loop {
+                    let n = libc::read(gate_fd, (&mut ack as *mut u8).cast(), 1);
+                    if n == 1 && ack == 1 {
+                        return Ok(());
+                    }
+                    if n < 0 && *libc::__errno_location() == libc::EINTR {
+                        continue;
+                    }
+                    return Err(std::io::Error::from_raw_os_error(libc::ECANCELED));
+                }
+            });
+        }
+        let job: SpawnJob = Box::new(move || {
+            let spawned = moved.spawn();
+            if !reply_delay.is_zero() {
+                std::thread::sleep(reply_delay);
+            }
+            used.store(true, Ordering::Release);
+            drop(gate);
+            let outcome = spawned
+                .map_err(|_| E::ProviderRejected)
+                .and_then(|mut child| {
+                    let pinned = owned_pin.lock().unwrap_or_else(|e| e.into_inner()).take();
+                    let Some(pinned) = pinned else {
+                        // A successful exec requires the parent to have stored the pin.
+                        // Preserve ownership even if an internal invariant is violated.
+                        enqueue_reap(child, permit);
+                        return Err(E::InternalError);
+                    };
+                    let stdin = child.stdin.take();
+                    Ok((
+                        OwnedChild {
+                            child: Some(child),
+                            reap_permit: Some(permit),
+                            pidfd: pinned.fd,
+                            pid: pinned.pid,
+                            start_ticks: pinned.start,
+                            stage: Stage::Running,
+                            stage_since: Instant::now(),
+                            grace,
+                            exit: None,
+                            reaped_elsewhere: false,
+                            stdin,
+                        },
+                        ContainmentReport {
+                            direct_child_pdeathsig: true,
+                            own_session: true,
+                            descendants_contained: false,
+                        },
+                    ))
+                });
+            // If the caller timed out or unwound, dropping an OwnedChild here still
+            // kills only its pinned process and transfers reap to the bounded reaper.
+            let _ = reply.send((moved, outcome));
+        });
+        coordinator.try_send(job).map_err(|_| E::CapacityExceeded)?;
+        Ok(Self {
+            result,
+            parent,
+            pin,
+            refusal_pin: None,
+            received_pin: None,
+            pid_bytes: [0; std::mem::size_of::<i32>()],
+            received: 0,
+            refused: false,
+            deadline: Instant::now() + timeout,
+            failure: None,
+            child: None,
+            original: None,
+            finished: false,
+        })
+    }
+
+    pub fn failure(&self) -> Option<E> {
+        self.failure
+    }
+    pub fn finished(&self) -> bool {
+        self.finished
+    }
+
+    pub fn cancel(&mut self) {
+        self.failure.get_or_insert(E::ProviderRejected);
+        self.refused = true;
+        let _ = self.parent.shutdown(std::net::Shutdown::Write);
+        if let Some(fd) = &self.refusal_pin {
+            let _ = unsafe {
+                libc::syscall(
+                    libc::SYS_pidfd_send_signal,
+                    fd.as_raw_fd(),
+                    libc::SIGKILL,
+                    std::ptr::null::<libc::siginfo_t>(),
+                    0,
                 )
             };
-            if n > 0 {
-                received += n as usize;
+        }
+        if let Some(child) = &mut self.child {
+            child.begin_stop(Instant::now());
+        }
+    }
+
+    /// Accept exactly one CLOEXEC descriptor and one complete native PID word.
+    /// The peer is the inherited private child gate; fdinfo validates the stable
+    /// descriptor is a pidfd for the sender, never authorizes a numeric lookup.
+    fn receive_pin(&mut self) -> ControlResult<Option<(OwnedFd, i32)>> {
+        let mut control = [0usize; 16];
+        let mut iov = libc::iovec {
+            iov_base: self.pid_bytes[self.received..].as_mut_ptr().cast(),
+            iov_len: self.pid_bytes.len() - self.received,
+        };
+        let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = control.as_mut_ptr().cast();
+        msg.msg_controllen = std::mem::size_of_val(&control);
+        let n = unsafe {
+            libc::recvmsg(
+                self.parent.as_raw_fd(),
+                &mut msg,
+                libc::MSG_DONTWAIT | libc::MSG_CMSG_CLOEXEC,
+            )
+        };
+        if n < 0 {
+            return match std::io::Error::last_os_error().kind() {
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted => Ok(None),
+                _ => Err(E::ProviderRejected),
+            };
+        }
+        let mut invalid = msg.msg_flags & (libc::MSG_CTRUNC | libc::MSG_TRUNC) != 0;
+        let mut cmsg = unsafe { libc::CMSG_FIRSTHDR(&msg) };
+        while !cmsg.is_null() {
+            let header = unsafe { &*cmsg };
+            let header_len = unsafe { libc::CMSG_LEN(0) } as usize;
+            if header.cmsg_level == libc::SOL_SOCKET
+                && header.cmsg_type == libc::SCM_RIGHTS
+                && header.cmsg_len >= header_len
+                && header.cmsg_len <= msg.msg_controllen
+            {
+                let bytes = header.cmsg_len - header_len;
+                invalid |= !bytes.is_multiple_of(std::mem::size_of::<i32>());
+                for index in 0..bytes / std::mem::size_of::<i32>() {
+                    // Wrap every received descriptor even on rejection, so
+                    // malformed/duplicate rights cannot leak a descriptor.
+                    let raw = unsafe {
+                        std::ptr::read_unaligned(libc::CMSG_DATA(cmsg).cast::<i32>().add(index))
+                    };
+                    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+                    if self.received_pin.is_some() {
+                        invalid = true;
+                    } else {
+                        self.received_pin = Some(fd);
+                    }
+                }
+            } else {
+                invalid = true;
             }
-            if received == pid_bytes.len() {
-                let pid = i32::from_ne_bytes(pid_bytes);
-                // The child is blocked before exec and cannot be reaped by this
-                // coordinator yet; pidfd acquisition precedes payload execution.
-                let fd = if fail_pin {
-                    -1
-                } else {
-                    unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) }
-                };
-                if fd >= 0 {
-                    let fd = Arc::new(unsafe { OwnedFd::from_raw_fd(fd as i32) });
+            cmsg = unsafe { libc::CMSG_NXTHDR(&msg, cmsg) };
+        }
+        if invalid || n == 0 {
+            self.received_pin.take();
+            return Err(E::ProviderRejected);
+        }
+        self.received += n as usize;
+        if self.received != self.pid_bytes.len() {
+            return Ok(None);
+        }
+        let fd = self.received_pin.take().ok_or(E::ProviderRejected)?;
+        let pid = i32::from_ne_bytes(self.pid_bytes);
+        if pid <= 0 {
+            return Err(E::ProviderRejected);
+        }
+        let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", fd.as_raw_fd()))
+            .map_err(|_| E::ProviderRejected)?;
+        let identity = info
+            .lines()
+            .find_map(|line| line.strip_prefix("Pid:")?.trim().parse::<i32>().ok());
+        if identity != Some(pid) {
+            return Err(E::ProviderRejected);
+        }
+        let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
+        if flags < 0 || flags & libc::FD_CLOEXEC == 0 {
+            return Err(E::ProviderRejected);
+        }
+        Ok(Some((fd, pid)))
+    }
+
+    /// `Some(Err)` is returned only after child cleanup is proved. Callers can
+    /// observe `failure()` earlier, but must keep polling and retain capacity.
+    pub fn poll(&mut self, now: Instant) -> Option<ControlResult<(OwnedChild, ContainmentReport)>> {
+        if self.finished {
+            return None;
+        }
+        if now >= self.deadline && self.failure.is_none() {
+            self.cancel();
+        }
+        if let Some(child) = &mut self.child {
+            if matches!(child.poll_stop(now), Ok(Progress::Reaped(_))) {
+                self.child.take();
+                self.finished = true;
+                return Some(Err(self.failure.unwrap_or(E::ProviderRejected)));
+            }
+            return None;
+        }
+        match self.result.try_recv() {
+            Ok((original, outcome)) => {
+                self.original = Some(original);
+                match outcome {
+                    Ok((child, report)) if self.failure.is_none() => {
+                        self.finished = true;
+                        return Some(Ok((child, report)));
+                    }
+                    Ok((child, _)) => {
+                        self.child = Some(child);
+                        self.cancel();
+                        return self.poll(now);
+                    }
+                    Err(E::InternalError) => {
+                        // Missing pin after successful exec is an invariant
+                        // failure, not proof that its reaper job has completed.
+                        self.failure = Some(E::InternalError);
+                        self.cancel();
+                        return None;
+                    }
+                    Err(e) => {
+                        // Command::spawn returns an exec error only after its
+                        // failed pre-exec child has been waited for internally.
+                        self.finished = true;
+                        self.failure.get_or_insert(e);
+                        return Some(Err(self.failure.unwrap()));
+                    }
+                }
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                // A coordinator panic is not proof of reap. Retain the slot.
+                self.failure.get_or_insert(E::InternalError);
+                self.cancel();
+                return None;
+            }
+            Err(mpsc::TryRecvError::Empty) => (),
+        }
+        if !self.refused && self.received < self.pid_bytes.len() {
+            match self.receive_pin() {
+                Ok(Some((fd, pid))) => {
                     if let Ok(start) = proc_start_ticks(pid) {
-                        refusal_pin = Some(Arc::clone(&fd));
-                        *pin.lock().unwrap_or_else(|e| e.into_inner()) =
+                        let fd = Arc::new(fd);
+                        self.refusal_pin = Some(Arc::clone(&fd));
+                        *self.pin.lock().unwrap_or_else(|e| e.into_inner()) =
                             Some(Pin { fd, pid, start });
                         let ack = [1u8];
-                        let _ = unsafe {
+                        let sent = unsafe {
                             libc::send(
-                                parent.as_raw_fd(),
+                                self.parent.as_raw_fd(),
                                 ack.as_ptr().cast(),
                                 1,
                                 libc::MSG_NOSIGNAL,
                             )
                         };
+                        if sent != 1 {
+                            self.failure.get_or_insert(E::ProviderRejected);
+                        }
+                    } else {
+                        self.failure.get_or_insert(E::ProviderRejected);
+                    }
+                    let _ = self.parent.shutdown(std::net::Shutdown::Write);
+                    self.refused = true;
+                    if self.failure.is_some() {
+                        self.cancel();
                     }
                 }
-                // Closing the write side refuses a failed pin without signalling
-                // any numeric PID, and makes pre_exec return before exec.
-                let _ = parent.shutdown(std::net::Shutdown::Write);
-                refused = true;
+                Ok(None) => (),
+                Err(error) => {
+                    self.failure = Some(error);
+                    self.cancel();
+                }
             }
         }
-        std::thread::sleep(Duration::from_millis(1));
+        None
+    }
+}
+impl Drop for PendingOwnedSpawn {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.cancel();
+        }
     }
 }
 
