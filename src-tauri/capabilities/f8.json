@@ -1,0 +1,31 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "f8",
+  "description": "Managed runtimes of protocol 2 (F8): reads and product intents for sessions, runtimes, leases, bindings, turns, approvals and the durable history. None names a control method, a process or a path; a decision on an approval is three commands, never a field. Enabled only by a configuration that lists it: the installed one lists `main` alone.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-f8-reconnect",
+    "allow-f8-sessions",
+    "allow-f8-session",
+    "allow-f8-session-prepare",
+    "allow-f8-session-close",
+    "allow-f8-runtime-start",
+    "allow-f8-runtime-stop",
+    "allow-f8-models",
+    "allow-f8-lease-grant",
+    "allow-f8-lease-renew",
+    "allow-f8-lease-revoke",
+    "allow-f8-binding-create",
+    "allow-f8-binding-resume",
+    "allow-f8-binding-abandon",
+    "allow-f8-turn-start",
+    "allow-f8-turn-cancel",
+    "allow-f8-turn-read",
+    "allow-f8-approval-read",
+    "allow-f8-approval-accept",
+    "allow-f8-approval-decline",
+    "allow-f8-approval-cancel",
+    "allow-f8-audit",
+    "allow-f8-audit-wait"
+  ]
+}

@@ -268,11 +268,14 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     // A handoff brief (F11a): prepared for review, and saved to a chosen file.
     'allow-native-handoff-prepare',
     'allow-native-handoff-save',
+    // Whether the protocol-2 interface exists (F8). The rest of it is the `f8` capability,
+    // which the installed configuration does not enable.
+    'allow-f8-state',
   ]);
   // Every permission is one of this application's own commands: none belongs to a
   // plugin (`fs:`, `shell:`, `dialog:`) or to the framework's core (`core:`).
   for (const permission of capability.permissions)
-    expect(permission).toMatch(/^allow-[a-z-]+$/);
+    expect(permission).toMatch(/^allow-[a-z0-9-]+$/);
   // Turns are read by exactly three commands (the newest, the ones before them, and one
   // turn's stream) and changed by exactly two (start and cancel). Reading older turns
   // takes a session and a position it was handed: nothing that starts, cancels or decides.
