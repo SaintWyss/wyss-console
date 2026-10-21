@@ -6,6 +6,8 @@ use std::sync::{
 use tauri::Manager;
 mod authority;
 mod events;
+#[cfg(target_os = "linux")]
+mod f8;
 mod glass;
 mod lifecycle;
 mod sessions;
@@ -103,7 +105,20 @@ impl Extension {
     }
 }
 
-pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>) {
+/// The protocol-2 service the desktop manages. Inactive unless a caller owning a connector
+/// says otherwise; the installed entry points never do.
+#[cfg(target_os = "linux")]
+pub type F8 = crate::f8::gui::F8Gui;
+#[cfg(not(target_os = "linux"))]
+pub type F8 = ();
+pub fn inactive_f8() -> F8 {
+    #[cfg(target_os = "linux")]
+    {
+        crate::f8::gui::F8Gui::inactive()
+    }
+}
+
+pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>, f8_gui: F8) {
     let stopping = Arc::new(AtomicBool::new(false));
     let managed_sessions = sessions::SessionService::from_environment();
     let authority = authority::AuthorityService::from_environment();
@@ -138,6 +153,54 @@ pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>)
         turns::managed_approval_deny,
         events::managed_events,
         events::managed_events_older,
+        #[cfg(target_os = "linux")]
+        f8::f8_state,
+        #[cfg(target_os = "linux")]
+        f8::f8_reconnect,
+        #[cfg(target_os = "linux")]
+        f8::f8_sessions,
+        #[cfg(target_os = "linux")]
+        f8::f8_session,
+        #[cfg(target_os = "linux")]
+        f8::f8_session_prepare,
+        #[cfg(target_os = "linux")]
+        f8::f8_session_close,
+        #[cfg(target_os = "linux")]
+        f8::f8_runtime_start,
+        #[cfg(target_os = "linux")]
+        f8::f8_runtime_stop,
+        #[cfg(target_os = "linux")]
+        f8::f8_models,
+        #[cfg(target_os = "linux")]
+        f8::f8_lease_grant,
+        #[cfg(target_os = "linux")]
+        f8::f8_lease_renew,
+        #[cfg(target_os = "linux")]
+        f8::f8_lease_revoke,
+        #[cfg(target_os = "linux")]
+        f8::f8_binding_create,
+        #[cfg(target_os = "linux")]
+        f8::f8_binding_resume,
+        #[cfg(target_os = "linux")]
+        f8::f8_binding_abandon,
+        #[cfg(target_os = "linux")]
+        f8::f8_turn_start,
+        #[cfg(target_os = "linux")]
+        f8::f8_turn_cancel,
+        #[cfg(target_os = "linux")]
+        f8::f8_turn_read,
+        #[cfg(target_os = "linux")]
+        f8::f8_approval_read,
+        #[cfg(target_os = "linux")]
+        f8::f8_approval_accept,
+        #[cfg(target_os = "linux")]
+        f8::f8_approval_decline,
+        #[cfg(target_os = "linux")]
+        f8::f8_approval_cancel,
+        #[cfg(target_os = "linux")]
+        f8::f8_audit,
+        #[cfg(target_os = "linux")]
+        f8::f8_audit_wait,
         settings::settings_read,
         settings::settings_update,
         settings::settings_reset,
@@ -167,6 +230,8 @@ pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>)
     builder
         .setup(|app| open_main_window(app))
         .manage(TerminalService::default())
+        // Inactive here: only Rust code that owns a connector makes protocol 2 reachable.
+        .manage(f8_gui)
         // Read-only and independent: no terminal operation waits on, or learns of, it.
         .manage(authority)
         .manage(bootstrap)
@@ -200,6 +265,8 @@ pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>)
                     .inner()
                     .clone();
                 let sessions = handle.state::<sessions::SessionService>().inner().clone();
+                #[cfg(target_os = "linux")]
+                let f8_gui = handle.state::<F8>().inner().clone();
                 let app = handle.clone();
                 let on_exit = on_exit.clone();
                 let for_exit = handle.clone();
@@ -207,6 +274,8 @@ pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>)
                     let result = tauri::async_runtime::spawn_blocking(move || {
                         // A session call in flight is cancelled; none is admitted after.
                         sessions.shutdown();
+                        #[cfg(target_os = "linux")]
+                        f8_gui.shutdown();
                         // Terminals first: the link's bounded stop never delays them.
                         let result = service.shutdown();
                         if let Some(on_exit) = &on_exit {
