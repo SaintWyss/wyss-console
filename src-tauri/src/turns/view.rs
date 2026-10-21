@@ -41,7 +41,7 @@ pub struct TurnSummary {
     pub cancellable: bool,
 }
 impl TurnSummary {
-    pub(super) fn of(status: ManagedTurnStatus) -> Self {
+    pub(crate) fn of(status: ManagedTurnStatus) -> Self {
         let turn = status.turn;
         Self {
             cancellable: !turn.state.terminal(),
@@ -96,7 +96,7 @@ pub struct TurnEvent {
     pub text: Option<String>,
 }
 impl TurnEvent {
-    pub(super) fn of(event: ManagedTurnStreamEventV1) -> Self {
+    pub(crate) fn of(event: ManagedTurnStreamEventV1) -> Self {
         use StreamKind as S;
         use TurnEventKind as K;
         let (kind, text) = match event.kind {
@@ -147,7 +147,7 @@ pub struct ApprovalNotice {
     pub expires_at: UtcTimestamp,
 }
 impl ApprovalNotice {
-    pub(super) fn of(status: ApprovalStatus) -> Self {
+    pub(crate) fn of(status: ApprovalStatus) -> Self {
         Self {
             id: status.approval.managed_approval_id,
             kind: status.approval.kind,

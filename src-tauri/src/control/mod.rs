@@ -7,7 +7,7 @@ pub mod client;
 mod conversations;
 #[cfg(test)]
 pub(crate) mod f8_fixture;
-mod framing;
+pub(crate) mod framing;
 mod gate;
 mod mediation;
 // The safe-path rules are the authority's; the desktop's installer follows the same ones.
@@ -22,6 +22,7 @@ mod watch;
 pub use application::run_from_environment;
 #[cfg(target_os = "linux")]
 pub use server::F8Transport;
+pub(crate) use server::peer;
 #[cfg(test)]
 mod tests;
 

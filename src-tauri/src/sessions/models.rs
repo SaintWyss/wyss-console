@@ -71,7 +71,10 @@ fn now() -> u64 {
 }
 
 /// The descriptor's fields by name: its own accessors are not public, its encoding is.
-fn entry_of(model: &serde_json::Value, offer: Option<&ModelOffer>) -> Option<CatalogueEntry> {
+pub(crate) fn entry_of(
+    model: &serde_json::Value,
+    offer: Option<&ModelOffer>,
+) -> Option<CatalogueEntry> {
     let text = |key: &str| {
         model
             .get(key)

@@ -25,7 +25,7 @@ pub struct EventService {
     sessions: SessionService,
 }
 
-fn position(value: u64) -> Result<Option<Sequence>, SessionError> {
+pub(crate) fn position(value: u64) -> Result<Option<Sequence>, SessionError> {
     (value > 0)
         .then(|| value.to_string().parse::<Sequence>())
         .transpose()
@@ -42,7 +42,7 @@ impl EventService {
         let mut client = self.sessions.connect()?;
         let (stream, head) = greeting(&client);
         let page = window(
-            &mut client,
+            &mut |read| client.audit(read),
             stream,
             head,
             head.saturating_sub(EVENTS_PAGE),
@@ -66,7 +66,7 @@ impl EventService {
         }
         let upper = before.get() - 1;
         window(
-            &mut client,
+            &mut |read| client.audit(read),
             current,
             head,
             upper.saturating_sub(EVENTS_PAGE),
@@ -93,8 +93,8 @@ fn greeting(client: &ControlClient) -> (WireUuid, u64) {
 /// failed read. The one hole that is said rather than refused is at the beginning: if the
 /// first event is not the one asked for, history before it is unavailable. That includes
 /// a window none of which is there: it is answered empty, as a gap.
-fn window(
-    client: &mut ControlClient,
+pub(crate) fn window(
+    audit: &mut dyn FnMut(AuditRead) -> Result<ResultValue, ControlError>,
     stream: WireUuid,
     head: u64,
     after: u64,
@@ -108,13 +108,12 @@ fn window(
         }
         let limit = u16::try_from((upper - cursor).min(EVENTS_PAGE))
             .map_err(|_| SessionError::new(SessionFailure::Internal))?;
-        let answer = client
-            .audit(AuditRead {
-                stream_id: stream.clone(),
-                after_sequence: position(cursor)?,
-                limit,
-            })
-            .map_err(SessionError::of)?;
+        let answer = audit(AuditRead {
+            stream_id: stream.clone(),
+            after_sequence: position(cursor)?,
+            limit,
+        })
+        .map_err(SessionError::of)?;
         let ResultValue::Audit { events, .. } = answer else {
             return Err(SessionError::of(ControlError::CorrelationError));
         };

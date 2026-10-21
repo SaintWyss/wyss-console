@@ -14,6 +14,7 @@ mod service;
 mod view;
 
 pub use activation::TurnGuard;
+pub(crate) use models::entry_of;
 pub use models::{CatalogueEntry, CatalogueState, ModelCatalogue};
 pub(crate) use service::{Grant, Held, session_revision};
 pub use service::{SessionService, SessionStats};

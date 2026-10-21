@@ -256,7 +256,7 @@ fn disposition(kind: EventKind, facts: &EventFacts) -> Disposition {
 
 /// Reduces one envelope, serialized as the authority sent it, to a row. The envelope was
 /// validated when it was received; what is checked here is that it belongs to `stream`.
-pub(super) fn project(envelope: &Value, stream: &WireUuid) -> Result<EventRow, ControlError> {
+pub(crate) fn project(envelope: &Value, stream: &WireUuid) -> Result<EventRow, ControlError> {
     let same = envelope["stream_id"]
         .as_str()
         .is_some_and(|id| id.eq_ignore_ascii_case(stream.as_str()));

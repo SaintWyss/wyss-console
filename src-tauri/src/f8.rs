@@ -9,6 +9,8 @@ pub mod budget;
 #[cfg(target_os = "linux")]
 pub mod engine;
 #[cfg(target_os = "linux")]
+pub mod gui;
+#[cfg(target_os = "linux")]
 pub mod launcher;
 #[cfg(target_os = "linux")]
 pub mod migration;

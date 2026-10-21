@@ -118,6 +118,23 @@ pub struct Request {
     target: Target,
 }
 impl Request {
+    /// A request a trusted client assembles from typed parts. It is encoded and parsed back
+    /// before it is returned, so it is exactly as strict as one received from the wire.
+    pub fn new(
+        request_id: WireUuid,
+        authority: Option<WireUuid>,
+        operation: v1::Operation,
+        target: Target,
+    ) -> ControlResult<Self> {
+        let request = Self {
+            request_id,
+            authority,
+            operation,
+            target,
+        };
+        request.encode()?;
+        Ok(request)
+    }
     pub fn parse(bytes: &[u8]) -> ControlResult<Self> {
         let mut v = v1::unique_json(bytes)?;
         if v.get("schema_version").and_then(Value::as_u64) != Some(2) {
@@ -674,6 +691,12 @@ impl Response {
             _ => (),
         }
         Ok(())
+    }
+    pub fn request_id(&self) -> &WireUuid {
+        &self.request_id
+    }
+    pub fn authority(&self) -> &WireUuid {
+        &self.authority
     }
     pub fn outcome(&self) -> &ControlResult<v1::ResultValue> {
         &self.outcome

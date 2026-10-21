@@ -27,8 +27,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-const AUTH: &str = "00000000-0000-4000-8000-0000000000a1";
-const SCRIPT: &str = r#"
+pub(crate) const AUTH: &str = "00000000-0000-4000-8000-0000000000a1";
+pub(crate) const SCRIPT: &str = r#"
 import json,sys
 workspace=sys.argv[1]
 profile=sys.argv[2]
@@ -60,7 +60,7 @@ for line in sys.stdin:
 "#;
 // Only this explicit test wrapper opts into the normalized fixture's synthetic safety
 // proof. ProcessWorker itself cannot approve an unverified provider preflight.
-struct FixtureWorker(DeferredProcessWorker);
+pub(crate) struct FixtureWorker(pub(crate) DeferredProcessWorker);
 impl Worker for FixtureWorker {
     fn preflight(&mut self, _: &Attachment) -> ControlResult<()> {
         Ok(())
@@ -90,9 +90,9 @@ impl Worker for FixtureWorker {
         self.0.poll_stop(now)
     }
 }
-struct FixtureSpawner {
-    workspace: PathBuf,
-    tools: bool,
+pub(crate) struct FixtureSpawner {
+    pub(crate) workspace: PathBuf,
+    pub(crate) tools: bool,
 }
 impl Spawner for FixtureSpawner {
     fn descendant_containment(&self) -> bool {
@@ -146,7 +146,7 @@ impl Spawner for FixtureSpawner {
         })
     }
 }
-fn id() -> String {
+pub(crate) fn id() -> String {
     crate::control::store::uuid().as_str().to_owned()
 }
 #[track_caller]

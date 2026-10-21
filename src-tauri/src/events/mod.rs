@@ -21,6 +21,8 @@ mod service;
 mod view;
 
 pub use service::EventService;
+pub(crate) use service::{position, window};
+pub(crate) use view::project;
 pub use view::{
     Disposition, EVENTS_PAGE, EventCategory, EventFacts, EventKind, EventRow, EventsPage,
 };

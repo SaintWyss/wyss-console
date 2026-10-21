@@ -70,7 +70,7 @@ pub struct ApprovalSummary {
     pub decidable: bool,
 }
 impl ApprovalSummary {
-    fn of(status: &ApprovalStatus) -> Self {
+    pub(crate) fn of(status: &ApprovalStatus) -> Self {
         let approval = &status.approval;
         Self {
             id: approval.managed_approval_id.clone(),
@@ -128,7 +128,7 @@ impl std::fmt::Debug for ApprovalDetail {
     }
 }
 impl ApprovalDetail {
-    fn of(status: ApprovalStatus, workspace: Option<String>) -> Self {
+    pub(crate) fn of(status: ApprovalStatus, workspace: Option<String>) -> Self {
         Self {
             approval: ApprovalSummary::of(&status),
             workspace,
