@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Raw } from './f8-harness';
 import {
   AUTHORITY,
@@ -475,6 +475,31 @@ describe('an approval', () => {
     await r.controller.refresh();
     await settle();
     expect(r.client.readApproval.mock.calls.length).toBe(reads);
+  });
+
+  it('that the authority still calls pending past its end is looked at once a second, not in a loop', async () => {
+    vi.useFakeTimers();
+    try {
+      const r = make();
+      // The window's clock is past the end the approval was shown with.
+      r.advance(10 * 60_000);
+      const live = detailWith(real.attached, (d) => {
+        d.turns = [copy(real.reading.turn)];
+        d.approval = copy(real.approval);
+      });
+      r.client.session.mockResolvedValue(live);
+      await r.open();
+      await settle();
+      const before = r.client.readApproval.mock.calls.length;
+      for (let i = 0; i < 6; i++) {
+        await vi.advanceTimersByTimeAsync(500);
+        await settle();
+      }
+      // Three seconds: a handful of looks, not one per round trip.
+      expect(r.client.readApproval.mock.calls.length - before).toBeLessThan(6);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('is decided with the fence on screen, the revision it was shown and one identity', async () => {

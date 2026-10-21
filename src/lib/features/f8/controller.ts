@@ -261,6 +261,7 @@ export const WATCH_MS = 20_000;
 export const FILES_AT_ONCE = 8;
 /** Past an approval's deadline, how long until what became of it is read. */
 export const EXPIRY_GRACE_MS = 400;
+export const EXPIRED_RECHECK_MS = 1000;
 /** Reads of a followed turn that may fail in a row before it is called lost. */
 const FOLLOW_FAILURES = 20;
 export const DEFAULT_SCOPES: readonly LeaseScope[] = [...LEASE_SCOPES];
@@ -1199,7 +1200,9 @@ export class F8Controller {
         void this.loadApproval(detail.approval.id, true);
         void this.refresh();
       },
-      Math.max(wait, 0),
+      // An approval the authority still calls pending past its end is looked at again in a
+      // second, not in a loop.
+      wait > 0 ? wait : EXPIRED_RECHECK_MS,
     );
   }
   private async readFiles(id: string, token: number): Promise<void> {

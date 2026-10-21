@@ -80,6 +80,9 @@ const KEEP_WORKSPACES: usize = 16;
 /// How long a connection may rest and still be used. The authority drops one that is silent
 /// for five seconds (its read timeout); this is well inside that.
 const REUSE_LIMIT: Duration = Duration::from_secs(2);
+/// The least time between two requests to try now: the delay between attempts cannot be
+/// skipped faster than this by asking over and over.
+const FORCED_INTERVAL: Duration = Duration::from_secs(1);
 /// The largest integer a JavaScript number holds exactly.
 const JS_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const FIRST_DELAY: Duration = Duration::from_millis(250);
@@ -100,6 +103,8 @@ struct Link {
     fault: Option<Fault>,
     failures: u32,
     retry_at: Option<Instant>,
+    /// When the user last asked to try now: asking again within `FORCED_INTERVAL` changes nothing.
+    forced_at: Option<Instant>,
 }
 impl Link {
     fn new() -> Self {
@@ -110,6 +115,7 @@ impl Link {
             fault: None,
             failures: 0,
             retry_at: None,
+            forced_at: None,
         }
     }
     fn delay(&mut self) -> Duration {
@@ -392,7 +398,13 @@ impl F8Gui {
     pub fn reconnect(&self) -> StateView {
         for link in &self.inner.links {
             let mut link = lock(link);
-            if link.client.is_none() {
+            let now = Instant::now();
+            if link.client.is_none()
+                && link
+                    .forced_at
+                    .is_none_or(|at| now.duration_since(at) >= FORCED_INTERVAL)
+            {
+                link.forced_at = Some(now);
                 link.retry_at = None;
                 link.failures = 0;
             }

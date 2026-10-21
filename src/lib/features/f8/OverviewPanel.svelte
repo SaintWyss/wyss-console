@@ -27,6 +27,7 @@
     SCOPE_LABEL,
     SCOPE_NOTE,
     ttlLabel,
+    visible,
   } from './present';
 
   let {
@@ -116,7 +117,7 @@
       <dd>{runtime.version ?? '—'}</dd>
       {#if runtime.workspace}
         <dt>Isolated for</dt>
-        <dd class="mono">{runtime.workspace}</dd>
+        <dd class="mono" dir="ltr">{visible(runtime.workspace)}</dd>
       {/if}
       <dt>Wanted</dt>
       <dd>
@@ -355,7 +356,7 @@
     <dl class="session-facts">
       <dt>Folder</dt>
       <dd class:mono={!!binding.workspace}>
-        {binding.workspace ?? 'None'}
+        {binding.workspace ? visible(binding.workspace) : 'None'}
         {#if binding.workspace}
           <span class="fact-note">{folderName(binding.workspace)}</span>
         {/if}

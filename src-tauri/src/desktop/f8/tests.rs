@@ -241,3 +241,18 @@ fn every_request_the_window_sends_is_one_its_command_accepts() {
     }
     assert_eq!(sent.len(), 24, "every command of the interface is sent");
 }
+
+#[test]
+fn the_installed_entry_points_never_reach_the_local_activation_boundary() {
+    for (name, source) in [
+        ("main.rs", include_str!("../../main.rs")),
+        ("wyss-control.rs", include_str!("../../bin/wyss-control.rs")),
+    ] {
+        for forbidden in ["run_with_f8", "F8Gui::local", "SocketConnector", "f8::dev"] {
+            assert!(
+                !source.contains(forbidden),
+                "{name} must not reference {forbidden}"
+            );
+        }
+    }
+}

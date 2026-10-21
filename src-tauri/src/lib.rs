@@ -28,8 +28,9 @@ pub fn run(authority_digest: Option<&'static str>) {
 pub use desktop::Extension;
 
 /// `run` with the protocol-2 interface made active by a connector the caller owns. This is
-/// the one local activation boundary: the installed entry points above never reach it.
-#[cfg(target_os = "linux")]
+/// the one local activation boundary: the installed entry points above never reach it, and a
+/// build without `f8-dev` does not contain it.
+#[cfg(all(target_os = "linux", feature = "f8-dev"))]
 pub fn run_with_f8(
     authority_digest: Option<&'static str>,
     extension: Option<Extension>,

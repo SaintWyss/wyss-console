@@ -184,6 +184,12 @@ fn the_windows_link_waits_out_an_outage_without_hammering_and_returns_by_itself(
     // A request to try now forgets the delay and tries once.
     let again = window.reconnect();
     assert_eq!(format!("{:?}", again.link.state), "Waiting");
+    // Asking over and over does not skip the delay faster than once a second.
+    let tries = window.stats().connections;
+    for _ in 0..10 {
+        window.reconnect();
+    }
+    assert_eq!(window.stats().connections, tries);
     // An authority is back: the next attempt after the delay connects, with no help.
     let root = app.retire();
     let back = App::start(durable(Some(root), FIRST));

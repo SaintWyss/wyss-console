@@ -15,6 +15,19 @@ import type { RuntimeTone } from '../../shell/runtime';
 
 /** Presentation only: nothing here is read back as state. */
 
+/**
+ * Text from a provider (a command, a directory, a path, a diff) as a person reads it before
+ * approving: every format and bidirectional control character is shown as its code point, so a
+ * right-to-left override or an invisible character cannot make one thing read as another.
+ */
+export function visible(text: string): string {
+  return text.replace(
+    /[\p{Cf}\u2028\u2029]/gu,
+    (c) =>
+      `⟨U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}⟩`,
+  );
+}
+
 export const RUNTIME_STATE: Record<
   ActualState,
   { label: string; tone: RuntimeTone }

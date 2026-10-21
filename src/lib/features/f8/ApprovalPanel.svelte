@@ -9,7 +9,7 @@
     shownOf,
   } from '../approvals/present';
   import type { ApprovalView, F8Controller } from './controller';
-  import { failureText, outcomeUnknown } from './present';
+  import { failureText, outcomeUnknown, visible } from './present';
 
   let {
     approval,
@@ -88,22 +88,22 @@
     <dl class="approval-fields">
       <dt>Command</dt>
       <!-- Plain text, as the authority presents it. It is never run or interpreted here. -->
-      <dd><pre class="approval-code">{command.command}</pre></dd>
+      <dd><pre class="approval-code">{visible(command.command)}</pre></dd>
       <dt>Directory</dt>
-      <dd class="mono">{command.cwd}</dd>
+      <dd class="mono" dir="ltr">{visible(command.cwd)}</dd>
     </dl>
   {:else if files !== null}
     {#each approval.files as file (file.index)}
       <div class="approval-file">
         <p class="file-head">
           <span class="file-kind">{FILE_KIND[file.kind]}</span>
-          <span class="mono">{file.path}</span>
+          <span class="mono" dir="ltr">{visible(file.path)}</span>
           {#if file.move_path}
             <span aria-hidden="true">→</span>
-            <span class="mono">{file.move_path}</span>
+            <span class="mono" dir="ltr">{visible(file.move_path)}</span>
           {/if}
         </p>
-        <pre class="approval-code">{file.text}</pre>
+        <pre class="approval-code">{visible(file.text)}</pre>
         {#if file.next !== null}
           <p class="approval-note">
             Preview truncated: {shownOf(file.text, file.bytes)}.
