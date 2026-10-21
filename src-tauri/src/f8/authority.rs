@@ -27,9 +27,13 @@ use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
+    cell::RefCell,
     collections::BTreeMap,
     time::{Duration, Instant},
 };
+
+/// The closed exit word, and the closed budget key of a budget exit, of an unexpected exit.
+type ExitFacts = Option<(String, Option<String>)>;
 
 const NIL: &str = "00000000-0000-4000-8000-000000000000";
 const PAGE_BYTES: usize = 65_536 - 1024;
@@ -112,6 +116,9 @@ pub struct Authority {
     recovery_pending: bool,
     /// When the durable expiry of leases and approvals is next looked for.
     housekeeping_at: Option<Instant>,
+    /// What the audit log last said of one generation's unexpected exit, and when it was read:
+    /// a status request never scans the log more than once per `EXIT_LOOKUP_TTL` for a generation.
+    exit_lookups: RefCell<BTreeMap<(String, i64), (Instant, ExitFacts)>>,
     streams: crate::control::turn_stream::Streams,
     #[cfg(test)]
     post_approval_write: Option<fn(&mut Connection)>,
@@ -158,6 +165,7 @@ impl Authority {
             // A successor must reconcile previous authority work even with no local exits.
             recovery_pending: true,
             housekeeping_at: None,
+            exit_lookups: RefCell::new(BTreeMap::new()),
             streams: Default::default(),
             #[cfg(test)]
             post_approval_write: None,
@@ -350,11 +358,24 @@ impl Authority {
     /// unexpected exit of one generation of a session, when this very authority recorded it.
     /// What a predecessor recorded is history: the runtime is not running, and that is all this
     /// authority can say of it.
-    fn unexpected_exit(
-        &self,
-        session: &str,
-        generation: i64,
-    ) -> ControlResult<Option<(String, Option<String>)>> {
+    fn unexpected_exit(&self, session: &str, generation: i64) -> ControlResult<ExitFacts> {
+        let key = (session.to_owned(), generation);
+        let now = Instant::now();
+        if let Some((at, facts)) = self.exit_lookups.borrow().get(&key)
+            && (facts.is_some() || now.duration_since(*at) < EXIT_LOOKUP_TTL)
+        {
+            return Ok(facts.clone());
+        }
+        let facts = self.read_unexpected_exit(session, generation)?;
+        let mut cache = self.exit_lookups.borrow_mut();
+        if cache.len() >= EXIT_LOOKUP_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, (now, facts.clone()));
+        Ok(facts)
+    }
+
+    fn read_unexpected_exit(&self, session: &str, generation: i64) -> ControlResult<ExitFacts> {
         self.engine
             .connection()
             .query_row(
@@ -1325,6 +1346,9 @@ fn lease_value(l: &crate::contracts::execution::ExecutionLease) -> ControlResult
 
 /// How often the durable expiry of leases and approvals is recorded.
 const HOUSEKEEPING_INTERVAL: Duration = Duration::from_millis(250);
+/// A found exit is final for its generation; a missing one is looked for again after this long.
+const EXIT_LOOKUP_TTL: Duration = Duration::from_millis(200);
+const EXIT_LOOKUP_LIMIT: usize = 256;
 
 #[cfg(test)]
 #[path = "authority_tests.rs"]
