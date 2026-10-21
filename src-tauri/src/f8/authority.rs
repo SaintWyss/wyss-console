@@ -674,6 +674,21 @@ impl Authority {
         }
     }
 
+    /// Whether the durable stream holds an event after `after`. A read only: it wakes a pending
+    /// audit watch cheaply, and the watch itself is then answered by an ordinary audit read.
+    pub fn audit_has_after(&self, after: u64) -> ControlResult<bool> {
+        let head: String = self
+            .engine
+            .connection()
+            .query_row(
+                "SELECT last_sequence FROM authority_metadata WHERE id=1",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|_| E::StorageUnavailable)?;
+        Ok(head.parse::<u64>().map_err(|_| E::StorageIncompatible)? > after)
+    }
+
     fn audit(
         &self,
         stream: &WireUuid,

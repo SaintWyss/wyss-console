@@ -917,6 +917,54 @@ struct F8Socket {
     output: Vec<u8>,
     written: usize,
     deadline: Instant,
+    /// An audit watch that found nothing yet. It holds no answer and no reader deadline; the
+    /// original request is replayed as an ordinary audit read once durable progress or its wait
+    /// ends, so nothing is ever answered from a stale snapshot.
+    watch: Option<F8Watch>,
+}
+/// Bounded by construction: at most one per client, and clients are bounded by `MAX_CLIENTS`.
+#[cfg(target_os = "linux")]
+struct F8Watch {
+    request: Vec<u8>,
+    after: u64,
+    deadline: Instant,
+}
+/// Frames one answer for the client's output queue; an unframeable answer is an internal fault.
+#[cfg(target_os = "linux")]
+fn queue(client: &mut F8Socket, answer: &[u8], now: Instant) -> ControlResult<()> {
+    if answer.is_empty() || answer.len() > MAX_FRAME {
+        return Err(ControlError::InternalError);
+    }
+    client
+        .output
+        .extend_from_slice(&(answer.len() as u32).to_be_bytes());
+    client.output.extend_from_slice(answer);
+    client.input.clear();
+    client.deadline = now + WRITE_TIMEOUT;
+    Ok(())
+}
+/// The wait of an audit watch that the authority answered empty, so it must be held. Any other
+/// answer (an event page, a refusal, or a request that is not a watch) is sent at once.
+#[cfg(target_os = "linux")]
+fn held_watch(request: &[u8], answer: &[u8], now: Instant) -> Option<F8Watch> {
+    use crate::f8::protocol::Request;
+    let parsed = Request::parse(request).ok()?;
+    let crate::contracts::control::Operation::AuditWatch(p) = parsed.operation() else {
+        return None;
+    };
+    if p.wait_ms == 0 {
+        return None;
+    }
+    let reply: serde_json::Value = serde_json::from_slice(answer).ok()?;
+    let empty = reply["result"]["kind"] == "audit"
+        && reply["result"]["value"]["events"]
+            .as_array()
+            .is_some_and(Vec::is_empty);
+    empty.then(|| F8Watch {
+        request: request.to_vec(),
+        after: p.after_sequence.map_or(0, |s| s.get()),
+        deadline: now + Duration::from_millis(p.wait_ms.into()),
+    })
 }
 #[cfg(target_os = "linux")]
 impl<S: crate::f8::engine::Spawner> F8Transport<S> {
@@ -947,6 +995,7 @@ impl<S: crate::f8::engine::Spawner> F8Transport<S> {
             output: Vec::new(),
             written: 0,
             deadline: now + HELLO_TIMEOUT,
+            watch: None,
         });
         Ok(())
     }
@@ -958,10 +1007,32 @@ impl<S: crate::f8::engine::Spawner> F8Transport<S> {
         while index < self.clients.len() {
             let client = &mut self.clients[index];
             let result = (|| -> ControlResult<()> {
-                if now >= client.deadline {
+                if let Some((deadline, after)) =
+                    client.watch.as_ref().map(|w| (w.deadline, w.after))
+                {
+                    // A waiting watch reads only to notice a disconnect or unrequested bytes.
+                    let mut probe = [0u8; 1];
+                    match client.stream.read(&mut probe) {
+                        Ok(0) => return Err(ControlError::TransportError),
+                        Ok(_) => return Err(ControlError::InvalidRequest),
+                        Err(e)
+                            if matches!(
+                                e.kind(),
+                                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                            ) => {}
+                        Err(_) => return Err(ControlError::TransportError),
+                    }
+                    if now >= deadline || self.service.authority().audit_has_after(after)? {
+                        let watch = client.watch.take().expect("watch checked above");
+                        let answer = self
+                            .service
+                            .exchange(&mut client.client, &watch.request, now);
+                        queue(client, &answer, now)?;
+                    }
+                } else if now >= client.deadline {
                     return Err(ControlError::Timeout);
                 }
-                if client.output.is_empty() {
+                if client.watch.is_none() && client.output.is_empty() {
                     // Read only enough for this frame; a pipelined request remains in the
                     // kernel. Partial/oversized JSON is never handed to the authority.
                     let need = if client.input.len() < 4 {
@@ -996,18 +1067,13 @@ impl<S: crate::f8::engine::Spawner> F8Transport<S> {
                             return Err(ControlError::FrameTooLarge);
                         }
                         if client.input.len() == n + 4 {
-                            let answer =
-                                self.service
-                                    .exchange(&mut client.client, &client.input[4..], now);
-                            if answer.is_empty() || answer.len() > MAX_FRAME {
-                                return Err(ControlError::InternalError);
-                            }
-                            client
-                                .output
-                                .extend_from_slice(&(answer.len() as u32).to_be_bytes());
-                            client.output.extend_from_slice(&answer);
+                            let request = client.input[4..].to_vec();
+                            let answer = self.service.exchange(&mut client.client, &request, now);
                             client.input.clear();
-                            client.deadline = now + WRITE_TIMEOUT;
+                            match held_watch(&request, &answer, now) {
+                                Some(watch) => client.watch = Some(watch),
+                                None => queue(client, &answer, now)?,
+                            }
                         }
                     }
                 }
