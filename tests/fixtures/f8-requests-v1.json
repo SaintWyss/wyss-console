@@ -1,0 +1,172 @@
+{
+  "f8_state": null,
+  "f8_reconnect": null,
+  "f8_sessions": {
+    "before": "7"
+  },
+  "f8_session": {
+    "session_id": "00000000-0000-4000-8000-000000000001"
+  },
+  "f8_session_prepare": {
+    "intent_id": "00000000-0000-4000-8000-000000000005"
+  },
+  "f8_session_close": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    },
+    "expected_revision": 1
+  },
+  "f8_runtime_start": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "expected_revision": 0,
+    "expected_generation": 0,
+    "mode": "local_tools",
+    "workspace": "/home/dev/project"
+  },
+  "f8_runtime_stop": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    },
+    "expected_revision": 1
+  },
+  "f8_models": {
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    }
+  },
+  "f8_lease_grant": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    },
+    "expected_session_revision": 1,
+    "scopes": ["turn_start", "file_change"],
+    "ttl_seconds": 300
+  },
+  "f8_lease_renew": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    },
+    "lease_id": "00000000-0000-4000-8000-000000000004",
+    "expected_revision": 1,
+    "ttl_seconds": 600
+  },
+  "f8_lease_revoke": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "lease_id": "00000000-0000-4000-8000-000000000004",
+    "expected_revision": 1
+  },
+  "f8_binding_create": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    },
+    "expected_session_revision": 1,
+    "workspace": "/home/dev/project"
+  },
+  "f8_binding_resume": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    },
+    "expected_session_revision": 1
+  },
+  "f8_binding_abandon": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    },
+    "operation_id": "00000000-0000-4000-8000-000000000007"
+  },
+  "f8_turn_start": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    },
+    "expected_session_revision": 1,
+    "prompt": "work"
+  },
+  "f8_turn_cancel": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    },
+    "turn_id": "00000000-0000-4000-8000-000000000002",
+    "expected_revision": 2
+  },
+  "f8_turn_read": {
+    "turn_id": "00000000-0000-4000-8000-000000000002",
+    "after": "3",
+    "wait": true
+  },
+  "f8_approval_read": {
+    "approval_id": "00000000-0000-4000-8000-000000000003",
+    "file": 1,
+    "offset": 8192
+  },
+  "f8_approval_accept": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    },
+    "approval_id": "00000000-0000-4000-8000-000000000003",
+    "expected_revision": 1
+  },
+  "f8_approval_decline": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    },
+    "approval_id": "00000000-0000-4000-8000-000000000003",
+    "expected_revision": 1
+  },
+  "f8_approval_cancel": {
+    "intent_id": "00000000-0000-4000-8000-000000000005",
+    "fence": {
+      "session": "00000000-0000-4000-8000-000000000001",
+      "generation": 1,
+      "instance": "00000000-0000-4000-8000-000000000006"
+    },
+    "approval_id": "00000000-0000-4000-8000-000000000003",
+    "expected_revision": 1
+  },
+  "f8_audit": {
+    "older": {
+      "stream_id": "00000000-0000-4000-8000-000000000008",
+      "before": "9"
+    }
+  },
+  "f8_audit_wait": {
+    "stream_id": "00000000-0000-4000-8000-000000000008",
+    "after": "9",
+    "wait_ms": 20000
+  }
+}

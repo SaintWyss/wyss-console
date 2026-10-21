@@ -195,3 +195,49 @@ fn the_commands_drive_a_real_application_and_only_a_chosen_folder_is_a_workspace
     assert_eq!(code(block(f8_runtime_stop(gui(), stale))), "stale");
     assert!(block(f8_state(gui())).unwrap().authority.is_some());
 }
+
+/// What the window's own client sends, as the TypeScript test writes it, taken by the very
+/// types each command accepts. A key renamed on one side fails here.
+#[test]
+fn every_request_the_window_sends_is_one_its_command_accepts() {
+    let sent: Value = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/f8-requests-v1.json"
+    ))
+    .unwrap();
+    let sent = sent.as_object().unwrap();
+    macro_rules! take {
+        ($ty:ty, $request:expr, $command:expr) => {
+            serde_json::from_value::<$ty>($request.clone())
+                .unwrap_or_else(|e| panic!("{}: {e}", $command))
+        };
+    }
+    for (command, request) in sent {
+        match command.as_str() {
+            "f8_state" | "f8_reconnect" => assert!(request.is_null(), "{command}"),
+            "f8_sessions" => drop(take!(SessionsRequest, request, command)),
+            "f8_session" => drop(take!(SessionRequest, request, command)),
+            "f8_session_prepare" => drop(take!(PrepareRequest, request, command)),
+            "f8_session_close" => drop(take!(CloseRequest, request, command)),
+            "f8_runtime_start" => drop(take!(StartRuntimeRequest, request, command)),
+            "f8_runtime_stop" => drop(take!(StopRuntimeRequest, request, command)),
+            "f8_models" => drop(take!(ModelsRequest, request, command)),
+            "f8_lease_grant" => drop(take!(GrantRequest, request, command)),
+            "f8_lease_renew" => drop(take!(RenewRequest, request, command)),
+            "f8_lease_revoke" => drop(take!(RevokeRequest, request, command)),
+            "f8_binding_create" => drop(take!(BindRequest, request, command)),
+            "f8_binding_resume" => drop(take!(ResumeRequest, request, command)),
+            "f8_binding_abandon" => drop(take!(AbandonRequest, request, command)),
+            "f8_turn_start" => drop(take!(StartTurnRequest, request, command)),
+            "f8_turn_cancel" => drop(take!(CancelTurnRequest, request, command)),
+            "f8_turn_read" => drop(take!(ReadTurnRequest, request, command)),
+            "f8_approval_read" => drop(take!(ReadApprovalRequest, request, command)),
+            "f8_approval_accept" | "f8_approval_decline" | "f8_approval_cancel" => {
+                drop(take!(DecideRequest, request, command))
+            }
+            "f8_audit" => drop(take!(AuditRequest, request, command)),
+            "f8_audit_wait" => drop(take!(AuditWaitRequest, request, command)),
+            other => panic!("the window sends {other}, which has no command"),
+        }
+    }
+    assert_eq!(sent.len(), 24, "every command of the interface is sent");
+}
