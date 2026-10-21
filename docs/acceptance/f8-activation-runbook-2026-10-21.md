@@ -27,6 +27,9 @@ capacidad `main` instalada hoy sólo concede `allow-f8-state` (informa `active:f
   sesiones vivas que implique.
 - Aceptación autenticada del proveedor (Codex real) autorizada y hecha: **NOT_PROVEN** hoy.
 - Compatibilidad de refresco de credenciales de Codex con varios procesos: **NOT_PROVEN**.
+- Decisión del dueño sobre el hallazgo W1 de la revisión (una ventana comprometida tiene la autoridad
+  de aprobación, igual que en protocolo 1): aceptarlo o exigir antes confirmación nativa en Rust /
+  token de lectura de un solo uso para `lease_grant` de comandos/archivos y `approval_accept`.
 - `max_active_runtimes = 1`. Subirlo requiere evidencia de recursos y decisión del dueño.
 
 ## Respaldo (antes de migrar)

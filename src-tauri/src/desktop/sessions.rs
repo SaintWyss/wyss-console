@@ -608,15 +608,24 @@ mod tests {
             // A handoff brief (F11a): prepared for review, and saved to a chosen file.
             "allow-native-handoff-prepare",
             "allow-native-handoff-save",
+            // Protocol 2 (F8): the window may only ask whether the interface is active. The
+            // other commands belong to capability `f8`, which the installed configuration does
+            // not list (tests/f8-capability.test.ts holds that side).
+            "allow-f8-state",
         ];
         assert_eq!(granted, expected);
         let manifest = include_str!("../../build.rs");
         let (_, list) = manifest.split_once("commands(&[").unwrap();
         let (list, _) = list.split_once(']').unwrap();
+        let list: String = list
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect();
         let commands: Vec<String> = list
             .split(',')
             .map(|c| c.trim().trim_matches('"').to_owned())
             .filter(|c| !c.is_empty())
+            .filter(|c| c == "f8_state" || !c.starts_with("f8_"))
             .collect();
         let permitted: Vec<String> = expected
             .iter()
