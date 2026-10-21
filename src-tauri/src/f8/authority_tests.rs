@@ -1662,3 +1662,151 @@ fn approval_reads_after_runtime_exit_and_lease_revocation_expose_no_action() {
     );
     validate_v8(rig.authority.engine().connection()).unwrap();
 }
+
+fn send_to(authority: &mut Authority, client: &mut Client, spawn: &mut Spawn, v: Value) -> Value {
+    let bytes = serde_json::to_vec(&v).unwrap();
+    let out = authority.handle(client, &bytes, spawn, Instant::now());
+    serde_json::from_slice(&out).unwrap()
+}
+
+/// Closure under a durable runtime: a live launch whose image is read back by a successor
+/// authority that holds no live state. Only the durable rows say it may still run.
+#[test]
+fn a_successor_authority_never_closes_a_durably_running_runtime() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (_, fence) = rig.ready();
+    let s = rig.sessions[0].clone();
+    let path = std::env::temp_dir().join(format!("wyss-f8-running-{}.sqlite3", uuid()));
+    rig.authority
+        .engine()
+        .connection()
+        .execute("VACUUM INTO ?1", [path.to_str().unwrap()])
+        .unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let auth = wire(AUTH);
+    let engine = crate::f8::engine::Engine::new(
+        conn,
+        auth.clone(),
+        crate::f8::registry::Registry::new(auth).unwrap(),
+        None,
+    )
+    .unwrap();
+    let mut successor = Authority::new(engine);
+    let mut client = Client::default();
+    let hello = send_to(
+        &mut successor,
+        &mut client,
+        &mut rig.spawn,
+        json!({"schema_version":2,"request_id":uuid(),
+        "method":"authority/hello","params":{"protocol_version":2,"client_instance_id":uuid()}}),
+    );
+    assert_eq!(hello["result"]["kind"], "hello", "{hello}");
+
+    let state = |a: &Authority| -> String {
+        a.engine()
+            .connection()
+            .query_row(
+                "SELECT control_state||':'||revision FROM managed_sessions WHERE session_id=?1",
+                [&s],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    let before = state(&successor);
+    let closed = send_to(
+        &mut successor,
+        &mut client,
+        &mut rig.spawn,
+        json!({"schema_version":2,"request_id":uuid(),"authority_instance_id":AUTH,
+        "method":"managedSession/close",
+        "params":{"intent_id":uuid(),"managed_session_id":s,"expected_revision":1,
+            "runtime_fence":{"managed_session_id":s,"generation":fence["generation"],
+                "runtime_instance_id":null}}}),
+    );
+    assert_eq!(
+        code(&closed),
+        "runtime_operation_in_progress",
+        "a durably running runtime must block closure: {closed}"
+    );
+    assert_eq!(
+        state(&successor),
+        before,
+        "the refusal leaves the session open"
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+/// Closure against a live launch: a ready runtime refuses it, and an active turn refuses it.
+#[test]
+fn closure_refuses_a_ready_or_busy_runtime() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (reference, fence) = rig.ready();
+    let s = rig.sessions[0].clone();
+    let close = |rig: &mut Rig, fence: Value| {
+        rig.call(
+            "managedSession/close",
+            json!({"intent_id":uuid(),"managed_session_id":s,"expected_revision":1,
+                "runtime_fence":fence}),
+        )
+    };
+    let ready = close(&mut rig, fence.clone());
+    assert_eq!(code(&ready), "runtime_operation_in_progress", "{ready}");
+
+    let grant = rig.call(
+        "executionLease/grant",
+        json!({"intent_id":uuid(),"session_id":s,"expected_session_revision":1,
+        "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence}),
+    );
+    assert_eq!(grant["result"]["kind"], "lease", "{grant}");
+    rig.bind(&reference);
+    let turn = rig.call(
+        "managedSession/turn/start",
+        json!({"intent_id":uuid(),"managed_session_id":s,
+        "expected_session_revision":1,"prompt":"busy","runtime_fence":fence}),
+    );
+    assert_eq!(turn["result"]["kind"], "turn", "{turn}");
+    let busy = close(&mut rig, fence.clone());
+    assert_eq!(code(&busy), "active_turn_exists", "{busy}");
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
+
+/// Historical identity: once the launch has stopped, its old instance proves nothing about the
+/// present; only the exact generation with no instance can close the session.
+#[test]
+fn a_stopped_launch_closes_only_with_its_exact_generation_and_no_instance() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (reference, _) = rig.ready();
+    let s = rig.sessions[0].clone();
+    let (generation, revision) = rig.expect(&s);
+    let stop = rig.call(
+        "runtime/stop",
+        json!({"intent_id":uuid(),"adapter_id":"codex","runtime_kind":"codex",
+        "managed_session_id":s,"expected_generation":generation,
+        "expected_revision":revision,"expected_runtime_instance_id":reference.runtime_instance_id}),
+    );
+    assert_eq!(stop["result"]["kind"], "runtime_control", "{stop}");
+    *rig.spawn.exited.lock().unwrap() = true;
+    rig.authority.tick(Instant::now()).unwrap();
+
+    let historical = rig.call(
+        "managedSession/close",
+        json!({"intent_id":uuid(),"managed_session_id":s,"expected_revision":1,
+            "runtime_fence":{"managed_session_id":s,"generation":reference.generation,
+                "runtime_instance_id":reference.runtime_instance_id}}),
+    );
+    assert_eq!(code(&historical), "stale_revision", "{historical}");
+    let exact = rig.call(
+        "managedSession/close",
+        json!({"intent_id":uuid(),"managed_session_id":s,"expected_revision":1,
+            "runtime_fence":{"managed_session_id":s,"generation":reference.generation,
+                "runtime_instance_id":null}}),
+    );
+    assert_eq!(
+        exact["result"]["value"]["control_state"], "closed",
+        "{exact}"
+    );
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}

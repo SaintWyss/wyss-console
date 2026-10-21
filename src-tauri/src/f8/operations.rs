@@ -435,7 +435,7 @@ fn session_mutation(engine: &mut Engine, r: &Request) -> ControlResult<Value> {
             }
             let changed = s.control_state != v1::ControlState::Closed;
             if changed {
-                let pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM managed_turns WHERE managed_session_id=?1 AND state IN ('starting','running')) OR EXISTS(SELECT 1 FROM managed_session_operations WHERE managed_session_id=?1 AND state IN ('reserved','dispatching','indeterminate'))",[p.managed_session_id.as_str()],|r|r.get(0)).map_err(db)?;
+                let pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM managed_turns WHERE managed_session_id=?1 AND state IN ('starting','running')) OR EXISTS(SELECT 1 FROM managed_session_operations WHERE managed_session_id=?1 AND state IN ('reserved','dispatching','indeterminate')) OR EXISTS(SELECT 1 FROM managed_runtimes WHERE managed_session_id=?1 AND desired_state='running')",[p.managed_session_id.as_str()],|r|r.get(0)).map_err(db)?;
                 if pending {
                     return Err(E::RuntimeOperationInProgress);
                 }
