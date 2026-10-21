@@ -278,14 +278,11 @@ fn hostile_and_malformed_bytes_never_reach_the_authority_and_never_hurt_the_othe
         // The authority answers with a closed error or closes the connection: it never answers
         // success, and it never stops answering the others.
         let mut reply = [0u8; 4];
-        match std::io::Read::read_exact(&mut client, &mut reply) {
-            Ok(()) => {
-                let mut body = vec![0u8; u32::from_be_bytes(reply) as usize];
-                std::io::Read::read_exact(&mut client, &mut body).unwrap();
-                let answer: Value = serde_json::from_slice(&body).unwrap();
-                assert!(answer["error"].is_object(), "{name}: {answer}");
-            }
-            Err(_) => {}
+        if std::io::Read::read_exact(&mut client, &mut reply).is_ok() {
+            let mut body = vec![0u8; u32::from_be_bytes(reply) as usize];
+            std::io::Read::read_exact(&mut client, &mut body).unwrap();
+            let answer: Value = serde_json::from_slice(&body).unwrap();
+            assert!(answer["error"].is_object(), "{name}: {answer}");
         }
         let mut healthy = app.raw();
         let ok = healthy.hello();

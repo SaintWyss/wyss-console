@@ -7,6 +7,15 @@ rust-version = "1.90"
 publish = false
 default-run = "wyss-console"
 
+[features]
+# Development only: a local protocol-2 application with a fixture child, to look at the
+# window with it active. No build of the installed desktop enables it.
+f8-dev = []
+
+[[example]]
+name = "f8_local_gui"
+required-features = ["f8-dev"]
+
 [build-dependencies]
 tauri-build = { version = "=2.7.1", features = [] }
 

@@ -226,6 +226,8 @@ impl Spawner for AppSpawner {
     }
 }
 
+type Seed = Box<dyn FnOnce(&Connection)>;
+
 #[derive(Default)]
 struct Options {
     limit: usize,
@@ -233,7 +235,7 @@ struct Options {
     staging: bool,
     stage_fault: Option<LaunchStage>,
     /// Seeds the V8 image before the application owns it.
-    seed: Option<Box<dyn FnOnce(&Connection)>>,
+    seed: Option<Seed>,
     /// A durable, file-backed image opened the way the application opens one: with the
     /// production constructor, which validates it and recovers what a predecessor left.
     file: bool,
@@ -1844,9 +1846,9 @@ fn f8_13_a_crash_at_every_launch_stage_never_reuses_a_generation_or_fabricates_r
             "{stage:?}"
         );
         std::thread::sleep(Duration::from_millis(400));
-        assert_eq!(
-            app.gui.session(a.clone()).unwrap().session.runtime.actual != ActualState::Ready,
-            true,
+        assert_ne!(
+            app.gui.session(a.clone()).unwrap().session.runtime.actual,
+            ActualState::Ready,
             "{stage:?}"
         );
         assert_eq!(app.events("runtime_ready"), 0, "{stage:?}");

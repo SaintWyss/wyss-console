@@ -319,12 +319,14 @@ impl Authority {
         // A runtime that was meant to run and whose launch ended unexpectedly says why, from
         // the durable record of that exit. Nothing about a missing record is invented.
         let (mut diagnostic, mut budget) = (None, None);
-        if launch.is_none() && desired == "running" && generation > 0 {
-            if let Some((kind, key)) = self.unexpected_exit(s, generation)? {
-                actual = "failed";
-                diagnostic = Some(kind);
-                budget = key;
-            }
+        if launch.is_none()
+            && desired == "running"
+            && generation > 0
+            && let Some((kind, key)) = self.unexpected_exit(s, generation)?
+        {
+            actual = "failed";
+            diagnostic = Some(kind);
+            budget = key;
         }
         let mut value = json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":desired,
             "revision":revision.max(0),"actual_state":actual,

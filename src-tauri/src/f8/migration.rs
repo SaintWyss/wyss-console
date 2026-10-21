@@ -17,7 +17,8 @@ impl PreparedMigration {
     pub fn validate(&self) -> ControlResult<()> {
         validate_migrated(&self.connection)
     }
-    #[cfg(test)]
+    /// The image, for tests and for the development-only local application.
+    #[cfg(any(test, feature = "f8-dev"))]
     pub(super) fn into_connection(self) -> Connection {
         self.connection
     }
