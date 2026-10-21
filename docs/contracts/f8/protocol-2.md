@@ -158,3 +158,30 @@ now have result-kind/record correlation. Binding-create success requires the ind
 canonical workspace via `correlate_binding_create`; generic correlation refuses without that context.
 Closed-session no-op returns revision 2 unchanged, as in the baseline. Do not use partial codecs to enable a V8 client/server. See the
 [implementation evidence](../../acceptance/f8-code-2026-10-20.md) for the remaining boundaries.
+
+## Window integration clarifications, 2026-10-21
+
+Found by driving the protocol through the desktop's own client; none changes a method, a key set or
+an error word.
+
+- **Runtime status is not empty.** `runtime/status` reports, for the live launch of the session, the
+  safety profile it was asked for (`runtime_safety_profile`) and, for local tools, the one workspace it
+  is isolated for (`workspace_root`), exactly as protocol 1's status does; `model_count` is the size of
+  the catalogue the attested launch listed (zero until it is ready). A session whose desired state is
+  `running` but which has no live launch reports `actual_state: failed` with the closed exit word as
+  `diagnostic` (`budget_exceeded` with its `budget_failure` key) **only** when the authority that is
+  answering recorded an unexpected `instance_exited` for the current generation. An exit recorded by a
+  predecessor authority is history: the runtime is reported `stopped`, not failed.
+- **Why a turn or an approval ended.** Work stranded by a launch of this authority that is gone is
+  recorded as `runtime_failed` / `runtime_lost`, or as `authority_shutdown` when the authority itself was
+  ending. `authority_restarted` is used only for work whose launch belongs to a predecessor.
+- **A binding the runtime did not survive.** A create or resume whose runtime was lost while it was
+  `reserved`/`dispatching` becomes uncertain (`binding_indeterminate`, operation retained) on the next
+  supervisor tick, so it can be abandoned; it is never redispatched.
+- **Counters the window cannot hold.** A generation counter at the end of its range is serialized by the
+  window's service as the largest integer a JavaScript number holds exactly, with `exhausted: true`; the
+  protocol itself is unchanged (u63).
+- **Transport.** A frame whose header and body the peer has already sent is read in one supervisor
+  quantum (it cost two). A client that asks for nothing for five seconds is dropped; the window's service
+  does not reuse a connection that rested more than two seconds. Durable lease and approval expiry is
+  recorded at most every 250 ms; reads still project expiry by the clock.
