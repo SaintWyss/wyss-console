@@ -160,6 +160,17 @@ impl IsolationLaunch {
     }
 
     #[cfg(test)]
+    pub(crate) fn fixture_exec_failure(&mut self) {
+        unsafe {
+            self.command
+                .pre_exec(|| Err(std::io::Error::from_raw_os_error(nix::libc::EIO)));
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture_env(&mut self, key: &str, value: &std::ffi::OsStr) {
+        self.command.env(key, value);
+    }
+    #[cfg(test)]
     pub(crate) fn fixture(command: Command, grants: Vec<OwnedFd>) -> Self {
         Self { command, grants }
     }
@@ -390,6 +401,7 @@ impl Isolation {
             home_dir,
             &inherited,
             Some(&mut held),
+            Vec::new(),
         )?;
         Ok(IsolationLaunch {
             command,
@@ -410,7 +422,15 @@ impl Isolation {
         inherited: &[std::ffi::OsString],
     ) -> ProbeResult<Command> {
         self.launch_inner(
-            executable, args, cwd, grants, user, home_dir, inherited, None,
+            executable,
+            args,
+            cwd,
+            grants,
+            user,
+            home_dir,
+            inherited,
+            None,
+            Vec::new(),
         )
     }
 
@@ -424,7 +444,8 @@ impl Isolation {
         user: &Path,
         home_dir: Option<PathBuf>,
         inherited: &[std::ffi::OsString],
-        f8_grants: Option<&mut Vec<OwnedFd>>,
+        mut f8_grants: Option<&mut Vec<OwnedFd>>,
+        f8_mounts: Vec<(OwnedFd, PathBuf)>,
     ) -> ProbeResult<Command> {
         let bwrap = fs::symlink_metadata(BWRAP).map_err(|_| ProbeError::RuntimeUnavailable)?;
         if !bwrap.is_file() || bwrap.uid() != 0 || bwrap.mode() & 0o022 != 0 {
@@ -482,6 +503,9 @@ impl Isolation {
             return Err(ProbeError::Protocol);
         }
         let mut command = Command::new(BWRAP);
+        if f8_grants.is_some() {
+            command.arg("--unshare-pid");
+        }
         command
             .args(["--die-with-parent", "--dev-bind", "/", "/"])
             // A private writable view of `/etc` gives the managed policy its mount point
@@ -543,7 +567,7 @@ impl Isolation {
             // SAFETY: after fork, one async-signal-safe syscall on a descriptor this
             // closure keeps open. Only the launcher inherits it; it stays close-on-exec in
             // the authority, so no other child ever receives it.
-            if let Some(held) = f8_grants {
+            if let Some(held) = f8_grants.as_mut() {
                 held.push(own.into());
             } else {
                 unsafe {
@@ -567,6 +591,24 @@ impl Isolation {
             .arg(cwd)
             .arg("--chdir")
             .arg(cwd);
+        for (fd, destination) in f8_mounts {
+            // Anonymous sealed images have no pathname for bind-fd's source
+            // canonicalization. ro-bind-data reads the FD into a private,
+            // readonly-mounted file; the credential still uses bind-fd.
+            command
+                .args([
+                    "--perms",
+                    if destination == executable {
+                        "0555"
+                    } else {
+                        "0600"
+                    },
+                    "--ro-bind-data",
+                ])
+                .arg(fd.as_raw_fd().to_string())
+                .arg(destination);
+            f8_grants.as_mut().ok_or(ProbeError::Protocol)?.push(fd);
+        }
         command.arg("--").arg(&executable).args(args);
         // The generation resolves everything from its private home; no inherited override.
         for key in inherited {
@@ -593,3 +635,362 @@ pub(super) struct Grants<'a> {
 #[cfg(test)]
 #[path = "isolation_tests.rs"]
 mod tests;
+
+/// Live host evidence for exactly one F8 launch. Never serialized or restored
+/// from SQLite: every new generation must prepare a fresh value.
+pub(crate) struct F8Attestation {
+    isolation: Isolation,
+    chain: Vec<PathBuf>,
+    masked: Vec<PathBuf>,
+    pub(crate) roots: Vec<String>,
+    pub(crate) home: PathBuf,
+    user: PathBuf,
+    credential: Option<Credential>,
+    identities: Vec<(PathBuf, fs::Metadata)>,
+    version_launch: Option<IsolationLaunch>,
+}
+impl F8Attestation {
+    /// Bounded host-side probe of exactly the sealed image used by the final
+    /// command. Run during preparation, never from the authority poll loop.
+    pub(crate) fn verify_version(&mut self) -> crate::contracts::control::ControlResult<()> {
+        use crate::contracts::control::ControlError as E;
+        use crate::f8::ownership::{ContainmentPolicy, Grace, PendingOwnedSpawn, Progress};
+        use std::{
+            io::Read,
+            time::{Duration, Instant},
+        };
+        let mut launch = self.version_launch.take().ok_or(E::GateDenied)?;
+        launch.pipe_stdio();
+        let mut pending = PendingOwnedSpawn::spawn_isolated(
+            launch,
+            ContainmentPolicy::DescendantsContained,
+            Grace::default(),
+        )?;
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let (mut child, _) = loop {
+            if let Some(result) = pending.poll(Instant::now()) {
+                break result?;
+            }
+            if Instant::now() >= deadline {
+                pending.cancel();
+                return Err(E::GateDenied);
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        let mut stdout = child.take_stdout().ok_or(E::TransportError)?;
+        let flags = unsafe { nix::libc::fcntl(stdout.as_raw_fd(), nix::libc::F_GETFL) };
+        if flags < 0
+            || unsafe {
+                nix::libc::fcntl(
+                    stdout.as_raw_fd(),
+                    nix::libc::F_SETFL,
+                    flags | nix::libc::O_NONBLOCK,
+                )
+            } < 0
+        {
+            return Err(E::TransportError);
+        }
+        let mut bytes = Vec::new();
+        let mut successful = false;
+        loop {
+            let mut chunk = [0u8; 129];
+            match stdout.read(&mut chunk) {
+                Ok(n) => bytes.extend_from_slice(&chunk[..n]),
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) => {}
+                Err(_) => break,
+            }
+            if bytes.len() > 128 || Instant::now() >= deadline {
+                break;
+            }
+            if let Some(status) = child.try_wait()? {
+                successful = status.success();
+                // Drain the final bounded bytes after exit before comparing.
+                if let Ok(n) = stdout.read(&mut chunk) {
+                    bytes.extend_from_slice(&chunk[..n]);
+                }
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        child.begin_stop(Instant::now());
+        while Instant::now() < deadline {
+            if matches!(child.poll_stop(Instant::now()), Ok(Progress::Reaped(_))) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        if !child.is_reaped() || !successful || bytes != b"codex-cli 0.159.0\n" {
+            return Err(E::Unsupported);
+        }
+        Ok(())
+    }
+    pub(crate) fn workspace(&self) -> &Path {
+        &self.isolation.workspace
+    }
+    pub(crate) fn holds(&self) -> bool {
+        self.isolation
+            .masks_hold(&self.chain, &self.masked)
+            .unwrap_or(false)
+            && match &self.credential {
+                Some(c) => Isolation::same_credential(c, &self.user).unwrap_or(false),
+                None => matches!(credential(&self.user), Ok(None)),
+            }
+            && self.identities.iter().all(|(p, old)| {
+                fs::symlink_metadata(p).is_ok_and(|now| {
+                    now.dev() == old.dev()
+                        && now.ino() == old.ino()
+                        && now.mode() == old.mode()
+                        && now.uid() == old.uid()
+                        && (now.is_dir()
+                            || (now.len() == old.len()
+                                && now.mtime() == old.mtime()
+                                && now.mtime_nsec() == old.mtime_nsec()
+                                && now.ctime() == old.ctime()
+                                && now.ctime_nsec() == old.ctime_nsec()))
+                })
+            })
+    }
+}
+impl Isolation {
+    /// Trusted host preparation only. The explicit user directory supports an
+    /// entirely synthetic fixture; no environment may select grants or argv.
+    pub(crate) fn prepare_f8(
+        self,
+        executable: &Path,
+        user: &Path,
+        cwd: &Path,
+        catalog: &Path,
+    ) -> crate::contracts::control::ControlResult<(IsolationLaunch, F8Attestation)> {
+        use crate::contracts::control::ControlError as E;
+        let prepare = || -> ProbeResult<_> {
+            let executable = fs::canonicalize(executable).map_err(unsafe_path)?;
+            let binary = fs::symlink_metadata(&executable).map_err(unsafe_path)?;
+            if !binary.is_file()
+                || binary.mode() & 0o022 != 0
+                || ![0, own_uid()].contains(&binary.uid())
+                || binary.mode() & 0o111 == 0
+            {
+                return Err(ProbeError::Protocol);
+            }
+            let hidden_default = env::var_os("HOME").map(|h| PathBuf::from(h).join(".codex"));
+            let chain = self.project_dirs()?;
+            let masked = self.layers()?;
+            let roots = self.trust_roots()?;
+            let credential = credential(user)?;
+            self.prepare()?;
+            let mut mounts = Vec::new();
+            for (path, bound, executable) in [
+                (executable.clone(), 256 * 1024 * 1024, true),
+                (catalog.to_path_buf(), 4 * 1024 * 1024, false),
+                (self.policy().join("requirements.toml"), 65536, false),
+                (self.policy().join("managed_config.toml"), 65536, false),
+            ] {
+                let image = sealed_file(&path, bound, executable)?;
+                if path == catalog {
+                    validate_catalog_image(&image)?;
+                }
+                for (name, expected) in [
+                    ("requirements.toml", safety::LOCAL_TOOLS_REQUIREMENTS),
+                    ("managed_config.toml", safety::LOCAL_TOOLS_MANAGED_CONFIG),
+                ] {
+                    if path == self.policy().join(name)
+                        && fs::read(format!("/proc/self/fd/{}", image.as_raw_fd()))
+                            .map_err(unsafe_path)?
+                            != expected.as_bytes()
+                    {
+                        return Err(ProbeError::Protocol);
+                    }
+                }
+                mounts.push((image, path));
+            }
+            let probe_mounts = mounts
+                .iter()
+                .map(|(fd, path)| {
+                    // Reopen our own sealed inode for an independent read offset;
+                    // duplicate FDs would share the offset consumed by bwrap.
+                    let file = fs::OpenOptions::new()
+                        .read(true)
+                        .custom_flags(nix::libc::O_CLOEXEC)
+                        .open(format!("/proc/self/fd/{}", fd.as_raw_fd()))
+                        .map_err(unsafe_path)?;
+                    Ok((file.into(), path.clone()))
+                })
+                .collect::<ProbeResult<Vec<_>>>()?;
+            let mut probe_grants = Vec::new();
+            let mut probe = self.launch_inner(
+                &executable,
+                vec!["--version".into()],
+                cwd,
+                &Grants {
+                    masked: &masked,
+                    catalog: Some(catalog),
+                    credential: None,
+                },
+                user,
+                hidden_default.clone(),
+                &[],
+                Some(&mut probe_grants),
+                probe_mounts,
+            )?;
+            probe
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("LANG", "C.UTF-8")
+                .env("CODEX_HOME", self.home());
+            let version_launch = IsolationLaunch {
+                command: probe,
+                grants: probe_grants,
+            };
+            let mut held = Vec::new();
+            let inherited: Vec<_> = env::vars_os().map(|(key, _)| key).collect();
+            let mut command = self.launch_inner(
+                &executable,
+                safety::local_tools_args(&std::collections::BTreeSet::new(), Some(catalog))
+                    .map_err(unsafe_path)?,
+                cwd,
+                &Grants {
+                    masked: &masked,
+                    catalog: Some(catalog),
+                    credential: credential.as_ref(),
+                },
+                user,
+                hidden_default.clone(),
+                &inherited,
+                Some(&mut held),
+                mounts,
+            )?;
+            // The F8 profile starts with a fixed environment. In particular,
+            // loader, shell and provider overrides never enter this generation.
+            command
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("LANG", "C.UTF-8")
+                .env("CODEX_HOME", self.home());
+            let mut identities = Vec::new();
+            for p in [
+                &executable,
+                catalog,
+                &self.workspace,
+                &self.state,
+                &self.home(),
+                &self.policy().join("requirements.toml"),
+                &self.policy().join("managed_config.toml"),
+            ] {
+                identities.push((
+                    p.to_path_buf(),
+                    fs::symlink_metadata(p).map_err(unsafe_path)?,
+                ));
+            }
+            Ok((
+                IsolationLaunch {
+                    command,
+                    grants: held,
+                },
+                chain,
+                masked,
+                roots,
+                credential,
+                identities,
+                version_launch,
+            ))
+        };
+        let (launch, chain, masked, roots, credential, identities, version_launch) =
+            prepare().map_err(|_| E::GateDenied)?;
+        let home = self.home();
+        Ok((
+            launch,
+            F8Attestation {
+                isolation: self,
+                chain,
+                masked,
+                roots,
+                home,
+                user: user.to_path_buf(),
+                credential,
+                identities,
+                version_launch: Some(version_launch),
+            },
+        ))
+    }
+}
+
+/// Only executable/catalog/policy bytes are copied, never credential contents.
+/// A sealed anonymous inode prevents both pathname swaps and in-place mutation
+/// after host preparation, including while the spawn coordinator is queued.
+fn sealed_file(path: &Path, limit: u64, executable: bool) -> ProbeResult<OwnedFd> {
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
+    let source = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_CLOEXEC)
+        .open(path)
+        .map_err(unsafe_path)?;
+    let metadata = source.metadata().map_err(unsafe_path)?;
+    if !metadata.is_file()
+        || metadata.len() > limit
+        || metadata.mode() & 0o022 != 0
+        || ![0, own_uid()].contains(&metadata.uid())
+    {
+        return Err(ProbeError::Protocol);
+    }
+    let fd = unsafe {
+        nix::libc::memfd_create(
+            c"wyss-f8-image".as_ptr(),
+            nix::libc::MFD_CLOEXEC | nix::libc::MFD_ALLOW_SEALING,
+        )
+    };
+    if fd < 0 {
+        return Err(ProbeError::Protocol);
+    }
+    let mut image = fs::File::from(unsafe { OwnedFd::from_raw_fd(fd) });
+    let copied = std::io::copy(&mut (&source).take(limit + 1), &mut image).map_err(unsafe_path)?;
+    let after = source.metadata().map_err(unsafe_path)?;
+    if after.ctime() != metadata.ctime()
+        || after.ctime_nsec() != metadata.ctime_nsec()
+        || after.mtime() != metadata.mtime()
+        || after.mtime_nsec() != metadata.mtime_nsec()
+        || copied != metadata.len()
+        || copied > limit
+    {
+        return Err(ProbeError::Protocol);
+    }
+    if unsafe { nix::libc::fchmod(fd, if executable { 0o555 } else { 0o400 }) } != 0
+        || unsafe {
+            nix::libc::fcntl(
+                fd,
+                nix::libc::F_ADD_SEALS,
+                nix::libc::F_SEAL_WRITE
+                    | nix::libc::F_SEAL_GROW
+                    | nix::libc::F_SEAL_SHRINK
+                    | nix::libc::F_SEAL_SEAL,
+            )
+        } != 0
+    {
+        return Err(ProbeError::Protocol);
+    }
+    if unsafe { nix::libc::lseek(fd, 0, nix::libc::SEEK_SET) } != 0 {
+        return Err(ProbeError::Protocol);
+    }
+    Ok(image.into())
+}
+
+fn validate_catalog_image(image: &OwnedFd) -> ProbeResult<()> {
+    // Validate the exact immutable bytes that bwrap will read, not a pathname
+    // that can be replaced between validation and snapshot preparation.
+    let path = format!("/proc/self/fd/{}", image.as_raw_fd());
+    if fs::metadata(&path).map_err(unsafe_path)?.len() > 4 * 1024 * 1024 {
+        return Err(ProbeError::Protocol);
+    }
+    let raw = fs::read(path).map_err(unsafe_path)?;
+    let clamped = safety::local_tools_catalog(&raw).map_err(unsafe_path)?;
+    if serde_json::from_slice::<serde_json::Value>(&raw).map_err(unsafe_path)?
+        != serde_json::from_slice::<serde_json::Value>(&clamped).map_err(unsafe_path)?
+    {
+        return Err(ProbeError::Protocol);
+    }
+    Ok(())
+}

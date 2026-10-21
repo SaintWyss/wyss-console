@@ -32,6 +32,9 @@ impl<P> Spawner for NativeInferenceSpawner<P>
 where
     P: FnMut(&RuntimeRef, Option<&mut LaunchStaging>) -> ControlResult<NativeLaunchPlan>,
 {
+    fn supports_profile(&self, profile: crate::contracts::control::RuntimeSafetyProfile) -> bool {
+        profile == crate::contracts::control::RuntimeSafetyProfile::CodexInferenceV1
+    }
     fn spawn(
         &mut self,
         reference: &RuntimeRef,
@@ -99,5 +102,138 @@ impl Worker for RefusedInitialization {
     }
     fn containment(&mut self) -> Containment {
         self.worker.containment()
+    }
+}
+
+/// Host-only local-tools plan. It cannot be built from protocol parameters.
+#[allow(dead_code)]
+pub(crate) struct NativeLocalToolsPlan {
+    launch: crate::adapters::codex::probe::isolation::IsolationLaunch,
+    proof: crate::adapters::codex::probe::isolation::F8Attestation,
+    attachment: Attachment,
+    catalogue: PathBuf,
+    version: String,
+}
+#[allow(dead_code)]
+impl NativeLocalToolsPlan {
+    pub(crate) fn prepare(
+        isolation: crate::adapters::codex::probe::isolation::Isolation,
+        executable: &std::path::Path,
+        user: &std::path::Path,
+        cwd: &std::path::Path,
+        catalogue: PathBuf,
+        observed_version: &str,
+    ) -> ControlResult<Self> {
+        if observed_version != "0.159.0" || !catalogue.is_absolute() {
+            return Err(E::Unsupported);
+        }
+        let attachment = Attachment {
+            workspace: isolation
+                .workspace
+                .to_str()
+                .ok_or(E::WorkspaceInvalid)?
+                .into(),
+            profile: "codex_local_tools_v1".into(),
+            revision: 1,
+        };
+        let (launch, mut proof) = isolation.prepare_f8(executable, user, cwd, &catalogue)?;
+        proof.verify_version()?;
+        Ok(Self {
+            launch,
+            proof,
+            attachment,
+            catalogue,
+            version: observed_version.into(),
+        })
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture_exec_failure(&mut self) {
+        self.launch.fixture_exec_failure();
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture_without_namespace(&mut self) {
+        self.launch = crate::adapters::codex::probe::isolation::IsolationLaunch::fixture(
+            Command::new("/bin/true"),
+            Vec::new(),
+        );
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture_env(&mut self, key: &str, value: &std::ffi::OsStr) {
+        self.launch.fixture_env(key, value);
+    }
+}
+#[allow(dead_code)]
+pub(crate) struct NativeLocalToolsSpawner {
+    plan: Option<NativeLocalToolsPlan>,
+    #[cfg(test)]
+    fault: Option<super::provider_adapter::NativeCriticalFault>,
+}
+#[allow(dead_code)]
+impl NativeLocalToolsSpawner {
+    pub(crate) fn new(plan: NativeLocalToolsPlan) -> Self {
+        Self {
+            plan: Some(plan),
+            #[cfg(test)]
+            fault: None,
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn empty() -> Self {
+        Self {
+            plan: None,
+            fault: None,
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn with_critical_fault(
+        mut self,
+        fault: Option<super::provider_adapter::NativeCriticalFault>,
+    ) -> Self {
+        self.fault = fault;
+        self
+    }
+}
+impl Spawner for NativeLocalToolsSpawner {
+    fn supports_profile(&self, profile: crate::contracts::control::RuntimeSafetyProfile) -> bool {
+        profile == crate::contracts::control::RuntimeSafetyProfile::CodexLocalToolsV1
+    }
+    fn descendant_containment(&self) -> bool {
+        true
+    }
+    fn spawn(
+        &mut self,
+        reference: &RuntimeRef,
+        _staging: Option<&mut LaunchStaging>,
+    ) -> ControlResult<Spawned> {
+        // This path only consumes already prepared, verified resources. It
+        // cannot copy/probe an executable while the sole writer is polling.
+        let plan = self.plan.take().ok_or(E::Unsupported)?;
+        if !plan.proof.holds() {
+            return Err(E::GateDenied);
+        }
+        let worker = DeferredProcessWorker::spawn_isolated(
+            plan.launch,
+            Grace::default(),
+            ContainmentPolicy::DescendantsContained,
+        )?;
+        let worker: Box<dyn Worker> = match NativeCodexWorker::local_tools_retaining(
+            worker,
+            reference.managed_session_id.clone(),
+            reference.runtime_instance_id.clone(),
+            plan.attachment,
+            plan.catalogue,
+            plan.version,
+            plan.proof,
+        ) {
+            Ok(native) => {
+                #[cfg(test)]
+                let mut native = native;
+                #[cfg(test)]
+                native.fixture_critical_fault(self.fault);
+                Box::new(native)
+            }
+            Err((error, worker)) => Box::new(RefusedInitialization { error, worker }),
+        };
+        Ok(Spawned { worker })
     }
 }

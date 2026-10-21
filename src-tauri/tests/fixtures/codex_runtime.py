@@ -22,7 +22,7 @@ def started_in(stage):
 
 if sys.argv[1:] == ['--version']:
     started_in('version')
-    print('codex-cli 0.159.0')
+    print('codex-cli 0.158.0' if scenario == 'f8_wrong_version' else 'codex-cli 0.159.0')
     sys.exit(0)
 assert sys.argv[-1] == 'app-server'
 argv = sys.argv[1:-1]
@@ -127,14 +127,18 @@ def resolve(tid, decision):
     waiting = None
     item = command_item if kind == 'command' else file_item
     emit({'method': 'serverRequest/resolved', 'params': {'threadId': tid, 'requestId': request_id}})
-    finished = lambda status, **extra: emit({'method': 'item/completed', 'params': {
-        'threadId': tid, 'turnId': turn['id'], 'completedAtMs': 2, 'item': item(workspace, status, **extra)}})
+    def finished(status, **extra):
+        completed = item(workspace, status, **extra)
+        if scenario == 'approval_command_changed_completion': completed['command'] = 'SUBSTITUTED_ACTION'
+        emit({'method': 'item/completed', 'params': {
+            'threadId': tid, 'turnId': turn['id'], 'completedAtMs': 2, 'item': completed}})
     if decision != 'accept':
         finished('declined')
         # `decline` keeps the turn; `cancel` interrupts it.
         emit({'method': 'turn/completed', 'params': {'threadId': tid, 'turn': dict(
             turn, status='completed' if decision == 'decline' else 'interrupted')}})
         return
+    if scenario.endswith('_crash_after'): os._exit(7)
     if scenario.endswith('_slow'):
         # Accepted and running: the outcome is never reported.
         tally('executions')
@@ -173,6 +177,8 @@ for line in sys.stdin:
         # Every response frame the authority ever writes, and the decision it carries.
         with (root / 'decisions').open('a') as record:
             record.write(json.dumps(message.get('result', {}).get('decision')) + '\n')
+        if os.environ.get('WYSS_F8_NATIVE_FIXTURE'):
+            with (root / 'critical-ids').open('a') as record: record.write(json.dumps(message.get('id'))+'\n')
         if waiting and message.get('id') == waiting['id']:
             resolve(tid, message['result']['decision'])
         continue
@@ -447,7 +453,17 @@ for line in sys.stdin:
                 ask['cwd'] = '/'
             if variant == 'command_remote':
                 ask['environmentId'] = 'remote'
+            if os.environ.get('WYSS_F8_NATIVE_FIXTURE') and kind == 'command':
+                ask['availableDecisions'] = ['accept', 'decline', 'cancel']
+            if variant == 'command_wrong_thread': ask['threadId'] = 'foreign-thread'
+            if variant == 'command_wrong_turn': ask['turnId'] = 'foreign-turn'
+            if variant == 'command_changed': ask['command'] = 'different action'
+            if variant == 'command_changed_actions': ask['commandActions'] = [{'type':'unknown','command':'different parse'}]
             request = {'id': 'approval-1', 'method': 'item/%s/requestApproval' % ('commandExecution' if kind == 'command' else 'fileChange'), 'params': ask}
+            if variant == 'command_numeric': request['id'] = 17
+            if variant == 'command_hidden_terminal':
+                emit({'method':'turn/completed','params':{'threadId':tid,'turn':dict(current_turn,status='completed',items=[command_item(workspace,'completed',exitCode=0)])}})
+                continue
             if variant == 'command_unasked':
                 # The runtime ran a command on its own: nothing was ever asked.
                 started(command_item(workspace, 'inProgress'))
@@ -456,9 +472,12 @@ for line in sys.stdin:
                 continue
             if variant != 'command_outside':
                 started(command_item(workspace, 'inProgress') if kind == 'command' else file_item(workspace, 'inProgress'))
-            waiting = {'id': 'approval-1', 'kind': kind, 'workspace': workspace, 'turn': current_turn}
+            waiting = {'id': request['id'], 'kind': kind, 'workspace': workspace, 'turn': current_turn}
             emit(request)
             (root / 'asked').touch()
+            if variant == 'command_withdrawn':
+                emit({'method':'serverRequest/resolved','params':{'threadId':tid,'requestId':'approval-1'}})
+            if variant == 'command_crash_before': os._exit(7)
             if variant == 'command_double':
                 emit(dict(request, id='approval-2'))
             if variant == 'command_early':

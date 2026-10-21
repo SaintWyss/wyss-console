@@ -970,7 +970,7 @@ pub(super) fn require_bound_launch(engine: &Engine, f: &RuntimeFence) -> Control
 mod tests;
 
 /// Complete bounded provider proposal; no Debug and no durable serialization.
-#[derive(Clone, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProviderAction {
     Command {
@@ -982,7 +982,7 @@ pub enum ProviderAction {
         changes: Vec<ProviderFileChange>,
     },
 }
-#[derive(Clone, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderFileChange {
     path: String,

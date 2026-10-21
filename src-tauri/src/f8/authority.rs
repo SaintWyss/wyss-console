@@ -160,6 +160,10 @@ impl Authority {
     pub fn engine(&self) -> &Engine {
         &self.engine
     }
+    #[cfg(test)]
+    pub(crate) fn fixture_after_approval_write(&mut self, inject: fn(&mut Connection)) {
+        self.post_approval_write = Some(inject);
+    }
     pub fn engine_mut(&mut self) -> &mut Engine {
         &mut self.engine
     }
@@ -705,6 +709,10 @@ impl Authority {
             if existing.is_none() {
                 return Err(E::StaleRevision);
             }
+        }
+        if !replay {
+            let attachment = self.engine.attachment(&session).ok_or(E::GateDenied)?;
+            self.engine.preflight(fence, &attachment)?;
         }
         if !replay && p.decision == ApprovalDecision::Accept {
             self.engine.approval_action_confined(fence, &item)?;

@@ -101,6 +101,9 @@ pub struct Spawned {
 /// Creates the worker for a launch the allocator already reserved. The engine never spawns
 /// anything for a launch that has no committed reservation.
 pub trait Spawner {
+    fn supports_profile(&self, _profile: v1::RuntimeSafetyProfile) -> bool {
+        true
+    }
     /// Whether this spawner launches payloads into a verified PID namespace. A profile which can
     /// execute tools is refused unless it does, before anything is reserved.
     fn descendant_containment(&self) -> bool {
@@ -483,6 +486,14 @@ impl Engine {
             ),
             _ => return Err(E::InvalidRequest),
         };
+        if let v1::Operation::RuntimeStart(m) = request.operation()
+            && !spawner.supports_profile(
+                m.safety_profile
+                    .unwrap_or(v1::RuntimeSafetyProfile::CodexInferenceV1),
+            )
+        {
+            return Err(E::Unsupported);
+        }
         // Execution paths whose required containment cannot be provided are refused outright:
         // nothing is reserved, spawned or recorded for them.
         if let v1::Operation::RuntimeStart(m) = request.operation()
@@ -946,6 +957,16 @@ impl Engine {
         live.approvals.remove(request_id);
         live.meter.approval_closed();
         Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture_corrupt_fingerprint(&mut self, from: &RuntimeRef, item: &str) {
+        self.live
+            .get_mut(from.managed_session_id.as_str())
+            .unwrap()
+            .approvals
+            .get_mut(item)
+            .unwrap()
+            .fingerprint = "0".repeat(64);
     }
     pub fn pending_approvals(&self, session: &str) -> usize {
         self.live.get(session).map_or(0, |l| l.approvals.len())

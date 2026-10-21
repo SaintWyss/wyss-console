@@ -1095,7 +1095,7 @@ fn f8_owned_grant_crosses_exec_and_is_consumed_by_the_real_namespace_launcher() 
             &user,
             None,
             &[],
-            Some(&mut grants),
+            Some(&mut grants), Vec::new(),
         )
         .unwrap();
     assert_eq!(grants.len(), 1);
@@ -1131,4 +1131,121 @@ fn f8_owned_grant_crosses_exec_and_is_consumed_by_the_real_namespace_launcher() 
     println!(
         "post-exec bwrap: synthetic validated inode mounted; source owner dropped before spawn"
     );
+}
+
+#[test]
+fn sealed_f8_images_are_mountable_by_bwrap() {
+    let t = Temp::new();
+    let (i, user, _) = t.layout();
+    let catalog = t.file("catalog.json", r#"{"models":[{"slug":"fixture","tool_mode":"direct","experimental_supported_tools":[],"multi_agent_version":null}]}"#, 0o600);
+    let cwd = place_of(&i);
+    let (launch, _proof) = i
+        .prepare_f8(Path::new("/bin/true"), &user, &cwd, &catalog)
+        .unwrap();
+    let (mut command, grants) = launch.into_parts();
+    unsafe {
+        command.pre_exec(move || {
+            for fd in &grants {
+                if nix::libc::fcntl(fd.as_raw_fd(), nix::libc::F_SETFD, 0) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+            }
+            Ok(())
+        });
+    }
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn queued_f8_exec_uses_sealed_image_after_rename_and_in_place_source_replacement() {
+    use crate::f8::ownership::{ContainmentPolicy, Grace, PendingOwnedSpawn};
+    use std::{
+        io::Read,
+        time::{Duration, Instant},
+    };
+    for replace_inode in [false, true] {
+        let t = Temp::new();
+        let (i, user, _) = t.layout();
+        let cwd = place_of(&i);
+        let executable = t.file("bin/fixture", "#!/bin/sh\nprintf trusted-image", 0o700);
+        let catalog = t.file("catalog.json", r#"{"models":[{"slug":"fixture","tool_mode":"direct","experimental_supported_tools":[],"multi_agent_version":null}]}"#, 0o600);
+        let (mut launch, _proof) = i.prepare_f8(&executable, &user, &cwd, &catalog).unwrap();
+        let sealed: Vec<_> = launch
+            .grants
+            .iter()
+            .filter(|fd| unsafe { nix::libc::fcntl(fd.as_raw_fd(), nix::libc::F_GET_SEALS) } >= 0)
+            .collect();
+        assert_eq!(sealed.len(), 4);
+        for fd in sealed {
+            assert_ne!(
+                unsafe { nix::libc::fcntl(fd.as_raw_fd(), nix::libc::F_GET_SEALS) }
+                    & nix::libc::F_SEAL_WRITE,
+                0
+            );
+            assert_eq!(
+                unsafe { nix::libc::write(fd.as_raw_fd(), b"x".as_ptr().cast(), 1) },
+                -1
+            );
+        }
+        launch.pipe_stdio();
+        let mut pending = PendingOwnedSpawn::spawn_isolated(
+            launch,
+            ContainmentPolicy::DescendantsContained,
+            Grace::default(),
+        )
+        .unwrap();
+        // The child cannot pass its ownership gate before poll. Substitute the
+        // source while queued/pre-exec; neither inode nor byte reuse changes it.
+        if replace_inode {
+            fs::rename(&executable, executable.with_extension("old")).unwrap();
+        }
+        fs::write(&executable, "#!/bin/sh\nprintf SUBSTITUTED").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let (mut child, _) = loop {
+            if let Some(result) = pending.poll(Instant::now()) {
+                break result.unwrap();
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        let mut text = String::new();
+        child
+            .take_stdout()
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
+        assert_eq!(text, "trusted-image");
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
+#[test]
+fn f8_catalog_validation_covers_sealed_bytes_even_when_path_is_replaced() {
+    let t = Temp::new();
+    let valid = r#"{"models":[{"slug":"fixture","tool_mode":"direct","experimental_supported_tools":[],"multi_agent_version":null}]}"#;
+    let path = t.file("catalog.json", valid, 0o600);
+    assert!(safety::local_tools_catalog(&fs::read(&path).unwrap()).is_ok());
+    fs::write(
+        &path,
+        r#"{"models":[{"slug":"fixture","tool_mode":"code_mode_only"}]}"#,
+    )
+    .unwrap();
+    let image = sealed_file(&path, 4 * 1024 * 1024, false).unwrap();
+    fs::write(&path, valid).unwrap();
+    assert!(validate_catalog_image(&image).is_err());
+    let image = sealed_file(&path, 4 * 1024 * 1024, false).unwrap();
+    assert!(validate_catalog_image(&image).is_ok());
 }

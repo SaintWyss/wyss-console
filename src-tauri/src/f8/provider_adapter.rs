@@ -26,6 +26,7 @@ enum Pending {
     Initialize,
     Config,
     Hooks,
+    Requirements,
     Models,
     Binding {
         operation: String,
@@ -65,6 +66,30 @@ pub struct NativeCodexWorker<W: Worker> {
     proof: bool,
     known_mcp: Option<BTreeSet<String>>,
     normalized: VecDeque<Vec<u8>>,
+    local: Option<crate::adapters::codex::probe::isolation::F8Attestation>,
+    proposals: BTreeMap<String, Value>,
+    approvals: BTreeMap<String, NativeApproval>,
+    seen_requests: BTreeSet<String>,
+    seen_items: BTreeSet<String>,
+    #[cfg(test)]
+    critical_fault: Option<NativeCriticalFault>,
+}
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(crate) enum NativeCriticalFault {
+    Backpressure,
+    PrefixThenFail,
+    AfterWriteFail,
+    ReapStuck,
+}
+struct NativeApproval {
+    message: WireMessage,
+    action: super::operations::ProviderAction,
+    fingerprint: String,
+    offered: safety::Offered,
+    decision: Option<String>,
+    consumed: bool,
+    ended: bool,
 }
 fn codec<T>(r: std::result::Result<T, codex::CodecError>) -> ControlResult<T> {
     r.map_err(|_| E::InvalidRequest)
@@ -93,7 +118,49 @@ impl<W: Worker> NativeCodexWorker<W> {
         catalog: PathBuf,
         version: String,
     ) -> std::result::Result<Self, (E, W)> {
-        if attachment.profile != "codex_inference_v1"
+        Self::retaining(
+            worker, session, instance, attachment, catalog, version, None,
+        )
+    }
+    #[allow(dead_code)] // Inactive trusted host entry; installed protocol 1 never selects it.
+    pub(crate) fn local_tools_retaining(
+        worker: W,
+        session: ManagedSessionId,
+        instance: AgentRuntimeInstanceId,
+        attachment: Attachment,
+        catalog: PathBuf,
+        version: String,
+        proof: crate::adapters::codex::probe::isolation::F8Attestation,
+    ) -> std::result::Result<Self, (E, W)> {
+        Self::retaining(
+            worker,
+            session,
+            instance,
+            attachment,
+            catalog,
+            version,
+            Some(proof),
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn retaining(
+        worker: W,
+        session: ManagedSessionId,
+        instance: AgentRuntimeInstanceId,
+        attachment: Attachment,
+        catalog: PathBuf,
+        version: String,
+        local: Option<crate::adapters::codex::probe::isolation::F8Attestation>,
+    ) -> std::result::Result<Self, (E, W)> {
+        if attachment.profile
+            != if local.is_some() {
+                "codex_local_tools_v1"
+            } else {
+                "codex_inference_v1"
+            }
+            || local.as_ref().is_some_and(|p| {
+                p.workspace().to_str() != Some(attachment.workspace.as_str()) || !p.holds()
+            })
             || attachment.revision == 0
             || version.is_empty()
             || version.len() > 128
@@ -123,6 +190,13 @@ impl<W: Worker> NativeCodexWorker<W> {
             proof: false,
             known_mcp: None,
             normalized: VecDeque::new(),
+            local,
+            proposals: BTreeMap::new(),
+            approvals: BTreeMap::new(),
+            seen_requests: BTreeSet::new(),
+            seen_items: BTreeSet::new(),
+            #[cfg(test)]
+            critical_fault: None,
         };
         let request = ClientOperation::Initialize {
             client_info: ClientInfo {
@@ -136,6 +210,10 @@ impl<W: Worker> NativeCodexWorker<W> {
             return Err((error, this.worker));
         }
         Ok(this)
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture_critical_fault(&mut self, fault: Option<NativeCriticalFault>) {
+        self.critical_fault = fault;
     }
     fn id(&mut self) -> ControlResult<CodexRequestId> {
         if self.pending.len() >= 16 {
@@ -178,6 +256,11 @@ impl<W: Worker> NativeCodexWorker<W> {
         match pending {
             Pending::Initialize => {
                 codec(self.state.initialize_response(message))?;
+                if let Some(local) = &self.local
+                    && message.result().and_then(|r| r["codexHome"].as_str()) != local.home.to_str()
+                {
+                    return Err(E::GateDenied);
+                }
                 let initialized = codec(codex::initialized_notification())?;
                 codec(self.state.outbound(&initialized))?;
                 self.worker.send(&codec(initialized.encode())?)?;
@@ -195,7 +278,11 @@ impl<W: Worker> NativeCodexWorker<W> {
                     Operation::ConfigRead,
                 ))?;
                 let result = message.result().ok_or(E::InvalidRequest)?;
-                codec(safety::verify_config(result, &self.catalog))?;
+                if self.local.is_some() {
+                    codec(safety::verify_local_tools_config(result, &self.catalog))?;
+                } else {
+                    codec(safety::verify_config(result, &self.catalog))?;
+                }
                 let configured = codec(safety::mcp_names(result, false))?;
                 if self
                     .known_mcp
@@ -209,6 +296,27 @@ impl<W: Worker> NativeCodexWorker<W> {
                     self.known_mcp = Some(configured);
                 }
                 self.config_verified = true;
+                if self.local.is_some() {
+                    self.query("configRequirements/read", json!({}), Pending::Requirements)?;
+                    return Ok(Vec::new());
+                }
+                self.query(
+                    "hooks/list",
+                    json!({"cwds":[self.attachment.workspace]}),
+                    Pending::Hooks,
+                )?;
+                Ok(Vec::new())
+            }
+            Pending::Requirements => {
+                codec(codex::validate_response(
+                    message,
+                    &request_id,
+                    Operation::ConfigRequirementsRead,
+                ))?;
+                codec(safety::verify_requirements(
+                    message.result().ok_or(E::InvalidRequest)?,
+                ))?;
+                self.host_proven()?;
                 self.query(
                     "hooks/list",
                     json!({"cwds":[self.attachment.workspace]}),
@@ -308,7 +416,14 @@ impl<W: Worker> NativeCodexWorker<W> {
             } => {
                 codec(codex::validate_response(message, &request_id, method))?;
                 let result = message.result().ok_or(E::InvalidRequest)?;
-                codec(safety::verify_resume(result))?;
+                if self.local.is_some() {
+                    codec(safety::verify_local_tools_thread(result))?;
+                    if result["thread"]["cliVersion"].as_str() != Some(self.version.as_str()) {
+                        return Err(E::GateDenied);
+                    }
+                } else {
+                    codec(safety::verify_resume(result))?;
+                }
                 if result["cwd"].as_str() != Some(self.attachment.workspace.as_str())
                     || result["thread"]["ephemeral"] != false
                 {
@@ -437,6 +552,10 @@ impl<W: Worker> NativeCodexWorker<W> {
                 };
                 if outcome != TurnOutcome::InProgress {
                     self.turn = None;
+                    self.proposals.clear();
+                    self.approvals.clear();
+                    self.seen_items.clear();
+                    self.proof = false;
                 }
                 Ok(vec![notice])
             }
@@ -538,6 +657,14 @@ impl<W: Worker> NativeCodexWorker<W> {
                 };
                 let mut params = json!({"cwd":self.attachment.workspace,"approvalPolicy":"never",
                     "sandbox":"read-only","config":codec(safety::thread_config(self.known_mcp.as_ref().ok_or(E::GateDenied)?))?});
+                if let Some(local) = &self.local {
+                    params["approvalPolicy"] = json!("untrusted");
+                    params["sandbox"] = json!("workspace-write");
+                    params["config"] = codec(safety::local_tools_thread_config(
+                        self.known_mcp.as_ref().ok_or(E::GateDenied)?,
+                        &local.roots,
+                    ))?;
+                }
                 let expected = if resume {
                     Some(codec(CodexThreadId::parse(
                         value["thread_id"].as_str().ok_or(E::InvalidRequest)?,
@@ -582,6 +709,7 @@ impl<W: Worker> Worker for NativeCodexWorker<W> {
         if context != &self.attachment || !self.ready {
             return Err(E::GateDenied);
         }
+        self.host_proven()?;
         if self.proof {
             return Ok(());
         }
@@ -598,8 +726,8 @@ impl<W: Worker> Worker for NativeCodexWorker<W> {
     fn send(&mut self, frame: &[u8]) -> ControlResult<()> {
         self.outbound(frame)
     }
-    fn send_critical(&mut self, _frame: &[u8]) -> ControlResult<()> {
-        Err(E::Unsupported)
+    fn send_critical(&mut self, frame: &[u8]) -> ControlResult<()> {
+        self.critical(frame)
     }
     fn flush(&mut self) -> ControlResult<()> {
         self.worker.flush()
@@ -625,7 +753,11 @@ impl<W: Worker> Worker for NativeCodexWorker<W> {
             } else {
                 // Existing inference isolation classifier rejects requests, tools, hooks,
                 // MCP and unknown executable surfaces before the normalizer sees them.
-                codec(safety::notification(&message))?;
+                let local_notice = if self.local.is_some() {
+                    codec(safety::local_notification(&message))?
+                } else {
+                    codec(safety::notification(&message))?
+                };
                 if !self.ready {
                     // The pinned fixture emits connection metadata before initialize's
                     // response. It cannot attest readiness, binding or executable work.
@@ -662,8 +794,32 @@ impl<W: Worker> Worker for NativeCodexWorker<W> {
                 {
                     return Err(E::CorrelationError);
                 }
-                let observation = codec(codex::normalize_inbound(&message, self.binding.as_ref()))?;
-                self.translate(observation, None)?
+                if self.local.is_some()
+                    && matches!(message.method(), Some("turn/started" | "turn/completed"))
+                {
+                    self.terminal_items(&message)?;
+                }
+                if self.local.is_some()
+                    && (message.kind() == WireKind::ServerRequest
+                        || matches!(
+                            local_notice.as_ref().map(|n| &n.kind),
+                            Some(
+                                safety::NoticeKind::CommandProposed(_)
+                                    | safety::NoticeKind::FileProposed(_)
+                                    | safety::NoticeKind::ApprovalRequested(_)
+                                    | safety::NoticeKind::Output { .. }
+                                    | safety::NoticeKind::ItemEnded { .. }
+                                    | safety::NoticeKind::DiffUpdated
+                            )
+                        )
+                        || message.method() == Some("serverRequest/resolved"))
+                {
+                    self.mediate(&message, local_notice)?
+                } else {
+                    let observation =
+                        codec(codex::normalize_inbound(&message, self.binding.as_ref()))?;
+                    self.translate(observation, None)?
+                }
             };
             for value in events {
                 // One native response can expand into models plus runtime-ready.
@@ -685,9 +841,20 @@ impl<W: Worker> Worker for NativeCodexWorker<W> {
         self.worker.has_exited()
     }
     fn begin_stop(&mut self, now: Instant) {
+        if self.local.is_some() {
+            self.proof = false;
+            self.ready = false;
+            self.approvals.clear();
+            self.proposals.clear();
+        }
         self.worker.begin_stop(now);
     }
     fn poll_stop(&mut self, now: Instant) -> StopState {
+        #[cfg(test)]
+        if matches!(self.critical_fault, Some(NativeCriticalFault::ReapStuck)) {
+            let _ = self.worker.poll_stop(now);
+            return StopState::Stuck;
+        }
         self.worker.poll_stop(now)
     }
     fn descendants(&self) -> usize {
@@ -700,6 +867,9 @@ impl<W: Worker> Worker for NativeCodexWorker<W> {
         self.worker.pid_for_diagnostics()
     }
 }
+
+#[path = "native_approvals.rs"]
+mod native_approvals;
 
 #[cfg(test)]
 #[path = "native_process_tests.rs"]

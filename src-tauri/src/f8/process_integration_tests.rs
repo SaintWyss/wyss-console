@@ -149,6 +149,7 @@ impl Spawner for FixtureSpawner {
 fn id() -> String {
     crate::control::store::uuid().as_str().to_owned()
 }
+#[track_caller]
 pub(crate) fn poll_until<S: Spawner>(
     t: &mut PreparedApplication<S>,
     mut condition: impl FnMut(&PreparedApplication<S>) -> bool,
@@ -168,7 +169,7 @@ pub(crate) fn call<S: Spawner>(
 ) -> Value {
     let mut request = json!({"schema_version":2,"request_id":id(),"method":method,"params":params});
     if method != "authority/hello" {
-        request["authority_instance_id"] = json!(AUTH);
+        request["authority_instance_id"] = json!(t.service().authority().engine().authority_id());
     }
     let bytes = serde_json::to_vec(&request).unwrap();
     c.write_all(&(bytes.len() as u32).to_be_bytes()).unwrap();
