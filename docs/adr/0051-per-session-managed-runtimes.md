@@ -189,3 +189,19 @@ regressions do not attest provider compatibility or owner acceptance. Active cap
 SOURCE_COMPLETE, INTEGRATION_TESTED, INDEPENDENTLY_REVIEWED, REAL_PROVIDER_ACCEPTED,
 INSTALLED_MIGRATION_ACCEPTED and OWNER_APPROVED are independent gates. No implementation status
 in this ADR grants Santiago's acceptance or authority to migrate the installed service.
+
+## Implementation status, window and acceptance, 2026-10-21
+
+Status is still **Proposed**; Santiago has not accepted this ADR. Source now contains protocol 2
+end to end: the authority, V8 writers, managed runtimes with native Codex local-tools approvals, and
+a protocol-2 window (`Runtimes`) behind the inactive local activation boundary. F8-01..F8-18 and all
+29 methods pass through the application and the real transport, and the window was driven in the
+real Tauri shell against an isolated authority. See the
+[delivery report](../acceptance/f8-delivery-2026-10-21.md), the
+[independent review](../acceptance/f8-security-review-2026-10-21.md) and the
+[activation runbook](../acceptance/f8-activation-runbook-2026-10-21.md).
+
+Still **NOT_PROVEN** and not authorized: an authenticated provider, multiprocess credential refresh,
+the installed V7→V8 migration, any activation, and any capacity above one. Protocol 2 has no
+model or effort field, so a per-session model choice cannot be expressed. The installed binary
+selects protocol 1 and schema 7; activation needs a separate reviewed code change.

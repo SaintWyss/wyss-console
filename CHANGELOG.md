@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-21 — F8: protocol-2 window and integrated acceptance (inactive, not activated)
+
+- New **Runtimes** window (sessions, runtime lifecycle, leases, bindings, turns with live
+  streaming and cancellation, native command/file approvals with accept/decline/cancel, bounded
+  history, reconnect/offline states) over protocol 2. Reachable only through a Rust-owned connector
+  (`f8-dev`); the installed `main` capability grants only the state read.
+- F8-01..F8-18 and all 29 methods pass through the real application and transport; defects found
+  by that integration fixed (status facts, recovery reasons, binding recovery, request latency,
+  idle-connection reuse, generation counter, idle CPU). Independent review: no CRITICAL/HIGH;
+  bidi-safe approval card, bounded status lookups, rate-limited reconnect.
+- Installed app stays on protocol 1 / schema 7. Not proven: authenticated provider, multiprocess
+  credential refresh, installed migration. ADR 0051 still Proposed; activation not authorized.
+
 ## 2026-10-20 — Per-session managed runtimes, proposed (F8 design only)
 
 - ADR 0051 (Proposed): identity, attestation per generation, bounded concurrency and budgets, cancellation,

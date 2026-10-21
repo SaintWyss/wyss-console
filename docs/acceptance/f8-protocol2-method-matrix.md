@@ -96,3 +96,16 @@ no acredita un cambio del límite operativo de uno.
 Resultados dinámicos y gates independientes: [informe de ejecución](f8-final-2026-10-21.md).
 SOURCE_COMPLETE, INTEGRATION_TESTED, INDEPENDENTLY_REVIEWED, REAL_PROVIDER_ACCEPTED,
 INSTALLED_MIGRATION_ACCEPTED y OWNER_APPROVED no son equivalentes.
+
+## Evidencia por socket de aplicación, 2026-10-21
+
+`all_29_methods_are_answered_and_refused_through_the_transport` envía cada uno de los 29 métodos
+por el transporte real de protocolo 2 de una aplicación preparada, y comprueba tanto su
+respuesta como su rechazo tipado; las 24 operaciones de la ventana pasan por el mismo camino
+(`f8/gui`). `runtime/status` ahora informa perfil, carpeta aislada, número de modelos y, tras una
+salida inesperada registrada por la autoridad actual, el estado `failed` con su diagnóstico y la
+clave de presupuesto. Los recorridos F8-01..F8-18 están en
+[el informe de entrega](f8-delivery-2026-10-21.md). Las observaciones anteriores de «sin prueba
+individual por socket de todos los métodos» y «frontend protocolo-2 abierto» quedan superadas;
+la aprobación nativa de comando y de archivos pasa por `NativeCodexWorker` y la ventana. El
+proveedor autenticado sigue NOT_PROVEN.
