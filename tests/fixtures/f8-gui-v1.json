@@ -407,11 +407,7 @@
             "expires_at": "2026-10-21T22:14:19.079189443Z",
             "revocation": "user_request",
             "runtime_version": null,
-            "scopes": [
-              "session_create",
-              "session_resume",
-              "turn_start"
-            ],
+            "scopes": ["session_create", "session_resume", "turn_start"],
             "turn_reason": null
           },
           "kind": "lease_revoked",
@@ -531,11 +527,7 @@
             "expires_at": "2026-10-21T22:14:19.079189443Z",
             "revocation": null,
             "runtime_version": null,
-            "scopes": [
-              "session_create",
-              "session_resume",
-              "turn_start"
-            ],
+            "scopes": ["session_create", "session_resume", "turn_start"],
             "turn_reason": null
           },
           "kind": "lease_granted",
@@ -620,9 +612,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": true,
         "model_id": "model-0",
         "provider_id": null,
@@ -632,9 +622,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-1",
         "provider_id": null,
@@ -644,9 +632,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-2",
         "provider_id": null,
@@ -656,9 +642,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-3",
         "provider_id": null,
@@ -668,9 +652,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-4",
         "provider_id": null,
@@ -680,9 +662,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-5",
         "provider_id": null,
@@ -692,9 +672,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-6",
         "provider_id": null,
@@ -704,9 +682,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-7",
         "provider_id": null,
@@ -716,9 +692,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-8",
         "provider_id": null,
@@ -728,9 +702,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-9",
         "provider_id": null,
@@ -740,9 +712,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-10",
         "provider_id": null,
@@ -752,9 +722,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-11",
         "provider_id": null,
@@ -764,9 +732,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-12",
         "provider_id": null,
@@ -776,9 +742,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-13",
         "provider_id": null,
@@ -788,9 +752,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-14",
         "provider_id": null,
@@ -800,9 +762,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-15",
         "provider_id": null,
@@ -812,9 +772,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-16",
         "provider_id": null,
@@ -824,9 +782,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-17",
         "provider_id": null,
@@ -836,9 +792,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-18",
         "provider_id": null,
@@ -848,9 +802,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-19",
         "provider_id": null,
@@ -860,9 +812,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-20",
         "provider_id": null,
@@ -872,9 +822,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-21",
         "provider_id": null,
@@ -884,9 +832,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-22",
         "provider_id": null,
@@ -896,9 +842,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-23",
         "provider_id": null,
@@ -908,9 +852,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-24",
         "provider_id": null,
@@ -920,9 +862,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-25",
         "provider_id": null,
@@ -932,9 +872,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-26",
         "provider_id": null,
@@ -944,9 +882,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-27",
         "provider_id": null,
@@ -956,9 +892,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-28",
         "provider_id": null,
@@ -968,9 +902,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-29",
         "provider_id": null,
@@ -980,9 +912,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-30",
         "provider_id": null,
@@ -992,9 +922,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-31",
         "provider_id": null,
@@ -1004,9 +932,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-32",
         "provider_id": null,
@@ -1016,9 +942,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-33",
         "provider_id": null,
@@ -1028,9 +952,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-34",
         "provider_id": null,
@@ -1040,9 +962,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-35",
         "provider_id": null,
@@ -1052,9 +972,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-36",
         "provider_id": null,
@@ -1064,9 +982,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-37",
         "provider_id": null,
@@ -1076,9 +992,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-38",
         "provider_id": null,
@@ -1088,9 +1002,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-39",
         "provider_id": null,
@@ -1100,9 +1012,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-40",
         "provider_id": null,
@@ -1112,9 +1022,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-41",
         "provider_id": null,
@@ -1124,9 +1032,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-42",
         "provider_id": null,
@@ -1136,9 +1042,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-43",
         "provider_id": null,
@@ -1148,9 +1052,7 @@
       {
         "default_effort": "medium",
         "display_name": "Synthetic model",
-        "efforts": [
-          "medium"
-        ],
+        "efforts": ["medium"],
         "is_default": false,
         "model_id": "model-44",
         "provider_id": null,

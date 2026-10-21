@@ -189,6 +189,8 @@ export interface ApprovalView {
 }
 export interface Conversation {
   turn: string;
+  /** The user opened this turn. It is not left for the turn that runs unless they ask. */
+  explicit: boolean;
   info: TurnInfo | null;
   transcript: Transcript;
   cursor: string | null;
@@ -614,6 +616,7 @@ export class F8Controller {
         this.observeAuthority(woke.authority);
         cursor = woke.head;
         if (woke.changed) await this.refresh();
+        else this.emit();
       } catch (error) {
         if (token !== this.watchToken) break;
         const failure = failureOf(error);
@@ -1039,24 +1042,29 @@ export class F8Controller {
   openTurn(turn: string): void {
     if (this.conversation && same(this.conversation.turn, turn)) return;
     this.tab = 'conversation';
-    void this.follow(turn);
+    void this.follow(turn, true);
   }
 
   /** A turn that is running is followed whatever started it, so a restart of the window resumes it. */
   private followRunning(detail: SessionDetail) {
     const newest = detail.turns[0];
     if (!newest || turnEnded(newest.turn.state)) return;
-    if (this.conversation && same(this.conversation.turn, newest.turn.id)) {
-      if (this.conversation.following || this.conversation.lost) return;
+    const open = this.conversation;
+    if (open && same(open.turn, newest.turn.id)) {
+      if (open.following || open.lost) return;
+    } else if (open && (open.explicit || open.following)) {
+      // The user is reading another turn, or a follower is already reading one.
+      return;
     }
     void this.follow(newest.turn.id);
   }
 
   /** Paced reads of one turn until it is seen to end, or can no longer be followed. */
-  private async follow(turn: string): Promise<void> {
+  private async follow(turn: string, explicit = false): Promise<void> {
     const token = ++this.followToken;
     this.conversation = {
       turn,
+      explicit,
       info: null,
       transcript: emptyTranscript,
       cursor: null,
@@ -1076,7 +1084,11 @@ export class F8Controller {
         if (token !== this.followToken) return;
         failures = 0;
         this.observeAuthority(reading.authority);
-        if (token !== this.followToken) return;
+        if (token !== this.followToken) {
+          // The authority changed under this turn: what was dropped is shown as dropped.
+          this.emit();
+          return;
+        }
         const done = turnEnded(reading.turn.turn.state) && !reading.more;
         this.conversation = {
           ...c,
