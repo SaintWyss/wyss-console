@@ -1059,9 +1059,12 @@ impl<'c> Writer<'c> {
         let mut approvals = 0;
         for id in &stranded.approvals {
             let mut a = read_approval(&tx, id)?;
-            let generation = sidecar(&tx, "managed_approval_launches", "managed_approval_id", id)?
-                .ok_or(E::StorageIncompatible)?
-                .1;
+            let (instance, generation) =
+                sidecar(&tx, "managed_approval_launches", "managed_approval_id", id)?
+                    .ok_or(E::StorageIncompatible)?;
+            // A launch of this very authority that is gone was lost; one of a predecessor was
+            // never going to be here: the two are not the same thing to the person reading.
+            let lost = launched_by(&tx, &instance, &authority)?;
             a.state = if a.state == ApprovalState::Pending {
                 ApprovalState::Invalidated
             } else {
@@ -1070,7 +1073,11 @@ impl<'c> Writer<'c> {
             if a.state == ApprovalState::Indeterminate {
                 a.effect = ApprovalEffect::Unknown;
             }
-            a.terminal_reason = Some(ApprovalReason::AuthorityRestarted);
+            a.terminal_reason = Some(if lost {
+                ApprovalReason::RuntimeLost
+            } else {
+                ApprovalReason::AuthorityRestarted
+            });
             bump(&mut a, now)?;
             update_approval(&tx, &a)?;
             approval_event(
@@ -1090,19 +1097,25 @@ impl<'c> Writer<'c> {
         let mut turns = 0;
         for id in &stranded.turns {
             let mut t = read_turn(&tx, id)?;
-            let generation = sidecar(&tx, "managed_turn_launches", "managed_turn_id", id)?
-                .ok_or(E::StorageIncompatible)?
-                .1;
+            let (instance, generation) =
+                sidecar(&tx, "managed_turn_launches", "managed_turn_id", id)?
+                    .ok_or(E::StorageIncompatible)?;
+            let lost = launched_by(&tx, &instance, &authority)?;
+            let reason = if lost {
+                TurnReason::RuntimeFailed
+            } else {
+                TurnReason::AuthorityRestarted
+            };
             let at = stamp(now.max(ts(&enum_text(&t.updated_at)?)?))?;
             t.state = TurnState::Indeterminate;
             t.revision += 1;
             t.updated_at = at.clone().try_into().map_err(invalid)?;
             t.terminal_at = Some(at.clone().try_into().map_err(invalid)?);
-            t.terminal_reason = Some(TurnReason::AuthorityRestarted);
+            t.terminal_reason = Some(reason);
             t.validate()?;
             tx.execute(
-                "UPDATE managed_turns SET state='indeterminate',revision=?2,updated_at=?3,terminal_at=?3,terminal_reason='authority_restarted' WHERE managed_turn_id=?1",
-                params![id, t.revision as i64, at],
+                "UPDATE managed_turns SET state='indeterminate',revision=?2,updated_at=?3,terminal_at=?3,terminal_reason=?4 WHERE managed_turn_id=?1",
+                params![id, t.revision as i64, at, enum_text(&reason)?],
             )
             .map_err(db)?;
             turn_event(
@@ -1119,6 +1132,18 @@ impl<'c> Writer<'c> {
         tx.commit().map_err(db)?;
         Ok((approvals, turns))
     }
+}
+
+/// Whether `authority` is the one that reserved the launch of `instance`.
+fn launched_by(c: &Connection, instance: &str, authority: &str) -> ControlResult<bool> {
+    c.query_row(
+        "SELECT authority_instance_id FROM managed_runtime_launches WHERE runtime_instance_id=?1",
+        [instance],
+        |r| r.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(db)
+    .map(|owner| owner.is_some_and(|owner| owner == authority))
 }
 
 pub fn read_turn_record(c: &Connection, id: &str) -> ControlResult<ManagedTurnRecord> {

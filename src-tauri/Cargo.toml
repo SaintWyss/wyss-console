@@ -50,3 +50,5 @@ opt-level = 3
 
 [dev-dependencies]
 tauri = { version = "=2.12.1", features = ["test"] }
+# Test-only: a fault switch for the audit table (F8-16) is an authorizer on the connection.
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "hooks"] }

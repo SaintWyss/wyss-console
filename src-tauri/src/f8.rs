@@ -55,6 +55,8 @@ mod process_integration_tests;
 mod read_tests;
 
 #[cfg(all(test, target_os = "linux"))]
+mod acceptance;
+#[cfg(all(test, target_os = "linux"))]
 mod application_tests;
 #[cfg(test)]
 mod lifecycle_tests;
