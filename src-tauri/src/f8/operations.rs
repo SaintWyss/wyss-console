@@ -311,7 +311,23 @@ pub(crate) fn handle(
         ),
         O::ApprovalPending(p) => {
             read_turn(engine.connection(), p.managed_turn_id.as_str())?;
-            let id:Option<String>=engine.connection().query_row("SELECT managed_approval_id FROM managed_approvals WHERE managed_turn_id=?1 AND state='pending' ORDER BY created_sequence LIMIT 1",[p.managed_turn_id.as_str()],|r|r.get(0)).optional().map_err(db)?;
+            // A row past its deadline is not awaiting a decision, even before the expiry tick
+            // persists it; it is never reported as pending.
+            let now = OffsetDateTime::now_utc();
+            let candidates: Vec<(String, String)> = {
+                let mut q = engine.connection().prepare("SELECT managed_approval_id,expires_at FROM managed_approvals WHERE managed_turn_id=?1 AND state='pending' ORDER BY created_sequence").map_err(db)?;
+                q.query_map([p.managed_turn_id.as_str()], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(db)?
+                    .collect::<Result<_, _>>()
+                    .map_err(db)?
+            };
+            let mut id = None;
+            for (candidate, expires) in candidates {
+                if OffsetDateTime::parse(&expires, &Rfc3339).map_err(invalid)? > now {
+                    id = Some(candidate);
+                    break;
+                }
+            }
             result(
                 "pending_approval",
                 id.map(|id| approval_status(engine, &id, None, None))

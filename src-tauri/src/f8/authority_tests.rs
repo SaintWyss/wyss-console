@@ -1261,3 +1261,404 @@ fn exact_turn_start_replay_survives_lease_revocation_and_runtime_exit_without_di
     );
     validate_v8(rig.authority.engine().connection()).unwrap();
 }
+
+/// Read-only observation: total SQLite changes on this connection, audit head and lease rows.
+fn read_snapshot(rig: &Rig) -> (u64, String, String) {
+    let c = rig.authority.engine().connection();
+    let head: String = c
+        .query_row(
+            "SELECT last_sequence FROM authority_metadata WHERE id=1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let leases: String = c
+        .query_row(
+            "SELECT coalesce(group_concat(lease_id||'|'||state||'|'||revision||'|'||expires_at||'|'||updated_at,';'),'') FROM (SELECT * FROM execution_leases ORDER BY lease_id)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    (c.total_changes(), head, leases)
+}
+
+/// A lease, a running turn and one provider approval `item`, all over one live, bound launch.
+fn live_approval(
+    rig: &mut Rig,
+    ttl_seconds: u32,
+    item: &str,
+) -> (
+    RuntimeRef,
+    Value,
+    String,
+    crate::contracts::approval::ManagedApprovalRecord,
+) {
+    let s = rig.sessions[0].clone();
+    let (reference, fence) = rig.ready();
+    // Binding resumes under a lease, so the grant comes first, as in the full conversation.
+    let grant = rig.call(
+        "executionLease/grant",
+        json!({"intent_id":uuid(),"session_id":s,"expected_session_revision":1,
+        "scopes":all_scopes(),"ttl_seconds":ttl_seconds,"runtime_fence":fence}),
+    );
+    assert_eq!(grant["result"]["kind"], "lease", "{grant}");
+    rig.bind(&reference);
+    let turn = rig.call(
+        "managedSession/turn/start",
+        json!({"intent_id":uuid(),"managed_session_id":s,
+        "expected_session_revision":1,"prompt":"approve","runtime_fence":fence}),
+    );
+    let turn_id = turn["result"]["value"]["managed_turn_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    rig.authority
+        .provider_turn_event(
+            &reference,
+            &ManagedTurnId::parse(&turn_id).unwrap(),
+            Some("provider-turn"),
+            TurnState::Running,
+            None,
+        )
+        .unwrap();
+    let approval = rig.action_approval(&reference, item);
+    (reference, fence, turn_id, approval)
+}
+
+#[test]
+fn binding_status_is_attached_only_with_a_live_proven_launch() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (bound, unbound) = (rig.sessions[0].clone(), rig.sessions[1].clone());
+    let read = |rig: &mut Rig, s: &str| {
+        rig.call(
+            "managedSession/runtime/status",
+            json!({"managed_session_id":s}),
+        )
+    };
+    let before = read_snapshot(&rig);
+
+    let u = read(&mut rig, &unbound);
+    assert_eq!(u["result"]["kind"], "binding_status", "{u}");
+    let v = &u["result"]["value"];
+    assert_eq!(v["state"], "unbound", "{u}");
+    for field in [
+        "binding",
+        "runtime_instance_id",
+        "runtime_identity",
+        "attachment_profile",
+        "operation_id",
+    ] {
+        assert!(v[field].is_null(), "{field}: {u}");
+    }
+
+    // The fixture's durable binding is history: it never makes an absent runtime attached.
+    let d = read(&mut rig, &bound);
+    let v = &d["result"]["value"];
+    assert_eq!(v["state"], "bound_detached", "{d}");
+    assert_eq!(v["binding"]["managed_session_id"], bound, "{d}");
+    assert!(v["runtime_instance_id"].is_null(), "{d}");
+    assert!(v["runtime_identity"].is_null(), "{d}");
+
+    assert_eq!(code(&read(&mut rig, &uuid())), "session_not_found");
+    assert_eq!(code(&read(&mut rig, "not-a-uuid")), "invalid_request");
+    assert_eq!(read_snapshot(&rig), before, "binding reads must not write");
+
+    // A ready worker with no successful binding for its launch is still detached.
+    let (reference, fence) = rig.ready();
+    let grant = rig.call(
+        "executionLease/grant",
+        json!({"intent_id":uuid(),"session_id":bound,"expected_session_revision":1,
+        "scopes":all_scopes(),"ttl_seconds":600,"runtime_fence":fence}),
+    );
+    assert_eq!(grant["result"]["kind"], "lease", "{grant}");
+    let unproven = read(&mut rig, &bound);
+    assert_eq!(
+        unproven["result"]["value"]["state"], "bound_detached",
+        "{unproven}"
+    );
+    assert!(
+        unproven["result"]["value"]["runtime_instance_id"].is_null(),
+        "{unproven}"
+    );
+
+    rig.bind(&reference);
+    let attached = read(&mut rig, &bound);
+    let v = &attached["result"]["value"];
+    assert_eq!(v["state"], "bound_attached", "{attached}");
+    assert_eq!(
+        v["runtime_instance_id"],
+        json!(reference.runtime_instance_id),
+        "{attached}"
+    );
+    assert_eq!(
+        v["runtime_identity"]["generation"], reference.generation,
+        "{attached}"
+    );
+    assert_eq!(v["attachment_profile"], "local_tools_v1", "{attached}");
+
+    // Stopping the launch withdraws the attachment and every identity it exposed.
+    let (generation, revision) = rig.expect(&bound);
+    let stop = rig.call(
+        "runtime/stop",
+        json!({"intent_id":uuid(),"adapter_id":"codex","runtime_kind":"codex",
+        "managed_session_id":bound,"expected_generation":generation,
+        "expected_revision":revision,"expected_runtime_instance_id":reference.runtime_instance_id}),
+    );
+    assert_eq!(stop["result"]["kind"], "runtime_control", "{stop}");
+    *rig.spawn.exited.lock().unwrap() = true;
+    rig.authority.tick(Instant::now()).unwrap();
+    let stopped = read(&mut rig, &bound);
+    let v = &stopped["result"]["value"];
+    assert_eq!(v["state"], "bound_detached", "{stopped}");
+    assert!(v["runtime_instance_id"].is_null(), "{stopped}");
+    assert!(v["runtime_identity"].is_null(), "{stopped}");
+    assert!(v["attachment_profile"].is_null(), "{stopped}");
+
+    // A replacement generation must not inherit the old attachment: it needs its own binding.
+    *rig.spawn.exited.lock().unwrap() = false;
+    let (next, _) = rig.ready_for(0);
+    assert!(next.generation > reference.generation);
+    let replaced = read(&mut rig, &bound);
+    let v = &replaced["result"]["value"];
+    assert_eq!(v["state"], "bound_detached", "{replaced}");
+    assert!(v["runtime_instance_id"].is_null(), "{replaced}");
+    rig.bind(&next);
+    let rebound = read(&mut rig, &bound);
+    assert_eq!(
+        rebound["result"]["value"]["runtime_identity"]["generation"],
+        next.generation
+    );
+    assert_eq!(
+        rebound["result"]["value"]["state"], "bound_attached",
+        "{rebound}"
+    );
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
+
+#[test]
+fn approval_status_is_executable_only_for_its_live_pending_launch() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (reference, fence, _turn, approval) = live_approval(&mut rig, 600, "item-1");
+    let aid = json!(approval.managed_approval_id);
+    let status = |rig: &mut Rig, id: Value| {
+        rig.call(
+            "managedTurn/approval/status",
+            json!({"managed_approval_id":id}),
+        )
+    };
+    let before = read_snapshot(&rig);
+
+    let live = status(&mut rig, aid.clone());
+    assert_eq!(live["result"]["kind"], "approval", "{live}");
+    let v = &live["result"]["value"];
+    assert_eq!(v["approval"]["state"], "pending", "{live}");
+    // The body is exactly the strict contract once the protocol's launch projection, which the
+    // response layer carries separately, is set aside.
+    let mut body = v.clone();
+    body.as_object_mut().unwrap().remove("runtime_ref");
+    body.as_object_mut().unwrap().remove("attestation");
+    let strict: Result<crate::contracts::approval::ApprovalStatus, _> =
+        serde_json::from_value(body);
+    assert!(
+        strict.is_ok(),
+        "approval status must match its strict contract: {live}"
+    );
+    assert_eq!(v["acceptable"], true, "{live}");
+    assert!(
+        !v["command"].is_null(),
+        "a live pending approval shows its action: {live}"
+    );
+    assert_eq!(
+        v["runtime_ref"]["runtime_instance_id"],
+        json!(reference.runtime_instance_id),
+        "{live}"
+    );
+
+    assert_eq!(code(&status(&mut rig, json!(uuid()))), "approval_not_found");
+    assert_eq!(
+        code(&status(&mut rig, json!("not-a-uuid"))),
+        "invalid_request"
+    );
+    let index = rig.call(
+        "managedTurn/approval/status",
+        json!({"managed_approval_id":aid,"file_index":3,"offset":0}),
+    );
+    assert_eq!(code(&index), "invalid_request", "{index}");
+    assert_eq!(read_snapshot(&rig), before, "approval reads must not write");
+
+    // Accepting makes the record final; its executable content is withdrawn.
+    let accept = rig.call(
+        "managedTurn/approval/respond",
+        json!({"intent_id":uuid(),"managed_approval_id":aid,"expected_revision":approval.revision,
+        "decision":"accept","runtime_fence":fence}),
+    );
+    assert_eq!(accept["result"]["kind"], "approval_receipt", "{accept}");
+    let accepted = status(&mut rig, aid.clone());
+    assert_eq!(
+        accepted["result"]["value"]["approval"]["state"], "accepted",
+        "{accepted}"
+    );
+    assert_eq!(
+        accepted["result"]["value"]["acceptable"], false,
+        "{accepted}"
+    );
+    assert!(
+        accepted["result"]["value"]["command"].is_null(),
+        "{accepted}"
+    );
+
+    // One undecided approval per session at a time; the second opens only after the first settles.
+    let second = rig.action_approval(&reference, "item-2");
+    let decline = rig.call(
+        "managedTurn/approval/respond",
+        json!({"intent_id":uuid(),"managed_approval_id":second.managed_approval_id,
+        "expected_revision":second.revision,"decision":"decline","runtime_fence":fence}),
+    );
+    assert_eq!(decline["result"]["kind"], "approval_receipt", "{decline}");
+    let declined = status(&mut rig, json!(second.managed_approval_id));
+    assert_eq!(
+        declined["result"]["value"]["approval"]["state"], "declined",
+        "{declined}"
+    );
+    assert_eq!(
+        declined["result"]["value"]["acceptable"], false,
+        "{declined}"
+    );
+    assert!(
+        declined["result"]["value"]["command"].is_null(),
+        "{declined}"
+    );
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
+
+#[test]
+fn pending_approval_query_returns_only_an_undecided_unexpired_approval() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let legacy: String = rig
+        .authority
+        .engine()
+        .connection()
+        .query_row(
+            "SELECT managed_turn_id FROM managed_turns WHERE state='completed' LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let pending = |rig: &mut Rig, turn: Value| {
+        rig.call(
+            "managedTurn/approval/pending",
+            json!({"managed_turn_id":turn}),
+        )
+    };
+
+    let none = pending(&mut rig, json!(legacy));
+    assert_eq!(none["result"]["kind"], "pending_approval", "{none}");
+    assert!(none["result"]["value"].is_null(), "{none}");
+    assert_eq!(code(&pending(&mut rig, json!(uuid()))), "turn_not_found");
+    assert_eq!(
+        code(&pending(&mut rig, json!("not-a-uuid"))),
+        "invalid_request"
+    );
+
+    let (_, fence, turn_id, approval) = live_approval(&mut rig, 600, "item-1");
+    let before = read_snapshot(&rig);
+    let one = pending(&mut rig, json!(turn_id));
+    assert_eq!(
+        one["result"]["value"]["approval"]["managed_approval_id"],
+        json!(approval.managed_approval_id),
+        "{one}"
+    );
+    assert_eq!(read_snapshot(&rig), before, "pending reads must not write");
+
+    let accept = rig.call(
+        "managedTurn/approval/respond",
+        json!({"intent_id":uuid(),"managed_approval_id":approval.managed_approval_id,
+        "expected_revision":approval.revision,"decision":"accept","runtime_fence":fence}),
+    );
+    assert_eq!(accept["result"]["kind"], "approval_receipt", "{accept}");
+    let resolved = pending(&mut rig, json!(turn_id));
+    assert!(resolved["result"]["value"].is_null(), "{resolved}");
+}
+
+#[test]
+fn an_approval_past_its_deadline_is_never_pending_or_executable() {
+    let mut rig = Rig::new();
+    rig.hello();
+    // The approval deadline is the earlier of its own TTL and the lease expiry; one second
+    // is the shortest lease the contract allows. Nothing ticks, so no expiry is persisted.
+    let (_, _, turn_id, approval) = live_approval(&mut rig, 1, "item-1");
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+
+    let pending = rig.call(
+        "managedTurn/approval/pending",
+        json!({"managed_turn_id":turn_id}),
+    );
+    assert!(
+        pending["result"]["value"].is_null(),
+        "a deadline-passed approval must not read as pending: {pending}"
+    );
+    let status = rig.call(
+        "managedTurn/approval/status",
+        json!({"managed_approval_id":approval.managed_approval_id}),
+    );
+    assert_eq!(status["result"]["value"]["acceptable"], false, "{status}");
+    assert!(status["result"]["value"]["command"].is_null(), "{status}");
+}
+
+#[test]
+fn approval_reads_after_runtime_exit_and_lease_revocation_expose_no_action() {
+    let mut rig = Rig::new();
+    rig.hello();
+    let (_, _, turn_id, approval) = live_approval(&mut rig, 600, "item-1");
+    let s = rig.sessions[0].clone();
+    let lease_id: String = rig
+        .authority
+        .engine()
+        .connection()
+        .query_row(
+            "SELECT lease_id FROM execution_leases WHERE session_id=?1 AND state='active'",
+            [&s],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let revoke = rig.call(
+        "executionLease/revoke",
+        json!({"intent_id":uuid(),"lease_id":lease_id,"expected_revision":1}),
+    );
+    assert_eq!(revoke["result"]["kind"], "lease", "{revoke}");
+
+    let status = |rig: &mut Rig| {
+        rig.call(
+            "managedTurn/approval/status",
+            json!({"managed_approval_id":approval.managed_approval_id}),
+        )
+    };
+    let revoked = status(&mut rig);
+    assert_eq!(revoked["result"]["value"]["acceptable"], false, "{revoked}");
+    assert!(revoked["result"]["value"]["command"].is_null(), "{revoked}");
+
+    *rig.spawn.exited.lock().unwrap() = true;
+    rig.authority.tick(Instant::now()).unwrap();
+    let before = read_snapshot(&rig);
+    let exited = status(&mut rig);
+    assert_ne!(
+        exited["result"]["value"]["approval"]["state"], "pending",
+        "{exited}"
+    );
+    assert_eq!(exited["result"]["value"]["acceptable"], false, "{exited}");
+    assert!(exited["result"]["value"]["command"].is_null(), "{exited}");
+    let pending = rig.call(
+        "managedTurn/approval/pending",
+        json!({"managed_turn_id":turn_id}),
+    );
+    assert!(pending["result"]["value"].is_null(), "{pending}");
+    assert_eq!(
+        read_snapshot(&rig),
+        before,
+        "reads after exit must not write"
+    );
+    validate_v8(rig.authority.engine().connection()).unwrap();
+}
