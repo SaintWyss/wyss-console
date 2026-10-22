@@ -42,16 +42,60 @@ ADRs/evidence to tidy unrelated files. `scan:repo` includes staged new files.
 
 ## Packaging and live installation
 
-`npm run desktop:package` builds a private directory package and digest manifest; it
-installs, publishes and migrates nothing. Installation, service operation and rollback
-are separate actions. Follow the applicable [acceptance/runbook](acceptance/) only under
-its actual authorization; a historical procedure is not current permission to repeat it.
+### Ordinary package installation and launch
 
-Preserve running sessions. GUI-only `--keep-host` updates can retain older host/authority
-components; never assume an updated window updated them. Installer rollback may stop the
-host. Account for live work, matching binaries, consistent SQLite backups/WAL and the
-post-snapshot loss window; no SQL downgrade or arbitrary PID cleanup. Repository checks
-need no personal credentials or installed-service changes.
+From the repository root, build the package after installing the prerequisites and
+running `npm ci`. Example for version 0.2.0 on Linux x64; if your build differs, set
+`wyss_package` to the exact directory printed by the packaging command:
+
+```sh
+npm run desktop:package
+wyss_package=".artifacts/package/wyss-console-0.2.0-linux-x64"
+bash "$wyss_package/share/wyss-console/install.sh" install --package "$wyss_package" --keep-host
+"$HOME/.local/opt/wyss-console/bin/wyss-console"
+```
+
+The output contains `bin/wyss-console`, `libexec/wyss-console/wyss-control` and
+`share/wyss-console/{package.json,install.sh,icon.png}`. The packaged installer is the
+same [installer](../scripts/install.sh) shipped by [package.mjs](../scripts/package.mjs).
+It checks binary digests, installs per-user without `sudo` to
+`~/.local/opt/wyss-console`, retains the previous package at that path plus `.previous`,
+and writes the Wyss Console application-menu entry and `~/.local/bin/wyss-console`
+symlink. Launch through the menu or the absolute command above; the symlink also works
+when `~/.local/bin` is on PATH. Building alone does not install or launch anything.
+
+**Preserve live terminals:** `--keep-host` skips the installer's host-stop request.
+Without it, installation asks the current host to stop, closing its terminals. With
+it, the existing host and terminals continue on their running version until it exits;
+new GUI features may remain unavailable on that older host. It does not restart or
+upgrade a running authority. Close/reopen only the GUI when needed; do not stop the
+host or services just to make versions match. Rollback has no `--keep-host` option and
+can close terminals, so it needs a separate session-aware operational plan.
+
+### F8 service activation is separate
+
+The ordinary example above selects the normal protocol1 desktop path, **not F8**.
+The packaged GUI may bootstrap its ordinary authority lifecycle on launch; that is not
+protocol2 activation. The installer alone does not migrate a database or enable/start
+an F8 service. Optional `--host-service` writes a native-host unit but does not enable
+it; that flag is not needed for the ordinary example either.
+
+For an existing F8-enabled installation, do **not** use the ordinary example as an
+upgrade recipe: it rewrites the menu entry without `--f8-authority`. Preserve its
+reviewed F8 installation settings and use the configured F8 menu entry; a bare binary
+or symlink launch does not select F8.
+
+F8 setup uses `install --f8-service --codex ABSOLUTE_PATH` with the pinned Codex 0.159.0;
+`--allow-credential` is a separate explicit choice. Those options write an F8 service
+unit and a menu entry with `--f8-authority`; they do not complete first-start store
+creation/migration or service activation. Follow the separately authorized
+[F8 activation and rollback procedure](acceptance/f8-activation-procedure-2026-10-22.md)
+for that operation, including live-session preservation and `--keep-host`. The historical
+record is not permission to repeat migration, credential use or service operations.
+
+Keep matching binaries and consistent SQLite backups/WAL with an explicit post-snapshot
+loss window; no SQL downgrade or arbitrary PID cleanup. Repository documentation checks
+require no installation, personal credentials or installed-service changes.
 
 ## Documentation maintenance
 

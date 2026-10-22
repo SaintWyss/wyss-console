@@ -15,3 +15,7 @@ separate from delivered functionality.
 For prerequisites, commands and maintenance policy, use
 [development and maintenance](docs/CHECKPOINT.md). No public release or installation
 change is implied by repository instructions.
+
+For a supported package install/run example and session-preserving update behaviour,
+see [package installation and launch](docs/CHECKPOINT.md#ordinary-package-installation-and-launch).
+F8 service activation is documented separately there.
