@@ -54,6 +54,26 @@ pub struct CodexConfig {
     pub allow_credential: bool,
 }
 
+impl CodexConfig {
+    /// What can be refused without creating anything: the choices are absolute, the home is a
+    /// directory of this user, and a credential in it is allowed by name.
+    pub fn check(&self) -> ControlResult<PathBuf> {
+        if !self.executable.is_absolute() || !self.home.is_absolute() {
+            return Err(E::UnsafePath);
+        }
+        let home = fs::canonicalize(&self.home).map_err(|_| E::UnsafePath)?;
+        let meta = fs::metadata(&home).map_err(|_| E::UnsafePath)?;
+        if !meta.is_dir() || meta.uid() != nix::unistd::geteuid().as_raw() {
+            return Err(E::UnsafePath);
+        }
+        // A credential is the one thing that can spend the user's provider quota.
+        if fs::symlink_metadata(home.join("auth.json")).is_ok() && !self.allow_credential {
+            return Err(E::GateDenied);
+        }
+        Ok(home)
+    }
+}
+
 pub struct CodexSpawner {
     config: CodexConfig,
     /// The authority's private product directories: hidden from the namespace.
@@ -71,18 +91,7 @@ impl CodexSpawner {
         runtime: &Path,
         state: &Path,
     ) -> ControlResult<(Self, StagingRoot)> {
-        if !config.executable.is_absolute() || !config.home.is_absolute() {
-            return Err(E::UnsafePath);
-        }
-        let home = fs::canonicalize(&config.home).map_err(|_| E::UnsafePath)?;
-        let meta = fs::metadata(&home).map_err(|_| E::UnsafePath)?;
-        if !meta.is_dir() || meta.uid() != nix::unistd::geteuid().as_raw() {
-            return Err(E::UnsafePath);
-        }
-        // A credential is the one thing that can spend the user's provider quota.
-        if fs::symlink_metadata(home.join("auth.json")).is_ok() && !config.allow_credential {
-            return Err(E::GateDenied);
-        }
+        let home = config.check()?;
         let staging = state.join("staging");
         let cwd = runtime.join("runtime-cwd");
         for dir in [&staging, &cwd] {
@@ -145,6 +154,9 @@ impl CodexSpawner {
         staging: &mut LaunchStaging,
         workspace: &str,
     ) -> ControlResult<NativeLocalToolsPlan> {
+        // The gate is not a startup check only: a credential that appeared since (`codex login`
+        // after the authority started) is refused at the start that would bind it.
+        self.config.check()?;
         let catalogue = safety::local_tools_catalog(&self.cache()?).map_err(|_| E::Unsupported)?;
         staging.write_file(CATALOGUE, &catalogue)?;
         let catalogue = self

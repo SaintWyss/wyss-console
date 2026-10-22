@@ -405,8 +405,67 @@ fn a_credential_is_never_bound_unless_the_operator_said_so() {
     let mut child = p.command(true, false).spawn().unwrap();
     let gui = p.gui();
     assert!(gui.state().authority.is_some());
+    // A launch binds nothing: the runtime sees an empty placeholder where a credential would be.
+    let (session, _, _) = session(&gui, &p.workspace(), 300);
+    let seen: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(p.root.join("local.json")).unwrap()).unwrap();
+    assert_eq!(seen["credential"], "", "no credential crossed");
+    // And one that appears later is refused at the next start, not bound.
+    let now = gui.session(session.clone()).unwrap();
+    gui.runtime_stop(
+        id(),
+        now.session.runtime.fence.clone(),
+        now.session.runtime.revision,
+    )
+    .unwrap();
+    eventually(|| {
+        let d = gui.session(session.clone()).ok()?;
+        (d.session.runtime.actual == ActualState::Stopped).then_some(())
+    });
+    fs::write(p.root.join("user/auth.json"), "FIXTURE-CREDENTIAL").unwrap();
+    fs::set_permissions(
+        p.root.join("user/auth.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    let again = gui.prepare(id()).unwrap().id;
+    let row = gui.session(again.clone()).unwrap().session;
+    let refused = gui.runtime_start(
+        id(),
+        again,
+        row.runtime.revision,
+        row.runtime.generation,
+        AgentMode::LocalTools,
+        Some(p.workspace()),
+    );
+    // The start is accepted by the authority and the launch is refused: no runtime of it is Ready.
+    let _ = refused;
+    thread::sleep(Duration::from_millis(500));
+    let detail = gui.sessions(None).unwrap();
+    assert!(
+        detail
+            .sessions
+            .iter()
+            .all(|row| row.runtime.actual != ActualState::Ready),
+        "a credential that appeared later was bound"
+    );
     kill(Pid::from_raw(child.id() as i32), Signal::SIGTERM).unwrap();
     assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn a_refused_start_leaves_nothing_behind() {
+    let t = Production::new("approval_command");
+    // No `--allow-credential` and a credential present: refused before anything is created.
+    assert_eq!(t.command(true, false).status().unwrap().code(), Some(2));
+    for path in [
+        "state/wyss-console/authority.sqlite3",
+        "state/wyss-console/staging",
+        "run/wyss-console/runtime-cwd",
+        "run/wyss-console/control.sock",
+    ] {
+        assert!(!t.root.join(path).exists(), "{path}");
+    }
 }
 
 #[test]

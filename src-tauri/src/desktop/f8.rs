@@ -366,6 +366,7 @@ pub async fn f8_lease_grant(
             let prompt = confirm::lease_prompt(
                 false,
                 &request.fence.session,
+                confirm::workspace_of(&s, &request.fence.session).as_deref(),
                 Some(&request.scopes),
                 request.ttl_seconds,
             );
@@ -394,7 +395,14 @@ pub async fn f8_lease_renew(
 ) -> Result<LeaseReceipt, F8Error> {
     let confirm = confirm.inner().clone();
     blocking(INTENT, service.inner().clone(), move |s| {
-        let prompt = confirm::lease_prompt(true, &request.fence.session, None, request.ttl_seconds);
+        let (workspace, scopes) = confirm::lease_of(&s, &request.fence.session, &request.lease_id);
+        let prompt = confirm::lease_prompt(
+            true,
+            &request.fence.session,
+            workspace.as_deref(),
+            scopes.as_deref(),
+            request.ttl_seconds,
+        );
         confirm::allow(
             &confirm,
             &format!(

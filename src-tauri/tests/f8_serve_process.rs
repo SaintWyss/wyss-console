@@ -359,13 +359,32 @@ fn a_rehearsal_migrates_a_copy_and_leaves_the_copy_alone() {
     let made = Command::new("sqlite3")
         .arg(&store)
         .arg(format!(".backup '{}'", copy.display()))
-        .status();
-    let Ok(made) = made else {
-        // The copy needs the sqlite3 tool; without it this check cannot be made here.
-        return;
-    };
+        .status()
+        .expect("the rehearsal needs the sqlite3 tool to make its copy");
     assert!(made.success());
+    fs::set_permissions(&copy, fs::Permissions::from_mode(0o600)).unwrap();
     let before = fs::read(&copy).unwrap();
+    // A copy that is not the caller's private file, or that does not exist, is refused, and
+    // the installed store's own name is never accepted, whatever it is reached through.
+    let loose = sandbox.root.join("loose.sqlite3");
+    fs::copy(&copy, &loose).unwrap();
+    fs::set_permissions(&loose, fs::Permissions::from_mode(0o644)).unwrap();
+    let link = sandbox.root.join("link.sqlite3");
+    std::os::unix::fs::symlink(&store, &link).unwrap();
+    for refused in [
+        loose,
+        sandbox.root.join("absent.sqlite3"),
+        link,
+        store.clone(),
+    ] {
+        let mut attempt = sandbox.start(&["--migrate-copy", refused.to_str().unwrap()]);
+        assert_eq!(attempt.exit(), 2, "{refused:?}");
+        assert!(!sandbox.image().exists(), "{refused:?} left an image");
+        assert!(
+            !sandbox.root.join("absent.sqlite3").exists(),
+            "it was created"
+        );
+    }
     let mut rehearsal = sandbox.start(&["--migrate-copy", copy.to_str().unwrap()]);
     let gui = sandbox.connected();
     let sessions = gui.sessions(None).unwrap();

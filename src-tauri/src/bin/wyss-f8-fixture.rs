@@ -23,8 +23,8 @@ fn main() {
     eprintln!(
         "wyss-f8-fixture: candidate authority, fixture runtime (not Codex), not for production"
     );
-    let result =
-        Serve::parse(std::env::args_os().skip(1)).and_then(|config| serve(&config, workspace));
+    let result = Serve::parse(std::env::args_os().skip(1))
+        .and_then(|config| serve(&config, || Ok(()), workspace));
     if let Err(error) = result {
         eprintln!("wyss-f8-fixture: {error}");
         std::process::exit(match error {

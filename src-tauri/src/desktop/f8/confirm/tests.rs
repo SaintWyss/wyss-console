@@ -41,6 +41,20 @@ fn formatting_characters_are_spelled_out_where_they_stand() {
     assert_eq!(visible("a\u{200B}b\u{FEFF}"), "a⟨U+200B⟩b⟨U+FEFF⟩");
     assert_eq!(visible("bell\u{7}"), "bell⟨U+0007⟩");
     assert_eq!(visible("e\u{0301} ñ 日本"), "e\u{0301} ñ 日本");
+    // What shows nothing, or passes for a space, is spelled out too.
+    for c in [
+        '\u{3164}', '\u{FFA0}', '\u{2800}', '\u{00A0}', '\u{3000}', '\u{2003}', '\u{FE0F}',
+        '\u{034F}',
+    ] {
+        assert_eq!(
+            visible(&c.to_string()),
+            format!("⟨U+{:04X}⟩", c as u32),
+            "{c:?}"
+        );
+    }
+    assert_eq!(visible("a b"), "a b", "a plain space stays one");
+    // A line break is kept, and in a command or a path it is also marked.
+    assert_eq!(inline("a\nb"), "a⏎\nb");
 }
 
 #[test]
@@ -50,13 +64,20 @@ fn only_a_lease_that_lets_a_runtime_act_is_asked_for() {
     assert!(acts(&[TurnStart, CommandExecute]));
     assert!(acts(&[FileChange]));
     let session = ManagedSessionId::parse("11111111-1111-4111-8111-111111111111").unwrap();
-    let grant = lease_prompt(false, &session, Some(&[CommandExecute, FileChange]), 300);
+    let grant = lease_prompt(
+        false,
+        &session,
+        Some("/w"),
+        Some(&[CommandExecute, FileChange]),
+        300,
+    );
     assert!(grant.complete);
     assert!(grant.body.contains("run commands"));
     assert!(grant.body.contains("change files"));
     assert!(grant.body.contains("5 minute(s) 0 second(s)"));
+    assert!(grant.body.contains("Workspace: /w"));
     assert!(grant.body.contains("11111111-1111-4111-8111-111111111111"));
-    let renew = lease_prompt(true, &session, None, 90);
+    let renew = lease_prompt(true, &session, None, None, 90);
     assert!(renew.body.contains("1 minute(s) 30 second(s)"));
     assert_ne!(grant.heading, renew.heading);
 }

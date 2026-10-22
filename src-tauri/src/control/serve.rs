@@ -186,7 +186,19 @@ fn open_image(state: &Path, image: &Image) -> ControlResult<Connection> {
                 // The installed store has this name; a copy is called something else.
                 return Err(E::UnsafePath);
             }
-            let mut source = Connection::open(copy).map_err(|_| E::StorageUnavailable)?;
+            // A file that exists, is the caller's, has one name and is not the installed store
+            // under another name; opened without the right to create it.
+            validate_file(copy)?;
+            let canonical = std::fs::canonicalize(copy).map_err(|_| E::UnsafePath)?;
+            if canonical.file_name().is_some_and(|n| n == PROTOCOL_1_STORE) {
+                return Err(E::UnsafePath);
+            }
+            let mut source = Connection::open_with_flags(
+                &canonical,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+            .map_err(|_| E::StorageUnavailable)?;
             migration::prepare(&mut source)?.write_new_image(&path)?;
         }
     }
@@ -241,6 +253,7 @@ fn accept(
 /// safe, from the private product directory the image lives in.
 pub fn serve<S: Spawner>(
     config: &Serve,
+    precheck: impl FnOnce() -> ControlResult<()>,
     spawner: impl FnOnce(&Path, &Path) -> ControlResult<(S, Option<StagingRoot>)>,
 ) -> ControlResult<()> {
     let mut mask = SigSet::empty();
@@ -253,10 +266,11 @@ pub fn serve<S: Spawner>(
     umask(Mode::from_bits_truncate(0o077));
     let paths = Paths::new(&config.runtime_root, &config.state_root)?;
     let _locks = paths.lock()?;
-    // What can refuse the start comes before anything is created: a refused start leaves no
-    // image behind.
-    let (spawner, staging) = spawner(&paths.runtime, &paths.state)?;
+    // What can refuse the start without creating anything comes first, and what creates
+    // something only once the image is: a refused start leaves no image or directory behind.
+    precheck()?;
     let connection = open_image(&paths.state, &config.image)?;
+    let (spawner, staging) = spawner(&paths.runtime, &paths.state)?;
     let (application, handle) = PreparedApplication::new(connection, uuid(), staging, spawner)?;
     let (listener, _socket) = bind(&paths.runtime.join("control.sock"))?;
     let done = Arc::new(AtomicBool::new(false));
@@ -275,11 +289,15 @@ pub fn serve<S: Spawner>(
 pub fn run_from_arguments(args: impl IntoIterator<Item = OsString>) -> ControlResult<()> {
     let config = Serve::parse(args)?;
     match config.codex.clone() {
-        Some(codex) => serve(&config, |runtime, state| {
-            let (spawner, staging) = CodexSpawner::new(codex, runtime, state)?;
-            Ok((spawner, Some(staging)))
-        }),
-        None => serve(&config, |_, _| Ok((NoRuntime, None))),
+        Some(codex) => serve(
+            &config,
+            || codex.check().map(|_| ()),
+            |runtime, state| {
+                let (spawner, staging) = CodexSpawner::new(codex.clone(), runtime, state)?;
+                Ok((spawner, Some(staging)))
+            },
+        ),
+        None => serve(&config, || Ok(()), |_, _| Ok((NoRuntime, None))),
     }
 }
 

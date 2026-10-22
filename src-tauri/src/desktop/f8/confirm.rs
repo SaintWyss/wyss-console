@@ -102,35 +102,58 @@ impl F8Confirm {
         }
         Ok(answer)
     }
-    /// A refusal when another prompt is open: two cannot be told apart by a user.
+    /// A refusal when another prompt is open: two cannot be told apart by a user. The
+    /// reservation is released however the answer ends, a panic included.
     fn ask(&self, prompt: &Prompt) -> Result<bool, F8Error> {
+        struct Open<'a>(&'a AtomicBool);
+        impl Drop for Open<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
+        }
         self.open
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| F8Error::new(F8Failure::Busy))?;
-        let answer = self.answer.ask(prompt);
-        self.open.store(false, Ordering::Release);
-        Ok(answer)
+        let _open = Open(&self.open);
+        Ok(self.answer.ask(prompt))
     }
 }
 
-/// The characters that would act on the text around them or show nothing.
+/// The characters that would act on the text around them, show nothing, or pass for a space:
+/// controls (but not the line break or tab), soft hyphen, Arabic/Syriac format marks, every
+/// kind of zero-width, directional and invisible-operator character, Hangul and Braille
+/// fillers, combining grapheme joiner, variation selectors, tag characters and the spaces
+/// other than U+0020.
 fn invisible(c: char) -> bool {
     (c.is_control() && c != '\n' && c != '\t')
         || matches!(
             c as u32,
-            0x00AD
+            0x00A0
+                | 0x00AD
+                | 0x034F
                 | 0x0600..=0x0605
                 | 0x061C
                 | 0x06DD
                 | 0x070F
-                | 0x180E
-                | 0x200B..=0x200F
-                | 0x2028..=0x202E
-                | 0x2060..=0x206F
+                | 0x115F
+                | 0x1160
+                | 0x1680
+                | 0x17B4
+                | 0x17B5
+                | 0x180B..=0x180F
+                | 0x2000..=0x200F
+                | 0x2028..=0x202F
+                | 0x205F..=0x206F
+                | 0x2800
+                | 0x3000
+                | 0x3164
+                | 0xFE00..=0xFE0F
                 | 0xFEFF
+                | 0xFFA0
                 | 0xFFF9..=0xFFFB
                 | 0xE0001
                 | 0xE0020..=0xE007F
+                | 0xE0100..=0xE01EF
         )
 }
 /// `text` with each such character spelled out where it stands.
@@ -146,6 +169,12 @@ pub(super) fn visible(text: &str) -> String {
     out
 }
 
+/// `visible`, for a command or a path: every line break is marked where it is, so that text
+/// pushed below the fold by blank lines cannot pass for nothing.
+pub(super) fn inline(text: &str) -> String {
+    visible(text).replace('\n', "⏎\n")
+}
+
 /// What the user is told about one session, which is all the desktop knows of it by name.
 fn session_line(session: &ManagedSessionId) -> String {
     format!("Session: {}", session.as_str())
@@ -158,7 +187,7 @@ fn approval_prompt(gui: &F8Gui, first: &ApprovalDetail) -> Result<Prompt, F8Erro
     let mut complete = true;
     let _ = writeln!(body, "{}", session_line(&first.approval.session));
     if let Some(workspace) = &first.workspace {
-        let _ = writeln!(body, "Workspace: {}", visible(workspace));
+        let _ = writeln!(body, "Workspace: {}", inline(workspace));
     }
     let heading;
     if let Some(command) = &first.command {
@@ -166,8 +195,8 @@ fn approval_prompt(gui: &F8Gui, first: &ApprovalDetail) -> Result<Prompt, F8Erro
         let _ = write!(
             body,
             "\nDirectory:\n{}\n\nCommand:\n{}\n",
-            visible(&command.cwd),
-            visible(&command.command)
+            inline(&command.cwd),
+            inline(&command.command)
         );
         complete = body.chars().count() <= SHOWN;
     } else if let Some(count) = first.files {
@@ -190,10 +219,10 @@ fn approval_prompt(gui: &F8Gui, first: &ApprovalDetail) -> Result<Prompt, F8Erro
                         "\n── {} of {count}: {:?} {}",
                         index + 1,
                         file.kind,
-                        visible(&file.path)
+                        inline(&file.path)
                     );
                     if let Some(to) = &file.move_path {
-                        let _ = write!(body, " → {}", visible(to));
+                        let _ = write!(body, " → {}", inline(to));
                     }
                     body.push('\n');
                 }
@@ -286,17 +315,22 @@ pub(super) fn acts(scopes: &[ExecutionScope]) -> bool {
 pub(super) fn lease_prompt(
     renew: bool,
     session: &ManagedSessionId,
+    workspace: Option<&str>,
     scopes: Option<&[ExecutionScope]>,
     ttl_seconds: u32,
 ) -> Prompt {
-    let mut body = format!("{}\n\n", session_line(session));
+    let mut body = format!("{}\n", session_line(session));
+    if let Some(workspace) = workspace {
+        let _ = writeln!(body, "Workspace: {}", inline(workspace));
+    }
+    body.push('\n');
     if let Some(scopes) = scopes {
         body.push_str("The runtime of this session may be allowed to:\n");
         for scope in scopes {
             let _ = writeln!(body, "  • {}", scope_text(*scope));
         }
     } else {
-        body.push_str("The permission this session already has is kept as it is.\n");
+        body.push_str("The permission this session has now stays in force.\n");
     }
     let _ = write!(
         body,
@@ -313,6 +347,28 @@ pub(super) fn lease_prompt(
         body,
         complete: true,
     }
+}
+/// The workspace the authority holds for a session's runtime, read here and not taken from the page.
+pub(super) fn workspace_of(gui: &F8Gui, session: &ManagedSessionId) -> Option<String> {
+    gui.session(session.clone())
+        .ok()
+        .and_then(|detail| detail.session.runtime.workspace)
+}
+/// The workspace and the scopes of a session's current lease, as the authority holds them. When
+/// the lease named is not the session's current one, no scopes are claimed.
+pub(super) fn lease_of(
+    gui: &F8Gui,
+    session: &ManagedSessionId,
+    lease: &crate::contracts::identities::ExecutionLeaseId,
+) -> (Option<String>, Option<Vec<ExecutionScope>>) {
+    let Ok(detail) = gui.session(session.clone()) else {
+        return (None, None);
+    };
+    let scopes = detail
+        .lease
+        .filter(|held| held.id == *lease)
+        .map(|held| held.scopes);
+    (detail.session.runtime.workspace, scopes)
 }
 /// Asks for a lease the user must allow. `Ok` only on Allow. `action` is the intent and what
 /// the prompt says, so that the same request sent again is the same answer.
@@ -353,15 +409,27 @@ impl Confirmer for Arc<GtkConfirmer> {
         let (answer, answered) = std::sync::mpsc::channel();
         let host = window.clone();
         let prompt = prompt.clone();
+        // Set when nobody answered in time: the window then closes itself, so that a late
+        // Allow is not given to nothing and a second window is never stacked on the first.
+        let expired = Arc::new(AtomicBool::new(false));
+        let watch = expired.clone();
         if window
             .run_on_main_thread(move || {
-                let _ = answer.send(show(host.gtk_window().ok(), &prompt));
+                let _ = answer.send(show(host.gtk_window().ok(), &prompt, watch));
             })
             .is_err()
         {
             return false;
         }
-        answered.recv_timeout(WAIT).unwrap_or(false)
+        match answered.recv_timeout(WAIT) {
+            Ok(allowed) => allowed,
+            Err(_) => {
+                expired.store(true, Ordering::Release);
+                // Wait for the window to go, so that the next prompt starts from none.
+                answered.recv_timeout(Duration::from_secs(5)).ok();
+                false
+            }
+        }
     }
 }
 #[cfg(not(target_os = "linux"))]
@@ -372,10 +440,13 @@ impl Confirmer for Arc<GtkConfirmer> {
 }
 
 /// The window itself, on GTK's thread. A modal dialog of the main window whose default is
-/// not to allow.
+/// not to allow. Allow is offered when what is shown is whole, a moment after the window
+/// opened and once the text has been scrolled to its end: nothing below the fold is allowed
+/// unseen.
 #[cfg(target_os = "linux")]
-fn show(parent: Option<gtk::ApplicationWindow>, prompt: &Prompt) -> bool {
+fn show(parent: Option<gtk::ApplicationWindow>, prompt: &Prompt, expired: Arc<AtomicBool>) -> bool {
     use gtk::prelude::*;
+    use std::{cell::Cell, rc::Rc};
     let dialog = gtk::Dialog::builder()
         .modal(true)
         .title(prompt.heading.as_str())
@@ -413,9 +484,41 @@ fn show(parent: Option<gtk::ApplicationWindow>, prompt: &Prompt) -> bool {
     dialog.show_all();
     deny.grab_focus();
     if prompt.complete {
+        let settled = Rc::new(Cell::new(false));
+        let adjustment = scroll.vadjustment();
+        let update = {
+            let (allow, settled, adjustment) = (allow.clone(), settled.clone(), adjustment.clone());
+            move || {
+                let at_end =
+                    adjustment.value() + adjustment.page_size() >= adjustment.upper() - 1.0;
+                allow.set_sensitive(settled.get() && at_end);
+            }
+        };
+        adjustment.connect_value_changed({
+            let update = update.clone();
+            move |_| update()
+        });
+        adjustment.connect_changed({
+            let update = update.clone();
+            move |_| update()
+        });
         // Inert for a moment: a click on what was under this window is not an answer to it.
-        let allow = allow.clone();
-        gtk::glib::timeout_add_local_once(SETTLE, move || allow.set_sensitive(true));
+        gtk::glib::timeout_add_local_once(SETTLE, move || {
+            settled.set(true);
+            update();
+        });
+    }
+    {
+        // Nobody answered in time: answer for them, with no.
+        let dialog = dialog.clone();
+        gtk::glib::timeout_add_local(Duration::from_millis(500), move || {
+            if expired.load(Ordering::Acquire) {
+                dialog.response(gtk::ResponseType::Cancel);
+                gtk::glib::ControlFlow::Break
+            } else {
+                gtk::glib::ControlFlow::Continue
+            }
+        });
     }
     let accepted = dialog.run() == gtk::ResponseType::Accept;
     dialog.close();

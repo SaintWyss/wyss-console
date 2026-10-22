@@ -27,9 +27,9 @@ const BWRAP: &str = "/usr/bin/bwrap";
 const MANAGED: &str = "/etc/codex";
 const MAX_DEPTH: usize = 64;
 /// The largest executable that is sealed into the namespace (a copy held in memory for the
-/// life of the launch). Codex 0.159.0 is 274 MiB; this leaves room for the next releases and
-/// still refuses a file that is not a program.
-const EXECUTABLE_IMAGE_LIMIT: u64 = 512 * 1024 * 1024;
+/// life of the launch). Codex 0.159.0 is 274 MiB; this leaves some room and still refuses a
+/// file that is not a program.
+const EXECUTABLE_IMAGE_LIMIT: u64 = 320 * 1024 * 1024;
 #[cfg(not(test))]
 fn managed() -> PathBuf {
     PathBuf::from(MANAGED)
