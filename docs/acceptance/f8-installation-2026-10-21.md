@@ -1,5 +1,8 @@
 # F8: instalación en el escritorio real y validación aislada, 2026-10-21
 
+> Registro histórico. La instalación posterior, hashes y limitaciones actuales están en el
+> [cierre independiente](f8-closeout-2026-10-21.md).
+
 Rama `feat/f8-installed-wiring` sobre `main` `226e41b`. Cierra el cableado de producción que
 el [runbook](f8-activation-runbook-2026-10-21.md) declaraba faltante, instala el paquete en la PC
 del dueño sin cambiar el protocolo en uso y valida la ruta F8 de punta a punta con estado aislado.

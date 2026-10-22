@@ -16,16 +16,23 @@ tiene el cableado de protocolo 2 y está instalado, inerte:
 - Las capacidades `main` + `f8` están listadas en `tauri.conf.json`; sin el flag todo responde `inactive`.
 - W1: aceptar una aprobación y conceder/renovar un lease que ejecuta exigen **Permitir** en una ventana GTK.
 
-**Falta, además de la autorización:**
+**Runtime de producción ensamblado, aún sin activar (cierre independiente):**
 
-1. **Un runtime real.** La autoridad de producción usa `NoRuntime`: prepara sesiones y leases pero no inicia
-   ningún runtime. Ensamblar el `NativeLocalToolsPlan` de producción (hoy sólo existe en pruebas) y un
-   `Spawner` real es un cambio de código separado, con revisión independiente, y lanza Codex autenticado
-   (no autorizado).
-2. Un servicio `systemd --user` para la autoridad de protocolo 2 y un lanzador que pase `--f8-authority`:
-   no se crearon (crearlos es parte de la activación).
-3. Que el protocolo 1 deje de escribir esa base: protocolo 1 y 2 usan archivos distintos, pero la
-   migración significa que la V7 deja de ser la fuente (ver Migración y Rollback).
+- Sin `--codex`, la autoridad conserva `NoRuntime` y rechaza inicios.
+- `--codex RUTA_ABSOLUTA --codex-home DIRECTORIO` selecciona explícitamente el spawner nativo
+  local-tools. El ejecutable sellado debe responder exactamente `codex-cli 0.159.0`; no hay fallback.
+- Una credencial sólo puede ligarse si el operador añadió `--allow-credential`. Se verifica la
+  capacidad realmente adquirida, además del chequeo inicial del directorio. **No usar ese flag
+  con credenciales reales sin autorización de Santiago para la aceptación autenticada y su cuota.**
+- Preparación/sellado/probe fuera del hilo del writer. Cancelación retiene slot y staging hasta
+  finalizar la preparación y demostrar reap; readiness exige el handshake y las attestations existentes.
+- Este spawner admite sólo `codex_local_tools_v1` con workspace. La ruta de inferencia existente
+  sigue probada por sus fixtures, pero no se selecciona mediante este spawner de producción.
+
+**Pendiente:** la aceptación gráfica actual y las condiciones NOT_PROVEN del
+[informe de cierre](f8-closeout-2026-10-21.md), además de las autorizaciones siguientes.
+No se creó servicio systemd ni lanzador activo de protocolo 2. La base instalada V7 sigue siendo
+la fuente de protocolo 1; ninguna de estas opciones la migra automáticamente.
 
 ## Precondiciones (todas)
 
@@ -34,9 +41,9 @@ tiene el cableado de protocolo 2 y está instalado, inerte:
   sesiones vivas que implique.
 - Aceptación autenticada del proveedor (Codex real) autorizada y hecha: **NOT_PROVEN** hoy.
 - Compatibilidad de refresco de credenciales de Codex con varios procesos: **NOT_PROVEN**.
-- Decisión del dueño sobre el hallazgo W1 de la revisión (una ventana comprometida tiene la autoridad
-  de aprobación, igual que en protocolo 1): aceptarlo o exigir antes confirmación nativa en Rust /
-  token de lectura de un solo uso para `lease_grant` de comandos/archivos y `approval_accept`.
+- Confirmación W1 implementada: aceptación y leases ejecutables exigen diálogo GTK leído desde
+  Rust. Lectura fallida o fence/lease diferente impide mostrar Allow. Falta completar su validación
+  gráfica actual en el escritorio real; el riesgo de inyección X11 por el mismo uid sigue declarado.
 - `max_active_runtimes = 1`. Subirlo requiere evidencia de recursos y decisión del dueño.
 
 ## Respaldo (antes de migrar)
@@ -72,8 +79,9 @@ Debe estar autorizado por Santiago, con tiempo de inactividad.
 1. Instalar la compilación con el cambio de código revisado y la capacidad `f8`.
 2. Arrancar la autoridad con protocolo 2 y confirmar `hello` v2 y `authority_instance_id`.
 3. Abrir "Runtimes" en la ventana: debe mostrar "Connected · protocol 2".
-4. Primer runtime sólo en perfil `Inference` y sesión de prueba; sin Local Tools hasta aceptar
-   el aislamiento en el host real.
+4. No iniciar un proveedor real hasta autorizar y completar su aceptación aislada autenticada,
+   incluida la contención local-tools en el host. El spawner CLI actual no ofrece Inference;
+   no sustituir el perfil ni debilitar el aislamiento para sortear ese rechazo.
 5. Criterio de abandono: cualquier `unavailable` sostenido, deriva de recuentos o fallo de
    auditoría → detener y ejecutar el rollback.
 
