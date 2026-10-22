@@ -59,6 +59,23 @@ describe('whether the interface exists', () => {
 });
 
 describe('reading', () => {
+  it('refreshes authoritative session counts after prepare and close', async () => {
+    const r = make();
+    await r.open();
+    const status = copy(real.state);
+    status.authority!.prepared_count = 2;
+    status.authority!.closed_count = 1;
+    r.client.state.mockResolvedValue(status);
+    await r.controller.refresh();
+    expect(r.state.authority?.prepared_count).toBe(2);
+    expect(r.state.authority?.closed_count).toBe(1);
+    status.authority!.prepared_count = 1;
+    status.authority!.closed_count = 2;
+    await r.controller.refresh();
+    expect(r.state.authority?.prepared_count).toBe(1);
+    expect(r.state.authority?.closed_count).toBe(2);
+  });
+
   it('reads a session when it is selected, and the same one once', async () => {
     const r = make();
     await r.open();
@@ -95,6 +112,7 @@ describe('reading', () => {
     const first = r.controller.refresh();
     void r.controller.refresh();
     void r.controller.refresh();
+    await settle();
     expect(r.client.sessions).toHaveBeenCalledTimes(1);
     release();
     await first;

@@ -535,6 +535,7 @@ export class F8Controller {
     this.reading = true;
     this.emit();
     try {
+      this.observeState(await this.client.state());
       const before = this.cursors.at(-1) ?? null;
       const view = await this.client.sessions(before);
       this.observeAuthority(view.authority);
