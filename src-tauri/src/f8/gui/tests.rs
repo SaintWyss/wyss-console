@@ -12,8 +12,8 @@ use crate::{
         identities::ManagedSessionId,
     },
     control::store::uuid,
+    f8::gui::ApprovalDetail,
     sessions::AgentMode,
-    turns::ApprovalDetail,
 };
 
 const ALL: [ExecutionScope; 5] = [

@@ -24,7 +24,7 @@ use crate::{
     events::EventsPage,
     f8::protocol::RuntimeFence,
     sessions::CatalogueEntry,
-    turns::{ApprovalDetail, ApprovalNotice, TurnEvent, TurnSummary},
+    turns::{ApprovalNotice, TurnEvent, TurnSummary},
 };
 use serde::{Deserialize, Serialize};
 
@@ -432,4 +432,37 @@ pub struct WatchView {
     /// The durable head after waiting. Equal to the cursor when nothing was committed.
     pub head: Option<Sequence>,
     pub changed: bool,
+}
+
+/// Supported decisions are transient capabilities of this connection, not stored history.
+#[derive(Clone, PartialEq, Eq, Serialize)]
+pub struct ApprovalDetail {
+    pub approval: crate::turns::ApprovalSummary,
+    pub workspace: Option<String>,
+    pub command: Option<crate::turns::CommandView>,
+    pub files: Option<u16>,
+    pub file: Option<crate::turns::FileView>,
+    pub decisions: Vec<crate::contracts::control::ApprovalDecision>,
+}
+impl std::fmt::Debug for ApprovalDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ApprovalDetail(<sensitive>)")
+    }
+}
+impl ApprovalDetail {
+    pub(super) fn of(
+        status: crate::contracts::approval::ApprovalStatus,
+        workspace: Option<String>,
+        decisions: Vec<crate::contracts::control::ApprovalDecision>,
+    ) -> Self {
+        let d = crate::turns::ApprovalDetail::of(status, workspace);
+        Self {
+            approval: d.approval,
+            workspace: d.workspace,
+            command: d.command,
+            files: d.files,
+            file: d.file,
+            decisions,
+        }
+    }
 }

@@ -20,10 +20,9 @@
 //!
 //! A start without a workspace (the inference profile) is refused: only the local-tools
 //! profile has a containment this authority attests, and an inference runtime would have no
-//! folder to bind. The plan is prepared synchronously, once per start, on the authority's
-//! thread: it seals the executable (a copy of a few tens of MB from the page cache) and runs a
-//! bounded `--version` probe, a few hundred milliseconds at most per runtime start. With one
-//! runtime at a time that delays only the start it belongs to.
+//! folder to bind. Sealing and version probing run on one preparation thread per reserved
+//! runtime. The authority continues polling; cancellation retains capacity and staging until
+//! that thread has finished and any resulting worker has been reaped.
 use super::{
     engine::{Spawned, Spawner},
     launcher::{NativeLocalToolsPlan, NativeLocalToolsSpawner},
@@ -74,6 +73,7 @@ impl CodexConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct CodexSpawner {
     config: CodexConfig,
     /// The authority's private product directories: hidden from the namespace.
@@ -148,36 +148,23 @@ impl CodexSpawner {
     }
 
     /// Everything one local-tools launch needs, prepared for `workspace`.
-    fn plan(
-        &self,
-        reference: &RuntimeRef,
-        staging: &mut LaunchStaging,
-        workspace: &str,
-    ) -> ControlResult<NativeLocalToolsPlan> {
-        // The gate is not a startup check only: a credential that appeared since (`codex login`
-        // after the authority started) is refused at the start that would bind it.
-        self.config.check()?;
-        let catalogue = safety::local_tools_catalog(&self.cache()?).map_err(|_| E::Unsupported)?;
-        staging.write_file(CATALOGUE, &catalogue)?;
-        let catalogue = self
-            .staging
-            .join(reference.runtime_instance_id.as_str())
-            .join(CATALOGUE);
-        if !safety::safe_catalog_path(&catalogue) {
-            return Err(E::UnsafePath);
+    fn plan(&self, catalogue: PathBuf, workspace: &str) -> ControlResult<NativeLocalToolsPlan> {
+        if self.config.check()? != self.config.home {
+            return Err(E::GateDenied);
         }
         let isolation = Isolation {
             workspace: PathBuf::from(workspace),
             state: self.state.join("codex-local-tools"),
             control: vec![self.runtime.clone(), self.state.clone()],
         };
-        NativeLocalToolsPlan::prepare(
+        NativeLocalToolsPlan::prepare_with_credential_policy(
             isolation,
             &self.config.executable,
             &self.config.home,
             &self.cwd,
             catalogue,
             CODEX_VERSION,
+            self.config.allow_credential,
         )
     }
 }
@@ -201,10 +188,27 @@ impl Spawner for CodexSpawner {
         let (Some(staging), Some(workspace)) = (staging, workspace) else {
             return Err(E::Unsupported);
         };
-        let plan = self.plan(launch, staging, workspace)?;
-        NativeLocalToolsSpawner::new(plan).spawn(launch, None)
+        self.config.check()?;
+        let catalogue = safety::local_tools_catalog(&self.cache()?).map_err(|_| E::Unsupported)?;
+        staging.write_file(CATALOGUE, &catalogue)?;
+        let catalogue = self
+            .staging
+            .join(launch.runtime_instance_id.as_str())
+            .join(CATALOGUE);
+        if !safety::safe_catalog_path(&catalogue) {
+            return Err(E::UnsafePath);
+        }
+        let owner = self.clone();
+        let workspace = workspace.to_owned();
+        Ok(Spawned {
+            worker: Box::new(pending::Preparing::start(launch.clone(), move || {
+                owner.plan(catalogue, &workspace)
+            })?),
+        })
     }
 }
 
 #[cfg(test)]
 mod tests;
+
+mod pending;

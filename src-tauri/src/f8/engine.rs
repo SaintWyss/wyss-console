@@ -33,6 +33,15 @@ const MAX_OUTBOUND_FRAME: usize = 65_536;
 /// buffer and return an error (back pressure) instead of waiting, because it runs on the thread
 /// which also drives every other runtime's cleanup.
 pub trait Worker: Send {
+    /// Live provider capabilities, never durable authority. Normalized workers support all three.
+    fn approval_decisions(&self, _item: &str) -> Vec<v1::ApprovalDecision> {
+        vec![
+            v1::ApprovalDecision::Accept,
+            v1::ApprovalDecision::Decline,
+            v1::ApprovalDecision::Cancel,
+        ]
+    }
+
     /// Fresh provider configuration and hooks attestation before admitting executable work.
     fn preflight(&mut self, _context: &Attachment) -> ControlResult<()> {
         Err(E::Unsupported)
@@ -374,6 +383,12 @@ impl Engine {
             .and_then(|p| p.action.as_ref())
             .ok_or(E::GateDenied)?
             .presentation(index, offset)
+    }
+    pub fn approval_decisions(&self, session: &str, item: &str) -> Vec<v1::ApprovalDecision> {
+        self.live
+            .get(session)
+            .filter(|l| l.phase == Phase::Ready && l.approvals.contains_key(item))
+            .map_or_else(Vec::new, |l| l.worker.approval_decisions(item))
     }
     pub fn pending_fingerprint(&self, session: &str, request_id: &str) -> Option<String> {
         self.live

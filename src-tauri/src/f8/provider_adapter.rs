@@ -705,6 +705,25 @@ impl<W: Worker> NativeCodexWorker<W> {
     }
 }
 impl<W: Worker> Worker for NativeCodexWorker<W> {
+    fn approval_decisions(&self, item: &str) -> Vec<crate::contracts::control::ApprovalDecision> {
+        use crate::contracts::control::ApprovalDecision as D;
+        let Some(a) = self
+            .approvals
+            .get(item)
+            .filter(|a| a.decision.is_none() && !a.consumed && !a.ended)
+        else {
+            return Vec::new();
+        };
+        [
+            (a.offered.accept, D::Accept),
+            (a.offered.decline, D::Decline),
+            (a.offered.cancel, D::Cancel),
+        ]
+        .into_iter()
+        .filter_map(|(yes, decision)| yes.then_some(decision))
+        .collect()
+    }
+
     fn preflight(&mut self, context: &Attachment) -> ControlResult<()> {
         if context != &self.attachment || !self.ready {
             return Err(E::GateDenied);

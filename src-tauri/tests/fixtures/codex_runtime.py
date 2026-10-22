@@ -302,14 +302,19 @@ for line in sys.stdin:
                 assert all(params['config'][k] is (v == 'true') for k, v in WORKSPACE_ONLY.items())
                 (root / 'trust-roots').write_text(json.dumps(sorted(projects)))
             else:
-                assert params['config']['mcp_servers']['fixture_mcp']['enabled'] is False
+                # A reconciled generation clamps every server observed during discovery,
+                # including the one this drift scenario introduced before readiness.
+                expected_mcp = ['fixture_mcp'] + (['new_mcp'] if scenario == 'mcp_drift' else [])
+                assert all(flags.get('mcp_servers.' + n + '.enabled') == 'false' for n in expected_mcp)
+                servers = {n: {'enabled': False} for n in expected_mcp}
+                assert params['config']['mcp_servers'] == servers
                 disabled = {key: False for key in flags if key.startswith('features.') or key in (
                     'cloud.skills.enabled', 'skills.include_instructions',
                     'tools.experimental_request_user_input.enabled', 'tools.update_plan.enabled')}
                 assert params['config'] == {**disabled, 'web_search': 'disabled',
                                            'agents.enabled': False,
                                            'default_permissions': ':read-only',
-                                           'mcp_servers': {'fixture_mcp': {'enabled': False}}}
+                                           'mcp_servers': servers}
         if method == 'thread/resume':
             assert threads[thread_id]['durable'] and not threads[thread_id]['archived']
         assert Path(params['cwd']).is_absolute()

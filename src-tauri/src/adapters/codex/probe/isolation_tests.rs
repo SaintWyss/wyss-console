@@ -1249,3 +1249,47 @@ fn f8_catalog_validation_covers_sealed_bytes_even_when_path_is_replaced() {
     let image = sealed_file(&path, 4 * 1024 * 1024, false).unwrap();
     assert!(validate_catalog_image(&image).is_ok());
 }
+
+#[test]
+fn f8_credential_consent_is_checked_on_the_acquired_grant_before_any_exec() {
+    use crate::f8::{launcher::NativeLocalToolsPlan, production::CodexConfig};
+    let t = Temp::new();
+    let (i, user, executable) = t.layout();
+    fs::remove_file(user.join("auth.json")).unwrap();
+    let config = CodexConfig {
+        executable: executable.clone(),
+        home: user.clone(),
+        allow_credential: false,
+    };
+    assert!(config.check().is_ok());
+    // Deterministically place the credential in the exact check/acquisition interval.
+    t.file("user/auth.json", "FIXTURE-CREDENTIAL", 0o600);
+    let marker = t.0.join("executed");
+    fs::write(
+        &executable,
+        format!(
+            "#!/bin/sh\nprintf executed > {}\nprintf 'codex-cli 0.159.0\\n'\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    let catalogue = t.file("catalog.json", r#"{"models":[{"slug":"fixture","tool_mode":"direct","experimental_supported_tools":[],"multi_agent_version":null}]}"#, 0o600);
+    let cwd = place_of(&i);
+    let refused = NativeLocalToolsPlan::prepare_with_credential_policy(
+        i,
+        &executable,
+        &user,
+        &cwd,
+        catalogue,
+        "0.159.0",
+        false,
+    );
+    assert!(matches!(
+        refused,
+        Err(crate::contracts::control::ControlError::GateDenied)
+    ));
+    assert!(
+        !marker.exists(),
+        "neither version probe nor payload may execute with an unauthorized grant"
+    );
+}

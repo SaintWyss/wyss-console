@@ -257,6 +257,149 @@ fn turn_with_approval(
 }
 
 #[test]
+fn slow_version_preparation_does_not_block_control_and_cancel_keeps_capacity_until_cleanup() {
+    let mut p = Production::new("approval_command");
+    let executable = p.root.join("bin/codex");
+    let script = fs::read_to_string(&executable).unwrap();
+    fs::write(
+        &executable,
+        script.replace(
+            "import os,runpy",
+            "import os,runpy,sys,time\nif sys.argv[1:] == ['--version']: time.sleep(1.5)",
+        ),
+    )
+    .unwrap();
+    p.start(true);
+    let gui = p.gui();
+    let session = gui.prepare(id()).unwrap().id;
+    let row = gui.session(session.clone()).unwrap().session;
+    let began = Instant::now();
+    gui.runtime_start(
+        id(),
+        session.clone(),
+        row.runtime.revision,
+        row.runtime.generation,
+        AgentMode::LocalTools,
+        Some(p.workspace()),
+    )
+    .unwrap();
+    assert!(
+        began.elapsed() < Duration::from_millis(500),
+        "runtime/start blocked for {:?}",
+        began.elapsed()
+    );
+    let began = Instant::now();
+    let detail = gui.session(session.clone()).unwrap();
+    assert!(began.elapsed() < Duration::from_millis(500));
+    assert_ne!(detail.session.runtime.actual, ActualState::Ready);
+    gui.runtime_stop(
+        id(),
+        detail.session.runtime.fence.clone(),
+        detail.session.runtime.revision,
+    )
+    .unwrap();
+    let other = gui.prepare(id()).unwrap().id;
+    let other_row = gui.session(other.clone()).unwrap().session;
+    assert_eq!(
+        gui.runtime_start(
+            id(),
+            other,
+            other_row.runtime.revision,
+            other_row.runtime.generation,
+            AgentMode::LocalTools,
+            Some(p.workspace())
+        )
+        .unwrap_err()
+        .code,
+        F8Failure::Busy,
+        "cancelled preparation still owns capacity"
+    );
+    assert_eq!(
+        fs::read_dir(p.root.join("state/wyss-console/staging"))
+            .unwrap()
+            .count(),
+        1
+    );
+    eventually(|| {
+        let detail = gui.session(session.clone()).ok()?;
+        (detail.session.runtime.actual == ActualState::Stopped).then_some(())
+    });
+    let cwds = fs::read_to_string(p.root.join("cwds")).unwrap_or_default();
+    assert!(
+        !cwds.contains("local-"),
+        "cancelled preparation launched payload: {cwds}"
+    );
+    assert_eq!(
+        fs::read_dir(p.root.join("state/wyss-console/staging"))
+            .map(|d| d.count())
+            .unwrap_or(0),
+        0
+    );
+    p.stop(Signal::SIGTERM);
+    eventually(|| (p.leftovers() == 0).then_some(()));
+}
+
+#[test]
+fn timed_out_version_probe_is_reaped_before_capacity_and_staging_are_released() {
+    let mut p = Production::new("approval_command");
+    let executable = p.root.join("bin/codex");
+    let original = fs::read_to_string(&executable).unwrap();
+    fs::write(
+        &executable,
+        original.replace(
+            "import os,runpy",
+            "import os,runpy,sys,time\nif sys.argv[1:] == ['--version']: time.sleep(10)",
+        ),
+    )
+    .unwrap();
+    p.start(true);
+    let gui = p.gui();
+    let session = gui.prepare(id()).unwrap().id;
+    let row = gui.session(session.clone()).unwrap().session;
+    gui.runtime_start(
+        id(),
+        session.clone(),
+        row.runtime.revision,
+        row.runtime.generation,
+        AgentMode::LocalTools,
+        Some(p.workspace()),
+    )
+    .unwrap();
+    eventually(|| {
+        gui.session(session.clone())
+            .ok()
+            .filter(|d| d.session.runtime.actual == ActualState::Failed)
+    });
+    assert_eq!(
+        fs::read_dir(p.root.join("state/wyss-console/staging"))
+            .unwrap()
+            .count(),
+        0
+    );
+    // Repair only our fixture executable and prove capacity was not lost or released early.
+    fs::write(&executable, original).unwrap();
+    let row = gui.session(session.clone()).unwrap().session;
+    gui.runtime_start(
+        id(),
+        session.clone(),
+        row.runtime.revision,
+        row.runtime.generation,
+        AgentMode::LocalTools,
+        Some(p.workspace()),
+    )
+    .unwrap();
+    let ready = ready(&gui, &session);
+    gui.runtime_stop(
+        id(),
+        ready.session.runtime.fence,
+        ready.session.runtime.revision,
+    )
+    .unwrap();
+    p.stop(Signal::SIGTERM);
+    eventually(|| (p.leftovers() == 0).then_some(()));
+}
+
+#[test]
 fn the_real_process_starts_the_isolated_runtime_and_runs_a_command_only_when_accepted() {
     for decision in [
         ApprovalDecision::Accept,
@@ -572,6 +715,11 @@ fn a_decision_codex_did_not_offer_is_refused_and_the_others_still_work() {
     let gui = p.gui();
     let (_, fence, attached) = session(&gui, &p.workspace(), 300);
     let (turn, approval, revision) = turn_with_approval(&gui, &fence, &attached);
+    let shown = gui.approval(approval.clone(), None, None).unwrap();
+    assert_eq!(
+        shown.decisions,
+        vec![ApprovalDecision::Accept, ApprovalDecision::Cancel]
+    );
     let intent = id();
     let refused = eventually(|| {
         match gui.approval_respond(
@@ -587,7 +735,26 @@ fn a_decision_codex_did_not_offer_is_refused_and_the_others_still_work() {
     });
     assert!(refused.is_err());
     assert_eq!(p.record("decisions"), 0, "nothing was written to Codex");
-    let _ = turn;
+    let still_pending = gui.approval(approval.clone(), None, None).unwrap();
+    assert_eq!(still_pending.approval.state, ApprovalState::Pending);
+    assert_eq!(still_pending.approval.revision, revision);
+    let accepted_intent = id();
+    settled(|| {
+        gui.approval_respond(
+            accepted_intent.clone(),
+            fence.clone(),
+            approval.clone(),
+            revision,
+            ApprovalDecision::Accept,
+        )
+    });
+    eventually(|| {
+        gui.turn(turn.clone(), None, false)
+            .ok()
+            .filter(|t| t.turn.turn.state.terminal())
+    });
+    assert_eq!(p.record("decisions"), 1);
+    assert_eq!(p.record("executions"), 1);
     p.stop(Signal::SIGTERM);
 }
 

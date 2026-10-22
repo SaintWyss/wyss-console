@@ -18,7 +18,7 @@ import {
 import {
   parseApprovalDetail,
   APPROVAL_STATES,
-  type ApprovalDetail,
+  type ApprovalDetail as BaseApprovalDetail,
   type ApprovalState,
 } from './approvals';
 import { parseEventsPage, type EventsPage } from './events';
@@ -799,7 +799,7 @@ export function parseSessionDetail(value: unknown): SessionDetail {
       Date.parse(turns[i - 1].turn.started_at)
     )
       throw invalid('order');
-  const approval = nullable(v.approval, parseApprovalDetail);
+  const approval = nullable(v.approval, parseF8ApprovalDetail);
   if (approval !== null && !same(approval.approval.session, session.id))
     throw invalid('approval');
   const gates = array(v.gates, GATE_ACTIONS.length, 'gates').map(parseGate);
@@ -984,5 +984,25 @@ export function parseWatchInfo(value: unknown): WatchInfo {
     stream: uuid(v.stream, 'stream'),
     head: nullable(v.head, (x) => sequence(x, 'head')),
     changed: flag(v.changed, 'changed'),
+  };
+}
+
+export interface ApprovalDetail extends BaseApprovalDetail {
+  decisions: ('accept' | 'decline' | 'cancel')[];
+}
+export function parseF8ApprovalDetail(value: unknown): ApprovalDetail {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw invalid('approval');
+  const { decisions, ...detail } = value as Record<string, unknown>;
+  if (
+    !Array.isArray(decisions) ||
+    decisions.length > 3 ||
+    new Set(decisions).size !== decisions.length ||
+    decisions.some((d) => !['accept', 'decline', 'cancel'].includes(d))
+  )
+    throw invalid('decisions');
+  return {
+    ...parseApprovalDetail(detail),
+    decisions: decisions as ApprovalDetail['decisions'],
   };
 }

@@ -274,3 +274,23 @@ fn the_same_action_sent_again_is_not_asked_twice_but_another_one_is() {
     assert_eq!(no.ask_once("i1|a", &prompt("one")), Ok(false));
     assert_eq!(shown.lock().unwrap().len(), 2);
 }
+
+#[test]
+fn failed_lease_reads_and_mismatched_leases_never_produce_confirmation_context() {
+    let h = NativeHarness::start("approval_command");
+    let (_, fence, _) = native_session(&h);
+    let wrong = crate::contracts::identities::ExecutionLeaseId::parse(uuid().as_str()).unwrap();
+    assert_eq!(
+        lease_of(&h.gui, &fence, &wrong).unwrap_err().code,
+        F8Failure::Stale
+    );
+    let offline = F8Gui::inactive();
+    assert!(workspace_of(&offline, &fence).is_err());
+    assert!(lease_of(&offline, &fence, &wrong).is_err());
+    let mut stale = fence.clone();
+    stale.generation += 1;
+    assert_eq!(
+        workspace_of(&h.gui, &stale).unwrap_err().code,
+        F8Failure::Stale
+    );
+}

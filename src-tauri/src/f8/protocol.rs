@@ -426,6 +426,7 @@ pub enum Projection {
     History {
         reference: Option<RuntimeRef>,
         attestation: Option<RuntimeIdentity>,
+        decisions: Option<Vec<v1::ApprovalDecision>>,
     },
     Attachment(Option<RuntimeIdentity>),
 }
@@ -573,9 +574,25 @@ impl Response {
                             return Err(E::CorrelationError);
                         }
                     }
+                    let decisions = if kind == "turn_status" {
+                        None
+                    } else {
+                        let decisions: Vec<v1::ApprovalDecision> =
+                            decode(o.remove("decisions").ok_or(E::InvalidRequest)?)?;
+                        if decisions.len() > 3
+                            || decisions
+                                .iter()
+                                .enumerate()
+                                .any(|(i, d)| decisions[..i].contains(d))
+                        {
+                            return Err(E::InvalidRequest);
+                        }
+                        Some(decisions)
+                    };
                     projection = Projection::History {
                         reference,
                         attestation,
+                        decisions,
                     };
                 }
                 // Event payloads are validated against their declared vocabulary in validate_projection.
@@ -856,7 +873,11 @@ impl Response {
                     Projection::History {
                         reference,
                         attestation,
+                        decisions,
                     } => {
+                        if let Some(decisions) = decisions {
+                            d["decisions"] = json!(decisions);
+                        }
                         d["runtime_ref"] = json!(reference);
                         d["attestation"] = json!(attestation);
                     }

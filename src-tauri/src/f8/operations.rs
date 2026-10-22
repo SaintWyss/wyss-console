@@ -161,7 +161,7 @@ fn approval_status(
     offset: Option<u32>,
 ) -> ControlResult<Value> {
     let approval = read_approval(engine.connection(), id)?;
-    let mut v = json!({"approval":approval,"acceptable":false,"command":null,"file_count":null,"file":null,"delivery":super::writers::read_delivery(engine.connection(),id)?});
+    let mut v = json!({"approval":approval,"acceptable":false,"decisions":[],"command":null,"file_count":null,"file":null,"delivery":super::writers::read_delivery(engine.connection(),id)?});
     project(
         engine,
         "managed_approval_launches",
@@ -193,6 +193,10 @@ fn approval_status(
             );
             match action {
                 Ok(presentation) => {
+                    v["decisions"] = json!(engine.approval_decisions(
+                        approval.managed_session_id.as_str(),
+                        &approval.provider_item_id
+                    ));
                     v["command"] = presentation["command"].clone();
                     v["file_count"] = presentation["file_count"].clone();
                     v["file"] = presentation["file"].clone();

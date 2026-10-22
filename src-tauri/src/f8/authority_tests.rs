@@ -1459,6 +1459,10 @@ fn approval_status_is_executable_only_for_its_live_pending_launch() {
     let mut body = v.clone();
     body.as_object_mut().unwrap().remove("runtime_ref");
     body.as_object_mut().unwrap().remove("attestation");
+    assert_eq!(
+        body.as_object_mut().unwrap().remove("decisions"),
+        Some(json!(["accept", "decline", "cancel"]))
+    );
     let strict: Result<crate::contracts::approval::ApprovalStatus, _> =
         serde_json::from_value(body);
     assert!(

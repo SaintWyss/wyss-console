@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import {
+  parseF8ApprovalDetail,
+  type ApprovalDetail,
   parseAbandonReceipt,
   parseAuditInfo,
   parseBindingReceipt,
@@ -33,10 +35,6 @@ import {
   type TurnReceipt,
   type WatchInfo,
 } from '../contracts/f8';
-import {
-  parseApprovalDetail,
-  type ApprovalDetail,
-} from '../contracts/approvals';
 import type {
   ManagedApprovalId,
   ManagedSessionId,
@@ -305,7 +303,7 @@ export function readApproval(
     'f8_approval_read',
     { approval_id: approval, file, offset },
     (value) => {
-      const detail = parseApprovalDetail(value);
+      const detail = parseF8ApprovalDetail(value);
       if (detail.approval.id.toLowerCase() !== String(approval).toLowerCase())
         throw new Error('f8: other_approval');
       return detail;

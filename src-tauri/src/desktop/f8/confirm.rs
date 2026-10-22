@@ -26,7 +26,7 @@ use super::{
 };
 use crate::{
     contracts::identities::{ManagedApprovalId, ManagedSessionId},
-    turns::ApprovalDetail,
+    f8::gui::ApprovalDetail,
 };
 use std::{
     collections::VecDeque,
@@ -209,7 +209,7 @@ fn approval_prompt(gui: &F8Gui, first: &ApprovalDetail) -> Result<Prompt, F8Erro
             let mut offset = 0;
             loop {
                 let page = gui.approval(first.approval.id.clone(), Some(index), Some(offset))?;
-                let Some(file) = page.file else {
+                let Some(ref file) = page.file else {
                     complete = false;
                     break 'files;
                 };
@@ -349,26 +349,28 @@ pub(super) fn lease_prompt(
     }
 }
 /// The workspace the authority holds for a session's runtime, read here and not taken from the page.
-pub(super) fn workspace_of(gui: &F8Gui, session: &ManagedSessionId) -> Option<String> {
-    gui.session(session.clone())
-        .ok()
-        .and_then(|detail| detail.session.runtime.workspace)
+pub(super) fn workspace_of(gui: &F8Gui, fence: &FenceView) -> Result<Option<String>, F8Error> {
+    let detail = gui.session(fence.session.clone())?;
+    if detail.session.runtime.fence != *fence {
+        return Err(F8Error::new(F8Failure::Stale));
+    }
+    Ok(detail.session.runtime.workspace)
 }
-/// The workspace and the scopes of a session's current lease, as the authority holds them. When
-/// the lease named is not the session's current one, no scopes are claimed.
+/// Read failures and a different lease never produce an incomplete Allow prompt.
 pub(super) fn lease_of(
     gui: &F8Gui,
-    session: &ManagedSessionId,
+    fence: &FenceView,
     lease: &crate::contracts::identities::ExecutionLeaseId,
-) -> (Option<String>, Option<Vec<ExecutionScope>>) {
-    let Ok(detail) = gui.session(session.clone()) else {
-        return (None, None);
-    };
-    let scopes = detail
+) -> Result<(Option<String>, Vec<ExecutionScope>), F8Error> {
+    let detail = gui.session(fence.session.clone())?;
+    if detail.session.runtime.fence != *fence {
+        return Err(F8Error::new(F8Failure::Stale));
+    }
+    let held = detail
         .lease
         .filter(|held| held.id == *lease)
-        .map(|held| held.scopes);
-    (detail.session.runtime.workspace, scopes)
+        .ok_or_else(|| F8Error::new(F8Failure::Stale))?;
+    Ok((detail.session.runtime.workspace, held.scopes))
 }
 /// Asks for a lease the user must allow. `Ok` only on Allow. `action` is the intent and what
 /// the prompt says, so that the same request sent again is the same answer.
@@ -487,8 +489,12 @@ fn show(parent: Option<gtk::ApplicationWindow>, prompt: &Prompt, expired: Arc<At
         let settled = Rc::new(Cell::new(false));
         let adjustment = scroll.vadjustment();
         let update = {
-            let (allow, settled, adjustment) = (allow.clone(), settled.clone(), adjustment.clone());
+            let (allow, settled, adjustment) =
+                (allow.clone(), settled.clone(), adjustment.downgrade());
             move || {
+                let Some(adjustment) = adjustment.upgrade() else {
+                    return;
+                };
                 let at_end =
                     adjustment.value() + adjustment.page_size() >= adjustment.upper() - 1.0;
                 allow.set_sensitive(settled.get() && at_end);
@@ -508,19 +514,18 @@ fn show(parent: Option<gtk::ApplicationWindow>, prompt: &Prompt, expired: Arc<At
             update();
         });
     }
-    {
+    let expiry_source = {
         // Nobody answered in time: answer for them, with no.
         let dialog = dialog.clone();
         gtk::glib::timeout_add_local(Duration::from_millis(500), move || {
             if expired.load(Ordering::Acquire) {
                 dialog.response(gtk::ResponseType::Cancel);
-                gtk::glib::ControlFlow::Break
-            } else {
-                gtk::glib::ControlFlow::Continue
             }
-        });
-    }
+            gtk::glib::ControlFlow::Continue
+        })
+    };
     let accepted = dialog.run() == gtk::ResponseType::Accept;
+    expiry_source.remove();
     dialog.close();
     accepted
 }

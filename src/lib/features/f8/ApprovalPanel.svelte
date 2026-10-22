@@ -194,24 +194,30 @@
 
   {#if pending}
     <div class="approval-actions">
-      <button
-        type="button"
-        class="action primary"
-        disabled={!decidable || !whole}
-        onclick={() => controller.decide('accept')}>Accept</button
-      >
-      <button
-        type="button"
-        class="action danger"
-        disabled={!decidable}
-        onclick={() => controller.decide('decline')}>Decline</button
-      >
-      <button
-        type="button"
-        class="action"
-        disabled={!decidable}
-        onclick={() => controller.decide('cancel')}>Cancel action</button
-      >
+      {#if approval.detail.decisions.includes('accept')}
+        <button
+          type="button"
+          class="action primary"
+          disabled={!decidable || !whole}
+          onclick={() => controller.decide('accept')}>Accept</button
+        >
+      {/if}
+      {#if approval.detail.decisions.includes('decline')}
+        <button
+          type="button"
+          class="action danger"
+          disabled={!decidable}
+          onclick={() => controller.decide('decline')}>Decline</button
+        >
+      {/if}
+      {#if approval.detail.decisions.includes('cancel')}
+        <button
+          type="button"
+          class="action"
+          disabled={!decidable}
+          onclick={() => controller.decide('cancel')}>Cancel action</button
+        >
+      {/if}
       {#if decidable && !whole}
         <p class="approval-note">Read the whole change to accept it.</p>
       {/if}

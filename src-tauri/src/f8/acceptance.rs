@@ -607,7 +607,7 @@ impl App {
         s: &Session,
     ) -> (
         crate::contracts::identities::ManagedTurnId,
-        crate::turns::ApprovalDetail,
+        crate::f8::gui::ApprovalDetail,
     ) {
         let intent = uuid();
         let turn = settled(|| {
@@ -625,7 +625,7 @@ impl App {
     fn decide(
         &self,
         s: &Session,
-        approval: &crate::turns::ApprovalDetail,
+        approval: &crate::f8::gui::ApprovalDetail,
         decision: ApprovalDecision,
     ) -> Result<crate::f8::gui::DecisionReceipt, super::gui::F8Error> {
         self.gui.approval_respond(

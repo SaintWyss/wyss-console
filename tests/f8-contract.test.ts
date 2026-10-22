@@ -16,7 +16,7 @@ import {
   parseTurnReceipt,
   parseWatchInfo,
 } from '../src/lib/contracts/f8';
-import { parseApprovalDetail } from '../src/lib/contracts/approvals';
+import { parseF8ApprovalDetail as parseApprovalDetail } from '../src/lib/contracts/f8';
 import fixture from './fixtures/f8-gui-v1.json';
 import type { Raw } from './f8-harness';
 

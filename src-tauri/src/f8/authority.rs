@@ -338,7 +338,7 @@ impl Authority {
         }
         let mut value = json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":desired,
             "revision":revision.max(0),"actual_state":actual,
-            "runtime_instance_id":identity.as_ref().map(|i| i.runtime_instance_id.clone()),
+            "runtime_instance_id":self.engine.reference(s).map(|r| r.runtime_instance_id),
             "runtime_version":identity.as_ref().map(|i| i.observed_version.clone()),
             "compatibility":if identity.is_some() { "compatible" } else { "unknown" },
             "model_count":models,"diagnostic":diagnostic,
@@ -793,6 +793,13 @@ impl Authority {
             }
         }
         if !replay {
+            if !self
+                .engine
+                .approval_decisions(&session, &item)
+                .contains(&p.decision)
+            {
+                return Err(E::Unsupported);
+            }
             let attachment = self.engine.attachment(&session).ok_or(E::GateDenied)?;
             self.engine.preflight(fence, &attachment)?;
         }

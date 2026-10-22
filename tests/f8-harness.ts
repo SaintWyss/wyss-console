@@ -9,7 +9,7 @@ import {
   type F8Failure,
   type SessionDetail,
 } from '../src/lib/contracts/f8';
-import { parseApprovalDetail } from '../src/lib/contracts/approvals';
+import { parseF8ApprovalDetail as parseApprovalDetail } from '../src/lib/contracts/f8';
 import { F8CallError } from '../src/lib/desktop/f8-client';
 import {
   F8Controller,

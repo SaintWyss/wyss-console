@@ -654,6 +654,10 @@ pub(crate) struct F8Attestation {
     version_launch: Option<IsolationLaunch>,
 }
 impl F8Attestation {
+    pub(crate) fn has_credential(&self) -> bool {
+        self.credential.is_some()
+    }
+
     /// Bounded host-side probe of exactly the sealed image used by the final
     /// command. Run during preparation, never from the authority poll loop.
     pub(crate) fn verify_version(&mut self) -> crate::contracts::control::ControlResult<()> {
@@ -677,57 +681,60 @@ impl F8Attestation {
             }
             if Instant::now() >= deadline {
                 pending.cancel();
-                return Err(E::GateDenied);
+                // A deadline requests cleanup; only poll's final result proves ownership ended.
             }
             std::thread::sleep(Duration::from_millis(1));
         };
-        let mut stdout = child.take_stdout().ok_or(E::TransportError)?;
-        let flags = unsafe { nix::libc::fcntl(stdout.as_raw_fd(), nix::libc::F_GETFL) };
-        if flags < 0
-            || unsafe {
-                nix::libc::fcntl(
-                    stdout.as_raw_fd(),
-                    nix::libc::F_SETFL,
-                    flags | nix::libc::O_NONBLOCK,
-                )
-            } < 0
-        {
-            return Err(E::TransportError);
-        }
-        let mut bytes = Vec::new();
-        let mut successful = false;
-        loop {
-            let mut chunk = [0u8; 129];
-            match stdout.read(&mut chunk) {
-                Ok(n) => bytes.extend_from_slice(&chunk[..n]),
-                Err(e)
-                    if matches!(
-                        e.kind(),
-                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-                    ) => {}
-                Err(_) => break,
+        let observed = (|| -> crate::contracts::control::ControlResult<bool> {
+            let mut stdout = child.take_stdout().ok_or(E::TransportError)?;
+            let flags = unsafe { nix::libc::fcntl(stdout.as_raw_fd(), nix::libc::F_GETFL) };
+            if flags < 0
+                || unsafe {
+                    nix::libc::fcntl(
+                        stdout.as_raw_fd(),
+                        nix::libc::F_SETFL,
+                        flags | nix::libc::O_NONBLOCK,
+                    )
+                } < 0
+            {
+                return Err(E::TransportError);
             }
-            if bytes.len() > 128 || Instant::now() >= deadline {
-                break;
-            }
-            if let Some(status) = child.try_wait()? {
-                successful = status.success();
-                // Drain the final bounded bytes after exit before comparing.
-                if let Ok(n) = stdout.read(&mut chunk) {
-                    bytes.extend_from_slice(&chunk[..n]);
+            let mut bytes = Vec::new();
+            let mut successful = false;
+            loop {
+                let mut chunk = [0u8; 129];
+                match stdout.read(&mut chunk) {
+                    Ok(n) => bytes.extend_from_slice(&chunk[..n]),
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                        ) => {}
+                    Err(_) => break,
                 }
-                break;
+                if bytes.len() > 128 || Instant::now() >= deadline {
+                    break;
+                }
+                if let Some(status) = child.try_wait()? {
+                    successful = status.success();
+                    // Drain the final bounded bytes after exit before comparing.
+                    if let Ok(n) = stdout.read(&mut chunk) {
+                        bytes.extend_from_slice(&chunk[..n]);
+                    }
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
             }
-            std::thread::sleep(Duration::from_millis(1));
-        }
+            Ok(successful && bytes == b"codex-cli 0.159.0\n")
+        })();
         child.begin_stop(Instant::now());
-        while Instant::now() < deadline {
-            if matches!(child.poll_stop(Instant::now()), Ok(Progress::Reaped(_))) {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(1));
+        // Do not transfer this probe to the detached reaper and release runtime capacity.
+        // An unkillable probe keeps this one preparation thread, its slot and staging held.
+        // The authority's bounded shutdown reports incomplete rather than inventing reap.
+        while !matches!(child.poll_stop(Instant::now()), Ok(Progress::Reaped(_))) {
+            std::thread::sleep(Duration::from_millis(10));
         }
-        if !child.is_reaped() || !successful || bytes != b"codex-cli 0.159.0\n" {
+        if !observed? {
             return Err(E::Unsupported);
         }
         Ok(())

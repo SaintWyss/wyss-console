@@ -335,6 +335,20 @@ it('shows a command waiting for approval whole, and sends each decision as its o
   }
 });
 
+it('offers only the decisions supported by the live native request', async () => {
+  const detail = copy(fx.session_attached);
+  detail.turns = [copy(fx.turn_reading.turn)];
+  detail.approval = { ...copy(fx.approval), decisions: ['accept', 'cancel'] };
+  await select({ session: () => detail, approval: () => detail.approval });
+  button('Conversation').click();
+  await flush();
+  const card = view().querySelector('.approval-card')!;
+  expect(card).not.toBeNull();
+  expect(button('Accept', card)).toBeDefined();
+  expect(button('Cancel action', card)).toBeDefined();
+  expect(button('Decline', card)).toBeUndefined();
+});
+
 it('does not offer a decision when the approval cannot be decided any more', async () => {
   const detail = copy(fx.session_attached);
   detail.turns = [copy(fx.turn_reading.turn)];

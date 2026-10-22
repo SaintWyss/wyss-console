@@ -20,7 +20,8 @@
     },
     "file": null,
     "files": null,
-    "workspace": "/tmp/wyss-native-local-7cb9559c-c20d-4413-9501-a96cadfe0908/repo/work"
+    "workspace": "/tmp/wyss-native-local-7cb9559c-c20d-4413-9501-a96cadfe0908/repo/work",
+    "decisions": ["accept", "decline", "cancel"]
   },
   "audit": {
     "authority": "00000000-0000-4000-8000-0000000000a1",

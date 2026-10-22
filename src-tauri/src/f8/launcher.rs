@@ -124,6 +124,25 @@ impl NativeLocalToolsPlan {
         catalogue: PathBuf,
         observed_version: &str,
     ) -> ControlResult<Self> {
+        Self::prepare_with_credential_policy(
+            isolation,
+            executable,
+            user,
+            cwd,
+            catalogue,
+            observed_version,
+            true,
+        )
+    }
+    pub(crate) fn prepare_with_credential_policy(
+        isolation: crate::adapters::codex::probe::isolation::Isolation,
+        executable: &std::path::Path,
+        user: &std::path::Path,
+        cwd: &std::path::Path,
+        catalogue: PathBuf,
+        observed_version: &str,
+        allow_credential: bool,
+    ) -> ControlResult<Self> {
         if observed_version != "0.159.0" || !catalogue.is_absolute() {
             return Err(E::Unsupported);
         }
@@ -137,6 +156,10 @@ impl NativeLocalToolsPlan {
             revision: 1,
         };
         let (launch, mut proof) = isolation.prepare_f8(executable, user, cwd, &catalogue)?;
+        // Check the acquired capability, not the pathname observed before preparation.
+        if !allow_credential && proof.has_credential() {
+            return Err(E::GateDenied);
+        }
         proof.verify_version()?;
         Ok(Self {
             launch,

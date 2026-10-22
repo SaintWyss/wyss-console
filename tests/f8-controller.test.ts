@@ -14,7 +14,7 @@ import {
   settle,
 } from './f8-harness';
 import { parseTurnReading, type WatchInfo } from '../src/lib/contracts/f8';
-import { parseApprovalDetail } from '../src/lib/contracts/approvals';
+import { parseF8ApprovalDetail as parseApprovalDetail } from '../src/lib/contracts/f8';
 
 type Rig = ReturnType<typeof rig>;
 let current: Rig | undefined;

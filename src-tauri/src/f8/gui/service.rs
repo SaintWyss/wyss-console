@@ -47,7 +47,7 @@ use crate::{
     events::{EventRow, project, window},
     f8::protocol::{Projection, Target},
     sessions::{AgentMode, entry_of},
-    turns::{ApprovalDetail, ApprovalNotice, TurnEvent, TurnSummary},
+    turns::{ApprovalNotice, TurnEvent, TurnSummary},
 };
 use std::{
     collections::{HashMap, VecDeque},
@@ -1145,24 +1145,23 @@ impl F8Gui {
         offset: Option<u32>,
     ) -> Result<ApprovalDetail, F8Error> {
         self.with(Role::Control, |client| {
-            let ResultValue::Approval(status) = client
-                .call(
-                    Operation::ApprovalStatus(ApprovalGet {
-                        managed_approval_id: id.clone(),
-                        file_index: file,
-                        offset,
-                    }),
-                    Target::None,
-                )?
-                .value
-            else {
+            let answer = client.call(
+                Operation::ApprovalStatus(ApprovalGet {
+                    managed_approval_id: id.clone(),
+                    file_index: file,
+                    offset,
+                }),
+                Target::None,
+            )?;
+            let decisions = approval_decisions(&answer.projection)?;
+            let ResultValue::Approval(status) = answer.value else {
                 return Err(broken());
             };
             if status.approval.managed_approval_id != id {
                 return Err(broken());
             }
             let binding = binding_view(client, &status.approval.managed_session_id)?;
-            Ok(ApprovalDetail::of(*status, binding.workspace))
+            Ok(ApprovalDetail::of(*status, binding.workspace, decisions))
         })
     }
 
@@ -1450,6 +1449,7 @@ fn turn_row(client: &mut F8Client, id: &ManagedTurnId) -> Result<TurnRow, CallEr
         Projection::History {
             reference,
             attestation,
+            ..
         },
     ) = (answer.value, answer.projection)
     else {
@@ -1481,12 +1481,17 @@ fn pending_approval(
         Err(CallError::Refused(E::TurnNotFound)) => return Ok(None),
         Err(error) => return Err(error),
     };
+    let decisions = if matches!(answer.value, ResultValue::PendingApproval(None)) {
+        Vec::new()
+    } else {
+        approval_decisions(&answer.projection)?
+    };
     let ResultValue::PendingApproval(pending) = answer.value else {
         return Err(broken());
     };
     Ok(pending
         .filter(|status| status.approval.managed_turn_id == *turn)
-        .map(|status| ApprovalDetail::of(*status, binding.workspace.clone())))
+        .map(|status| ApprovalDetail::of(*status, binding.workspace.clone(), decisions)))
 }
 
 /// Reads the durable stream forward from where the index stopped, remembering which turn
@@ -1545,4 +1550,14 @@ fn scan(client: &mut F8Client, index: &mut Index) -> Result<(), CallError> {
         }
     }
     Ok(())
+}
+
+fn approval_decisions(projection: &Projection) -> Result<Vec<ApprovalDecision>, CallError> {
+    match projection {
+        Projection::History {
+            decisions: Some(decisions),
+            ..
+        } => Ok(decisions.clone()),
+        _ => Err(broken()),
+    }
 }

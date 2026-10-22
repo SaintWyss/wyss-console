@@ -19,12 +19,12 @@ use super::workspace::WorkspaceSelections;
 mod confirm;
 pub use crate::{
     contracts::control::{ApprovalDecision, ExecutionScope},
+    f8::gui::ApprovalDetail,
     f8::gui::{
         AbandonReceipt, AuditView, BindingReceipt, DecisionReceipt, F8Error, F8Failure, F8Gui,
         FenceView, LeaseReceipt, ModelsView, RuntimeReceipt, SessionDetail, SessionReceipt,
         SessionsView, StateView, TurnReading, TurnReceipt, WatchView,
     },
-    turns::ApprovalDetail,
 };
 use crate::{
     contracts::{
@@ -366,7 +366,7 @@ pub async fn f8_lease_grant(
             let prompt = confirm::lease_prompt(
                 false,
                 &request.fence.session,
-                confirm::workspace_of(&s, &request.fence.session).as_deref(),
+                confirm::workspace_of(&s, &request.fence)?.as_deref(),
                 Some(&request.scopes),
                 request.ttl_seconds,
             );
@@ -395,12 +395,12 @@ pub async fn f8_lease_renew(
 ) -> Result<LeaseReceipt, F8Error> {
     let confirm = confirm.inner().clone();
     blocking(INTENT, service.inner().clone(), move |s| {
-        let (workspace, scopes) = confirm::lease_of(&s, &request.fence.session, &request.lease_id);
+        let (workspace, scopes) = confirm::lease_of(&s, &request.fence, &request.lease_id)?;
         let prompt = confirm::lease_prompt(
             true,
             &request.fence.session,
             workspace.as_deref(),
-            scopes.as_deref(),
+            Some(&scopes),
             request.ttl_seconds,
         );
         confirm::allow(

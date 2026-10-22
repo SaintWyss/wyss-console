@@ -92,7 +92,9 @@ completeness/next fields. Existing result kind words do not change.
 `RuntimeIdentity` has exactly `schema:2`, `authority_instance_id`, `managed_session_id`,
 `runtime_instance_id`, positive `generation`, and `observed_version` (the existing bounded numeric
 provider version, never a client claim). Publish only after spawn and successful attestation;
-reserved launch metadata may fence pending work but cannot report ready.
+reserved launch metadata may fence pending work but cannot report ready. During initialization,
+`runtime_instance_id` is the reserved live instance, while `runtime_identity` stays null and
+compatibility unknown. This permits an exact stop of a pending launch without attesting readiness.
 
 New binding-status attachments use the live RuntimeIdentity. Turn/approval status projections add
 `runtime_ref:null|RuntimeRef` and `attestation:null|RuntimeIdentity` instead. RuntimeRef has exactly
@@ -102,6 +104,12 @@ observed_version and exists only while that exact launch is attested live; never
 from an installed binary or a different generation. A V8 historical record retains runtime_ref with
 null attestation; a legacy unassigned record has both null. Permanent bindings and historical
 turn/approval records, receipts and stream cursor IDs remain immutable. No legacy generation 1 is invented.
+Approval status and non-null pending-approval projections also carry `decisions`, a unique list
+of at most three closed words (`accept`, `decline`, `cancel`) offered by that live provider request.
+Historical or unavailable requests carry an empty list. These are transient presentation and
+admission capabilities, never durable authorization. An unoffered decision refuses before recording
+an intent or writing to the provider. Protocol 1 and its approval payloads are unchanged.
+
 Durable leases remain session grants; launch-scoped admission is transient and separate.
 
 This file freezes candidate shapes; production serializers/GUI parsers and their shared fixtures

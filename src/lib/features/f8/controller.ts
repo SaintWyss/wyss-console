@@ -1,4 +1,4 @@
-import type { ApprovalDetail } from '../../contracts/approvals';
+import type { ApprovalDetail } from '../../contracts/f8';
 import type {
   AuditInfo,
   AuthorityInfo,
@@ -1293,7 +1293,13 @@ export class F8Controller {
   async decide(kind: Decision): Promise<void> {
     const approval = this.approval;
     const row = this.detail?.session;
-    if (!approval || !row || approval.decision?.status === 'pending') return;
+    if (
+      !approval ||
+      !row ||
+      approval.decision?.status === 'pending' ||
+      !approval.detail.decisions.includes(kind)
+    )
+      return;
     const fence = row.runtime.fence;
     if (!approval.detail.approval.decidable || fence.instance === null) return;
     this.decisionIntent = {
