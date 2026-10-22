@@ -1,5 +1,10 @@
 # What was built, against the planning set merged from the documentation branches
 
+> **Historical record.** For current status use the [gap register](../product/implementation-status.md)
+> and [remaining roadmap](../product/roadmap.md). F8 was subsequently activated in production
+> with real Codex, P2/V8, ADR0051 Accepted and cap1; P1 remains. The report below retains
+> its original observations and limitations; its procedures are not new authorization.
+
 The architecture set (`docs/architecture/`, from `docs/console-planning-review-2026-10-13` and
 `docs/fx-b1-native-verification-2026-10-14`) was written before F1 to F14 were built and still
 says "proposed" in places. Where the owner decided or the build differs, the accepted ADRs and

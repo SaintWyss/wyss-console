@@ -1,5 +1,12 @@
 # 15 — Performance engineering
 
+> **2026-10-22 consolidation:** this document retains dated design/evidence and detailed
+> contracts. Its present-tense status/decision tables describe their stated baseline,
+> not necessarily current implementation. Read the [current product set](../product/README.md),
+> [verified gaps](../product/implementation-status.md) and [requirement crosswalk](../product/traceability.md)
+> first. F8 is active P2/V8, ADR0051 Accepted, cap1; P1 remains available. New product
+> direction does not supersede accepted security ADRs or turn proposed tests into PASS.
+
 > Current evidence (2026-10-19): `../acceptance/p1-2026-10-19.md` records two partial
 > measurements of the real installed application, including Ghostty already present on
 > the machine. `benchmarks/idle.py` exists. Historical “none measured” statements below

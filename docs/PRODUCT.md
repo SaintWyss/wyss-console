@@ -1,79 +1,74 @@
-# Wyss Console: the product
+# Wyss Console: product direction
 
-This page says what Wyss Console is for and what its owner has asked of it. It is the first
-document to read and the one the others answer to (see [Documents](#documents)). What is
-actually built is in the [README](../README.md); this page says so where the two differ.
+Current consolidation: 2026-10-22, source baseline `main` at `e480d479`.
+This page records owner scope. The [functional specification](product/functional-specification.md)
+defines final behaviour; [implementation status](product/implementation-status.md) says
+what exists and what recorded evidence proves. A requirement is not a production
+capability, and scope approval is not acceptance of a technical ADR.
 
-Status: approved by the owner on 2026-10-12, with the ten decisions recorded in
-[ADR 0028](adr/0028-product-direction-and-agent-configuration.md), which is accepted.
+## Owner decisions
 
-## What it is
+| ID    | Approved product decision                                                                                   | Consequence                                                                                                                                |
+| ----- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| WD-01 | Full hybrid: Claude Code and Codex first-class, Native and Managed where technically feasible               | Preserve original features through each own Native CLI; qualify Managed profiles separately without weakening security or inventing parity |
+| WD-02 | Projects are the primary working context, containing terminals, agents, sessions, profiles and coordination | Device/host → project → workspace → sessions; global configuration/administration remains separately accessible                            |
 
-Wyss Console is a fast, light, native terminal and the control centre of a development
-environment that works with AI agents. It shows and changes the real configuration of each
-installed agent (rules, hooks, skills, MCP servers and settings), says which configuration
-each session actually uses, and runs supervised work under a separate authority with leases
-and approvals. The terminal works with no agent at all.
+The target is the **complete personal product**, not an MVP. Previously approved
+[owner directions](architecture/32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md) remain:
+finite supervised OL3, transparent remote PCs, native Android, real configuration,
+optional lingering, faithful terminal reattachment, safe model/effort control and
+Wyss policy/effects with Hermes planning behind a boundary. These choices are not
+reopened. Public distribution and unattended OL4 remain outside personal scope.
 
-It is not a chat application, not only a terminal emulator, and not a settings screen: a change
-made in it is a change to the file the agent reads, visible to that agent when it is started
-anywhere else.
+## Product promise
 
-## Why it exists
+Wyss Console is a fast native terminal and development control centre, useful without
+agents or network. It changes real provider files through reviewed operations, shows
+global/project/session scope, and separates persisted, provider-resolved and session-
+effective facts. File success never proves provider consumption.
 
-Its owner works every day with Codex, Claude Code and other agents under a methodology of his
-own: global and per-project instructions, engineering and security rules, validation hooks,
-skills, model routing and working profiles, across several repositories and two computers. In
-the terminal he used, switching agents and knowing or changing which rules and hooks were
-active meant editing configuration files by hand and remembering what was on. Wyss Console
-exists to give that environment one visible, real-time place of control.
+Every session identifies host/project/provider/mode, profile and known state. Projects
+organize work, not permissions. Switching/closing a view does not stop/restart work.
+Reconnect queries surviving owners; dead/ambiguous work is shown honestly and restart
+is explicit. Handoff is reviewed context for a new recipient, not private model-state
+transfer. OL3 coordinates finite work without becoming an authority.
 
-## Two planes
+| Plane   | Execution/configuration                                                                    | Boundary                                                         | Baseline                                                               |
+| ------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Native  | Original Claude Code/Codex CLI in a real terminal, real files or supported session profile | Provider/user controls; full account rights, not Wyss-mediated   | Both launchers/profiles built; full feature/acceptance closure partial |
+| Managed | Provider execution owned by `wyss-control` under an exact attested profile                 | Scoped expiring leases, generation fencing, per-action mediation | Codex implemented; Claude designed/feasibility-gated                   |
 
-| Plane       | What runs                                 | With which configuration                                               | Who decides what it may do                                |
-| ----------- | ----------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------- |
-| **Native**  | an agent's own CLI in a Console terminal  | the user's real global and project configuration, or a session profile | the agent itself: its permissions and its hooks           |
-| **Managed** | Codex under the authority, `wyss-control` | the isolated configuration the authority fixes                         | the authority: leases and approvals, one action at a time |
+An unsupported Managed feature remains a product gap. Native is an explicit alternative
+launch, never automatic fallback. Hooks/MCP/skills/subagents cannot silently widen an
+existing Managed profile.
 
-The two are never shown as one. Every session says which plane it is in and which configuration
-it uses. A change to the global configuration never makes a managed session claim to use it.
+## Current baseline
 
-## Requirements the owner has stated
+F8 is **production-active** with real Codex 0.159.0, protocol 2, SQLite V8 and
+[ADR0051 Accepted](adr/0051-per-session-managed-runtimes.md). Runtime capacity is **one**.
+Protocol1/V7 remains available with separate service/store. The
+[activation result](acceptance/f8-activation-procedure-2026-10-22.md) supersedes earlier
+inactive/Proposed statements. Multi-process credential refresh remains NOT_PROVEN.
 
-| #   | Requirement                                                                                                                                                                          | Built today                                                                  |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| R1  | A capable terminal on its own: low idle memory, fast start and input, correct resize and IME                                                                                         | Yes, unmeasured: no performance figure exists yet                            |
-| R2  | Read and change the real global configuration files of the installed agents, in both directions: first switching what exists, then creating and editing, as far as each agent allows | No                                                                           |
-| R3  | Show what is declared, what the agent resolved and what each running session uses, separately                                                                                        | No                                                                           |
-| R4  | Never report a change as active because a file was written                                                                                                                           | No                                                                           |
-| R5  | Security controls stay under the owner's control and never change silently                                                                                                           | No                                                                           |
-| R6  | Global editing and independent per-project or per-session profiles, as two distinct features                                                                                         | No                                                                           |
-| R7  | Start and supervise an agent from the Console, with profiles and observability                                                                                                       | No. An agent can be started by hand in a terminal tab                        |
-| R8  | Codex, Claude Code, OpenCode and Hermes, through adapters that state what each can really do                                                                                         | Codex only, managed                                                          |
-| R9  | Keep the managed execution boundaries exactly as they are                                                                                                                            | Yes                                                                          |
-| R10 | Nothing tied to one person's paths, user name, host or provider settings                                                                                                             | Yes in the code; the product is built for one desktop                        |
-| R11 | Native Codex runs the owner's real global hooks while managed Inference keeps working, independently of them                                                                         | No. Today managed Inference refuses to start while any Codex hook is enabled |
+F8 completion does not imply concurrent Managed work, Claude Managed or full OL3.
+Existing project selection/grouping/defaults are not the project-centered workspace.
+Native sessions, host, layout, configuration/restoration, manual handoff and personal
+installation have evidence with explicit limits. Remote/client/Android, faithful screen
+recovery and complete performance/accessibility acceptance remain in the roadmap.
 
-## Not now
+## Documents and authority
 
-Each of these is wanted and each needs its own decision before any work starts: several managed
-runtimes or turns at once, handing work from one agent to another, showing the model of a
-session, remote access from another device, a personal assistant of the owner's own, and
-distribution to other users ([ADR 0027](adr/0027-local-product-no-distribution-packaging.md)
-stands).
+1. This page and owner records define product scope.
+2. [docs/product](product/README.md) consolidates final behaviour, architecture,
+   capabilities, gaps, roadmap and traceability; unchanged detailed contracts remain linked.
+3. Accepted [ADRs](adr/) govern technical/security decisions. Product goals cannot
+   supersede them. New ADR0052/0053 remain Proposed.
+4. [README](../README.md), source and dated acceptance describe actual implementation,
+   each at its stated version/slice.
+5. Historical architecture/drafts/research and `wyss-agent-legacy/` remain inputs;
+   dated present-tense statements are not a second current backlog.
 
-## Documents
-
-| Order | Document                  | Answers                                                                                                 |
-| ----- | ------------------------- | ------------------------------------------------------------------------------------------------------- |
-| 1     | This page                 | What the product is and what has been asked of it                                                       |
-| 2     | `docs/spec/`, per feature | The exact behaviour of a feature and how it is accepted                                                 |
-| 3     | [`docs/adr/`](adr/)       | Technical decisions. A later one extends or supersedes an earlier one; an accepted one is not rewritten |
-| 4     | [README](../README.md)    | What is implemented and verified, and nothing else                                                      |
-
-A goal on this page does not by itself override an established security control. Changing one
-takes an explicit technical decision, recorded in an ADR, and proof.
-
-`wyss-agent-legacy/` (the archive of the original Wyss assistant), the base specification v0.1 and
-the research and vision reports that preceded this page are inputs. What is taken from them
-enters through an ADR.
+The prior [product snapshot](history/PRODUCT-before-phase-1-2026-10-22.md) is retained.
+No technical ADR, service action, migration or credential use is approved by this phase.
+Unresolved owner choices have alternatives/recommendations in the
+[roadmap](product/roadmap.md#3-outstanding-owner-decisions-and-technical-discovery).

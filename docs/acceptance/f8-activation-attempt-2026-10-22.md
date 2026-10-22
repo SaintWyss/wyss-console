@@ -1,5 +1,10 @@
 # F8: primer turno con Codex real, causa y corrección (2026-10-22)
 
+> **Historical record.** For current status use the [gap register](../product/implementation-status.md)
+> and [remaining roadmap](../product/roadmap.md). F8 was subsequently activated in production
+> with real Codex, P2/V8, ADR0051 Accepted and cap1; P1 remains. The report below retains
+> its original observations and limitations; its procedures are not new authorization.
+
 Estado: **el turno con Codex 0.159.0 real funciona de punta a punta en una GUI aislada.** F8 sigue
 **sin activar**: la consola instalada del dueño (protocolo 1, SQLite V7) no cambió, no se paró, no se
 reinició y no se migró. ADR 0051 sigue _Proposed_.

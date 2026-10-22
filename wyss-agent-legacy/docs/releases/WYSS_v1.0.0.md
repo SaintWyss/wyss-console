@@ -2,7 +2,7 @@
 
 Release de la línea v1: Wyss como autoridad única sobre PC, web LAN, teléfono y
 panel del hogar. Alcance funcional = fases 9–16 del milestone «Producto final».
-Cambios detallados en [`CHANGELOG.md`](../../CHANGELOG.md).
+Cambios detallados en [`CHANGELOG.md`](../../root-documents/CHANGELOG.md).
 
 ## Alcance
 

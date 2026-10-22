@@ -1,5 +1,11 @@
 # Changing the configuration (F2a)
 
+> **Implemented baseline contract with later extensions:** ADR0034 governs custody;
+> ADR0041–0047 and0050 extend operations/scopes. For the final target and exact current
+> gaps read [configuration requirements](../product/functional-specification.md#fp-cfg-02)
+> and [status](../product/implementation-status.md). The proposed exchange/settling writer
+> in architecture07 is not the implemented descriptor-based rename protocol below.
+
 What the Console can change in Claude Code's own files, how it does it, what it keeps, and
 what it promises. The decision behind the storage is [ADR 0034](../adr/0034-encrypted-restoration-store-and-secret-bearing-entries.md);
 the machinery is described in [07 §5](../architecture/07-CONFIGURATION-ENGINE.md) and the

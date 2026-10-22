@@ -4,14 +4,14 @@ Yo organicé la documentación de Wyss para que una persona sin experiencia en a
 
 ## Recorrido recomendado
 
-1. [Producto y primeros pasos](docs/manual/01_PRODUCTO_Y_PRIMEROS_PASOS.md)
-2. [Uso funcional](docs/manual/02_USO_FUNCIONAL.md)
-3. [Arquitectura y decisiones](docs/manual/03_ARQUITECTURA_Y_DECISIONES.md)
-4. [Diagramas UML](docs/manual/04_UML.md)
-5. [Configuración, datos y APIs](docs/manual/05_CONFIGURACION_DATOS_Y_API.md)
-6. [Seguridad, pruebas y calidad](docs/manual/06_SEGURIDAD_PRUEBAS_Y_CALIDAD.md)
-7. [Operación, despliegue y recuperación](docs/manual/07_OPERACION_DESPLIEGUE_Y_RECUPERACION.md)
-8. [Estado, limitaciones, roadmap y glosario](docs/manual/08_ESTADO_LIMITACIONES_Y_GLOSARIO.md)
+1. [Producto y primeros pasos](../docs/manual/01_PRODUCTO_Y_PRIMEROS_PASOS.md)
+2. [Uso funcional](../docs/manual/02_USO_FUNCIONAL.md)
+3. [Arquitectura y decisiones](../docs/manual/03_ARQUITECTURA_Y_DECISIONES.md)
+4. [Diagramas UML](../docs/manual/04_UML.md)
+5. [Configuración, datos y APIs](../docs/manual/05_CONFIGURACION_DATOS_Y_API.md)
+6. [Seguridad, pruebas y calidad](../docs/manual/06_SEGURIDAD_PRUEBAS_Y_CALIDAD.md)
+7. [Operación, despliegue y recuperación](../docs/manual/07_OPERACION_DESPLIEGUE_Y_RECUPERACION.md)
+8. [Estado, limitaciones, roadmap y glosario](../docs/manual/08_ESTADO_LIMITACIONES_Y_GLOSARIO.md)
 
 ## Criterio editorial
 

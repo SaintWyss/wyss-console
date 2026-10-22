@@ -1,5 +1,12 @@
 # 34 — OL3 supervised multi-agent orchestration contract
 
+> **2026-10-22 consolidation:** this document retains dated design/evidence and detailed
+> contracts. Its present-tense status/decision tables describe their stated baseline,
+> not necessarily current implementation. Read the [current product set](../product/README.md),
+> [verified gaps](../product/implementation-status.md) and [requirement crosswalk](../product/traceability.md)
+> first. F8 is active P2/V8, ADR0051 Accepted, cap1; P1 remains available. New product
+> direction does not supersede accepted security ADRs or turn proposed tests into PASS.
+
 Status: **candidate final-product design, NOT accepted architecture**. Owner chose DN-15=OL3
 and DN-08=A. Ties to [05](05-TERMINAL-AND-NATIVE-SESSIONS.md),
 [09](09-PROFILES-AND-ORCHESTRATION.md),
