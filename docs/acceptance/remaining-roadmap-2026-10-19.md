@@ -1,5 +1,10 @@
 # What the roadmap still holds, and what each part needs
 
+> **Historical record.** For current status use the [gap register](../product/implementation-status.md)
+> and [remaining roadmap](../product/roadmap.md). F8 was subsequently activated in production
+> with real Codex, P2/V8, ADR0051 Accepted and cap1; P1 remains. The report below retains
+> its original observations and limitations; its procedures are not new authorization.
+
 State at `main` after the merge of 2026-10-19. "Built" means in the application and verified as
 the acceptance records say; nothing below is declared done that is not.
 

@@ -1,5 +1,12 @@
 # 52 — B1 phase P1: typed admission, execution, export and quarantine contracts
 
+> **2026-10-22 consolidation:** this document retains dated design/evidence and detailed
+> contracts. Its present-tense status/decision tables describe their stated baseline,
+> not necessarily current implementation. Read the [current product set](../product/README.md),
+> [verified gaps](../product/implementation-status.md) and [requirement crosswalk](../product/traceability.md)
+> first. F8 is active P2/V8, ADR0051 Accepted, cap1; P1 remains available. New product
+> direction does not supersede accepted security ADRs or turn proposed tests into PASS.
+
 > Integration note (2026-10-19): the dated design and experiment statements below are historical. Only the pure Rust data/validation foundation and test-only filesystem fixtures are being integrated; there is no production B1 launcher, trusted capture, quarantine service or new authority permission. B1 containment and FX-H01 remain NOT_PROVEN. The current owner policy permits ordinary unit fixtures but prohibits disposable HOME, private keyrings/buses, VMs, containers and artificial user installations for development/acceptance. Historical isolated experiment recipes are not current instructions. Accepted authority contracts remain unchanged.
 
 Date: 2026-10-14. **P1 design contract; documentation only, NOT_IMPLEMENTED, NOT_SECURITY_PROVEN, ADR_NOT_ACCEPTED.**

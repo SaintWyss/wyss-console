@@ -1,5 +1,12 @@
 # 14 — Data, persistence and recovery
 
+> **2026-10-22 consolidation:** this document retains dated design/evidence and detailed
+> contracts. Its present-tense status/decision tables describe their stated baseline,
+> not necessarily current implementation. Read the [current product set](../product/README.md),
+> [verified gaps](../product/implementation-status.md) and [requirement crosswalk](../product/traceability.md)
+> first. F8 is active P2/V8, ADR0051 Accepted, cap1; P1 remains available. New product
+> direction does not supersede accepted security ADRs or turn proposed tests into PASS.
+
 Domains J (records) and L (persistence) of [04](04-TARGET-ARCHITECTURE.md): who owns each
 piece of state, where it lives, how it survives a crash and how it is undone. `[R]` marks what
 exists; the rest is `[P]`.

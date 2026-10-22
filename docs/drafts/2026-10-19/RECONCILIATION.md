@@ -1,5 +1,10 @@
 # Reconciliation of the 2026-10-19 drafts with the implementation
 
+> **Historical draft pack.** Current scope/status/dependencies are consolidated in
+> [docs/product](../../product/README.md). Proposed ADR numbers and “not built” statements
+> below are dated; use the [crosswalk/resolutions](../../product/traceability.md).
+> Preserve the contracts as inputs, not a second current execution roadmap.
+
 The drafts in this folder were written without sight of the code. They stay **proposals**.
 The accepted record is ADR 0034–0046 and `docs/acceptance/`.
 

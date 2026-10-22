@@ -1,5 +1,10 @@
 # What the owner has to decide before the next phase
 
+> **Historical record.** For current status use the [gap register](../product/implementation-status.md)
+> and [remaining roadmap](../product/roadmap.md). F8 was subsequently activated in production
+> with real Codex, P2/V8, ADR0051 Accepted and cap1; P1 remains. The report below retains
+> its original observations and limitations; its procedures are not new authorization.
+
 > Current execution policy (Santiago, 2026-10-19): the eligible remaining roadmap is
 > authorised. Real development/acceptance uses the owner's normal computer and environment;
 > no disposable HOME, private keyring/bus, VM, container or artificial user installation.

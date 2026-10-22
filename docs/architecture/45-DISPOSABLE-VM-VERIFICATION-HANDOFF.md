@@ -1,5 +1,12 @@
 # 45 — Disposable Linux VM verification handoff (next evidence gate)
 
+> **2026-10-22 consolidation:** this document retains dated design/evidence and detailed
+> contracts. Its present-tense status/decision tables describe their stated baseline,
+> not necessarily current implementation. Read the [current product set](../product/README.md),
+> [verified gaps](../product/implementation-status.md) and [requirement crosswalk](../product/traceability.md)
+> first. F8 is active P2/V8, ADR0051 Accepted, cap1; P1 remains available. New product
+> direction does not supersede accepted security ADRs or turn proposed tests into PASS.
+
 > **SUPERSEDED as general verification instruction (2026-10-14).** The owner requires native CachyOS, not Ubuntu/VM. Read [46 — CachyOS native verification](46-CACHYOS-NATIVE-VERIFICATION-HANDOFF.md) first. This document is retained **only** as a restricted procedure for risky/privileged tests that genuinely need a separate disposable guest. It is not permission or a requirement to create any VM.
 
 **Status:** procedures ONLY, not a passed test or implementation authorisation.

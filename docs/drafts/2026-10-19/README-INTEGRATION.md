@@ -1,5 +1,10 @@
 # Wyss Console — consolidated design and documentation package
 
+> **Historical draft pack.** Current scope/status/dependencies are consolidated in
+> [docs/product](../../product/README.md). Proposed ADR numbers and “not built” statements
+> below are dated; use the [crosswalk/resolutions](../../product/traceability.md).
+> Preserve the contracts as inputs, not a second current execution roadmap.
+
 **Prepared:** 2026-10-19
 **Git branch:** `docs/wyss-console-planning-2026-10-19`
 **Source base:** `main` at `916521c05cb38c292c0d8b15faee68f5bce8fb03`

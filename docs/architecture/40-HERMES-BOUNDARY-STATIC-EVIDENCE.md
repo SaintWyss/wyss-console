@@ -1,5 +1,12 @@
 # 40 — DN-06=D: static Hermes boundary evidence and non-bypass tests
 
+> **2026-10-22 consolidation:** this document retains dated design/evidence and detailed
+> contracts. Its present-tense status/decision tables describe their stated baseline,
+> not necessarily current implementation. Read the [current product set](../product/README.md),
+> [verified gaps](../product/implementation-status.md) and [requirement crosswalk](../product/traceability.md)
+> first. F8 is active P2/V8, ADR0051 Accepted, cap1; P1 remains available. New product
+> direction does not supersede accepted security ADRs or turn proposed tests into PASS.
+
 Date: 2026-10-13. **Source reading only, no execution or external review.**
 Pinned Hermes upstream revision:
 `NousResearch/hermes-agent@e06df9c2eae6901f4c88f464e0ae6e753c0428b8`.

@@ -10,7 +10,7 @@ El código de `main` contiene el alcance funcional del milestone interno **v1.0 
 - **versión activa:** `1.0.0` en package, web y cliente Android.
 
 La preparación de release está completa: changelog, matriz de gates desde un commit exacto,
-artefactos, upgrade y rollback. Ver [`../CHANGELOG.md`](../CHANGELOG.md),
+artefactos, upgrade y rollback. Ver [`../CHANGELOG.md`](../root-documents/CHANGELOG.md),
 [`releases/WYSS_v1.0.0.md`](releases/WYSS_v1.0.0.md) y [`UPGRADE.md`](UPGRADE.md).
 El tag `v1.0.0` y la GitHub release se publicaron el 2026-07-20 con autorización del owner.
 

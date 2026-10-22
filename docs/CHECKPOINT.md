@@ -1,108 +1,117 @@
-# Checkpoint
+# Development and maintenance
 
-Current continuation: 2026-10-21, `integrate/f8-final`, worktree `~/Github_repos/wyss-console-rama-4`, private
-`origin/main`. Recheck actual Git heads/status before writing or pushing. No public release.
-The other worktree and all unrelated pending work are preserved.
+This page owns engineering commands and documentation policy. Current product state
+belongs only to [implementation status](product/implementation-status.md); work order
+belongs to the [roadmap](product/roadmap.md). Start with the relevant item, then follow
+its functional requirement and architecture references through the
+[documentation map](product/README.md).
 
-## Implementation and acceptance are different states
+## Prerequisites and commands
 
-| Block                                                          | Implementation                                                                                                          | Real acceptance / next requirement                                                                                                                           |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| F1/F2                                                          | Implemented                                                                                                             | Accepted; `acceptance/f1-f2a-2026-10-19.md`, `f2b-owner-decisions.md`                                                                                        |
-| F3 native sessions/profiles                                    | Implemented                                                                                                             | Accepted baseline; `acceptance/f3-2026-10-19.md`, ADR 0035                                                                                                   |
-| F9 persistent host                                             | Implemented                                                                                                             | Accepted baseline; ADR 0036; preserve live terminals across GUI upgrades                                                                                     |
-| F14/F11a/F13 baseline                                          | Implemented                                                                                                             | Historical acceptance in `acceptance/f14-f11a-f13-closure-2026-10-19.md`                                                                                     |
-| F4a inventory/switches                                         | Implemented                                                                                                             | Baseline accepted; `acceptance/f4a-f5-f6-f1b-2026-10-19.md`                                                                                                  |
-| F5 account hooks/MCP/instruction edits/templates/create/delete | Implemented                                                                                                             | Baseline real acceptance; ADRs 0042–0047 and linked acceptance records                                                                                       |
-| F5 project files and hook/MCP templates                        | Implemented, ADR 0050                                                                                                   | Native authoring/Undo and template roundtrip PASS; confirmed template apply NOT_RUN; provider consumption NOT_PROVEN                                         |
-| F6 models/catalogue/reroute/native effort                      | Implemented, ADR 0048                                                                                                   | Partial installed-provider acceptance; old host/authority lack new behaviour                                                                                 |
-| F8 per-session runtimes                                        | Source complete behind the inactive boundary (protocol 2, V8, native local-tools, `Runtimes` window); ADR 0051 Proposed | Integrated acceptance PASS (F8-01..18, 29 methods); provider, installed migration, owner acceptance NOT_PROVEN; see f8-delivery-2026-10-21.md; no activation |
-| P1                                                             | Backend baseline and idle optimization implemented                                                                      | Partial measurements; visual matrix NOT_RUN; no canonical budget pass                                                                                        |
-| F10 gateway                                                    | Reviewed unreachable foundations, ADR 0049                                                                              | Authentication decision preparation only; no transport/listener/device enrollment                                                                            |
-| F1b / B1 / G-INF                                               | Research and reviewed pure contracts                                                                                    | Isolation/provider claims remain partial or NOT_PROVEN; no production B1 worker                                                                              |
+Linux/CachyOS KDE, Rust, Node26+, npm12+ and the
+[Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
+Managed provider/version/isolation requirements are recorded in the status page and
+linked contracts, not duplicated here.
 
-Authoritative record of this continuation:
-[engineering acceptance and preservation](acceptance/engineering-2026-10-20.md).
-Broader remaining scope: [roadmap](acceptance/remaining-roadmap-2026-10-19.md).
-This supersedes earlier checkpoint statements that called F5 fully accepted, described project
-selection as unimplemented, said gateway had no second review, or used old installed/runtime PIDs.
+```sh
+npm ci
+npm run desktop:dev
+```
 
-## Live installation observed on 2026-10-20
+`desktop:dev` uses the native IPC host; `npm run dev` alone serves the frontend.
+For code changes, select the relevant checks; the full repository suites are:
 
-- Installed GUI revision `2f503902946a`, PID 1852991, is open after a GUI-only `--keep-host` update.
-  Existing packaged authority payload was preserved byte-for-byte; compatible update pending remains.
-- Host 1607394 and fish 1607420 retained identities/inode; the same terminal remains running.
-  Authority 1167285 and Codex 1167441 retained identities, schema 7, runtime revision 9, ready/inference,
-  seven cached models, unchanged outbound counters and durable head 76. No authority/host restart.
-- Original provider configuration bytes/owners/modes and inventoried live process identities unchanged.
-  Both project fixtures returned empty through Undo; GUI project selection cleared.
-- Native AT-SPI control was available. Real chooser, trust/path rejection, instruction authoring,
-  confirmations/cancellations, deletion/exact Undo and encrypted hook/MCP roundtrip observed PASS.
-  Confirmed template application and provider consumption remain separate outstanding slices.
-- Host protocol 1 still lacks effort-profile support; authority model-list lacks new offers/completeness.
-  F6 incompatible-runtime behavior remains explicit; SG-12 unchanged. No paid provider experiment.
-- Retained packages preserve previous GUI and the older inode used by the host. Rollback stops the
-  host and must not run unattended. These historical PIDs are never cleanup targets.
-- Details and local evidence: [native acceptance](acceptance/f5-native-wayland-2026-10-20.md).
+```sh
+npm run check
+npm run check:rust
+npm run scan:repo
+```
 
-## Current engineering decisions
+`check` covers formatting, lint, types, frontend tests, the owned-process harness and
+frontend build. `check:rust` uses the repository's selected fmt/check/test/clippy suite.
+**Do not substitute blanket `cargo test` or `lifecycle_process`**: the latter creates
+an inherited private user/systemd environment. Do not enable ignored real-provider or
+credential-store tests merely because an old report mentions them. Real acceptance
+uses the owner's normal native environment; unit fixtures and intrinsic Managed
+isolation are distinct from historical disposable HOME/keyring/bus/VM procedures.
 
-F8 execution continues on the private integration branch, based on `172a1c4`; `main` remains
-`1117217` until mandatory integration and security gates pass. All 29 protocol-2 methods route through
-`authority.rs` or `operations.rs`; V8 durable writers, process workers, bindings and reads exist.
-The local application selector now composes a validated prepared V8 image, one registry/writer,
-F8 transport and supervised service. Native inference uses DeferredProcessWorker and the native
-Codex adapter; the installed entry point still explicitly selects protocol 1. No installed database
-is opened by the prepared-F8 constructor and no listener or environment activation switch was added.
+For documentation-only changes, check changed Markdown formatting, relative links and
+anchors, FP/AC and legacy crosswalk preservation, and documentation-only Git scope;
+application builds/provider experiments are unnecessary. Never blanket-format historical
+ADRs/evidence to tidy unrelated files. `scan:repo` includes staged new files.
 
-Cold reviews found and corrected recovery/replay, native normalization and spawn ownership defects.
-Pending spawn and timeout retain capacity/staging until reap. The child transfers its self-pidfd
-before exec, avoiding parental acquisition by a recyclable child PID. See the
-[execution and precise remaining gates](acceptance/f8-final-2026-10-21.md),
-[independent security evidence](acceptance/f8-security-review-2026-10-21.md) and
-[29-method source matrix](acceptance/f8-protocol2-method-matrix.md).
-Native local-tools approvals and the coordinated protocol-2 window are implemented and accepted at
-the application level ([delivery report](acceptance/f8-delivery-2026-10-21.md)); the activation
-runbook is [prepared, not authorized](acceptance/f8-activation-runbook-2026-10-21.md).
-Capacity stays one; multiprocess credential refresh, real provider, installed migration and owner
-acceptance remain separate NOT_PROVEN gates. Historical installed observations below are not current
-process identities or cleanup targets.
+## Packaging and live installation
 
-F10 authentication preparation recommends standard authenticated TLS plus standard WebAuthn user
-verification for further review; no custom production signing protocol and no dependencies added.
-Selected-version audit coverage, device/origin/transport policy and dependency approval remain open.
-See [F10 decision preparation](research/f10-authentication-decision-2026-10-20.md).
+### Ordinary package installation and launch
 
-P1 backend and read-only observations continue without interrupting live processes. Visual desktop
-benchmarks require Santiago's presence and explicit approval. Do not drop caches, reboot, close other
-applications or substitute a software-rendered/nested environment. Unmet conditions stay NOT_RUN.
+From the repository root, build the package after installing the prerequisites and
+running `npm ci`. Example for version 0.2.0 on Linux x64; if your build differs, set
+`wyss_package` to the exact directory printed by the packaging command:
 
-## Testing and safety policy
+```sh
+npm run desktop:package
+wyss_package=".artifacts/package/wyss-console-0.2.0-linux-x64"
+bash "$wyss_package/share/wyss-console/install.sh" install --package "$wyss_package" --keep-host
+"$HOME/.local/opt/wyss-console/bin/wyss-console"
+```
 
-Normal owner desktop/HOME/XDG/session bus/wallet only for development and real acceptance. Ordinary
-unit fixtures are permitted; no disposable user installation, private keyring/bus, VM or container.
-Historical isolated acceptance records are evidence, not current recipes.
+The output contains `bin/wyss-console`, `libexec/wyss-console/wyss-control` and
+`share/wyss-console/{package.json,install.sh,icon.png}`. The packaged installer is the
+same [installer](../scripts/install.sh) shipped by [package.mjs](../scripts/package.mjs).
+It checks binary digests, installs per-user without `sudo` to
+`~/.local/opt/wyss-console`, retains the previous package at that path plus `.previous`,
+and writes the Wyss Console application-menu entry and `~/.local/bin/wyss-console`
+symlink. Launch through the menu or the absolute command above; the symlink also works
+when `~/.local/bin` is on PATH. Building alone does not install or launch anything.
 
-Use `npm run check` and `npm run check:rust`. Do **not** run blanket `cargo test`: inherited
-`lifecycle_process` creates a prohibited private user/systemd environment. Do not weaken a failed
-ownership check. The 2026-10-20 continuation records one transient fail-closed owned-launch check;
-its repeat and 500 diagnostic launches passed, but its cause is not established.
+**Preserve live terminals:** `--keep-host` skips the installer's host-stop request.
+Without it, installation asks the current host to stop, closing its terminals. With
+it, the existing host and terminals continue on their running version until it exits;
+new GUI features may remain unavailable on that older host. It does not restart or
+upgrade a running authority. Close/reopen only the GUI when needed; do not stop the
+host or services just to make versions match. Rollback has no `--keep-host` option and
+can close terminals, so it needs a separate session-aware operational plan.
 
-Configuration changes need exact paths/metadata, verified backup and byte/mode restoration. Never
-print secrets or assume provider consumption. Codex hooks stay blocked until G-INF. Managed model
-choice stays excluded under ADRs 0014/0015 and DN-42; SG-12 remains unchanged.
+### F8 service activation is separate
 
-Installer `--keep-host` preserves a compatible live host. Compatible authority mismatch is update
-pending, not an automatic restart. Installer rollback **stops the host** and cannot run unattended.
-Installed authority migration/rollback, live-session interruption, paid-quota experiments, new
-crypto dependencies, listener/transport and real-device enrollment need specific owner decisions.
+The ordinary example above selects the normal protocol1 desktop path, **not F8**.
+The packaged GUI may bootstrap its ordinary authority lifecycle on launch; that is not
+protocol2 activation. The installer alone does not migrate a database or enable/start
+an F8 service. Optional `--host-service` writes a native-host unit but does not enable
+it; that flag is not needed for the ordinary example either.
 
-## Historical integration and incident evidence
+For an existing F8-enabled installation, do **not** use the ordinary example as an
+upgrade recipe: it rewrites the menu entry without `--f8-authority`. Preserve its
+reviewed F8 installation settings and use the configured F8 menu entry; a bare binary
+or symlink launch does not select F8.
 
-Validated branch integration remains preserved, including pure B1 contracts and fixture packaging
-checks; excluded F1 trial branches, weaker JavaScript prototype and incompatible native-E2E user
-harness remain excluded. See [branch record](acceptance/branch-integration-2026-10-19.md).
+F8 setup uses `install --f8-service --codex ABSOLUTE_PATH` with the pinned Codex 0.159.0;
+`--allow-credential` is a separate explicit choice. Those options write an F8 service
+unit and a menu entry with `--f8-authority`; they do not complete first-start store
+creation/migration or service activation. Follow the separately authorized
+[F8 activation and rollback procedure](acceptance/f8-activation-procedure-2026-10-22.md)
+for that operation, including live-session preservation and `--keep-host`. The historical
+record is not permission to repeat migration, credential use or service operations.
 
-The earlier process-name benchmark destroyed the original fish session; a replacement shell is not
-recovery. Only verified owned handles may drive cleanup. See
-[incident and reviewed lifecycle](incidents/2026-10-20-benchmark-ended-live-session.md).
+Keep matching binaries and consistent SQLite backups/WAL with an explicit post-snapshot
+loss window; no SQL downgrade or arbitrary PID cleanup. Repository documentation checks
+require no installation, personal credentials or installed-service changes.
+
+## Documentation maintenance
+
+- **Update the canonical owner first.** The [six-page map](product/README.md) assigns one
+  location per information kind. Change behaviour in the functional specification,
+  ownership/security in architecture, delivered evidence in status, and sequencing in
+  roadmap; avoid copying those explanations into README or a new checkpoint.
+- Create a document only for genuinely separate detailed contracts or dated evidence.
+  Link it from its canonical owner and label scope, baseline and status. Keep such
+  references out of the routine reading path unless the task needs them.
+- Preserve all 31 FP IDs, matching ACs and 208 legacy mappings in
+  [traceability](product/traceability.md). When behaviour changes, update its crosswalk
+  and acceptance criterion together. Distinguish specification, fixture result and
+  production observation; a passed docs check proves no provider capability.
+- Accepted ADR decisions and historical findings/evidence remain intact. Extend decisions
+  through a separately reviewed ADR; new proposals stay Proposed until the owner accepts.
+  Correct current interpretation by reference instead of rewriting historical outcomes.
+- README is the short repository entrance; `docs/product/README.md` is the ownership map.
+  Store dated validation results in an existing applicable report or PR, not these pages.

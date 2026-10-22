@@ -1,5 +1,12 @@
 # 20 — Verification and acceptance
 
+> **2026-10-22 consolidation:** this document retains dated design/evidence and detailed
+> contracts. Its present-tense status/decision tables describe their stated baseline,
+> not necessarily current implementation. Read the [current product set](../product/README.md),
+> [verified gaps](../product/implementation-status.md) and [requirement crosswalk](../product/traceability.md)
+> first. F8 is active P2/V8, ADR0051 Accepted, cap1; P1 remains available. New product
+> direction does not supersede accepted security ADRs or turn proposed tests into PASS.
+
 > Current execution policy (Santiago, 2026-10-19): the eligible remaining roadmap is
 > authorised. Real development/acceptance uses the owner's normal computer and environment;
 > no disposable HOME, private keyring/bus, VM, container or artificial user installation.

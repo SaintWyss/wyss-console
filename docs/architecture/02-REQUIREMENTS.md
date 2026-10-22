@@ -1,5 +1,12 @@
 # 02 — Requirements
 
+> **2026-10-22 consolidation:** this document retains dated design/evidence and detailed
+> contracts. Its present-tense status/decision tables describe their stated baseline,
+> not necessarily current implementation. Read the [current product set](../product/README.md),
+> [verified gaps](../product/implementation-status.md) and [requirement crosswalk](../product/traceability.md)
+> first. F8 is active P2/V8, ADR0051 Accepted, cap1; P1 remains available. New product
+> direction does not supersede accepted security ADRs or turn proposed tests into PASS.
+
 Every requirement has a stable identifier. **Source** says who asked: `Owner` (stated by the
 owner on 2026-10-12, with the decision when there is one), an ADR, or `Design` (proposed by
 this set and approved by nobody yet). **Phase** is the first phase of

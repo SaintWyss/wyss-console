@@ -1,5 +1,12 @@
 # 25 — Independent review
 
+> **2026-10-22 consolidation:** this document retains dated design/evidence and detailed
+> contracts. Its present-tense status/decision tables describe their stated baseline,
+> not necessarily current implementation. Read the [current product set](../product/README.md),
+> [verified gaps](../product/implementation-status.md) and [requirement crosswalk](../product/traceability.md)
+> first. F8 is active P2/V8, ADR0051 Accepted, cap1; P1 remains available. New product
+> direction does not supersede accepted security ADRs or turn proposed tests into PASS.
+
 One cold review of the architecture set by a reviewer who did not write it, and what was done
 about each of its findings. The reviewer's own text, unedited, is in
 [reviews/2026-10-12-independent-review-report.md](reviews/2026-10-12-independent-review-report.md).

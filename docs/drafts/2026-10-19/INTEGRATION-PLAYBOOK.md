@@ -1,5 +1,10 @@
 # Integration, review and reconciliation instructions for Sonnet
 
+> **Historical draft pack.** Current scope/status/dependencies are consolidated in
+> [docs/product](../../product/README.md). Proposed ADR numbers and “not built” statements
+> below are dated; use the [crosswalk/resolutions](../../product/traceability.md).
+> Preserve the contracts as inputs, not a second current execution roadmap.
+
 **Source:** GitHub branch `docs/wyss-console-planning-2026-10-19`.
 **Baseline:** main `916521c05cb38c292c0d8b15faee68f5bce8fb03`.
 **Local development reported by owner:** `f1-f2a-configuration`, HEAD `5708c09`, with F9 implemented and T1/T2 GUI acceptance outstanding.

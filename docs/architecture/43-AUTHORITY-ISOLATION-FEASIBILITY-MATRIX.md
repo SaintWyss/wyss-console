@@ -1,5 +1,12 @@
 # 43 — Authority vs native-worker isolation: feasibility and decision matrix
 
+> **2026-10-22 consolidation:** this document retains dated design/evidence and detailed
+> contracts. Its present-tense status/decision tables describe their stated baseline,
+> not necessarily current implementation. Read the [current product set](../product/README.md),
+> [verified gaps](../product/implementation-status.md) and [requirement crosswalk](../product/traceability.md)
+> first. F8 is active P2/V8, ADR0051 Accepted, cap1; P1 remains available. New product
+> direction does not supersede accepted security ADRs or turn proposed tests into PASS.
+
 Date: 2026-10-14. **Stage:** owner-authorised bounded isolated verification; document-only change.
 **Status:** security research and candidate design, **NOT an ADR, NOT a final architecture**.
 No application implementation, real provider launch, host service installation, account login

@@ -8,9 +8,9 @@ Asistente operativo humano-primero con política A–D, ejecución verificable, 
 **Estado funcional:** alcance del milestone v1.0 implementado en el código  
 **Versión del paquete:** `1.0.0` — release publicada el 2026-07-20 (tag `v1.0.0`)
 
-- [Estado real y evidencia](docs/RELEASE_STATUS.md)
-- [Guía del operador](docs/OPERATOR.md)
-- [Índice documental](docs/README.md)
+- [Estado real y evidencia](../docs/RELEASE_STATUS.md)
+- [Guía del operador](../docs/OPERATOR.md)
+- [Índice documental](../docs/README.md)
 
 ## Qué es
 
@@ -116,7 +116,7 @@ uv run wyss memory list
 uv run wyss fin ver
 ```
 
-La referencia completa está en [`docs/OPERATOR.md`](docs/OPERATOR.md).
+La referencia completa está en [`docs/OPERATOR.md`](../docs/OPERATOR.md).
 
 ## LLM real
 
@@ -215,7 +215,7 @@ Reglas de capas:
 - TOML no sensible: `config/config.toml`;
 - secretos: `config/.env`;
 - plantilla: `config/config.example.toml`;
-- referencia: [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
+- referencia: [`docs/CONFIGURATION.md`](../docs/CONFIGURATION.md).
 
 La configuración falla ante claves desconocidas o tipos incorrectos. Las reglas TOML solo agregan restricciones; nunca eliminan la denylist built-in.
 
@@ -249,7 +249,7 @@ cd mobile/android
 ```
 
 El workflow raíz automatiza Python, web y Android como gates independientes y bloqueantes. Ver
-[`docs/TESTING.md`](docs/TESTING.md).
+[`docs/TESTING.md`](../docs/TESTING.md).
 
 ## Límites conocidos
 
@@ -261,7 +261,7 @@ El workflow raíz automatiza Python, web y Android como gates independientes y b
 
 ## Documentación
 
-La fuente canónica es [`docs/README.md`](docs/README.md). `.planning/` conserva requisitos, decisiones y evidencia histórica, pero no tiene precedencia sobre código, pruebas o `docs/RELEASE_STATUS.md`.
+La fuente canónica es [`docs/README.md`](../docs/README.md). `.planning/` conserva requisitos, decisiones y evidencia histórica, pero no tiene precedencia sobre código, pruebas o `docs/RELEASE_STATUS.md`.
 
 ---
 
