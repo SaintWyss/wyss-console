@@ -255,6 +255,13 @@ const RUNTIME_PACE_MS = 400;
 /** How long a binding is asked for again while the authority is still creating it. */
 export const BIND_WAIT_MS = 30_000;
 const BIND_PACE_MS = 500;
+/**
+ * How long a turn is asked for again while the authority proves the runtime for it. The first
+ * turn after a binding makes the runtime answer a configuration read before it is admitted, and
+ * until it answers the authority says busy; asking again with the same identity is the same action.
+ */
+export const TURN_WAIT_MS = 10_000;
+const TURN_PACE_MS = 300;
 /** The most one watcher waits for a commit before it asks again. */
 export const WATCH_MS = 20_000;
 /** Files of a change set read without being asked for. The rest are read on request. */
@@ -1012,12 +1019,23 @@ export class F8Controller {
       kind: 'turn',
       session: row.id,
       run: async () => {
-        const receipt = await this.client.startTurn(
-          id,
-          fence,
-          revision,
-          prompt,
-        );
+        const deadline = this.now() + TURN_WAIT_MS;
+        let receipt;
+        for (;;) {
+          try {
+            receipt = await this.client.startTurn(id, fence, revision, prompt);
+            break;
+          } catch (error) {
+            const failure = failureOf(error);
+            if (
+              failure.code !== 'busy' ||
+              this.now() >= deadline ||
+              this.disposed
+            )
+              throw error;
+            await this.sleep(TURN_PACE_MS);
+          }
+        }
         // The authority admitted it: the text is its, not a draft any more.
         this.draft = '';
         this.tab = 'conversation';

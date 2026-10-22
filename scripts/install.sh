@@ -2,6 +2,7 @@
 # Installs, upgrades, rolls back and removes a Wyss Console package for the current user (F13).
 #
 #   install.sh install   [--package DIR] [--prefix DIR] [--host-service] [--keep-host]
+#                        [--f8-service --codex ABSOLUTE_PATH [--allow-credential]]
 #   install.sh rollback  [--prefix DIR]
 #   install.sh uninstall [--prefix DIR] [--purge]
 #   install.sh status    [--prefix DIR]
@@ -23,6 +24,9 @@ prefix="$home/.local/opt/wyss-console"
 purge=0
 service=0
 keep_host=0
+f8=0
+codex=""
+allow_credential=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --package) package="${2:?--package needs a directory}"; shift 2 ;;
@@ -30,6 +34,9 @@ while [ $# -gt 0 ]; do
     --purge) purge=1; shift ;;
     --host-service) service=1; shift ;;
     --keep-host) keep_host=1; shift ;;
+    --f8-service) f8=1; shift ;;
+    --codex) codex="${2:?--codex needs an absolute path}"; shift 2 ;;
+    --allow-credential) allow_credential=1; shift ;;
     *) echo "install: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -44,6 +51,8 @@ link="$bin_dir/wyss-console"
 desktop="$apps_dir/wyss-console.desktop"
 icon="$icons_dir/wyss-console.png"
 unit="$units_dir/wyss-console-host.service"
+f8_unit="$units_dir/wyss-console-f8.service"
+f8_runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/wyss-console-f8"
 
 say() { printf 'install: %s\n' "$*"; }
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
@@ -69,6 +78,53 @@ verify_package() {
     || die "a file of the package does not match its digest: nothing was installed"
 }
 
+# The protocol-2 authority is a unit of its own, beside the protocol-1 one, and never replaces it.
+# Everything it is told is written here and nowhere else: the Codex executable (it must answer
+# exactly `codex-cli 0.159.0`), its home, and whether the credential in that home may be bound.
+check_f8_options() {
+  [ "$f8" -eq 1 ] || { [ -z "$codex" ] && [ "$allow_credential" -eq 0 ]; } \
+    || die "--codex and --allow-credential belong to --f8-service"
+  [ "$f8" -eq 1 ] || return 0
+  case "$codex" in /*) ;; *) die "--f8-service needs --codex with an absolute path" ;; esac
+  [ -x "$codex" ] || die "$codex is not an executable"
+  [ "$("$codex" --version 2>/dev/null)" = "codex-cli 0.159.0" ] \
+    || die "$codex does not answer exactly 'codex-cli 0.159.0'"
+}
+
+write_f8_unit() {
+  mkdir -p "$units_dir"
+  local credential=""
+  [ "$allow_credential" -eq 1 ] && credential=" --allow-credential"
+  cat >"$f8_unit" <<UNIT
+# Managed by Wyss Console install.sh (wyss-console-f8.service, protocol 2). Edits do not last.
+[Unit]
+Description=Wyss Control Authority (protocol 2, managed runtimes)
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=exec
+RuntimeDirectory=wyss-console-f8
+RuntimeDirectoryMode=0700
+ExecStart="$prefix/libexec/wyss-console/wyss-control" --protocol 2 --runtime-root "%t/wyss-console-f8" --state-root "%h/.local/state/wyss-console-f8" --codex "$codex" --codex-home "%h/.codex"$credential
+Restart=on-failure
+RestartSec=1
+RestartPreventExitStatus=2
+KillMode=mixed
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+UnsetEnvironment=LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_DEBUG_OUTPUT LD_PROFILE LD_PROFILE_OUTPUT GCONV_PATH
+
+[Install]
+WantedBy=default.target
+UNIT
+  say "wrote $f8_unit (the first start needs a migrated or created store: scripts/f8-activation.sh)"
+}
+
 write_integration() {
   mkdir -p "$bin_dir" "$apps_dir" "$icons_dir"
   ln -sfn "$prefix/bin/wyss-console" "$link"
@@ -80,12 +136,13 @@ write_integration() {
 Type=Application
 Name=Wyss Console
 Comment=Terminals, agents and their configuration
-Exec=$prefix/bin/wyss-console
+Exec=$prefix/bin/wyss-console$([ "$f8" -eq 1 ] && printf ' --f8-authority %s' "$f8_runtime")
 Icon=wyss-console
 Terminal=false
 Categories=Development;Utility;
 StartupWMClass=wyss-console
 DESKTOP
+  [ "$f8" -eq 1 ] && write_f8_unit
   if [ "$service" -eq 1 ]; then
     mkdir -p "$units_dir"
     cat >"$unit" <<UNIT
@@ -106,6 +163,7 @@ UNIT
 }
 
 cmd_install() {
+  check_f8_options
   [ -n "$package" ] || package="$(cd "$here/../.." 2>/dev/null && pwd)"
   verify_package "$package"
   local version
@@ -137,6 +195,7 @@ cmd_install() {
 }
 
 cmd_rollback() {
+  check_f8_options
   [ -d "$previous" ] || die "there is no previous version to go back to"
   stop_host
   local swap="$prefix.swap.$$"
@@ -149,7 +208,7 @@ cmd_rollback() {
 
 cmd_uninstall() {
   stop_host
-  rm -f "$link" "$desktop" "$icon" "$unit"
+  rm -f "$link" "$desktop" "$icon" "$unit" "$f8_unit"
   rm -rf "$prefix" "$previous"
   say "removed the application"
   if [ "$purge" -eq 1 ]; then

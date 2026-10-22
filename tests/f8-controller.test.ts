@@ -307,6 +307,36 @@ describe('an action is one intent', () => {
     expect(r.client.createBinding.mock.calls.length).toBeLessThan(10);
   });
 
+  it('starts a turn by asking again, with the same identity, while the authority proves the runtime', async () => {
+    const r = make();
+    r.client.session.mockResolvedValue(runtimeAs('ready'));
+    await r.open();
+    r.controller.setDraft('hello');
+    r.client.startTurn
+      .mockRejectedValueOnce(failure('busy', true))
+      .mockResolvedValueOnce({ id: 'turn-1' });
+    await r.controller.startTurn();
+    expect(r.client.startTurn).toHaveBeenCalledTimes(2);
+    const ids = new Set(r.client.startTurn.mock.calls.map((c) => c[0]));
+    expect(ids.size).toBe(1);
+    expect(r.state.operation).toBeNull();
+  });
+
+  it('gives up asking for a turn at the bound, keeps the text and shows the busy authority', async () => {
+    const r = make();
+    r.client.session.mockResolvedValue(runtimeAs('ready'));
+    await r.open();
+    r.controller.setDraft('hello');
+    r.client.startTurn.mockImplementation(async () => {
+      r.advance(4_000);
+      throw failure('busy', true);
+    });
+    await r.controller.startTurn();
+    expect(r.state.operation?.failure?.code).toBe('busy');
+    expect(r.client.startTurn.mock.calls.length).toBeLessThan(10);
+    expect(r.state.draft).toBe('hello');
+  });
+
   it('closes a session only when asked twice, and with the fence and revision it was shown', async () => {
     const r = make();
     r.client.session.mockResolvedValue(runtimeAs('stopped'));
