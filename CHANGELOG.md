@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-22 — F8: protocol 2 activated in the installed Console
+
+- Owner approved ADR 0051, a new V8 store migrated from a copy of a fresh backup, installation without interrupting
+  sessions and the real credential. `wyss-console-f8.service` runs beside the untouched protocol-1 authority; the
+  launcher opens the window with `--f8-authority`. Verified with the installed binaries: Ready, W1 lease, bound,
+  real turn Completed, service restart and recovery, stop and close.
+- Fixed: the first turn is asked again (same identity) while the authority proves the runtime (was a "busy" error);
+  after an authority restart a still-wanted runtime can be stopped and its session closed (stop fence, audit replay,
+  "Stop runtime" in the window).
+- New: `install.sh --f8-service --codex PATH [--allow-credential]`, `scripts/f8-activation.sh backup|rehearse|migrate|rollback`.
+
 ## 2026-10-22 — F8: first turn with real Codex 0.159.0 fixed (still not activated)
 
 - Root cause: after `thread/archive` + `thread/unarchive` Codex 0.159.0 leaves the thread unloaded and refuses

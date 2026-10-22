@@ -376,7 +376,9 @@ fn runtime_receipts(c: &Connection, replay: &AuditReplay) -> ControlResult<()> {
             || intent.running != start
             || *expected_generation != intent.prev_generation
             || mutation.expected_revision.and_then(|n| n.checked_add(1)) != Some(intent.revision)
-            || (!start && fenced_instance != intent.prev_instance)
+            || (!start
+                && fenced_instance != intent.prev_instance
+                && !(fenced_instance.is_none() && !intent.prev_owned))
             || fenced_instance
                 .as_ref()
                 .is_some_and(|i| launches.get(i).is_none_or(|l| l.0 != intent.session))

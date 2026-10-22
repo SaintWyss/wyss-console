@@ -272,7 +272,9 @@ impl<'c> Allocator<'c> {
             // A stop fences the launch it observed: a concrete instance must be the current one,
             // and null means explicitly "no launch", never a wildcard.
             let expected = expected_instance.as_ref().map(|i| i.as_str().to_owned());
-            let live_now = desired == "running" && current_instance.is_some();
+            // Only a launch of this very authority can be live: after a restart the predecessor's
+            // launch is history, the status names no instance, and the stop that names none is current.
+            let live_now = desired == "running" && owned && current_instance.is_some();
             if expected
                 != if live_now {
                     current_instance.clone()

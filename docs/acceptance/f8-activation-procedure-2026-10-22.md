@@ -1,7 +1,7 @@
-# F8: procedimiento de activación y rollback (preparado, NO ejecutado)
+# F8: procedimiento de activación y rollback (EJECUTADO el 2026-10-22)
 
-Estado: **preparado y ensayado en aislado; nada de esto se aplicó a la instalación del dueño.** Requiere
-la aprobación explícita de Santiago (ADR 0051, interrupción, migración y uso autenticado).
+Estado: **protocolo 2 activo en la instalación del dueño** tras su aprobación explícita (ADR 0051, migración a
+base nueva, instalación sin interrumpir sesiones y uso autenticado). Resultado al final de este documento.
 
 ## Qué se investigó
 
@@ -85,3 +85,42 @@ restauración de V7 (innecesaria mientras el protocolo 1 siga intacto).
   Codex actualiza: si borra esa versión, la autoridad se niega a lanzar (no hay otro ejecutable aceptado).
 - Una sola autoridad de protocolo 2 y `max_active_runtimes = 1`.
 - ADR 0051 pasa a _Accepted_ sólo por decisión de Santiago.
+
+## Resultado de la activación (2026-10-22, tras la aprobación de Santiago)
+
+Aprobado: ADR 0051 → Accepted; migración a base nueva; instalación `--keep-host` sin interrumpir sesiones;
+credencial real (`--allow-credential`). **No** se paró `wyss-control.service` (protocolo 1), ni el host, ni la
+terminal fish, ni el Codex del dueño (PIDs 255925/256074/256102/256140 iguales antes y después).
+
+Hecho, en este orden: respaldo fresco (`…-backup-20261022-170920-f8`, V7, integridad ok, 0 FK, mismo SHA
+`6d98cc59…c3627`) → base de pruebas anterior movida a `~/.local/state/wyss-console-f8.attempt-20261022` →
+instalación del paquete → `f8-activation.sh migrate` (V8, integridad ok, 0 FK, todas las tablas conservan filas) →
+`systemctl --user enable --now wyss-console-f8.service`. Lanzador: `wyss-console --f8-authority /run/user/1000/wyss-console-f8`.
+
+Verificado con los binarios **instalados**, el socket y el servicio **reales** y la credencial real (ventana en un
+display aislado, para no tomar la pantalla del dueño):
+
+| Comprobación                                                                                                                                                          | Resultado                                                                                      |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| "Connected · protocol 2" con las 2 sesiones migradas visibles                                                                                                         | PASS                                                                                           |
+| Runtime Local Tools **Ready** (0.159.0), lease con diálogo W1, workspace Attached                                                                                     | PASS                                                                                           |
+| Turno real → **Completed**, sin el "busy" del primer turno (reintento con la misma identidad)                                                                         | PASS                                                                                           |
+| `systemctl --user restart` con el runtime Ready: sin proceso hijo, ventana reconectada ("nothing from before is acted on"), sesión Stopped, turno histórico Completed | PASS                                                                                           |
+| Defecto hallado: tras el reinicio la sesión no se podía cerrar ("busy") ni detener ("stale")                                                                          | corregido (ver abajo) y **reverificado en producción**: Stop → Close → "0 prepared · 3 closed" |
+| `auth.json` real: mismo SHA-256 y mtime (2026-10-13) tras dos runtimes y un turno: no hubo refresco                                                                   | —                                                                                              |
+| Permisos: runtime dir 0700, socket 0600, base 0600, unidad 0644, sin copias de la credencial                                                                          | PASS                                                                                           |
+
+Defecto corregido: con el runtime ya detenido tras reiniciar la autoridad, `desired_state` seguía en `running` y su
+`managed_runtime_launches` era el de la autoridad anterior. El estado leído nombra ninguna instancia, pero el stop
+exigía la instancia muerta (`StaleRevision`) y el cierre se negaba mientras `desired_state='running'`.
+`allocator.rs`: sólo un launch propio puede estar vivo (`live_now … && owned`); `audit.rs`/`v8.rs`: el recibo de un
+stop de la sucesora con fence nulo es válido, y los registros anteriores siguen siéndolo. Ventana: con el runtime
+detenido pero todavía deseado se ofrece "Stop runtime". Test `a_runtime_still_wanted_after_a_restart_is_stopped_by_the_fence_the_status_shows`.
+Revisión independiente (Codex, sólo lectura): sin hallazgos; la exclusión de dos autoridades simultáneas descansa en
+`control.lock` (ya probada: una segunda autoridad sobre los mismos directorios se rechaza).
+
+Queda abierto (decisión del dueño): reabrir la ventana desde el lanzador nuevo; reiniciar el host (cierra fish) para
+que éste corra la versión nueva; retirar el protocolo 1; refresco de credenciales con varios procesos NOT_PROVEN.
+
+Rollback vigente: `scripts/f8-activation.sh rollback` (deshabilita la unidad y `install.sh rollback` al paquete
+anterior en `~/.local/opt/wyss-console.previous`). La V7 viva nunca se tocó; la base V8 se conserva.

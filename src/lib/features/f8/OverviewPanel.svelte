@@ -201,7 +201,21 @@
             (mode === 'local_tools' && folder === null)}
           onclick={() => controller.startRuntime()}>Start runtime</button
         >
+        {#if runtime.desired === 'running'}
+          <button
+            type="button"
+            class="action"
+            disabled={!acts}
+            onclick={() => controller.confirm('stop')}>Stop runtime</button
+          >
+        {/if}
       </div>
+      {#if runtime.desired === 'running'}
+        <p class="composer-note">
+          The runtime is not running but is still wanted, for example after the
+          authority restarted. Stop it to close this session.
+        </p>
+      {/if}
       {#if mode === 'local_tools'}
         <p class="composer-note">
           Folder: <span class="mono">{folder ?? 'none selected'}</span>

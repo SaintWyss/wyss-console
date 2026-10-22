@@ -1,7 +1,6 @@
 # ADR 0051: One managed runtime per session, with bounded concurrency (DN-08 = A, F8)
 
-Status: **Proposed.** Independently reviewed design; not owner-accepted, inactive implementation with application wiring under validation. Owner acceptance remains open. Nothing here changes the running authority, its schema (V7) or any
-accepted guarantee. Extends ADRs 0012 and 0015; reconciles RC-03 (`33-CROSS-DOMAIN-RECONCILIATION.md`).
+Status: **Accepted** by Santiago on 2026-10-22 (explicit approval in the session that activated protocol 2; see the end of this ADR). Before that it was Proposed and independently reviewed. Protocol 1 and its V7 store keep running beside it. Extends ADRs 0012 and 0015; reconciles RC-03 (`33-CROSS-DOMAIN-RECONCILIATION.md`).
 Date: 2026-10-20
 
 The owner's direction for DN-08 is **A**: a separate managed runtime per session, with bounded concurrent
@@ -205,3 +204,16 @@ Still **NOT_PROVEN** and not authorized: an authenticated provider, multiprocess
 the installed V7→V8 migration, any activation, and any capacity above one. Protocol 2 has no
 model or effort field, so a per-session model choice cannot be expressed. The installed binary
 selects protocol 1 and schema 7; activation needs a separate reviewed code change.
+
+## Acceptance and activation, 2026-10-22
+
+Santiago explicitly approved, on 2026-10-22: accepting this ADR; the V7→V8 migration into a **new** store
+(`~/.local/state/wyss-console-f8/wyss-console/authority.sqlite3`, created from a copy of a fresh online backup;
+the V7 store is only read); installing the package and enabling `wyss-console-f8.service` without interrupting
+live sessions (`--keep-host`; the protocol-1 authority and host were not stopped); and authenticated use with the
+real credential (`--allow-credential`). `max_active_runtimes` stays 1.
+
+Still **NOT_PROVEN**: credential refresh with several Codex processes at once (the real `auth.json` keeps its
+inode across refreshes, so the bound descriptor and `credential_holds` keep working; what two processes do to
+one refresh token is Codex's behaviour). Retiring protocol 1 is a separate decision. Procedure, rollback and
+verification: [activation procedure](../acceptance/f8-activation-procedure-2026-10-22.md).

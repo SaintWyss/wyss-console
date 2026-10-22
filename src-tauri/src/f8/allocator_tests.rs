@@ -471,6 +471,35 @@ fn restart_leaves_predecessor_launches_unowned_and_reuse_impossible() {
 }
 
 #[test]
+fn a_runtime_still_wanted_after_a_restart_is_stopped_by_the_fence_the_status_shows() {
+    let (mut c, s) = image();
+    let o = Allocator::new(&mut c, wire(A))
+        .unwrap()
+        .start(&start(&s, &uuid(), 0, 0), &free())
+        .unwrap();
+    let old = o.runtime_instance_id.clone().unwrap();
+    // The authority restarts as B: the runtime is wanted, but its launch is the predecessor's.
+    // The status then names no instance, so naming the dead one is stale and naming none is current.
+    let mut b = Allocator::new(&mut c, wire(B)).unwrap();
+    assert_eq!(
+        b.stop(&stop(&s, &uuid(), 1, 1, Some(old.as_str())), &free())
+            .err(),
+        Some(E::StaleRevision)
+    );
+    let stopped = b.stop(&stop(&s, &uuid(), 1, 1, None), &free()).unwrap();
+    assert_eq!(
+        (
+            stopped.generation,
+            stopped.record.revision,
+            stopped.runtime_instance_id
+        ),
+        (1, 2, None)
+    );
+    drop(b);
+    validate_v8(&c).unwrap();
+}
+
+#[test]
 fn every_authority_instance_announces_itself_once_naming_its_predecessor() {
     let (mut c, s) = image();
     let started = |c: &Connection| -> Vec<(String, Option<String>)> {

@@ -425,6 +425,10 @@ pub struct Intent {
     pub prev_generation: u64,
     /// The launch the mutation found live (desired running), else none.
     pub prev_instance: Option<String>,
+    /// That launch belongs to the authority that wrote the mutation. A predecessor's does not:
+    /// the stop of a successor names no launch (what the status shows); a stop that named the
+    /// predecessor's, as the first protocol-2 builds required, is still a valid record.
+    pub prev_owned: bool,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Domain {
@@ -776,6 +780,9 @@ impl AuditReplay {
                 .as_ref()
                 .filter(|r| r.desired_running)
                 .and_then(|r| r.instance.clone());
+            let found_owned = found_live
+                .as_ref()
+                .is_some_and(|i| self.launches.get(i).is_some_and(|l| l.authority == source));
             if revision != prev_rev + 1 || generation < prev_gen || generation > prev_gen + 1 {
                 return Err(bad());
             }
@@ -841,6 +848,7 @@ impl AuditReplay {
                         running,
                         prev_generation: prev_gen,
                         prev_instance: found_live,
+                        prev_owned: found_owned,
                     },
                 )
                 .is_some()
