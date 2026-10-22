@@ -22,6 +22,7 @@ fn main() {
                     | ControlError::UnsafePath
                     | ControlError::InvalidRequest
                     | ControlError::StorageIncompatible
+                    | ControlError::GateDenied
             ) {
                 EXIT_WILL_NOT_START
             } else {

@@ -27,7 +27,12 @@ use super::{
 };
 use crate::{
     contracts::control::{ControlError as E, ControlResult},
-    f8::{engine::Spawner, migration},
+    f8::{
+        engine::Spawner,
+        migration,
+        production::{CodexConfig, CodexSpawner},
+        staging::StagingRoot,
+    },
 };
 use nix::{
     errno::Errno,
@@ -74,14 +79,17 @@ pub struct Serve {
     pub runtime_root: PathBuf,
     pub state_root: PathBuf,
     pub image: Image,
+    /// Codex, when the operator named it. Without it no runtime can be started.
+    pub codex: Option<CodexConfig>,
 }
 impl Serve {
-    /// Parses `--protocol 2 --runtime-root DIR --state-root DIR [--create | --migrate-copy FILE]`
-    /// (without the program name). Every other shape is refused: an unknown flag, a repeated
+    /// Parses `--protocol 2 --runtime-root DIR --state-root DIR [--create | --migrate-copy FILE]
+    /// [--codex PATH --codex-home DIR [--allow-credential]]` (without the program name). Every other shape is refused: an unknown flag, a repeated
     /// one, a relative path, another version.
     pub fn parse(args: impl IntoIterator<Item = OsString>) -> ControlResult<Self> {
         let mut args = args.into_iter();
         let (mut protocol, mut runtime, mut state, mut image) = (false, None, None, None);
+        let (mut codex, mut home, mut credential) = (None, None, false);
         while let Some(flag) = args.next() {
             match flag.to_str() {
                 Some("--protocol") if !protocol => {
@@ -96,6 +104,9 @@ impl Serve {
                 Some("--state-root") if state.is_none() => {
                     state = Some(absolute(take(&mut args)?)?);
                 }
+                Some("--codex") if codex.is_none() => codex = Some(absolute(take(&mut args)?)?),
+                Some("--codex-home") if home.is_none() => home = Some(absolute(take(&mut args)?)?),
+                Some("--allow-credential") if !credential => credential = true,
                 Some("--create") if image.is_none() => image = Some(Image::Create),
                 Some("--migrate-copy") if image.is_none() => {
                     image = Some(Image::MigrateCopy(absolute(take(&mut args)?)?));
@@ -103,11 +114,22 @@ impl Serve {
                 _ => return Err(E::InvalidRequest),
             }
         }
+        // Codex and its home go together; a credential is allowed only where there is a Codex.
+        let codex = match (codex, home, credential) {
+            (None, None, false) => None,
+            (Some(executable), Some(home), allow_credential) => Some(CodexConfig {
+                executable,
+                home,
+                allow_credential,
+            }),
+            _ => return Err(E::InvalidRequest),
+        };
         match (protocol, runtime, state) {
             (true, Some(runtime_root), Some(state_root)) => Ok(Self {
                 runtime_root,
                 state_root,
                 image: image.unwrap_or(Image::Existing),
+                codex,
             }),
             _ => Err(E::InvalidRequest),
         }
@@ -219,7 +241,7 @@ fn accept(
 /// safe, from the private product directory the image lives in.
 pub fn serve<S: Spawner>(
     config: &Serve,
-    spawner: impl FnOnce(&Path) -> ControlResult<S>,
+    spawner: impl FnOnce(&Path, &Path) -> ControlResult<(S, Option<StagingRoot>)>,
 ) -> ControlResult<()> {
     let mut mask = SigSet::empty();
     mask.add(Signal::SIGTERM);
@@ -231,9 +253,11 @@ pub fn serve<S: Spawner>(
     umask(Mode::from_bits_truncate(0o077));
     let paths = Paths::new(&config.runtime_root, &config.state_root)?;
     let _locks = paths.lock()?;
+    // What can refuse the start comes before anything is created: a refused start leaves no
+    // image behind.
+    let (spawner, staging) = spawner(&paths.runtime, &paths.state)?;
     let connection = open_image(&paths.state, &config.image)?;
-    let spawner = spawner(&paths.state)?;
-    let (application, handle) = PreparedApplication::new(connection, uuid(), None, spawner)?;
+    let (application, handle) = PreparedApplication::new(connection, uuid(), staging, spawner)?;
     let (listener, _socket) = bind(&paths.runtime.join("control.sock"))?;
     let done = Arc::new(AtomicBool::new(false));
     let acceptor = {
@@ -246,10 +270,17 @@ pub fn serve<S: Spawner>(
     result
 }
 
-/// What `wyss-control` does when it was given arguments: a protocol-2 authority that starts
-/// no runtime.
+/// What `wyss-control` does when it was given arguments: a protocol-2 authority. With
+/// `--codex` it starts Codex in the isolated local-tools namespace; without it, no runtime.
 pub fn run_from_arguments(args: impl IntoIterator<Item = OsString>) -> ControlResult<()> {
-    serve(&Serve::parse(args)?, |_| Ok(NoRuntime))
+    let config = Serve::parse(args)?;
+    match config.codex.clone() {
+        Some(codex) => serve(&config, |runtime, state| {
+            let (spawner, staging) = CodexSpawner::new(codex, runtime, state)?;
+            Ok((spawner, Some(staging)))
+        }),
+        None => serve(&config, |_, _| Ok((NoRuntime, None))),
+    }
 }
 
 #[cfg(test)]

@@ -24,6 +24,8 @@ pub mod operations;
 pub mod ownership;
 #[cfg(target_os = "linux")]
 pub mod process_worker;
+#[cfg(target_os = "linux")]
+pub mod production;
 pub mod protocol;
 #[cfg(target_os = "linux")]
 pub mod provider_adapter;

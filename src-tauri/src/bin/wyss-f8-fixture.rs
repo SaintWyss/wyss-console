@@ -6,17 +6,17 @@ use std::{os::unix::fs::DirBuilderExt, path::Path};
 use wyss_console::{
     contracts::control::{ControlError, ControlResult},
     control::serve::{Serve, serve},
-    f8::fixture::FixtureSpawner,
+    f8::{fixture::FixtureSpawner, staging::StagingRoot},
 };
 
-fn workspace(state: &Path) -> ControlResult<FixtureSpawner> {
+fn workspace(_: &Path, state: &Path) -> ControlResult<(FixtureSpawner, Option<StagingRoot>)> {
     let workspace = state.join("workspace");
     match std::fs::DirBuilder::new().mode(0o700).create(&workspace) {
         Ok(()) => (),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
         Err(_) => return Err(ControlError::UnsafePath),
     }
-    Ok(FixtureSpawner::new(workspace))
+    Ok((FixtureSpawner::new(workspace), None))
 }
 
 fn main() {
@@ -31,7 +31,8 @@ fn main() {
             ControlError::AlreadyRunning
             | ControlError::UnsafePath
             | ControlError::InvalidRequest
-            | ControlError::StorageIncompatible => 2,
+            | ControlError::StorageIncompatible
+            | ControlError::GateDenied => 2,
             _ => 1,
         });
     }

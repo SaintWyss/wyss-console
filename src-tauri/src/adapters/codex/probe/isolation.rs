@@ -26,6 +26,10 @@ const BWRAP: &str = "/usr/bin/bwrap";
 /// and nothing of a host `/etc/codex` is visible under it.
 const MANAGED: &str = "/etc/codex";
 const MAX_DEPTH: usize = 64;
+/// The largest executable that is sealed into the namespace (a copy held in memory for the
+/// life of the launch). Codex 0.159.0 is 274 MiB; this leaves room for the next releases and
+/// still refuses a file that is not a program.
+const EXECUTABLE_IMAGE_LIMIT: u64 = 512 * 1024 * 1024;
 #[cfg(not(test))]
 fn managed() -> PathBuf {
     PathBuf::from(MANAGED)
@@ -784,7 +788,7 @@ impl Isolation {
             self.prepare()?;
             let mut mounts = Vec::new();
             for (path, bound, executable) in [
-                (executable.clone(), 256 * 1024 * 1024, true),
+                (executable.clone(), EXECUTABLE_IMAGE_LIMIT, true),
                 (catalog.to_path_buf(), 4 * 1024 * 1024, false),
                 (self.policy().join("requirements.toml"), 65536, false),
                 (self.policy().join("managed_config.toml"), 65536, false),

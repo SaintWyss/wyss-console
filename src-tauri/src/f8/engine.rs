@@ -114,6 +114,17 @@ pub trait Spawner {
         launch: &RuntimeRef,
         staging: Option<&mut LaunchStaging>,
     ) -> ControlResult<Spawned>;
+    /// `spawn`, told what the start asked for: the canonical workspace of a local-tools
+    /// start, and `None` for an inference one. A spawner that prepares its own namespace per
+    /// launch needs it; one that was prepared beforehand ignores it.
+    fn spawn_for(
+        &mut self,
+        launch: &RuntimeRef,
+        staging: Option<&mut LaunchStaging>,
+        _workspace: Option<&str>,
+    ) -> ControlResult<Spawned> {
+        self.spawn(launch, staging)
+    }
 }
 
 /// The lease facts needed at the moment of writing. The durable lease is a session grant;
@@ -583,7 +594,8 @@ impl Engine {
                 Some(root) => Some(root.create(&reference.runtime_instance_id)?),
                 None => None,
             };
-            let spawned = spawner.spawn(reference, staging.as_mut());
+            let spawned =
+                spawner.spawn_for(reference, staging.as_mut(), requested_workspace.as_deref());
             let spawned = match spawned {
                 Ok(s) => s,
                 Err(e) => {
