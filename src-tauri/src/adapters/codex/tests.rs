@@ -867,3 +867,43 @@ fn a_malformed_or_oversized_marking_is_nothing_marked_and_does_not_fail_the_list
         assert!(models[0].codex.get("retirementAt").is_none(), "{bad}");
     }
 }
+
+/// A real Codex 0.159.0 local-tools turn, replayed frame by frame through the classifiers the
+/// native adapter applies (`safety::local_notification`, `normalize_inbound`, and the
+/// `turn/start` response normalizer). Every frame must be accepted.
+#[test]
+fn local_tools_real_0_159_turn_is_accepted_frame_by_frame() {
+    let binding = normalize::SessionBinding {
+        managed_session_id: ManagedSessionId::parse("00000000-0000-4000-8000-000000000001")
+            .unwrap(),
+        runtime_instance_id: AgentRuntimeInstanceId::parse("00000000-0000-4000-8000-000000000002")
+            .unwrap(),
+        thread_id: CodexThreadId::parse("01a164e8-0e5a-76b3-af97-e805f5fa65a2").unwrap(),
+    };
+    let fixture = include_str!("../../../../tests/fixtures/codex-0.159.0-local-turn.jsonl");
+    for (index, line) in fixture.lines().enumerate() {
+        let message = WireMessage::parse(line.as_bytes(), Direction::ServerToClient)
+            .unwrap_or_else(|e| panic!("frame {index}: wire parse failed: {e:?}"));
+        match message.kind() {
+            WireKind::SuccessResponse => {
+                normalize_response(
+                    &message,
+                    &CodexRequestId::Integer(4),
+                    Operation::TurnStart,
+                    Some(&binding),
+                )
+                .unwrap_or_else(|e| panic!("frame {index}: turn/start response refused: {e:?}"));
+            }
+            WireKind::Notification => {
+                let method = message.method().unwrap_or_default().to_owned();
+                safety::local_notification(&message).unwrap_or_else(|e| {
+                    panic!("frame {index} ({method}): local classifier refused: {e:?}")
+                });
+                normalize_inbound(&message, Some(&binding)).unwrap_or_else(|e| {
+                    panic!("frame {index} ({method}): normalizer refused: {e:?}")
+                });
+            }
+            other => panic!("frame {index}: unexpected kind {other:?}"),
+        }
+    }
+}

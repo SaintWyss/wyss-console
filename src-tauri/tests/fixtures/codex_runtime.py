@@ -90,6 +90,9 @@ def notification():
 
 threads_file = root / "threads.json"
 threads = json.loads(threads_file.read_text()) if threads_file.exists() else {}
+# Codex 0.159 refuses a turn on a thread that is not loaded: after archive/unarchive, and in a
+# process that never loaded it, only thread/resume loads it again.
+loaded = set()
 initialized = False
 initialize_id = None
 # The one approval request this provider is waiting on, and what it would act on.
@@ -340,6 +343,7 @@ for line in sys.stdin:
                   'source': 'appServer', 'status': {'type': 'idle'}, 'turns': []}
         if method == 'thread/start':
             threads[thread_id] = {'thread': dict(thread), 'durable': False, 'archived': False}
+        loaded.add(thread_id)
         if scenario == 'thread_wrong_id' and method == 'thread/resume':
             thread['id'] = 'substituted-provider-identity'
         if scenario == 'thread_wrong_cwd':
@@ -389,6 +393,7 @@ for line in sys.stdin:
             if scenario=='unarchive_wrong_cwd': result['thread']['cwd']='/'
             if scenario=='unarchive_relative_cwd': result['thread']['cwd']='.'
             if scenario=='unarchive_malformed': del result['thread']['id']
+        loaded.discard(tid)
         threads_file.write_text(json.dumps(threads))
         if scenario == key+'_lock_response':
             import sqlite3
@@ -404,6 +409,9 @@ for line in sys.stdin:
         assert len(p['input'])==1 and set(p['input'][0])=={'type','text','textElements'}
         assert p['input'][0]['type']=='text' and p['input'][0]['textElements']==[]
         tid=p['threadId'];turn_id='provider-turn-'+str(len((root/'methods').read_text().splitlines()))
+        if tid not in loaded:
+            emit({'id':message['id'],'error':{'code':-32600,'message':'thread not found: '+tid}})
+            continue
         current_turn={'id':turn_id,'items':[],'status':'inProgress','error':None}
         (root/'turn-written').touch()
         if scenario=='turn_timeout':continue

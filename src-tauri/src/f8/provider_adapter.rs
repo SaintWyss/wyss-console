@@ -472,7 +472,21 @@ impl<W: Worker> NativeCodexWorker<W> {
                 {
                     return Err(E::GateDenied);
                 }
-                self.binding_confirmed(operation, thread)
+                // Unarchiving leaves the thread unloaded: Codex refuses a turn on it
+                // (-32600) until it is resumed. Bind only when the resume answers.
+                let mut params = self.thread_params()?;
+                params["threadId"] = json!(thread);
+                params["excludeTurns"] = json!(true);
+                self.query(
+                    "thread/resume",
+                    params,
+                    Pending::Binding {
+                        operation,
+                        method: Operation::ThreadResume,
+                        expected: Some(thread),
+                    },
+                )?;
+                Ok(Vec::new())
             }
             Pending::Turn { managed } => {
                 // A turn/start result can carry the same item list as a lifecycle
@@ -589,6 +603,20 @@ impl<W: Worker> NativeCodexWorker<W> {
             _ => Err(E::InvalidRequest),
         }
     }
+    /// The thread posture that starts and resumes share, per profile.
+    fn thread_params(&self) -> ControlResult<Value> {
+        let mut params = json!({"cwd":self.attachment.workspace,"approvalPolicy":"never",
+            "sandbox":"read-only","config":codec(safety::thread_config(self.known_mcp.as_ref().ok_or(E::GateDenied)?))?});
+        if let Some(local) = &self.local {
+            params["approvalPolicy"] = json!("untrusted");
+            params["sandbox"] = json!("workspace-write");
+            params["config"] = codec(safety::local_tools_thread_config(
+                self.known_mcp.as_ref().ok_or(E::GateDenied)?,
+                &local.roots,
+            ))?;
+        }
+        Ok(params)
+    }
     fn outbound(&mut self, frame: &[u8]) -> ControlResult<()> {
         if !self.ready {
             return Err(E::InvalidTransition);
@@ -655,16 +683,7 @@ impl<W: Worker> NativeCodexWorker<W> {
                 } else {
                     Operation::ThreadStart
                 };
-                let mut params = json!({"cwd":self.attachment.workspace,"approvalPolicy":"never",
-                    "sandbox":"read-only","config":codec(safety::thread_config(self.known_mcp.as_ref().ok_or(E::GateDenied)?))?});
-                if let Some(local) = &self.local {
-                    params["approvalPolicy"] = json!("untrusted");
-                    params["sandbox"] = json!("workspace-write");
-                    params["config"] = codec(safety::local_tools_thread_config(
-                        self.known_mcp.as_ref().ok_or(E::GateDenied)?,
-                        &local.roots,
-                    ))?;
-                }
+                let mut params = self.thread_params()?;
                 let expected = if resume {
                     Some(codec(CodexThreadId::parse(
                         value["thread_id"].as_str().ok_or(E::InvalidRequest)?,
@@ -977,6 +996,129 @@ mod tests {
             Some(CodexTurnId::parse("turn-A").unwrap()),
         ));
         w
+    }
+    /// Real Codex 0.159.0 turn, replayed through the adapter's own inbound path. Ids are
+    /// mapped onto the bound thread and turn; nothing else changes.
+    #[test]
+    fn native_real_0_159_turn_replays_through_adapter() {
+        let mut w = bound();
+        w.pending.insert(
+            "f8-4".into(),
+            Pending::Turn {
+                managed: "00000000-0000-4000-8000-000000000003".into(),
+            },
+        );
+        let fixture = include_str!("../../../tests/fixtures/codex-0.159.0-local-turn.jsonl")
+            .replace("01a164e8-0e5a-76b3-af97-e805f5fa65a2", "thread-A")
+            .replace("01a164e8-26a9-7381-9afd-62b9aeb24be4", "turn-A")
+            .replace("\"id\":4,", "\"id\":\"f8-4\",");
+        // Thread binding frames arrive before the turn and have their own pending state.
+        let turn = fixture
+            .lines()
+            .skip_while(|line| !line.starts_with("{\"id\":\"f8-4\""));
+        for (index, line) in turn.enumerate() {
+            w.worker.inbound.push_back(line.as_bytes().to_vec());
+            if let Err(error) = w.inbound(16) {
+                panic!("frame {index}: adapter refused it: {error:?}");
+            }
+        }
+    }
+    /// A worker whose `thread/unarchive` was just answered by real Codex 0.159.0: the adapter
+    /// has sent `thread/resume` and nothing is bound yet. Returns the worker and the real
+    /// resume answer addressed to the request id the adapter actually generated.
+    fn unarchived_awaiting_resume() -> (NativeCodexWorker<Fixture>, String) {
+        let frames = include_str!("../../../tests/fixtures/codex-0.159.0-resume.jsonl")
+            .replace("\"id\":4,", "\"id\":\"f8-u\",");
+        let mut lines = frames.lines();
+        let unarchive = lines.next().unwrap().as_bytes().to_vec();
+        let resume_answer = lines.next().unwrap().to_owned();
+        let mut w = bound();
+        w.binding = None;
+        // The handshake and the preflight's config/read happen before any thread work.
+        // The constructor already sent `initialize` as f8-1.
+        w.state
+            .initialize_response(
+                &WireMessage::from_value(
+                    json!({"id":"f8-1","result":{"userAgent":"fixture","codexHome":"/private",
+                        "platformFamily":"unix","platformOs":"linux"}}),
+                    Direction::ServerToClient,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        w.state
+            .outbound(&codex::initialized_notification().unwrap())
+            .unwrap();
+        w.known_mcp = Some(Default::default());
+        w.pending.insert(
+            "f8-u".into(),
+            Pending::Unarchive {
+                operation: "operation".into(),
+                thread: CodexThreadId::parse("thread-A").unwrap(),
+            },
+        );
+        w.worker.inbound.push_back(unarchive);
+        assert!(w.inbound(16).unwrap().is_empty());
+        assert!(
+            w.binding.is_none(),
+            "binding must wait for the resume answer"
+        );
+        let resume_id = w
+            .worker
+            .sent
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|frame| serde_json::from_slice::<Value>(frame).ok())
+            .find(|frame| frame["method"] == "thread/resume")
+            .map(|frame| frame["id"].as_str().expect("string request id").to_owned())
+            .expect("unarchive must be followed by thread/resume");
+        let answer = resume_answer.replace("\"id\":5,", &format!("\"id\":\"{resume_id}\","));
+        (w, answer)
+    }
+    /// Real Codex 0.159.0: a thread that was archived and unarchived is not loaded, and a
+    /// `turn/start` on it is refused with -32600 until `thread/resume` answers. The adapter
+    /// must resume after unarchive and bind only on that answer.
+    #[test]
+    fn native_unarchive_resumes_thread_before_binding() {
+        let (mut w, answer) = unarchived_awaiting_resume();
+        w.worker.inbound.push_back(answer.into_bytes());
+        let events = w.inbound(16).unwrap();
+        assert_eq!(events.len(), 1);
+        let event: Value = serde_json::from_slice(&events[0]).unwrap();
+        assert_eq!(event["kind"], "binding_confirmed");
+        assert_eq!(event["operation_id"], "operation");
+        assert_eq!(event["provider_thread_id"], "thread-A");
+        let binding = w.binding.as_ref().expect("resume answer binds the thread");
+        assert_eq!(binding.thread_id.as_str(), "thread-A");
+    }
+    /// A provider that answers the resume wrongly, twice or not as a result never binds.
+    #[test]
+    fn native_unarchive_resume_that_answers_wrongly_never_binds() {
+        let (mut w, good) = unarchived_awaiting_resume();
+        let mut tampered = vec![
+            // Another thread's identity.
+            good.replace("\"id\":\"thread-A\"", "\"id\":\"thread-B\""),
+            // A different workspace.
+            good.replace("\"cwd\":\"/work\"", "\"cwd\":\"/elsewhere\""),
+            // An ephemeral thread.
+            good.replace("\"ephemeral\":false", "\"ephemeral\":true"),
+        ];
+        // A JSON-RPC error with the right id.
+        let id = serde_json::from_str::<Value>(&good).unwrap()["id"].clone();
+        tampered.push(json!({"id":id,"error":{"code":-32600,"message":"no"}}).to_string());
+        for (index, frame) in tampered.into_iter().enumerate() {
+            let (mut w, _) = unarchived_awaiting_resume();
+            assert_ne!(frame, good, "case {index} changed nothing");
+            w.worker.inbound.push_back(frame.into_bytes());
+            assert!(w.inbound(16).is_err(), "case {index} was accepted");
+            assert!(w.binding.is_none(), "case {index} bound the thread");
+        }
+        // The answer is consumed once: a repeat finds no request to correlate with.
+        w.worker.inbound.push_back(good.clone().into_bytes());
+        assert_eq!(w.inbound(16).unwrap().len(), 1);
+        w.worker.inbound.push_back(good.into_bytes());
+        assert!(w.inbound(16).is_err());
     }
     #[test]
     fn native_cross_thread_and_cross_turn_messages_are_refused() {

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-22 — F8: first turn with real Codex 0.159.0 fixed (still not activated)
+
+- Root cause: after `thread/archive` + `thread/unarchive` Codex 0.159.0 leaves the thread unloaded and refuses
+  `turn/start` (-32600) until `thread/resume`. The native adapter now resumes after unarchive, with the same
+  parameters as a start (`thread_params()`), and publishes the binding only when that answer passes the
+  existing checks (posture, version, workspace, non-ephemeral, expected thread id). Security posture unchanged.
+- The Codex fixture now behaves like the real one (4 integration tests fail without the fix); real 0.159.0
+  transcripts are replayed frame by frame through the classifiers and the adapter.
+- Real Codex 0.159.0 through the packaged GUI in an isolated display: Ready → lease (W1) → bound → turn → Completed
+  → stopped → closed. Installed console, authority, V7 store and credentials untouched; ADR 0051 still Proposed.
+  Record: `docs/acceptance/f8-activation-attempt-2026-10-22.md`.
+
 ## 2026-10-21 — F8: installed wiring, W1 native confirmation, candidate validation (still not activated)
 
 - `wyss-control --protocol 2 …` serves a V8 image of its own on a private socket (no arguments is still
