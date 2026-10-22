@@ -1,23 +1,12 @@
 # Final-product functional specification
 
-Status: **target behaviour for review**, 2026-10-22; baseline and evidence rules in
-[the consolidation index](README.md). Every `FP-*` below is a requirement, not a claim
-of implementation. Its same-number `AC-FP-*` paragraph is the acceptance specification;
-all such cases remain **NOT_RUN for the final product**. Baseline evidence is recorded
-separately in [implementation status](implementation-status.md).
+This page owns target behaviour: all 31 FP requirements, user journeys and same-number
+AC-FP acceptance specifications. They are requirements, not claims of implementation.
+Read [product scope](../PRODUCT.md) for owner decisions,
+[implementation status](implementation-status.md) for delivered evidence and
+[architecture](architecture.md) for ownership/security constraints.
 
 ## 1. Product and context
-
-Wyss Console is Santiago's native personal development workspace: a useful terminal on
-its own and a control centre for projects, real provider configuration, agent work and
-supervised execution. Claude Code and Codex are first-class providers in a full hybrid
-product. Their Native CLIs retain their own features; a Managed profile exposes only
-independently supported, attested capabilities. Missing Managed support is a visible
-product gap, never simulated by a terminal or silently replaced by another provider.
-
-Public distribution, teams/multi-tenant accounts, an IDE, desktop screen sharing and
-OL4 event-triggered unattended workflows are outside this personal-product scope.
-Upstream OpenCode/Hermes and Wyss Agent remain explicitly tracked extensions (§11).
 
 <a id="fp-ctx-01"></a>
 

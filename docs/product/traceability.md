@@ -1,5 +1,9 @@
 # Documentation consistency and requirement traceability
 
+> **On-demand requirement/reconciliation reference.** Keep FP/AC and legacy mappings
+> current; Phase1 audit/check results below remain dated evidence, not the latest
+> development status. Use the [canonical map](README.md) for routine work.
+
 Baseline `e480d479fdbd8a215612b1d809862a62aa914eb5`, Phase1 documentation consolidation, 2026-10-22.
 This report separates paper coverage from implemented/accepted product behaviour.
 

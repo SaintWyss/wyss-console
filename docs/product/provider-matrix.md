@@ -1,5 +1,9 @@
 # Claude Code and Codex capability matrix
 
+> **On-demand capability reference**, pinned to the Phase1 baseline below. Status cells
+> are that dated snapshot; update current implementation/evidence only in the
+> [canonical status register](implementation-status.md).
+
 Baseline `e480d479`, reviewed 2026-10-22. `I` = implemented with the cited real/production
 observation for that slice; `P` = implemented but only partially verified; `D` = designed,
 not implemented; `B` = blocked on evidence/security; `U` = integration behaviour undecided.

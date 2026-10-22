@@ -6,12 +6,9 @@ and accepted ADRs together. A diagram arrow is neither implementation nor proof 
 
 ## 1. Baseline and architectural delta
 
-At `e480d479`, Tauri/Svelte with Rust backend owns configuration presentation/authoring,
-while the persistent host (`wyss-console --wyss-host`, ADR 0036) owns native terminals
-and native session/profile operations. `wyss-control` owns canonical Managed state,
-leases, runtime supervision, turns, approvals and audit. Protocol 1/V7 and the activated
-F8 protocol 2/V8 use separate authorities/stores. F8 runtime identity is per session;
-release capacity is one. Never share a writer/store between the two authorities.
+Current implementation/acceptance is owned by the [status register](implementation-status.md).
+The component model below specifies ownership and proposed changes, not another
+capability checklist. In particular, separate authorities must never share a writer/store.
 
 The redesign adds a **project/workspace identity and projection layer**, not a replacement
 authority or terminal engine. Existing folder selection, project defaults, native grouping

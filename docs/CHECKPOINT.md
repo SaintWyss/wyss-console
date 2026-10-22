@@ -1,59 +1,73 @@
-# Checkpoint
+# Development and maintenance
 
-Documentation baseline: `main` at `e480d479fdbd8a215612b1d809862a62aa914eb5`,
-2026-10-22. Phase1 consolidates the complete personal product only. No application
-source, installed state, credentials, services or user sessions are changed.
+This page owns engineering commands and documentation policy. Current product state
+belongs only to [implementation status](product/implementation-status.md); work order
+belongs to the [roadmap](product/roadmap.md). Start with the relevant item, then follow
+its functional requirement and architecture references through the
+[documentation map](product/README.md).
 
-## Source and recorded production state
+## Prerequisites and commands
 
-| Area                | Current status                                                                        | Next work                                                         |
-| ------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| F8                  | Production-active P2/V8, real Codex 0.159.0, ADR0051 Accepted                         | Preserve recovery/safety; broader exact conformance evidence      |
-| Managed capacity    | One runtime                                                                           | Shared-provider refresh/resource proof before increase            |
-| P1/V7               | Still available, separate authority/store                                             | Retirement is a separate owner operational decision               |
-| Claude/Codex Native | Launcher/registry/profiles and parallel sessions built                                | Full original-feature/consumption/effort acceptance               |
-| Claude Managed      | Not implemented                                                                       | Pinned integration, auth/effect/attestation proof and safety ADR  |
-| Projects            | Known folders/defaults, scoped config/layout built                                    | Primary stable project/workspace model and migration              |
-| F5                  | Supported authoring/Undo/templates built                                              | Confirmed imported-template apply NOT_RUN; consumption NOT_PROVEN |
-| F6                  | Catalogue/observed model/reroute handling and Native effort built, partially verified | Managed choice and durable metrics not built                      |
-| F9/T1/T2            | Persistent host, panes/search/keys/layout baseline                                    | Faithful checkpoint/parser isolation and final lifecycle evidence |
-| OL3/B1              | Contracts/research                                                                    | No production coordinator or staged/quarantined worker            |
-| F10                 | Unreachable gateway foundations                                                       | Transport/auth/enrollment, remote PC/native Android               |
-| P1 performance      | Backend/idle observations                                                             | Complete visual/reference/device budgets NOT_PROVEN               |
+Linux/CachyOS KDE, Rust, Node26+, npm12+ and the
+[Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
+Managed provider/version/isolation requirements are recorded in the status page and
+linked contracts, not duplicated here.
 
-F8 closure: [activation/result](acceptance/f8-activation-procedure-2026-10-22.md) and
-[ADR0051 final addendum](adr/0051-per-session-managed-runtimes.md#acceptance-and-activation-2026-10-22).
-Restart/wanted-runtime Stop→Close is fixed at this baseline and recorded as reverified
-in production. Earlier reports remain dated evidence. This phase does not refresh live
-process identities; historical PIDs are never targets.
+```sh
+npm ci
+npm run desktop:dev
+```
 
-## Resume
+`desktop:dev` uses the native IPC host; `npm run dev` alone serves the frontend.
+For code changes, select the relevant checks; the full repository suites are:
 
-Read the [product index](product/README.md), [functional specification](product/functional-specification.md),
-[architecture](product/architecture.md), [provider matrix](product/provider-matrix.md),
-[gap register](product/implementation-status.md), [roadmap](product/roadmap.md) and
-[traceability](product/traceability.md). WD-01/02 are owner-approved product scope.
-ADR0052/0053 are Proposed. This Phase1 PR authorizes no implementation/experiment.
+```sh
+npm run check
+npm run check:rust
+npm run scan:repo
+```
 
-## Verification policy preserved
+`check` covers formatting, lint, types, frontend tests, the owned-process harness and
+frontend build. `check:rust` uses the repository's selected fmt/check/test/clippy suite.
+**Do not substitute blanket `cargo test` or `lifecycle_process`**: the latter creates
+an inherited private user/systemd environment. Do not enable ignored real-provider or
+credential-store tests merely because an old report mentions them. Real acceptance
+uses the owner's normal native environment; unit fixtures and intrinsic Managed
+isolation are distinct from historical disposable HOME/keyring/bus/VM procedures.
 
-Use `npm run check` and `npm run check:rust` for their defined repository suites,
-plus docs-reference/scope checks. **Do not run blanket `cargo test` or `lifecycle_process`**:
-the inherited latter creates a private user/systemd environment. Real acceptance uses
-the owner's normal native environment; old disposable HOME/keyring/bus/VM/container
-procedures are historical. Unit fixtures and intrinsic Managed isolation are distinct.
+For documentation-only changes, check changed Markdown formatting, relative links and
+anchors, FP/AC and legacy crosswalk preservation, and documentation-only Git scope;
+application builds/provider experiments are unnecessary. Never blanket-format historical
+ADRs/evidence to tidy unrelated files. `scan:repo` includes staged new files.
 
-Never restart/upgrade host or authority to obtain evidence without the applicable
-operational authorization. Installer rollback may stop the host; account for live work,
-matching binaries, consistent backup and post-snapshot loss. No SQL downgrade or arbitrary
-PID cleanup. No live SQLite DB-only copy ignoring WAL consistency.
+## Packaging and live installation
 
-Configuration changes retain exact paths/metadata, current-plan checks, sealed restoration
-and applicable Undo. Do not assume provider consumption. Codex hook authoring stays
-blocked until G-INF/trust requirements pass. Managed model choice is excluded by current
-authority/adapter contract; SG-12 itself is not a model-selection rule and is unchanged.
+`npm run desktop:package` builds a private directory package and digest manifest; it
+installs, publishes and migrates nothing. Installation, service operation and rollback
+are separate actions. Follow the applicable [acceptance/runbook](acceptance/) only under
+its actual authorization; a historical procedure is not current permission to repeat it.
 
-The previous [checkpoint snapshot](history/CHECKPOINT-before-phase-1-2026-10-22.md)
-preserves continuation history without treating old observations as fresh. Current
-checks/review belong to [traceability](product/traceability.md) and
-[independent review](product/independent-review.md).
+Preserve running sessions. GUI-only `--keep-host` updates can retain older host/authority
+components; never assume an updated window updated them. Installer rollback may stop the
+host. Account for live work, matching binaries, consistent SQLite backups/WAL and the
+post-snapshot loss window; no SQL downgrade or arbitrary PID cleanup. Repository checks
+need no personal credentials or installed-service changes.
+
+## Documentation maintenance
+
+- **Update the canonical owner first.** The [six-page map](product/README.md) assigns one
+  location per information kind. Change behaviour in the functional specification,
+  ownership/security in architecture, delivered evidence in status, and sequencing in
+  roadmap; avoid copying those explanations into README or a new checkpoint.
+- Create a document only for genuinely separate detailed contracts or dated evidence.
+  Link it from its canonical owner and label scope, baseline and status. Keep such
+  references out of the routine reading path unless the task needs them.
+- Preserve all 31 FP IDs, matching ACs and 208 legacy mappings in
+  [traceability](product/traceability.md). When behaviour changes, update its crosswalk
+  and acceptance criterion together. Distinguish specification, fixture result and
+  production observation; a passed docs check proves no provider capability.
+- Accepted ADR decisions and historical findings/evidence remain intact. Extend decisions
+  through a separately reviewed ADR; new proposals stay Proposed until the owner accepts.
+  Correct current interpretation by reference instead of rewriting historical outcomes.
+- README is the short repository entrance; `docs/product/README.md` is the ownership map.
+  Store dated validation results in an existing applicable report or PR, not these pages.

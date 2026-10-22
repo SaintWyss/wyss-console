@@ -1,42 +1,34 @@
-# Final personal product — Phase 1 consolidation
+# Documentation map
 
-Baseline: `main` at `e480d479fdbd8a215612b1d809862a62aa914eb5`, 2026-10-22.
-This is a documentation deliverable. No implementation, service operation, provider run,
-credential access, installed migration or product acceptance is performed by this phase.
+Choose the page for your task; routine work does not require reading the whole set.
 
-Start with [PRODUCT](../PRODUCT.md), then:
+## Active canonical documentation
 
-| Document                                                | Purpose                                                                        |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [Functional specification](functional-specification.md) | End-to-end target behaviour, screens, journeys, states, acceptance cases       |
-| [Architecture](architecture.md)                         | Ownership, identity, security boundaries, persistence and interface deltas     |
-| [Provider matrix](provider-matrix.md)                   | Claude Code and Codex, separately by mode, capability and evidence             |
-| [Implementation status](implementation-status.md)       | Source/evidence gap register at the baseline                                   |
-| [Roadmap](roadmap.md)                                   | Dependency order, delivery gates, rollback, outstanding decisions              |
-| [Traceability](traceability.md)                         | Current requirements, legacy requirement crosswalk and consistency resolutions |
-| [Inventory](documentation-inventory.md)                 | Every tracked documentation/evidence path, its role and baseline digest        |
-| [Independent review](independent-review.md)             | Reviewer findings, resolutions and scope of the verdict                        |
+| Question / information owner                                      | Canonical page                                                    |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Why this product; approved scope and requirement entry point      | [Product vision and requirements](../PRODUCT.md)                  |
+| What users do; screens, states, errors and FP acceptance criteria | [Functional behaviour and workflows](functional-specification.md) |
+| Who owns state; interfaces, persistence and security boundaries   | [Architecture](architecture.md)                                   |
+| What is implemented and what evidence proves it                   | [Implementation and acceptance status](implementation-status.md)  |
+| What remains; dependencies, milestones and owner decisions        | [Roadmap](roadmap.md)                                             |
+| How to develop, validate and maintain these docs                  | [Development and maintenance](../CHECKPOINT.md)                   |
 
-## Reading rules
+For an engineering task, read status and the relevant roadmap item, then only the
+functional requirement and architecture contract it touches. Product goals never
+supersede accepted security ADRs; planned behaviour is not implementation evidence.
 
-Owner decisions **WD-01 full hybrid** and **WD-02 project-centered workspace** are approved
-product directions. The detailed design here is proposed for engineering review. It does
-not accept any technical ADR. The complete personal product is the target, not an MVP.
+## References on demand
 
-For **current status**, use the gap register and the latest applicable acceptance record,
-not a historical present-tense sentence. For **target behaviour**, this set consolidates
-the older architecture and drafts; unchanged detailed contracts continue to apply.
-For **security enforcement**, accepted ADRs prevail until explicitly extended by another
-accepted ADR. Source existence, a passing fixture, production observation and an owner
-decision are different kinds of evidence. Neither product scope nor this PR erases an
-earlier security review's REJECT verdict.
+[Provider matrix](provider-matrix.md): versioned capability detail.
+[Traceability](traceability.md): all 31 FP/AC and 208 legacy requirements, reconciliation
+and dated Phase1 checks. [Inventory](documentation-inventory.md): 519 baseline artifacts.
+[Independent review](independent-review.md): dated findings and resolutions.
 
-F8 is production-active, real Codex 0.159.0, protocol 2, SQLite V8, ADR 0051 Accepted.
-Active runtime capacity is **one**. Protocol 1/V7 remains available with its own store.
-This is neither Claude Code Managed support nor concurrent Managed execution nor OL3.
+[ADRs](../adr/) retain their individual Accepted/Proposed status and binding decisions.
+[Detailed architecture](../architecture/00-INDEX.md), [acceptance reports](../acceptance/),
+[research](../research/), [drafts](../drafts/2026-10-19/README-INTEGRATION.md) and
+[history](../history/) are lookup material, not another current roadmap. Dated evidence
+remains valid for its recorded slice; current interpretation belongs to the status page.
 
-Historical documents and evidence remain at their original paths. Navigation/status
-overlays identify where to find the consolidation; accepted ADR bodies are unchanged.
-The inventory distinguishes current contracts, proposed contracts, dated observations,
-drafts and the original Wyss archive. Historical procedures are not current permission
-to run them.
+Update the canonical owner before creating a document; see the
+[maintenance policy](../CHECKPOINT.md#documentation-maintenance).
