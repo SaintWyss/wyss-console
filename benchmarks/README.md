@@ -64,3 +64,8 @@ benchmarks/m1_gui_runs.sh src-tauri/target/release/wyss-console \
   src-tauri/target/debug/deps/wyss_console-<hash> OUT_DIR
 python3 -I benchmarks/m1_gui_report.py OUT_DIR
 ```
+
+`m1_gui.py --shape none` starts the application with no projects and the release gate off (what an installed
+build looks like before adoption); `--seed DIR` copies `layout.json`, `native/` and `configuration/trusted-writers` of
+a backup into the run's own state, so the import can be rehearsed on a copy of real records (the originals are
+only read).
