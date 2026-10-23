@@ -83,8 +83,9 @@ M1 adds a private projection store; it does not take over host/authority persist
 Read-only recovery must bypass Native `Registry::open` (mutates unfinished records),
 lazy HostLink startup/retry, and layout restoration that recreates missing shells.
 Old-host compatibility checks the peer on the same connection as each operation;
-metadata/session association never grants Managed execution authority. ADR0052 remains
-Proposed and requires explicit owner acceptance before release/adoption.
+metadata/session association never grants Managed execution authority. ADR0052 is
+Accepted as an architectural decision; M1 implementation and real desktop adoption
+remain separately gated on its safety, migration and acceptance evidence.
 
 ## 3. Component contracts and invariants
 
@@ -202,7 +203,8 @@ of only one file. No automated purge of protected recovery material.
    or stop the host as an incidental documentation/UI migration.
 
 Schema/serializer/Rust/TypeScript fixtures and failure-at-every-step tests are prerequisites
-of implementation release, not artifacts already present in this PR. ADR 0052 remains Proposed.
+of implementation release, not artifacts already present in this PR. ADR 0052 is
+Accepted as architecture, not as completed implementation or release.
 
 ## 7. Workflow and degraded-mode routing
 

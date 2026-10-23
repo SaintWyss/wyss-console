@@ -3,7 +3,7 @@
 **Proposed, not implemented.** Engineering baseline: main
 `d2ee8d2971ed50de2e39d73ad71f2a29f14c42b2`, 2026-10-22. Implements only
 [FP-CTX-01..04](../product/functional-specification.md#fp-ctx-01), with
-[ADR0052 still Proposed](../adr/0052-project-centered-workspace-identities.md).
+[ADR0052 Accepted (architecture only)](../adr/0052-project-centered-workspace-identities.md).
 This is the detailed contract owned/referenced by [architecture](../product/architecture.md);
 current evidence stays in [status](../product/implementation-status.md#m0-engineering-baseline).
 All DTOs, filenames and tests below are implementation proposals, not existing APIs.
@@ -219,8 +219,10 @@ cleanup. Absence of a difference is preservation evidence, not proof of provider
 Build in separate reviewable increments: pure closed codec/schema + fixtures; locked
 store/CAS + failure injection; non-starting owner projection/checked transport; migration
 preview/commit; project/Scratch navigation; layouts/input coordination; launch/config
-context integration. M1 may build deterministic fixtures while ADR0052 is Proposed;
-release/adoption needs Santiago's explicit acceptance. No dependency on Claude Managed,
+context integration. ADR0052 accepts the identity/projection architecture; M1 design details and
+fixtures remain unimplemented. Release/adoption still requires all applicable
+M1-01..13 acceptance evidence, performance budgets, review and a separately authorized
+preservation-aware deployment, not merely this ADR's approval. No dependency on Claude Managed,
 new remote transport, concurrency increase, parser helpers or OL3 implementation.
 
 | Required test ID | Exact oracle / acceptance | FP/AC |

@@ -54,7 +54,8 @@ limits, dependency-ordered increments, M1-01..13 tests, deterministic legacy mig
 context/receipt handling, mixed-host compatibility, preservation and rollback. That is
 the single detailed handoff; do not duplicate it in a new plan. Global administration and
 Scratch stay independent from Managed authority. M1 does not implement Claude Managed,
-OL3, new remote transport or concurrency above1. ADR0052 remains **Proposed**; explicit
+OL3, new remote transport or concurrency above1. ADR0052 is **Accepted** for the
+project/workspace identity architecture; its validation and release gates remain. Explicit
 Santiago acceptance is required before release/adoption, not inferred from PR16 merge.
 
 Verification/DoD: all AC-FP-CTX-01..04 and M1-01..13, including two windows, old host,
@@ -247,7 +248,7 @@ SDK/build/auth route; G-INF E9 policy precedence and old bindings; numeric runti
 screen/resource budgets; parser implementation/isolation; provider refresh semantics;
 Android presence capabilities; final DTO/SQL schemas; per-feature consumption and usage
 metadata policy. Return a genuine product trade-off only when these facts rule out a
-recommended design. Acceptance of Proposed ADR0052/0053 and any later security ADR is
+recommended design. Acceptance of Proposed ADR0053 and any later security ADR is
 always Santiago's explicit act, never inferred from WD-01/02 or merging this PR.
 
 ## 4. Uniform verification and rollback record
