@@ -51,6 +51,8 @@ pub enum LaunchError {
 pub struct TerminalRow {
     pub terminal_id: String,
     pub running: bool,
+    /// Where its shell started, as the host reports it.
+    pub cwd: Option<String>,
     /// The Native session this terminal runs, when it runs one.
     pub native_session: Option<String>,
 }
@@ -145,6 +147,15 @@ pub struct ManagedLaunched {
     pub session_id: String,
 }
 
+/// A read of one terminal's output from a byte position, as the host holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TermRead {
+    pub data: Vec<u8>,
+    pub next: u64,
+    pub eof: bool,
+    pub truncated: bool,
+}
+
 pub trait Owner: Send + Sync {
     /// One checked, non-starting read of the host. `expected` is the epoch observed before;
     /// a different host is `HostChanged`.
@@ -158,6 +169,13 @@ pub trait Owner: Send + Sync {
     -> Result<NativeLaunched, LaunchError>;
     fn launch_shell(&self, path: &str, epoch: &str) -> Result<ShellLaunched, LaunchError>;
     fn launch_managed(&self, launch: &ManagedLaunch) -> Result<ManagedLaunched, LaunchError>;
+    /// Terminal I/O through the same checked connection: a different host is `HostChanged` and
+    /// nothing is sent. `wait_ms` bounds how long a read waits for output.
+    fn term_read(&self, epoch: &str, terminal: &str, from: u64, wait_ms: u64)
+    -> Result<TermRead, OwnerError>;
+    fn term_write(&self, epoch: &str, terminal: &str, data: &[u8]) -> Result<(), OwnerError>;
+    fn term_resize(&self, epoch: &str, terminal: &str, rows: u16, cols: u16)
+    -> Result<(), OwnerError>;
 }
 
 // ---- the checked connection --------------------------------------------------------------
@@ -182,9 +200,13 @@ fn observe_peer(stream: &UnixStream, socket: &Path) -> Result<String, OwnerError
 
 /// Field 22 of `/proc/<pid>/stat`: the process start time in clock ticks since boot.
 pub fn start_ticks(pid: i32) -> Option<u64> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // The command name is in parentheses and may contain spaces and parentheses itself.
-    let after = &stat[stat.rfind(')')? + 2..];
+    parse_start_ticks(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+}
+
+/// The command name is in parentheses and may contain spaces and parentheses itself, so the
+/// fields are counted from the last closing one.
+pub fn parse_start_ticks(stat: &str) -> Option<u64> {
+    let after = stat.get(stat.rfind(')')? + 2..)?;
     after.split(' ').nth(19)?.parse().ok()
 }
 
@@ -259,6 +281,7 @@ impl HostSocket {
                 Some(TerminalRow {
                     terminal_id: row["terminal"]["terminal_id"].as_str()?.to_owned(),
                     running: row["terminal"]["state"] == json!("running"),
+                    cwd: row["terminal"]["cwd"].as_str().map(str::to_owned),
                     native_session: row["native"]["session_id"].as_str().map(str::to_owned),
                 })
             })
@@ -307,6 +330,12 @@ impl CallFailure {
 
 /// Looks at a folder without following a link in its last component and without changing it.
 pub fn inspect_root(path: &str) -> Result<RootInfo, RootError> {
+    let home = std::env::var_os("HOME").and_then(|h| fs::canonicalize(h).ok());
+    inspect_root_in(path, home.as_deref())
+}
+
+/// `inspect_root` with the home folder named, so a test can name its own.
+pub fn inspect_root_in(path: &str, home: Option<&Path>) -> Result<RootInfo, RootError> {
     if !path.starts_with('/') || path.len() > MAX_PATH_BYTES || path.contains('\0') {
         return Err(RootError::Ineligible);
     }
@@ -334,8 +363,7 @@ pub fn inspect_root(path: &str) -> Result<RootInfo, RootError> {
         Ok(git) if git.is_file() => CheckoutKind::Worktree,
         _ => CheckoutKind::Folder,
     };
-    let home = std::env::var_os("HOME").and_then(|h| fs::canonicalize(h).ok());
-    let is_home = home.as_deref() == Some(canonical.as_path());
+    let is_home = home == Some(canonical.as_path());
     Ok(RootInfo {
         device: meta.dev(),
         inode: meta.ino(),
@@ -514,5 +542,57 @@ impl<M: ManagedPort> Owner for RealOwner<M> {
 
     fn launch_managed(&self, launch: &ManagedLaunch) -> Result<ManagedLaunched, LaunchError> {
         self.managed.prepare(launch)
+    }
+
+    fn term_read(
+        &self,
+        epoch: &str,
+        terminal: &str,
+        from: u64,
+        wait_ms: u64,
+    ) -> Result<TermRead, OwnerError> {
+        let answer = self
+            .socket()?
+            .call(
+                Some(epoch),
+                "term_read",
+                json!({"terminal_id": terminal, "from": from, "wait_ms": wait_ms.min(1000)}),
+            )
+            .map_err(CallFailure::before)?;
+        let data = answer["data"]
+            .as_array()
+            .ok_or(OwnerError::Unsupported)?
+            .iter()
+            .map(|b| b.as_u64().and_then(|b| u8::try_from(b).ok()))
+            .collect::<Option<Vec<u8>>>()
+            .ok_or(OwnerError::Unsupported)?;
+        Ok(TermRead {
+            data,
+            next: answer["next"].as_u64().unwrap_or(from),
+            eof: answer["eof"] == json!(true),
+            truncated: answer["truncated"] == json!(true),
+        })
+    }
+
+    fn term_write(&self, epoch: &str, terminal: &str, data: &[u8]) -> Result<(), OwnerError> {
+        self.socket()?
+            .call(
+                Some(epoch),
+                "term_write",
+                json!({"terminal_id": terminal, "data": data}),
+            )
+            .map(|_| ())
+            .map_err(CallFailure::before)
+    }
+
+    fn term_resize(&self, epoch: &str, terminal: &str, rows: u16, cols: u16) -> Result<(), OwnerError> {
+        self.socket()?
+            .call(
+                Some(epoch),
+                "term_resize",
+                json!({"terminal_id": terminal, "size": {"rows": rows, "cols": cols}}),
+            )
+            .map(|_| ())
+            .map_err(CallFailure::before)
     }
 }

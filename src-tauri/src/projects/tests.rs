@@ -7,7 +7,7 @@ use super::{
     owner::{
         FolderError, HostView, LaunchError, ManagedLaunch, ManagedLaunched, ManagedRow,
         NativeLaunch, NativeLaunched, Owner, OwnerError, RootError, RootInfo, ShellLaunched,
-        TerminalRow,
+        TermRead, TerminalRow,
     },
     store::{Faults, Loaded, Point, Store, StoreError},
 };
@@ -114,6 +114,8 @@ pub(super) struct Script {
     pub prepared: Vec<Result<ManagedLaunched, LaunchError>>,
     pub calls: Vec<String>,
     pub folders: Vec<(String, String)>,
+    pub written: Vec<(String, Vec<u8>)>,
+    pub resized: Vec<(String, u16, u16)>,
 }
 
 pub(super) struct FakeOwner(pub Mutex<Script>);
@@ -131,6 +133,8 @@ impl FakeOwner {
             prepared: Vec::new(),
             calls: Vec::new(),
             folders: Vec::new(),
+            written: Vec::new(),
+            resized: Vec::new(),
         })))
     }
 
@@ -233,6 +237,38 @@ impl Owner for FakeOwner {
                 panic!("an unscripted shell launch reached the owner");
             }
             s.shell.remove(0)
+        })
+    }
+
+    fn term_read(&self, epoch: &str, terminal: &str, from: u64, _: u64) -> Result<TermRead, OwnerError> {
+        self.script(|s| {
+            s.calls.push(format!("term_read {terminal}"));
+            if epoch != s.epoch {
+                return Err(OwnerError::HostChanged);
+            }
+            Ok(TermRead { data: b"out".to_vec(), next: from + 3, eof: false, truncated: false })
+        })
+    }
+
+    fn term_write(&self, epoch: &str, terminal: &str, data: &[u8]) -> Result<(), OwnerError> {
+        self.script(|s| {
+            s.calls.push(format!("term_write {terminal}"));
+            if epoch != s.epoch {
+                return Err(OwnerError::HostChanged);
+            }
+            s.written.push((terminal.to_owned(), data.to_vec()));
+            Ok(())
+        })
+    }
+
+    fn term_resize(&self, epoch: &str, terminal: &str, rows: u16, cols: u16) -> Result<(), OwnerError> {
+        self.script(|s| {
+            s.calls.push(format!("term_resize {terminal}"));
+            if epoch != s.epoch {
+                return Err(OwnerError::HostChanged);
+            }
+            s.resized.push((terminal.to_owned(), rows, cols));
+            Ok(())
         })
     }
 
@@ -392,6 +428,7 @@ pub(super) fn native_row(terminal: &str, session: Option<&str>) -> TerminalRow {
     TerminalRow {
         terminal_id: terminal.to_owned(),
         running: true,
+        cwd: None,
         native_session: session.map(str::to_owned),
     }
 }
@@ -421,3 +458,6 @@ pub(super) fn unusable(result: Result<StoreV1, StoreError>) -> super::store::Unu
 mod store_tests;
 mod project_tests;
 mod launch_tests;
+mod owner_tests;
+mod migration_tests;
+mod service_tests;
