@@ -17,6 +17,9 @@ mod handoff;
 mod host;
 #[cfg(target_os = "linux")]
 mod native;
+// The project-centered workspace (M1, ADR 0052): presentation metadata over the owners.
+#[cfg(target_os = "linux")]
+mod projects;
 #[cfg(target_os = "linux")]
 mod native_dialog;
 // The remote gateway's core (F10a foundations, ADR 0049): decisions with no transport. Nothing
