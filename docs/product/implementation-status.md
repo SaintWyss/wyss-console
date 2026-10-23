@@ -213,14 +213,15 @@ rollback is not an unattended escape hatch. No host stop, SQL downgrade or F8 re
 
 **M1 status (2026-10-23): engineering complete, release blocked.** The store, command engine,
 checked owner, migration, input claim, window commands and Projects view are implemented behind a
-release gate that is off, and M1-01..12 pass as recorded in the
-[M1 delivery record](../acceptance/m1-delivery-2026-10-23.md); M1-02 is partial (a foreign ACL on a
-root is not detected) and M1-13 is partial (backend and host costs measured, no GUI budget, none
-set). Exercised: an isolated graphical run with its own host, and real-process tests; **not**
-exercised: the owner's installation, a real registry/layout import, real Native agents or Managed
-sessions through the Projects view. ADR0052 is Accepted as an architectural decision, not
-product/release acceptance; adoption needs the owner's explicit step and the measurements the
-record lists. No new owner product choice
+release gate that is off, and M1-01..13 pass as recorded in the
+[M1 delivery record](../acceptance/m1-delivery-2026-10-23.md), including foreign-writer refusal on
+roots, Managed authority and capability checks, operation-ID semantics for every command, the real
+directory of a shell before it is adopted, and the GUI measurements of M1-13 (nine runs on an isolated
+native display). The reference budgets are proposed, not agreed. Exercised: isolated graphical runs
+with their own host, and real-process tests; **not** exercised: the owner's installation, a real
+registry/layout import, real Native agents or Managed sessions through the Projects view. ADR0052 is
+Accepted as an architectural decision, not product/release acceptance; adoption needs the owner's
+explicit step and the agreement of the budgets. No new owner product choice
 is needed for the recommended proposal; retain WD01/02, P1 and F8 cap1. Source/installed
 binary correspondence, exact F8 resource mismatches, real-desktop budgets and provider
 consumption remain explicit evidence gaps, not reasons to restart production in M0.

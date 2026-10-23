@@ -48,7 +48,7 @@ Before M1 can be adopted on the owner's desktop, validate exact schema/DTO fixtu
 deterministic legacy mapping, interrupted migration, stale context/project switch,
 missing roots, duplicate bindings, protected paths, bounds, newer-store refusal and
 rollback preserving live session identities. No source implementation or migration is performed by accepting the architecture.
-The M1-01..13 tests exist and ran (11 PASS, 2 PARTIAL; see the delivery record); negative cases, interrupted
+The M1-01..13 tests exist and ran (13 PASS; the reference budgets await the owner; see the delivery record); negative cases, interrupted
 migration, rollback, UI/runtime identity preservation and real-desktop resource budgets
 must pass before production adoption. Any material alteration to the accepted trust or
 ownership boundaries requires a new review/ADR.

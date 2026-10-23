@@ -9,10 +9,19 @@
   (a killed writer leaves the complete old or new file), never replaced when corrupt or newer, closed
   commands for every change, a launch journal that never dispatches twice, and recovery that only makes an
   unknown launch `ambiguous` and waits for the user.
-- Deterministic, read-only-first import of the legacy registry and saved layout (exact bytes kept in a private
+- Deterministic, read-only-first import of the older registry and saved layout (exact bytes kept in a private
   snapshot, then the store published last), incremental updates, and a rollback report.
 - The owner is read through a checked, non-starting socket: a replaced host is `host_changed`, an absent one
   `host_offline`, and nothing is started, retried or recreated. Managed launch prepares a session only.
+- Managed work records the authority it was asked of and is only retried there; a profile is offered only
+  when the authority's own status shows it serves it. Every operation ID is looked up first; adopting a
+  shell shows the directory it is really in; a folder another account can write is refused unless the owner
+  named the account in `trusted-writers`; display reads are shared between windows; layout saves are
+  debounced; long lists draw only the rows in view.
+- The older Console view no longer closes a terminal when another window's write makes the host answer
+  `busy`: the write is offered again (found while measuring the real desktop).
+- Measured on an isolated native display (nine runs): input to render about 60–70 ms, project switch about
+  80–130 ms (about 0.5 s to show sixteen panes), reference budgets proposed, not approved.
 - Nothing is installed or migrated by this change; F8 capacity stays one. Record:
   `docs/acceptance/m1-delivery-2026-10-23.md`.
 

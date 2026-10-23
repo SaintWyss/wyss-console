@@ -1,0 +1,31 @@
+WebKitWebProces        tid=1263305  cpu= 2.500%  wakeups/s=   51.1  involuntary/s=   2.4
+HeapHelper             tid=1263424  cpu= 0.200%  wakeups/s=   98.5  involuntary/s=   0.7
+WebKitWebProces        tid=1263313  cpu= 0.150%  wakeups/s=   10.1  involuntary/s=   0.0
+ReceiveQueue           tid=1263316  cpu= 0.150%  wakeups/s=   85.2  involuntary/s=   0.0
+JITWorker              tid=1263353  cpu= 0.150%  wakeups/s=    2.1  involuntary/s=   0.1
+HeapHelper             tid=1263423  cpu= 0.150%  wakeups/s=  104.0  involuntary/s=   1.1
+HeapHelper             tid=1263425  cpu= 0.150%  wakeups/s=  113.5  involuntary/s=   0.5
+HeapHelper             tid=1263426  cpu= 0.150%  wakeups/s=  108.7  involuntary/s=   0.3
+HeapHelper             tid=1263427  cpu= 0.150%  wakeups/s=   98.1  involuntary/s=   0.6
+HeapHelper             tid=1263428  cpu= 0.150%  wakeups/s=  104.0  involuntary/s=   0.8
+HeapHelper             tid=1263429  cpu= 0.150%  wakeups/s=  101.8  involuntary/s=   1.0
+ollector Thread        tid=1263601  cpu= 0.050%  wakeups/s=   59.9  involuntary/s=   0.3
+EventDispatcher        tid=1263314  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+rruptDispatcher        tid=1263315  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+ReceiveQueue           tid=1263318  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+pool-spawner           tid=1263319  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+gmain                  tid=1263320  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+gdbus                  tid=1263322  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+eadedCompositor        tid=1263323  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+eadedCompositor        tid=1263325  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+eadedCompositor        tid=1263326  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+WebKitWebProces        tid=1263328  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+WebKitWebProces        tid=1263329  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+Core: Scrolling        tid=1263333  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+SkiaCPUWorker          tid=1263334  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+SkiaCPUWorker          tid=1263335  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+SkiaCPUWorker          tid=1263336  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+SkiaCPUWorker          tid=1263337  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+JITWorker              tid=1263354  cpu= 0.000%  wakeups/s=    0.5  involuntary/s=   0.0
+CryptoQueue            tid=1263356  cpu= 0.000%  wakeups/s=    0.0  involuntary/s=   0.0
+total cpu = 4.100% of one core, wakeups/s = 937.7, window 20.0s

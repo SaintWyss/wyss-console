@@ -41,3 +41,26 @@ ends nothing. `idle_ab.py` ends only the process it launched, through `owned.py`
 by a pidfd; no process is ever found by name or path; see `docs/incidents/2026-10-20-benchmark-ended-live-session.md`).
 `python3 -I benchmarks/test_owned.py` is the negative test of that rule and also fails a script that
 uses `pkill`, `pgrep`, `killall` or a `kill` on a variable.
+
+## M1 project workspace on the real desktop (M1-13)
+
+`m1_gui.py` runs the built application on a nested display it makes for the run (a virtual KWin
+compositor and Xwayland, each on a session bus of its own), with its own home, state and runtime
+directory, a disposable terminal host and synthetic projects built by the ignored test
+`projects::tests::perf_world` through the commands the window sends. It measures from outside: key
+or click to the first frame that shows the answer (`ffmpeg` x11grab at 60 frames a second, so a
+figure is quantised to about 17 ms and carries the capture's own latency), and the owned tree's
+memory (RSS, PSS), processor time, threads, descriptors and wake-ups while idle with the view
+shown and hidden. `m1_gui_runs.sh` makes three runs of each of three shapes (1 terminal and 2
+workspaces; 16 terminals and 32 workspaces; 16 terminals in one workspace); `m1_gui_report.py`
+reads the run files and prints the figures and the proposed budgets. Everything it starts is a
+direct child launched through `owned.py` and adopted by descriptor (`adopt_tree`), and the script
+reports, without touching them, any process that still carries the run's directory afterwards.
+
+```sh
+npx tauri build --no-bundle -- --locked              # the release binary, once
+cargo test --locked --bin wyss-console --no-run      # the test executable that builds the world
+benchmarks/m1_gui_runs.sh src-tauri/target/release/wyss-console \
+  src-tauri/target/debug/deps/wyss_console-<hash> OUT_DIR
+python3 -I benchmarks/m1_gui_report.py OUT_DIR
+```

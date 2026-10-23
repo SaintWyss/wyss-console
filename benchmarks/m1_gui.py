@@ -184,13 +184,15 @@ def sample(pids):
         except (OSError, IndexError, ValueError):
             ticks = None
         voluntary = 0
+        by_thread = {}
         try:
             for t in os.listdir(f"/proc/{pid}/task"):
                 try:
                     with open(f"/proc/{pid}/task/{t}/status") as f:
                         for line in f:
                             if line.startswith("voluntary_ctxt_switches"):
-                                voluntary += int(line.split()[1])
+                                by_thread[t] = int(line.split()[1])
+                                voluntary += by_thread[t]
                 except OSError:
                     pass
         except OSError:
@@ -207,6 +209,7 @@ def sample(pids):
             "threads": int(st["Threads"]),
             "fds": fds,
             "voluntary": voluntary,
+            "voluntary_by_thread": by_thread,
         }
     return rows
 
@@ -229,7 +232,16 @@ def idle_window(owned_pids, seconds, interval=1.0):
     span = last["t"] - first["t"]
     common = [p for p in last["procs"] if p in first["procs"]]
     cpu = sum(last["procs"][p]["cpu_ticks"] - first["procs"][p]["cpu_ticks"] for p in common) / CLK
-    wake = sum(last["procs"][p]["voluntary"] - first["procs"][p]["voluntary"] for p in common)
+    # Wake-ups are the voluntary context switches, counted between each pair of neighbouring
+    # samples thread by thread: a thread that was born in between counts all it has, one that
+    # ended in between counts nothing more, so a thread that comes and goes cannot make the total
+    # go backwards.
+    wake = 0
+    for before, after in zip(raw, raw[1:]):
+        for pid, now in after["procs"].items():
+            was = before["procs"].get(pid, {"voluntary_by_thread": {}})["voluntary_by_thread"]
+            for tid, count in now["voluntary_by_thread"].items():
+                wake += max(0, count - was.get(tid, 0))
     total = lambda key: sum((v[key] or 0) for v in last["procs"].values())  # noqa: E731
     return raw, {
         "seconds": span,
@@ -467,7 +479,7 @@ def main():
                 time.sleep(7.0)
                 place_window(x_env)
                 time.sleep(1.5)
-                run_steps(json.load(open(args.steps)), x_env, pointer, args.out, args.run, world, socket_path)
+                run_steps(json.load(open(args.steps)), x_env, pointer, args.out, args.run, world, socket_path, (app.pid,))
                 print("host alive:", host.alive(), "code:", host.proc.poll())
                 print(json.dumps(host_list(socket_path))[:1500])
                 return 0
@@ -521,7 +533,7 @@ def leftovers(root):
     return found
 
 
-def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None):
+def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None, session_pid=(None,)):
     """Calibration: click, type, wait and take pictures, to read the screen by eye."""
     for step in steps:
         kind = step[0]
@@ -541,6 +553,14 @@ def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None):
             time.sleep(step[1])
         elif kind == "shot":
             shot(x_env, os.path.join(out, f"cal{run}-{step[1]}.png"))
+        elif kind == "threads":
+            # CPU and wake-ups by thread of the application and of its web process, for a window.
+            for pid in descendants(session_pid[0]):
+                if comm_of(pid) in ("WebKitWebProces", "wyss-console"):
+                    done = subprocess.run([sys.executable, "-I", os.path.join(HERE, "threads.py"), str(pid), str(step[1])],
+                                          capture_output=True, text=True)
+                    with open(os.path.join(out, f"threads{run}-{step[2]}-{comm_of(pid)}-{pid}.txt"), "w") as f:
+                        f.write(done.stdout)
         elif kind == "hostwrite":
             host_write(socket_path, world["projects"][0]["terminals"][0]["terminal"],
                        step[1].encode().decode("unicode_escape").encode())
@@ -752,7 +772,7 @@ def measure(args, result, world, layout, x_env, pointer, host, app, logs, binary
                         time.sleep(0.05)
                 stop_watch = threading.Event()
                 threading.Thread(target=watch, daemon=True).start()
-            keys = []
+            keys, echoes = [], []
             for i in range(args.keys + 1):
                 # Setup, not measured: a screenful of long lines, then the picture is left alone.
                 host_write(socket_path, terminal, b"seq -f ABCDEFGHIJKLMNOPQRSTUVWXYZ%g 1 60\r")
@@ -776,9 +796,18 @@ def measure(args, result, world, layout, x_env, pointer, host, app, logs, binary
                      "max_diff": max((differs(f, filled) for _, f in after), default=None),
                      "filled_nonblank": float(np.mean(filled > 40))})
                 settle(frames, 0.8)
+                # One character at the prompt: the smallest thing a person types.
+                base = frames.latest()
+                t1 = monotonic_ns()
+                pointer.do("key x")
+                echo = time_to_change(frames, t1, base, threshold=0.00004, timeout_s=3.0)
+                time.sleep(0.4)
+                pointer.do("key ctrl+u")
+                time.sleep(0.3)
                 if i == 0:
                     continue  # the first one only warms the path
                 keys.append(ms)
+                echoes.append(echo)
             if os.environ.get("M1_TRACE_HOST"):
                 stop_watch.set()
                 print("watch:", watch_log, flush=True)
@@ -786,6 +815,7 @@ def measure(args, result, world, layout, x_env, pointer, host, app, logs, binary
                 time.sleep(1.5)
                 shot(x_env, os.path.join(os.environ["M1_DEBUG_SHOTS"], "console-after.png"))
             result["events"]["input_to_render_ms"] = {"samples": keys, **summary([k for k in keys if k])}
+            result["events"]["echo_to_render_ms"] = {"samples": echoes, **summary([k for k in echoes if k])}
         frames.stop()
         frames = None
 
