@@ -5,6 +5,7 @@ use super::{
     M1Error, M1Result, MAX_EPOCH_BYTES, MAX_PATH_BYTES, MAX_TEXT_SCALARS, ensure, invalid,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
 
 fn lower_hex(byte: u8) -> bool {
     matches!(byte, b'0'..=b'9' | b'a'..=b'f')
@@ -201,7 +202,7 @@ fn plain(value: &str) -> bool {
 macro_rules! text_scalar {
     ($(#[$doc:meta])* $name:ident, $field:literal, $valid:expr) => {
         $(#[$doc])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
         #[serde(try_from = "String", into = "String")]
         pub struct $name(String);
 
@@ -260,3 +261,22 @@ text_scalar!(
             && (v == "/" || v[1..].split('/').all(|s| !matches!(s, "" | "." | "..")))
     }
 );
+
+impl fmt::Debug for Text {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_tuple("Text").field(&self.0).finish()
+    }
+}
+
+impl fmt::Debug for EpochText {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_tuple("EpochText").field(&self.0).finish()
+    }
+}
+
+/// A path is private to this machine, so `{:?}` never prints it.
+impl fmt::Debug for AbsolutePath {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("AbsolutePath(<private>)")
+    }
+}

@@ -157,6 +157,7 @@ const RECORD_PATHS: &[&str] = &[
     "/workspaces/0",
     "/workspaces/0/layout",
     "/workspaces/1/layout/b",
+    "/workspaces/1/layout/a",
     "/workspaces/1/preferences",
     "/workspaces/0/leaves/0",
     "/sessions/0",
@@ -1268,4 +1269,153 @@ fn a_hand_built_store_over_a_ceiling_is_refused_on_encode() {
     let template = store.projects[0].clone();
     store.projects = vec![template; MAX_PROJECTS + 1];
     assert!(encode(&store).is_err());
+}
+
+// ---- review findings: placement, references, round trip, redaction ----
+
+#[test]
+fn a_leaf_is_placed_exactly_once() {
+    let mut twice = scratch_only();
+    twice["workspaces"][0]["layout"] = split(leaf_node(1), leaf_node(1));
+    twice["workspaces"][0]["leaves"] = json!([leaf(1, Value::Null)]);
+    invalid_at(&twice, "workspaces.leaves");
+    // And one leaf ID never names two placements anywhere in the store.
+    invalid_at(
+        &edited(|v| {
+            v["workspaces"][2]["layout"] = leaf_node(3);
+            v["workspaces"][2]["leaves"] = json!([leaf(3, Value::Null)]);
+        }),
+        "workspaces.leaves",
+    );
+}
+
+#[test]
+fn an_unfinished_receipt_names_a_context_that_exists_and_agrees() {
+    invalid_at(
+        &edited(|v| v["operations"][2]["projectId"] = json!(id(0x10, 9))),
+        "operations.leafId",
+    );
+    invalid_at(
+        &edited(|v| v["operations"][2]["projectId"] = Value::Null),
+        "operations.leafId",
+    );
+    invalid_at(
+        &edited(|v| v["operations"][2]["bindingId"] = json!(id(0x20, 9))),
+        "operations.bindingId",
+    );
+    // Finished and ambiguous receipts are history: they may outlive the leaf or binding they cite.
+    accepted(&edited(|v| {
+        v["operations"][3]["leafId"] = json!(id(0x40, 99))
+    }));
+    accepted(&edited(|v| {
+        v["operations"][4]["workspaceId"] = json!(id(0x30, 99))
+    }));
+    accepted(&edited(|v| {
+        v["operations"][4]["bindingId"] = json!(id(0x20, 99))
+    }));
+}
+
+#[test]
+fn an_ambiguous_receipt_may_keep_the_association_a_lost_acknowledgement_left() {
+    accepted(&edited(|v| {
+        v["operations"][3]["provider"] = json!("shell");
+        v["operations"][3]["associationId"] = json!(id(0x50, 1));
+        v["sessions"][0]["operationId"] = json!(id(0x70, 4));
+    }));
+    invalid_at(
+        &edited(|v| v["operations"][2]["associationId"] = json!(id(0x50, 1))),
+        "operations.associationId",
+    );
+}
+
+#[test]
+fn a_receipt_and_the_session_it_produced_agree_on_kind_and_requested_profile() {
+    invalid_at(
+        &edited(|v| {
+            v["sessions"][1]["target"] = json!({"kind": "managed", "protocol": 2,
+                "storeStreamId": id(0x80, 5), "sessionId": id(0x90, 5), "requestedSafetyProfile": "local_tools"});
+        }),
+        "operations.target",
+    );
+    invalid_at(
+        &edited(|v| v["sessions"][3]["target"]["requestedSafetyProfile"] = json!("inference")),
+        "operations.target",
+    );
+    invalid_at(
+        &edited(|v| v["sessions"][3]["target"]["requestedSafetyProfile"] = Value::Null),
+        "operations.target",
+    );
+}
+
+#[test]
+fn an_owner_target_is_one_session_even_across_kinds() {
+    let mut same_native = full();
+    let mut copy = same_native["sessions"][1].clone();
+    copy["id"] = json!(id(0x50, 70));
+    copy["operationId"] = Value::Null;
+    copy["target"]["terminalId"] = json!(id(0x60, 70));
+    same_native["sessions"].as_array_mut().unwrap().push(copy);
+    invalid_at(&same_native, "sessions.target");
+    let mut shell_over_native = full();
+    let mut copy = shell_over_native["sessions"][0].clone();
+    copy["id"] = json!(id(0x50, 71));
+    copy["target"]["terminalId"] = json!(id(0x60, 2));
+    shell_over_native["sessions"]
+        .as_array_mut()
+        .unwrap()
+        .push(copy);
+    invalid_at(&shell_over_native, "sessions.target");
+}
+
+#[test]
+fn every_representable_split_ratio_survives_a_round_trip() {
+    // The store is built from a typed f64, as a layout the application produced would be.
+    let base = accepted(&full());
+    let round_trip = |ratio: f64| {
+        let mut store = base.clone();
+        let Some(Node::Split { ratio: slot, .. }) = store.workspaces[1].layout.as_mut() else {
+            panic!("the fixture layout is a split");
+        };
+        *slot = ratio;
+        let bytes = encode(&store).unwrap();
+        assert_eq!(decode(&bytes).unwrap(), store, "{ratio:e}");
+        assert_eq!(
+            encode(&decode(&bytes).unwrap()).unwrap(),
+            bytes,
+            "{ratio:e}"
+        );
+    };
+    // Found by the independent review: serde_json's default float parser is off by one ulp.
+    for ratio in [
+        0.24036974322645302,
+        0.36792573792456285,
+        0.48368605141586085,
+    ] {
+        round_trip(ratio);
+    }
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    for _ in 0..2_000 {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        round_trip(0.1 + 0.8 * ((state >> 11) as f64 / (1u64 << 53) as f64));
+    }
+}
+
+#[test]
+fn a_revision_that_cannot_advance_is_not_encoded() {
+    let mut store = accepted(&full());
+    store.revision = Counter::new(u64::MAX).unwrap();
+    assert_eq!(encode(&store).unwrap_err().field, "revision");
+}
+
+#[test]
+fn debug_output_never_prints_a_private_path() {
+    let store = accepted(&full());
+    let printed = format!("{store:?}");
+    assert!(
+        !printed.contains("/home/fixture"),
+        "a path leaked into Debug output"
+    );
+    assert!(printed.contains("AbsolutePath(<private>)"));
 }

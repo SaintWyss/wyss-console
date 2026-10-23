@@ -62,7 +62,7 @@ impl StoreV1 {
         self.check_bindings(&projects, &bindings)?;
         self.check_workspaces(&projects, &sessions)?;
         self.check_sessions(&projects, &bindings, &operations, &closed)?;
-        self.check_operations(&workspaces, &sessions)?;
+        self.check_operations(&projects, &bindings, &workspaces, &sessions)?;
         self.check_migration()
     }
 
@@ -185,7 +185,13 @@ impl StoreV1 {
         sessions: &HashMap<&str, &Association>,
     ) -> M1Result {
         let mut scratch = 0;
+        let mut leaf_ids = HashSet::new();
         for workspace in &self.workspaces {
+            // A leaf ID names one placement in the whole store, so a duplicated workspace
+            // must have new ones.
+            for leaf in &workspace.leaves {
+                ensure(leaf_ids.insert(leaf.id.as_str()), "workspaces.leaves")?;
+            }
             can_advance(workspace.revision, "workspaces.revision")?;
             ensure(workspace.host_id == self.host_id, "workspaces.hostId")?;
             match &workspace.project_id {
@@ -217,6 +223,7 @@ impl StoreV1 {
         closed: &HashSet<&str>,
     ) -> M1Result {
         let mut targets = HashSet::new();
+        let mut native_sessions = HashSet::new();
         for session in &self.sessions {
             ensure(session.host_id == self.host_id, "sessions.hostId")?;
             ensure(
@@ -246,6 +253,12 @@ impl StoreV1 {
                 targets.insert(target_key(&session.target)),
                 "sessions.target",
             )?;
+            if let Target::Native { session_id, .. } = &session.target {
+                ensure(
+                    native_sessions.insert(session_id.as_str()),
+                    "sessions.target",
+                )?;
+            }
             if let Some(id) = &session.operation_id {
                 match operations.get(id.as_str()) {
                     Some(operation) => ensure(
@@ -261,6 +274,8 @@ impl StoreV1 {
 
     fn check_operations(
         &self,
+        projects: &HashMap<&str, &super::records::Project>,
+        bindings: &HashMap<&str, &Binding>,
         workspaces: &HashMap<&str, &Workspace>,
         sessions: &HashMap<&str, &Association>,
     ) -> M1Result {
@@ -274,29 +289,57 @@ impl StoreV1 {
             )?;
             let pending = operation.state == OperationState::Pending;
             ensure(pending == operation.claim.is_some(), "operations.claim")?;
-            let committed = operation.state == OperationState::Committed;
+            // Only `committed` must have an association; `ambiguous` may keep the one a lost
+            // acknowledgement left behind; `pending` and `refused` have none.
             ensure(
-                committed == operation.association_id.is_some(),
+                match operation.state {
+                    OperationState::Committed => operation.association_id.is_some(),
+                    OperationState::Ambiguous => true,
+                    OperationState::Pending | OperationState::Refused => {
+                        operation.association_id.is_none()
+                    }
+                },
                 "operations.associationId",
             )?;
-            // A receipt that has not finished still names a leaf that exists, and a leaf
-            // has at most one such receipt (`leaf_busy`).
             if matches!(
                 operation.state,
                 OperationState::Pending | OperationState::Ambiguous
             ) {
-                ensure(
-                    workspaces
-                        .get(operation.workspace_id.as_str())
-                        .is_some_and(|w| w.leaves.iter().any(|l| l.id == operation.leaf_id)),
-                    "operations.leafId",
-                )?;
+                // A leaf has at most one unfinished receipt (`leaf_busy`), whether or not
+                // the leaf still exists.
                 ensure(
                     busy.insert((operation.workspace_id.as_str(), operation.leaf_id.as_str())),
                     "operations.leafId",
                 )?;
             }
-            // Where both ends of a receipt still exist they must agree.
+            if pending {
+                // A request in flight names a context that exists and agrees with itself.
+                let workspace = workspaces.get(operation.workspace_id.as_str());
+                ensure(
+                    workspace.is_some_and(|w| {
+                        w.leaves.iter().any(|l| l.id == operation.leaf_id)
+                            && w.project_id == operation.project_id
+                    }),
+                    "operations.leafId",
+                )?;
+                ensure(
+                    operation
+                        .project_id
+                        .as_ref()
+                        .is_none_or(|p| projects.get(p.as_str()).is_some_and(|p| !p.tombstone)),
+                    "operations.projectId",
+                )?;
+                ensure(
+                    operation.binding_id.as_ref().is_none_or(|b| {
+                        bindings
+                            .get(b.as_str())
+                            .is_some_and(|b| Some(&b.project_id) == operation.project_id.as_ref())
+                    }),
+                    "operations.bindingId",
+                )?;
+            }
+            // Where both ends of a receipt still exist they must agree. Finished receipts are
+            // history and may outlive the records they name.
             if let Some(session) = operation
                 .association_id
                 .as_ref()
@@ -305,6 +348,10 @@ impl StoreV1 {
                 ensure(
                     session.operation_id.as_ref() == Some(&operation.id),
                     "operations.associationId",
+                )?;
+                ensure(
+                    receipt_matches_target(operation, &session.target),
+                    "operations.target",
                 )?;
             }
         }
@@ -334,15 +381,16 @@ impl StoreV1 {
 /// The identity of an owner's session, as the owner names it.
 fn target_key(target: &Target) -> (u8, &str, &str, &str) {
     match target {
+        // A terminal is one thing, whichever kind of session runs in it.
         Target::Native {
             terminal_id,
             host_epoch,
             ..
-        } => (1, terminal_id.as_str(), host_epoch.as_str(), ""),
-        Target::Shell {
+        }
+        | Target::Shell {
             terminal_id,
             host_epoch,
-        } => (2, terminal_id.as_str(), host_epoch.as_str(), ""),
+        } => (1, terminal_id.as_str(), host_epoch.as_str(), ""),
         Target::Managed {
             protocol,
             store_stream_id,
@@ -357,6 +405,26 @@ fn target_key(target: &Target) -> (u8, &str, &str, &str) {
             session_id.as_str(),
             "",
         ),
+    }
+}
+
+/// The kind of session a receipt asked for is the kind of session its association holds, and a
+/// Managed association keeps the requested profile of the receipt, no other.
+fn receipt_matches_target(operation: &Operation, target: &Target) -> bool {
+    match target {
+        Target::Native { .. } => {
+            operation.mode == Mode::Native && operation.provider != LaunchProvider::Shell
+        }
+        Target::Shell { .. } => {
+            operation.mode == Mode::Native && operation.provider == LaunchProvider::Shell
+        }
+        Target::Managed {
+            requested_safety_profile,
+            ..
+        } => {
+            operation.mode == Mode::Managed
+                && *requested_safety_profile == operation.managed_safety_profile
+        }
     }
 }
 
@@ -404,10 +472,12 @@ fn check_layout(workspace: &Workspace, sessions: &HashMap<&str, &Association>) -
         walk(layout, 0, &mut placed)?;
     }
     let declared: HashSet<&str> = workspace.leaves.iter().map(|l| l.id.as_str()).collect();
-    let placed: HashSet<&str> = placed.into_iter().collect();
+    let placed_once: HashSet<&str> = placed.iter().copied().collect();
     // Each leaf is placed exactly once, and every placement has its leaf record.
     ensure(
-        declared.len() == workspace.leaves.len() && declared == placed,
+        declared.len() == workspace.leaves.len()
+            && placed.len() == workspace.leaves.len()
+            && declared == placed_once,
         "workspaces.leaves",
     )?;
     ensure(

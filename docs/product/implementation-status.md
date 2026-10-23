@@ -217,7 +217,7 @@ M1-01 passes at the closed-schema and strict-codec level only (`contracts::m1::t
 unwired and unreleased); its "before save" wiring and M1-02..13 and the native project journeys
 remain **NOT_RUN** acceptance obligations.
 ADR0052 is now Accepted as an architectural decision, not product/release acceptance.
-Its 13 M1 acceptance tests remain NOT_RUN and adoption needs real-desktop evidence,
+Its M1 acceptance tests are not complete (only M1-01 at codec level) and adoption needs real-desktop evidence,
 preservation/rollback and a separately authorized deployment. No new owner product choice
 is needed for the recommended proposal; retain WD01/02, P1 and F8 cap1. Source/installed
 binary correspondence, exact F8 resource mismatches, real-desktop budgets and provider
