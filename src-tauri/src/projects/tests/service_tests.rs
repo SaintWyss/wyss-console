@@ -1181,3 +1181,22 @@ fn what_the_owners_said_is_read_again_once_its_time_is_over() {
     assert!(!service.overview().host.reachable);
     assert_eq!(counted(&f, "host"), 3);
 }
+
+#[test]
+fn one_write_to_a_terminal_is_bounded() {
+    let f = fixture().enabled();
+    let (project, workspace) = f.register(ROOT_A);
+    let association = f.shell(&project, &workspace, TERMINAL_1);
+    f.service.claim_input("w1", &association).unwrap();
+    let too_long = vec![b'x'; crate::projects::service::MAX_WRITE + 1];
+    for data in [&too_long[..], &[][..]] {
+        let failure = f.service.write_input("w1", &association, data).unwrap_err();
+        assert_eq!(failure.code, ErrorCode::InvalidRecord);
+        assert_eq!(failure.field, Some("data"));
+    }
+    assert!(f.owner.script(|s| s.written.is_empty()), "nothing was sent");
+    let at_the_bound = vec![b'x'; crate::projects::service::MAX_WRITE];
+    f.service
+        .write_input("w1", &association, &at_the_bound)
+        .unwrap();
+}

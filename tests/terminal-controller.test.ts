@@ -393,6 +393,40 @@ describe('real IPC bridge plus terminal lifecycle controller', () => {
       error: 'write_failed',
     });
   });
+  it('offers a write the host did not take (busy) again and keeps the terminal', async () => {
+    // Another window was writing at that moment: nothing of this write reached the terminal.
+    let tries = 0;
+    handle = (command) => {
+      if (command === 'terminal_write') {
+        tries += 1;
+        return tries <= 3 ? Promise.reject({ code: 'busy' }) : 3;
+      }
+      return command === 'terminal_read_output'
+        ? new Promise(() => undefined)
+        : info;
+    };
+    await controller.start();
+    render.text('abc');
+    await flush();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(count('terminal_write')).toBe(4);
+    expect(states.at(-1)?.state).toBe('running');
+    expect(count('close_terminal')).toBe(0);
+  });
+  it('gives up on a terminal that stays busy, as before', async () => {
+    handle = (command) =>
+      command === 'terminal_write'
+        ? Promise.reject({ code: 'busy' })
+        : command === 'terminal_read_output'
+          ? new Promise(() => undefined)
+          : info;
+    await controller.start();
+    render.text('abc');
+    await flush();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(count('terminal_write')).toBe(41);
+    expect(states.at(-1)).toMatchObject({ state: 'failed', error: 'busy' });
+  });
   it('does not write after disposal even when an input promise resolves late', async () => {
     const write = deferred<number>();
     handle = (command) =>

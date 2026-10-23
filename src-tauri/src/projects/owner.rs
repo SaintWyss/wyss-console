@@ -21,6 +21,10 @@ use wyss_console::contracts::m1::{
     records::{CheckoutKind, ManagedProtocol, ManagedSafetyProfile},
 };
 
+/// How many times, and how far apart, a write the host refused as busy is offered again.
+const WRITE_BUSY_RETRIES: usize = 40;
+const WRITE_BUSY_DELAY: Duration = Duration::from_millis(25);
+
 /// Longest wait for the host to answer a read or a launch.
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -760,14 +764,27 @@ impl<M: ManagedPort> Owner for RealOwner<M> {
     }
 
     fn term_write(&self, epoch: &str, terminal: &str, data: &[u8]) -> Result<(), OwnerError> {
-        self.socket()?
-            .call(
+        let socket = self.socket()?;
+        // The host takes one write at a time for a terminal. `busy` is its refusal before anything
+        // was written, typically because another window (the older terminal view) was writing at
+        // that moment, so the same bytes are offered again shortly instead of being dropped. Any
+        // other answer, and a terminal that stays busy, ends the attempt.
+        for attempt in 0..=WRITE_BUSY_RETRIES {
+            match socket.call(
                 Some(epoch),
                 "term_write",
                 json!({"terminal_id": terminal, "data": data}),
-            )
-            .map(|_| ())
-            .map_err(CallFailure::before)
+            ) {
+                Ok(_) => return Ok(()),
+                Err(CallFailure::Refused(code))
+                    if code == "busy" && attempt < WRITE_BUSY_RETRIES =>
+                {
+                    std::thread::sleep(WRITE_BUSY_DELAY);
+                }
+                Err(other) => return Err(other.before()),
+            }
+        }
+        Err(OwnerError::Refused)
     }
 
     fn term_resize(

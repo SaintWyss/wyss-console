@@ -169,6 +169,26 @@ class OwnedTests(Base):
             time.sleep(0.1)
         self.assertTrue(self._gone(kid), "the adopted child outlived its owner")
 
+    def test_a_whole_tree_is_adopted_from_the_owned_process_and_ended_with_it_and_a_decoy_is_not(self):
+        sh = os.path.join(self.dir, "sh3")
+        shutil.copy("/bin/sh", sh)
+        # a child that starts a child of its own, which ignores termination
+        script = f'{sh} -c \'trap "" TERM; {self.exe} 300 & wait\' & wait'
+        with Owned([sh, "-c", script], sh) as o:
+            time.sleep(0.6)
+            seen = o.adopt_tree()
+            self.assertGreaterEqual(seen, 2)
+            adopted = list(o.adopted)
+            self.assertNotIn(self.decoy.pid, adopted)
+            # adopting again changes nothing
+            self.assertEqual(o.adopt_tree(), 0)
+        for _ in range(50):
+            if all(self._gone(p) for p in adopted):
+                break
+            time.sleep(0.1)
+        self.assertTrue(all(self._gone(p) for p in adopted), "a descendant outlived its owner")
+        self.assertIsNone(self.decoy.poll())
+
     @staticmethod
     def _gone(pid):
         try:

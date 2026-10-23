@@ -69,7 +69,7 @@ Paths stay private/local; frontend DTOs use root label/eligibility, not trusted 
 | NativeTarget         | `kind:native`, `sessionId:NativeId`, `terminalId:UUID`, `hostEpoch:EpochText`                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ShellTarget          | `kind:shell`, `terminalId:UUID`, `hostEpoch:EpochText`                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ManagedTarget        | `kind:managed`, `protocol:1 \| 2`, `storeStreamId:UUID`, `sessionId:UUID`, `requestedSafetyProfile:ManagedSafetyProfile \| null`; a display-only request, never proof of effective authority profile                                                                                                                                                                                                                                                                                                                        |
-| Operation            | `id`, `kind:launch`, `projectId:UUID \| null`, `workspaceId`, `leafId`, `bindingId:UUID \| null`, `bindingRevision:Counter \| null`, `provider:claude \| codex \| shell`, `mode:native \| managed`, `nativeProfile:ProfileRef \| null`, `managedSafetyProfile:ManagedSafetyProfile \| null`, `state:pending \| committed \| ambiguous \| refused`, `associationId:UUID \| null`, `claim:EpochText \| null`, `createdAt`; a durable requested-profile receipt, never an approval, credential or executed-profile attestation |
+| Operation            | `id`, `kind:launch`, `projectId:UUID \| null`, `workspaceId`, `leafId`, `bindingId:UUID \| null`, `bindingRevision:Counter \| null`, `provider:claude \| codex \| shell`, `mode:native \| managed`, `nativeProfile:ProfileRef \| null`, `managedSafetyProfile:ManagedSafetyProfile \| null`, `managedAuthority:{protocol:1 \| 2,storeStreamId:UUID} \| null` (the authority the launch was first asked of: present exactly for a Managed launch, and the one a Managed association of the receipt must name), `state:pending \| committed \| ambiguous \| refused`, `associationId:UUID \| null`, `claim:EpochText \| null`, `createdAt`; a durable requested-profile receipt, never an approval, credential or executed-profile attestation |
 | Migration            | `version:1`, `id:UUID`, `sources:{kind:registry \| layout,digest:SHA256}[]`, `map:{sourceKind:registry_project \| registry_session \| layout_leaf,sourceKey:Text,targetId:UUID}[]`, `state:committed`; sourceKey is an opaque source-record digest, not a public path                                                                                                                                                                                                                                                       |
 
 `id`, `projectId`, `hostId`, `workspaceId`, `bindingId`, `associationId` above are UUIDs;
@@ -212,7 +212,8 @@ receipt whose `claim` no longer matches a live backend process is CAS-updated to
 is left alone. Transitions: `pending` to `committed`, `refused` or `ambiguous` only by the
 claim holder; `ambiguous` to `committed` or `refused` only by an explicit user reconciliation
 against the owner (target identified or confirmed absent), recorded by CAS. Any new launch
-needs a new `operationId`. `context_stale` is evaluated against the immutable captured
+needs a new `operationId`. A command that makes no receipt of its own may not reuse an ID a receipt owns or one
+already in `closedOperations`: it is refused `invalid_record`, effect `none` for an open receipt and `unknown` for a closed ID. `context_stale` is evaluated against the immutable captured
 context before any dispatch, never against current UI selection.
 
 Errors: `unsupported_schema`, `invalid_record`, `capacity_exceeded`, `revision_conflict`,
@@ -339,12 +340,28 @@ output is read through the same socket (`projects_term_read`), so a recovered vi
 shell. Managed sessions come from the desktop's own P1 and P2 interfaces, each under its
 authority's stream ID, bounded to eight pages.
 
-**Managed launch prepares a session and nothing else.** It asks the owner for a session with the
-receipt's operation ID as the intent (P2 when the protocol-2 interface is active, P1 otherwise) and
-records the requested profile. Binding a workspace, starting a runtime, leases and turns stay in
-the Managed screens, which read the request as a hint and grant nothing from it. A launch whose
-outcome is unknown is retried only by the user (`reconcileLaunch retryManaged`), with the same
-intent. Claude Managed is `unsupported_capability`.
+**Managed launch prepares a session and nothing else.** It first reads the one authority the launch
+would go to (the protocol-2 interface when it is active, the installed authority otherwise) and
+what that authority says of itself, and refuses with nothing written unless that shows it serves
+the requested profile. No wire field lists the profiles an authority supports (adding one would
+change the authority protocol, which this contract may not do), so a profile counts as advertised
+only when the authority's own status proves what it needs: Inference needs the greeting of that
+interface's own protocol and storage schema (protocol 1 / schema 7, protocol 2 / schema 8);
+Local Tools, the privileged profile, also needs the authority to be the very build of this desktop
+(the rule the protocol-2 client already applies to everything), so an older protocol-1 authority is
+offered Inference only. An authority that cannot be read, or that proves nothing, refuses
+`host_offline` or `unsupported_capability`; the window's state is never evidence. The receipt
+records the authority (`managedAuthority`: protocol and stream) before the owner is asked, the
+owner is sent that authority and refuses (`host_changed`, nothing sent) if the authority that would
+answer is another one, and a reply that names another authority is ambiguous, never recorded as
+this launch's. The operation ID is the intent, and the requested profile is recorded. Binding a
+workspace, starting a runtime, leases and turns stay in the Managed screens, which read the request
+as a hint and grant nothing from it. A launch whose outcome is unknown is retried only by the user
+(`reconcileLaunch retryManaged`), with the same intent, of the recorded authority and no other: a
+desktop that has moved between protocol 1 and 2 refuses (`host_changed`, effect unknown, nothing
+sent) rather than prepare a second session elsewhere, and the profile must be shown again. `absent`
+for a Managed launch is judged by that same authority's sessions. Claude Managed is
+`unsupported_capability`.
 
 **Launch journal.** `pending` carries a `claim` (`c1:<pid>:<start ticks>:<nonce>`); on start the
 service makes `pending` receipts of a gone process `ambiguous`. Receipts are compacted only by an

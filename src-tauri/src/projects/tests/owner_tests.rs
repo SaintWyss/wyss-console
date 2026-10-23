@@ -266,3 +266,114 @@ fn roots_are_looked_at_without_following_a_final_link_and_the_home_folder_is_not
         "no Git, no files"
     );
 }
+
+#[test]
+fn a_host_replaced_between_the_greeting_and_the_terminal_list_is_never_described_with_the_new_ones_epoch()
+ {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let dir = TestDir::new();
+    let path = dir.0.join("swap.sock");
+    let old = UnixListener::bind(&path).unwrap();
+    let asked_new = Arc::new(AtomicUsize::new(0));
+    let server = {
+        let (path, asked_new) = (path.clone(), asked_new.clone());
+        thread::spawn(move || {
+            // Connection 1 only observes the host: nothing is sent.
+            let _ = old.accept();
+            // Connection 2 is the greeting. Before it is answered the socket is replaced by
+            // another one, as a restarted host would be.
+            let (mut greeted, _) = old.accept().unwrap();
+            let _: protocol::Request = protocol::read_frame(&mut greeted).unwrap();
+            std::fs::remove_file(&path).unwrap();
+            let new = UnixListener::bind(&path).unwrap();
+            protocol::write_frame(
+                &mut greeted,
+                &protocol::Answer::Ok(json!({"protocol": protocol::PROTOCOL, "features": []})),
+            )
+            .unwrap();
+            // Whatever the new host is asked is counted; it would answer an empty list.
+            new.set_nonblocking(true).unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            while std::time::Instant::now() < deadline {
+                if let Ok((mut stream, _)) = new.accept() {
+                    stream.set_nonblocking(false).unwrap();
+                    if protocol::read_frame::<protocol::Request>(&mut stream).is_ok() {
+                        asked_new.fetch_add(1, Ordering::SeqCst);
+                        let _ =
+                            protocol::write_frame(&mut stream, &protocol::Answer::Ok(json!([])));
+                    }
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        })
+    };
+    let socket = HostSocket::new(path);
+    let first = socket.epoch().unwrap();
+    let result = socket.host_view(Some(&first));
+    assert_eq!(result.unwrap_err(), OwnerError::HostChanged);
+    server.join().unwrap();
+    assert_eq!(
+        asked_new.load(Ordering::SeqCst),
+        0,
+        "nothing was asked of the host that replaced it"
+    );
+}
+
+#[test]
+fn a_write_the_host_refuses_as_busy_is_offered_again_and_other_refusals_are_not() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    for (refusals, word, expected_calls, outcome) in [
+        (3usize, "busy", 4usize, true),
+        // Never takes it: the attempt ends, after the bounded number of offers.
+        (1000, "busy", 41, false),
+        // Any other refusal is final at once.
+        (1000, "unknown_terminal", 1, false),
+    ] {
+        let dir = TestDir::new();
+        let path = dir.0.join("busy.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = {
+            let calls = calls.clone();
+            thread::spawn(move || {
+                // Connection 1 only observes the host; each later one is a write.
+                let _ = listener.accept();
+                listener.set_nonblocking(true).unwrap();
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                while std::time::Instant::now() < deadline {
+                    let Ok((mut stream, _)) = listener.accept() else {
+                        thread::sleep(Duration::from_millis(2));
+                        continue;
+                    };
+                    stream.set_nonblocking(false).unwrap();
+                    if protocol::read_frame::<protocol::Request>(&mut stream).is_err() {
+                        continue;
+                    }
+                    let n = calls.fetch_add(1, Ordering::SeqCst) + 1;
+                    let answer = if n <= refusals {
+                        protocol::Answer::Err(protocol::HostError::new(word))
+                    } else {
+                        protocol::Answer::Ok(json!({"written": 3}))
+                    };
+                    let _ = protocol::write_frame(&mut stream, &answer);
+                    if n >= expected_calls {
+                        break;
+                    }
+                }
+            })
+        };
+        let owner = RealOwner::new(Some(HostSocket::new(path.clone())), NoManaged);
+        let epoch = HostSocket::new(path).epoch().unwrap();
+        let done = owner.term_write(&epoch, "aaaaaaaa-0000-4000-8000-000000000001", b"abc");
+        assert_eq!(done.is_ok(), outcome, "{word} x{refusals}");
+        if !outcome {
+            assert_eq!(done.unwrap_err(), OwnerError::Refused);
+        }
+        server.join().unwrap();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            expected_calls,
+            "{word} x{refusals}"
+        );
+    }
+}

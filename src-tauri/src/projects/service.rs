@@ -32,6 +32,9 @@ use wyss_console::contracts::m1::{
 /// Most rows a page returns.
 pub const PAGE: usize = 100;
 
+/// Most bytes one write to a terminal carries.
+pub const MAX_WRITE: usize = 64 * 1024;
+
 /// How long what the owners said is shown to every window before they are asked again. A display
 /// read inside this time costs the owners nothing, however many windows are open and however
 /// often they ask; anything that acts, or that decides what to do, reads the owner itself.
@@ -1136,6 +1139,10 @@ impl ProjectsService {
     /// Input and resize need the claim: a mirror view is read-only.
     pub fn write_input(&self, window: &str, association: &str, data: &[u8]) -> Result<(), Failure> {
         self.gated()?;
+        // A keystroke, a paste or a reply of the terminal: never a megabyte in one call.
+        if data.is_empty() || data.len() > MAX_WRITE {
+            return Err(failure(ErrorCode::InvalidRecord).with_field("data"));
+        }
         let (epoch, terminal) = self.terminal_of(association)?;
         if !self.claims.holds(window, &epoch, &terminal) {
             return Err(failure(ErrorCode::OwnerRefused).with_field("input_claim"));

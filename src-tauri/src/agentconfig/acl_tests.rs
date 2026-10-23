@@ -201,3 +201,25 @@ fn the_acl_a_directory_gives_what_is_made_in_it_is_read_apart() {
     );
     fs::remove_dir(base).unwrap();
 }
+
+#[test]
+fn an_attribute_that_cannot_be_asked_for_is_somebody_who_cannot_be_named() {
+    use super::acl::inherited;
+    use std::os::unix::fs::OpenOptionsExt;
+    let (base, _) = dir(0o700);
+    // A descriptor that only names the directory cannot be asked for its attributes. That is a
+    // failure to know, not an absence: both the ACL it has and the one it gives are unverified.
+    let named = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_PATH | nix::libc::O_DIRECTORY | nix::libc::O_CLOEXEC)
+        .open(&base)
+        .unwrap();
+    let (me, gid) = (geteuid().as_raw(), getegid().as_raw());
+    assert!(writers(&named, 0o700, gid, me).everyone);
+    assert!(inherited(&named, gid, me).everyone);
+    // The same directory through one that can be asked has neither.
+    let open = fs::File::open(&base).unwrap();
+    assert_eq!(writers(&open, 0o700, gid, me), Writers::default());
+    assert_eq!(inherited(&open, gid, me), Writers::default());
+    fs::remove_dir(base).unwrap();
+}

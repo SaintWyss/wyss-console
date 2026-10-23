@@ -43,6 +43,18 @@ def _stat(pid):
     return int(fields[1]), int(fields[19])
 
 
+def _children(pid):
+    """The direct children of `pid`, from the kernel's own list for it."""
+    out = []
+    try:
+        for task in os.listdir(f"/proc/{pid}/task"):
+            with open(f"/proc/{pid}/task/{task}/children") as f:
+                out.extend(int(x) for x in f.read().split())
+    except OSError:
+        pass
+    return out
+
+
 class Owned:
     def __init__(self, argv, expect_exe, env=None, log=None):
         self.expect_exe = os.path.realpath(expect_exe)
@@ -136,6 +148,37 @@ class Owned:
             self.adopted[pid] = fd
             return pid
         return None
+
+    def adopt_tree(self):
+        """Adopt every descendant of the owned process that is there now, by descriptor.
+
+        The candidates are read from the children lists of this process and then of each process
+        adopted before, never from a listing of the system; each is checked after its descriptor
+        is open, so a PID that changed hands in between is rejected. A helper that a bus or a
+        window starts on demand is thereby ended with its parent if it outlives it. Returns how
+        many were adopted."""
+        adopted = 0
+        todo = [self.pid]
+        while todo:
+            parent = todo.pop()
+            for pid in _children(parent):
+                before = _stat(pid)
+                if before is None or before[0] != parent:
+                    continue
+                if pid in self.adopted:
+                    todo.append(pid)
+                    continue
+                try:
+                    fd = os.pidfd_open(pid)
+                except OSError:
+                    continue
+                if _stat(pid) != before:
+                    os.close(fd)
+                    continue
+                self.adopted[pid] = fd
+                todo.append(pid)
+                adopted += 1
+        return adopted
 
     def stop(self, grace=10.0):
         """End what was launched and what was adopted. Idempotent. Interruptions are held back

@@ -687,6 +687,9 @@ pub async fn projects_set_enabled(
     .await
 }
 
+/// Most extra workspace windows open at once.
+const MOST_WINDOWS: usize = 8;
+
 /// Another window onto the same store: it shows the project workspace and nothing else.
 #[tauri::command]
 pub async fn projects_open_window(
@@ -696,6 +699,16 @@ pub async fn projects_open_window(
     let service = projects.get(&app);
     if !service.enabled() {
         return Err(Failure::new(ErrorCode::UnsupportedCapability).with_field("disabled"));
+    }
+    // Each window reads the store on its own poll: eight is more than anyone uses at once.
+    if app
+        .webview_windows()
+        .keys()
+        .filter(|label| label.starts_with("w-"))
+        .count()
+        >= MOST_WINDOWS
+    {
+        return Err(Failure::new(ErrorCode::CapacityExceeded));
     }
     let label = format!("w-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
     tauri::WebviewWindowBuilder::new(
