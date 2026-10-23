@@ -52,7 +52,7 @@ impl World {
         // Waits for input (so it stays alive) after printing what it got.
         script(
             &bin.join("claude"),
-            "[ \"$1\" = \"--version\" ] && { echo '2.0.0 (fake)'; exit 0; }\n\
+            "[ \"$1\" = \"--version\" ] && { echo '2.1.309 (Claude Code)'; exit 0; }\n\
              echo \"FAKE-CLAUDE argc=$#\"; for a in \"$@\"; do echo \"[$a]\"; done\n\
              echo \"SESSION=$WYSS_NATIVE_SESSION_ID\"\n\
              for a in \"$@\"; do case \"$prev\" in --settings) echo \"OVERLAY=$(cat \"$a\")\";; esac; prev=\"$a\"; done\n\
@@ -60,7 +60,7 @@ impl World {
         );
         script(
             &bin.join("codex"),
-            "[ \"$1\" = \"--version\" ] && { echo 'codex-cli 0.0.0 (fake)'; exit 0; }\n\
+            "[ \"$1\" = \"--version\" ] && { echo 'codex-cli 0.159.0'; exit 0; }\n\
              echo \"FAKE-CODEX argc=$#\"; for a in \"$@\"; do echo \"[$a]\"; done\n\
              exit 3",
         );
@@ -98,6 +98,11 @@ impl World {
         agent: AgentId,
         profile: Option<&str>,
     ) -> Result<super::service::StartReply, super::service::NativeError> {
+        let preview = self.service.preview(agent, profile)?;
+        let expected_cli_version = match agent {
+            AgentId::ClaudeCode => Some("2.1.309 (Claude Code)".to_owned()),
+            AgentId::Codex => Some("codex-cli 0.159.0".to_owned()),
+        };
         self.service.start(
             &self.terminal,
             StartRequest {
@@ -106,6 +111,8 @@ impl World {
                 profile_id: profile.map(str::to_owned),
                 size: SIZE,
                 brief: None,
+                plan_token: preview.plan_token,
+                expected_cli_version,
             },
         )
     }
@@ -163,7 +170,7 @@ fn the_catalogue_finds_what_is_installed_and_says_what_is_not() {
         .find(|a| a.executable == "claude")
         .unwrap();
     assert!(claude.installed);
-    assert_eq!(claude.version.as_deref(), Some("2.0.0 (fake)"));
+    assert_eq!(claude.version.as_deref(), Some("2.1.309 (Claude Code)"));
     fs::remove_file(world.bin.join("codex")).unwrap();
     // The answer is kept for a short while; a new service looks again.
     let again = World::open(&world.base, &world.home, &world.bin).launcher();
@@ -223,7 +230,20 @@ fn stopping_ends_the_process_and_restarting_makes_a_new_session_of_the_same_kind
     let stopped = world.wait_state(&id, State::Stopped);
     assert!(stopped.session.ended_at.is_some());
 
-    let second = world.service.restart(&world.terminal, &id, SIZE).unwrap();
+    let preview = world
+        .service
+        .preview(AgentId::ClaudeCode, Some("template-review"))
+        .unwrap();
+    let second = world
+        .service
+        .restart(
+            &world.terminal,
+            &id,
+            SIZE,
+            preview.plan_token,
+            Some("2.1.309 (Claude Code)".to_owned()),
+        )
+        .unwrap();
     assert_ne!(second.session.session.id, id);
     assert_eq!(
         second.session.session.restart_of.as_deref(),
@@ -253,6 +273,144 @@ fn stopping_ends_the_process_and_restarting_makes_a_new_session_of_the_same_kind
 }
 
 #[test]
+fn a_stale_restart_preview_leaves_the_existing_native_session_running() {
+    let world = World::new();
+    let body = Body {
+        name: "Restart model".to_owned(),
+        applies_to: vec![AgentId::ClaudeCode],
+        model: Some("sonnet".to_owned()),
+        ..Body::default()
+    };
+    let profile_id = world.service.profiles().create(body.clone()).unwrap();
+    let first = world.start(AgentId::ClaudeCode, Some(&profile_id)).unwrap();
+    let id = first.session.session.id.clone();
+    world.output_until(&first.terminal.terminal_id, "SESSION=");
+    let preview = world
+        .service
+        .preview(AgentId::ClaudeCode, Some(&profile_id))
+        .unwrap();
+    let mut changed = body;
+    changed.model = Some("opus".to_owned());
+    world.service.profiles().save(&profile_id, changed).unwrap();
+
+    let error = world
+        .service
+        .restart(
+            &world.terminal,
+            &id,
+            SIZE,
+            preview.plan_token,
+            Some("2.1.309 (Claude Code)".to_owned()),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, "profile_preview_stale");
+    let old = world
+        .service
+        .sessions(&world.terminal, false)
+        .into_iter()
+        .find(|session| session.session.id == id)
+        .unwrap();
+    assert_eq!(old.session.state, State::Running);
+}
+
+#[test]
+fn a_running_native_session_is_stopped_only_after_its_replacement_starts() {
+    let world = World::new();
+    let first = world.start(AgentId::ClaudeCode, None).unwrap();
+    let id = first.session.session.id.clone();
+    world.output_until(&first.terminal.terminal_id, "SESSION=");
+
+    let replacement = world
+        .service
+        .restart(&world.terminal, &id, SIZE, None, None)
+        .unwrap();
+    assert_ne!(replacement.session.session.id, id);
+    let old = world
+        .service
+        .sessions(&world.terminal, false)
+        .into_iter()
+        .find(|session| session.session.id == id)
+        .unwrap();
+    assert_eq!(old.session.state, State::Stopped);
+    assert_eq!(replacement.session.session.state, State::Running);
+    assert_eq!(
+        replacement.session.session.restart_of.as_deref(),
+        Some(id.as_str())
+    );
+}
+
+#[test]
+fn a_shell_version_mismatch_during_restart_keeps_the_previous_session_running() {
+    let world = World::new();
+    let profile_id = world
+        .service
+        .profiles()
+        .create(Body {
+            name: "Pinned model".to_owned(),
+            applies_to: vec![AgentId::ClaudeCode],
+            model: Some("sonnet".to_owned()),
+            ..Body::default()
+        })
+        .unwrap();
+    let first = world.start(AgentId::ClaudeCode, Some(&profile_id)).unwrap();
+    let id = first.session.session.id.clone();
+    world.output_until(&first.terminal.terminal_id, "SESSION=");
+    let preview = world
+        .service
+        .preview(AgentId::ClaudeCode, Some(&profile_id))
+        .unwrap();
+
+    let changed_bin = world.base.parent().unwrap().join("changed-bin");
+    fs::create_dir_all(&changed_bin).unwrap();
+    let started = changed_bin.join("provider-started");
+    script(
+        &changed_bin.join("claude"),
+        &format!(
+            "[ \"$1\" = \"--version\" ] && {{ echo '2.1.310 (Claude Code)'; exit 0; }}\nprintf started > '{}'\n",
+            started.display()
+        ),
+    );
+    script(
+        &world.bin.join("bash"),
+        &format!(
+            "export PATH='{}':\"$PATH\"\nexec /usr/bin/bash --norc --noprofile \"$@\"",
+            changed_bin.display()
+        ),
+    );
+
+    let error = world
+        .service
+        .restart(
+            &world.terminal,
+            &id,
+            SIZE,
+            preview.plan_token,
+            Some("2.1.309 (Claude Code)".to_owned()),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, "provider_version_unverified");
+    assert!(
+        !started.exists(),
+        "mismatched CLI must not receive profile flags"
+    );
+    let old = world
+        .service
+        .sessions(&world.terminal, false)
+        .into_iter()
+        .find(|session| session.session.id == id)
+        .unwrap();
+    assert_eq!(old.session.state, State::Running);
+    assert!(
+        world
+            .terminal
+            .status(&first.terminal.terminal_id)
+            .unwrap()
+            .state
+            == wyss_console::terminal::contracts::TerminalState::Running
+    );
+}
+
+#[test]
 fn only_a_folder_the_user_chose_or_a_known_project_can_be_a_project() {
     let world = World::new();
     let elsewhere = world.home.parent().unwrap().join("elsewhere");
@@ -263,6 +421,8 @@ fn only_a_folder_the_user_chose_or_a_known_project_can_be_a_project() {
         profile_id: None,
         size: SIZE,
         brief: None,
+        plan_token: None,
+        expected_cli_version: None,
     };
     assert_eq!(
         world
@@ -339,6 +499,42 @@ fn a_profile_the_agent_cannot_apply_refuses_to_start_and_starts_nothing() {
             .code,
         "profile_not_applicable"
     );
+}
+
+#[test]
+fn a_profile_change_after_preview_refuses_the_stale_start_without_creating_a_session() {
+    let world = World::new();
+    let mut body = Body {
+        name: "Pinned model".to_owned(),
+        applies_to: vec![AgentId::ClaudeCode],
+        model: Some("sonnet".to_owned()),
+        ..Body::default()
+    };
+    let id = world.service.profiles().create(body.clone()).unwrap();
+    let preview = world
+        .service
+        .preview(AgentId::ClaudeCode, Some(&id))
+        .unwrap();
+    body.model = Some("opus".to_owned());
+    world.service.profiles().save(&id, body).unwrap();
+
+    let error = world
+        .service
+        .start(
+            &world.terminal,
+            StartRequest {
+                agent_id: AgentId::ClaudeCode,
+                project: world.home.to_string_lossy().into_owned(),
+                profile_id: Some(id),
+                size: SIZE,
+                brief: None,
+                plan_token: preview.plan_token,
+                expected_cli_version: Some("2.1.309 (Claude Code)".to_owned()),
+            },
+        )
+        .unwrap_err();
+    assert_eq!(error.code, "profile_preview_stale");
+    assert!(world.service.sessions(&world.terminal, false).is_empty());
 }
 
 #[test]
@@ -561,6 +757,8 @@ fn real_agents_start_in_native_terminals_and_stop() {
                     profile_id: None,
                     size: SIZE,
                     brief: None,
+                    plan_token: None,
+                    expected_cli_version: None,
                 },
             )
             .unwrap();
@@ -642,6 +840,8 @@ fn a_reviewed_brief_is_the_agents_first_message_as_one_word_and_a_bad_one_is_ref
                 profile_id: None,
                 size: SIZE,
                 brief: brief.map(str::to_owned),
+                plan_token: None,
+                expected_cli_version: None,
             },
         )
     };

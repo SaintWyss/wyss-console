@@ -66,3 +66,44 @@ pub fn recipe(shell: &Path, words: &[String], direct: &Path) -> Recipe {
         through_shell: true,
     }
 }
+
+/// A profile's provider flags are checked against the build that the window discovered. A
+/// shell may change PATH in its startup files, so a profile launch checks the shell-resolved
+/// binary with its supported `--version` interface and execs that same resolved path. Values
+/// remain argv words; none of the provider or profile data becomes shell command text.
+pub fn recipe_with_version_guard(
+    shell: &Path,
+    words: &[String],
+    direct: &Path,
+    expected_version: Option<&str>,
+) -> Recipe {
+    let Some(expected_version) = expected_version else {
+        return recipe(shell, words, direct);
+    };
+    let Some(family) = family(shell) else {
+        // The service checks the known absolute path immediately before this direct launch.
+        return recipe(shell, words, direct);
+    };
+    let mut args = match family {
+        Family::Posix | Family::Bash | Family::Zsh => vec![
+            "-i".to_owned(),
+            "-c".to_owned(),
+            "resolved=$(command -v \"$1\") || { printf '%s\\n' 'Wyss: provider command could not be resolved; no agent was started.' >&2; exit 127; }; actual=$(\"$resolved\" --version 2>/dev/null) || { printf '%s\\n' 'Wyss: provider version could not be checked; no agent was started.' >&2; exit 125; }; if [ \"$actual\" != \"$2\" ]; then printf '%s\\n' 'Wyss: provider build changed after preview; no profile was applied and no agent was started.' >&2; exit 125; fi; if [ -z \"${WYSS_NATIVE_VERSION_GUARD:-}\" ] || ! printf 'ok\\n' > \"$WYSS_NATIVE_VERSION_GUARD\"; then printf '%s\\n' 'Wyss: provider start could not be verified; no agent was started.' >&2; exit 125; fi; unset WYSS_NATIVE_VERSION_GUARD; shift 2; exec \"$resolved\" \"$@\"".to_owned(),
+            "wyss-checked-launch".to_owned(),
+        ],
+        Family::Fish => vec![
+            "-i".to_owned(),
+            "-c".to_owned(),
+            "set -l resolved (command -s -- \"$argv[1]\"); if test -z \"$resolved\"; printf '%s\\n' 'Wyss: provider command could not be resolved; no agent was started.' >&2; exit 127; end; set -l actual (\"$resolved\" --version 2>/dev/null); if test (count $actual) -ne 1; printf '%s\\n' 'Wyss: provider version could not be checked; no agent was started.' >&2; exit 125; end; if test \"$actual\" != \"$argv[2]\"; printf '%s\\n' 'Wyss: provider build changed after preview; no profile was applied and no agent was started.' >&2; exit 125; end; if not set -q WYSS_NATIVE_VERSION_GUARD; or test -z \"$WYSS_NATIVE_VERSION_GUARD\"; printf '%s\\n' 'Wyss: provider start could not be verified; no agent was started.' >&2; exit 125; end; printf 'ok\\n' > \"$WYSS_NATIVE_VERSION_GUARD\"; or begin; printf '%s\\n' 'Wyss: provider start could not be verified; no agent was started.' >&2; exit 125; end; set -e WYSS_NATIVE_VERSION_GUARD; set -e argv[1]; set -e argv[1]; exec \"$resolved\" $argv".to_owned(),
+            "--".to_owned(),
+        ],
+    };
+    args.push(words[0].clone());
+    args.push(expected_version.to_owned());
+    args.extend(words.iter().skip(1).cloned());
+    Recipe {
+        program: shell.to_owned(),
+        args,
+        through_shell: true,
+    }
+}

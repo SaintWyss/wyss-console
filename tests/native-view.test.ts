@@ -48,6 +48,91 @@ describe('the launcher', () => {
     );
   });
 
+  it('shows exact-build syntax evidence without claiming effective provider use', async () => {
+    const current = launcher();
+    const claude = current.agents[0]!;
+    await shown(
+      fakeClient({
+        launcher: vi.fn(async () =>
+          launcher({
+            agents: [
+              {
+                ...claude,
+                version: '2.1.309 (Claude Code)',
+                profile_capability: {
+                  status: 'syntax_verified',
+                  qualified_version: '2.1.309 (Claude Code)',
+                  checked_on: '2026-10-23',
+                  operations: [
+                    'model via --model',
+                    'reasoning effort via --effort',
+                  ],
+                  interface: '--model and --effort',
+                  format: 'argv flags',
+                  scope: 'one process',
+                  reload_semantics: 'Not tested',
+                  source: 'installed CLI --help',
+                  limitation:
+                    'CLI syntax only; provider-resolved and effective values are not reported.',
+                },
+              },
+              current.agents[1],
+            ],
+          }),
+        ),
+      }),
+    );
+    const evidence = text(document.querySelector('.native-capability'));
+    expect(evidence).toContain('syntax is verified');
+    expect(evidence).toContain('2.1.309 (Claude Code)');
+    expect(evidence).toContain('effective values are not reported');
+    const details = text(document.querySelector('.native-capability-details'));
+    expect(details).toContain('reasoning effort via --effort');
+    expect(details).toContain('Reload: Not tested.');
+  });
+
+  it('disables profile overrides for an unverified build while preserving As configured', async () => {
+    const current = launcher();
+    const client = fakeClient({
+      launcher: vi.fn(async () =>
+        launcher({
+          agents: [{ ...current.agents[0]!, version: '2.1.310 (Claude Code)' }],
+        }),
+      ),
+      preview: vi.fn(async () => ({
+        applied: ['Model: sonnet.'],
+        with_cost: [],
+        not_applicable: [
+          'Profile overrides are refused for an unverified provider build.',
+        ],
+        can_start: false,
+        through_shell: true,
+        warnings: [
+          'Profile overrides are not verified for 2.1.310 (Claude Code). Choose As configured.',
+        ],
+        plan_token: 'preview-token',
+        provider_version: '2.1.310 (Claude Code)',
+      })),
+    });
+    await shown(client);
+    const select =
+      document.querySelector<HTMLSelectElement>('#native-profile')!;
+    select.value = 'b'.repeat(32);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(text(document.querySelector('.native-capability'))).toContain(
+      'unverified for 2.1.310 (Claude Code)',
+    );
+    expect(text(document.querySelector('.native-preview'))).toContain(
+      'not verified for 2.1.310 (Claude Code)',
+    );
+    expect(button('Start Claude Code').disabled).toBe(true);
+    expect(
+      Array.from(select.options).find((option) => option.value === '')?.text,
+    ).toContain('as configured');
+  });
+
   it('starts the chosen agent on the chosen project with the chosen profile and shows the terminals', async () => {
     const client = fakeClient();
     const started = vi.fn();
@@ -69,6 +154,10 @@ describe('the launcher', () => {
       '/home/u/work/app',
       'template-review',
       null,
+      expect.objectContaining({
+        plan_token: 'preview-token',
+        provider_version: '2.1.309 (Claude Code)',
+      }),
     );
     expect(started).toHaveBeenCalledTimes(1);
     expect(onconsole).toHaveBeenCalledTimes(1);
@@ -82,6 +171,9 @@ describe('the launcher', () => {
         not_applicable: ['Codex hooks cannot be switched off for one session.'],
         can_start: false,
         through_shell: true,
+        warnings: [],
+        plan_token: 'preview-token',
+        provider_version: '2.1.309 (Claude Code)',
       })),
       launcher: vi.fn(async () =>
         launcher({
@@ -388,6 +480,7 @@ describe('a handoff', () => {
       '/home/u/app',
       null,
       '# Handoff from Claude Code\n\nFinish the parser.',
+      null,
     );
     expect(onconsole).toHaveBeenCalled();
   });

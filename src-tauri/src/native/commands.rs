@@ -4,7 +4,12 @@
 //! environment or a path (C-01): the folder of a project is only ever a folder the native
 //! dialog returned. The sessions themselves live in the host (F9): these commands only
 //! validate the request and pass it on, and the answer comes back as the host made it.
-use super::{catalogue::AgentId, profile::Body, service::StartRequest};
+use super::{
+    capabilities::{self, Evidence, Status},
+    catalogue::{self, AgentId},
+    profile::Body,
+    service::StartRequest,
+};
 use crate::host::{client::HostLink, protocol::HostError};
 use crate::native_dialog::{choose_file_titled, choose_folder};
 use serde::{Deserialize, Serialize};
@@ -43,10 +48,205 @@ async fn blocking<T: Send + 'static>(
 /// The host's answer, for the page to check against its own contract.
 type Answer = Result<Value, HostError>;
 
+fn agent_word(agent: AgentId) -> &'static str {
+    match agent {
+        AgentId::ClaudeCode => "claude_code",
+        AgentId::Codex => "codex",
+    }
+}
+
+fn launcher_agent(link: &HostLink, agent: AgentId) -> Result<Value, HostError> {
+    let launcher = link.call("native_launcher", Value::Null)?;
+    launcher["agents"]
+        .as_array()
+        .and_then(|agents| {
+            agents
+                .iter()
+                .find(|entry| entry["agent_id"].as_str() == Some(agent_word(agent)))
+        })
+        .cloned()
+        .ok_or_else(|| HostError::new("agent_not_installed"))
+}
+
+fn current_evidence(
+    link: &HostLink,
+    agent: AgentId,
+) -> Result<(Evidence, Option<String>), HostError> {
+    let entry = launcher_agent(link, agent)?;
+    let version = entry["path"]
+        .as_str()
+        .and_then(|path| catalogue::probe_version(std::path::Path::new(path)));
+    let evidence = capabilities::evidence(agent, version.as_deref());
+    Ok((evidence, version))
+}
+
+fn effectful_preview(preview: &Value) -> bool {
+    ["applied", "with_cost"].iter().any(|key| {
+        preview[*key]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+    })
+}
+
+fn profile_requires_effort_from_list(profiles: &Value, profile_id: &str) -> Option<bool> {
+    let profile = profiles
+        .as_array()?
+        .iter()
+        .find(|profile| profile["id"].as_str() == Some(profile_id))?;
+    Some(
+        profile["body"]["effort"].as_str().is_some()
+            || profile["from"]["effort"].as_str().is_some(),
+    )
+}
+
+fn profile_requires_effort(link: &HostLink, profile_id: &str) -> Result<bool, HostError> {
+    let profiles = link.call("profiles", Value::Null)?;
+    profile_requires_effort_from_list(&profiles, profile_id)
+        .ok_or_else(|| HostError::new("profile_unknown"))
+}
+
+fn push_string(value: &mut Value, field: &str, text: String) {
+    if !value[field].is_array() {
+        value[field] = Value::Array(Vec::new());
+    }
+    if let Some(items) = value[field].as_array_mut() {
+        items.push(Value::String(text));
+    }
+}
+
+fn preview_capability_message(evidence: Evidence, version: Option<&str>) -> String {
+    match evidence.status {
+        Status::SyntaxVerified => format!(
+            "Profile override syntax is verified for {}. This does not prove provider-resolved or effective use.",
+            version.unwrap_or("the reported build")
+        ),
+        Status::Unverified => format!(
+            "Profile overrides are not verified for {}. Choose As configured to launch the Native CLI without overrides.",
+            version.unwrap_or("an unknown provider version")
+        ),
+    }
+}
+
+fn check_start_capability(
+    link: &HostLink,
+    agent: AgentId,
+    profile_id: Option<&str>,
+    plan_token: Option<&str>,
+    expected_cli_version: Option<&str>,
+) -> Result<(), HostError> {
+    let Some(profile_id) = profile_id else {
+        return Ok(());
+    };
+    let preview = link.call(
+        "native_preview",
+        json!({"agent_id": agent, "profile_id": profile_id}),
+    )?;
+    if link.has_feature("native_profile_plan_token") {
+        let actual_token = preview["plan_token"]
+            .as_str()
+            .ok_or_else(|| HostError::new("host_outdated"))?;
+        if plan_token != Some(actual_token) {
+            return Err(HostError::new("profile_preview_stale"));
+        }
+    } else if profile_requires_effort(link, profile_id)? {
+        // A legacy host can still resolve and launch fields it already knew, but cannot pin
+        // an effort-bearing plan to the preview or guard the shell-resolved CLI build.
+        return Err(HostError::new("host_outdated"));
+    }
+    if !effectful_preview(&preview) {
+        return Ok(());
+    }
+    let (_, version) = current_evidence(link, agent)?;
+    if version.as_deref() != expected_cli_version
+        || !capabilities::allows_start_with_profile(agent, expected_cli_version, true)
+    {
+        return Err(HostError::new("provider_version_unverified"));
+    }
+    Ok(())
+}
+
+fn annotate_launcher(mut launcher: Value) -> Result<Value, HostError> {
+    let agents = launcher["agents"]
+        .as_array_mut()
+        .ok_or_else(|| HostError::new("internal"))?;
+    for entry in agents {
+        let agent = serde_json::from_value::<AgentId>(entry["agent_id"].clone())
+            .map_err(|_| HostError::new("internal"))?;
+        let version = entry["path"]
+            .as_str()
+            .and_then(|path| catalogue::probe_version(std::path::Path::new(path)));
+        entry["version"] = version.clone().map_or(Value::Null, Value::String);
+        let evidence = capabilities::evidence(agent, version.as_deref());
+        entry["profile_capability"] =
+            serde_json::to_value(evidence).map_err(|_| HostError::new("internal"))?;
+    }
+    Ok(launcher)
+}
+
+fn annotate_preview(
+    link: &HostLink,
+    mut preview: Value,
+    agent: AgentId,
+    profile_id: Option<&str>,
+) -> Result<Value, HostError> {
+    let (evidence, version) = current_evidence(link, agent)?;
+    push_string(
+        &mut preview,
+        "warnings",
+        preview_capability_message(evidence, version.as_deref()),
+    );
+    preview["provider_version"] = version.clone().map_or(Value::Null, Value::String);
+    if profile_id.is_some()
+        && link.has_feature("native_profile_plan_token")
+        && preview["plan_token"].as_str().is_none()
+    {
+        preview["can_start"] = Value::Bool(false);
+        push_string(
+            &mut preview,
+            "warnings",
+            "The Native host cannot bind profile preview to start. Update the host before using profiles.".to_owned(),
+        );
+        return Ok(preview);
+    }
+    if let Some(profile_id) = profile_id
+        && !link.has_feature("native_profile_plan_token")
+    {
+        if profile_requires_effort(&link, profile_id)? {
+            preview["can_start"] = Value::Bool(false);
+            push_string(
+                &mut preview,
+                "warnings",
+                "This Native host cannot bind an effort-bearing profile to its preview. Update the host before starting it.".to_owned(),
+            );
+            return Ok(preview);
+        }
+        push_string(
+            &mut preview,
+            "warnings",
+            "Legacy Native host: it cannot bind this profile to the displayed preview revision and may apply the latest saved version at start.".to_owned(),
+        );
+    }
+    if profile_id.is_some()
+        && !capabilities::allows_start_with_profile(
+            agent,
+            version.as_deref(),
+            effectful_preview(&preview),
+        )
+    {
+        preview["can_start"] = Value::Bool(false);
+        push_string(
+            &mut preview,
+            "not_applicable",
+            "Profile overrides are refused for an unverified provider build.".to_owned(),
+        );
+    }
+    Ok(preview)
+}
+
 #[tauri::command]
 pub async fn native_launcher(link: State<'_, HostLink>) -> Answer {
     let link = link.inner().clone();
-    blocking(move || link.call("native_launcher", Value::Null)).await
+    blocking(move || annotate_launcher(link.call("native_launcher", Value::Null)?)).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,9 +263,15 @@ pub async fn native_preview(link: State<'_, HostLink>, request: PreviewRequest) 
     }
     let link = link.inner().clone();
     blocking(move || {
-        link.call(
+        let preview = link.call(
             "native_preview",
             json!({"agent_id": request.agent_id, "profile_id": request.profile_id}),
+        )?;
+        annotate_preview(
+            &link,
+            preview,
+            request.agent_id,
+            request.profile_id.as_deref(),
         )
     })
     .await
@@ -78,16 +284,26 @@ pub async fn native_start(link: State<'_, HostLink>, request: StartRequest) -> A
     }
     let link = link.inner().clone();
     blocking(move || {
-        link.call(
-            "native_start",
-            json!({
-                "agent_id": request.agent_id,
-                "project": request.project,
-                "profile_id": request.profile_id,
-                "size": request.size,
-                "brief": request.brief,
-            }),
-        )
+        check_start_capability(
+            &link,
+            request.agent_id,
+            request.profile_id.as_deref(),
+            request.plan_token.as_deref(),
+            request.expected_cli_version.as_deref(),
+        )?;
+        let has_profile = request.profile_id.is_some();
+        let mut params = json!({
+            "agent_id": request.agent_id,
+            "project": request.project,
+            "profile_id": request.profile_id,
+            "size": request.size,
+            "brief": request.brief,
+        });
+        if has_profile && link.has_feature("native_profile_plan_token") {
+            params["plan_token"] = json!(request.plan_token);
+            params["expected_cli_version"] = json!(request.expected_cli_version);
+        }
+        link.call("native_start", params)
     })
     .await
 }
@@ -129,10 +345,67 @@ pub async fn native_restart(link: State<'_, HostLink>, request: RestartRequest) 
     well_formed(&request.id)?;
     let link = link.inner().clone();
     blocking(move || {
-        link.call(
-            "native_restart",
-            json!({"id": request.id, "size": request.size}),
-        )
+        let sessions = link.call("native_sessions", json!({"sample": false}))?;
+        let old = sessions.as_array().and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["id"].as_str() == Some(&request.id))
+        });
+        if let Some(old) = old {
+            let agent = serde_json::from_value::<AgentId>(old["agent_id"].clone())
+                .map_err(|_| HostError::new("internal"))?;
+            let profile_id = old["profile"]["id"].as_str();
+            let (plan_token, expected_cli_version) = if let Some(profile_id) = profile_id {
+                let supports_plan_token = link.has_feature("native_profile_plan_token");
+                let preview = link.call(
+                    "native_preview",
+                    json!({"agent_id": agent, "profile_id": profile_id}),
+                )?;
+                let plan_token = if supports_plan_token {
+                    Some(
+                        preview["plan_token"]
+                            .as_str()
+                            .ok_or_else(|| HostError::new("host_outdated"))?
+                            .to_owned(),
+                    )
+                } else {
+                    None
+                };
+                let (_, version) = current_evidence(&link, agent)?;
+                let expected_cli_version = if effectful_preview(&preview) {
+                    let Some(version) = version else {
+                        return Err(HostError::new("provider_version_unverified"));
+                    };
+                    if !capabilities::allows_start_with_profile(agent, Some(&version), true) {
+                        return Err(HostError::new("provider_version_unverified"));
+                    }
+                    Some(version)
+                } else {
+                    None
+                };
+                (plan_token, expected_cli_version)
+            } else {
+                (None, None)
+            };
+            check_start_capability(
+                &link,
+                agent,
+                profile_id,
+                plan_token.as_deref(),
+                expected_cli_version.as_deref(),
+            )?;
+            let mut params = json!({"id": request.id, "size": request.size});
+            if link.has_feature("native_profile_plan_token") && profile_id.is_some() {
+                params["plan_token"] = json!(plan_token);
+                params["expected_cli_version"] = json!(expected_cli_version);
+            }
+            link.call("native_restart", params)
+        } else {
+            link.call(
+                "native_restart",
+                json!({"id": request.id, "size": request.size}),
+            )
+        }
     })
     .await
 }
@@ -421,5 +694,48 @@ pub fn extension() -> wyss_console::Extension {
         // The state they use is the host link, made by the terminal commands' extension.
         install: Box::new(|builder| builder),
         on_exit: None,
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::{effectful_preview, profile_requires_effort_from_list};
+    use serde_json::json;
+
+    #[test]
+    fn preview_needs_version_evidence_for_applied_or_costly_profile_overrides() {
+        assert!(effectful_preview(&json!({"applied": ["Model: gpt-test"]})));
+        assert!(effectful_preview(&json!({"with_cost": ["Hooks are off"]})));
+        assert!(!effectful_preview(&json!({"applied": [], "with_cost": []})));
+        // Unsupported profile fields are refused by the existing host plan, which also sets
+        // can_start=false; this gate must not reinterpret them as silently applied.
+        assert!(!effectful_preview(
+            &json!({"not_applicable": ["unsupported field"]})
+        ));
+    }
+
+    #[test]
+    fn a_legacy_host_keeps_non_effort_profiles_compatible_but_detects_inherited_effort() {
+        let profiles = json!([
+            {"id":"plain", "body":{"effort":null}, "from":{}},
+            {"id":"own", "body":{"effort":"high"}, "from":{}},
+            {"id":"inherited", "body":{"effort":null}, "from":{"effort":"Parent"}}
+        ]);
+        assert_eq!(
+            profile_requires_effort_from_list(&profiles, "plain"),
+            Some(false)
+        );
+        assert_eq!(
+            profile_requires_effort_from_list(&profiles, "own"),
+            Some(true)
+        );
+        assert_eq!(
+            profile_requires_effort_from_list(&profiles, "inherited"),
+            Some(true)
+        );
+        assert_eq!(
+            profile_requires_effort_from_list(&profiles, "missing"),
+            None
+        );
     }
 }

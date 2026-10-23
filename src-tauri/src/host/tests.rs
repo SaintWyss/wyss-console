@@ -272,7 +272,10 @@ fn it_says_what_it_is_and_refuses_what_it_does_not_know() {
     let hello = client.call("hello", Value::Null).unwrap();
     assert_eq!(hello["protocol"], json!(PROTOCOL));
     // It names what it has beyond protocol 1, so a newer window can tell an older host.
-    assert_eq!(hello["features"], json!(["profile_effort"]));
+    assert_eq!(
+        hello["features"],
+        json!(["profile_effort", "native_profile_plan_token"])
+    );
     assert_eq!(
         client.call("exec", json!({"cmd": "id"})).unwrap_err(),
         HostError::new("unknown_op")

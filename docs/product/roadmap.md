@@ -1,9 +1,11 @@
 # Dependency-ordered final-product roadmap
 
-Status: **proposed remaining engineering plan**, 2026-10-22. This PR delivers Phase1
-documentation only; it authorizes no application change, experiment using credentials,
-deployment, migration, restart or ADR acceptance. The complete personal product remains
-the completion target. Intermediate milestones are increments, not a reduced MVP scope.
+Baseline status: **proposed remaining engineering plan**, 2026-10-22. The Phase1
+documentation delivery made no application changes and authorized no credential-backed
+experiment, deployment, migration, restart or ADR acceptance. Dated M1/M2 addenda below
+record later engineering deliveries without rewriting that baseline. The complete
+personal product remains the completion target. Intermediate milestones are increments,
+not a reduced MVP scope.
 
 ## 1. Priority and dependency graph
 
@@ -95,6 +97,12 @@ have race/failure coverage, GUI says precisely what each session uses or cannot 
 Risk: unsupported provider versions/format changes and external writers. Rollback:
 undo only unchanged postimages through reviewed writer; otherwise stop/replan, retain
 sealed recovery material. Never force-restore over outside edits.
+
+**M2 engineering delivery, 2026-10-23:** `ENGINEERING_COMPLETE_RELEASE_BLOCKED` on
+`feat/m2-native-parity-2026-10-23`. The frozen 12-oracle contract and actual test,
+provider and review evidence are in the [M2 delivery record](../acceptance/m2-engineering-2026-10-23.md).
+Native desktop/provider-consumption acceptance and OD-M2-01 remain release conditions;
+this delivery does not include M3 Managed model/effort selection or Claude Managed.
 
 ### M3 — Managed provider parity and model contract
 

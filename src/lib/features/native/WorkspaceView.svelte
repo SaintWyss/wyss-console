@@ -61,7 +61,7 @@
       !!project &&
       !!chosen?.installed &&
       !native.starting &&
-      (preview === null || preview.can_start),
+      (profile === null || preview?.can_start === true),
   );
 
   // The first time the launcher is known: an installed agent and the home folder.
@@ -90,17 +90,21 @@
   });
   // What the profile would do for this agent, read from the desktop before starting.
   let previewSeq = 0;
+  let previewFailed = $state(false);
   $effect(() => {
     const a = agent;
     const p = profile;
-    preview = null;
-    if (!a || !p) return;
     const seq = ++previewSeq;
+    preview = null;
+    previewFailed = false;
+    if (!a || !p) return;
     void controller.preview(a, p).then(
       (next) => {
         if (seq === previewSeq) preview = next;
       },
-      () => undefined,
+      () => {
+        if (seq === previewSeq) previewFailed = true;
+      },
     );
   });
   $effect(() => {
@@ -126,7 +130,8 @@
   }
   async function launch() {
     if (!agent || !project) return;
-    if (await controller.startAgent(agent, project, profile)) onconsole();
+    if (await controller.startAgent(agent, project, profile, null, preview))
+      onconsole();
   }
   function open(session: NativeSession) {
     if (controller.showTerminal(session.id)) onconsole();
@@ -218,6 +223,40 @@
             </label>
           {/each}
         </div>
+        {#if chosen?.installed}
+          <p class="event-meta native-capability" aria-live="polite">
+            {#if chosen.profile_capability.status === 'syntax_verified'}
+              Profile override syntax is verified for {chosen.profile_capability
+                .qualified_version};
+              {chosen.profile_capability.limitation}.
+            {:else}
+              Profile overrides are unverified for {chosen.version ??
+                'an unknown provider build'}. “No profile — as configured”
+              remains available.
+            {/if}
+          </p>
+          <details class="native-capability-details">
+            <summary>Capability evidence and limits</summary>
+            {#if chosen.profile_capability.status === 'syntax_verified'}
+              <p>Checked {chosen.profile_capability.checked_on}.</p>
+              <ul>
+                {#each chosen.profile_capability.operations as operation (operation)}
+                  <li>{operation}</li>
+                {/each}
+              </ul>
+              <p>
+                Interface: {chosen.profile_capability.interface}. Format:
+                {chosen.profile_capability.format}. Scope:
+                {chosen.profile_capability.scope}.
+              </p>
+              <p>Reload: {chosen.profile_capability.reload_semantics}.</p>
+              <p>Source: {chosen.profile_capability.source}.</p>
+              <p>Limit: {chosen.profile_capability.limitation}.</p>
+            {:else}
+              <p>{chosen.profile_capability.limitation}</p>
+            {/if}
+          </details>
+        {/if}
 
         <div class="native-field">
           <label for="native-project">Project folder</label>
@@ -234,6 +273,12 @@
             >
           </div>
         </div>
+        {#if profile && previewFailed}
+          <p class="native-warning" role="status">
+            Could not verify this profile preview. Refresh Native before
+            starting.
+          </p>
+        {/if}
 
         <div class="native-field">
           <label for="native-profile">Profile</label>
@@ -263,6 +308,9 @@
                   {line}
                 </li>{/each}
               {#each preview.not_applicable as line (line)}<li class="refused">
+                  {line}
+                </li>{/each}
+              {#each preview.warnings as line (line)}<li class="evidence">
                   {line}
                 </li>{/each}
             </ul>

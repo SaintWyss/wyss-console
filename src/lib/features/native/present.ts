@@ -54,6 +54,12 @@ export const FAILURE_TEXT: Record<string, string> = {
     'That folder cannot be used. Choose a folder with the folder button.',
   profile_not_applicable: 'This profile cannot be applied to that agent.',
   profile_unknown: 'That profile no longer exists.',
+  profile_preview_required:
+    'Review the current profile preview before starting with it.',
+  profile_preview_stale:
+    'The profile changed after its preview. Review the new preview and start again.',
+  provider_version_unverified:
+    'This exact provider build is not verified for profile overrides, so the override was not launched. Choose “No profile — as configured” or use a qualified build.',
   brief_invalid:
     'The brief must start with a “# ” heading, hold no NUL and be at most 16 KiB.',
   limit_reached:
@@ -69,7 +75,7 @@ export const FAILURE_TEXT: Record<string, string> = {
     'The Console has no private folder to keep native sessions in, so it cannot start agents.',
   request_invalid: 'The request was not valid.',
   host_outdated:
-    'The terminal host that is running is older than this window and cannot keep a reasoning effort. Close your terminals and restart the app so it runs again, or leave the effort empty.',
+    'The terminal host is older than this window and cannot keep these profile options. Update it before using effort or preview-bound profiles; existing sessions are unchanged.',
   export_failed: 'The file could not be written.',
   profile_name_invalid:
     'The name must be 1 to 60 characters, without control characters.',

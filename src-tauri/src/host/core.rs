@@ -137,6 +137,10 @@ struct Sample {
 struct Restart {
     id: String,
     size: TerminalSize,
+    #[serde(default)]
+    plan_token: Option<String>,
+    #[serde(default)]
+    expected_cli_version: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -416,7 +420,13 @@ impl HostCore {
                 let request: Restart = params(value)?;
                 let reply = self
                     .native()?
-                    .restart(&self.terminals, &request.id, request.size)
+                    .restart(
+                        &self.terminals,
+                        &request.id,
+                        request.size,
+                        request.plan_token,
+                        request.expected_cli_version,
+                    )
                     .map_err(|e| native_error(&e))?;
                 self.track_native(
                     &reply.terminal,
