@@ -104,19 +104,22 @@ branch is isolated from the separate working checkout.
   plaintext fallback for entries classified secret-free when Secret Service is
   unavailable. Any all-sealed policy extension is a separate owner decision; no change
   was silently made.
-- Real provider consumption and the native desktop acceptance remain **NOT_RUN**. Their
-  execution requires explicit authorization; current syntax evidence does not replace it.
+- The isolated fixture-only Tauri GUI workflow is **PASS** as recorded under M2-11.
+  Owner acceptance of the Native desktop workflow and real-provider consumption remain
+  **NOT_RUN**; exact-build provider checks require explicit authorization, and syntax
+  evidence does not replace them.
 - M2 adoption requires review/merge by the owner, then a controlled update to the M2
   GUI and host together. The updated host must announce `native_profile_plan_token`.
   Do not restart/replace the currently installed host as part of this engineering PR.
-- Run M2-11 with disposable HOME/XDG roots and fixture CLIs first, save screenshots and
-  logs, and verify cancellation, preview refresh, launch, restart and configuration
-  authoring/Undo. After that, obtain explicit authorization for exact-build real Native
-  provider model/effort consumption and preservation checks. Record configured,
-  requested, provider-resolved and observed/effective facts separately.
+- The M2-11 fixture runs and screenshots are complete at
+  `docs/acceptance/evidence/m2-gui-2026-10-23/`. Use this evidence for owner review;
+  any acceptance on the adopted GUI/host pair is a separate release activity. Before
+  exact-build real Native provider model/effort consumption and preservation checks,
+  obtain explicit authorization. Record configured, requested, provider-resolved and
+  observed/effective facts separately.
 - Unsupported Codex project skills, hook mutation, project trust writes and per-session
   hook/skill exclusions remain visible refusals. Claude Managed, Managed model/effort
   selection and authority extensions remain M3.
-- This branch is not merged or deployed. Release remains blocked until the native GUI
-  and provider-consumption evidence is accepted and any required ADR0034 policy decision
-  is recorded.
+- This branch is not merged or deployed. Release remains blocked until owner acceptance
+  of the native desktop workflow and real-provider consumption evidence; any separately
+  requested ADR0034 policy extension must also receive an owner decision.
