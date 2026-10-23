@@ -41,7 +41,7 @@ Performance procedure is frozen by reference to architecture15; new real-desktop
 provider consumption/refresh and exact resource conformance are explicitly NOT_PROVEN,
 not counted as qualified production measurements. M1 release must collect its own
 reference performance/preservation evidence; M2/M3 carry G-INF E1–E9 and provider parity;
-M5 owns F8 scratch/catalogue mismatches, stale classification, service quantum/load and
+M5 owns the F8 provider stdout scratch mismatch, stale catalogue classification, service quantum/load and
 attachment/retention enforcement proof before any capacity expansion. Current cap1 stays.
 No paid/provider/lifecycle experiment is required to begin M1's pure implementation work.
 Rollback of M0 is documentation/manifest revert only, with no installed operation.
