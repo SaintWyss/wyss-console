@@ -40,6 +40,8 @@ pub enum StoreStatus {
         revision: String,
         host_id: String,
         store_id: String,
+        /// The one projectless workspace, which has no project to be listed under.
+        scratch_workspace_id: String,
     },
     /// Present and not loadable: read-only recovery, exact bytes kept.
     #[serde(rename_all = "camelCase")]
@@ -186,6 +188,20 @@ pub struct ProjectsService {
     gate: Option<PathBuf>,
 }
 
+fn ready_status(store: &StoreV1) -> StoreStatus {
+    StoreStatus::Ready {
+        revision: store.revision.get().to_string(),
+        host_id: store.host_id.as_str().to_owned(),
+        store_id: store.store_id.as_str().to_owned(),
+        scratch_workspace_id: store
+            .workspaces
+            .iter()
+            .find(|w| w.project_id.is_none())
+            .map(|w| w.id.as_str().to_owned())
+            .unwrap_or_default(),
+    }
+}
+
 fn failure(code: ErrorCode) -> Failure {
     Failure::new(code)
 }
@@ -311,11 +327,7 @@ impl ProjectsService {
         let store = match &self.store {
             None => StoreStatus::Unavailable,
             Some(_) => match self.loaded() {
-                Ok(Loaded::Ready(store)) => StoreStatus::Ready {
-                    revision: store.revision.get().to_string(),
-                    host_id: store.host_id.as_str().to_owned(),
-                    store_id: store.store_id.as_str().to_owned(),
-                },
+                Ok(Loaded::Ready(store)) => ready_status(&store),
                 Ok(Loaded::Missing) => StoreStatus::Missing,
                 Ok(Loaded::Unusable(u)) => StoreStatus::Unusable {
                     code: store_failure(StoreError::Unusable(u)).code,
@@ -884,11 +896,7 @@ impl ProjectsService {
                 migration::commit_incremental(store, expected, &plan)?
             }
         };
-        Ok(StoreStatus::Ready {
-            revision: committed.revision.get().to_string(),
-            host_id: committed.host_id.as_str().to_owned(),
-            store_id: committed.store_id.as_str().to_owned(),
-        })
+        Ok(ready_status(&committed))
     }
 
     // ---- the terminal input claim -------------------------------------------------------------

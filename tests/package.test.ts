@@ -41,10 +41,11 @@ it('bundles no installer, no updater and no signing claim', () => {
     expect(bundle[key], key).toBeUndefined();
   // Signing is claimed nowhere in the configuration.
   expect(JSON.stringify(tauriConfig)).not.toMatch(/sign|pubkey|updater/i);
-  // The window is granted exactly what it was.
+  // The window is granted what it was, and the project workspace's capability, whose commands
+  // answer `unsupported_capability` until the owner turns it on in a native confirmation.
   expect(
     (tauriConfig.app.security as { capabilities: string[] }).capabilities,
-  ).toEqual(['main', 'f8']);
+  ).toEqual(['main', 'f8', 'projects']);
 });
 
 it('opens in a window wide enough for a full-width shell greeting', () => {

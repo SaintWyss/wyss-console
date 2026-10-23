@@ -4,6 +4,7 @@ export type ViewId =
   | 'sessions'
   | 'agents'
   | 'runtimes'
+  | 'projects'
   | 'approvals'
   | 'events'
   | 'configuration'
@@ -101,9 +102,33 @@ export const RUNTIMES_NAV_ITEM: NavItem = {
   icon: 'M4 6h16v5H4zM4 13h16v5H4zM7.5 8.5h.01M7.5 15.5h.01M11 8.5h6M11 15.5h6',
 };
 
-/** The navigation, with Runtimes after Agents when the interface is active. */
-export function navItems(runtimes: boolean): readonly NavItem[] {
-  if (!runtimes) return NAV_ITEMS;
-  const at = NAV_ITEMS.findIndex((item) => item.id === 'agents') + 1;
-  return [...NAV_ITEMS.slice(0, at), RUNTIMES_NAV_ITEM, ...NAV_ITEMS.slice(at)];
+/**
+ * The project-centered workspace. Offered only after the owner turned it on, so that the
+ * navigation of a Console that has not adopted it is the one it always was.
+ */
+export const PROJECTS_NAV_ITEM: NavItem = {
+  id: 'projects',
+  label: 'Projects',
+  subtitle: 'Folders, workspaces and the sessions they show',
+  icon: 'M3 7h6l2 2h10v10H3zM3 7V5h6l2 2',
+};
+
+/**
+ * The navigation, with Runtimes after Agents when the interface is active and Projects after
+ * the Console when the project workspace is on.
+ */
+export function navItems(
+  runtimes: boolean,
+  projects = false,
+): readonly NavItem[] {
+  let items: NavItem[] = [...NAV_ITEMS];
+  if (runtimes) {
+    const at = items.findIndex((item) => item.id === 'agents') + 1;
+    items = [...items.slice(0, at), RUNTIMES_NAV_ITEM, ...items.slice(at)];
+  }
+  if (projects) {
+    const at = items.findIndex((item) => item.id === 'console') + 1;
+    items = [...items.slice(0, at), PROJECTS_NAV_ITEM, ...items.slice(at)];
+  }
+  return runtimes || projects ? items : NAV_ITEMS;
 }
