@@ -397,3 +397,44 @@ fn a_leftover_temporary_file_does_not_block_a_writer_and_is_swept() {
         .unwrap();
     assert!(!world.store.dir().join("store.json.tmp-deadbeef").exists());
 }
+
+#[test]
+fn a_version_already_decoded_is_shared_until_the_file_is_replaced() {
+    use crate::projects::store::Shared;
+    let world = World::new();
+    let first = match world.store.read_shared().unwrap() {
+        Shared::Ready(store) => store,
+        other => panic!("{other:?}"),
+    };
+    let again = match world.store.read_shared().unwrap() {
+        Shared::Ready(store) => store,
+        other => panic!("{other:?}"),
+    };
+    assert!(
+        Arc::ptr_eq(&first, &again),
+        "an unchanged file is decoded once"
+    );
+    // A commit replaces the file: the next read is the new version, not the cached one.
+    let committed = world
+        .store
+        .transact(first.revision, |s| relabel(s, "n"))
+        .unwrap()
+        .unwrap();
+    let after = match world.store.read_shared().unwrap() {
+        Shared::Ready(store) => store,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(after.revision, committed.revision);
+    assert!(!Arc::ptr_eq(&first, &after));
+    // And bytes that no longer decode are reported as they are, never served from the cache.
+    write_raw(&world, b"{ not json", 0o600);
+    assert!(matches!(
+        world.store.read_shared().unwrap(),
+        Shared::Unusable(_)
+    ));
+    std::fs::remove_file(world.store.dir().join("store.json")).unwrap();
+    assert!(matches!(
+        world.store.read_shared().unwrap(),
+        Shared::Missing
+    ));
+}

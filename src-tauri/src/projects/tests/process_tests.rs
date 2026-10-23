@@ -48,7 +48,12 @@ impl Real {
         let home = root.join("home");
         std::fs::create_dir_all(&home).unwrap();
         let child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "projects::tests::process_tests::child_real_host", "--nocapture", "--test-threads=1"])
+            .args([
+                "--exact",
+                "projects::tests::process_tests::child_real_host",
+                "--nocapture",
+                "--test-threads=1",
+            ])
             .env("WYSS_M1_REAL_HOST", "1")
             .env("XDG_RUNTIME_DIR", &run)
             .env("XDG_STATE_HOME", root.join("hoststate"))
@@ -57,11 +62,17 @@ impl Real {
             .stderr(Stdio::null())
             .spawn()
             .expect("a disposable host process");
-        let this = Self { runtime: run, child: Some(child) };
+        let this = Self {
+            runtime: run,
+            child: Some(child),
+        };
         let socket = Self::socket(root);
         let deadline = Instant::now() + Duration::from_secs(10);
         while HostSocket::new(socket.clone()).epoch().is_err() {
-            assert!(Instant::now() < deadline, "the disposable host did not come up");
+            assert!(
+                Instant::now() < deadline,
+                "the disposable host did not come up"
+            );
             std::thread::sleep(Duration::from_millis(20));
         }
         this
@@ -129,7 +140,11 @@ fn a_real_terminal_is_launched_attached_read_and_typed_into_through_the_checked_
     };
     let status = service.overview();
     let (host_id, scratch) = match status.store {
-        crate::projects::service::StoreStatus::Ready { host_id, scratch_workspace_id, .. } => (host_id, scratch_workspace_id),
+        crate::projects::service::StoreStatus::Ready {
+            host_id,
+            scratch_workspace_id,
+            ..
+        } => (host_id, scratch_workspace_id),
         other => panic!("{other:?}"),
     };
     assert!(status.host.reachable && status.host.epoch.is_some());
@@ -156,36 +171,77 @@ fn a_real_terminal_is_launched_attached_read_and_typed_into_through_the_checked_
     assert!(service.claim_input("w2", &association).is_err());
     assert!(service.write_input("w2", &association, b"x").is_err());
     // The typed text echoes back; only a shell that ran it prints the second word joined.
-    service.write_input("w1", &association, b"printf 'm1-%s-end\\n' marker\n").unwrap();
+    service
+        .write_input("w1", &association, b"printf 'm1-%s-end\\n' marker\n")
+        .unwrap();
     let mut from = 0;
     let mut seen = Vec::new();
     until(|| {
         let out = service.read_output(&association, from, 200).ok()?;
         from = out.next;
         seen.extend(out.data);
-        String::from_utf8_lossy(&seen).contains("m1-marker-end").then_some(())
+        String::from_utf8_lossy(&seen)
+            .contains("m1-marker-end")
+            .then_some(())
     });
     service.resize("w1", &association, 30, 100).unwrap();
 
     // The host is replaced. Nothing is started to replace it, nothing is guessed: the session is
     // reported as belonging to a host that is gone, and every call is refused before it is sent.
     host.kill();
-    assert_eq!(service.read_output(&association, 0, 0).unwrap_err().code, ErrorCode::HostOffline);
-    let offline = service.get_workspace(&scratch, Some("w1")).unwrap().leaves[0].session.clone().unwrap();
-    assert_eq!((offline.availability, offline.reason), ("unknown", Some("host_offline")));
-    assert!(!HostSocket::new(Real::socket(&dir.0)).epoch().is_ok(), "reading never starts a host");
+    assert_eq!(
+        service.read_output(&association, 0, 0).unwrap_err().code,
+        ErrorCode::HostOffline
+    );
+    let offline = service.get_workspace(&scratch, Some("w1")).unwrap().leaves[0]
+        .session
+        .clone()
+        .unwrap();
+    assert_eq!(
+        (offline.availability, offline.reason),
+        ("unknown", Some("host_offline"))
+    );
+    assert!(
+        !HostSocket::new(Real::socket(&dir.0)).epoch().is_ok(),
+        "reading never starts a host"
+    );
     let _second = Real::start(&dir.0);
     let after = service.overview();
     assert!(after.host.reachable);
-    assert_ne!(after.host.epoch.as_deref(), Some(epoch_before.as_str()), "a new process is a new epoch");
-    let ended = service.get_workspace(&scratch, Some("w1")).unwrap().leaves[0].session.clone().unwrap();
-    assert_eq!((ended.availability, ended.reason), ("ended", Some("host_changed")));
-    assert_eq!(service.read_output(&association, 0, 0).unwrap_err().code, ErrorCode::HostChanged);
-    assert_eq!(service.write_input("w1", &association, b"echo no\n").unwrap_err().code, ErrorCode::HostChanged);
+    assert_ne!(
+        after.host.epoch.as_deref(),
+        Some(epoch_before.as_str()),
+        "a new process is a new epoch"
+    );
+    let ended = service.get_workspace(&scratch, Some("w1")).unwrap().leaves[0]
+        .session
+        .clone()
+        .unwrap();
+    assert_eq!(
+        (ended.availability, ended.reason),
+        ("ended", Some("host_changed"))
+    );
+    assert_eq!(
+        service.read_output(&association, 0, 0).unwrap_err().code,
+        ErrorCode::HostChanged
+    );
+    assert_eq!(
+        service
+            .write_input("w1", &association, b"echo no\n")
+            .unwrap_err()
+            .code,
+        ErrorCode::HostChanged
+    );
     // Attach is refused, and the new host holds no terminal that anything here created.
-    let attach = run(ctx.clone(), json!({"kind": "attach", "workspaceId": scratch, "leafId": leaf, "associationId": association}));
+    let attach = run(
+        ctx.clone(),
+        json!({"kind": "attach", "workspaceId": scratch, "leafId": leaf, "associationId": association}),
+    );
     assert_eq!(attach.unwrap_err().code, ErrorCode::HostChanged);
-    let rows = crate::projects::owner::HostSocket::new(Real::socket(&dir.0)).host_view(None).unwrap().terminals;
+    let rows = crate::projects::owner::HostSocket::new(Real::socket(&dir.0))
+        .host_view(None)
+        .unwrap()
+        .terminals;
     assert!(rows.is_empty(), "no shell was recreated: {rows:?}");
 }
 
@@ -202,26 +258,43 @@ fn a_real_host_gives_the_same_epoch_to_every_read_and_a_project_launch_runs_in_i
     let e1 = service.overview().host.epoch;
     let e2 = service.overview().host.epoch;
     assert_eq!(e1, e2);
-    let pick = service.issue_pick(project_dir.to_str().unwrap(), Purpose::Register, 1).unwrap();
+    let pick = service
+        .issue_pick(project_dir.to_str().unwrap(), Purpose::Register, 1)
+        .unwrap();
     let status = service.overview();
     let (host_id, revision) = match status.store {
-        crate::projects::service::StoreStatus::Ready { host_id, revision, .. } => (host_id, revision),
+        crate::projects::service::StoreStatus::Ready {
+            host_id, revision, ..
+        } => (host_id, revision),
         other => panic!("{other:?}"),
     };
     let ctx = json!({"hostId": host_id, "projectId": null, "workspaceId": null, "bindingId": null,
                      "bindingRevision": null, "selectionRevision": "1"});
     let receipt = service
-        .execute(serde_json::from_value(json!({"schema": 1, "operationId": env.uuid(),
+        .execute(
+            serde_json::from_value(json!({"schema": 1, "operationId": env.uuid(),
             "expectedStoreRevision": revision, "context": ctx,
-            "command": {"kind": "registerExisting", "selectionToken": pick.token}})).unwrap())
+            "command": {"kind": "registerExisting", "selectionToken": pick.token}}))
+            .unwrap(),
+        )
         .unwrap();
-    let id = |role: &str| receipt.created.iter().find(|c| c.role == role).unwrap().id.clone();
+    let id = |role: &str| {
+        receipt
+            .created
+            .iter()
+            .find(|c| c.role == role)
+            .unwrap()
+            .id
+            .clone()
+    };
     let (project, workspace) = (id("project"), id("workspace"));
     let leaf = env.uuid();
     let store_view = service.get_project(&project).unwrap();
     let root = store_view.root.unwrap();
-    let context = |ws: &str| json!({"hostId": host_id, "projectId": project, "workspaceId": ws,
-        "bindingId": root.binding_id, "bindingRevision": root.binding_revision, "selectionRevision": "1"});
+    let context = |ws: &str| {
+        json!({"hostId": host_id, "projectId": project, "workspaceId": ws,
+        "bindingId": root.binding_id, "bindingRevision": root.binding_revision, "selectionRevision": "1"})
+    };
     let revision_now = |service: &ProjectsService| match service.overview().store {
         crate::projects::service::StoreStatus::Ready { revision, .. } => revision,
         other => panic!("{other:?}"),
@@ -250,6 +323,8 @@ fn a_real_host_gives_the_same_epoch_to_every_read_and_a_project_launch_runs_in_i
         let out = service.read_output(&association, from, 200).ok()?;
         from = out.next;
         seen.extend(out.data);
-        String::from_utf8_lossy(&seen).contains(&expected).then_some(())
+        String::from_utf8_lossy(&seen)
+            .contains(&expected)
+            .then_some(())
     });
 }

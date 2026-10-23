@@ -485,10 +485,11 @@ pub(super) fn unusable(result: Result<StoreV1, StoreError>) -> super::store::Unu
     }
 }
 
+mod bench_tests;
 mod launch_tests;
 mod migration_tests;
 mod owner_tests;
+mod process_tests;
 mod project_tests;
 mod service_tests;
-mod process_tests;
 mod store_tests;

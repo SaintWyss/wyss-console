@@ -14,6 +14,7 @@ use std::{
     io::{self, Read, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, PoisonError},
     time::{Duration, Instant},
 };
 use wyss_console::contracts::m1::{
@@ -98,8 +99,30 @@ pub enum Point {
 #[cfg(test)]
 pub type Faults = std::sync::Arc<dyn Fn(Point) -> io::Result<()> + Send + Sync>;
 
+/// What identifies one version of the store file: the writer replaces it by rename, so a new
+/// version is a new inode, with its own time and size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileKey {
+    device: u64,
+    inode: u64,
+    size: u64,
+    modified: (i64, i64),
+    changed: (i64, i64),
+}
+
+/// A read for display, shared between readers until the file changes.
+#[derive(Debug, Clone)]
+pub enum Shared {
+    Missing,
+    Ready(Arc<StoreV1>),
+    Unusable(Unusable),
+}
+
 pub struct Store {
     dir: PathBuf,
+    /// The decoded store of the file version last read for display. A view asked for often
+    /// (the window polls) then costs one `stat` and no parsing, until the file is replaced.
+    cache: Mutex<Option<(FileKey, Arc<StoreV1>)>>,
     #[cfg(test)]
     faults: Option<Faults>,
 }
@@ -138,6 +161,7 @@ impl Store {
         }
         Ok(Self {
             dir,
+            cache: Mutex::new(None),
             #[cfg(test)]
             faults: None,
         })
@@ -169,6 +193,49 @@ impl Store {
     /// atomically, so this sees the old store or the new one.
     pub fn read(&self) -> io::Result<Loaded> {
         read_store(&self.store_path())
+    }
+
+    /// Like `read`, for display: a version of the file already decoded is shared, not decoded
+    /// again. Writers never use this; they read the file under the lock.
+    pub fn read_shared(&self) -> io::Result<Shared> {
+        use std::os::unix::fs::MetadataExt;
+        let key = match fs::symlink_metadata(self.store_path()) {
+            Ok(meta) => Some(FileKey {
+                device: meta.dev(),
+                inode: meta.ino(),
+                size: meta.len(),
+                modified: (meta.mtime(), meta.mtime_nsec()),
+                changed: (meta.ctime(), meta.ctime_nsec()),
+            }),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+        if let (Some(key), Some((known, store))) = (key, cache.as_ref())
+            && *known == key
+        {
+            return Ok(Shared::Ready(store.clone()));
+        }
+        // The file changed (or was never read): decode it, and keep the result for this version.
+        match read_store(&self.store_path())? {
+            Loaded::Missing => {
+                *cache = None;
+                Ok(Shared::Missing)
+            }
+            Loaded::Unusable(unusable) => {
+                *cache = None;
+                Ok(Shared::Unusable(unusable))
+            }
+            Loaded::Ready(store) => {
+                let store: Arc<StoreV1> = Arc::from(store);
+                // Keyed by what was seen before decoding: if the file moved on meanwhile the
+                // next call sees a different key and decodes again.
+                if let Some(key) = key {
+                    *cache = Some((key, store.clone()));
+                }
+                Ok(Shared::Ready(store))
+            }
+        }
     }
 
     fn lock(&self) -> Result<Flock<fs::File>, StoreError> {

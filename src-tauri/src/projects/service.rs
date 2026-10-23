@@ -11,7 +11,7 @@ use super::{
     command::{Envelope, ErrorCode, Failure, Receipt},
     migration::{self, IncrementalPlan, Plan, Sources, Summary},
     owner::{HostView, ManagedRow, Owner, OwnerError, RootError, TermRead},
-    store::{Loaded, Store, StoreError},
+    store::{Loaded, Shared, Store, StoreError},
 };
 use serde::Serialize;
 use std::{
@@ -311,12 +311,19 @@ impl ProjectsService {
             .map_err(|_| failure(ErrorCode::IoFailure))
     }
 
-    fn ready(&self) -> Result<StoreV1, Failure> {
-        match self.loaded()? {
-            Loaded::Ready(store) => Ok(*store),
-            Loaded::Missing => Err(failure(ErrorCode::InvalidRecord).with_field("store")),
-            Loaded::Unusable(unusable) => Err(store_failure(StoreError::Unusable(unusable))),
+    /// The store for display. A version already decoded is shared between views.
+    fn ready(&self) -> Result<Arc<StoreV1>, Failure> {
+        match self.shared()? {
+            Shared::Ready(store) => Ok(store),
+            Shared::Missing => Err(failure(ErrorCode::InvalidRecord).with_field("store")),
+            Shared::Unusable(unusable) => Err(store_failure(StoreError::Unusable(unusable))),
         }
+    }
+
+    fn shared(&self) -> Result<Shared, Failure> {
+        self.store()?
+            .read_shared()
+            .map_err(|_| failure(ErrorCode::IoFailure))
     }
 
     fn host_view(&self) -> Result<HostView, OwnerError> {
@@ -326,10 +333,10 @@ impl ProjectsService {
     pub fn overview(&self) -> Overview {
         let store = match &self.store {
             None => StoreStatus::Unavailable,
-            Some(_) => match self.loaded() {
-                Ok(Loaded::Ready(store)) => ready_status(&store),
-                Ok(Loaded::Missing) => StoreStatus::Missing,
-                Ok(Loaded::Unusable(u)) => StoreStatus::Unusable {
+            Some(_) => match self.shared() {
+                Ok(Shared::Ready(store)) => ready_status(&store),
+                Ok(Shared::Missing) => StoreStatus::Missing,
+                Ok(Shared::Unusable(u)) => StoreStatus::Unusable {
                     code: store_failure(StoreError::Unusable(u)).code,
                     field: u.field,
                 },
