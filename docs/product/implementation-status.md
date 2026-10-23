@@ -211,14 +211,16 @@ keeps old/new records and a deterministic map, and never restores over a live wr
 GUI rollback must account for new records and old shell recreation behaviour; installer
 rollback is not an unattended escape hatch. No host stop, SQL downgrade or F8 replacement.
 
-**Readiness:** bounded M1 implementation can start with pure codecs/fixtures and the
-specified increments, without deciding remote transport or Claude Managed feasibility.
-M1-01 passes at the closed-schema and strict-codec level only (`contracts::m1::tests`, increment 1,
-unwired and unreleased); its "before save" wiring and M1-02..13 and the native project journeys
-remain **NOT_RUN** acceptance obligations.
-ADR0052 is now Accepted as an architectural decision, not product/release acceptance.
-Its M1 acceptance tests are not complete (only M1-01 at codec level) and adoption needs real-desktop evidence,
-preservation/rollback and a separately authorized deployment. No new owner product choice
+**M1 status (2026-10-23): engineering complete, release blocked.** The store, command engine,
+checked owner, migration, input claim, window commands and Projects view are implemented behind a
+release gate that is off, and M1-01..12 pass as recorded in the
+[M1 delivery record](../acceptance/m1-delivery-2026-10-23.md); M1-02 is partial (a foreign ACL on a
+root is not detected) and M1-13 is partial (backend and host costs measured, no GUI budget, none
+set). Exercised: an isolated graphical run with its own host, and real-process tests; **not**
+exercised: the owner's installation, a real registry/layout import, real Native agents or Managed
+sessions through the Projects view. ADR0052 is Accepted as an architectural decision, not
+product/release acceptance; adoption needs the owner's explicit step and the measurements the
+record lists. No new owner product choice
 is needed for the recommended proposal; retain WD01/02, P1 and F8 cap1. Source/installed
 binary correspondence, exact F8 resource mismatches, real-desktop budgets and provider
 consumption remain explicit evidence gaps, not reasons to restart production in M0.

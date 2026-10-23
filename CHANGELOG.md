@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-23 — M1: project-centered workspace (engineering complete, behind an off gate)
+
+- New **Projects** view (shown only after the owner turns it on in Settings, confirmed in a native window):
+  folders become projects with their own workspaces, panes and sessions; Scratch for what has no folder;
+  a second window onto the same store; read-only mirrors with one exclusive, explicit input holder.
+- A private, versioned, locked compare-and-swap store (`$XDG_STATE_HOME/wyss-console/projects/v1`): crash-safe
+  (a killed writer leaves the complete old or new file), never replaced when corrupt or newer, closed
+  commands for every change, a launch journal that never dispatches twice, and recovery that only makes an
+  unknown launch `ambiguous` and waits for the user.
+- Deterministic, read-only-first import of the legacy registry and saved layout (exact bytes kept in a private
+  snapshot, then the store published last), incremental updates, and a rollback report.
+- The owner is read through a checked, non-starting socket: a replaced host is `host_changed`, an absent one
+  `host_offline`, and nothing is started, retried or recreated. Managed launch prepares a session only.
+- Nothing is installed or migrated by this change; F8 capacity stays one. Record:
+  `docs/acceptance/m1-delivery-2026-10-23.md`.
+
 ## 2026-10-22 — F8: protocol 2 activated in the installed Console
 
 - Owner approved ADR 0051, a new V8 store migrated from a copy of a fresh backup, installation without interrupting
