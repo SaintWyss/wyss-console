@@ -1,7 +1,8 @@
 # Claude Code and Codex capability matrix
 
 > **On-demand capability reference**, pinned to the Phase1 baseline below. Status cells
-> are that dated snapshot; update current implementation/evidence only in the
+> are that dated snapshot; the M0 manifest below adds scoped installed-build observations.
+> Update current implementation/evidence only in the
 > [canonical status register](implementation-status.md).
 
 Baseline `e480d479`, reviewed 2026-10-22. `I` = implemented with the cited real/production
@@ -87,3 +88,49 @@ real global/project settings. Managed checks must prove absence of every unsuppo
 effect route, including provider subagents, hooks, plugins, MCP, background tools and
 network. A feature unavailable safely in Managed remains visible with reason and a Native
 alternative requiring a **new explicit launch**, never automatic fallback.
+
+## M0 installed-build manifest
+
+Dated observation 2026-10-22, source main `d2ee8d2` (application trees equal `e480d479`).
+This augments the historical matrix, not its acceptance scope. Probes used only PATH
+`claude --version`, `codex --version`, existing host hello and existing F8 authority/hello;
+no help/model-list refresh, sign-in, auth/config reads, inference or paid calls.
+
+| Provider / mode / profile                      | Installed observation / compatibility                                                                    | Evidence, test and remaining qualification                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Native / original CLI + Native profiles | PATH2.1.309; host catalogue supports Claude. No exact2.1.309 original-feature qualification              | F3 real2.1.303 launch; F6 parse2.1.304 flags. New version probe proves version only. Hooks/skills/MCP/sign-in/profile/model/effort consumption fidelity on2.1.309 remains partial/NOT_PROVEN; M2 positive original workflow + denied unsupported override + restart/continuity matrix                                   |
+| Codex Native / original CLI + Native profiles  | PATH0.159.0, matches recorded launch/config evidence                                                     | F3/F6; model/config override partial, original commands/auth/hook/skill/MCP use remains provider-owned. Per-session Codex hooks-off/skills exclusions unsupported. M2 must test supported profile flags without editing original settings                                                                               |
+| Codex Managed / inference_only_v1              | P1/V7 separately active; P2 supports this attested profile, real F8 observation specifically Local Tools | Existing ADR0014/0015 and protocol fixtures; no claim that M0 ran an inference turn, refreshed auth or resolved G-INF. Real per-profile/version consumption/refresh/error matrix remains required                                                                                                                       |
+| Codex Managed / codex_local_tools_v1           | P2/V8 active, service0.2.0; production adapter pins0.159.0, cap1                                         | Recorded real0.159.0 F8 activation + accepted ADR0051; M0 hello confirms2/8, registry/engine/transport fixtures confirm narrow contracts. No new runtime launch, real overload, refresh, reroute or full adversarial provider campaign. Model/effort selection fields remain absent; hooks/MCP/plugins/subagents denied |
+| Claude Managed / any profile                   | No released adapter/compatible build                                                                     | ADR0053 Proposed; unsupported. M3 pins official surface/auth/settings route and mediates every effect before even no-tool acceptance; Native is a separately explicit alternative                                                                                                                                       |
+| OpenCode/Hermes                                | No Native catalogue entry/Managed execution adapter qualified                                            | Retained config/extension work only; not another installed provider qualification or M1 dependency                                                                                                                                                                                                                      |
+
+Host hello0.2.0 exposes `profile_effort`; this changes the old-host compatibility
+observation, not the recorded limits of real GUI/provider consumption. The host's protocol1
+is its **terminal transport**, not proof that the selected Managed authority is P1.
+Installed GUI/authority binary fingerprints and remaining source correspondence are in
+[status](implementation-status.md#m0-engineering-baseline). Unknown/new build => Native
+inspection may remain available with unqualified label; Managed attestation must refuse
+an unsupported exact build, never fall back automatically or reuse Native trust.
+
+### G-INF carry-forward: E1–E9 scope
+
+[Historical E1–E8](../research/inference-isolation-2026-10-19.md) used procedures now
+prohibited for real acceptance; retain observations, do not rerun disposable HOME/keyring
+experiments. E1 user-hook hiding, E2 policy pin visibility, E4 project trust, E8 visible
+policy/namespace had bounded controls; E3 synthetic link write was **not real refresh**;
+E5 full isolated authority attestation and E6 turn/resume were NOT_RUN; E7 old thread-store
+resume needs an explicit compatibility plan. F8 Local Tools acceptance does not close these.
+
+E9 is a **required future matrix, NOT_RUN**, not an existing experiment result:
+
+| Source / behaviour               | Must establish before G-INF/native-hooks coexistence release                                                                                                               |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Account and project config/trust | Isolated inference cannot inherit external hooks/tools; original Native settings remain intact; effective values, not only discovery counts                                |
+| Administrator/managed policy     | Host policy remains visible/authoritative; pinned-on features and executable definitions distinguished; fail closed on incompatible mandated effect                        |
+| Plugin/skill/subagent surfaces   | Enumerate inherited/generated actions and deny unsupported paths before dispatch; no callback-only isolation claim                                                         |
+| MCP account/project/policy       | Enumerate servers/tools/transport and policy precedence; no inherited connection or executable server merely because hooks list is empty                                   |
+| Auth and old bindings            | Supported credential route, real refresh/multi-process safety and resume/old binding behaviour with explicit authorization; no credential copying or shared-store shortcut |
+
+M0 carries this matrix without new experiments. M2/M3 own the unlocking evidence; M1
+project registration does not enable hooks, trust a project or weaken Managed attestation.

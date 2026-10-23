@@ -1,6 +1,6 @@
 # ADR 0052: Project-centered workspace identities and projections
 
-Status: **Proposed**. Owner WD-02 approves the product direction, not this technical ADR.
+Status: **Accepted** by Santiago; the design dates from 2026-10-22 and the owner's authorization was confirmed in the PR #17 integration review on 2026-10-23 and recorded in [this PR comment](https://github.com/SaintWyss/wyss-console/pull/17#issuecomment-6356533896). The earlier WD-02 product direction alone did not accept this ADR.
 Date: 2026-10-22. Extends native project/default/layout semantics of ADR0035/0037;
 does not alter Managed authority, leases, database schema or execution permissions.
 
@@ -10,7 +10,7 @@ Current projects are known native folders/defaults plus a separate configuration
 layout is window-centered. Final product needs stable device/host/project/workspace
 navigation without changing process ownership or confusing path equality with identity.
 
-## Proposed decision
+## Decision
 
 Introduce opaque ProjectId, RootBindingId and WorkspaceId in a dedicated private
 versioned metadata store. A workspace belongs to one project/host; a session keeps its
@@ -33,10 +33,21 @@ responsibility and makes native work depend on it. Use a project projection outs
 authority: recommended; requires consistent association/reconciliation and explicit
 mixed-version feature negotiation rather than an assumed cross-owner transaction.
 
-## Acceptance before implementation release
+## Acceptance and prerequisites before implementation release
 
-Owner explicitly accepts this ADR after review. Validate exact schema/DTO fixtures,
+This acceptance is limited to the **architectural decision**: a dedicated versioned
+project/workspace metadata projection outside Native and Managed execution authorities,
+with stable opaque identities, checked owner association and stale-context refusal. It
+does not certify or authorize any migration, installed change, release, service action,
+credential access, host/authority restart, runtime-capacity expansion, or claim of
+OS-level isolation. ADR0053 remains Proposed. The explicit detailed M1 contract and
+13 new acceptance oracles remain proposed engineering details, not executable proof.
+
+Before M1 can be adopted on the owner's desktop, validate exact schema/DTO fixtures,
 deterministic legacy mapping, interrupted migration, stale context/project switch,
 missing roots, duplicate bindings, protected paths, bounds, newer-store refusal and
-rollback preserving live session identities. No source implementation or migration is
-performed by proposing this ADR. Product ownership approval is not technical acceptance.
+rollback preserving live session identities. No source implementation or migration is performed by accepting the architecture.
+All M1-01..13 tests remain NOT_RUN until implementation; negative cases, interrupted
+migration, rollback, UI/runtime identity preservation and real-desktop resource budgets
+must pass before production adoption. Any material alteration to the accepted trust or
+ownership boundaries requires a new review/ADR.
