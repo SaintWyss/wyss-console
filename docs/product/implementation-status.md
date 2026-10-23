@@ -242,8 +242,8 @@ Final documentation/scope/preservation checks are recorded with the M0 delivery 
 
 Final M0 checks: changed Markdown Prettier PASS;487 Markdown files/2101 local references,
 zero broken links;31 FP/AC and208 legacy mappings retained; all33 numeric F8 resource
-ceilings covered. Accepted/historical ADRs unchanged. Repository scanner5/5 PASS.
+ceilings covered. Accepted/historical ADRs unchanged except ADR0052's own status and acceptance section. Repository scanner5/5 PASS.
 Before/after P1/F8 service start identities, host/F8 socket metadata, Native registry,
 layout and installed-binary metadata unchanged. This comparison proves no observed owner
 replacement or metadata rewrite during M0; it does not certify every live session's
-internal state. Scope: five documentation files, no application implementation.
+internal state. Scope: documentation files only (the M1 contract, canonical pages and the ADR0052 status), no application implementation.

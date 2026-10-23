@@ -1,6 +1,6 @@
 # ADR 0052: Project-centered workspace identities and projections
 
-Status: **Accepted** by Santiago (decision dated 2026-10-22). The owner's authorization was confirmed in the PR #17 integration review on 2026-10-23 and recorded in [this PR comment](https://github.com/SaintWyss/wyss-console/pull/17#issuecomment-6356533896). The earlier WD-02 product direction alone did not accept this ADR.
+Status: **Accepted** by Santiago; the design dates from 2026-10-22 and the owner's authorization was confirmed in the PR #17 integration review on 2026-10-23 and recorded in [this PR comment](https://github.com/SaintWyss/wyss-console/pull/17#issuecomment-6356533896). The earlier WD-02 product direction alone did not accept this ADR.
 Date: 2026-10-22. Extends native project/default/layout semantics of ADR0035/0037;
 does not alter Managed authority, leases, database schema or execution permissions.
 
@@ -10,7 +10,7 @@ Current projects are known native folders/defaults plus a separate configuration
 layout is window-centered. Final product needs stable device/host/project/workspace
 navigation without changing process ownership or confusing path equality with identity.
 
-## Proposed decision
+## Decision
 
 Introduce opaque ProjectId, RootBindingId and WorkspaceId in a dedicated private
 versioned metadata store. A workspace belongs to one project/host; a session keeps its
