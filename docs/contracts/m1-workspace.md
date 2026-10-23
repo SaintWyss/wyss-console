@@ -297,8 +297,8 @@ new remote transport, concurrency increase, parser helpers or OL3 implementation
 Fixtures must use synthetic metadata and fail-on-call spawn/stop/provider/config writers.
 No test requires real credentials, a live service restart or installed-store migration.
 Current fixture passes in the status register prove the old components only; the results of
-the M1-01..13 tests are recorded in `docs/acceptance/m1-delivery-2026-10-23.md` (11 PASS, 2
-PARTIAL). Required native desktop journey after owner
+the M1-01..13 tests are recorded in `docs/acceptance/m1-delivery-2026-10-23.md` (13 PASS; the GUI reference budgets of M1-13
+are proposed and await the owner). Required native desktop journey after owner
 acceptance: A/B/Scratch, Native Claude/Codex and existing F8 visible in correct scope,
 archive/reopen, GUI-only recovery, two windows, loss of owner connection. Zero duplicate
 processes/prompts and unchanged live ownership are explicit release oracles.
