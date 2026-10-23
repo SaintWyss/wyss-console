@@ -6,7 +6,7 @@
 //! the store and, best effort, of the owners; an owner that cannot be read makes a session
 //! `unknown` with a reason, never `ended`.
 use super::{
-    apply::{Engine, Env, Purpose, Selections, empty_store, store_failure},
+    apply::{Disclosures, Engine, Env, Purpose, Selections, empty_store, store_failure},
     claim::{ClaimError, Claims},
     command::{Envelope, ErrorCode, Failure, Receipt},
     migration::{self, IncrementalPlan, Plan, Sources, Summary},
@@ -18,6 +18,7 @@ use std::{
     fs,
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock, PoisonError},
+    time::{Duration, Instant},
 };
 use wyss_console::contracts::m1::{
     StoreV1,
@@ -25,10 +26,50 @@ use wyss_console::contracts::m1::{
         Association, AssociationState, Binding, BindingState, ManagedProtocol,
         ManagedSafetyProfile, Node, Preferences, Project, Target, Workspace,
     },
+    scalar::{AssociationId, ProjectId},
 };
 
 /// Most rows a page returns.
 pub const PAGE: usize = 100;
+
+/// How long what the owners said is shown to every window before they are asked again. A display
+/// read inside this time costs the owners nothing, however many windows are open and however
+/// often they ask; anything that acts, or that decides what to do, reads the owner itself.
+pub const INVENTORY_TTL: Duration = Duration::from_millis(1000);
+
+/// One owner's answer, kept for `INVENTORY_TTL`. The lock is held while it is read, so windows
+/// that ask together share a single read instead of making one each.
+struct Remembered<T> {
+    answer: Mutex<Option<(Instant, Result<T, OwnerError>)>>,
+}
+
+impl<T: Clone> Remembered<T> {
+    fn new() -> Self {
+        Self {
+            answer: Mutex::new(None),
+        }
+    }
+
+    fn get(
+        &self,
+        ttl: Duration,
+        read: impl FnOnce() -> Result<T, OwnerError>,
+    ) -> Result<T, OwnerError> {
+        let mut held = self.answer.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((at, answer)) = held.as_ref()
+            && at.elapsed() < ttl
+        {
+            return answer.clone();
+        }
+        let answer = read();
+        *held = Some((Instant::now(), answer.clone()));
+        answer
+    }
+
+    fn forget(&self) {
+        *self.answer.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -189,6 +230,18 @@ struct Held {
     sources: Sources,
 }
 
+/// What the window shows before it asks to move a shell into a project.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdoptionView {
+    /// The project's folder the shell would be recorded under; the adoption names it.
+    pub binding_id: String,
+    /// The directory the shell is in now.
+    pub cwd: String,
+    /// Whether it is the project's folder or inside it.
+    pub inside: bool,
+}
+
 pub struct ProjectsService {
     /// Opened on first use, and only once the gate is on: a build with the workspace off makes
     /// no directory and reads no file of it.
@@ -197,10 +250,15 @@ pub struct ProjectsService {
     owner: Arc<dyn Owner>,
     env: Arc<dyn Env>,
     selections: Selections,
+    disclosures: Disclosures,
     claims: Claims,
     held: Mutex<Option<Held>>,
     older_dir: Option<PathBuf>,
     gate: Option<PathBuf>,
+    /// What the host and the Managed authorities last said, shared by every window.
+    host_seen: Remembered<HostView>,
+    managed_seen: Remembered<Vec<ManagedRow>>,
+    inventory_ttl: Duration,
 }
 
 fn ready_status(store: &StoreV1) -> StoreStatus {
@@ -254,11 +312,22 @@ impl ProjectsService {
             owner,
             env,
             selections: Selections::default(),
+            disclosures: Disclosures::default(),
             claims,
             held: Mutex::new(None),
             older_dir,
             gate,
+            host_seen: Remembered::new(),
+            managed_seen: Remembered::new(),
+            inventory_ttl: INVENTORY_TTL,
         }
+    }
+
+    /// The time an owner's answer is shared for, for a test that must see it end.
+    #[cfg(test)]
+    pub fn with_inventory_ttl(mut self, ttl: Duration) -> Self {
+        self.inventory_ttl = ttl;
+        self
     }
 
     /// The store, made private and opened on first use. Callers have passed the gate.
@@ -274,6 +343,7 @@ impl ProjectsService {
             owner: &*self.owner,
             env: &*self.env,
             selections: &self.selections,
+            disclosures: &self.disclosures,
         })
     }
 
@@ -349,8 +419,27 @@ impl ProjectsService {
             .map_err(|_| failure(ErrorCode::IoFailure))
     }
 
+    /// The host as it is now, for what decides or does something.
     fn host_view(&self) -> Result<HostView, OwnerError> {
         self.owner.host(None)
+    }
+
+    /// The host as it was a moment ago, for what is only shown. One read serves every window.
+    fn host_shown(&self) -> Result<HostView, OwnerError> {
+        self.host_seen
+            .get(self.inventory_ttl, || self.owner.host(None))
+    }
+
+    /// The Managed sessions as they were a moment ago, for what is only shown.
+    fn managed_shown(&self) -> Result<Vec<ManagedRow>, OwnerError> {
+        self.managed_seen
+            .get(self.inventory_ttl, || self.owner.managed())
+    }
+
+    /// Whatever an effect may have changed in the owners is read again the next time.
+    fn forget_inventory(&self) {
+        self.host_seen.forget();
+        self.managed_seen.forget();
     }
 
     pub fn overview(&self) -> Overview {
@@ -379,7 +468,7 @@ impl ProjectsService {
                 Err(_) => StoreStatus::Unavailable,
             },
         };
-        let host = match self.host_view() {
+        let host = match self.host_shown() {
             Ok(view) => HostStatus {
                 reachable: true,
                 epoch: Some(view.epoch),
@@ -419,6 +508,7 @@ impl ProjectsService {
             ),
             Err(RootError::Missing) => ("missing", false, false),
             Err(RootError::Ineligible) => ("ineligible", false, false),
+            Err(RootError::Shared) => ("shared", false, false),
         };
         RootView {
             binding_id: binding.id.as_str().to_owned(),
@@ -661,8 +751,8 @@ impl ProjectsService {
             .iter()
             .find(|w| w.id.as_str() == id)
             .ok_or_else(|| failure(ErrorCode::ContextStale))?;
-        let host = self.host_view();
-        let managed = self.owner.managed();
+        let host = self.host_shown();
+        let managed = self.managed_shown();
         Ok(self.workspace_view(&store, workspace, &host, &managed, window))
     }
 
@@ -732,8 +822,8 @@ impl ProjectsService {
         window: Option<&str>,
     ) -> Result<Page<SessionView>, Failure> {
         let store = self.ready()?;
-        let host = self.host_view();
-        let managed = self.owner.managed();
+        let host = self.host_shown();
+        let managed = self.managed_shown();
         let rows = store
             .sessions
             .iter()
@@ -759,6 +849,7 @@ impl ProjectsService {
         let root = self.owner.root(path).map_err(|e| match e {
             RootError::Missing => failure(ErrorCode::RootMissing),
             RootError::Ineligible => failure(ErrorCode::RootIneligible),
+            RootError::Shared => failure(ErrorCode::RootIneligible).with_field("foreignAcl"),
         })?;
         let token = format!("pick-{}", self.env.uuid());
         self.selections.issue(
@@ -780,9 +871,32 @@ impl ProjectsService {
         })
     }
 
-    /// The window switched project or workspace: picks made before are no longer usable.
+    /// The window switched project or workspace: picks made before are no longer usable, and
+    /// neither is a directory shown for an adoption.
     pub fn forget_picks(&self) {
         self.selections.clear();
+        self.disclosures.clear();
+    }
+
+    /// Where a Scratch shell really is, shown before the user is asked to move it into a project.
+    /// The answer is good for that one adoption only.
+    pub fn preview_adoption(
+        &self,
+        association_id: &str,
+        project_id: &str,
+    ) -> Result<AdoptionView, Failure> {
+        self.gated()?;
+        let parse = |field: &'static str| failure(ErrorCode::InvalidRecord).with_field(field);
+        let association =
+            AssociationId::parse(association_id).map_err(|_| parse("associationId"))?;
+        let project = ProjectId::parse(project_id).map_err(|_| parse("projectId"))?;
+        let engine = self.engine().ok_or_else(|| failure(ErrorCode::IoFailure))?;
+        let shown = engine.disclose_adoption(&association, &project)?;
+        Ok(AdoptionView {
+            binding_id: shown.binding_id.as_str().to_owned(),
+            cwd: shown.cwd,
+            inside: shown.inside,
+        })
     }
 
     // ---- commands -----------------------------------------------------------------------------
@@ -790,7 +904,10 @@ impl ProjectsService {
     pub fn execute(&self, envelope: Envelope) -> Result<Receipt, Failure> {
         self.gated()?;
         let engine = self.engine().ok_or_else(|| failure(ErrorCode::IoFailure))?;
-        engine.execute(envelope)
+        let done = engine.execute(envelope);
+        // A launch or a settling changed what the owners hold, whatever the answer was.
+        self.forget_inventory();
+        done
     }
 
     /// Creates the empty store (Scratch only) when none exists. An explicit act.

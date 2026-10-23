@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ProjectsController, ProjectsState } from './controller';
+  import VirtualList from './VirtualList.svelte';
 
   let {
     projects,
@@ -26,6 +27,7 @@
     missing: 'Folder missing',
     identity_changed: 'Folder replaced',
     ineligible: 'Folder not usable',
+    shared: 'Another account can write here',
     unknown: '',
   };
 </script>
@@ -63,7 +65,7 @@
       disabled={projects.busy || folderName.trim() === ''}>Create…</button
     >
   </form>
-  <ul class="projects-list" aria-label="Projects">
+  <ul class="projects-list" aria-label="Scratch">
     <li>
       <button
         type="button"
@@ -75,24 +77,29 @@
         <span class="projects-note">no folder</span>
       </button>
     </li>
-    {#each live as project (project.id)}
-      <li>
-        <button
-          type="button"
-          class="projects-item"
-          aria-current={projects.project === project.id ? 'true' : undefined}
-          onclick={() => void controller.selectProject(project.id)}
-        >
-          <span>{project.label}{project.archived ? ' (archived)' : ''}</span>
-          <span class="projects-note">
-            {project.root
-              ? AVAILABILITY[project.root.availability] || project.root.label
-              : 'no folder'}
-          </span>
-        </button>
-      </li>
-    {/each}
   </ul>
+  <VirtualList
+    items={live}
+    rowHeight={56}
+    key={(project) => project.id}
+    label="Projects"
+  >
+    {#snippet row(project)}
+      <button
+        type="button"
+        class="projects-item"
+        aria-current={projects.project === project.id ? 'true' : undefined}
+        onclick={() => void controller.selectProject(project.id)}
+      >
+        <span>{project.label}{project.archived ? ' (archived)' : ''}</span>
+        <span class="projects-note">
+          {project.root
+            ? AVAILABILITY[project.root.availability] || project.root.label
+            : 'no folder'}
+        </span>
+      </button>
+    {/snippet}
+  </VirtualList>
   <label class="projects-check">
     <input type="checkbox" bind:checked={showArchived} /> Show archived
   </label>

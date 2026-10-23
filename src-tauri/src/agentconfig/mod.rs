@@ -22,6 +22,25 @@ mod acl;
 #[cfg(test)]
 mod acl_tests;
 pub mod author;
+
+/// Whether anybody besides the owner can write the folder behind `fd` (mode `mode`, group `gid`),
+/// through its ACL, its mode bits, or the ACL it gives what is made in it. The accounts the owner
+/// named in `trusted-writers` under `state` are not anybody; a folder whose ACL cannot be read
+/// counts as shared, never as private.
+pub fn folder_is_shared(
+    fd: &impl std::os::fd::AsRawFd,
+    mode: u32,
+    gid: u32,
+    me: u32,
+    state: Option<&std::path::Path>,
+) -> bool {
+    let declared = state.map_or_else(Vec::new, |state| declared::uids(&declared::load(state)));
+    [acl::writers(fd, mode, gid, me), acl::inherited(fd, gid, me)]
+        .iter()
+        .any(|who| {
+            who.everyone || who.group_shared || who.named.iter().any(|uid| !declared.contains(uid))
+        })
+}
 pub mod codex_author;
 #[cfg(test)]
 pub(crate) use acl::{

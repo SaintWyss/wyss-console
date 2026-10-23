@@ -101,6 +101,7 @@ fn service(root: &std::path::Path, env: Arc<FakeEnv>) -> ProjectsService {
         env,
         Claims::new(Some(root.join("claims"))),
     )
+    .with_inventory_ttl(Duration::ZERO)
 }
 
 fn until<T>(mut poll: impl FnMut() -> Option<T>) -> T {

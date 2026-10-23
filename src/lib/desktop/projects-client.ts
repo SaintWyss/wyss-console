@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import {
+  parseAdoptionPreview,
   parseFailure,
   parseOrphans,
   parseOutput,
@@ -13,6 +14,7 @@ import {
   parseStoreStatus,
   parseSummary,
   parseWorkspace,
+  type AdoptionPreview,
   type Envelope,
   type Failure,
   type MigrationSummary,
@@ -67,6 +69,11 @@ export interface ProjectsClient {
   writeInput(associationId: string, data: Uint8Array): Promise<void>;
   resize(associationId: string, rows: number, cols: number): Promise<void>;
   orphans(launchOperationId: string): Promise<Orphan[]>;
+  /** Where the shell really is now; the answer is good for one adoption. */
+  adoptionPreview(
+    associationId: string,
+    projectId: string,
+  ): Promise<AdoptionPreview>;
   rollbackReport(): Promise<RollbackReport>;
   compactReceipts(): Promise<number>;
   setEnabled(on: boolean): Promise<Overview>;
@@ -177,6 +184,14 @@ export const desktopProjects: ProjectsClient = {
     return checked(
       await call('projects_orphans', { request: { launchOperationId } }),
       parseOrphans,
+    );
+  },
+  async adoptionPreview(associationId, projectId) {
+    return checked(
+      await call('projects_adoption_preview', {
+        request: { associationId, projectId },
+      }),
+      parseAdoptionPreview,
     );
   },
   async rollbackReport() {

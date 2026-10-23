@@ -69,6 +69,7 @@ fn terminal(id: &str, session: Option<&str>, cwd: &str) -> TerminalRow {
         running: true,
         cwd: Some(cwd.to_owned()),
         native_session: session.map(str::to_owned),
+        pid: None,
     }
 }
 

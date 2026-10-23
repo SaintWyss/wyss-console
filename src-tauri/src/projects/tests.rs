@@ -2,12 +2,12 @@
 //! host, an agent or a provider: the owner is a recorder whose launches are fail-on-call unless a
 //! test scripts one, and every store lives in a directory made for the test and removed with it.
 use super::{
-    apply::{Engine, Env, Purpose, Selections, empty_store},
+    apply::{Disclosures, Engine, Env, Purpose, Selections, empty_store},
     command::{Envelope, ErrorCode, Failure, Receipt},
     owner::{
-        FolderError, HostView, LaunchError, ManagedLaunch, ManagedLaunched, ManagedRow,
-        NativeLaunch, NativeLaunched, Owner, OwnerError, RootError, RootInfo, ShellLaunched,
-        TermRead, TerminalRow,
+        AuthorityRef, FolderError, HostView, LaunchError, ManagedAdvert, ManagedLaunch,
+        ManagedLaunched, ManagedRow, NativeLaunch, NativeLaunched, Owner, OwnerError, RootError,
+        RootInfo, ShellCwd, ShellLaunched, TermRead, TerminalRow,
     },
     store::{Faults, Loaded, Point, Store, StoreError},
 };
@@ -102,7 +102,30 @@ impl Env for FakeEnv {
 
 // ---- a scripted owner --------------------------------------------------------------------
 
+/// The Managed authority a launch goes to unless a test says otherwise.
+pub(super) const STREAM_P1: &str = "bbbbbbbb-0000-4000-8000-000000000001";
+
+pub(super) fn advert(
+    protocol: ManagedProtocol,
+    stream: &str,
+    profiles: &[ManagedSafetyProfile],
+) -> ManagedAdvert {
+    ManagedAdvert {
+        authority: AuthorityRef {
+            protocol,
+            store_stream_id: stream.to_owned(),
+        },
+        profiles: profiles.to_vec(),
+    }
+}
+
 pub(super) struct Script {
+    /// Runs once, the next time a folder is looked at: another window acting in between.
+    pub on_root: Option<Box<dyn FnOnce() + Send>>,
+    /// What the Managed authority a launch would go to shows it serves.
+    pub advert: Result<ManagedAdvert, OwnerError>,
+    /// Where a running shell is, by terminal ID.
+    pub cwd: HashMap<String, Result<ShellCwd, OwnerError>>,
     /// A launch waits here (outside the script's lock) until the test releases it.
     pub gate: Option<std::sync::mpsc::Receiver<()>>,
     pub epoch: String,
@@ -113,6 +136,8 @@ pub(super) struct Script {
     pub shell: Vec<Result<ShellLaunched, LaunchError>>,
     pub prepared: Vec<Result<ManagedLaunched, LaunchError>>,
     pub calls: Vec<String>,
+    /// The authority each Managed launch named.
+    pub authorities: Vec<AuthorityRef>,
     pub folders: Vec<(String, String)>,
     pub written: Vec<(String, Vec<u8>)>,
     pub resized: Vec<(String, u16, u16)>,
@@ -123,6 +148,16 @@ pub(super) struct FakeOwner(pub Mutex<Script>);
 impl FakeOwner {
     pub(super) fn new() -> Arc<Self> {
         Arc::new(Self(Mutex::new(Script {
+            on_root: None,
+            advert: Ok(advert(
+                ManagedProtocol::P1,
+                STREAM_P1,
+                &[
+                    ManagedSafetyProfile::Inference,
+                    ManagedSafetyProfile::LocalTools,
+                ],
+            )),
+            cwd: HashMap::new(),
             gate: None,
             epoch: "h1:1:1:100:1000".to_owned(),
             host: Some(Ok(Vec::new())),
@@ -132,6 +167,7 @@ impl FakeOwner {
             shell: Vec::new(),
             prepared: Vec::new(),
             calls: Vec::new(),
+            authorities: Vec::new(),
             folders: Vec::new(),
             written: Vec::new(),
             resized: Vec::new(),
@@ -195,7 +231,30 @@ impl Owner for FakeOwner {
         })
     }
 
+    fn managed_advert(&self) -> Result<ManagedAdvert, OwnerError> {
+        self.script(|s| {
+            s.calls.push("managed_advert".into());
+            s.advert.clone()
+        })
+    }
+
+    fn shell_cwd(&self, epoch: &str, terminal: &str) -> Result<ShellCwd, OwnerError> {
+        self.script(|s| {
+            s.calls.push(format!("shell_cwd {terminal}"));
+            if epoch != s.epoch {
+                return Err(OwnerError::HostChanged);
+            }
+            s.cwd
+                .get(terminal)
+                .cloned()
+                .unwrap_or(Err(OwnerError::Refused))
+        })
+    }
+
     fn root(&self, path: &str) -> Result<RootInfo, RootError> {
+        if let Some(act) = self.script(|s| s.on_root.take()) {
+            act();
+        }
         self.script(|s| {
             s.calls.push("root".into());
             s.roots
@@ -297,6 +356,7 @@ impl Owner for FakeOwner {
         self.script(|s| {
             s.calls
                 .push(format!("launch_managed {} {}", launch.path, launch.intent));
+            s.authorities.push(launch.authority.clone());
             if s.prepared.is_empty() {
                 panic!("an unscripted Managed launch reached the owner");
             }
@@ -316,6 +376,7 @@ pub(super) struct World {
     pub owner: Arc<FakeOwner>,
     pub env: Arc<FakeEnv>,
     pub selections: Selections,
+    pub disclosures: Disclosures,
     pub window_revision: u64,
 }
 
@@ -334,6 +395,7 @@ impl World {
             owner,
             env,
             selections: Selections::default(),
+            disclosures: Disclosures::default(),
             window_revision: 1,
         }
     }
@@ -351,6 +413,7 @@ impl World {
             owner: &*self.owner,
             env: &*self.env,
             selections: &self.selections,
+            disclosures: &self.disclosures,
         }
     }
 
@@ -460,6 +523,7 @@ pub(super) fn native_row(terminal: &str, session: Option<&str>) -> TerminalRow {
         running: true,
         cwd: None,
         native_session: session.map(str::to_owned),
+        pid: None,
     }
 }
 
@@ -485,6 +549,8 @@ pub(super) fn unusable(result: Result<StoreV1, StoreError>) -> super::store::Unu
     }
 }
 
+mod acl_tests;
+mod adoption_tests;
 mod bench_tests;
 mod launch_tests;
 mod migration_tests;

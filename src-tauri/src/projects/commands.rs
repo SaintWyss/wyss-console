@@ -11,8 +11,8 @@ use super::{
     command::{Envelope, ErrorCode, Failure, Receipt},
     migration::Summary,
     owner::{
-        HostSocket, LaunchError, ManagedLaunch, ManagedLaunched, ManagedPort, ManagedRow,
-        OwnerError, RealOwner,
+        AuthorityFacts, AuthorityRef, HostSocket, LaunchError, ManagedAdvert, ManagedLaunch,
+        ManagedLaunched, ManagedPort, ManagedRow, OwnerError, RealOwner, advertised_profiles,
     },
     service::{
         HostStatus, Overview, Page, PickView, ProjectView, ProjectsService, RollbackReport,
@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use wyss_console::{
+    authority::Connection,
     contracts::control::ActualState,
     contracts::{
         WireUuid,
@@ -42,6 +43,16 @@ const WALK_PAGES: usize = 8;
 /// was started against one). It can list and prepare; it has no way to bind, lease or run.
 struct ManagedFromApp {
     app: AppHandle,
+}
+
+fn advert_of(protocol: ManagedProtocol, facts: AuthorityFacts, own: &str) -> ManagedAdvert {
+    ManagedAdvert {
+        authority: AuthorityRef {
+            protocol,
+            store_stream_id: facts.stream_id.clone(),
+        },
+        profiles: advertised_profiles(protocol, &facts, own),
+    }
 }
 
 fn profile_of(profile: RuntimeSafetyProfile) -> ManagedSafetyProfile {
@@ -136,19 +147,63 @@ impl ManagedPort for ManagedFromApp {
         }
     }
 
-    /// Prepares a session, nothing more. With a protocol-2 interface the session is its; without
-    /// one it is the installed authority's. The operation is the intent, so a retry is the same.
-    fn prepare(&self, launch: &ManagedLaunch) -> Result<ManagedLaunched, LaunchError> {
-        let intent = WireUuid::try_from(launch.intent.clone())
-            .map_err(|_| LaunchError::NotDispatched(OwnerError::Refused))?;
+    /// The authority a launch would go to, read now: the protocol-2 interface when it is active,
+    /// the installed authority otherwise. What it can do is what its own status shows.
+    fn advertised(&self) -> Result<ManagedAdvert, OwnerError> {
+        let own = env!("CARGO_PKG_VERSION");
         if let Some(gui) = self.app.try_state::<F8Gui>()
             && gui.is_active()
         {
-            let stream = gui
-                .state()
-                .authority
-                .map(|a| a.stream_id.as_str().to_owned())
-                .ok_or(LaunchError::NotDispatched(OwnerError::HostOffline))?;
+            let state = gui.state();
+            if state.link.state != Connection::Connected {
+                return Err(OwnerError::HostOffline);
+            }
+            let status = state.authority.ok_or(OwnerError::HostOffline)?;
+            return Ok(advert_of(
+                ManagedProtocol::P2,
+                AuthorityFacts {
+                    protocol_version: status.protocol_version,
+                    storage_schema_version: status.storage_schema_version,
+                    service_version: status.service_version,
+                    stream_id: status.stream_id.as_str().to_owned(),
+                },
+                own,
+            ));
+        }
+        let service = self
+            .app
+            .try_state::<SessionService>()
+            .ok_or(OwnerError::Unsupported)?;
+        let status = service.status().map_err(|error| match error.code {
+            SessionFailure::Incompatible => OwnerError::Unsupported,
+            _ => OwnerError::HostOffline,
+        })?;
+        Ok(advert_of(
+            ManagedProtocol::P1,
+            AuthorityFacts {
+                protocol_version: status.protocol_version,
+                storage_schema_version: status.storage_schema_version,
+                service_version: status.service_version,
+                stream_id: status.stream_id.as_str().to_owned(),
+            },
+            own,
+        ))
+    }
+
+    /// Prepares a session, nothing more, in the authority the launch names and in no other. The
+    /// operation is the intent, so a retry is the same.
+    fn prepare(&self, launch: &ManagedLaunch) -> Result<ManagedLaunched, LaunchError> {
+        let intent = WireUuid::try_from(launch.intent.clone())
+            .map_err(|_| LaunchError::NotDispatched(OwnerError::Refused))?;
+        // The authority that would answer now must be the one the launch is for.
+        let now = self.advertised().map_err(LaunchError::NotDispatched)?;
+        if now.authority != launch.authority {
+            return Err(LaunchError::NotDispatched(OwnerError::HostChanged));
+        }
+        if let Some(gui) = self.app.try_state::<F8Gui>()
+            && gui.is_active()
+        {
+            let stream = launch.authority.store_stream_id.clone();
             return match gui.prepare(intent) {
                 Ok(receipt) => Ok(ManagedLaunched {
                     protocol: ManagedProtocol::P2,
@@ -169,13 +224,10 @@ impl ManagedPort for ManagedFromApp {
             .app
             .try_state::<SessionService>()
             .ok_or(LaunchError::NotDispatched(OwnerError::Unsupported))?;
-        let stream = service
-            .stream_id()
-            .map_err(|_| LaunchError::NotDispatched(OwnerError::HostOffline))?;
         match service.prepare(intent) {
             Ok(receipt) => Ok(ManagedLaunched {
                 protocol: ManagedProtocol::P1,
-                store_stream_id: stream.as_str().to_owned(),
+                store_stream_id: launch.authority.store_stream_id.clone(),
                 session_id: receipt.id.as_str().to_owned(),
             }),
             // The authority may have taken the intent: never retried from here.
@@ -565,6 +617,24 @@ pub async fn projects_orphans(
     blocking(move || service.orphans(&request.launch_operation_id)).await
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdoptionRequest {
+    association_id: String,
+    project_id: String,
+}
+
+/// Where a Scratch shell really is, before the user is asked to move it into a project.
+#[tauri::command]
+pub async fn projects_adoption_preview(
+    app: AppHandle,
+    projects: State<'_, Projects>,
+    request: AdoptionRequest,
+) -> Result<super::service::AdoptionView, Failure> {
+    let service = projects.get(&app);
+    blocking(move || service.preview_adoption(&request.association_id, &request.project_id)).await
+}
+
 #[tauri::command]
 pub async fn projects_rollback_report(
     app: AppHandle,
@@ -658,6 +728,7 @@ const COMMANDS: &[&str] = &[
     "projects_term_write",
     "projects_term_resize",
     "projects_orphans",
+    "projects_adoption_preview",
     "projects_rollback_report",
     "projects_compact_receipts",
     "projects_set_enabled",
@@ -685,6 +756,7 @@ pub fn extension() -> wyss_console::Extension {
             projects_term_write,
             projects_term_resize,
             projects_orphans,
+            projects_adoption_preview,
             projects_rollback_report,
             projects_compact_receipts,
             projects_set_enabled,

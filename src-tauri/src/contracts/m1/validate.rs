@@ -419,11 +419,17 @@ fn receipt_matches_target(operation: &Operation, target: &Target) -> bool {
             operation.mode == Mode::Native && operation.provider == LaunchProvider::Shell
         }
         Target::Managed {
+            protocol,
+            store_stream_id,
             requested_safety_profile,
             ..
         } => {
             operation.mode == Mode::Managed
                 && *requested_safety_profile == operation.managed_safety_profile
+                // The session belongs to the authority that was asked, no other.
+                && operation.managed_authority.as_ref().is_some_and(|authority| {
+                    authority.protocol == *protocol && authority.store_stream_id == *store_stream_id
+                })
         }
     }
 }
@@ -462,7 +468,12 @@ fn check_launch_profiles(operation: &Operation) -> M1Result {
             operation.native_profile.is_none() && operation.managed_safety_profile.is_some()
         }
     };
-    ensure(valid, "operations.profile")
+    ensure(valid, "operations.profile")?;
+    // The authority a Managed launch was first asked of is recorded with it, and only with it.
+    ensure(
+        (operation.mode == Mode::Managed) == operation.managed_authority.is_some(),
+        "operations.managedAuthority",
+    )
 }
 
 /// The layout tree, its leaves and the associations they hold.

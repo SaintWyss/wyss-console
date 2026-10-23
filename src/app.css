@@ -3065,6 +3065,14 @@ li.native-row .native-note {
   flex-direction: column;
   gap: 4px;
 }
+.projects-virtual {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.projects-virtual .projects-session-row {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
 .projects-item {
   width: 100%;
   display: flex;

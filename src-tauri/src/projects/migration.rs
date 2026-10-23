@@ -69,6 +69,9 @@ pub enum ConflictKind {
     Alias,
     /// A registered folder is missing or not eligible: not imported, never invented.
     RootUnavailable,
+    /// A registered folder can be used by another account (an ACL or the mode bits), or that
+    /// could not be checked: not imported, unless the owner's trust file names the account.
+    RootShared,
     /// The host could not be read: no live session is imported, no shell is remade.
     HostOffline,
     /// A live terminal or tab cannot be placed within the bounds. Blocks, nothing truncated.
@@ -537,6 +540,7 @@ pub fn plan_initial(
                 Err(RootError::Missing | RootError::Ineligible) => {
                     b.conflict(ConflictKind::RootUnavailable);
                 }
+                Err(RootError::Shared) => b.conflict(ConflictKind::RootShared),
             }
         }
     }

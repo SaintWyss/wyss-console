@@ -28,7 +28,7 @@ function make(client: Fake = fakeClient()) {
   const controller = new ProjectsController(
     (s) => changes.push(s),
     client,
-    { poll: 20 },
+    { poll: 20, save: 400 },
     newId,
   );
   return { client, controller, changes };
@@ -320,10 +320,77 @@ describe('panes', () => {
     const { controller, client } = withTwo();
     await controller.refresh();
     await controller.selectProject(PROJECT_A);
-    await controller.resizeSplit('', 0.99);
+    controller.resizeSplit('', 0.99);
+    await controller.flushLayout();
     const command = client.sent[0]!.command;
     if (command.kind !== 'saveWorkspace') throw new Error('save');
     expect(command.layout).toMatchObject({ ratio: 0.9 });
+  });
+
+  it('shows a moved divider at once and saves the latest ratio once, after the moves stop', async () => {
+    const { controller, client } = withTwo();
+    await controller.refresh();
+    await controller.selectProject(PROJECT_A);
+    vi.useFakeTimers();
+    for (const ratio of [0.4, 0.45, 0.5, 0.55, 0.6]) {
+      controller.resizeSplit('', ratio);
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    // Shown now, written to no store yet.
+    expect(controller.state().workspace?.layout).toMatchObject({ ratio: 0.6 });
+    expect(client.sent).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(client.sent).toHaveLength(1);
+    const command = client.sent[0]!.command;
+    if (command.kind !== 'saveWorkspace') throw new Error('save');
+    expect(command.layout).toMatchObject({ ratio: 0.6 });
+    // Nothing is written again by itself.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(client.sent).toHaveLength(1);
+  });
+
+  it('writes a moved divider before anything else is sent, before the view goes quiet and before another is selected', async () => {
+    for (const away of [
+      async (c: ProjectsController) => {
+        await c.rename(PROJECT_A, 'Next');
+      },
+      async (c: ProjectsController) => {
+        await c.selectProject(null);
+      },
+      async (c: ProjectsController) => {
+        c.setVisible(false);
+        await settle();
+      },
+    ]) {
+      const { controller, client } = withTwo();
+      await controller.refresh();
+      await controller.selectProject(PROJECT_A);
+      controller.setVisible(true);
+      await settle();
+      client.sent.length = 0;
+      controller.resizeSplit('', 0.7);
+      expect(client.sent).toHaveLength(0);
+      await away(controller);
+      await settle();
+      const kinds = client.sent.map((e) => e.command.kind);
+      expect(kinds[0]).toBe('saveWorkspace');
+      const first = client.sent[0]!.command;
+      if (first.kind !== 'saveWorkspace') throw new Error('save');
+      expect(first.layout).toMatchObject({ ratio: 0.7 });
+      controller.dispose();
+    }
+  });
+
+  it('does not let a read of the store undo a divider that is not saved yet', async () => {
+    const { controller, client } = withTwo();
+    await controller.refresh();
+    await controller.selectProject(PROJECT_A);
+    client.sent.length = 0;
+    controller.resizeSplit('', 0.3);
+    // A read arriving now saves it first and shows it after.
+    await controller.refresh();
+    expect(client.sent).toHaveLength(1);
+    expect(controller.state().workspace?.layout).toBeTruthy();
   });
 });
 

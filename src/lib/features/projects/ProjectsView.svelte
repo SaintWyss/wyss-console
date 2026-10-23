@@ -1,10 +1,15 @@
 <script lang="ts">
   import type { Profile } from '../../contracts/native';
-  import type { ProjectView, SessionView } from '../../contracts/projects';
+  import type {
+    AdoptionPreview,
+    ProjectView,
+    SessionView,
+  } from '../../contracts/projects';
   import type { ProjectsClient } from '../../desktop/projects-client';
   import type { NativeProfileOption } from './LaunchPanel.svelte';
   import MigrationPanel from './MigrationPanel.svelte';
   import ProjectRail from './ProjectRail.svelte';
+  import VirtualList from './VirtualList.svelte';
   import WorkspaceCanvas from './WorkspaceCanvas.svelte';
   import type { ProjectsController, ProjectsState } from './controller';
 
@@ -42,10 +47,18 @@
   const emptyLeaf = $derived(
     projects.workspace?.leaves.find((l) => !l.session) ?? null,
   );
-  // Adopting a shell changes which project it belongs to: it is asked once, then done.
-  let adopting = $state<{ session: SessionView; project: ProjectView } | null>(
-    null,
-  );
+  // Adopting a shell changes which project it belongs to. The window first asks the desktop where
+  // the shell really is, shows that, and only then asks: the answer is good for one adoption.
+  let adopting = $state<{
+    session: SessionView;
+    project: ProjectView;
+    shown: AdoptionPreview;
+  } | null>(null);
+  async function askToAdopt(session: SessionView, project: ProjectView) {
+    adopting = null;
+    const shown = await controller.previewAdoption(session.id, project.id);
+    if (shown) adopting = { session, project, shown };
+  }
   const SESSION_KIND: Record<string, string> = {
     native: 'Agent',
     shell: 'Shell',
@@ -163,82 +176,91 @@
               ? 'Unassigned sessions'
               : `Sessions of ${current?.label ?? ''}`}
           </h3>
+          {#if adopting}
+            <div class="projects-adopt" role="alert">
+              <p class="projects-note">
+                {label(adopting.session)} is in
+                <code>{adopting.shown.cwd}</code>.
+                {adopting.shown.inside
+                  ? `That is inside ${adopting.project.label}.`
+                  : `That is outside the folder of ${adopting.project.label}.`}
+                Move it into {adopting.project.label}? It keeps running where it
+                is; only the project it is listed under changes.
+              </p>
+              <div class="projects-row">
+                <button
+                  type="button"
+                  class="action primary"
+                  disabled={projects.busy}
+                  onclick={() => {
+                    const chosen = adopting;
+                    adopting = null;
+                    if (chosen)
+                      void controller.adopt(
+                        chosen.session.id,
+                        chosen.project.id,
+                        chosen.shown.bindingId,
+                      );
+                  }}>Move</button
+                >
+                <button
+                  type="button"
+                  class="action"
+                  onclick={() => (adopting = null)}>Cancel</button
+                >
+              </div>
+            </div>
+          {/if}
           {#if projects.sessions.length === 0}
             <p class="projects-note">
               None. History that is not shown in a pane stays here.
             </p>
           {:else}
-            <ul class="projects-list">
-              {#each projects.sessions as session (session.id)}
-                <li
-                  class="projects-session-row"
-                  data-availability={session.availability}
-                >
-                  <span>{label(session)}</span>
-                  <span class="projects-note">
-                    {SESSION_KIND[session.kind]} · {session.availability}{session.reason
-                      ? ` (${session.reason.replace('_', ' ')})`
-                      : ''} · {session.state}
-                  </span>
-                  {#if session.availability === 'live' && session.state !== 'attached' && emptyLeaf}
-                    <button
-                      type="button"
-                      class="action"
-                      disabled={projects.busy}
-                      onclick={() =>
-                        void controller.attach(emptyLeaf.id, session.id)}
-                      >Show in an empty pane</button
-                    >
-                  {/if}
-                  {#if scratch && session.kind === 'shell' && session.originProjectId === null && projects.projects.length > 0}
-                    <select
-                      aria-label={`Adopt ${label(session)} into a project`}
-                      onchange={(event) => {
-                        const id = event.currentTarget.value;
-                        const target = projects.projects.find(
-                          (p) => p.id === id,
-                        );
-                        event.currentTarget.value = '';
-                        if (target?.root)
-                          adopting = { session, project: target };
-                      }}
-                    >
-                      <option value="">Adopt into a project…</option>
-                      {#each projects.projects.filter((p) => !p.tombstone && p.root) as p (p.id)}
-                        <option value={p.id}>{p.label}</option>
-                      {/each}
-                    </select>
-                  {/if}
-                  {#if adopting?.session.id === session.id}
-                    <span class="projects-note" role="alert">
-                      Move this shell into {adopting.project.label}? It keeps
-                      running where it is; only the project it is listed under
-                      changes.
-                    </span>
-                    <button
-                      type="button"
-                      class="action primary"
-                      disabled={projects.busy}
-                      onclick={() => {
-                        const chosen = adopting;
-                        adopting = null;
-                        if (chosen?.project.root)
-                          void controller.adopt(
-                            chosen.session.id,
-                            chosen.project.id,
-                            chosen.project.root.bindingId,
-                          );
-                      }}>Move</button
-                    >
-                    <button
-                      type="button"
-                      class="action"
-                      onclick={() => (adopting = null)}>Cancel</button
-                    >
-                  {/if}
-                </li>
-              {/each}
-            </ul>
+            <VirtualList
+              items={projects.sessions}
+              rowHeight={44}
+              key={(session) => session.id}
+              label="Sessions"
+              attrs={(session) => ({
+                class: 'projects-session-row',
+                'data-availability': session.availability,
+              })}
+            >
+              {#snippet row(session)}
+                <span>{label(session)}</span>
+                <span class="projects-note">
+                  {SESSION_KIND[session.kind]} · {session.availability}{session.reason
+                    ? ` (${session.reason.replace('_', ' ')})`
+                    : ''} · {session.state}
+                </span>
+                {#if session.availability === 'live' && session.state !== 'attached' && emptyLeaf}
+                  <button
+                    type="button"
+                    class="action"
+                    disabled={projects.busy}
+                    onclick={() =>
+                      void controller.attach(emptyLeaf.id, session.id)}
+                    >Show in an empty pane</button
+                  >
+                {/if}
+                {#if scratch && session.kind === 'shell' && session.originProjectId === null && projects.projects.length > 0}
+                  <select
+                    aria-label={`Adopt ${label(session)} into a project`}
+                    onchange={(event) => {
+                      const id = event.currentTarget.value;
+                      const target = projects.projects.find((p) => p.id === id);
+                      event.currentTarget.value = '';
+                      if (target?.root) void askToAdopt(session, target);
+                    }}
+                  >
+                    <option value="">Adopt into a project…</option>
+                    {#each projects.projects.filter((p) => !p.tombstone && p.root) as p (p.id)}
+                      <option value={p.id}>{p.label}</option>
+                    {/each}
+                  </select>
+                {/if}
+              {/snippet}
+            </VirtualList>
           {/if}
         </section>
         {#if store.state === 'ready'}

@@ -54,6 +54,8 @@ pub struct TerminalRow {
     pub cwd: Option<String>,
     /// The Native session this terminal runs, when it runs one.
     pub native_session: Option<String>,
+    /// The shell process the host observed for it.
+    pub pid: Option<u32>,
 }
 
 /// A read of the host through one checked connection.
@@ -95,6 +97,8 @@ pub enum RootError {
     Missing,
     /// A link, not a directory, or not the user's.
     Ineligible,
+    /// Another account can use the folder (an ACL or the mode bits), or that could not be told.
+    Shared,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,6 +133,62 @@ pub struct ShellLaunched {
     pub terminal_id: String,
 }
 
+/// The one Managed authority a request is for: its protocol and the identity of its durable
+/// stream. A request is only ever made of the authority it names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorityRef {
+    pub protocol: ManagedProtocol,
+    pub store_stream_id: String,
+}
+
+/// What a Managed authority's own status says. Nothing else is evidence of what it can do: the
+/// protocol has no list of supported profiles, and a window's state grants nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorityFacts {
+    pub protocol_version: u8,
+    pub storage_schema_version: u8,
+    pub service_version: String,
+    pub stream_id: String,
+}
+
+/// The authority a Managed launch would go to and the profiles it has shown it serves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedAdvert {
+    pub authority: AuthorityRef,
+    pub profiles: Vec<ManagedSafetyProfile>,
+}
+
+/// The profiles `facts` support, for the interface of `protocol`; none when the authority is
+/// not the one that interface speaks to or cannot be verified as such.
+///
+/// Inference needs the greeting of that interface's own protocol and storage schema. Local Tools
+/// is the privileged profile, so it also needs the authority to be the very build of this
+/// desktop, the build whose safety-profile handling is the one that was verified (the same
+/// rule protocol 2's own client applies to everything). An older build of the protocol-1
+/// authority is offered Inference only; any doubt offers nothing.
+pub fn advertised_profiles(
+    protocol: ManagedProtocol,
+    facts: &AuthorityFacts,
+    own_version: &str,
+) -> Vec<ManagedSafetyProfile> {
+    let (wire, schema) = match protocol {
+        ManagedProtocol::P1 => (1, 7),
+        ManagedProtocol::P2 => (2, 8),
+    };
+    if facts.protocol_version != wire || facts.storage_schema_version != schema {
+        return Vec::new();
+    }
+    let same_build = !facts.service_version.is_empty() && facts.service_version == own_version;
+    match (protocol, same_build) {
+        (_, true) => vec![
+            ManagedSafetyProfile::Inference,
+            ManagedSafetyProfile::LocalTools,
+        ],
+        (ManagedProtocol::P1, false) => vec![ManagedSafetyProfile::Inference],
+        (ManagedProtocol::P2, false) => Vec::new(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedLaunch {
     pub agent: Agent,
@@ -137,6 +197,9 @@ pub struct ManagedLaunch {
     pub requested: ManagedSafetyProfile,
     /// Names the whole user action: the same value sent again is the same action.
     pub intent: String,
+    /// The authority this action is for. The owner refuses, before sending, when the authority
+    /// that would answer is not this one.
+    pub authority: AuthorityRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +207,15 @@ pub struct ManagedLaunched {
     pub protocol: ManagedProtocol,
     pub store_stream_id: String,
     pub session_id: String,
+}
+
+/// Where a running shell is right now, and which process that was said of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellCwd {
+    pub cwd: String,
+    pub pid: u32,
+    /// The process's start time in clock ticks: a pid reused by another process differs.
+    pub start_ticks: u64,
 }
 
 /// A read of one terminal's output from a byte position, as the host holds it.
@@ -161,6 +233,9 @@ pub trait Owner: Send + Sync {
     fn host(&self, expected: Option<&str>) -> Result<HostView, OwnerError>;
     /// Sessions of the Managed authorities, P1 and P2, each under its own store identity.
     fn managed(&self) -> Result<Vec<ManagedRow>, OwnerError>;
+    /// The authority a Managed launch would go to, read now, and what it has shown it serves.
+    /// An authority that cannot be read or verified is an error, never an empty promise.
+    fn managed_advert(&self) -> Result<ManagedAdvert, OwnerError>;
     fn root(&self, path: &str) -> Result<RootInfo, RootError>;
     /// Makes `name` inside `parent` exclusively, without Git and without launching anything.
     fn create_folder(&self, parent: &str, name: &str) -> Result<String, FolderError>;
@@ -188,6 +263,41 @@ pub trait Owner: Send + Sync {
         rows: u16,
         cols: u16,
     ) -> Result<(), OwnerError>;
+    /// The directory the shell of a running terminal is in now, read from the process the host
+    /// reports for it. A host that is not the one observed is `HostChanged`; a terminal that is
+    /// not running, has no observed process or whose directory cannot be read is refused: an
+    /// unverifiable directory is never guessed from where the shell started.
+    fn shell_cwd(&self, epoch: &str, terminal: &str) -> Result<ShellCwd, OwnerError>;
+}
+
+/// The working directory of `pid` through `/proc`, taken only while the process is the same one
+/// before and after the read, and the user's own.
+pub fn read_cwd(pid: u32) -> Result<ShellCwd, OwnerError> {
+    let pid_i = i32::try_from(pid).map_err(|_| OwnerError::Refused)?;
+    let before = start_ticks(pid_i).ok_or(OwnerError::Refused)?;
+    let proc = PathBuf::from(format!("/proc/{pid}"));
+    let meta = fs::metadata(&proc).map_err(|_| OwnerError::Refused)?;
+    if meta.uid() != nix::unistd::geteuid().as_raw() {
+        return Err(OwnerError::Refused);
+    }
+    let link = fs::read_link(proc.join("cwd")).map_err(|_| OwnerError::Refused)?;
+    if start_ticks(pid_i) != Some(before) {
+        return Err(OwnerError::Refused);
+    }
+    let cwd = link.to_str().ok_or(OwnerError::Refused)?.to_owned();
+    // A directory that was removed is shown by the kernel with a suffix: it is not a place.
+    if !cwd.starts_with('/')
+        || cwd.len() > MAX_PATH_BYTES
+        || cwd.chars().any(char::is_control)
+        || cwd.ends_with(" (deleted)")
+    {
+        return Err(OwnerError::Refused);
+    }
+    Ok(ShellCwd {
+        cwd,
+        pid,
+        start_ticks: before,
+    })
 }
 
 // ---- the checked connection --------------------------------------------------------------
@@ -310,6 +420,9 @@ impl HostSocket {
                     running: row["terminal"]["state"] == json!("running"),
                     cwd: row["terminal"]["cwd"].as_str().map(str::to_owned),
                     native_session: row["native"]["session_id"].as_str().map(str::to_owned),
+                    pid: row["terminal"]["observed_pid"]
+                        .as_u64()
+                        .and_then(|pid| u32::try_from(pid).ok()),
                 })
             })
             .collect();
@@ -358,11 +471,32 @@ impl CallFailure {
 /// Looks at a folder without following a link in its last component and without changing it.
 pub fn inspect_root(path: &str) -> Result<RootInfo, RootError> {
     let home = std::env::var_os("HOME").and_then(|h| fs::canonicalize(h).ok());
-    inspect_root_in(path, home.as_deref())
+    inspect_root_with(path, home.as_deref(), console_state().as_deref())
 }
 
-/// `inspect_root` with the home folder named, so a test can name its own.
+/// The Console's state directory, where the owner's `configuration/trusted-writers` is.
+fn console_state() -> Option<PathBuf> {
+    super::store::default_dir()?
+        .parent()?
+        .parent()
+        .map(PathBuf::from)
+}
+
+/// `inspect_root` with the home folder named and no account declared, so a test can name its own.
+#[cfg(test)]
 pub fn inspect_root_in(path: &str, home: Option<&Path>) -> Result<RootInfo, RootError> {
+    inspect_root_with(path, home, None)
+}
+
+/// `inspect_root` with the home folder and the state directory named. A folder anybody else can
+/// write (an ACL, the mode bits, or the ACL it gives what is made in it) is not a root, except
+/// for the accounts the owner declared in `<state>/configuration/trusted-writers`, the file the
+/// configuration engine already believes. A folder whose ACL cannot be read is not private.
+pub fn inspect_root_with(
+    path: &str,
+    home: Option<&Path>,
+    state: Option<&Path>,
+) -> Result<RootInfo, RootError> {
     if !path.starts_with('/') || path.len() > MAX_PATH_BYTES || path.contains('\0') {
         return Err(RootError::Ineligible);
     }
@@ -380,6 +514,10 @@ pub fn inspect_root_in(path: &str, home: Option<&Path>) -> Result<RootInfo, Root
     let meta = dir.metadata().map_err(|_| RootError::Ineligible)?;
     if !meta.is_dir() || meta.uid() != nix::unistd::geteuid().as_raw() {
         return Err(RootError::Ineligible);
+    }
+    // Who else can write the folder is read from the descriptor just opened, not from the path.
+    if crate::agentconfig::folder_is_shared(&dir, meta.mode(), meta.gid(), meta.uid(), state) {
+        return Err(RootError::Shared);
     }
     let text = canonical.to_str().ok_or(RootError::Ineligible)?.to_owned();
     if text.len() > MAX_PATH_BYTES || text.chars().any(char::is_control) {
@@ -442,6 +580,9 @@ pub fn make_folder(parent: &str, name: &str) -> Result<String, FolderError> {
 /// existing Managed screens.
 pub trait ManagedPort: Send + Sync {
     fn sessions(&self) -> Result<Vec<ManagedRow>, OwnerError>;
+    fn advertised(&self) -> Result<ManagedAdvert, OwnerError>;
+    /// Prepares a session in `launch.authority` and in no other: when the authority that would
+    /// answer is a different one nothing is sent (`HostChanged`).
     fn prepare(&self, launch: &ManagedLaunch) -> Result<ManagedLaunched, LaunchError>;
 }
 
@@ -453,6 +594,10 @@ pub struct NoManaged;
 impl ManagedPort for NoManaged {
     fn sessions(&self) -> Result<Vec<ManagedRow>, OwnerError> {
         Ok(Vec::new())
+    }
+
+    fn advertised(&self) -> Result<ManagedAdvert, OwnerError> {
+        Err(OwnerError::Unsupported)
     }
 
     fn prepare(&self, _: &ManagedLaunch) -> Result<ManagedLaunched, LaunchError> {
@@ -496,6 +641,10 @@ impl<M: ManagedPort> Owner for RealOwner<M> {
 
     fn managed(&self) -> Result<Vec<ManagedRow>, OwnerError> {
         self.managed.sessions()
+    }
+
+    fn managed_advert(&self) -> Result<ManagedAdvert, OwnerError> {
+        self.managed.advertised()
     }
 
     fn root(&self, path: &str) -> Result<RootInfo, RootError> {
@@ -636,5 +785,15 @@ impl<M: ManagedPort> Owner for RealOwner<M> {
             )
             .map(|_| ())
             .map_err(CallFailure::before)
+    }
+
+    fn shell_cwd(&self, epoch: &str, terminal: &str) -> Result<ShellCwd, OwnerError> {
+        let view = self.socket()?.host_view(Some(epoch))?;
+        let row = view
+            .terminals
+            .iter()
+            .find(|t| t.terminal_id == terminal && t.running)
+            .ok_or(OwnerError::Refused)?;
+        read_cwd(row.pid.ok_or(OwnerError::Unsupported)?)
     }
 }

@@ -780,6 +780,39 @@ fn a_session_of_another_project_cannot_be_attached_to_this_workspace() {
     );
 }
 
+/// The shell of `association` is in `cwd`, and the user has been shown that.
+pub(super) fn show_directory(world: &World, association: &str, project: &str, cwd: &str) {
+    world.owner.script(|s| {
+        let terminal = match &world
+            .now()
+            .sessions
+            .iter()
+            .find(|a| a.id.as_str() == association)
+            .unwrap()
+            .target
+        {
+            wyss_console::contracts::m1::records::Target::Shell { terminal_id, .. } => {
+                terminal_id.as_str().to_owned()
+            }
+            other => panic!("{other:?}"),
+        };
+        s.cwd.insert(
+            terminal,
+            Ok(ShellCwd {
+                cwd: cwd.to_owned(),
+                pid: 4242,
+                start_ticks: 777,
+            }),
+        );
+    });
+    let shown = world.engine().disclose_adoption(
+        &wyss_console::contracts::m1::scalar::AssociationId::parse(association).unwrap(),
+        &wyss_console::contracts::m1::scalar::ProjectId::parse(project).unwrap(),
+    );
+    // A project whose folder is not the shell's still discloses it.
+    shown.expect("the directory was disclosed");
+}
+
 #[test]
 fn only_an_unassigned_shell_is_adopted_into_a_project() {
     let world = World::new();
@@ -801,6 +834,7 @@ fn only_an_unassigned_shell_is_adopted_into_a_project() {
         world.now().workspaces[0].leaves[0].association_id.is_some(),
         "the Scratch shell is shown in Scratch"
     );
+    show_directory(&world, &association, &project, ROOT_A);
     world
         .send(
             world.context(Some(&project), Some(&workspace)),
@@ -827,13 +861,19 @@ fn only_an_unassigned_shell_is_adopted_into_a_project() {
             .iter()
             .all(|l| l.association_id.is_none())
     );
-    // Once adopted, it is not Scratch's any more and cannot be adopted again.
+    // Once adopted, it is not Scratch's any more and cannot be adopted again: there is nothing
+    // to show for it, and nothing shown to adopt it with.
+    let shown = world.engine().disclose_adoption(
+        &wyss_console::contracts::m1::scalar::AssociationId::parse(&association).unwrap(),
+        &wyss_console::contracts::m1::scalar::ProjectId::parse(&project).unwrap(),
+    );
+    assert_eq!(shown.unwrap_err().code, ErrorCode::InvalidRecord);
     refused(
         world.send(
             world.context(Some(&project), Some(&workspace)),
             json!({"kind": "adoptScratch", "associationId": association, "projectId": project, "bindingId": binding}),
         ),
-        ErrorCode::InvalidRecord,
+        ErrorCode::ContextStale,
     );
     let _ = NATIVE_1;
 }

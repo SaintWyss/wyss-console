@@ -4,6 +4,7 @@ import ProjectsHarness from './ProjectsHarness.svelte';
 import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import {
   ASSOCIATION_1,
+  BINDING_A,
   LEAF_1,
   PROJECT_A,
   SCRATCH,
@@ -682,9 +683,17 @@ describe('the sessions list', () => {
     choose.value = PROJECT_A;
     choose.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
-    // Choosing only asks: nothing moves until it is confirmed, and Cancel moves nothing.
+    // Choosing only asks: the desktop says where the shell really is, nothing moves until it is
+    // confirmed, and Cancel moves nothing.
     expect(client.execute).not.toHaveBeenCalled();
-    expect(text(row)).toContain('Move this shell into');
+    expect(client.adoptionPreview).toHaveBeenCalledWith(
+      'aaaaaaaa-0000-4000-8000-0000000000b1',
+      PROJECT_A,
+    );
+    const ask = text(document.querySelector('.projects-adopt'));
+    expect(ask).toContain('/home/fixture/work/a/src');
+    expect(ask).toContain('inside Alpha');
+    expect(ask).toContain('Move it into Alpha');
     await click('Cancel');
     expect(client.execute).not.toHaveBeenCalled();
     choose.value = PROJECT_A;
@@ -695,7 +704,47 @@ describe('the sessions list', () => {
       kind: 'adoptScratch',
       projectId: PROJECT_A,
       associationId: 'aaaaaaaa-0000-4000-8000-0000000000b1',
+      // The binding the desktop named when it showed the directory.
+      bindingId: BINDING_A,
     });
+  });
+
+  it('says so when the shell is outside the project folder, and asks nothing when the directory cannot be read', async () => {
+    const client = readyClient();
+    client.state.unassigned = [
+      session({
+        id: 'aaaaaaaa-0000-4000-8000-0000000000b1',
+        originProjectId: null,
+        state: 'detached',
+      }),
+    ];
+    client.state.adoption = {
+      bindingId: BINDING_A,
+      cwd: '/tmp/elsewhere',
+      inside: false,
+    };
+    await shown(client);
+    const choose = document.querySelector<HTMLSelectElement>(
+      '.projects-session-row select',
+    )!;
+    choose.value = PROJECT_A;
+    choose.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(text(document.querySelector('.projects-adopt'))).toContain(
+      'outside the folder of Alpha',
+    );
+    await click('Cancel');
+    // The desktop could not read where the shell is: nothing is offered, and the reason shows.
+    client.state.adoption = failure('owner_refused', { field: 'cwd' });
+    choose.value = PROJECT_A;
+    choose.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(document.querySelector('.projects-adopt')).toBeNull();
+    expect(button('Move')).toBeUndefined();
+    expect(text(document.querySelector('.projects-banner'))).toContain(
+      'cannot be read, so nothing was moved',
+    );
+    expect(client.execute).not.toHaveBeenCalled();
   });
 
   it('offers to show a live session in an empty pane', async () => {
@@ -711,6 +760,71 @@ describe('the sessions list', () => {
       leafId: LEAF_1,
       associationId: ASSOCIATION_1,
     });
+  });
+});
+
+describe('long lists', () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      session({
+        id: `aaaaaaaa-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+        originProjectId: null,
+        state: 'detached',
+        terminalId: `bbbbbbbb-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+      }),
+    );
+
+  it('draws the rows that can be seen, not all of a store at its ceiling', async () => {
+    const client = readyClient();
+    client.state.unassigned = many(500);
+    await shown(client);
+    const list = document.querySelector<HTMLElement>(
+      '.projects-sessions .projects-virtual',
+    )!;
+    expect(list.dataset.rows).toBe('500');
+    const drawn = document.querySelectorAll(
+      '.projects-sessions .projects-session-row',
+    ).length;
+    expect(drawn).toBeGreaterThan(0);
+    expect(drawn).toBeLessThan(40);
+    // Scrolling draws the rows that come into view and lets go of the others.
+    list.scrollTop = 44 * 300;
+    list.dispatchEvent(new Event('scroll'));
+    await settle();
+    const rows = Array.from(
+      document.querySelectorAll('.projects-sessions .projects-session-row'),
+    );
+    expect(rows.length).toBeLessThan(40);
+    expect(text(rows[0]!)).toContain('bbbbbbbb');
+    expect(rows.some((r) => r.getAttribute('data-row') === '301')).toBe(true);
+  });
+
+  it('draws a short list whole', async () => {
+    const client = readyClient();
+    client.state.unassigned = many(5);
+    await shown(client);
+    expect(document.querySelector('.projects-virtual')).toBeNull();
+    expect(
+      document.querySelectorAll('.projects-sessions .projects-session-row'),
+    ).toHaveLength(5);
+  });
+
+  it('draws only the projects in view in the rail', async () => {
+    const client = readyClient();
+    client.state.projects = Array.from({ length: 200 }, (_, n) =>
+      project({
+        id: `cccccccc-0000-4000-8000-${String(n + 1).padStart(12, '0')}`,
+        label: `Project ${n + 1}`,
+      }),
+    );
+    await shown(client);
+    const rail = document.querySelector<HTMLElement>(
+      '.projects-rail .projects-virtual',
+    )!;
+    expect(rail.dataset.rows).toBe('200');
+    expect(Number(rail.dataset.drawn)).toBeLessThan(40);
+    // Scratch is always there, outside the long list.
+    expect(text(document.querySelector('.projects-rail'))).toContain('Scratch');
   });
 });
 

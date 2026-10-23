@@ -90,7 +90,12 @@ export interface RootView {
   label: string;
   state: 'valid' | 'missing' | 'identity_changed' | 'unverified' | 'retired';
   availability:
-    'available' | 'missing' | 'identity_changed' | 'ineligible' | 'unknown';
+    | 'available'
+    | 'missing'
+    | 'identity_changed'
+    | 'ineligible'
+    | 'shared'
+    | 'unknown';
   nativeEligible: boolean;
   configEligible: boolean;
 }
@@ -143,6 +148,13 @@ export interface Orphan {
   terminalId: string;
   nativeSessionId: string | null;
   folder: string | null;
+}
+/** Where a Scratch shell really is, shown before it is moved into a project. */
+export interface AdoptionPreview {
+  bindingId: string;
+  cwd: string;
+  /** Whether that is the project's folder or inside it. */
+  inside: boolean;
 }
 export interface WorkspaceView {
   id: string;
@@ -439,6 +451,7 @@ function parseRoot(value: unknown): RootView | null {
         'missing',
         'identity_changed',
         'ineligible',
+        'shared',
         'unknown',
       ] as const,
       'availability',
@@ -536,6 +549,15 @@ export function parseOrphans(value: unknown): Orphan[] {
       folder: strOrNull(o.folder, 'folder'),
     };
   });
+}
+
+export function parseAdoptionPreview(value: unknown): AdoptionPreview {
+  const v = rec(value, 'adoption');
+  return {
+    bindingId: str(v.bindingId, 'binding', 36),
+    cwd: str(v.cwd, 'cwd', 4096),
+    inside: bool(v.inside, 'inside'),
+  };
 }
 
 export function parsePage<T>(value: unknown, item: (v: unknown) => T): Page<T> {

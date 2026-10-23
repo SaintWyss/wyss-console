@@ -39,7 +39,9 @@ fn fixture() -> Fixture {
         owner.clone(),
         env.clone(),
         Claims::new(Some(dir.0.join("run").join("claims"))),
-    );
+    )
+    // Every read here asks the owner: the tests change what it says between two of them.
+    .with_inventory_ttl(std::time::Duration::ZERO);
     Fixture {
         dir,
         owner,
@@ -350,6 +352,11 @@ fn managed_sessions_show_the_effective_profile_and_flag_a_mismatch_without_chang
         "cccccccc-0000-4000-8000-000000000001",
     );
     f.owner.script(|s| {
+        s.advert = Ok(advert(
+            ManagedProtocol::P2,
+            stream,
+            &[ManagedSafetyProfile::Inference],
+        ));
         s.prepared.push(Ok(ManagedLaunched {
             protocol: ManagedProtocol::P2,
             store_stream_id: stream.into(),
@@ -1087,3 +1094,90 @@ fn the_answers_the_window_parses_match_the_recorded_shapes() {
 }
 
 use std::os::unix::fs::PermissionsExt;
+
+// ---- one shared inventory of the owners ---------------------------------------------------------
+
+fn counted(f: &Fixture, what: &str) -> usize {
+    f.owner
+        .calls()
+        .iter()
+        .filter(|c| c.as_str() == what)
+        .count()
+}
+
+#[test]
+fn windows_reading_together_share_one_read_of_each_owner_until_something_acts() {
+    let f = fixture().enabled();
+    // The same service, with a time during which what the owners said is shared.
+    let service = ProjectsService::new(
+        Some(f.dir.0.join("state/wyss-console/projects/v1")),
+        f.owner.clone(),
+        f.env.clone(),
+        Claims::new(Some(f.dir.0.join("run/claims"))),
+    )
+    .with_inventory_ttl(std::time::Duration::from_secs(60));
+    let (project, workspace) = f.register(ROOT_A);
+    f.owner.script(|s| s.calls.clear());
+    // Many windows, many views, one read of the host and one of the Managed authorities.
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            scope.spawn(|| {
+                service.overview();
+                service.get_workspace(&workspace, Some("w-1")).unwrap();
+                service.list_sessions(None, None, Some("w-2")).unwrap();
+            });
+        }
+    });
+    assert_eq!(counted(&f, "host"), 1, "{:?}", f.owner.calls());
+    assert_eq!(counted(&f, "managed"), 1);
+    // Showing a project is a read like the others and costs the owners nothing more.
+    service.get_workspace(&workspace, None).unwrap();
+    assert_eq!(counted(&f, "host"), 1);
+    assert_eq!(counted(&f, "managed"), 1);
+    // Anything that acts, or that decides what to do, asks the owner itself.
+    service.orphans(&f.env.uuid()).unwrap_err();
+    f.owner.script(|s| s.calls.clear());
+    let leaf = f.env.uuid();
+    let _ = (project, leaf);
+    service
+        .execute(
+            serde_json::from_value(json!({
+                "schema": 1, "operationId": f.env.uuid(),
+                "expectedStoreRevision": f.store().revision.get().to_string(),
+                "context": f.context(None, None),
+                "command": {"kind": "closeWorkspace", "workspaceId": workspace},
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    service.overview();
+    service.get_workspace(&workspace, None).unwrap();
+    assert_eq!(counted(&f, "host"), 1, "read again after a command");
+    assert_eq!(counted(&f, "managed"), 1);
+}
+
+#[test]
+fn what_the_owners_said_is_read_again_once_its_time_is_over() {
+    let f = fixture().enabled();
+    let service = ProjectsService::new(
+        Some(f.dir.0.join("state/wyss-console/projects/v1")),
+        f.owner.clone(),
+        f.env.clone(),
+        Claims::new(Some(f.dir.0.join("run/claims"))),
+    )
+    .with_inventory_ttl(std::time::Duration::from_millis(30));
+    f.owner.script(|s| s.calls.clear());
+    service.overview();
+    service.overview();
+    assert_eq!(counted(&f, "host"), 1);
+    std::thread::sleep(std::time::Duration::from_millis(60));
+    service.overview();
+    assert_eq!(counted(&f, "host"), 2);
+    // A host that was unreachable is shared for the same time and then asked again.
+    f.owner
+        .script(|s| s.host = Some(Err(OwnerError::HostOffline)));
+    std::thread::sleep(std::time::Duration::from_millis(60));
+    assert!(!service.overview().host.reachable);
+    assert!(!service.overview().host.reachable);
+    assert_eq!(counted(&f, "host"), 3);
+}

@@ -7,6 +7,7 @@
  * that came back unknown stays unknown here too: nothing sends it again by itself.
  */
 import type {
+  AdoptionPreview,
   Command,
   Context,
   Envelope,
@@ -66,7 +67,12 @@ export interface ProjectsState {
 
 export interface Timings {
   poll: number;
+  /** How long a layout change waits for another before the latest one is saved. */
+  save?: number;
 }
+
+/** What a ratio drag or a run of arrow keys waits for: the latest one is saved, not each. */
+const SAVE_DELAY = 400;
 
 const WORDS: Record<string, string> = {
   revision_conflict:
@@ -91,16 +97,33 @@ const WORDS: Record<string, string> = {
   unsupported_schema: 'The store is from a newer version and is read-only.',
 };
 
+/** What a refusal says when the field it names changes its meaning. */
+const FIELD_WORDS: Record<string, string> = {
+  'root_ineligible:foreignAcl':
+    'Another account can write in that folder, or that could not be checked. It is not used.',
+  'context_stale:cwd':
+    'That shell was not shown to you, or it is not where it was shown. Nothing was moved.',
+  'owner_refused:cwd':
+    'Where that shell is cannot be read, so nothing was moved.',
+  'unsupported_capability:managedSafetyProfile':
+    'That Managed authority has not shown it serves that profile. Nothing was started.',
+};
+
 export function noticeOf(failure: Failure): Notice {
-  return {
-    kind: 'error',
+  let text: string;
+  if (failure.effect === 'unknown') {
     // An unknown effect is said as such whatever the code: it is never shown as "not done".
-    text:
-      failure.effect === 'unknown'
-        ? WORDS['effect_ambiguous']!
-        : (WORDS[failure.code] ?? 'Not done.'),
-    failure,
-  };
+    text =
+      failure.code === 'host_changed'
+        ? 'The Managed authority is not the one that was asked first. Nothing was sent to this one; the first attempt is still unknown.'
+        : WORDS['effect_ambiguous']!;
+  } else {
+    text =
+      (failure.field && FIELD_WORDS[`${failure.code}:${failure.field}`]) ||
+      WORDS[failure.code] ||
+      'Not done.';
+  }
+  return { kind: 'error', text, failure };
 }
 
 const initial = (): ProjectsState => ({
@@ -128,6 +151,12 @@ export class ProjectsController {
   private disposed = false;
   private loading = false;
   private again = false;
+  /** A divider moved and not yet saved: the layout the window already shows. */
+  private pending: {
+    workspaceId: string;
+    layout: WorkspaceView['layout'];
+  } | null = null;
+  private saveTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly emit: (next: ProjectsState) => void,
@@ -158,9 +187,13 @@ export class ProjectsController {
     if (visible) {
       void this.refresh();
       this.schedule();
-    } else if (this.timer !== undefined) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
+    } else {
+      // What was moved is saved before the view goes quiet.
+      void this.flushLayout();
+      if (this.timer !== undefined) {
+        clearTimeout(this.timer);
+        this.timer = undefined;
+      }
     }
   }
 
@@ -198,13 +231,17 @@ export class ProjectsController {
   }
 
   dispose() {
+    void this.flushLayout();
     this.disposed = true;
+    if (this.saveTimer !== undefined) clearTimeout(this.saveTimer);
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
   }
 
   /** Reads the overview and, when there is a store, everything the view shows. */
   async refresh(): Promise<void> {
+    // What the window shows of a layout it has not saved yet is not read over by the store's.
+    if (this.pending) await this.flushLayout();
     if (this.loading) {
       this.again = true;
       return;
@@ -258,13 +295,17 @@ export class ProjectsController {
         this.again = true;
         return;
       }
+      const unsaved = this.pending;
       this.set({
         overview,
         phase: 'ready',
         projects,
         project,
         workspaceId,
-        workspace,
+        workspace:
+          unsaved && unsaved.workspaceId === workspace.id
+            ? { ...workspace, layout: unsaved.layout }
+            : workspace,
         sessions,
         unassigned,
         revision: store.revision,
@@ -316,6 +357,7 @@ export class ProjectsController {
 
   /** Shows a project (or Scratch). Presentation only: nothing is launched, stopped or resumed. */
   async selectProject(project: string | null) {
+    await this.flushLayout();
     this.selection += 1;
     await this.client.forgetPicks().catch(() => undefined);
     this.set({ project, workspaceId: null, notice: null, launched: null });
@@ -323,6 +365,7 @@ export class ProjectsController {
   }
 
   async selectWorkspace(id: string) {
+    await this.flushLayout();
     this.selection += 1;
     await this.client.forgetPicks().catch(() => undefined);
     this.set({ workspaceId: id, notice: null, launched: null });
@@ -356,6 +399,9 @@ export class ProjectsController {
     override?: Partial<Context>,
     onReceipt?: (receipt: Receipt) => void,
   ): Promise<Receipt | Failure> {
+    // What the user moved is written before whatever they ask for next.
+    if (this.pending && command.kind !== 'saveWorkspace')
+      await this.flushLayout();
     const store = this.ready();
     const context = this.context();
     if (!store || !context) return this.refuse('invalid_record');
@@ -497,6 +543,23 @@ export class ProjectsController {
   closeWorkspace(workspaceId: string) {
     return this.send({ kind: 'closeWorkspace', workspaceId });
   }
+  /**
+   * Where a Scratch shell really is, read from its process. The answer is what the user is shown
+   * before being asked to move it; nothing is moved by asking.
+   */
+  async previewAdoption(
+    associationId: string,
+    projectId: string,
+  ): Promise<AdoptionPreview | null> {
+    try {
+      return await this.client.adoptionPreview(associationId, projectId);
+    } catch (error) {
+      if (error instanceof ProjectsCallError)
+        this.set({ notice: noticeOf(error.failure) });
+      return null;
+    }
+  }
+
   adopt(associationId: string, projectId: string, bindingId: string) {
     return this.send({
       kind: 'adoptScratch',
@@ -562,6 +625,10 @@ export class ProjectsController {
   ) {
     const workspace = this.s.workspace;
     if (!workspace) return this.refuse('context_stale');
+    // What is written is the layout the window shows, so a pending one is written with it.
+    this.pending = null;
+    if (this.saveTimer !== undefined) clearTimeout(this.saveTimer);
+    this.saveTimer = undefined;
     return this.send({
       kind: 'saveWorkspace',
       workspaceId: workspace.id,
@@ -616,14 +683,44 @@ export class ProjectsController {
     );
   }
 
+  /**
+   * A divider moved. The window shows it at once; the store is written once, with the latest
+   * ratio, when no other move has come for a while, or before anything else is sent.
+   */
   resizeSplit(path: string, ratio: number) {
     const workspace = this.s.workspace;
     if (!workspace?.layout) return this.refuse('context_stale');
-    return this.save(
-      resize(workspace.layout, path, ratio),
-      this.leaves(),
-      workspace.focus,
+    const layout = resize(workspace.layout, path, ratio);
+    this.pending = { workspaceId: workspace.id, layout };
+    this.set({ workspace: { ...workspace, layout } });
+    this.armSave();
+  }
+
+  private armSave() {
+    if (this.saveTimer !== undefined) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(
+      () => void this.flushLayout(),
+      this.timings.save ?? SAVE_DELAY,
     );
+  }
+
+  /** Writes the layout the window is showing if it has not been written. */
+  async flushLayout(): Promise<void> {
+    if (this.saveTimer !== undefined) clearTimeout(this.saveTimer);
+    this.saveTimer = undefined;
+    const pending = this.pending;
+    if (!pending) return;
+    // A change is still in flight: this one goes after it, as the latest.
+    if (this.s.busy) {
+      if (!this.disposed) this.armSave();
+      return;
+    }
+    const workspace = this.s.workspace;
+    if (!workspace || workspace.id !== pending.workspaceId) {
+      this.pending = null;
+      return;
+    }
+    await this.save(pending.layout, this.leaves(), workspace.focus);
   }
 
   // ---- adoption of the feature, migration, rollback --------------------------------------------

@@ -10,7 +10,9 @@
     "enabled": true,
     "host": {
       "epoch": "h1:1:1:100:1000",
-      "features": ["profile_effort"],
+      "features": [
+        "profile_effort"
+      ],
       "reachable": true,
       "reason": null
     },
@@ -42,7 +44,9 @@
         },
         "sessions": 0,
         "tombstone": false,
-        "workspaceIds": ["0000feed-0000-4000-8000-000000000004"]
+        "workspaceIds": [
+          "0000feed-0000-4000-8000-000000000004"
+        ]
       }
     ],
     "storeRevision": "5"

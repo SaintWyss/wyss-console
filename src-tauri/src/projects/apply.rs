@@ -11,8 +11,9 @@ use super::{
         Receipt, Resolution, SaveWorkspace, SelectionToken,
     },
     owner::{
-        Agent, FolderError, HostView, LaunchError, ManagedLaunch, ManagedLaunched, NativeLaunch,
-        NativeLaunched, Owner, OwnerError, RootError, RootInfo, ShellLaunched,
+        Agent, AuthorityRef, FolderError, HostView, LaunchError, ManagedLaunch, ManagedLaunched,
+        NativeLaunch, NativeLaunched, Owner, OwnerError, RootError, RootInfo, ShellCwd,
+        ShellLaunched,
     },
     store::{Loaded, Store, StoreError},
 };
@@ -26,8 +27,9 @@ use wyss_console::contracts::{
         M1ErrorCode,
         records::{
             Association, AssociationState, Binding, BindingState, LaunchProvider, Leaf,
-            ManagedSafetyProfile, Mode, Node, Operation, OperationKind, OperationState,
-            Preferences, ProfileDefaults, ProfileRef, Project, StoreV1, Target, Workspace,
+            ManagedAuthority, ManagedSafetyProfile, Mode, Node, Operation, OperationKind,
+            OperationState, Preferences, ProfileDefaults, ProfileRef, Project, StoreV1, Target,
+            Workspace,
         },
         scalar::{
             AbsolutePath, AssociationId, BindingId, Counter, EpochText, LeafId, ManagedSessionId,
@@ -158,11 +160,61 @@ impl Selections {
     }
 }
 
+/// What the user was shown before moving a Scratch shell into a project: the directory the shell
+/// is in and the process that was said of. It is used once, by the adoption it was shown for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Disclosed {
+    project: ProjectId,
+    binding: BindingId,
+    terminal: TerminalId,
+    epoch: EpochText,
+    shell: ShellCwd,
+}
+
+#[derive(Default)]
+pub struct Disclosures {
+    shown: Mutex<VecDeque<(AssociationId, Disclosed)>>,
+}
+
+impl Disclosures {
+    fn put(&self, association: AssociationId, disclosed: Disclosed) {
+        let mut shown = self.shown.lock().unwrap_or_else(PoisonError::into_inner);
+        shown.retain(|(id, _)| id != &association);
+        if shown.len() == MOST_PICKS {
+            shown.pop_front();
+        }
+        shown.push_back((association, disclosed));
+    }
+
+    fn take(&self, association: &AssociationId) -> Option<Disclosed> {
+        let mut shown = self.shown.lock().unwrap_or_else(PoisonError::into_inner);
+        let at = shown.iter().position(|(id, _)| id == association)?;
+        shown.remove(at).map(|(_, disclosed)| disclosed)
+    }
+
+    pub fn clear(&self) {
+        self.shown
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+    }
+}
+
+/// The answer to "where is this shell?" that the window shows before it asks to adopt it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdoptionPreview {
+    pub binding_id: BindingId,
+    pub cwd: String,
+    /// Whether that directory is the project's folder or inside it.
+    pub inside: bool,
+}
+
 pub struct Engine<'a> {
     pub store: &'a Store,
     pub owner: &'a dyn Owner,
     pub env: &'a dyn Env,
     pub selections: &'a Selections,
+    pub disclosures: &'a Disclosures,
 }
 
 type R<T = ()> = Result<T, Failure>;
@@ -208,10 +260,12 @@ fn owner_failure(error: OwnerError) -> Failure {
 }
 
 fn root_failure(error: RootError) -> Failure {
-    Failure::new(match error {
-        RootError::Missing => ErrorCode::RootMissing,
-        RootError::Ineligible => ErrorCode::RootIneligible,
-    })
+    match error {
+        RootError::Missing => Failure::new(ErrorCode::RootMissing),
+        RootError::Ineligible => Failure::new(ErrorCode::RootIneligible),
+        // Another account can use the folder, or that could not be told.
+        RootError::Shared => Failure::new(ErrorCode::RootIneligible).with_field("foreignAcl"),
+    }
 }
 
 /// A value the contract's own types have already accepted; failing here is a bug, so it is
@@ -366,6 +420,16 @@ impl Engine<'_> {
 
     fn run(&self, envelope: &Envelope) -> R<Receipt> {
         let current = self.load()?;
+        // The operation ID is looked up first, under every command (contract §3). A launch that
+        // is already known answers from its receipt, and never reaches an owner a second time.
+        match &envelope.command {
+            Command::Launch(launch) => {
+                if let Some(answer) = self.replay(&current, envelope, launch) {
+                    return answer;
+                }
+            }
+            _ => Self::unused(&current, &envelope.operation_id)?,
+        }
         if current.revision != envelope.expected_store_revision {
             return fail(ErrorCode::RevisionConflict);
         }
@@ -515,6 +579,9 @@ impl Engine<'_> {
                     project_id.clone(),
                     binding_id.clone(),
                 );
+                // The directory the user was shown must still be the shell's, as the host
+                // reports it, or nothing moves.
+                self.check_disclosure(&current, &association, &project, &binding)?;
                 self.commit(envelope, move |store, _| {
                     adopt(store, &association, &project, &binding)
                 })
@@ -553,6 +620,48 @@ impl Engine<'_> {
             })
             .map_err(store_failure)??;
         Ok(self.receipt(envelope, committed.revision, created))
+    }
+}
+
+/// The authority a receipt records, from the one an owner named.
+fn authority_of(authority: &AuthorityRef) -> R<ManagedAuthority> {
+    Ok(ManagedAuthority {
+        protocol: authority.protocol,
+        store_stream_id: valid(
+            StoreStreamId::parse(&authority.store_stream_id),
+            "managedAuthority",
+        )?,
+    })
+}
+
+fn authority_of_ref(authority: &AuthorityRef) -> ManagedAuthority {
+    ManagedAuthority {
+        protocol: authority.protocol,
+        // A reference built by `ref_of` from a valid identity holds a valid one.
+        store_stream_id: StoreStreamId::parse(&authority.store_stream_id)
+            .expect("an identity taken from a receipt"),
+    }
+}
+
+fn ref_of(authority: &ManagedAuthority) -> AuthorityRef {
+    AuthorityRef {
+        protocol: authority.protocol,
+        store_stream_id: authority.store_stream_id.as_str().to_owned(),
+    }
+}
+
+/// A session that an authority other than the one asked reports is not the answer to this
+/// launch: whatever was prepared elsewhere is unknown here and is never recorded as this one's.
+fn answered_by(
+    done: ManagedLaunched,
+    authority: &ManagedAuthority,
+) -> Result<ManagedLaunched, LaunchError> {
+    if done.protocol == authority.protocol
+        && done.store_stream_id == authority.store_stream_id.as_str()
+    {
+        Ok(done)
+    } else {
+        Err(LaunchError::Ambiguous)
     }
 }
 
@@ -943,6 +1052,8 @@ struct Plan {
     mode: Mode,
     native: Option<ProfileRef>,
     safety: Option<ManagedSafetyProfile>,
+    /// The Managed authority this launch is for, verified before anything is recorded.
+    authority: Option<ManagedAuthority>,
 }
 
 enum Dispatched {
@@ -956,19 +1067,92 @@ fn terminal_state(state: OperationState) -> bool {
 }
 
 impl Engine<'_> {
-    /// Rebuilds the immutable fields of a receipt from a request, to compare a repeat with the
-    /// original. The owner is not asked anything.
-    fn same_request(existing: &Operation, plan: &Plan, context: &Context) -> bool {
+    /// Whether `existing` is the receipt of this very request: every immutable field of it, as the
+    /// request states it. The store's current state, the selection revision and the expected store
+    /// revision are not part of the request's identity.
+    fn same_request(existing: &Operation, context: &Context, launch: &Launch) -> bool {
+        let native = launch.native_profile.as_ref().map(|choice| ProfileRef {
+            id: choice.id.clone(),
+            version: choice.version,
+        });
         existing.kind == OperationKind::Launch
-            && existing.workspace_id == plan.workspace
-            && existing.leaf_id == plan.leaf
-            && existing.project_id == plan.project
+            && existing.workspace_id == launch.workspace_id
+            && existing.leaf_id == launch.leaf_id
+            && existing.project_id == context.project_id
             && existing.binding_id == context.binding_id
             && existing.binding_revision == context.binding_revision
-            && existing.provider == plan.provider
-            && existing.mode == plan.mode
-            && existing.native_profile == plan.native
-            && existing.managed_safety_profile == plan.safety
+            && existing.provider == launch.provider
+            && existing.mode == launch.mode
+            && existing.native_profile == native
+            && existing.managed_safety_profile == launch.managed_safety_profile
+    }
+
+    /// The answer a receipt that already exists gives to the same request again.
+    fn answer_from(
+        &self,
+        existing: &Operation,
+        envelope: &Envelope,
+        revision: Counter,
+    ) -> R<Receipt> {
+        match existing.state {
+            OperationState::Committed => {
+                let created = existing
+                    .association_id
+                    .iter()
+                    .map(|id| created("association", id.as_str()))
+                    .collect();
+                let mut receipt = self.receipt(envelope, revision, created);
+                receipt.replayed = true;
+                Ok(receipt)
+            }
+            OperationState::Pending => {
+                Err(Failure::new(ErrorCode::LeafBusy).with_effect(Effect::Unknown))
+            }
+            OperationState::Ambiguous => {
+                Err(Failure::new(ErrorCode::EffectAmbiguous).with_effect(Effect::Unknown))
+            }
+            OperationState::Refused => fail(ErrorCode::OwnerRefused),
+        }
+    }
+
+    /// A launch that is already known, looked up before the store's revision or the window's
+    /// context are weighed: a repeat is the same request or it is refused, and either way no
+    /// owner is asked. `None` is a request this store has not seen.
+    fn replay(
+        &self,
+        current: &StoreV1,
+        envelope: &Envelope,
+        launch: &Launch,
+    ) -> Option<R<Receipt>> {
+        let id = &envelope.operation_id;
+        if current.closed_operations.iter().any(|c| c == id) {
+            return Some(Err(Failure::new(ErrorCode::InvalidRecord)
+                .with_field("operationId")
+                .with_effect(Effect::Unknown)));
+        }
+        let existing = current.operations.iter().find(|o| &o.id == id)?;
+        if envelope.context.host_id != current.host_id {
+            return Some(fail(ErrorCode::ContextStale));
+        }
+        if !Self::same_request(existing, &envelope.context, launch) {
+            return Some(bad("operationId"));
+        }
+        Some(self.answer_from(existing, envelope, current.revision))
+    }
+
+    /// An operation ID that no receipt of this store owns. A command that makes no receipt of its
+    /// own may not reuse the ID of one that did, or of one already compacted: whatever that ID
+    /// stands for is not this command.
+    fn unused(current: &StoreV1, id: &OperationId) -> R {
+        if current.closed_operations.iter().any(|c| c == id) {
+            return Err(Failure::new(ErrorCode::InvalidRecord)
+                .with_field("operationId")
+                .with_effect(Effect::Unknown));
+        }
+        if current.operations.iter().any(|o| &o.id == id) {
+            return bad("operationId");
+        }
+        Ok(())
     }
 
     /// Checks the request against the store and the context and fixes the plan. Nothing is
@@ -1059,37 +1243,30 @@ impl Engine<'_> {
             mode: launch.mode,
             native,
             safety,
+            authority: None,
         })
     }
 
+    /// The Managed authority a launch for `requested` would go to, and the proof it serves that
+    /// profile. An authority that cannot be read, or cannot show it serves the profile, refuses
+    /// before anything is recorded or sent.
+    fn managed_authority(
+        &self,
+        requested: Option<ManagedSafetyProfile>,
+    ) -> R<(ManagedAuthority, AuthorityRef)> {
+        let requested = requested.map_or_else(|| bad("profile"), Ok)?;
+        let advert = self.owner.managed_advert().map_err(owner_failure)?;
+        if !advert.profiles.contains(&requested) {
+            return Err(
+                Failure::new(ErrorCode::UnsupportedCapability).with_field("managedSafetyProfile")
+            );
+        }
+        Ok((authority_of(&advert.authority)?, advert.authority))
+    }
+
     fn launch(&self, current: &StoreV1, envelope: &Envelope, launch: &Launch) -> R<Receipt> {
-        let plan = self.plan(current, &envelope.context, launch)?;
+        let mut plan = self.plan(current, &envelope.context, launch)?;
         let id = &envelope.operation_id;
-        if current.closed_operations.iter().any(|c| c == id) {
-            return Err(Failure::new(ErrorCode::InvalidRecord)
-                .with_field("operationId")
-                .with_effect(Effect::Unknown));
-        }
-        if let Some(existing) = current.operations.iter().find(|o| &o.id == id) {
-            // The same operation again: never a second dispatch.
-            if !Self::same_request(existing, &plan, &envelope.context) {
-                return bad("operationId");
-            }
-            return match existing.state {
-                OperationState::Committed => {
-                    let mut receipt = self.receipt(envelope, current.revision, Vec::new());
-                    receipt.replayed = true;
-                    Ok(receipt)
-                }
-                OperationState::Pending => {
-                    Err(Failure::new(ErrorCode::LeafBusy).with_effect(Effect::Unknown))
-                }
-                OperationState::Ambiguous => {
-                    Err(Failure::new(ErrorCode::EffectAmbiguous).with_effect(Effect::Unknown))
-                }
-                OperationState::Refused => fail(ErrorCode::OwnerRefused),
-            };
-        }
         let occupied = current
             .workspaces
             .iter()
@@ -1120,6 +1297,10 @@ impl Engine<'_> {
             None
         };
         let epoch = host.as_ref().map(|h| h.epoch.clone());
+        // Managed work needs the authority to show it serves the requested profile.
+        if plan.mode == Mode::Managed {
+            plan.authority = Some(self.managed_authority(plan.safety)?.0);
+        }
 
         // Phase A: the journal says `pending` before anything is dispatched.
         let claim = self.env.claim();
@@ -1135,6 +1316,7 @@ impl Engine<'_> {
             mode: plan.mode,
             native_profile: plan.native.clone(),
             managed_safety_profile: plan.safety,
+            managed_authority: plan.authority.clone(),
             state: OperationState::Pending,
             association_id: None,
             claim: Some(valid(EpochText::parse(&claim), "operations.claim")?),
@@ -1143,7 +1325,8 @@ impl Engine<'_> {
                 "operations.createdAt",
             )?,
         };
-        self.store
+        let recorded = self
+            .store
             .transact(envelope.expected_store_revision, |store| {
                 let busy = store.operations.iter().any(|o| {
                     o.workspace_id == plan.workspace
@@ -1160,8 +1343,20 @@ impl Engine<'_> {
                 }
                 store.operations.push(pending);
                 Ok::<(), Failure>(())
-            })
-            .map_err(store_failure)??;
+            });
+        match recorded {
+            Ok(Ok(_)) => {}
+            Ok(Err(failure)) => return Err(failure),
+            // Another window wrote first. If what it wrote is this very request, this one is a
+            // repeat and answers from it; otherwise the store moved under a different request.
+            Err(StoreError::RevisionConflict { .. }) => {
+                let fresh = self.load()?;
+                return self
+                    .replay(&fresh, envelope, launch)
+                    .unwrap_or_else(|| fail(ErrorCode::RevisionConflict));
+            }
+            Err(other) => return Err(store_failure(other)),
+        }
 
         // Phase B: the owner is asked, outside the lock, once.
         let dispatched = self.dispatch(&plan, epoch.as_deref(), id);
@@ -1210,6 +1405,10 @@ impl Engine<'_> {
             (Mode::Managed, Some(agent)) => {
                 let path = path.ok_or(not_dispatched(OwnerError::Refused))?;
                 let requested = plan.safety.ok_or(not_dispatched(OwnerError::Refused))?;
+                let authority = plan
+                    .authority
+                    .as_ref()
+                    .ok_or(not_dispatched(OwnerError::Refused))?;
                 self.owner
                     .launch_managed(&ManagedLaunch {
                         agent,
@@ -1217,7 +1416,9 @@ impl Engine<'_> {
                         requested,
                         // The operation names the whole action: a retry is the same intent.
                         intent: operation.as_str().to_owned(),
+                        authority: ref_of(authority),
                     })
+                    .and_then(|done| answered_by(done, authority))
                     .map(Dispatched::Managed)
             }
             (Mode::Managed, None) => Err(not_dispatched(OwnerError::Unsupported)),
@@ -1592,6 +1793,127 @@ impl Engine<'_> {
         })
     }
 
+    /// The authority a Managed receipt was first asked of. A receipt without one cannot be
+    /// retried or declared absent: nothing says whose answer would count.
+    fn asked(operation: &Operation) -> R<AuthorityRef> {
+        operation
+            .managed_authority
+            .as_ref()
+            .map(ref_of)
+            .map_or_else(|| bad("managedAuthority"), Ok)
+    }
+
+    /// What the user is shown before a Scratch shell is moved into a project: where the shell is
+    /// now, read from its process, never from where it started. The answer is kept for the one
+    /// adoption it is shown for. A directory that cannot be read refuses; nothing is guessed.
+    pub fn disclose_adoption(
+        &self,
+        association_id: &AssociationId,
+        project_id: &ProjectId,
+    ) -> R<AdoptionPreview> {
+        let current = self.load()?;
+        let (project, binding) = Self::adoptable(&current, project_id)?;
+        let Some(association) = current.sessions.iter().find(|a| &a.id == association_id) else {
+            return fail(ErrorCode::ContextStale);
+        };
+        let Target::Shell {
+            terminal_id,
+            host_epoch,
+        } = &association.target
+        else {
+            return bad("sessions.target");
+        };
+        if association.origin_project_id.is_some() {
+            return bad("sessions.originProjectId");
+        }
+        let shell = self
+            .owner
+            .shell_cwd(host_epoch.as_str(), terminal_id.as_str())
+            .map_err(|error| match error {
+                OwnerError::HostOffline | OwnerError::HostChanged => owner_failure(error),
+                _ => Failure::new(ErrorCode::OwnerRefused).with_field("cwd"),
+            })?;
+        let inside = std::path::Path::new(&shell.cwd).starts_with(binding.path.as_str());
+        let preview = AdoptionPreview {
+            binding_id: binding.id.clone(),
+            cwd: shell.cwd.clone(),
+            inside,
+        };
+        self.disclosures.put(
+            association_id.clone(),
+            Disclosed {
+                project: project.id.clone(),
+                binding: binding.id.clone(),
+                terminal: terminal_id.clone(),
+                epoch: host_epoch.clone(),
+                shell,
+            },
+        );
+        Ok(preview)
+    }
+
+    /// The live project and the binding a shell would be adopted under.
+    fn adoptable<'s>(store: &'s StoreV1, project_id: &ProjectId) -> R<(&'s Project, &'s Binding)> {
+        let project = store
+            .projects
+            .iter()
+            .find(|p| &p.id == project_id && !p.tombstone)
+            .map_or_else(|| fail(ErrorCode::ContextStale), Ok)?;
+        let binding = project
+            .default_binding_id
+            .as_ref()
+            .and_then(|id| store.bindings.iter().find(|b| &b.id == id))
+            .filter(|b| b.state == BindingState::Valid)
+            .map_or_else(|| fail(ErrorCode::RootIneligible), Ok)?;
+        Ok((project, binding))
+    }
+
+    /// An adoption goes through only with the directory the user was shown, still the shell's now.
+    /// What was shown is consumed whether or not it still holds.
+    fn check_disclosure(
+        &self,
+        current: &StoreV1,
+        association_id: &AssociationId,
+        project_id: &ProjectId,
+        binding_id: &BindingId,
+    ) -> R {
+        let unconfirmed = || Failure::new(ErrorCode::ContextStale).with_field("cwd");
+        let shown = self
+            .disclosures
+            .take(association_id)
+            .ok_or_else(unconfirmed)?;
+        let Some(Target::Shell {
+            terminal_id,
+            host_epoch,
+        }) = current
+            .sessions
+            .iter()
+            .find(|a| &a.id == association_id)
+            .map(|a| &a.target)
+        else {
+            return Err(unconfirmed());
+        };
+        if &shown.project != project_id
+            || &shown.binding != binding_id
+            || &shown.terminal != terminal_id
+            || &shown.epoch != host_epoch
+        {
+            return Err(unconfirmed());
+        }
+        let now = self
+            .owner
+            .shell_cwd(host_epoch.as_str(), terminal_id.as_str())
+            .map_err(|error| match error {
+                OwnerError::HostOffline | OwnerError::HostChanged => owner_failure(error),
+                _ => Failure::new(ErrorCode::OwnerRefused).with_field("cwd"),
+            })?;
+        if now == shown.shell {
+            Ok(())
+        } else {
+            Err(unconfirmed())
+        }
+    }
+
     /// The user's decision about a launch whose outcome was unknown.
     fn reconcile(
         &self,
@@ -1643,6 +1965,14 @@ impl Engine<'_> {
                         }
                     }
                     Mode::Managed => {
+                        // Only the authority that was asked can show it holds nothing.
+                        let asked = Self::asked(operation)?;
+                        let advert = self.owner.managed_advert().map_err(owner_failure)?;
+                        if advert.authority != asked {
+                            return Err(
+                                owner_failure(OwnerError::HostChanged).with_effect(Effect::Unknown)
+                            );
+                        }
                         let rows = self.owner.managed().map_err(owner_failure)?;
                         let known: HashSet<&str> = current
                             .sessions
@@ -1652,7 +1982,11 @@ impl Engine<'_> {
                                 _ => None,
                             })
                             .collect();
-                        if rows.iter().any(|r| !known.contains(r.session_id.as_str())) {
+                        if rows.iter().any(|r| {
+                            r.protocol == asked.protocol
+                                && r.store_stream_id == asked.store_stream_id
+                                && !known.contains(r.session_id.as_str())
+                        }) {
                             return Err(
                                 Failure::new(ErrorCode::OwnerRefused).with_field("candidates")
                             );
@@ -1687,13 +2021,30 @@ impl Engine<'_> {
                     .and_then(|id| current.bindings.iter().find(|b| &b.id == id))
                     .map(|b| b.path.as_str().to_owned())
                     .map_or_else(|| fail(ErrorCode::RootIneligible), Ok)?;
+                // The retry is of the authority the first attempt was sent to and of no other: a
+                // desktop that has since moved between protocol 1 and 2 must not prepare a second
+                // session elsewhere. The authority must also still show it serves the profile.
+                let asked = Self::asked(operation)?;
+                let advert = self.owner.managed_advert().map_err(owner_failure)?;
+                if advert.authority != asked {
+                    return Err(owner_failure(OwnerError::HostChanged).with_effect(Effect::Unknown));
+                }
+                if !advert.profiles.contains(&requested) {
+                    return Err(Failure::new(ErrorCode::UnsupportedCapability)
+                        .with_field("managedSafetyProfile"));
+                }
                 // The same intent the first attempt used: the owner settles it, it does not repeat it.
-                let done = match self.owner.launch_managed(&ManagedLaunch {
-                    agent,
-                    path,
-                    requested,
-                    intent: launch_id.as_str().to_owned(),
-                }) {
+                let done = match self
+                    .owner
+                    .launch_managed(&ManagedLaunch {
+                        agent,
+                        path,
+                        requested,
+                        intent: launch_id.as_str().to_owned(),
+                        authority: asked.clone(),
+                    })
+                    .and_then(|done| answered_by(done, &authority_of_ref(&asked)))
+                {
                     Ok(done) => done,
                     Err(LaunchError::NotDispatched(error)) => return Err(owner_failure(error)),
                     Err(LaunchError::Ambiguous) => {

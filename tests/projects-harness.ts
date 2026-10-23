@@ -4,6 +4,7 @@ import {
   parseProject,
   parseSession,
   parseWorkspace,
+  type AdoptionPreview,
   type Envelope,
   type MigrationSummary,
   type Overview,
@@ -182,6 +183,8 @@ export interface Fake extends ProjectsClient {
       truncated: boolean;
     }[];
     claimError: ProjectsCallError | null;
+    /** What the desktop says about where a shell is; an error is a refusal. */
+    adoption: AdoptionPreview | ProjectsCallError;
   };
 }
 
@@ -196,6 +199,11 @@ export function fakeClient(): Fake {
     receipt: receipt(),
     output: [],
     claimError: null,
+    adoption: {
+      bindingId: BINDING_A,
+      cwd: '/home/fixture/work/a/src',
+      inside: true,
+    },
   };
   const sent: Envelope[] = [];
   const client: Fake = {
@@ -236,6 +244,10 @@ export function fakeClient(): Fake {
     writeInput: vi.fn(async () => undefined),
     resize: vi.fn(async () => undefined),
     orphans: vi.fn(async () => []),
+    adoptionPreview: vi.fn(async () => {
+      if (state.adoption instanceof ProjectsCallError) throw state.adoption;
+      return state.adoption;
+    }),
     rollbackReport: vi.fn(async () => ({
       canDisable: true,
       unfinishedLaunches: 0,

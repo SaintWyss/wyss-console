@@ -109,6 +109,10 @@ fn a_native_launch_is_journalled_dispatched_once_and_committed() {
     let operation = r.operation(&op).unwrap();
     assert_eq!(operation.state, OperationState::Committed);
     assert!(operation.claim.is_none());
+    assert!(
+        operation.managed_authority.is_none(),
+        "only Managed work names an authority"
+    );
     let association = store
         .sessions
         .iter()
@@ -440,6 +444,7 @@ fn a_launch_whose_receipt_cannot_be_saved_is_ambiguous_and_never_repeated() {
         owner: &*r.world.owner,
         env: &restarted_env,
         selections: &r.world.selections,
+        disclosures: &r.world.disclosures,
     };
     assert_eq!(engine.recover_pending().unwrap(), 1);
     assert_eq!(r.operation(&op).unwrap().state, OperationState::Ambiguous);
@@ -501,6 +506,7 @@ fn a_live_claim_is_not_recovered_from_under_another_window_but_a_dead_one_is() {
                     mode: wyss_console::contracts::m1::records::Mode::Native,
                     native_profile: None,
                     managed_safety_profile: None,
+                    managed_authority: None,
                     state: OperationState::Pending,
                     association_id: None,
                     claim: Some(
@@ -529,6 +535,7 @@ fn a_live_claim_is_not_recovered_from_under_another_window_but_a_dead_one_is() {
         owner: &*r.world.owner,
         env: &restarted,
         selections: &r.world.selections,
+        disclosures: &r.world.disclosures,
     };
     assert_eq!(engine.recover_pending().unwrap(), 1);
     assert_eq!(r.world.now().operations[0].state, OperationState::Ambiguous);
@@ -728,6 +735,7 @@ fn compacted_receipts_free_the_ceiling_but_their_ids_are_never_live_again() {
                     mode: wyss_console::contracts::m1::records::Mode::Native,
                     native_profile: None,
                     managed_safety_profile: None,
+                    managed_authority: None,
                     state: OperationState::Refused,
                     association_id: None,
                     claim: None,
@@ -966,8 +974,8 @@ fn a_managed_launch_of_unknown_outcome_is_retried_only_by_the_user_and_with_its_
     // The owner settles the same intent.
     r.world.owner.script(|s| {
         s.prepared.push(Ok(ManagedLaunched {
-            protocol: ManagedProtocol::P2,
-            store_stream_id: STREAM_2.into(),
+            protocol: ManagedProtocol::P1,
+            store_stream_id: STREAM_1.into(),
             session_id: MANAGED_1.into(),
         }));
     });
@@ -999,9 +1007,434 @@ fn a_managed_launch_of_unknown_outcome_is_retried_only_by_the_user_and_with_its_
         } => {
             assert_eq!(
                 (*protocol, *requested_safety_profile),
-                (ManagedProtocol::P2, Some(ManagedSafetyProfile::LocalTools))
+                (ManagedProtocol::P1, Some(ManagedSafetyProfile::LocalTools))
             );
         }
         other => panic!("{other:?}"),
     }
+}
+
+// ---- Managed capabilities and the authority a retry belongs to ---------------------------------
+
+fn serving(r: &Ready, protocol: ManagedProtocol, stream: &str, profiles: &[ManagedSafetyProfile]) {
+    r.world
+        .owner
+        .script(|s| s.advert = Ok(advert(protocol, stream, profiles)));
+}
+
+fn managed_ok(r: &Ready, protocol: ManagedProtocol, stream: &str) {
+    r.world.owner.script(|s| {
+        s.prepared.push(Ok(ManagedLaunched {
+            protocol,
+            store_stream_id: stream.into(),
+            session_id: MANAGED_1.into(),
+        }));
+    });
+}
+
+fn reconcile(r: &Ready, launch: &str, resolution: Value) -> Result<Receipt, Failure> {
+    let revision = r.world.now().revision;
+    r.world.engine().execute(r.world.envelope(
+        &op_id(&r.world),
+        revision,
+        r.world.context(Some(&r.project), Some(&r.workspace)),
+        json!({"kind": "reconcileLaunch", "launchOperationId": launch, "resolution": resolution}),
+    ))
+}
+
+#[test]
+fn a_managed_launch_records_the_authority_it_was_asked_of() {
+    let r = ready();
+    serving(
+        &r,
+        ManagedProtocol::P2,
+        STREAM_2,
+        &[ManagedSafetyProfile::Inference],
+    );
+    managed_ok(&r, ManagedProtocol::P2, STREAM_2);
+    let op = op_id(&r.world);
+    r.send_as(
+        &op,
+        r.command("codex", "managed", Value::Null, json!("inference")),
+    )
+    .unwrap();
+    let operation = r.operation(&op).unwrap();
+    let authority = operation.managed_authority.clone().expect("recorded");
+    assert_eq!(
+        (authority.protocol, authority.store_stream_id.as_str()),
+        (ManagedProtocol::P2, STREAM_2)
+    );
+    // The owner was asked of exactly that authority, after it was read.
+    let sent = r.world.owner.script(|s| s.authorities.clone());
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        (sent[0].protocol, sent[0].store_stream_id.as_str()),
+        (ManagedProtocol::P2, STREAM_2)
+    );
+    let calls = r.world.owner.calls();
+    let advert_at = calls.iter().position(|c| c == "managed_advert").unwrap();
+    let launch_at = calls
+        .iter()
+        .position(|c| c.starts_with("launch_managed"))
+        .unwrap();
+    assert!(advert_at < launch_at);
+}
+
+#[test]
+fn a_profile_the_authority_has_not_shown_refuses_with_nothing_written_or_sent() {
+    let r = ready();
+    serving(
+        &r,
+        ManagedProtocol::P1,
+        STREAM_1,
+        &[ManagedSafetyProfile::Inference],
+    );
+    let before = r.world.now();
+    let failure = refused(
+        r.send_as(
+            &op_id(&r.world),
+            r.command("codex", "managed", Value::Null, json!("local_tools")),
+        ),
+        ErrorCode::UnsupportedCapability,
+    );
+    assert_eq!(failure.field, Some("managedSafetyProfile"));
+    assert_eq!(failure.effect, super::super::command::Effect::None);
+    assert_eq!(r.world.now(), before, "not even a pending receipt");
+    assert_eq!(r.world.owner.launches(), 0);
+    // What it has shown is served.
+    managed_ok(&r, ManagedProtocol::P1, STREAM_1);
+    r.send_as(
+        &op_id(&r.world),
+        r.command("codex", "managed", Value::Null, json!("inference")),
+    )
+    .unwrap();
+}
+
+#[test]
+fn an_authority_that_cannot_be_read_or_verified_refuses_before_anything_is_written() {
+    for (advert_now, code) in [
+        (Err(OwnerError::HostOffline), ErrorCode::HostOffline),
+        (
+            Err(OwnerError::Unsupported),
+            ErrorCode::UnsupportedCapability,
+        ),
+        // Greeted, but it proved nothing it could serve.
+        (
+            Ok(advert(ManagedProtocol::P1, STREAM_1, &[])),
+            ErrorCode::UnsupportedCapability,
+        ),
+    ] {
+        let r = ready();
+        r.world.owner.script(|s| s.advert = advert_now);
+        let before = r.world.now();
+        refused(
+            r.send_as(
+                &op_id(&r.world),
+                r.command("codex", "managed", Value::Null, json!("inference")),
+            ),
+            code,
+        );
+        assert_eq!(r.world.now(), before);
+        assert_eq!(r.world.owner.launches(), 0);
+    }
+}
+
+#[test]
+fn a_retry_goes_to_the_authority_that_was_asked_and_to_no_other() {
+    let r = ready();
+    let both = [
+        ManagedSafetyProfile::Inference,
+        ManagedSafetyProfile::LocalTools,
+    ];
+    serving(&r, ManagedProtocol::P1, STREAM_1, &both);
+    r.world
+        .owner
+        .script(|s| s.prepared.push(Err(LaunchError::Ambiguous)));
+    let op = op_id(&r.world);
+    refused(
+        r.send_as(
+            &op,
+            r.command("codex", "managed", Value::Null, json!("inference")),
+        ),
+        ErrorCode::EffectAmbiguous,
+    );
+    assert_eq!(r.world.owner.launches(), 1);
+    // The desktop moved to protocol 2 meanwhile, or to another stream of the same protocol.
+    for (protocol, stream) in [
+        (ManagedProtocol::P2, STREAM_2),
+        (ManagedProtocol::P2, STREAM_1),
+        (ManagedProtocol::P1, STREAM_2),
+    ] {
+        serving(&r, protocol, stream, &both);
+        let failure = refused(
+            reconcile(&r, &op, json!({"kind": "retryManaged"})),
+            ErrorCode::HostChanged,
+        );
+        assert_eq!(failure.effect, super::super::command::Effect::Unknown);
+        assert_eq!(
+            r.world.owner.launches(),
+            1,
+            "a session was not prepared in another authority"
+        );
+        assert_eq!(r.operation(&op).unwrap().state, OperationState::Ambiguous);
+        // Nor can another authority declare the launch absent.
+        refused(
+            reconcile(&r, &op, json!({"kind": "absent"})),
+            ErrorCode::HostChanged,
+        );
+    }
+    // Back in the authority that was asked, and still serving the profile.
+    serving(
+        &r,
+        ManagedProtocol::P1,
+        STREAM_1,
+        &[ManagedSafetyProfile::LocalTools],
+    );
+    refused(
+        reconcile(&r, &op, json!({"kind": "retryManaged"})),
+        ErrorCode::UnsupportedCapability,
+    );
+    serving(&r, ManagedProtocol::P1, STREAM_1, &both);
+    managed_ok(&r, ManagedProtocol::P1, STREAM_1);
+    reconcile(&r, &op, json!({"kind": "retryManaged"})).unwrap();
+    assert_eq!(r.operation(&op).unwrap().state, OperationState::Committed);
+    let sent = r.world.owner.script(|s| s.authorities.clone());
+    assert!(
+        sent.iter()
+            .all(|a| a.protocol == ManagedProtocol::P1 && a.store_stream_id == STREAM_1),
+        "every attempt named the authority of the first: {sent:?}"
+    );
+}
+
+#[test]
+fn absent_is_judged_by_the_authority_that_was_asked() {
+    let r = ready();
+    serving(
+        &r,
+        ManagedProtocol::P1,
+        STREAM_1,
+        &[ManagedSafetyProfile::Inference],
+    );
+    r.world
+        .owner
+        .script(|s| s.prepared.push(Err(LaunchError::Ambiguous)));
+    let op = op_id(&r.world);
+    refused(
+        r.send_as(
+            &op,
+            r.command("codex", "managed", Value::Null, json!("inference")),
+        ),
+        ErrorCode::EffectAmbiguous,
+    );
+    // A session of the other authority is not a candidate; one of the asked one is.
+    r.world.owner.script(|s| {
+        s.managed = Ok(vec![managed_row(
+            ManagedProtocol::P2,
+            STREAM_2,
+            MANAGED_1,
+            None,
+        )]);
+    });
+    let mut stray = ManagedRow {
+        session_id: "cccccccc-0000-4000-8000-000000000009".into(),
+        ..managed_row(ManagedProtocol::P1, STREAM_1, MANAGED_1, None)
+    };
+    r.world
+        .owner
+        .script(|s| s.managed.as_mut().unwrap().push(stray.clone()));
+    refused(
+        reconcile(&r, &op, json!({"kind": "absent"})),
+        ErrorCode::OwnerRefused,
+    );
+    stray.protocol = ManagedProtocol::P2;
+    r.world
+        .owner
+        .script(|s| s.managed = Ok(vec![stray.clone()]));
+    reconcile(&r, &op, json!({"kind": "absent"})).unwrap();
+    assert_eq!(r.operation(&op).unwrap().state, OperationState::Refused);
+}
+
+#[test]
+fn an_answer_from_another_authority_is_never_recorded_as_this_launchs() {
+    let r = ready();
+    serving(
+        &r,
+        ManagedProtocol::P1,
+        STREAM_1,
+        &[ManagedSafetyProfile::Inference],
+    );
+    // The owner prepared a session in protocol 2, not in the authority that was asked.
+    managed_ok(&r, ManagedProtocol::P2, STREAM_2);
+    let op = op_id(&r.world);
+    refused(
+        r.send_as(
+            &op,
+            r.command("codex", "managed", Value::Null, json!("inference")),
+        ),
+        ErrorCode::EffectAmbiguous,
+    );
+    assert_eq!(r.operation(&op).unwrap().state, OperationState::Ambiguous);
+    assert!(r.world.now().sessions.is_empty());
+}
+
+// ---- operation IDs: one meaning each, replayed or refused, never dispatched twice ---------------
+
+#[test]
+fn a_repeat_answers_from_its_receipt_whatever_the_store_and_the_window_became() {
+    let r = ready();
+    r.native_ok();
+    let op = op_id(&r.world);
+    let command = r.command("codex", "native", Value::Null, Value::Null);
+    let stale = r.world.now().revision;
+    let first = r.send_as(&op, command.clone()).unwrap();
+    // The store moves on, and the window moves to another selection revision.
+    let (other, _, _) = r.world.register(ROOT_B);
+    let again = r
+        .world
+        .engine()
+        .execute({
+            let mut context = r.world.context(Some(&r.project), Some(&r.workspace));
+            context["selectionRevision"] = json!("99");
+            r.world.envelope(&op, stale, context, command.clone())
+        })
+        .unwrap();
+    assert!(again.replayed);
+    assert_eq!(again.created, first.created, "the association it made");
+    assert_eq!(r.world.owner.launches(), 1);
+    // Another field of the request is another request, and refused with no effect.
+    for changed in [
+        r.command("claude", "native", Value::Null, Value::Null),
+        r.command("shell", "native", Value::Null, Value::Null),
+        json!({"kind": "launch", "workspaceId": r.workspace, "leafId": r.world.env.uuid(),
+               "provider": "codex", "mode": "native", "nativeProfile": null,
+               "managedSafetyProfile": null}),
+    ] {
+        let failure = refused(
+            r.world.engine().execute(r.world.envelope(
+                &op,
+                stale,
+                r.world.context(Some(&r.project), Some(&r.workspace)),
+                changed,
+            )),
+            ErrorCode::InvalidRecord,
+        );
+        assert_eq!(failure.effect, super::super::command::Effect::None);
+    }
+    // The captured context is part of the request: another project is another request.
+    refused(
+        r.world.engine().execute(r.world.envelope(
+            &op,
+            r.world.now().revision,
+            r.world.context(Some(&other), Some(&r.workspace)),
+            command,
+        )),
+        ErrorCode::InvalidRecord,
+    );
+    assert_eq!(r.world.owner.launches(), 1);
+}
+
+#[test]
+fn an_operation_id_belongs_to_the_receipt_that_made_it_and_to_nothing_else() {
+    let r = ready();
+    r.native_ok();
+    let op = op_id(&r.world);
+    r.send_as(&op, r.command("codex", "native", Value::Null, Value::Null))
+        .unwrap();
+    let rename = |id: &str| {
+        let revision = r.world.now().revision;
+        r.world.engine().execute(r.world.envelope(
+            id,
+            revision,
+            r.world.context(Some(&r.project), None),
+            json!({"kind": "renameProject", "projectId": r.project, "label": "Renamed"}),
+        ))
+    };
+    // A command with no receipt of its own cannot borrow a launch's.
+    let failure = refused(rename(&op), ErrorCode::InvalidRecord);
+    assert_eq!(failure.field, Some("operationId"));
+    assert_eq!(failure.effect, super::super::command::Effect::None);
+    assert_eq!(r.world.now().projects[0].label.as_str(), "a");
+    // Nor can it use one that was compacted: that ID is closed for good.
+    assert_eq!(r.world.engine().compact_receipts().unwrap(), 1);
+    let failure = refused(rename(&op), ErrorCode::InvalidRecord);
+    assert_eq!(failure.effect, super::super::command::Effect::Unknown);
+    // A launch with a closed ID is refused the same way, and never reaches the owner.
+    refused(
+        r.send_as(&op, r.command("codex", "native", Value::Null, Value::Null)),
+        ErrorCode::InvalidRecord,
+    );
+    assert_eq!(r.world.owner.launches(), 1);
+    // A fresh ID does what it says.
+    rename(&op_id(&r.world)).unwrap();
+    assert_eq!(r.world.now().projects[0].label.as_str(), "Renamed");
+}
+
+#[test]
+fn the_same_launch_from_two_windows_dispatches_once_and_the_other_reads_its_state() {
+    for _ in 0..25 {
+        let r = Arc::new(ready());
+        let (release, gate) = mpsc::channel();
+        r.world.owner.script(|s| s.gate = Some(gate));
+        r.native_ok();
+        let op = op_id(&r.world);
+        let command = r.command("codex", "native", Value::Null, Value::Null);
+        let revision = r.world.now().revision;
+        let start = Arc::new(std::sync::Barrier::new(2));
+        let (done, results) = mpsc::channel();
+        for _ in 0..2 {
+            let (r, op, command, start, done) = (
+                r.clone(),
+                op.clone(),
+                command.clone(),
+                start.clone(),
+                done.clone(),
+            );
+            thread::spawn(move || {
+                let envelope = r.world.envelope(
+                    &op,
+                    revision,
+                    r.world.context(Some(&r.project), Some(&r.workspace)),
+                    command,
+                );
+                start.wait();
+                let _ = done.send(r.world.engine().execute(envelope));
+            });
+        }
+        // The one that did not dispatch is answered while the other is inside the owner: it read
+        // the state of the first, and it is not a conflict.
+        let early = results.recv_timeout(Duration::from_secs(10)).unwrap();
+        let failure = early.expect_err("only one of them dispatches");
+        assert_eq!(failure.code, ErrorCode::LeafBusy, "{failure:?}");
+        assert_eq!(failure.effect, super::super::command::Effect::Unknown);
+        release.send(()).unwrap();
+        results
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap()
+            .expect("the dispatching window commits");
+        assert_eq!(r.world.owner.launches(), 1);
+        assert_eq!(r.operation(&op).unwrap().state, OperationState::Committed);
+    }
+}
+
+#[test]
+fn a_window_that_loses_the_race_to_record_the_same_launch_answers_from_the_winner() {
+    // Between this window looking the operation up (absent) and recording it, another window
+    // makes the very same request and finishes it. The first must not get a conflict nor send
+    // anything: it reads what the other recorded and answers from it.
+    let r = Arc::new(ready());
+    r.native_ok();
+    let op = op_id(&r.world);
+    let command = r.command("codex", "native", Value::Null, Value::Null);
+    let other = {
+        let (r, op, command) = (r.clone(), op.clone(), command.clone());
+        move || {
+            r.send_as(&op, command).expect("the other window commits");
+        }
+    };
+    r.world.owner.script(|s| s.on_root = Some(Box::new(other)));
+    let answer = r.send_as(&op, command).expect("answered from the receipt");
+    assert!(answer.replayed);
+    assert_eq!(r.world.owner.launches(), 1);
+    assert_eq!(r.operation(&op).unwrap().state, OperationState::Committed);
+    assert_eq!(r.world.now().sessions.len(), 1);
 }

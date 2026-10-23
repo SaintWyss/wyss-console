@@ -45,6 +45,8 @@
     alias: 'A registered folder is another spelling of a registered root',
     root_unavailable:
       'A registered folder is missing or cannot be used (not imported)',
+    root_shared:
+      'Another account can write in a registered folder, or that could not be checked (not imported)',
     host_offline: 'No terminal host answered: no live session is imported',
     over_bound: 'Something does not fit the limits; nothing is cut to fit',
     incompatible_id:
