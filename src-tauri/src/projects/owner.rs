@@ -559,7 +559,9 @@ impl<M: ManagedPort> Owner for RealOwner<M> {
             .call(
                 Some(epoch),
                 "term_create",
-                json!({"size": {"rows": 24, "cols": 80}, "cwd": path, "title": null}),
+                // Scratch has no folder: the host's own default starts it.
+                json!({"size": {"rows": 24, "cols": 80},
+                       "cwd": (!path.is_empty()).then_some(path), "title": null}),
             )
             .map_err(CallFailure::launch)?;
         let terminal_id = created["terminal_id"]

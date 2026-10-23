@@ -490,4 +490,5 @@ mod migration_tests;
 mod owner_tests;
 mod project_tests;
 mod service_tests;
+mod process_tests;
 mod store_tests;
