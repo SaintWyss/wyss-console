@@ -60,8 +60,8 @@ impl StoreV1 {
 
         self.check_projects(&bindings, &workspaces)?;
         self.check_bindings(&projects, &bindings)?;
-        self.check_workspaces(&projects, &sessions)?;
         self.check_sessions(&projects, &bindings, &operations, &closed)?;
+        self.check_workspaces(&projects, &sessions)?;
         self.check_operations(&projects, &bindings, &workspaces, &sessions)?;
         self.check_migration()
     }
@@ -491,7 +491,12 @@ fn check_layout(workspace: &Workspace, sessions: &HashMap<&str, &Association>) -
     for leaf in &workspace.leaves {
         if let Some(association) = &leaf.association_id {
             ensure(
-                sessions.contains_key(association.as_str()) && held.insert(association.as_str()),
+                sessions.get(association.as_str()).is_some_and(|a| {
+                    // A workspace shows its own project's sessions, and Scratch only the
+                    // unassigned ones: a session moves between them by explicit adoption,
+                    // never because a layout names it.
+                    a.origin_project_id == workspace.project_id
+                }) && held.insert(association.as_str()),
                 "workspaces.leaves.associationId",
             )?;
         }

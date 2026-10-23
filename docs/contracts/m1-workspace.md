@@ -105,7 +105,7 @@ workspace and binding are its own, a tombstone has neither and owns no workspace
 exactly one Scratch workspace; each workspace's leaves are exactly the leaves its layout places,
 each placed once, with focus and associations valid and no association twice in one workspace;
 one association per owner target (a terminal is one target whether it runs Native or a shell,
-and a Native session ID is held once); a bound association belongs to its binding's project;
+and a Native session ID is held once); a bound association belongs to its binding's project; a workspace shows only sessions whose origin is its own project (Scratch: origin null), so a session moves to a project by explicit adoption, never because a layout names it, and unassigned or unavailable history stays discoverable without an invented owner;
 bindings chain inside one project without a cycle; migration sources are one or two distinct
 kinds. Receipts: `pending` has a `claim` and no association and names an existing leaf, project
 and binding that agree; only `committed` must have an association, `ambiguous` may keep the

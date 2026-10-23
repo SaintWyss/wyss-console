@@ -910,9 +910,14 @@ fn a_tombstone_keeps_history_and_nothing_that_could_act() {
         ));
     invalid_at(&with_workspace, "projects.tombstone");
     // History may still name the tombstoned project.
-    accepted(&edited(|v| {
-        v["sessions"][0]["originProjectId"] = json!(id(0x10, 2))
-    }));
+    let mut history = full();
+    let mut retained = history["sessions"][0].clone();
+    retained["id"] = json!(id(0x50, 61));
+    retained["target"]["terminalId"] = json!(id(0x60, 61));
+    retained["originProjectId"] = json!(id(0x10, 2));
+    retained["state"] = json!("unavailable");
+    history["sessions"].as_array_mut().unwrap().push(retained);
+    accepted(&history);
 }
 
 #[test]
@@ -1418,4 +1423,42 @@ fn debug_output_never_prints_a_private_path() {
         "a path leaked into Debug output"
     );
     assert!(printed.contains("AbsolutePath(<private>)"));
+}
+
+#[test]
+fn a_workspace_shows_only_its_own_projects_sessions() {
+    // Scratch never shows a project's session, and a project never shows an unassigned one.
+    invalid_at(
+        &edited(|v| v["workspaces"][0]["leaves"][1]["associationId"] = json!(id(0x50, 2))),
+        "workspaces.leaves.associationId",
+    );
+    invalid_at(
+        &edited(|v| v["workspaces"][2]["leaves"][0]["associationId"] = json!(id(0x50, 1))),
+        "workspaces.leaves.associationId",
+    );
+    // Nor another project's session, live or tombstoned.
+    invalid_at(
+        &edited(|v| {
+            v["sessions"][1]["originProjectId"] = json!(id(0x10, 2));
+            v["sessions"][1]["bindingId"] = Value::Null;
+            v["sessions"][1]["bindingRevision"] = Value::Null;
+        }),
+        "workspaces.leaves.associationId",
+    );
+    // The same session in two workspaces of its own project is a mirror, and an unassigned or
+    // unavailable session no workspace shows is simply discoverable, with no invented owner.
+    accepted(&edited(|v| {
+        v["workspaces"][2]["leaves"][0]["associationId"] = json!(id(0x50, 2))
+    }));
+    accepted(&edited(|v| {
+        v["sessions"][0]["state"] = json!("unavailable");
+        v["workspaces"][0]["leaves"][0]["associationId"] = Value::Null;
+    }));
+    let mut orphan = full();
+    let mut history = orphan["sessions"][0].clone();
+    history["id"] = json!(id(0x50, 60));
+    history["target"]["terminalId"] = json!(id(0x60, 60));
+    history["state"] = json!("unavailable");
+    orphan["sessions"].as_array_mut().unwrap().push(history);
+    accepted(&orphan);
 }
