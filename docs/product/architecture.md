@@ -73,30 +73,18 @@ when P1 and P2 histories originated from a migration copy.
 
 ### Project/workspace data contract (proposed version 1)
 
-`ProjectV1`: schema, ProjectId, label, created/updated timestamps, revision, archived,
-root bindings, default workspace ID and provider-specific default profile references.
-`RootBindingV1`: BindingId, HostId, revision, canonical path (local private store only),
-device/inode observation plus explicit relink history, checkout kind and state.
-Identity observation must be revalidated through descriptors before scoped effects;
-an inode is not everlasting identity and remote clients never supply trusted paths.
-`WorkspaceV1`: schema, WorkspaceId, project/host IDs, revision, layout tree, focus,
-pinned safe titles, session references and launch preferences. No prompt/output,
-provider credential, lease, approval, generated overlay or PID is stored there.
+The exact proposed version1 records, closed commands, limits, compatibility transport,
+CAS/journal, migration and M1 acceptance tests are in the on-demand
+[M1 implementation contract](../contracts/m1-workspace.md). It refines the previous
+candidate to the existing binary layout depth6 and preserves Native's 32-hex IDs alongside
+terminal/Managed UUIDs. Nothing there is implemented by this documentation change.
 
-Launch requests use project/binding/workspace IDs, expected revisions, provider/mode/
-profile IDs and placement. Backend derives the actual directory and closed launch
-parameters, invokes the existing owner and records association only after an unambiguous
-receipt. If spawn may have happened without association commit, retain an ambiguous
-association entry, reconcile by immutable request/session ID and do not spawn again.
-Unknown schema/fields, wrong host/project, stale binding or deleted profile refuses.
-
-Proposed admission ceilings: 256 project records, 32 workspaces per project, 16 root
-bindings per project, 16 terminal leaves per workspace subject to the **existing global
-host PTY cap of 16**, tree depth 8, labels 64 Unicode scalars, path 4096 UTF-8 bytes,
-project/workspace file <=4 MiB. Validate counts/bytes/depth before parse allocation;
-these are design limits to test, not performance measurements. Do not invent garbage
-collection of user projects on reaching a ceiling; refuse new records and offer archive/
-explicit removal. Archive itself does not free a live execution slot.
+M1 adds a private projection store; it does not take over host/authority persistence.
+Read-only recovery must bypass Native `Registry::open` (mutates unfinished records),
+lazy HostLink startup/retry, and layout restoration that recreates missing shells.
+Old-host compatibility checks the peer on the same connection as each operation;
+metadata/session association never grants Managed execution authority. ADR0052 remains
+Proposed and requires explicit owner acceptance before release/adoption.
 
 ## 3. Component contracts and invariants
 

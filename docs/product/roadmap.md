@@ -30,41 +30,44 @@ independent review of its changed trust surfaces before release.
 
 ### M0 — Qualification and preservation foundation
 
-Inputs: baseline code, inventory, status matrix, accepted ADRs and existing acceptance.
-Produce one provider/build/mode/profile/capability manifest, with source of evidence,
-exact tests, observed/fixture status and remaining failure cases. Inventory only the
-scoped runtime/configuration state needed by a future authorized operation; never read
-credential values or broadly search HOME. Freeze benchmark procedure from architecture15
-and maintain all historical failures alongside later successes.
+**Eligible M0 work completed, 2026-10-22.** Reproducible source/component inventory,
+installed-build capability manifest, every F8 resource-ceiling classification, scoped
+read-only preservation observations and selected fixture results are in the
+[canonical baseline](implementation-status.md#m0-engineering-baseline) and its linked
+provider manifest. Phase1 merged at `d2ee8d2`; application baseline is unchanged.
+No installed store, credential, service or session was changed by M0.
 
-Trace F8 resource keys through `f8/budget.rs` and actual launcher/transport/scheduler
-enforcement. Classify hard enforcement, soft observations and NOT_PROVEN separately;
-do not turn contract JSON constants into measured whole-process-tree caps. Prepare
-release tests for missing enforcement/fairness before expanding runtime capacity.
-Carry E9 policy-source/MCP matrix and E1–E8 distinctions for G-INF.
-
-Verification: link/ID/schema coverage; deterministic fixtures and targeted boundary
-checks; baseline resource samples only under the later authorized procedure. DoD:
-each release claim has a reproducible evidence row, each missing row a blocked criterion.
-Rollback: documentation/manifest revert only; no installed state changes.
+Performance procedure is frozen by reference to architecture15; new real-desktop budgets,
+provider consumption/refresh and exact resource conformance are explicitly NOT_PROVEN,
+not counted as qualified production measurements. M1 release must collect its own
+reference performance/preservation evidence; M2/M3 carry G-INF E1–E9 and provider parity;
+M5 owns F8 scratch/catalogue mismatches, stale classification, service quantum/load and
+attachment/retention enforcement proof before any capacity expansion. Current cap1 stays.
+No paid/provider/lifecycle experiment is required to begin M1's pure implementation work.
+Rollback of M0 is documentation/manifest revert only, with no installed operation.
 
 ### M1 — Project-centered workspace
 
-Implement FP-CTX-01..04 and project-scoped screen routing against existing host/authority
-owners. Preserve global admin and Scratch. Deliver exact versioned schema/DTO fixtures,
-backend root resolver, deterministic legacy project/layout mapping, named workspaces,
-safe context capture, archive/remove semantics and session associations. A configured
-project is not new Managed authority. ADR0052 remains Proposed in this phase.
+**Implementation-ready proposal; not implemented or released.** Implement FP-CTX-01..04
+using the exact proposed [M1 contract](../contracts/m1-workspace.md): closed records/DTOs,
+limits, dependency-ordered increments, M1-01..13 tests, deterministic legacy migration,
+context/receipt handling, mixed-host compatibility, preservation and rollback. That is
+the single detailed handoff; do not duplicate it in a new plan. Global administration and
+Scratch stay independent from Managed authority. M1 does not implement Claude Managed,
+OL3, new remote transport or concurrency above1. ADR0052 remains **Proposed**; explicit
+Santiago acceptance is required before release/adoption, not inferred from PR16 merge.
 
-Verification: AC-FP-CTX-01..04, multi-project/multi-window context races, stale binding,
-duplicate/relinked roots, newer/corrupt stores, interrupted migration and mixed-host
-feature negotiation. Manual project switch/restore journeys must create zero duplicate
-processes or prompts. DoD: owner can enter a project and reach all its work/settings
-without guessing scope; every existing session remains attributable.
+Verification/DoD: all AC-FP-CTX-01..04 and M1-01..13, including two windows, old host,
+no-effect navigation/restore, dispatch/association ambiguity, corrupt/newer stores and
+interrupted migration. Native desktop acceptance must show all existing sessions remain
+attributable, zero duplicate processes/prompts, no host restart/SQL migration, no project-
+switch effects, and measured performance budgets. M1 tests are NOT_RUN until implemented.
 
-Risk: path-keyed legacy data and spawn/association partial commit. Rollback: preserve
-old metadata snapshot and deterministic map; select old reader only after accounting
-for post-snapshot records. No host stop or authority database migration for a UI rollback.
+Risk/rollback: existing registry open mutates and old layout restore can recreate shells;
+M1 requires non-starting checked observation and attach-only recovery. Preserve private
+legacy snapshot/map, account for post-snapshot work and do not restore over a live writer.
+Use GUI/metadata rollback with explicit owner review; installer rollback can close terminals
+and is not a substitute. Exact failure states/procedure are in contract sections3–4.
 
 ### M2 — Native parity and configuration closure
 
