@@ -198,7 +198,10 @@ impl Owner for FakeOwner {
     fn root(&self, path: &str) -> Result<RootInfo, RootError> {
         self.script(|s| {
             s.calls.push("root".into());
-            s.roots.get(path).cloned().unwrap_or(Err(RootError::Missing))
+            s.roots
+                .get(path)
+                .cloned()
+                .unwrap_or(Err(RootError::Missing))
         })
     }
 
@@ -216,7 +219,8 @@ impl Owner for FakeOwner {
         epoch: &str,
     ) -> Result<NativeLaunched, LaunchError> {
         let gate = self.script(|s| {
-            s.calls.push(format!("launch_native {} {epoch}", launch.path));
+            s.calls
+                .push(format!("launch_native {} {epoch}", launch.path));
             s.gate.take()
         });
         if let Some(gate) = gate {
@@ -240,13 +244,24 @@ impl Owner for FakeOwner {
         })
     }
 
-    fn term_read(&self, epoch: &str, terminal: &str, from: u64, _: u64) -> Result<TermRead, OwnerError> {
+    fn term_read(
+        &self,
+        epoch: &str,
+        terminal: &str,
+        from: u64,
+        _: u64,
+    ) -> Result<TermRead, OwnerError> {
         self.script(|s| {
             s.calls.push(format!("term_read {terminal}"));
             if epoch != s.epoch {
                 return Err(OwnerError::HostChanged);
             }
-            Ok(TermRead { data: b"out".to_vec(), next: from + 3, eof: false, truncated: false })
+            Ok(TermRead {
+                data: b"out".to_vec(),
+                next: from + 3,
+                eof: false,
+                truncated: false,
+            })
         })
     }
 
@@ -261,7 +276,13 @@ impl Owner for FakeOwner {
         })
     }
 
-    fn term_resize(&self, epoch: &str, terminal: &str, rows: u16, cols: u16) -> Result<(), OwnerError> {
+    fn term_resize(
+        &self,
+        epoch: &str,
+        terminal: &str,
+        rows: u16,
+        cols: u16,
+    ) -> Result<(), OwnerError> {
         self.script(|s| {
             s.calls.push(format!("term_resize {terminal}"));
             if epoch != s.epoch {
@@ -318,7 +339,9 @@ impl World {
     }
 
     pub(super) fn with_faults(mut self, faults: Faults) -> Self {
-        self.store = Store::open(self.dir.0.join("v1")).unwrap().with_faults(faults);
+        self.store = Store::open(self.dir.0.join("v1"))
+            .unwrap()
+            .with_faults(faults);
         self
     }
 
@@ -338,15 +361,15 @@ impl World {
         }
     }
 
-    pub(super) fn host_id(&self) -> String {
-        self.now().host_id.as_str().to_owned()
-    }
-
     /// A native pick as the dialog would issue it.
     pub(super) fn pick(&self, path: &str, purpose: Purpose) -> String {
         let token = format!("token-{}", self.env.uuid());
-        self.selections
-            .issue(token.clone(), path.to_owned(), purpose, self.window_revision);
+        self.selections.issue(
+            token.clone(),
+            path.to_owned(),
+            purpose,
+            self.window_revision,
+        );
         token
     }
 
@@ -370,7 +393,13 @@ impl World {
         })
     }
 
-    pub(super) fn envelope(&self, operation: &str, revision: Counter, context: Value, command: Value) -> Envelope {
+    pub(super) fn envelope(
+        &self,
+        operation: &str,
+        revision: Counter,
+        context: Value,
+        command: Value,
+    ) -> Envelope {
         serde_json::from_value(json!({
             "schema": 1,
             "operationId": operation,
@@ -385,7 +414,8 @@ impl World {
     pub(super) fn send(&self, context: Value, command: Value) -> Result<Receipt, Failure> {
         let revision = self.now().revision;
         let operation = self.env.uuid();
-        self.engine().execute(self.envelope(&operation, revision, context, command))
+        self.engine()
+            .execute(self.envelope(&operation, revision, context, command))
     }
 
     /// Registers `path` and returns (project, binding, workspace) IDs.
@@ -455,9 +485,9 @@ pub(super) fn unusable(result: Result<StoreV1, StoreError>) -> super::store::Unu
     }
 }
 
-mod store_tests;
-mod project_tests;
 mod launch_tests;
-mod owner_tests;
 mod migration_tests;
+mod owner_tests;
+mod project_tests;
 mod service_tests;
+mod store_tests;

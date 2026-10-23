@@ -8,8 +8,7 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
-    fs,
-    io,
+    fs, io,
     os::unix::{
         fs::{MetadataExt, OpenOptionsExt},
         net::UnixStream,
@@ -165,17 +164,30 @@ pub trait Owner: Send + Sync {
     fn root(&self, path: &str) -> Result<RootInfo, RootError>;
     /// Makes `name` inside `parent` exclusively, without Git and without launching anything.
     fn create_folder(&self, parent: &str, name: &str) -> Result<String, FolderError>;
-    fn launch_native(&self, launch: &NativeLaunch, epoch: &str)
-    -> Result<NativeLaunched, LaunchError>;
+    fn launch_native(
+        &self,
+        launch: &NativeLaunch,
+        epoch: &str,
+    ) -> Result<NativeLaunched, LaunchError>;
     fn launch_shell(&self, path: &str, epoch: &str) -> Result<ShellLaunched, LaunchError>;
     fn launch_managed(&self, launch: &ManagedLaunch) -> Result<ManagedLaunched, LaunchError>;
     /// Terminal I/O through the same checked connection: a different host is `HostChanged` and
     /// nothing is sent. `wait_ms` bounds how long a read waits for output.
-    fn term_read(&self, epoch: &str, terminal: &str, from: u64, wait_ms: u64)
-    -> Result<TermRead, OwnerError>;
+    fn term_read(
+        &self,
+        epoch: &str,
+        terminal: &str,
+        from: u64,
+        wait_ms: u64,
+    ) -> Result<TermRead, OwnerError>;
     fn term_write(&self, epoch: &str, terminal: &str, data: &[u8]) -> Result<(), OwnerError>;
-    fn term_resize(&self, epoch: &str, terminal: &str, rows: u16, cols: u16)
-    -> Result<(), OwnerError>;
+    fn term_resize(
+        &self,
+        epoch: &str,
+        terminal: &str,
+        rows: u16,
+        cols: u16,
+    ) -> Result<(), OwnerError>;
 }
 
 // ---- the checked connection --------------------------------------------------------------
@@ -191,7 +203,12 @@ fn observe_peer(stream: &UnixStream, socket: &Path) -> Result<String, OwnerError
     }
     let meta = fs::symlink_metadata(socket).map_err(|_| OwnerError::HostChanged)?;
     let ticks = start_ticks(credentials.pid()).ok_or(OwnerError::HostChanged)?;
-    let epoch = format!("h1:{}:{}:{}:{ticks}", meta.dev(), meta.ino(), credentials.pid());
+    let epoch = format!(
+        "h1:{}:{}:{}:{ticks}",
+        meta.dev(),
+        meta.ino(),
+        credentials.pid()
+    );
     if epoch.len() > MAX_EPOCH_BYTES {
         return Err(OwnerError::HostChanged);
     }
@@ -265,7 +282,12 @@ impl HostSocket {
         }
         let features = hello["features"]
             .as_array()
-            .map(|names| names.iter().filter_map(|n| n.as_str().map(str::to_owned)).collect())
+            .map(|names| {
+                names
+                    .iter()
+                    .filter_map(|n| n.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default();
         // The terminals are read on a connection of their own, checked against the epoch just
         // observed, so a host replaced between the two calls is refused rather than mixed.
@@ -377,9 +399,12 @@ pub fn inspect_root_in(path: &str, home: Option<&Path>) -> Result<RootInfo, Root
 
 fn system_folder(path: &Path) -> bool {
     path.components().count() <= 2
-        || ["/etc", "/usr", "/bin", "/sbin", "/lib", "/boot", "/proc", "/sys", "/dev", "/run", "/var"]
-            .iter()
-            .any(|root| path.starts_with(root))
+        || [
+            "/etc", "/usr", "/bin", "/sbin", "/lib", "/boot", "/proc", "/sys", "/dev", "/run",
+            "/var",
+        ]
+        .iter()
+        .any(|root| path.starts_with(root))
 }
 
 /// Creates `name` inside `parent` exclusively: one plain basename, nothing else.
@@ -397,7 +422,9 @@ pub fn make_folder(parent: &str, name: &str) -> Result<String, FolderError> {
     let target = Path::new(&parent.path).join(name);
     match fs::create_dir(&target) {
         Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Err(FolderError::Exists),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            return Err(FolderError::Exists);
+        }
         Err(_) => return Err(FolderError::Io),
     }
     target.to_str().map(str::to_owned).ok_or(FolderError::Io)
@@ -413,9 +440,11 @@ pub trait ManagedPort: Send + Sync {
     fn prepare(&self, launch: &ManagedLaunch) -> Result<ManagedLaunched, LaunchError>;
 }
 
-/// No Managed authority is reachable from this build.
+/// No Managed authority is reachable. Only tests build an owner without one.
+#[cfg(test)]
 pub struct NoManaged;
 
+#[cfg(test)]
 impl ManagedPort for NoManaged {
     fn sessions(&self) -> Result<Vec<ManagedRow>, OwnerError> {
         Ok(Vec::new())
@@ -585,7 +614,13 @@ impl<M: ManagedPort> Owner for RealOwner<M> {
             .map_err(CallFailure::before)
     }
 
-    fn term_resize(&self, epoch: &str, terminal: &str, rows: u16, cols: u16) -> Result<(), OwnerError> {
+    fn term_resize(
+        &self,
+        epoch: &str,
+        terminal: &str,
+        rows: u16,
+        cols: u16,
+    ) -> Result<(), OwnerError> {
         self.socket()?
             .call(
                 Some(epoch),

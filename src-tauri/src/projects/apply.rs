@@ -25,10 +25,9 @@ use wyss_console::contracts::{
     m1::{
         M1ErrorCode,
         records::{
-            Association, AssociationState, Binding, BindingState, Leaf, LaunchProvider,
-            ManagedSafetyProfile, Mode, Node, Operation, OperationKind,
-            OperationState, Preferences, ProfileDefaults, ProfileRef, Project, StoreV1, Target,
-            Workspace,
+            Association, AssociationState, Binding, BindingState, LaunchProvider, Leaf,
+            ManagedSafetyProfile, Mode, Node, Operation, OperationKind, OperationState,
+            Preferences, ProfileDefaults, ProfileRef, Project, StoreV1, Target, Workspace,
         },
         scalar::{
             AbsolutePath, AssociationId, BindingId, Counter, EpochText, LeafId, ManagedSessionId,
@@ -192,8 +191,9 @@ pub fn store_failure(error: StoreError) -> Failure {
         })
         .with_field(error.field),
         StoreError::Io(_) => Failure::new(ErrorCode::IoFailure),
-        StoreError::PublishUnknown(_) => Failure::new(ErrorCode::IoFailure)
-            .with_effect(Effect::Unknown),
+        StoreError::PublishUnknown(_) => {
+            Failure::new(ErrorCode::IoFailure).with_effect(Effect::Unknown)
+        }
     }
 }
 
@@ -221,7 +221,10 @@ fn valid<T, E>(value: Result<T, E>, field: &'static str) -> R<T> {
 }
 
 fn label_for(path: &str) -> Text {
-    let base = path.rsplit('/').find(|s| !s.is_empty()).unwrap_or("Project");
+    let base = path
+        .rsplit('/')
+        .find(|s| !s.is_empty())
+        .unwrap_or("Project");
     let cleaned: String = base
         .chars()
         .map(|c| if c.is_control() { '?' } else { c })
@@ -235,9 +238,7 @@ fn counter(value: u64) -> Counter {
 }
 
 fn bump(revision: Counter, field: &'static str) -> R<Counter> {
-    revision
-        .next()
-        .map_or_else(|| bad(field), Ok)
+    revision.next().map_or_else(|| bad(field), Ok)
 }
 
 fn native_preferences() -> Preferences {
@@ -251,7 +252,11 @@ fn native_preferences() -> Preferences {
 
 impl Engine<'_> {
     fn load(&self) -> R<StoreV1> {
-        match self.store.read().map_err(|_| Failure::new(ErrorCode::IoFailure))? {
+        match self
+            .store
+            .read()
+            .map_err(|_| Failure::new(ErrorCode::IoFailure))?
+        {
             Loaded::Ready(store) => Ok(*store),
             Loaded::Missing => bad("store"),
             Loaded::Unusable(unusable) => Err(store_failure(StoreError::Unusable(unusable))),
@@ -323,8 +328,12 @@ impl Engine<'_> {
             }
             | Command::CloseWorkspace { workspace_id: id }
             | Command::DeleteWorkspace { workspace_id: id }
-            | Command::Attach { workspace_id: id, .. }
-            | Command::Detach { workspace_id: id, .. } => of_workspace(id),
+            | Command::Attach {
+                workspace_id: id, ..
+            }
+            | Command::Detach {
+                workspace_id: id, ..
+            } => of_workspace(id),
             Command::SaveWorkspace(save) => of_workspace(&save.workspace_id),
             Command::Launch(launch) => of_workspace(&launch.workspace_id),
             Command::AdoptScratch { project_id, .. } => Some(Some(project_id.clone())),
@@ -342,7 +351,7 @@ impl Engine<'_> {
     pub fn execute(&self, envelope: Envelope) -> Result<Receipt, Failure> {
         let tagged = |mut failure: Failure| {
             failure.operation_id = Some(envelope.operation_id.clone());
-            failure.context = Some(envelope.context.clone());
+            failure.context = Some(Box::new(envelope.context.clone()));
             failure
         };
         self.run(&envelope).map_err(tagged)
@@ -379,22 +388,27 @@ impl Engine<'_> {
                 name,
             } => {
                 let parent = self.pick(selection_token, Purpose::Parent, revision)?;
-                let made = self.owner.create_folder(&parent, name).map_err(|e| match e {
-                    FolderError::Name => Failure::new(ErrorCode::InvalidRecord).with_field("name"),
-                    FolderError::Exists => Failure::new(ErrorCode::OwnerRefused).with_field("name"),
-                    FolderError::Io => Failure::new(ErrorCode::IoFailure),
-                })?;
+                let made = self
+                    .owner
+                    .create_folder(&parent, name)
+                    .map_err(|e| match e {
+                        FolderError::Name => {
+                            Failure::new(ErrorCode::InvalidRecord).with_field("name")
+                        }
+                        FolderError::Exists => {
+                            Failure::new(ErrorCode::OwnerRefused).with_field("name")
+                        }
+                        FolderError::Io => Failure::new(ErrorCode::IoFailure),
+                    })?;
                 let root = self.owner.root(&made).map_err(root_failure)?;
                 // The folder exists now. If the store cannot take it, it stays, empty and
                 // visible, and the user can register it; it is never deleted from here.
                 self.commit(envelope, move |store, env| register(store, &root, env))
-                    .map_err(|failure| {
-                        Failure {
-                            effect: Effect::Unknown,
-                            next_action: NextAction::ChooseAgain,
-                            field: Some("createdFolder"),
-                            ..failure
-                        }
+                    .map_err(|failure| Failure {
+                        effect: Effect::Unknown,
+                        next_action: NextAction::ChooseAgain,
+                        field: Some("createdFolder"),
+                        ..failure
                     })
             }
             Command::Relink {
@@ -405,7 +419,9 @@ impl Engine<'_> {
                 let path = self.pick(selection_token, Purpose::Relink, revision)?;
                 let root = self.owner.root(&path).map_err(root_failure)?;
                 let (project_id, old) = (project_id.clone(), old_binding_id.clone());
-                self.commit(envelope, move |store, env| relink(store, &project_id, &old, &root, env))
+                self.commit(envelope, move |store, env| {
+                    relink(store, &project_id, &old, &root, env)
+                })
             }
             Command::RenameProject { project_id, label } => {
                 let (project_id, label) = (project_id.clone(), label.clone());
@@ -435,9 +451,12 @@ impl Engine<'_> {
                 self.commit(envelope, move |store, env| {
                     live_project(store, &project_id)?;
                     let id = valid(WorkspaceId::parse(&env.uuid()), "workspaces")?;
-                    store
-                        .workspaces
-                        .push(new_workspace(id.clone(), Some(project_id), store.host_id.clone(), label));
+                    store.workspaces.push(new_workspace(
+                        id.clone(),
+                        Some(project_id),
+                        store.host_id.clone(),
+                        label,
+                    ));
                     Ok(vec![created("workspace", id.as_str())])
                 })
             }
@@ -446,7 +465,9 @@ impl Engine<'_> {
                 label,
             } => {
                 let (source, label) = (source_workspace_id.clone(), label.clone());
-                self.commit(envelope, move |store, env| duplicate(store, &source, label, env))
+                self.commit(envelope, move |store, env| {
+                    duplicate(store, &source, label, env)
+                })
             }
             Command::SaveWorkspace(save) => {
                 let save = save.clone();
@@ -454,7 +475,9 @@ impl Engine<'_> {
             }
             Command::DeleteWorkspace { workspace_id } => {
                 let workspace_id = workspace_id.clone();
-                self.commit(envelope, move |store, env| delete_workspace(store, &workspace_id, env))
+                self.commit(envelope, move |store, env| {
+                    delete_workspace(store, &workspace_id, env)
+                })
             }
             Command::Attach {
                 workspace_id,
@@ -466,18 +489,28 @@ impl Engine<'_> {
                 leaf_id,
                 association_id,
             } => {
-                let (workspace, leaf, association) =
-                    (workspace_id.clone(), leaf_id.clone(), association_id.clone());
-                self.commit(envelope, move |store, _| detach(store, &workspace, &leaf, &association))
+                let (workspace, leaf, association) = (
+                    workspace_id.clone(),
+                    leaf_id.clone(),
+                    association_id.clone(),
+                );
+                self.commit(envelope, move |store, _| {
+                    detach(store, &workspace, &leaf, &association)
+                })
             }
             Command::AdoptScratch {
                 association_id,
                 project_id,
                 binding_id,
             } => {
-                let (association, project, binding) =
-                    (association_id.clone(), project_id.clone(), binding_id.clone());
-                self.commit(envelope, move |store, _| adopt(store, &association, &project, &binding))
+                let (association, project, binding) = (
+                    association_id.clone(),
+                    project_id.clone(),
+                    binding_id.clone(),
+                );
+                self.commit(envelope, move |store, _| {
+                    adopt(store, &association, &project, &binding)
+                })
             }
         }
     }
@@ -511,8 +544,7 @@ impl Engine<'_> {
                 created = change(store, self.env)?;
                 Ok::<(), Failure>(())
             })
-            .map_err(store_failure)?
-            .map_err(|failure| failure)?;
+            .map_err(store_failure)??;
         Ok(self.receipt(envelope, committed.revision, created))
     }
 }
@@ -698,8 +730,8 @@ fn duplicate(
             Node::Split { dir, ratio, a, b } => Node::Split {
                 dir: *dir,
                 ratio: *ratio,
-                a: Box::new(remap(a, &renamed)?),
-                b: Box::new(remap(b, &renamed)?),
+                a: Box::new(remap(a, renamed)?),
+                b: Box::new(remap(b, renamed)?),
             },
         })
     }
@@ -725,7 +757,11 @@ fn save_workspace(store: &mut StoreV1, save: &SaveWorkspace) -> R<Vec<Created>> 
         .filter(|o| o.workspace_id == save.workspace_id && o.state == OperationState::Pending)
         .map(|o| o.leaf_id.clone())
         .collect();
-    let Some(workspace) = store.workspaces.iter_mut().find(|w| w.id == save.workspace_id) else {
+    let Some(workspace) = store
+        .workspaces
+        .iter_mut()
+        .find(|w| w.id == save.workspace_id)
+    else {
         return fail(ErrorCode::ContextStale);
     };
     if workspace.revision != save.expected_workspace_revision {
@@ -854,7 +890,9 @@ fn adopt(
     let binding = store
         .bindings
         .iter()
-        .find(|b| &b.id == binding_id && &b.project_id == project_id && b.state == BindingState::Valid)
+        .find(|b| {
+            &b.id == binding_id && &b.project_id == project_id && b.state == BindingState::Valid
+        })
         .map(|b| b.revision);
     let Some(revision) = binding else {
         return fail(ErrorCode::RootIneligible);
@@ -871,7 +909,11 @@ fn adopt(
     found.binding_revision = Some(revision);
     found.state = AssociationState::Detached;
     // A Scratch leaf no longer shows what is not Scratch's: the shell stays discoverable.
-    for workspace in store.workspaces.iter_mut().filter(|w| w.project_id.is_none()) {
+    for workspace in store
+        .workspaces
+        .iter_mut()
+        .filter(|w| w.project_id.is_none())
+    {
         for leaf in workspace
             .leaves
             .iter_mut()
@@ -928,20 +970,20 @@ impl Engine<'_> {
         if context.workspace_id.as_ref() != Some(&launch.workspace_id) {
             return fail(ErrorCode::ContextStale);
         }
-        let Some(workspace) = current.workspaces.iter().find(|w| w.id == launch.workspace_id)
+        let Some(workspace) = current
+            .workspaces
+            .iter()
+            .find(|w| w.id == launch.workspace_id)
         else {
             return fail(ErrorCode::ContextStale);
         };
         if !workspace.leaves.iter().any(|l| l.id == launch.leaf_id) {
             return fail(ErrorCode::ContextStale);
         }
-        let native = match &launch.native_profile {
-            Some(choice) => Some(ProfileRef {
-                id: choice.id.clone(),
-                version: choice.version,
-            }),
-            None => None,
-        };
+        let native = launch.native_profile.as_ref().map(|choice| ProfileRef {
+            id: choice.id.clone(),
+            version: choice.version,
+        });
         let safety = launch.managed_safety_profile;
         // The two profiles are different things; a launch names the one its mode uses and never
         // a stand-in for the other.
@@ -1032,10 +1074,12 @@ impl Engine<'_> {
                     receipt.replayed = true;
                     Ok(receipt)
                 }
-                OperationState::Pending => Err(Failure::new(ErrorCode::LeafBusy)
-                    .with_effect(Effect::Unknown)),
-                OperationState::Ambiguous => Err(Failure::new(ErrorCode::EffectAmbiguous)
-                    .with_effect(Effect::Unknown)),
+                OperationState::Pending => {
+                    Err(Failure::new(ErrorCode::LeafBusy).with_effect(Effect::Unknown))
+                }
+                OperationState::Ambiguous => {
+                    Err(Failure::new(ErrorCode::EffectAmbiguous).with_effect(Effect::Unknown))
+                }
                 OperationState::Refused => fail(ErrorCode::OwnerRefused),
             };
         }
@@ -1087,7 +1131,10 @@ impl Engine<'_> {
             state: OperationState::Pending,
             association_id: None,
             claim: Some(valid(EpochText::parse(&claim), "operations.claim")?),
-            created_at: valid(UtcTimestamp::try_from(self.env.now()), "operations.createdAt")?,
+            created_at: valid(
+                UtcTimestamp::try_from(self.env.now()),
+                "operations.createdAt",
+            )?,
         };
         self.store
             .transact(envelope.expected_store_revision, |store| {
@@ -1146,9 +1193,7 @@ impl Engine<'_> {
                 let epoch = epoch.ok_or(not_dispatched(OwnerError::HostOffline))?;
                 // Scratch has no folder: the host's own default applies.
                 let path = path.unwrap_or_default();
-                self.owner
-                    .launch_shell(&path, epoch)
-                    .map(Dispatched::Shell)
+                self.owner.launch_shell(&path, epoch).map(Dispatched::Shell)
             }
             (Mode::Managed, Some(agent)) => {
                 let path = path.ok_or(not_dispatched(OwnerError::Refused))?;
@@ -1262,11 +1307,15 @@ impl Engine<'_> {
                             committed.revision,
                             vec![created("association", association_id.as_str())],
                         )),
-                        Ok(_) => Err(Failure::new(ErrorCode::EffectAmbiguous)
-                            .with_effect(Effect::Committed)),
+                        Ok(_) => {
+                            Err(Failure::new(ErrorCode::EffectAmbiguous)
+                                .with_effect(Effect::Committed))
+                        }
                         Err(LaunchError::NotDispatched(error)) => Err(owner_failure(error)),
-                        Err(LaunchError::Ambiguous) => Err(Failure::new(ErrorCode::EffectAmbiguous)
-                            .with_effect(Effect::Unknown)),
+                        Err(LaunchError::Ambiguous) => {
+                            Err(Failure::new(ErrorCode::EffectAmbiguous)
+                                .with_effect(Effect::Unknown))
+                        }
                     };
                 }
                 Ok(Err(failure)) => return Err(failure),
@@ -1327,7 +1376,10 @@ impl Engine<'_> {
                 host_epoch,
                 session_id,
             } => {
-                let view = self.owner.host(Some(host_epoch.as_str())).map_err(owner_failure)?;
+                let view = self
+                    .owner
+                    .host(Some(host_epoch.as_str()))
+                    .map_err(owner_failure)?;
                 let row = view
                     .terminals
                     .iter()
@@ -1340,7 +1392,10 @@ impl Engine<'_> {
                 terminal_id,
                 host_epoch,
             } => {
-                let view = self.owner.host(Some(host_epoch.as_str())).map_err(owner_failure)?;
+                let view = self
+                    .owner
+                    .host(Some(host_epoch.as_str()))
+                    .map_err(owner_failure)?;
                 if !view
                     .terminals
                     .iter()
@@ -1369,22 +1424,26 @@ impl Engine<'_> {
                 if requested_safety_profile.is_some()
                     && row.effective_profile != *requested_safety_profile
                 {
-                    return Err(Failure::new(ErrorCode::OwnerRefused)
-                        .with_field("managedSafetyProfile"));
+                    return Err(
+                        Failure::new(ErrorCode::OwnerRefused).with_field("managedSafetyProfile")
+                    );
                 }
             }
         }
-        let (workspace_id, leaf_id, association_id) =
-            (workspace_id.clone(), leaf_id.clone(), association_id.clone());
+        let (workspace_id, leaf_id, association_id) = (
+            workspace_id.clone(),
+            leaf_id.clone(),
+            association_id.clone(),
+        );
         self.commit(envelope, move |store, _| {
-            let Some(workspace) = store.workspaces.iter_mut().find(|w| w.id == workspace_id)
-            else {
+            let Some(workspace) = store.workspaces.iter_mut().find(|w| w.id == workspace_id) else {
                 return fail(ErrorCode::ContextStale);
             };
             let Some(leaf) = workspace.leaves.iter_mut().find(|l| l.id == leaf_id) else {
                 return fail(ErrorCode::ContextStale);
             };
-            if leaf.association_id.is_some() && leaf.association_id.as_ref() != Some(&association_id)
+            if leaf.association_id.is_some()
+                && leaf.association_id.as_ref() != Some(&association_id)
             {
                 return fail(ErrorCode::LeafBusy);
             }
@@ -1481,7 +1540,9 @@ impl Engine<'_> {
                 .filter(|b| b.project_id == project_id)
                 .map(|b| b.id.clone())
                 .collect();
-            store.workspaces.retain(|w| w.project_id.as_ref() != Some(&project_id));
+            store
+                .workspaces
+                .retain(|w| w.project_id.as_ref() != Some(&project_id));
             store.bindings.retain(|b| b.project_id != project_id);
             if retain_history {
                 // History keeps its origin; it no longer names a binding that is gone.
@@ -1555,7 +1616,9 @@ impl Engine<'_> {
                             .iter()
                             .any(|t| t.running && !held.contains(t.terminal_id.as_str()))
                         {
-                            return Err(Failure::new(ErrorCode::OwnerRefused).with_field("candidates"));
+                            return Err(
+                                Failure::new(ErrorCode::OwnerRefused).with_field("candidates")
+                            );
                         }
                     }
                     Mode::Managed => {
@@ -1569,7 +1632,9 @@ impl Engine<'_> {
                             })
                             .collect();
                         if rows.iter().any(|r| !known.contains(r.session_id.as_str())) {
-                            return Err(Failure::new(ErrorCode::OwnerRefused).with_field("candidates"));
+                            return Err(
+                                Failure::new(ErrorCode::OwnerRefused).with_field("candidates")
+                            );
                         }
                     }
                 }
@@ -1581,6 +1646,47 @@ impl Engine<'_> {
                     operation.state = OperationState::Refused;
                     operation.claim = None;
                     Ok(Vec::new())
+                })
+            }
+            Resolution::RetryManaged => {
+                if operation.mode != Mode::Managed {
+                    return fail(ErrorCode::UnsupportedCapability);
+                }
+                let agent = match operation.provider {
+                    LaunchProvider::Codex => Agent::Codex,
+                    LaunchProvider::Claude => Agent::ClaudeCode,
+                    LaunchProvider::Shell => return bad("provider"),
+                };
+                let requested = operation
+                    .managed_safety_profile
+                    .map_or_else(|| bad("profile"), Ok)?;
+                let path = operation
+                    .binding_id
+                    .as_ref()
+                    .and_then(|id| current.bindings.iter().find(|b| &b.id == id))
+                    .map(|b| b.path.as_str().to_owned())
+                    .map_or_else(|| fail(ErrorCode::RootIneligible), Ok)?;
+                // The same intent the first attempt used: the owner settles it, it does not repeat it.
+                let done = match self.owner.launch_managed(&ManagedLaunch {
+                    agent,
+                    path,
+                    requested,
+                    intent: launch_id.as_str().to_owned(),
+                }) {
+                    Ok(done) => done,
+                    Err(LaunchError::NotDispatched(error)) => return Err(owner_failure(error)),
+                    Err(LaunchError::Ambiguous) => {
+                        return Err(
+                            Failure::new(ErrorCode::EffectAmbiguous).with_effect(Effect::Unknown)
+                        );
+                    }
+                };
+                let target = self
+                    .target_of(&Dispatched::Managed(done), None, Some(requested))
+                    .map_or_else(|| bad("target"), Ok)?;
+                let association_id = valid(AssociationId::parse(&self.env.uuid()), "sessions")?;
+                self.commit(envelope, move |store, _| {
+                    complete_with(store, &launch_id, association_id, target)
                 })
             }
             Resolution::Identified {
@@ -1601,7 +1707,8 @@ impl Engine<'_> {
                 };
                 let shell = operation.provider == LaunchProvider::Shell;
                 if shell != row.native_session.is_none()
-                    || (!shell && row.native_session.as_deref() != session_id.as_ref().map(|s| s.as_str()))
+                    || (!shell
+                        && row.native_session.as_deref() != session_id.as_ref().map(|s| s.as_str()))
                 {
                     return Err(Failure::new(ErrorCode::OwnerRefused).with_field("target"));
                 }
@@ -1619,52 +1726,7 @@ impl Engine<'_> {
                 };
                 let association_id = valid(AssociationId::parse(&self.env.uuid()), "sessions")?;
                 self.commit(envelope, move |store, _| {
-                    let Some(at) = store.operations.iter().position(|o| o.id == launch_id) else {
-                        return fail(ErrorCode::ContextStale);
-                    };
-                    let (workspace, leaf, project, binding) = {
-                        let o = &store.operations[at];
-                        (
-                            o.workspace_id.clone(),
-                            o.leaf_id.clone(),
-                            o.project_id.clone(),
-                            o.binding_id.clone().zip(o.binding_revision),
-                        )
-                    };
-                    let free = store
-                        .workspaces
-                        .iter()
-                        .find(|w| w.id == workspace)
-                        .and_then(|w| w.leaves.iter().find(|l| l.id == leaf))
-                        .is_some_and(|l| l.association_id.is_none());
-                    store.sessions.push(Association {
-                        id: association_id.clone(),
-                        origin_project_id: project,
-                        host_id: store.host_id.clone(),
-                        binding_id: binding.as_ref().map(|(id, _)| id.clone()),
-                        binding_revision: binding.map(|(_, r)| r),
-                        target,
-                        state: if free {
-                            AssociationState::Attached
-                        } else {
-                            AssociationState::Detached
-                        },
-                        operation_id: Some(launch_id.clone()),
-                    });
-                    let operation = &mut store.operations[at];
-                    operation.state = OperationState::Committed;
-                    operation.association_id = Some(association_id.clone());
-                    operation.claim = None;
-                    if free
-                        && let Some(leaf) = store
-                            .workspaces
-                            .iter_mut()
-                            .find(|w| w.id == workspace)
-                            .and_then(|w| w.leaves.iter_mut().find(|l| l.id == leaf))
-                    {
-                        leaf.association_id = Some(association_id.clone());
-                    }
-                    Ok(vec![created("association", association_id.as_str())])
+                    complete_with(store, &launch_id, association_id, target)
                 })
             }
         }
@@ -1683,7 +1745,9 @@ impl Engine<'_> {
                 .iter()
                 .filter(|o| {
                     o.state == OperationState::Pending
-                        && o.claim.as_ref().is_none_or(|c| !self.env.claim_is_live(c.as_str()))
+                        && o.claim
+                            .as_ref()
+                            .is_none_or(|c| !self.env.claim_is_live(c.as_str()))
                 })
                 .map(|o| o.id.clone())
                 .collect();
@@ -1766,4 +1830,60 @@ pub fn empty_store(env: &dyn Env) -> R<StoreV1> {
         closed_operations: Vec::new(),
         migration: None,
     })
+}
+
+/// Gives an ambiguous receipt the session the user (or the owner's own settling of an intent)
+/// established: an association, in the receipt's leaf when it is still free, and `committed`.
+fn complete_with(
+    store: &mut StoreV1,
+    launch_id: &OperationId,
+    association_id: AssociationId,
+    target: Target,
+) -> R<Vec<Created>> {
+    let Some(at) = store.operations.iter().position(|o| &o.id == launch_id) else {
+        return fail(ErrorCode::ContextStale);
+    };
+    let (workspace, leaf, project, binding) = {
+        let o = &store.operations[at];
+        (
+            o.workspace_id.clone(),
+            o.leaf_id.clone(),
+            o.project_id.clone(),
+            o.binding_id.clone().zip(o.binding_revision),
+        )
+    };
+    let free = store
+        .workspaces
+        .iter()
+        .find(|w| w.id == workspace)
+        .and_then(|w| w.leaves.iter().find(|l| l.id == leaf))
+        .is_some_and(|l| l.association_id.is_none());
+    store.sessions.push(Association {
+        id: association_id.clone(),
+        origin_project_id: project,
+        host_id: store.host_id.clone(),
+        binding_id: binding.as_ref().map(|(id, _)| id.clone()),
+        binding_revision: binding.map(|(_, r)| r),
+        target,
+        state: if free {
+            AssociationState::Attached
+        } else {
+            AssociationState::Detached
+        },
+        operation_id: Some(launch_id.clone()),
+    });
+    let operation = &mut store.operations[at];
+    operation.state = OperationState::Committed;
+    operation.association_id = Some(association_id.clone());
+    operation.claim = None;
+    if free
+        && let Some(leaf) = store
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace)
+            .and_then(|w| w.leaves.iter_mut().find(|l| l.id == leaf))
+    {
+        leaf.association_id = Some(association_id.clone());
+    }
+    Ok(vec![created("association", association_id.as_str())])
 }

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! M1: the project-centered workspace (`docs/contracts/m1-workspace.md`, ADR 0052).
 //!
 //! The Console's presentation metadata, kept in one private versioned store outside the Native
@@ -17,6 +16,7 @@
 pub mod apply;
 pub mod claim;
 pub mod command;
+pub mod commands;
 pub mod migration;
 pub mod owner;
 pub mod service;

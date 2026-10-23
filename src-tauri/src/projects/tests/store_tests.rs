@@ -11,8 +11,9 @@ use std::{
 use wyss_console::contracts::m1::{M1ErrorCode, records::StoreV1};
 
 /// A valid change that is visible in the revision and in the bytes.
-fn relabel(store: &mut StoreV1, _tag: &str) {
+fn relabel(store: &mut StoreV1, _tag: &str) -> Result<(), ()> {
     store.workspaces[0].pinned = !store.workspaces[0].pinned;
+    Ok(())
 }
 
 fn ready(world: &World) -> StoreV1 {
@@ -32,7 +33,11 @@ fn the_store_is_private_and_a_second_creation_is_refused() {
         world.store.create(again),
         Err(StoreError::StoreState("exists"))
     ));
-    assert_eq!(std::fs::read(&file).unwrap(), before, "an existing store is never replaced");
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        before,
+        "an existing store is never replaced"
+    );
 }
 
 #[test]
@@ -41,12 +46,14 @@ fn a_loser_of_a_race_gets_a_revision_conflict_and_the_winner_is_kept() {
     let first = ready(&world).revision;
     let committed = world
         .store
-        .transact(first, |s| Ok::<(), ()>(relabel(s, "a")))
+        .transact(first, |s| relabel(s, "a"))
         .unwrap()
         .unwrap();
     assert_eq!(committed.revision.get(), first.get() + 1);
-    match world.store.transact(first, |s| Ok::<(), ()>(relabel(s, "b"))) {
-        Err(StoreError::RevisionConflict { current }) => assert_eq!(current, committed.revision.get()),
+    match world.store.transact(first, |s| relabel(s, "b")) {
+        Err(StoreError::RevisionConflict { current }) => {
+            assert_eq!(current, committed.revision.get())
+        }
         other => panic!("expected a conflict, got {other:?}"),
     }
     assert_eq!(ready(&world), committed);
@@ -57,7 +64,10 @@ fn a_change_that_fails_writes_nothing_and_a_refused_store_is_not_published() {
     let world = World::new();
     let before = std::fs::read(world.store.dir().join("store.json")).unwrap();
     let revision = ready(&world).revision;
-    let refused = world.store.transact(revision, |_| Err::<(), &str>("no")).unwrap();
+    let refused = world
+        .store
+        .transact(revision, |_| Err::<(), &str>("no"))
+        .unwrap();
     assert_eq!(refused.unwrap_err(), "no");
     // A change that breaks the contract (a second Scratch) is refused whole.
     let broken = world.store.transact(revision, |s| {
@@ -70,7 +80,10 @@ fn a_change_that_fails_writes_nothing_and_a_refused_store_is_not_published() {
         Ok::<(), ()>(())
     });
     assert!(matches!(broken, Err(StoreError::Invalid(_))));
-    assert_eq!(std::fs::read(world.store.dir().join("store.json")).unwrap(), before);
+    assert_eq!(
+        std::fs::read(world.store.dir().join("store.json")).unwrap(),
+        before
+    );
 }
 
 #[test]
@@ -83,7 +96,7 @@ fn eight_threads_at_one_revision_commit_exactly_once() {
             thread::spawn(move || {
                 world
                     .store
-                    .transact(revision, |s| Ok::<(), ()>(relabel(s, &"x".repeat(n + 1))))
+                    .transact(revision, |s| relabel(s, &"x".repeat(n + 1)))
                     .map(|r| r.is_ok())
             })
         })
@@ -126,7 +139,7 @@ fn child_store_worker() {
         .and_then(|v| v.parse::<u64>().ok())
         .map_or(revision, |v| Counter::new(v).unwrap());
     let tag = std::env::var("WYSS_M1_TAG").unwrap_or_default();
-    match store.transact(expected, |s| Ok::<(), ()>(relabel(s, &tag))) {
+    match store.transact(expected, |s| relabel(s, &tag)) {
         Ok(Ok(_)) => println!("RESULT WON"),
         Err(StoreError::RevisionConflict { .. }) => println!("RESULT LOST"),
         other => println!("RESULT OTHER {other:?}"),
@@ -136,7 +149,12 @@ fn child_store_worker() {
 fn child(dir: &PathBuf, envs: &[(&str, &str)]) -> std::process::Child {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command
-        .args(["--exact", "projects::tests::store_tests::child_store_worker", "--nocapture", "--test-threads=1"])
+        .args([
+            "--exact",
+            "projects::tests::store_tests::child_store_worker",
+            "--nocapture",
+            "--test-threads=1",
+        ])
         .env("WYSS_M1_CHILD_DIR", dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -160,25 +178,51 @@ fn six_processes_at_one_revision_commit_exactly_once() {
     let dir = world.store.dir().to_path_buf();
     let revision = ready(&world).revision.get().to_string();
     let children: Vec<_> = (0..6)
-        .map(|n| child(&dir, &[("WYSS_M1_EXPECT", &revision), ("WYSS_M1_TAG", &"y".repeat(n + 1))]))
+        .map(|n| {
+            child(
+                &dir,
+                &[
+                    ("WYSS_M1_EXPECT", &revision),
+                    ("WYSS_M1_TAG", &"y".repeat(n + 1)),
+                ],
+            )
+        })
         .collect();
     let outputs: Vec<_> = children.into_iter().map(verdict).collect();
-    let won = outputs.iter().filter(|(_, o)| o.contains("RESULT WON")).count();
-    let lost = outputs.iter().filter(|(_, o)| o.contains("RESULT LOST")).count();
+    let won = outputs
+        .iter()
+        .filter(|(_, o)| o.contains("RESULT WON"))
+        .count();
+    let lost = outputs
+        .iter()
+        .filter(|(_, o)| o.contains("RESULT LOST"))
+        .count();
     assert_eq!((won, lost), (1, 5), "{outputs:?}");
-    assert_eq!(ready(&world).revision.get(), revision.parse::<u64>().unwrap() + 1);
+    assert_eq!(
+        ready(&world).revision.get(),
+        revision.parse::<u64>().unwrap() + 1
+    );
 }
 
 #[test]
 fn a_process_killed_at_every_step_of_a_write_leaves_the_old_or_the_new_store_whole() {
-    let before_rename = ["AfterLock", "BeforeTempWrite", "MidTempWrite", "BeforeFileFsync", "BeforeRename"];
+    let before_rename = [
+        "AfterLock",
+        "BeforeTempWrite",
+        "MidTempWrite",
+        "BeforeFileFsync",
+        "BeforeRename",
+    ];
     let after_rename = ["AfterRename", "BeforeDirFsync"];
     for point in before_rename.iter().chain(after_rename.iter()) {
         let world = World::new();
         let dir = world.store.dir().to_path_buf();
         let old = ready(&world);
         let old_bytes = std::fs::read(dir.join("store.json")).unwrap();
-        let (success, _) = verdict(child(&dir, &[("WYSS_M1_CRASH_AT", point), ("WYSS_M1_TAG", "zz")]));
+        let (success, _) = verdict(child(
+            &dir,
+            &[("WYSS_M1_CRASH_AT", point), ("WYSS_M1_TAG", "zz")],
+        ));
         assert!(!success, "{point}: the child must have died");
         // Whatever the child did, the file is a complete valid store: never empty, never half.
         let now = match world.store.read().unwrap() {
@@ -187,7 +231,11 @@ fn a_process_killed_at_every_step_of_a_write_leaves_the_old_or_the_new_store_who
         };
         if before_rename.contains(point) {
             assert_eq!(now, old, "{point}");
-            assert_eq!(std::fs::read(dir.join("store.json")).unwrap(), old_bytes, "{point}");
+            assert_eq!(
+                std::fs::read(dir.join("store.json")).unwrap(),
+                old_bytes,
+                "{point}"
+            );
         } else {
             assert_eq!(now.revision.get(), old.revision.get() + 1, "{point}");
         }
@@ -195,14 +243,18 @@ fn a_process_killed_at_every_step_of_a_write_leaves_the_old_or_the_new_store_who
         // sweeps the temporary file the dead one left.
         let next = world
             .store
-            .transact(now.revision, |s| Ok::<(), ()>(relabel(s, "again")))
+            .transact(now.revision, |s| relabel(s, "again"))
             .unwrap()
             .unwrap();
         assert_eq!(next.revision.get(), now.revision.get() + 1, "{point}");
         let leftovers = std::fs::read_dir(&dir)
             .unwrap()
             .flatten()
-            .filter(|e| e.file_name().to_string_lossy().starts_with("store.json.tmp-"))
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("store.json.tmp-")
+            })
             .count();
         assert_eq!(leftovers, 0, "{point}");
     }
@@ -227,12 +279,13 @@ fn an_error_before_the_rename_leaves_the_old_store_and_one_after_it_is_unknown()
         });
         let world = World::new().with_faults(fail);
         let old = ready(&world);
-        let result = world
-            .store
-            .transact(old.revision, |s| Ok::<(), ()>(relabel(s, "q")));
+        let result = world.store.transact(old.revision, |s| relabel(s, "q"));
         let now = ready(&world);
         if committed {
-            assert!(matches!(result, Err(StoreError::PublishUnknown(_))), "{point:?}");
+            assert!(
+                matches!(result, Err(StoreError::PublishUnknown(_))),
+                "{point:?}"
+            );
             assert_eq!(now.revision.get(), old.revision.get() + 1, "{point:?}");
         } else {
             assert!(matches!(result, Err(StoreError::Io(_))), "{point:?}");
@@ -241,7 +294,11 @@ fn an_error_before_the_rename_leaves_the_old_store_and_one_after_it_is_unknown()
         let leftovers = std::fs::read_dir(world.store.dir())
             .unwrap()
             .flatten()
-            .filter(|e| e.file_name().to_string_lossy().starts_with("store.json.tmp-"))
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("store.json.tmp-")
+            })
             .count();
         assert_eq!(leftovers, 0, "{point:?}");
     }
@@ -260,8 +317,14 @@ fn a_corrupt_newer_or_oversized_store_is_read_only_and_keeps_its_exact_bytes() {
     let cases: Vec<(Vec<u8>, M1ErrorCode)> = vec![
         (b"{ not json".to_vec(), M1ErrorCode::InvalidRecord),
         (Vec::new(), M1ErrorCode::InvalidRecord),
-        (br#"{"schema":2,"anything":[1,2,3]}"#.to_vec(), M1ErrorCode::UnsupportedSchema),
-        (vec![b' '; 4 * 1024 * 1024 + 1], M1ErrorCode::CapacityExceeded),
+        (
+            br#"{"schema":2,"anything":[1,2,3]}"#.to_vec(),
+            M1ErrorCode::UnsupportedSchema,
+        ),
+        (
+            vec![b' '; 4 * 1024 * 1024 + 1],
+            M1ErrorCode::CapacityExceeded,
+        ),
     ];
     for (bytes, code) in cases {
         let world = World::new();
@@ -272,14 +335,21 @@ fn a_corrupt_newer_or_oversized_store_is_read_only_and_keeps_its_exact_bytes() {
         };
         assert_eq!(found.code, code);
         // Neither a change nor a fresh creation may replace it.
-        let unusable = super::unusable(world.store.transact(Counter::new(1).unwrap(), |_| Ok::<(), ()>(()))
-            .map(|r| r.unwrap().clone()));
+        let unusable = super::unusable(
+            world
+                .store
+                .transact(Counter::new(1).unwrap(), |_| Ok::<(), ()>(()))
+                .map(|r| r.unwrap().clone()),
+        );
         assert_eq!(unusable.code, code);
         assert!(matches!(
             world.store.create(empty_store(&*world.env).unwrap()),
             Err(StoreError::Unusable(_))
         ));
-        assert_eq!(std::fs::read(world.store.dir().join("store.json")).unwrap(), bytes);
+        assert_eq!(
+            std::fs::read(world.store.dir().join("store.json")).unwrap(),
+            bytes
+        );
     }
 }
 
@@ -322,7 +392,7 @@ fn a_leftover_temporary_file_does_not_block_a_writer_and_is_swept() {
     let revision = ready(&world).revision;
     world
         .store
-        .transact(revision, |s| Ok::<(), ()>(relabel(s, "k")))
+        .transact(revision, |s| relabel(s, "k"))
         .unwrap()
         .unwrap();
     assert!(!world.store.dir().join("store.json.tmp-deadbeef").exists());

@@ -19,9 +19,9 @@ mod host;
 mod native;
 // The project-centered workspace (M1, ADR 0052): presentation metadata over the owners.
 #[cfg(target_os = "linux")]
-mod projects;
-#[cfg(target_os = "linux")]
 mod native_dialog;
+#[cfg(target_os = "linux")]
+mod projects;
 // The remote gateway's core (F10a foundations, ADR 0049): decisions with no transport. Nothing
 // constructs it outside its tests, and it is not in the library the authority links.
 #[cfg(target_os = "linux")]
@@ -68,6 +68,7 @@ fn main() {
                 configuration::extension()
                     .merge(host::commands::extension())
                     .merge(native::extension())
+                    .merge(projects::commands::extension())
                     .merge(credentials::commands::extension()),
             ),
             f8,

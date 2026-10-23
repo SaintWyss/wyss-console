@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use wyss_console::contracts::m1::{
     records::{LaunchProvider, Leaf, Mode, Node, Preferences},
     scalar::{
-        AssociationId, BindingId, Counter, HostId, LeafId, OperationId, ProfileVersion,
-        ProjectId, Text, WorkspaceId,
+        AssociationId, BindingId, Counter, HostId, LeafId, OperationId, ProfileVersion, ProjectId,
+        Text, WorkspaceId,
     },
 };
 
@@ -137,6 +137,9 @@ pub enum Resolution {
     },
     /// The owner shows nothing the launch could have started, and the user confirms it.
     Absent,
+    /// A Managed launch asks its owner again with its original intent, which the owner treats
+    /// as the same action. Only the user starts it; nothing retries by itself.
+    RetryManaged,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -223,7 +226,7 @@ pub struct Failure {
     pub effect: Effect,
     pub next_action: NextAction,
     pub operation_id: Option<OperationId>,
-    pub context: Option<Context>,
+    pub context: Option<Box<Context>>,
     /// A closed field name for the window to point at, never user content.
     pub field: Option<&'static str>,
 }

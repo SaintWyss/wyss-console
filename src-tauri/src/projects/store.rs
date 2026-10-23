@@ -56,10 +56,14 @@ pub struct Unusable {
     pub field: &'static str,
 }
 
+/// The payloads are read by tests and by diagnostics; a release build only needs the variant.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum StoreError {
     /// Another writer committed first; the current revision is given.
-    RevisionConflict { current: u64 },
+    RevisionConflict {
+        current: u64,
+    },
     /// The store is absent where a revision was expected, or present where it was to be created.
     StoreState(&'static str),
     Unusable(Unusable),
@@ -323,7 +327,8 @@ fn read_store(path: &Path) -> io::Result<Loaded> {
         return Ok(unusable(M1ErrorCode::CapacityExceeded, "store"));
     }
     let mut bytes = Vec::with_capacity(meta.len() as usize);
-    file.take(MAX_STORE_BYTES as u64 + 1).read_to_end(&mut bytes)?;
+    file.take(MAX_STORE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
     Ok(match decode(&bytes) {
         Ok(store) => Loaded::Ready(Box::new(store)),
         Err(error) => Loaded::Unusable(Unusable {

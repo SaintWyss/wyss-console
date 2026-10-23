@@ -162,6 +162,28 @@ fn main() {
             "credential_verify",
             "native_handoff_prepare",
             "native_handoff_save",
+            // The project-centered workspace (M1): granted by the `projects` capability, whose
+            // Managed side can prepare a session and nothing more.
+            "projects_overview",
+            "projects_list",
+            "projects_project",
+            "projects_workspace",
+            "projects_sessions",
+            "projects_choose_folder",
+            "projects_forget_picks",
+            "projects_execute",
+            "projects_initialize_empty",
+            "projects_migration_preview",
+            "projects_migration_commit",
+            "projects_input_claim",
+            "projects_input_release",
+            "projects_term_read",
+            "projects_term_write",
+            "projects_term_resize",
+            "projects_rollback_report",
+            "projects_compact_receipts",
+            "projects_set_enabled",
+            "projects_open_window",
             // Protocol 2 (F8): granted by the `f8` capability, which the installed
             // configuration does not enable; only the state read is in `main`.
             "f8_state",

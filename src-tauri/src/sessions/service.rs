@@ -190,6 +190,12 @@ impl SessionService {
         self.inner.stop.load(Ordering::Acquire)
     }
 
+    /// The identity of the authority's durable stream, as its greeting stated it. Read only:
+    /// it names which authority a session belongs to, so P1 and P2 sessions never mix.
+    pub fn stream_id(&self) -> Result<WireUuid, SessionError> {
+        self.call(|client| Ok(client.hello_status().stream_id.clone()))
+    }
+
     /// The newest sessions, or those created before `before`.
     pub fn page(&self, before: Option<Sequence>) -> Result<SessionPage, SessionError> {
         self.call(|client| {

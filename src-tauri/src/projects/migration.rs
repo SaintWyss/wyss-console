@@ -15,7 +15,7 @@ use super::{
     apply::{Env, store_failure},
     command::{ErrorCode, Failure},
     owner::{HostView, Owner, RootError, RootInfo},
-    store::{Loaded, Store, StoreError},
+    store::{Store, StoreError},
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -25,7 +25,7 @@ use std::{
     fs,
     io::{self, Read, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt},
-    path::{Path, PathBuf},
+    path::Path,
 };
 use wyss_console::contracts::{
     UtcTimestamp,
@@ -224,8 +224,11 @@ pub fn read_sources(state_dir: &Path) -> Result<Sources, (ConflictKind, &'static
         )
     };
     Ok(Sources {
-        registry: read_consistent(&state_dir.join("native").join("registry.json"), REGISTRY_MAX_BYTES)
-            .map_err(|e| conflict(e, "registry"))?,
+        registry: read_consistent(
+            &state_dir.join("native").join("registry.json"),
+            REGISTRY_MAX_BYTES,
+        )
+        .map_err(|e| conflict(e, "registry"))?,
         layout: read_consistent(&state_dir.join("layout.json"), LAYOUT_MAX_BYTES)
             .map_err(|e| conflict(e, "layout"))?,
     })
@@ -262,7 +265,12 @@ fn parse_registry(bytes: &[u8]) -> Option<RegistryDoc> {
             .collect::<Option<_>>()?,
         sessions: sessions
             .iter()
-            .map(|s| Some((s["id"].as_str()?.to_owned(), s["project"].as_str()?.to_owned())))
+            .map(|s| {
+                Some((
+                    s["id"].as_str()?.to_owned(),
+                    s["project"].as_str()?.to_owned(),
+                ))
+            })
             .collect::<Option<_>>()?,
     })
 }
@@ -345,7 +353,10 @@ fn parse_layout(bytes: &[u8]) -> Option<LayoutDoc> {
             }
         }
     }
-    Some(LayoutDoc { tabs: parsed, titles })
+    Some(LayoutDoc {
+        tabs: parsed,
+        titles,
+    })
 }
 
 fn leaves_of(tree: &Tree, out: &mut Vec<String>) {
@@ -385,7 +396,14 @@ pub fn derive(namespace: &str, kind: &str, key: &str) -> String {
     bytes[6] = (bytes[6] & 0x0f) | 0x80;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     let h = hex(&bytes);
-    format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
+    format!(
+        "{}-{}-{}-{}-{}",
+        &h[0..8],
+        &h[8..12],
+        &h[12..16],
+        &h[16..20],
+        &h[20..32]
+    )
 }
 
 fn key_of(kind: &str, legacy: &str) -> String {
@@ -402,8 +420,7 @@ pub struct Plan {
     pub epoch: Option<String>,
 }
 
-struct Builder<'a> {
-    env: &'a dyn Env,
+struct Builder {
     namespace: String,
     store: StoreV1,
     conflicts: BTreeMap<u8, (ConflictKind, usize)>,
@@ -411,12 +428,17 @@ struct Builder<'a> {
     map: Vec<MigrationMapRow>,
 }
 
-impl Builder<'_> {
+impl Builder {
     fn conflict(&mut self, kind: ConflictKind) {
         self.conflicts.entry(kind as u8).or_insert((kind, 0)).1 += 1;
     }
 
-    fn id<T>(&self, kind: &str, key: &str, parse: impl Fn(&str) -> Result<T, wyss_console::contracts::m1::M1Error>) -> Option<T> {
+    fn id<T>(
+        &self,
+        kind: &str,
+        key: &str,
+        parse: impl Fn(&str) -> Result<T, wyss_console::contracts::m1::M1Error>,
+    ) -> Option<T> {
         parse(&derive(&self.namespace, kind, key)).ok()
     }
 }
@@ -434,6 +456,9 @@ fn counter1() -> Counter {
     Counter::new(1).expect("one")
 }
 
+/// The terminals of one group of a tab, each with the association that shows there.
+type Placed = Vec<(String, Option<AssociationId>)>;
+
 /// The pure assembly of the new store from the legacy documents and a read of the host.
 #[allow(clippy::too_many_arguments)]
 pub fn plan_initial(
@@ -446,7 +471,6 @@ pub fn plan_initial(
     let bad = || Failure::new(ErrorCode::InvalidRecord).with_field("migration");
     let host_id = HostId::parse(&env.uuid()).map_err(|_| bad())?;
     let mut b = Builder {
-        env,
         namespace: migration_id.to_owned(),
         store: StoreV1 {
             schema: wyss_console::contracts::m1::records::SchemaV1,
@@ -553,7 +577,13 @@ pub fn plan_initial(
         });
         b.store.projects.push(Project {
             id: project.clone(),
-            label: text(canonical.rsplit('/').find(|s| !s.is_empty()).unwrap_or("Project"), "Project"),
+            label: text(
+                canonical
+                    .rsplit('/')
+                    .find(|s| !s.is_empty())
+                    .unwrap_or("Project"),
+                "Project",
+            ),
             created_at: now.clone(),
             updated_at: now.clone(),
             revision: counter1(),
@@ -596,18 +626,16 @@ pub fn plan_initial(
                         .get(session.as_str())
                         .and_then(|p| canonical_of(p))
                         .and_then(|root| project_of_root.get(&root).cloned());
-                    if registry.is_some() && session_project.contains_key(session.as_str()) {
-                        if let Some(key) = Some(key_of("registry_session", session)) {
-                            // The association's identity is derived from the legacy session.
-                            let id = b.id("session", session, AssociationId::parse);
-                            if let Some(id) = id {
-                                b.map.push(MigrationMapRow {
-                                    source_kind: MapSourceKind::RegistrySession,
-                                    source_key: text(&key, "key"),
-                                    target_id: MappedId::parse(id.as_str()).expect("UUID"),
-                                });
-                            }
-                        }
+                    if registry.is_some()
+                        && session_project.contains_key(session.as_str())
+                        && let Some(id) = b.id("session", session, AssociationId::parse)
+                    {
+                        // The association's identity is derived from the legacy session.
+                        b.map.push(MigrationMapRow {
+                            source_kind: MapSourceKind::RegistrySession,
+                            source_key: text(&key_of("registry_session", session), "key"),
+                            target_id: MappedId::parse(id.as_str()).expect("UUID"),
+                        });
                     }
                     (
                         origin,
@@ -639,7 +667,11 @@ pub fn plan_initial(
                 Some(session) => session.clone(),
                 None => row.terminal_id.clone(),
             };
-            let kind = if row.native_session.is_some() { "session" } else { "shell" };
+            let kind = if row.native_session.is_some() {
+                "session"
+            } else {
+                "shell"
+            };
             let Some(id) = b.id(kind, &legacy_key, AssociationId::parse) else {
                 b.conflict(ConflictKind::IncompatibleId);
                 continue;
@@ -662,7 +694,7 @@ pub fn plan_initial(
     b.counts.sessions = b.store.sessions.len();
 
     // Tabs become workspaces: one per tab and origin, in tab order.
-    let mut scratch_leaves: Vec<(Tree, Vec<(String, Option<AssociationId>)>)> = Vec::new();
+    let mut scratch_leaves: Vec<(Tree, Placed)> = Vec::new();
     let mut default_of: HashMap<String, WorkspaceId> = HashMap::new();
     let mut per_project_count: HashMap<String, usize> = HashMap::new();
     if let Some(doc) = &layout {
@@ -674,7 +706,9 @@ pub fn plan_initial(
             let mut tally: BTreeMap<Option<String>, usize> = BTreeMap::new();
             for id in &all {
                 if let Some(origin) = live_origin(id) {
-                    *tally.entry(origin.map(|p| p.as_str().to_owned())).or_default() += 1;
+                    *tally
+                        .entry(origin.map(|p| p.as_str().to_owned()))
+                        .or_default() += 1;
                 }
             }
             let Some(majority) = tally
@@ -713,9 +747,8 @@ pub fn plan_initial(
                         .sessions
                         .iter()
                         .find(|a| match &a.target {
-                            Target::Native { terminal_id, .. } | Target::Shell { terminal_id, .. } => {
-                                terminal_id.as_str() == terminal
-                            }
+                            Target::Native { terminal_id, .. }
+                            | Target::Shell { terminal_id, .. } => terminal_id.as_str() == terminal,
                             Target::Managed { .. } => false,
                         })
                         .map(|a| a.id.clone());
@@ -738,7 +771,9 @@ pub fn plan_initial(
                             continue;
                         };
                         *per_project_count.entry(project.clone()).or_default() += 1;
-                        default_of.entry(project.clone()).or_insert_with(|| workspace.clone());
+                        default_of
+                            .entry(project.clone())
+                            .or_insert_with(|| workspace.clone());
                         let title = format!("Tab {}", index + 1);
                         push_workspace(
                             &mut b,
@@ -757,7 +792,9 @@ pub fn plan_initial(
     }
 
     // The one Scratch workspace holds every unassigned group, in one balanced tree.
-    let scratch_id = b.id("scratch", "scratch", WorkspaceId::parse).ok_or_else(bad)?;
+    let scratch_id = b
+        .id("scratch", "scratch", WorkspaceId::parse)
+        .ok_or_else(bad)?;
     let mut scratch = Workspace {
         id: scratch_id,
         project_id: None,
@@ -785,7 +822,10 @@ pub fn plan_initial(
             scratch.leaves.push(Leaf {
                 id: id.clone(),
                 title: text(
-                    layout.as_ref().and_then(|d| d.titles.get(terminal)).map_or("Terminal", |t| t.as_str()),
+                    layout
+                        .as_ref()
+                        .and_then(|d| d.titles.get(terminal))
+                        .map_or("Terminal", |t| t.as_str()),
                     "Terminal",
                 ),
                 association_id: association.clone(),
@@ -853,7 +893,9 @@ pub fn plan_initial(
 
     // Bounds are refused whole.
     if b.store.projects.len() > MAX_PROJECTS
-        || per_project_count.values().any(|n| *n + 1 > MAX_WORKSPACES_PER_PROJECT)
+        || per_project_count
+            .values()
+            .any(|n| *n + 1 > MAX_WORKSPACES_PER_PROJECT)
         || b.store.bindings.len() > MAX_PROJECTS * MAX_BINDINGS_PER_PROJECT
     {
         b.conflict(ConflictKind::OverBound);
@@ -880,7 +922,8 @@ pub fn plan_initial(
         }
         let mut map = std::mem::take(&mut b.map);
         map.sort_by(|a, c| {
-            (a.source_kind as u8, a.source_key.as_str()).cmp(&(c.source_kind as u8, c.source_key.as_str()))
+            (a.source_kind as u8, a.source_key.as_str())
+                .cmp(&(c.source_kind as u8, c.source_key.as_str()))
         });
         map.dedup_by(|a, c| a.source_kind == c.source_kind && a.source_key == c.source_key);
         b.store.migration = Some(Migration {
@@ -899,12 +942,21 @@ pub fn plan_initial(
             _ => ConflictKind::Invalid,
         });
     }
-    let aliases = b.conflicts.get(&(ConflictKind::Alias as u8)).is_some_and(|c| c.1 > 0);
-    let blocked = b.conflicts.values().any(|(kind, n)| *n > 0 && kind.blocks());
+    let aliases = b
+        .conflicts
+        .get(&(ConflictKind::Alias as u8))
+        .is_some_and(|c| c.1 > 0);
+    let blocked = b
+        .conflicts
+        .values()
+        .any(|(kind, n)| *n > 0 && kind.blocks());
     let conflicts: Vec<Conflict> = b
         .conflicts
         .values()
-        .map(|(kind, count)| Conflict { kind: *kind, count: *count })
+        .map(|(kind, count)| Conflict {
+            kind: *kind,
+            count: *count,
+        })
         .collect();
     let sources_view = digests
         .iter()
@@ -960,7 +1012,9 @@ fn balanced(mut nodes: Vec<Node>) -> Option<Node> {
 
 fn to_node(tree: &Tree, ids: &HashMap<String, LeafId>) -> Option<Node> {
     Some(match tree {
-        Tree::Leaf(id) => Node::Leaf { id: ids.get(id)?.clone() },
+        Tree::Leaf(id) => Node::Leaf {
+            id: ids.get(id)?.clone(),
+        },
         Tree::Split { dir, ratio, a, b } => Node::Split {
             dir: *dir,
             ratio: *ratio,
@@ -972,7 +1026,7 @@ fn to_node(tree: &Tree, ids: &HashMap<String, LeafId>) -> Option<Node> {
 
 #[allow(clippy::too_many_arguments)]
 fn push_workspace(
-    b: &mut Builder<'_>,
+    b: &mut Builder,
     id: WorkspaceId,
     project: Option<ProjectId>,
     title: &str,
@@ -995,7 +1049,10 @@ fn push_workspace(
         }
         records.push(Leaf {
             id: leaf,
-            title: text(titles.get(terminal).map_or("Terminal", |t| t.as_str()), "Terminal"),
+            title: text(
+                titles.get(terminal).map_or("Terminal", |t| t.as_str()),
+                "Terminal",
+            ),
             association_id: association.clone(),
         });
     }
@@ -1016,11 +1073,6 @@ fn push_workspace(
 }
 
 // ---- reading, previewing, committing ---------------------------------------------------------
-
-/// The legacy directory: `$XDG_STATE_HOME/wyss-console` (or `~/.local/state/wyss-console`).
-pub fn legacy_dir() -> Option<PathBuf> {
-    super::store::default_dir().and_then(|dir| dir.parent()?.parent().map(Path::to_path_buf))
-}
 
 #[derive(Serialize)]
 struct Manifest<'a> {
@@ -1120,14 +1172,6 @@ pub fn committed_digest(store: &StoreV1, kind: MigrationSourceKind) -> Option<St
         .map(|s| s.digest.as_str().to_owned())
 }
 
-pub fn loaded(store: &Store) -> Result<Option<StoreV1>, Failure> {
-    match store.read().map_err(|_| Failure::new(ErrorCode::IoFailure))? {
-        Loaded::Ready(found) => Ok(Some(*found)),
-        Loaded::Missing => Ok(None),
-        Loaded::Unusable(unusable) => Err(store_failure(StoreError::Unusable(unusable))),
-    }
-}
-
 // ---- importing what appeared later ---------------------------------------------------------------
 
 /// What an incremental import adds. It never changes or removes a record the new store has:
@@ -1151,9 +1195,18 @@ pub struct IncrementalPlan {
 
 fn terminal_key(target: &Target) -> Option<(String, String)> {
     match target {
-        Target::Native { terminal_id, host_epoch, .. } | Target::Shell { terminal_id, host_epoch } => {
-            Some((terminal_id.as_str().to_owned(), host_epoch.as_str().to_owned()))
+        Target::Native {
+            terminal_id,
+            host_epoch,
+            ..
         }
+        | Target::Shell {
+            terminal_id,
+            host_epoch,
+        } => Some((
+            terminal_id.as_str().to_owned(),
+            host_epoch.as_str().to_owned(),
+        )),
         Target::Managed { .. } => None,
     }
 }
@@ -1204,7 +1257,10 @@ pub fn plan_incremental(
             Some(known) => {
                 remap.insert(
                     project.id.clone(),
-                    (known.project_id.clone(), Some((known.id.clone(), known.revision))),
+                    (
+                        known.project_id.clone(),
+                        Some((known.id.clone(), known.revision)),
+                    ),
                 );
             }
             None => {
@@ -1265,11 +1321,17 @@ pub fn plan_incremental(
     let known_rows: HashSet<(u8, String)> = existing
         .migration
         .as_ref()
-        .map(|m| m.map.iter().map(|r| (r.source_kind as u8, r.source_key.as_str().to_owned())).collect())
+        .map(|m| {
+            m.map
+                .iter()
+                .map(|r| (r.source_kind as u8, r.source_key.as_str().to_owned()))
+                .collect()
+        })
         .unwrap_or_default();
-    additions
-        .map
-        .retain(|r| r.source_kind != MapSourceKind::LayoutLeaf && !known_rows.contains(&(r.source_kind as u8, r.source_key.as_str().to_owned())));
+    additions.map.retain(|r| {
+        r.source_kind != MapSourceKind::LayoutLeaf
+            && !known_rows.contains(&(r.source_kind as u8, r.source_key.as_str().to_owned()))
+    });
     for (kind, bytes) in [
         (MigrationSourceKind::Registry, &sources.registry),
         (MigrationSourceKind::Layout, &sources.layout),
@@ -1278,10 +1340,9 @@ pub fn plan_incremental(
             additions.sources.push((kind, sha256(bytes)));
         }
     }
-    summary.legacy_changed = additions
-        .sources
-        .iter()
-        .any(|(kind, digest)| committed_digest(existing, *kind).as_deref() != Some(digest.as_str()));
+    summary.legacy_changed = additions.sources.iter().any(|(kind, digest)| {
+        committed_digest(existing, *kind).as_deref() != Some(digest.as_str())
+    });
     summary.counts = Counts {
         projects: additions.projects.len(),
         workspaces: additions.workspaces.len(),
@@ -1291,7 +1352,10 @@ pub fn plan_incremental(
     summary.sources = additions
         .sources
         .iter()
-        .map(|(kind, digest)| SourceDigest { kind: source_kind(*kind), digest: digest.clone() })
+        .map(|(kind, digest)| SourceDigest {
+            kind: source_kind(*kind),
+            digest: digest.clone(),
+        })
         .collect();
     let mut snapshot = Vec::new();
     if let Some(bytes) = &sources.registry {
@@ -1312,7 +1376,9 @@ fn apply_additions(store: &mut StoreV1, additions: &Additions) -> Result<(), Fai
     let bad = || Failure::new(ErrorCode::InvalidRecord).with_field("migration");
     store.projects.extend(additions.projects.iter().cloned());
     store.bindings.extend(additions.bindings.iter().cloned());
-    store.workspaces.extend(additions.workspaces.iter().cloned());
+    store
+        .workspaces
+        .extend(additions.workspaces.iter().cloned());
     store.sessions.extend(additions.sessions.iter().cloned());
     let sources: Vec<MigrationSource> = additions
         .sources

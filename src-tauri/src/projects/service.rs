@@ -9,9 +9,7 @@ use super::{
     apply::{Engine, Env, Purpose, Selections, empty_store, store_failure},
     claim::{ClaimError, Claims},
     command::{Envelope, ErrorCode, Failure, Receipt},
-    migration::{
-        self, IncrementalPlan, Plan, Sources, Summary,
-    },
+    migration::{self, IncrementalPlan, Plan, Sources, Summary},
     owner::{HostView, ManagedRow, Owner, OwnerError, RootError, TermRead},
     store::{Loaded, Store, StoreError},
 };
@@ -24,8 +22,8 @@ use std::{
 use wyss_console::contracts::m1::{
     StoreV1,
     records::{
-        Association, AssociationState, Binding, BindingState, ManagedProtocol, ManagedSafetyProfile,
-        Node, Preferences, Project, Target, Workspace,
+        Association, AssociationState, Binding, BindingState, ManagedProtocol,
+        ManagedSafetyProfile, Node, Preferences, Project, Target, Workspace,
     },
 };
 
@@ -205,7 +203,12 @@ fn owner_code(error: OwnerError) -> ErrorCode {
 impl ProjectsService {
     /// `store_dir` is `…/projects/v1`; the feature gate sits beside it, and the legacy files
     /// are in the Console's state directory two levels up.
-    pub fn new(store_dir: Option<PathBuf>, owner: Arc<dyn Owner>, env: Arc<dyn Env>, claims: Claims) -> Self {
+    pub fn new(
+        store_dir: Option<PathBuf>,
+        owner: Arc<dyn Owner>,
+        env: Arc<dyn Env>,
+        claims: Claims,
+    ) -> Self {
         let gate = store_dir
             .as_ref()
             .and_then(|dir| dir.parent())
@@ -277,6 +280,11 @@ impl ProjectsService {
         } else {
             Err(failure(ErrorCode::UnsupportedCapability).with_field("disabled"))
         }
+    }
+
+    /// The folder dialog is only opened for a window that is allowed to use the result.
+    pub fn gated_for_pick(&self) -> Result<(), Failure> {
+        self.gated()
     }
 
     // ---- reading ----------------------------------------------------------------------------
@@ -385,7 +393,10 @@ impl ProjectsService {
             archived: project.archived,
             tombstone: project.tombstone,
             revision: project.revision.get().to_string(),
-            default_workspace_id: project.default_workspace_id.as_ref().map(|w| w.as_str().to_owned()),
+            default_workspace_id: project
+                .default_workspace_id
+                .as_ref()
+                .map(|w| w.as_str().to_owned()),
             root: binding.map(|b| self.root_view(b)),
             workspace_ids: store
                 .workspaces
@@ -401,21 +412,31 @@ impl ProjectsService {
         }
     }
 
-    fn page_of<T>(&self, store: &StoreV1, mut rows: Vec<T>, cursor: Option<&str>) -> Result<Page<T>, Failure> {
+    fn page_of<T>(
+        &self,
+        store: &StoreV1,
+        mut rows: Vec<T>,
+        cursor: Option<&str>,
+    ) -> Result<Page<T>, Failure> {
         let start = match cursor {
             None => 0,
             Some(text) => {
-                let (revision, offset) = text.split_once(':').ok_or_else(|| failure(ErrorCode::InvalidRecord))?;
+                let (revision, offset) = text
+                    .split_once(':')
+                    .ok_or_else(|| failure(ErrorCode::InvalidRecord))?;
                 // A cursor belongs to the revision it was issued at: another one is a refetch.
                 if revision != store.revision.get().to_string() {
                     return Err(failure(ErrorCode::RevisionConflict));
                 }
-                offset.parse::<usize>().map_err(|_| failure(ErrorCode::InvalidRecord))?
+                offset
+                    .parse::<usize>()
+                    .map_err(|_| failure(ErrorCode::InvalidRecord))?
             }
         };
         let total = rows.len();
         let items: Vec<T> = rows.drain(..).skip(start).take(PAGE).collect();
-        let next = (start + items.len() < total).then(|| format!("{}:{}", store.revision.get(), start + items.len()));
+        let next = (start + items.len() < total)
+            .then(|| format!("{}:{}", store.revision.get(), start + items.len()));
         Ok(Page {
             items,
             cursor: next,
@@ -425,7 +446,11 @@ impl ProjectsService {
 
     pub fn list_projects(&self, cursor: Option<&str>) -> Result<Page<ProjectView>, Failure> {
         let store = self.ready()?;
-        let rows = store.projects.iter().map(|p| self.project_view(&store, p)).collect();
+        let rows = store
+            .projects
+            .iter()
+            .map(|p| self.project_view(&store, p))
+            .collect();
         self.page_of(&store, rows, cursor)
     }
 
@@ -448,7 +473,10 @@ impl ProjectsService {
     ) -> SessionView {
         let mut view = SessionView {
             id: association.id.as_str().to_owned(),
-            origin_project_id: association.origin_project_id.as_ref().map(|p| p.as_str().to_owned()),
+            origin_project_id: association
+                .origin_project_id
+                .as_ref()
+                .map(|p| p.as_str().to_owned()),
             state: association.state,
             kind: "",
             availability: "unknown",
@@ -461,20 +489,47 @@ impl ProjectsService {
             requested_safety_profile: None,
             effective_safety_profile: None,
             profile_mismatch: false,
-            operation_id: association.operation_id.as_ref().map(|o| o.as_str().to_owned()),
+            operation_id: association
+                .operation_id
+                .as_ref()
+                .map(|o| o.as_str().to_owned()),
             input: "none",
         };
         match &association.target {
-            Target::Native { session_id, terminal_id, host_epoch } => {
+            Target::Native {
+                session_id,
+                terminal_id,
+                host_epoch,
+            } => {
                 view.kind = "native";
                 view.native_session_id = Some(session_id.as_str().to_owned());
-                self.terminal_state(&mut view, terminal_id.as_str(), host_epoch.as_str(), host, window);
+                self.terminal_state(
+                    &mut view,
+                    terminal_id.as_str(),
+                    host_epoch.as_str(),
+                    host,
+                    window,
+                );
             }
-            Target::Shell { terminal_id, host_epoch } => {
+            Target::Shell {
+                terminal_id,
+                host_epoch,
+            } => {
                 view.kind = "shell";
-                self.terminal_state(&mut view, terminal_id.as_str(), host_epoch.as_str(), host, window);
+                self.terminal_state(
+                    &mut view,
+                    terminal_id.as_str(),
+                    host_epoch.as_str(),
+                    host,
+                    window,
+                );
             }
-            Target::Managed { protocol, store_stream_id, session_id, requested_safety_profile } => {
+            Target::Managed {
+                protocol,
+                store_stream_id,
+                session_id,
+                requested_safety_profile,
+            } => {
                 view.kind = "managed";
                 view.protocol = Some(match protocol {
                     ManagedProtocol::P1 => 1,
@@ -528,7 +583,11 @@ impl ProjectsService {
             }
             Ok(host) => {
                 let row = host.terminals.iter().find(|t| t.terminal_id == terminal);
-                view.availability = if row.is_some_and(|t| t.running) { "live" } else { "ended" };
+                view.availability = if row.is_some_and(|t| t.running) {
+                    "live"
+                } else {
+                    "ended"
+                };
                 if view.availability == "live" {
                     view.input = match self.claims.holder(epoch, terminal) {
                         Some(holder) if Some(holder.as_str()) == window => "this",
@@ -632,25 +691,34 @@ impl ProjectsService {
     // ---- choosing a folder --------------------------------------------------------------------
 
     /// Records a folder the native dialog returned and hands the window a one-use token for it.
-    pub fn issue_pick(&self, path: &str, purpose: Purpose, selection_revision: u64) -> Result<PickView, Failure> {
+    pub fn issue_pick(
+        &self,
+        path: &str,
+        purpose: Purpose,
+        selection_revision: u64,
+    ) -> Result<PickView, Failure> {
         let root = self.owner.root(path).map_err(|e| match e {
             RootError::Missing => failure(ErrorCode::RootMissing),
             RootError::Ineligible => failure(ErrorCode::RootIneligible),
         })?;
         let token = format!("pick-{}", self.env.uuid());
-        self.selections
-            .issue(token.clone(), root.path.clone(), purpose, selection_revision);
+        self.selections.issue(
+            token.clone(),
+            root.path.clone(),
+            purpose,
+            selection_revision,
+        );
         Ok(PickView {
             token,
-            label: root.path.rsplit('/').find(|s| !s.is_empty()).unwrap_or("/").to_owned(),
+            label: root
+                .path
+                .rsplit('/')
+                .find(|s| !s.is_empty())
+                .unwrap_or("/")
+                .to_owned(),
             native_eligible: root.native_eligible,
             config_eligible: root.config_eligible,
         })
-    }
-
-    /// A parent for a new folder: it must exist and be the user's, nothing more.
-    pub fn issue_parent_pick(&self, path: &str, selection_revision: u64) -> Result<PickView, Failure> {
-        self.issue_pick(path, Purpose::Parent, selection_revision)
     }
 
     /// The window switched project or workspace: picks made before are no longer usable.
@@ -724,11 +792,24 @@ impl ProjectsService {
         };
         let (summary, plan) = match existing {
             None => {
-                let plan = migration::plan_initial(&*self.env, &*self.owner, &sources, host.as_ref(), &id)?;
+                let plan = migration::plan_initial(
+                    &*self.env,
+                    &*self.owner,
+                    &sources,
+                    host.as_ref(),
+                    &id,
+                )?;
                 (plan.summary.clone(), Ok(plan))
             }
             Some(existing) => {
-                let plan = migration::plan_incremental(&*self.env, &*self.owner, &sources, host.as_ref(), &existing, &id)?;
+                let plan = migration::plan_incremental(
+                    &*self.env,
+                    &*self.owner,
+                    &sources,
+                    host.as_ref(),
+                    &existing,
+                    &id,
+                )?;
                 (plan.summary.clone(), Err(plan))
             }
         };
@@ -738,7 +819,11 @@ impl ProjectsService {
 
     /// Commits exactly the preview that was shown: the legacy files must still have the bytes it
     /// was made from, and the host must be the one it read.
-    pub fn commit_migration(&self, preview_id: &str, accept_aliases: bool) -> Result<StoreStatus, Failure> {
+    pub fn commit_migration(
+        &self,
+        preview_id: &str,
+        accept_aliases: bool,
+    ) -> Result<StoreStatus, Failure> {
         self.gated()?;
         let held = self
             .held
@@ -775,11 +860,23 @@ impl ProjectsService {
         shown_ok.needs_alias_acceptance = false;
         let committed = match held.plan {
             Ok(mut plan) => {
-                plan.summary.can_commit = plan.summary.can_commit || accept_aliases && !plan.summary.conflicts.iter().any(|c| c.kind.blocks_commit());
+                plan.summary.can_commit = plan.summary.can_commit
+                    || accept_aliases
+                        && !plan
+                            .summary
+                            .conflicts
+                            .iter()
+                            .any(|c| c.kind.blocks_commit());
                 migration::commit_initial(store, plan)?
             }
             Err(mut plan) => {
-                plan.summary.can_commit = plan.summary.can_commit || accept_aliases && !plan.summary.conflicts.iter().any(|c| c.kind.blocks_commit());
+                plan.summary.can_commit = plan.summary.can_commit
+                    || accept_aliases
+                        && !plan
+                            .summary
+                            .conflicts
+                            .iter()
+                            .any(|c| c.kind.blocks_commit());
                 let expected = match store.read().map_err(|_| failure(ErrorCode::IoFailure))? {
                     Loaded::Ready(found) => found.revision,
                     _ => return Err(failure(ErrorCode::InvalidRecord).with_field("store")),
@@ -804,10 +901,21 @@ impl ProjectsService {
             .find(|a| a.id.as_str() == association)
             .ok_or_else(|| failure(ErrorCode::ContextStale))?;
         match &found.target {
-            Target::Native { terminal_id, host_epoch, .. } | Target::Shell { terminal_id, host_epoch } => {
-                Ok((host_epoch.as_str().to_owned(), terminal_id.as_str().to_owned()))
+            Target::Native {
+                terminal_id,
+                host_epoch,
+                ..
             }
-            Target::Managed { .. } => Err(failure(ErrorCode::UnsupportedCapability).with_field("managed")),
+            | Target::Shell {
+                terminal_id,
+                host_epoch,
+            } => Ok((
+                host_epoch.as_str().to_owned(),
+                terminal_id.as_str().to_owned(),
+            )),
+            Target::Managed { .. } => {
+                Err(failure(ErrorCode::UnsupportedCapability).with_field("managed"))
+            }
         }
     }
 
@@ -816,11 +924,17 @@ impl ProjectsService {
     pub fn claim_input(&self, window: &str, association: &str) -> Result<(), Failure> {
         self.gated()?;
         let (epoch, terminal) = self.terminal_of(association)?;
-        self.owner.host(Some(&epoch)).map_err(|e| failure(owner_code(e)))?;
-        self.claims.claim(window, &epoch, &terminal).map_err(|e| match e {
-            ClaimError::HeldByOther => failure(ErrorCode::OwnerRefused).with_field("input_claim"),
-            ClaimError::Unavailable => failure(ErrorCode::IoFailure).with_field("input_claim"),
-        })
+        self.owner
+            .host(Some(&epoch))
+            .map_err(|e| failure(owner_code(e)))?;
+        self.claims
+            .claim(window, &epoch, &terminal)
+            .map_err(|e| match e {
+                ClaimError::HeldByOther => {
+                    failure(ErrorCode::OwnerRefused).with_field("input_claim")
+                }
+                ClaimError::Unavailable => failure(ErrorCode::IoFailure).with_field("input_claim"),
+            })
     }
 
     pub fn release_input(&self, window: &str, association: &str) {
@@ -835,7 +949,12 @@ impl ProjectsService {
     }
 
     /// Output is readable by every view; it never needs the claim.
-    pub fn read_output(&self, association: &str, from: u64, wait_ms: u64) -> Result<TermRead, Failure> {
+    pub fn read_output(
+        &self,
+        association: &str,
+        from: u64,
+        wait_ms: u64,
+    ) -> Result<TermRead, Failure> {
         self.gated()?;
         let (epoch, terminal) = self.terminal_of(association)?;
         self.owner
@@ -855,7 +974,13 @@ impl ProjectsService {
             .map_err(|e| failure(owner_code(e)))
     }
 
-    pub fn resize(&self, window: &str, association: &str, rows: u16, cols: u16) -> Result<(), Failure> {
+    pub fn resize(
+        &self,
+        window: &str,
+        association: &str,
+        rows: u16,
+        cols: u16,
+    ) -> Result<(), Failure> {
         self.gated()?;
         let (epoch, terminal) = self.terminal_of(association)?;
         if !self.claims.holds(window, &epoch, &terminal) {
@@ -896,7 +1021,8 @@ impl ProjectsService {
         };
         if let Some(store) = &self.store {
             let path = store.dir().join("rollback-report.json");
-            let bytes = serde_json::to_vec_pretty(&report).map_err(|_| failure(ErrorCode::IoFailure))?;
+            let bytes =
+                serde_json::to_vec_pretty(&report).map_err(|_| failure(ErrorCode::IoFailure))?;
             let _ = crate::native::store::write_atomic(&path, &bytes);
         }
         Ok(report)
