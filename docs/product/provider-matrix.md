@@ -89,6 +89,20 @@ effect route, including provider subagents, hooks, plugins, MCP, background tool
 network. A feature unavailable safely in Managed remains visible with reason and a Native
 alternative requiring a **new explicit launch**, never automatic fallback.
 
+### M3 feasibility update — 2026-10-23
+
+Official current candidates are Python Agent SDK `0.2.173` with bundled Claude Code
+`2.1.309`, and TypeScript SDK `0.3.308` with CLI parity `2.1.308`. These release facts do
+not certify Wyss compatibility. The SDK's `disallowed_tools=["*"]` removes tool definitions,
+which makes text-only Inference plausible; effective managed policy, hooks, connectors,
+memory and authentication remain unproven. Permission rules/hooks can decide before or
+without `canUseTool`, so callback-only Local Tools mediation is insufficient. Both profiles
+remain unavailable pending the exact tests in the
+[M3 feasibility report](../research/claude-managed-feasibility-2026-10-23.md). Model/effort
+selection is separately proposed in [ADR0054](../adr/0054-managed-model-selection-and-effort.md);
+history persistence is separately proposed in the
+[M3 usage-history contract](../contracts/m3-model-usage-history.md).
+
 ## M0 installed-build manifest
 
 Dated observation 2026-10-22, source main `d2ee8d2` (application trees equal `e480d479`).

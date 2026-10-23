@@ -124,6 +124,13 @@ Risk: SDK callbacks insufficient as an isolation boundary, auth incompatibility,
 reliable catalogue. Rollback: disable the new profile/feature on fresh launches, preserve
 old session history and existing Codex profiles; never auto-convert a session to Native.
 
+The frozen engineering oracles and current status are recorded in the
+[M3 contract](../contracts/m3-managed-parity.md),
+[acceptance record](../acceptance/m3-engineering-2026-10-23.md), and
+[Claude feasibility report](../research/claude-managed-feasibility-2026-10-23.md).
+As of 2026-10-23 Claude profiles remain blocked pending no-effect/action-mediation proof;
+these records do not accept ADR0053 or authorize real-provider tests.
+
 ### M4 — Persistent terminal fidelity and lifecycle
 
 Deliver isolated individually restartable parser helpers, bounded volatile checkpoints,

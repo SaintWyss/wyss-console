@@ -149,6 +149,18 @@ was refused; corrected closed schema2 hello succeeded, with no operational reque
   version labels alone do not prove binary equivalence. Neither was rebuilt/replaced.
   Installed binary-to-source reproducibility remains NOT_PROVEN.
 
+## M3 engineering pass — 2026-10-23
+
+M3 scope is frozen in [the contract](../contracts/m3-managed-parity.md), with runnable
+acceptance oracles and current evidence in [the acceptance record](../acceptance/m3-engineering-2026-10-23.md).
+The official Claude Agent SDK is a candidate, not an accepted or qualified adapter. Both
+Claude Managed profiles remain blocked until their independent effect guarantees are
+proven; see the [feasibility report](../research/claude-managed-feasibility-2026-10-23.md).
+Managed model/effort is a proposed versioned extension in [ADR0054](../adr/0054-managed-model-selection-and-effort.md),
+and metrics history persistence remains disabled pending the owner decision in the
+[privacy/store contract](../contracts/m3-model-usage-history.md). These records add no
+source/runtime acceptance or release claim.
+
 ### F8 resource enforcement reconciliation
 
 Every numeric ceiling in [resources.json](../contracts/f8/resources.json) is covered
