@@ -160,3 +160,66 @@ fn a_name_that_is_not_an_account_here_declares_nobody() {
     let uids = declared::uids(&["nobody".to_owned(), "no-such-account-xyz".to_owned()]);
     assert_eq!(uids.len(), 1);
 }
+
+fn image(entries: &[(u16, u16, u32)]) -> Vec<u8> {
+    let mut bytes = 2_u32.to_le_bytes().to_vec();
+    for (tag, permissions, id) in entries {
+        bytes.extend(tag.to_le_bytes());
+        bytes.extend(permissions.to_le_bytes());
+        bytes.extend(id.to_le_bytes());
+    }
+    bytes
+}
+
+#[test]
+fn an_acl_the_kernel_does_not_write_is_not_understood_and_so_is_not_private() {
+    use super::acl::parse;
+    let base = [
+        (ACL_USER_OBJ, 7, 0),
+        (ACL_GROUP_OBJ, 5, 0),
+        (ACL_OTHER, 0, 0),
+    ];
+    assert!(parse(&image(&base)).is_some());
+    // A tag or a permission bit that does not exist, another version, a torn image.
+    assert!(parse(&image(&[(0x40, 7, 0)])).is_none());
+    assert!(parse(&image(&[(ACL_USER_OBJ, 8, 0)])).is_none());
+    let mut other_version = image(&base);
+    other_version[0] = 1;
+    assert!(parse(&other_version).is_none());
+    assert!(parse(&image(&base)[..image(&base).len() - 3]).is_none());
+    assert!(parse(&[]).is_none());
+}
+
+#[test]
+fn the_acl_a_directory_gives_what_is_made_in_it_is_read_apart() {
+    use super::acl::inherited;
+    let (base, fd) = dir(0o700);
+    // Nothing inherited: nobody.
+    assert_eq!(
+        inherited(&fd, getegid().as_raw(), geteuid().as_raw()),
+        Writers::default()
+    );
+    fs::remove_dir(base).unwrap();
+}
+
+#[test]
+fn an_attribute_that_cannot_be_asked_for_is_somebody_who_cannot_be_named() {
+    use super::acl::inherited;
+    use std::os::unix::fs::OpenOptionsExt;
+    let (base, _) = dir(0o700);
+    // A descriptor that only names the directory cannot be asked for its attributes. That is a
+    // failure to know, not an absence: both the ACL it has and the one it gives are unverified.
+    let named = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_PATH | nix::libc::O_DIRECTORY | nix::libc::O_CLOEXEC)
+        .open(&base)
+        .unwrap();
+    let (me, gid) = (geteuid().as_raw(), getegid().as_raw());
+    assert!(writers(&named, 0o700, gid, me).everyone);
+    assert!(inherited(&named, gid, me).everyone);
+    // The same directory through one that can be asked has neither.
+    let open = fs::File::open(&base).unwrap();
+    assert_eq!(writers(&open, 0o700, gid, me), Writers::default());
+    assert_eq!(inherited(&open, gid, me), Writers::default());
+    fs::remove_dir(base).unwrap();
+}

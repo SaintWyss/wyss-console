@@ -40,14 +40,15 @@ project/workspace metadata projection outside Native and Managed execution autho
 with stable opaque identities, checked owner association and stale-context refusal. It
 does not certify or authorize any migration, installed change, release, service action,
 credential access, host/authority restart, runtime-capacity expansion, or claim of
-OS-level isolation. ADR0053 remains Proposed. The explicit detailed M1 contract and
-13 new acceptance oracles remain proposed engineering details, not executable proof.
+OS-level isolation. ADR0053 remains Proposed. The detailed M1 contract and its 13 acceptance
+oracles are implemented behind a release gate that is off by default; their recorded results are
+in `docs/acceptance/m1-delivery-2026-10-23.md`. They are engineering evidence, not adoption.
 
 Before M1 can be adopted on the owner's desktop, validate exact schema/DTO fixtures,
 deterministic legacy mapping, interrupted migration, stale context/project switch,
 missing roots, duplicate bindings, protected paths, bounds, newer-store refusal and
 rollback preserving live session identities. No source implementation or migration is performed by accepting the architecture.
-All M1-01..13 tests remain NOT_RUN until implemented (M1-01 holds at schema/codec level only; see implementation status); negative cases, interrupted
+The M1-01..13 tests exist and ran (13 PASS; the reference budgets await the owner; see the delivery record); negative cases, interrupted
 migration, rollback, UI/runtime identity preservation and real-desktop resource budgets
 must pass before production adoption. Any material alteration to the accepted trust or
 ownership boundaries requires a new review/ADR.

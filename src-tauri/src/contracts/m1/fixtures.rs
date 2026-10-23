@@ -77,6 +77,11 @@ pub fn shell_association(n: u32) -> Value {
     })
 }
 
+/// The Managed authority of a receipt: its protocol and its stream.
+pub fn authority(protocol: u8, n: u32) -> Value {
+    json!({"protocol": protocol, "storeStreamId": id(0x80, n)})
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn operation(
     n: u32,
@@ -96,6 +101,7 @@ pub fn operation(
         "bindingId": id(0x20, 2), "bindingRevision": "3",
         "provider": provider, "mode": mode,
         "nativeProfile": native_profile, "managedSafetyProfile": safety,
+        "managedAuthority": if mode == "managed" { authority(1, 1) } else { Value::Null },
         "state": state, "associationId": association, "claim": claim, "createdAt": STAMP
     })
 }
@@ -171,6 +177,21 @@ pub fn full() -> Value {
         "state": "attached", "operationId": id(0x70, 2)
     });
 
+    // The committed Managed receipt was asked of the protocol-2 authority its association names.
+    let mut second = operation(
+        2,
+        2,
+        5,
+        "codex",
+        "managed",
+        Value::Null,
+        json!("local_tools"),
+        "committed",
+        json!(id(0x50, 4)),
+        Value::Null,
+    );
+    second["managedAuthority"] = authority(2, 2);
+
     json!({
         "schema": 1, "storeId": id(2, 1), "revision": "7", "hostId": host(),
         "projects": [a, b],
@@ -183,8 +204,7 @@ pub fn full() -> Value {
         "operations": [
             operation(1, 2, 3, "claude", "native", profile(NATIVE_B, "2"), Value::Null,
                       "committed", json!(id(0x50, 2)), Value::Null),
-            operation(2, 2, 5, "codex", "managed", Value::Null, json!("local_tools"),
-                      "committed", json!(id(0x50, 4)), Value::Null),
+            second,
             operation(3, 3, 6, "codex", "managed", Value::Null, json!("inference"),
                       "pending", Value::Null, json!("claim-1")),
             operation(4, 3, 7, "codex", "native", Value::Null, Value::Null,

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import {
     CURSOR_STYLES,
     EVENT_FILTER_PREFERENCES,
@@ -34,6 +35,7 @@
     retrying,
     onretry,
     visible,
+    children,
   }: {
     settings: SettingsState;
     controller: SettingsController;
@@ -43,6 +45,8 @@
     retrying: boolean;
     onretry: () => void;
     visible: boolean;
+    /** Cards another feature adds to this page (the project workspace's switch). */
+    children?: Snippet;
   } = $props();
 
   const prefs = $derived(settings.preferences);
@@ -402,5 +406,6 @@
         </p>
       {/if}
     </section>
+    {@render children?.()}
   </div>
 </section>

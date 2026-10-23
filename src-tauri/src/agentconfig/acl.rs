@@ -9,10 +9,7 @@
 //! shared group allows stays read only. This module only says who can write; whether that is
 //! acceptable is decided in `place.rs`.
 use nix::libc;
-use std::{
-    fs,
-    os::fd::{AsRawFd, OwnedFd},
-};
+use std::{fs, os::fd::AsRawFd};
 
 const TAG_USER_OBJ: u16 = 0x01;
 const TAG_USER: u16 = 0x02;
@@ -33,32 +30,71 @@ pub(crate) struct Writers {
     pub everyone: bool,
 }
 
-/// The access ACL of the file behind `fd`, or `None` when it has none.
-fn access_acl(fd: &OwnedFd) -> Option<Vec<u8>> {
-    let name = b"system.posix_acl_access\0";
-    let mut buffer = vec![0_u8; 4096];
-    // SAFETY: `name` is NUL-terminated, the buffer is as long as the length passed, and the
-    // descriptor is open for the whole call.
-    let length = unsafe {
-        libc::fgetxattr(
-            fd.as_raw_fd(),
-            name.as_ptr().cast(),
-            buffer.as_mut_ptr().cast(),
-            buffer.len(),
-        )
-    };
-    let length = usize::try_from(length).ok()?;
-    buffer.truncate(length);
-    Some(buffer)
+const ACCESS_ACL: &[u8] = b"system.posix_acl_access\0";
+const DEFAULT_ACL: &[u8] = b"system.posix_acl_default\0";
+const MOST_ACL_BYTES: usize = 4096;
+
+/// What asking for one ACL attribute found. Not being able to ask is not the same as there being
+/// nothing to find: only the kernel saying so (no attribute, or a file system that keeps none)
+/// is an absence.
+enum Attribute {
+    Absent,
+    Found(Vec<u8>),
+    Unknown,
 }
 
-struct Entry {
-    tag: u16,
-    permissions: u16,
-    id: u32,
+fn attribute(fd: &impl AsRawFd, name: &[u8]) -> Attribute {
+    for _ in 0..2 {
+        // SAFETY: `name` is NUL-terminated and the descriptor is open for the whole call.
+        let size = unsafe {
+            libc::fgetxattr(
+                fd.as_raw_fd(),
+                name.as_ptr().cast(),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if size < 0 {
+            return match std::io::Error::last_os_error().raw_os_error() {
+                Some(libc::ENODATA | libc::EOPNOTSUPP) => Attribute::Absent,
+                _ => Attribute::Unknown,
+            };
+        }
+        let Ok(size) = usize::try_from(size) else {
+            return Attribute::Unknown;
+        };
+        if size > MOST_ACL_BYTES {
+            return Attribute::Unknown;
+        }
+        let mut buffer = vec![0_u8; size];
+        // SAFETY: the buffer is as long as the length passed, and the descriptor is open.
+        let read = unsafe {
+            libc::fgetxattr(
+                fd.as_raw_fd(),
+                name.as_ptr().cast(),
+                buffer.as_mut_ptr().cast(),
+                size,
+            )
+        };
+        if let Ok(read) = usize::try_from(read) {
+            buffer.truncate(read);
+            return Attribute::Found(buffer);
+        }
+        // It grew between the two calls: look once more, then give up.
+        if std::io::Error::last_os_error().raw_os_error() != Some(libc::ERANGE) {
+            return Attribute::Unknown;
+        }
+    }
+    Attribute::Unknown
 }
 
-fn parse(bytes: &[u8]) -> Option<Vec<Entry>> {
+pub(crate) struct Entry {
+    pub(crate) tag: u16,
+    pub(crate) permissions: u16,
+    pub(crate) id: u32,
+}
+
+pub(crate) fn parse(bytes: &[u8]) -> Option<Vec<Entry>> {
     // Version 2, then eight bytes an entry: tag, permissions, id, little-endian.
     if bytes.len() < 4
         || bytes.len() % 8 != 4
@@ -66,18 +102,26 @@ fn parse(bytes: &[u8]) -> Option<Vec<Entry>> {
     {
         return None;
     }
-    Some(
-        bytes[4..]
-            .as_chunks::<8>()
-            .0
-            .iter()
-            .map(|chunk| Entry {
-                tag: u16::from_le_bytes([chunk[0], chunk[1]]),
-                permissions: u16::from_le_bytes([chunk[2], chunk[3]]),
-                id: u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]),
-            })
-            .collect(),
-    )
+    let entries: Vec<Entry> = bytes[4..]
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| Entry {
+            tag: u16::from_le_bytes([chunk[0], chunk[1]]),
+            permissions: u16::from_le_bytes([chunk[2], chunk[3]]),
+            id: u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]),
+        })
+        .collect();
+    // A tag or a permission the kernel does not write is not an ACL this understands.
+    entries
+        .iter()
+        .all(|e| {
+            matches!(
+                e.tag,
+                TAG_USER_OBJ | TAG_USER | TAG_GROUP_OBJ | TAG_GROUP | TAG_MASK | TAG_OTHER
+            ) && e.permissions & !0o7 == 0
+        })
+        .then_some(entries)
 }
 
 /// Whether the account databases are the local files only: a name service that reaches a
@@ -144,24 +188,14 @@ pub(crate) fn group_is_private(gid: u32, me: u32) -> bool {
     !others_have_it_as_primary && !members_other_than_me && !system_reports_others
 }
 
-/// Who can write the directory behind `fd` (whose mode is `mode` and group `gid`).
-pub(crate) fn writers(fd: &OwnedFd, mode: u32, gid: u32, me: u32) -> Writers {
-    let mut found = Writers {
-        everyone: mode & 0o002 != 0,
-        ..Writers::default()
-    };
-    let acl = access_acl(fd).and_then(|bytes| parse(&bytes));
-    let Some(entries) = acl else {
-        // No ACL: the mode bits say it all.
-        found.group_shared = mode & 0o020 != 0 && !group_is_private(gid, me);
-        return found;
-    };
+/// Who the entries of an ACL let write, on top of `found`.
+fn from_entries(entries: &[Entry], gid: u32, me: u32, mut found: Writers) -> Writers {
     let mask = entries
         .iter()
         .find(|e| e.tag == TAG_MASK)
         .map(|e| e.permissions);
     let effective = |permissions: u16| mask.map_or(permissions, |m| permissions & m);
-    for entry in &entries {
+    for entry in entries {
         match entry.tag {
             TAG_OTHER if entry.permissions & WRITE != 0 => found.everyone = true,
             TAG_USER if effective(entry.permissions) & WRITE != 0 && entry.id != me => {
@@ -173,13 +207,55 @@ pub(crate) fn writers(fd: &OwnedFd, mode: u32, gid: u32, me: u32) -> Writers {
             TAG_GROUP if effective(entry.permissions) & WRITE != 0 => {
                 found.group_shared |= !group_is_private(entry.id, me);
             }
-            TAG_USER_OBJ => (),
             _ => (),
         }
     }
     found.named.sort_unstable();
     found.named.dedup();
     found
+}
+
+/// What stands for "somebody we cannot name can write": an ACL that could not be read or
+/// understood is never taken to be the absence of one.
+fn unverified() -> Writers {
+    Writers {
+        everyone: true,
+        ..Writers::default()
+    }
+}
+
+/// Who can write the directory behind `fd` (whose mode is `mode` and group `gid`).
+pub(crate) fn writers(fd: &impl AsRawFd, mode: u32, gid: u32, me: u32) -> Writers {
+    let found = Writers {
+        everyone: mode & 0o002 != 0,
+        ..Writers::default()
+    };
+    let entries = match attribute(fd, ACCESS_ACL) {
+        Attribute::Found(bytes) => match parse(&bytes) {
+            Some(entries) => entries,
+            None => return unverified(),
+        },
+        // No ACL: the mode bits say it all.
+        Attribute::Absent => {
+            let mut found = found;
+            found.group_shared = mode & 0o020 != 0 && !group_is_private(gid, me);
+            return found;
+        }
+        Attribute::Unknown => return unverified(),
+    };
+    from_entries(&entries, gid, me, found)
+}
+
+/// Who the ACL a directory gives what is made in it (its default ACL) lets write. A directory
+/// that hands another account write access to every file created in it has given it the project.
+pub(crate) fn inherited(fd: &impl AsRawFd, gid: u32, me: u32) -> Writers {
+    match attribute(fd, DEFAULT_ACL) {
+        Attribute::Absent => Writers::default(),
+        Attribute::Found(bytes) => parse(&bytes).map_or_else(unverified, |entries| {
+            from_entries(&entries, gid, me, Writers::default())
+        }),
+        Attribute::Unknown => unverified(),
+    }
 }
 
 /// Writes an ACL for a test: the entries as `(tag, permissions, id)`.

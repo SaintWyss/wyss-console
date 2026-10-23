@@ -626,6 +626,9 @@ mod tests {
             .map(|c| c.trim().trim_matches('"').to_owned())
             .filter(|c| !c.is_empty())
             .filter(|c| c == "f8_state" || !c.starts_with("f8_"))
+            // The project workspace's commands belong to capability `projects`, which the
+            // test of its own routing holds (`projects::commands`).
+            .filter(|c| !c.starts_with("projects_"))
             .collect();
         let permitted: Vec<String> = expected
             .iter()

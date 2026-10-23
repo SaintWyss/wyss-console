@@ -16,6 +16,19 @@ const WRITE_LIMIT = 4096;
 /** An empty answer that took at least this long was a wait the desktop made for us (host_read). */
 const LONG_POLL_SEEN_MS = 500;
 
+/** How often, and how long apart, a write the host did not take is offered again. */
+const BUSY_RETRIES = 40;
+const BUSY_DELAY_MS = 25;
+
+function isBusy(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'busy'
+  );
+}
+
 /** One local human-terminal owner. No command interpretation or domain authority. */
 export class TerminalController {
   private active = true;
@@ -207,11 +220,26 @@ export class TerminalController {
   private async writeInput() {
     if (this.writing || !this.id) return;
     this.writing = true;
+    let busy = 0;
     try {
       while (!this.stopped && this.state === 'running' && this.inputs.length) {
         const data = this.inputs[0];
         const chunk = data.subarray(0, WRITE_LIMIT);
-        const written = await desktop.writeTerminal(this.id, chunk);
+        let written: number;
+        try {
+          written = await desktop.writeTerminal(this.id, chunk);
+        } catch (error) {
+          // The host takes one write at a time per terminal. `busy` means this one was not taken
+          // (nothing was written), typically because another window was writing at that moment:
+          // it is asked again shortly, in order, instead of failing and closing the terminal that
+          // other window is using.
+          if (isBusy(error) && ++busy <= BUSY_RETRIES && !this.stopped) {
+            await this.sleep(BUSY_DELAY_MS);
+            continue;
+          }
+          throw error;
+        }
+        busy = 0;
         if (this.stopped || this.state !== 'running') return;
         if (written !== chunk.length) throw new Error('write_failed');
         this.inputBytes -= chunk.length;

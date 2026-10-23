@@ -35,9 +35,9 @@ use crate::{
     contracts::{
         Sequence, WireUuid,
         control::{
-            BindingResume, Close, ControlError, ControlResult, ExecutionLease, ExecutionScope,
-            GateQuery, GateReason, LeaseGrant, LeaseRevoke, List, MAX_PAGE, ManagedSessionRecord,
-            Prepare, ResultValue, RuntimeTarget,
+            AuthorityStatus, BindingResume, Close, ControlError, ControlResult, ExecutionLease,
+            ExecutionScope, GateQuery, GateReason, LeaseGrant, LeaseRevoke, List, MAX_PAGE,
+            ManagedSessionRecord, Prepare, ResultValue, RuntimeTarget,
         },
         identities::ManagedSessionId,
     },
@@ -188,6 +188,18 @@ impl SessionService {
     }
     pub(crate) fn stopping(&self) -> bool {
         self.inner.stop.load(Ordering::Acquire)
+    }
+
+    /// The identity of the authority's durable stream, as its greeting stated it. Read only:
+    /// it names which authority a session belongs to, so P1 and P2 sessions never mix.
+    pub fn stream_id(&self) -> Result<WireUuid, SessionError> {
+        self.call(|client| Ok(client.hello_status().stream_id.clone()))
+    }
+
+    /// The authority's own status, read now: its protocol, storage schema, version and stream.
+    /// Read only. It is what a caller may take as the authority's word about itself.
+    pub fn status(&self) -> Result<AuthorityStatus, SessionError> {
+        self.call(|client| client.status().map_err(SessionError::of))
     }
 
     /// The newest sessions, or those created before `before`.

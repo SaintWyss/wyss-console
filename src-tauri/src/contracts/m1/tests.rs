@@ -124,7 +124,7 @@ fn the_canonical_bytes_are_deterministic_across_runs() {
     assert_eq!(small, GOLDEN_SCRATCH_SHA256);
 }
 
-const GOLDEN_FULL_SHA256: &str = "a91749cd414d0a1b4b235e38a1fa189acadb13dfc01d05469887ee3080324725";
+const GOLDEN_FULL_SHA256: &str = "c91c31656546117c0a1e75208c495df7af444c2e9ff3b3bba3846a05f69b5e7f";
 const GOLDEN_SCRATCH_SHA256: &str =
     "55e9a41782a807b8c34bcdd657c9b539f525ba89ec158a528d21d43cb9074c09";
 
@@ -557,6 +557,11 @@ fn launch(provider: &str, mode: &str, native: Value, safety: Value) -> Value {
         v["operations"][4]["mode"] = json!(mode);
         v["operations"][4]["nativeProfile"] = native;
         v["operations"][4]["managedSafetyProfile"] = safety;
+        v["operations"][4]["managedAuthority"] = if mode == "managed" {
+            authority(1, 1)
+        } else {
+            Value::Null
+        };
     })
 }
 
@@ -1043,6 +1048,47 @@ fn a_committed_receipt_and_its_association_must_agree() {
     accepted(&compacted);
     compacted["closedOperations"] = json!([id(0x70, 99)]);
     invalid_at(&compacted, "sessions.operationId");
+}
+
+#[test]
+fn a_managed_receipt_names_the_authority_it_was_asked_of_and_only_a_managed_one_does() {
+    // Operation 0 is Native, 1 and 2 are Managed (1 committed with its association).
+    invalid_at(
+        &edited(|v| v["operations"][0]["managedAuthority"] = json!(authority(1, 1))),
+        "operations.managedAuthority",
+    );
+    invalid_at(
+        &edited(|v| v["operations"][2]["managedAuthority"] = Value::Null),
+        "operations.managedAuthority",
+    );
+    // The omitted field is a malformed record, as for every optional value.
+    let error = refusal(&edited(|v| {
+        v["operations"][1]
+            .as_object_mut()
+            .unwrap()
+            .remove("managedAuthority");
+    }));
+    assert_eq!(error.code, Code::InvalidRecord, "{error}");
+    // A committed receipt and its association are of the same authority: protocol and stream.
+    invalid_at(
+        &edited(|v| v["operations"][1]["managedAuthority"] = authority(1, 2)),
+        "operations.target",
+    );
+    invalid_at(
+        &edited(|v| v["operations"][1]["managedAuthority"] = authority(2, 1)),
+        "operations.target",
+    );
+    // Only protocols 1 and 2 exist, and the stream is a UUID.
+    for bad in [
+        json!({"protocol": 3, "storeStreamId": id(0x80, 2)}),
+        json!({"protocol": 2, "storeStreamId": "not-a-uuid"}),
+        json!({"protocol": 2, "storeStreamId": id(0x80, 2), "path": "/x"}),
+    ] {
+        let error = refusal(&edited(|v| {
+            v["operations"][1]["managedAuthority"] = bad.clone()
+        }));
+        assert_eq!(error.code, Code::InvalidRecord, "{bad}: {error}");
+    }
 }
 
 #[test]

@@ -48,8 +48,9 @@ Rollback of M0 is documentation/manifest revert only, with no installed operatio
 
 ### M1 — Project-centered workspace
 
-**Implementation-ready proposal; not implemented or released.** Implement FP-CTX-01..04
-using the exact proposed [M1 contract](../contracts/m1-workspace.md): closed records/DTOs,
+**Engineering complete behind an off gate; release blocked on the owner's adoption and the real-desktop
+measurements** ([delivery record](../acceptance/m1-delivery-2026-10-23.md)). FP-CTX-01..04 are implemented per
+the [M1 contract](../contracts/m1-workspace.md): closed records/DTOs,
 limits, dependency-ordered increments, M1-01..13 tests, deterministic legacy migration,
 context/receipt handling, mixed-host compatibility, preservation and rollback. That is
 the single detailed handoff; do not duplicate it in a new plan. Global administration and
@@ -62,7 +63,9 @@ Verification/DoD: all AC-FP-CTX-01..04 and M1-01..13, including two windows, old
 no-effect navigation/restore, dispatch/association ambiguity, corrupt/newer stores and
 interrupted migration. Native desktop acceptance must show all existing sessions remain
 attributable, zero duplicate processes/prompts, no host restart/SQL migration, no project-
-switch effects, and measured performance budgets. M1-02..13 are NOT_RUN until implemented; M1-01 holds at codec level only (see status).
+switch effects, and measured performance budgets. M1-01..12 pass (M1-02 partial: no foreign-ACL check);
+M1-13 has measured costs and **no budget**; the native journey with real providers and the owner's own
+registry is the adoption acceptance (see the delivery record).
 
 Risk/rollback: existing registry open mutates and old layout restore can recreate shells;
 M1 requires non-starting checked observation and attach-only recovery. Preserve private

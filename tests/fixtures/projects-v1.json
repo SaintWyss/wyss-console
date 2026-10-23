@@ -1,0 +1,92 @@
+{
+  "orphans": [
+    {
+      "folder": "repo",
+      "nativeSessionId": null,
+      "terminalId": "aaaaaaaa-0000-4000-8000-000000000002"
+    }
+  ],
+  "overview": {
+    "enabled": true,
+    "host": {
+      "epoch": "h1:1:1:100:1000",
+      "features": ["profile_effort"],
+      "reachable": true,
+      "reason": null
+    },
+    "store": {
+      "hostId": "0000feed-0000-4000-8000-000000000001",
+      "revision": "5",
+      "scratchWorkspaceId": "0000feed-0000-4000-8000-000000000002",
+      "state": "ready",
+      "storeId": "0000feed-0000-4000-8000-000000000003"
+    }
+  },
+  "projects": {
+    "cursor": null,
+    "items": [
+      {
+        "archived": false,
+        "defaultWorkspaceId": "0000feed-0000-4000-8000-000000000004",
+        "id": "0000feed-0000-4000-8000-000000000005",
+        "label": "a",
+        "revision": "1",
+        "root": {
+          "availability": "available",
+          "bindingId": "0000feed-0000-4000-8000-000000000006",
+          "bindingRevision": "1",
+          "configEligible": true,
+          "label": "a",
+          "nativeEligible": true,
+          "state": "valid"
+        },
+        "sessions": 0,
+        "tombstone": false,
+        "workspaceIds": ["0000feed-0000-4000-8000-000000000004"]
+      }
+    ],
+    "storeRevision": "5"
+  },
+  "rollback": {
+    "canDisable": false,
+    "mappedOlderRecords": 0,
+    "note": "Disabling returns to the older windows. The store, its tombstones and the migration snapshot are kept for forward recovery; no older file is restored over a live writer and no session is stopped. The older window can recreate missing shells by its own behaviour.",
+    "projects": 1,
+    "sessions": 0,
+    "unfinishedLaunches": 1,
+    "workspaces": 2
+  },
+  "workspace": {
+    "focus": null,
+    "id": "0000feed-0000-4000-8000-000000000004",
+    "label": "Main",
+    "layout": {
+      "id": "0000feed-0000-4000-8000-000000000007",
+      "kind": "leaf"
+    },
+    "leaves": [
+      {
+        "id": "0000feed-0000-4000-8000-000000000007",
+        "session": null,
+        "title": "Pane"
+      }
+    ],
+    "pinned": false,
+    "preferences": {
+      "managedSafetyProfile": null,
+      "mode": "native",
+      "nativeProfile": null,
+      "provider": null
+    },
+    "projectId": "0000feed-0000-4000-8000-000000000005",
+    "revision": "2",
+    "unfinished": [
+      {
+        "leafId": "0000feed-0000-4000-8000-000000000007",
+        "mode": "native",
+        "operationId": "0000feed-0000-4000-8000-000000000008",
+        "state": "ambiguous"
+      }
+    ]
+  }
+}

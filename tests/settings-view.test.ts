@@ -139,6 +139,7 @@ it('opens from the sidebar with every section, in order, and the defaults select
       'Authority',
       'About',
       'Reset',
+      'Projects and workspaces',
     ],
   );
   expect(select('setting-landing').value).toBe('console');

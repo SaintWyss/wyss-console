@@ -307,6 +307,16 @@ pub enum OperationState {
     Refused,
 }
 
+/// The Managed authority a launch was first asked of: its protocol and the identity of its
+/// durable stream. A retry is made of this authority and of no other, so a desktop that changed
+/// between protocol 1 and 2 cannot prepare a second session elsewhere.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManagedAuthority {
+    pub protocol: ManagedProtocol,
+    pub store_stream_id: StoreStreamId,
+}
+
 /// The durable receipt of a launch request. It records what was asked, with the Native
 /// profile and the requested Managed profile kept apart. It is never an approval, a
 /// credential or proof of the profile that ran.
@@ -329,6 +339,9 @@ pub struct Operation {
     pub native_profile: Option<ProfileRef>,
     #[serde(deserialize_with = "required")]
     pub managed_safety_profile: Option<ManagedSafetyProfile>,
+    /// Present exactly for a Managed launch: the authority that was asked first.
+    #[serde(deserialize_with = "required")]
+    pub managed_authority: Option<ManagedAuthority>,
     pub state: OperationState,
     #[serde(deserialize_with = "required")]
     pub association_id: Option<AssociationId>,

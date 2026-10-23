@@ -14,6 +14,10 @@
   import CredentialsView from './lib/features/credentials/CredentialsView.svelte';
   import { EventsController } from './lib/features/events/controller';
   import { F8Controller } from './lib/features/f8/controller';
+  import { ProjectsController } from './lib/features/projects/controller';
+  import ProjectsGate from './lib/features/projects/ProjectsGate.svelte';
+  import ProjectsView from './lib/features/projects/ProjectsView.svelte';
+  import { desktopProjects } from './lib/desktop/projects-client';
   import RuntimesView from './lib/features/f8/RuntimesView.svelte';
   import { ModelsController } from './lib/features/models/controller';
   import ModelsView from './lib/features/models/ModelsView.svelte';
@@ -134,7 +138,15 @@
     f8 = next;
   });
   let f8 = $state(f8Controller.state());
-  const items = $derived(navItems(f8.gate === 'active'));
+  // The project-centered workspace: off until the owner turns it on in Settings. Its state is
+  // read once at start (the gate), and then only while its view is shown.
+  const projectsController = new ProjectsController((next) => {
+    projects = next;
+  });
+  let projects = $state(projectsController.state());
+  const items = $derived(
+    navItems(f8.gate === 'active', projects.overview?.enabled === true),
+  );
   let opened = false;
   let navigated = false;
   const current = $derived(items.find((item) => item.id === activeView));
@@ -145,6 +157,9 @@
   });
   $effect(() => {
     f8Controller.setVisible(activeView === 'runtimes');
+  });
+  $effect(() => {
+    projectsController.setVisible(activeView === 'projects');
   });
   // Approvals are read while their view is shown or a turn is being followed: an
   // approval exists only for a turn that runs. Nothing is read for them otherwise.
@@ -182,7 +197,8 @@
     nativeController.setVisible(
       activeView === 'workspace' ||
         activeView === 'profiles' ||
-        activeView === 'models',
+        activeView === 'models' ||
+        activeView === 'projects',
     );
   });
 
@@ -212,6 +228,7 @@
     let active = true;
     settingsController.start();
     void f8Controller.start();
+    void projectsController.refresh();
     void getAppInfo().then(
       (info) => {
         if (active) version = info.version;
@@ -245,6 +262,7 @@
       credentialsController.dispose();
       settingsController.dispose();
       f8Controller.dispose();
+      projectsController.dispose();
     };
   });
 
@@ -363,6 +381,15 @@
       {approvalsController}
       onsessions={() => go('sessions')}
     />
+    {#if projects.overview?.enabled}
+      <ProjectsView
+        visible={activeView === 'projects'}
+        {projects}
+        controller={projectsController}
+        client={desktopProjects}
+        nativeProfiles={native.profiles}
+      />
+    {/if}
     {#if f8.gate === 'active'}
       <RuntimesView
         visible={activeView === 'runtimes'}
@@ -422,6 +449,8 @@
       {lifecycle}
       {retrying}
       onretry={retry}
-    />
+    >
+      <ProjectsGate {projects} controller={projectsController} />
+    </SettingsView>
   </main>
 </div>

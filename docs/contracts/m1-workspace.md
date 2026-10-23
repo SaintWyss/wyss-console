@@ -1,12 +1,16 @@
 # M1 workspace implementation contract
 
-**Proposed; only increment 1 exists.** The closed schema, identities, strict codec and M1-01-level fixtures are implemented in `contracts::m1` (unwired, unreleased); everything else below is not implemented. Engineering baseline: main
-`d2ee8d2971ed50de2e39d73ad71f2a29f14c42b2`, 2026-10-22. Implements only
+**Implemented, feature-gated and not adopted.** The pure schema and codec are `contracts::m1`;
+the locked store, command engine, checked owner, migration, input claim, service and window
+commands are `src-tauri/src/projects/`; the Projects view is `src/lib/features/projects/`.
+Everything sits behind the release gate (§6). Engineering baseline: main
+`b3d3c0b455ac77c78eab3b007b36abddb019c889`, 2026-10-23. Implements only
 [FP-CTX-01..04](../product/functional-specification.md#fp-ctx-01), with
 [ADR0052 Accepted (architecture only)](../adr/0052-project-centered-workspace-identities.md).
 This is the detailed contract owned/referenced by [architecture](../product/architecture.md);
-current evidence stays in [status](../product/implementation-status.md#m0-engineering-baseline).
-All DTOs, filenames and tests below are implementation proposals, not existing APIs.
+current evidence stays in [status](../product/implementation-status.md#m0-engineering-baseline) and
+the [M1 delivery record](../acceptance/m1-delivery-2026-10-23.md). Where the build had to decide
+something the proposal left open, §6 says what it decided.
 
 ## 1. Ownership and compatibility
 
@@ -41,7 +45,7 @@ Propose `$XDG_STATE_HOME/wyss-console/projects/v1/store.json` (fallback
 `~/.local/state`), directory 0700, file 0600, user-owned non-symlink ancestors, atomic
 same-directory write + fsync file/directory. One transaction holds an interprocess file
 lock, rereads the current revision, validates and compare-and-swaps the entire store.
-No watcher writes a legacy file. Contending windows return `revision_conflict`; refetch,
+No watcher writes a older file. Contending windows return `revision_conflict`; refetch,
 never silently last-write-wins. Do not hold this lock across native dialogs/provider IO.
 
 Closed JSON types; reject unknown fields, duplicate JSON keys, unknown enums, nonfinite
@@ -51,22 +55,22 @@ zeros) to avoid JavaScript precision loss; timestamps are UTC RFC3339, informati
 Optional values use null; no arbitrary JSON bags. Times/IDs come from the backend.
 Paths stay private/local; frontend DTOs use root label/eligibility, not trusted path input.
 
-| Record               | Exact fields and meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| StoreV1              | `schema:1`, `storeId:UUID`, `revision:Counter`, `hostId:UUID`, `projects:Project[]`, `bindings:Binding[]`, `workspaces:Workspace[]`, `sessions:Association[]`, `operations:Operation[]`, `closedOperations:UUID[]`, `migration:Migration \| null`                                                                                                                                                                                                                                                                           |
-| Project              | `id`, `label:Text`, `createdAt:Time`, `updatedAt:Time`, `revision`, `archived:bool`, `tombstone:bool`, `defaultBindingId:UUID \| null`, `defaultWorkspaceId:UUID \| null`, `profileDefaults:{claude:ProfileRef \| null,codex:ProfileRef \| null}`                                                                                                                                                                                                                                                                           |
-| ProfileRef           | `id:NativeId`, `version:Counter` (1..u32::MAX); existing owner resolves availability, no profile body/credential copy                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ManagedSafetyProfile | Closed, provider-qualified requested profile: `inference` (text-only) or `local_tools` (mediated effects); neither grants execution or approval privileges.                                                                                                                                                                                                                                                                                                                                                                 |
-| Binding              | `id`, `projectId`, `hostId`, `revision`, `path:AbsolutePath`, `observation:{device:Counter,inode:Counter}`, `checkoutKind:folder \| git \| worktree`, `state:valid \| missing \| identity_changed \| unverified \| retired`, `previousBindingId:UUID \| null`                                                                                                                                                                                                                                                               |
-| Workspace            | `id`, `projectId:UUID \| null`, `hostId`, `revision`, `label`, `layout:Node \| null`, `focus:UUID \| null`, `pinned:bool`, `leaves:Leaf[]`, `preferences:{provider:claude \| codex \| null,mode:native \| managed,nativeProfile:ProfileRef \| null,managedSafetyProfile:ManagedSafetyProfile \| null}`                                                                                                                                                                                                                      |
-| Node                 | `{kind:leaf,id:UUID}` or `{kind:split,dir:row \| col,ratio:number,a:Node,b:Node}`; leaf ID names a workspace Leaf                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Leaf                 | `id`, `title:Text`, `associationId:UUID \| null`; null means an empty placement, never permission to launch                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Association          | `id`, `originProjectId:UUID \| null`, `hostId`, `bindingId:UUID \| null`, `bindingRevision:Counter \| null`, `target:NativeTarget \| ShellTarget \| ManagedTarget`, `state:attached \| detached \| unavailable \| ambiguous`, `operationId:UUID \| null`                                                                                                                                                                                                                                                                    |
-| NativeTarget         | `kind:native`, `sessionId:NativeId`, `terminalId:UUID`, `hostEpoch:EpochText`                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ShellTarget          | `kind:shell`, `terminalId:UUID`, `hostEpoch:EpochText`                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ManagedTarget        | `kind:managed`, `protocol:1 \| 2`, `storeStreamId:UUID`, `sessionId:UUID`, `requestedSafetyProfile:ManagedSafetyProfile \| null`; a display-only request, never proof of effective authority profile                                                                                                                                                                                                                                                                                                                        |
-| Operation            | `id`, `kind:launch`, `projectId:UUID \| null`, `workspaceId`, `leafId`, `bindingId:UUID \| null`, `bindingRevision:Counter \| null`, `provider:claude \| codex \| shell`, `mode:native \| managed`, `nativeProfile:ProfileRef \| null`, `managedSafetyProfile:ManagedSafetyProfile \| null`, `state:pending \| committed \| ambiguous \| refused`, `associationId:UUID \| null`, `claim:EpochText \| null`, `createdAt`; a durable requested-profile receipt, never an approval, credential or executed-profile attestation |
-| Migration            | `version:1`, `id:UUID`, `sources:{kind:registry \| layout,digest:SHA256}[]`, `map:{sourceKind:registry_project \| registry_session \| layout_leaf,sourceKey:Text,targetId:UUID}[]`, `state:committed`; sourceKey is an opaque source-record digest, not a public path                                                                                                                                                                                                                                                       |
+| Record               | Exact fields and meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| StoreV1              | `schema:1`, `storeId:UUID`, `revision:Counter`, `hostId:UUID`, `projects:Project[]`, `bindings:Binding[]`, `workspaces:Workspace[]`, `sessions:Association[]`, `operations:Operation[]`, `closedOperations:UUID[]`, `migration:Migration \| null`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Project              | `id`, `label:Text`, `createdAt:Time`, `updatedAt:Time`, `revision`, `archived:bool`, `tombstone:bool`, `defaultBindingId:UUID \| null`, `defaultWorkspaceId:UUID \| null`, `profileDefaults:{claude:ProfileRef \| null,codex:ProfileRef \| null}`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ProfileRef           | `id:NativeId`, `version:Counter` (1..u32::MAX); existing owner resolves availability, no profile body/credential copy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ManagedSafetyProfile | Closed, provider-qualified requested profile: `inference` (text-only) or `local_tools` (mediated effects); neither grants execution or approval privileges.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Binding              | `id`, `projectId`, `hostId`, `revision`, `path:AbsolutePath`, `observation:{device:Counter,inode:Counter}`, `checkoutKind:folder \| git \| worktree`, `state:valid \| missing \| identity_changed \| unverified \| retired`, `previousBindingId:UUID \| null`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Workspace            | `id`, `projectId:UUID \| null`, `hostId`, `revision`, `label`, `layout:Node \| null`, `focus:UUID \| null`, `pinned:bool`, `leaves:Leaf[]`, `preferences:{provider:claude \| codex \| null,mode:native \| managed,nativeProfile:ProfileRef \| null,managedSafetyProfile:ManagedSafetyProfile \| null}`                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Node                 | `{kind:leaf,id:UUID}` or `{kind:split,dir:row \| col,ratio:number,a:Node,b:Node}`; leaf ID names a workspace Leaf                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Leaf                 | `id`, `title:Text`, `associationId:UUID \| null`; null means an empty placement, never permission to launch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Association          | `id`, `originProjectId:UUID \| null`, `hostId`, `bindingId:UUID \| null`, `bindingRevision:Counter \| null`, `target:NativeTarget \| ShellTarget \| ManagedTarget`, `state:attached \| detached \| unavailable \| ambiguous`, `operationId:UUID \| null`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| NativeTarget         | `kind:native`, `sessionId:NativeId`, `terminalId:UUID`, `hostEpoch:EpochText`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ShellTarget          | `kind:shell`, `terminalId:UUID`, `hostEpoch:EpochText`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ManagedTarget        | `kind:managed`, `protocol:1 \| 2`, `storeStreamId:UUID`, `sessionId:UUID`, `requestedSafetyProfile:ManagedSafetyProfile \| null`; a display-only request, never proof of effective authority profile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Operation            | `id`, `kind:launch`, `projectId:UUID \| null`, `workspaceId`, `leafId`, `bindingId:UUID \| null`, `bindingRevision:Counter \| null`, `provider:claude \| codex \| shell`, `mode:native \| managed`, `nativeProfile:ProfileRef \| null`, `managedSafetyProfile:ManagedSafetyProfile \| null`, `managedAuthority:{protocol:1 \| 2,storeStreamId:UUID} \| null` (the authority the launch was first asked of: present exactly for a Managed launch, and the one a Managed association of the receipt must name), `state:pending \| committed \| ambiguous \| refused`, `associationId:UUID \| null`, `claim:EpochText \| null`, `createdAt`; a durable requested-profile receipt, never an approval, credential or executed-profile attestation |
+| Migration            | `version:1`, `id:UUID`, `sources:{kind:registry \| layout,digest:SHA256}[]`, `map:{sourceKind:registry_project \| registry_session \| layout_leaf,sourceKey:Text,targetId:UUID}[]`, `state:committed`; sourceKey is an opaque source-record digest, not a public path                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 `id`, `projectId`, `hostId`, `workspaceId`, `bindingId`, `associationId` above are UUIDs;
 `revision` is Counter; `label`/`title` are Text. `profileDefaults` is presentation for
@@ -136,19 +140,20 @@ unconfirmed plans. Side-effect receipts always name their captured context.
 
 Closed Command variants (tag `kind`, exact remaining fields):
 
-| Kind                                     | Payload / rule                                                                                                                                                                                                                                                                                                                                                                            |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `registerExisting`                       | `selectionToken`; backend-owned one-use native chooser token, descriptor-revalidated root; duplicate canonical root on host returns existing project                                                                                                                                                                                                                                      |
-| `createFolder`                           | `selectionToken,name`; native-confirmed parent + one basename (no separators/dot segments); mkdir exclusively, no Git/launch; failed store commit leaves visible unregistered empty folder with explicit recovery, never deletes a now-nonempty folder                                                                                                                                    |
-| `relink`                                 | `projectId,oldBindingId,selectionToken`; display old/new comparison and per-operation eligibility before commit                                                                                                                                                                                                                                                                           |
-| `renameProject` / `archiveProject`       | `projectId,label` / `projectId,archived`; archive hides recent item, preserves attention/live work                                                                                                                                                                                                                                                                                        |
-| `removeProject`                          | `projectId,retainHistory:bool`; refuse active/ambiguous/unavailable-not-proven-ended targets; retainHistory keeps a tombstone Project (no active workspace/binding); otherwise remove proven-ended associations/workspaces/bindings. No filesystem/provider/vault deletion                                                                                                                |
-| `createWorkspace` / `duplicateWorkspace` | `projectId,label` / `sourceWorkspaceId,label`; duplicate uses new leaf IDs, all associations null; copy preferences only                                                                                                                                                                                                                                                                  |
-| `saveWorkspace`                          | `workspaceId,expectedWorkspaceRevision,label,layout,focus,pinned,leaves,preferences`; same-store CAS, all association origins must match project except explicit Scratch adoption                                                                                                                                                                                                         |
-| `closeWorkspace` / `deleteWorkspace`     | `workspaceId`; close releases views/input only; delete detaches associations, replaces deleted default with first remaining workspace or a new empty default                                                                                                                                                                                                                              |
-| `attach` / `detach`                      | `workspaceId,leafId,associationId`; verified owner lookup, never launch; detach does not close PTY/runtime                                                                                                                                                                                                                                                                                |
-| `adoptScratch`                           | `associationId,projectId,bindingId`; only origin-null ShellTarget, confirmed actual cwd disclosure; assignment of origin once, no cd/mode/permission change                                                                                                                                                                                                                               |
-| `launch`                                 | `workspaceId,leafId,provider:claude \| codex \| shell,mode:native \| managed,nativeProfile:ProfileRef \| null,managedSafetyProfile:ManagedSafetyProfile \| null`; Native/shell: `managedSafetyProfile` null; Managed: `nativeProfile` null and `managedSafetyProfile` an explicit per-launch choice; fresh binding + eligibility + owner availability, explicit user action, no free argv |
+| Kind                                     | Payload / rule                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `registerExisting`                       | `selectionToken`; backend-owned one-use native chooser token, descriptor-revalidated root; duplicate canonical root on host returns existing project                                                                                                                                                                                                                                                                  |
+| `createFolder`                           | `selectionToken,name`; native-confirmed parent + one basename (no separators/dot segments); mkdir exclusively, no Git/launch; failed store commit leaves visible unregistered empty folder with explicit recovery, never deletes a now-nonempty folder                                                                                                                                                                |
+| `relink`                                 | `projectId,oldBindingId,selectionToken`; display old/new comparison and per-operation eligibility before commit                                                                                                                                                                                                                                                                                                       |
+| `renameProject` / `archiveProject`       | `projectId,label` / `projectId,archived`; archive hides recent item, preserves attention/live work                                                                                                                                                                                                                                                                                                                    |
+| `removeProject`                          | `projectId,retainHistory:bool`; refuse active/ambiguous/unavailable-not-proven-ended targets; retainHistory keeps a tombstone Project (no active workspace/binding); otherwise remove proven-ended associations/workspaces/bindings. No filesystem/provider/vault deletion                                                                                                                                            |
+| `createWorkspace` / `duplicateWorkspace` | `projectId,label` / `sourceWorkspaceId,label`; duplicate uses new leaf IDs, all associations null; copy preferences only                                                                                                                                                                                                                                                                                              |
+| `saveWorkspace`                          | `workspaceId,expectedWorkspaceRevision,label,layout,focus,pinned,leaves,preferences`; same-store CAS, all association origins must match project except explicit Scratch adoption                                                                                                                                                                                                                                     |
+| `closeWorkspace` / `deleteWorkspace`     | `workspaceId`; close releases views/input only; delete detaches associations, replaces deleted default with first remaining workspace or a new empty default                                                                                                                                                                                                                                                          |
+| `attach` / `detach`                      | `workspaceId,leafId,associationId`; verified owner lookup, never launch; detach does not close PTY/runtime                                                                                                                                                                                                                                                                                                            |
+| `adoptScratch`                           | `associationId,projectId,bindingId`; only origin-null ShellTarget, confirmed actual cwd disclosure; assignment of origin once, no cd/mode/permission change                                                                                                                                                                                                                                                           |
+| `launch`                                 | `workspaceId,leafId,provider:claude \| codex \| shell,mode:native \| managed,nativeProfile:ProfileRef \| null,managedSafetyProfile:ManagedSafetyProfile \| null`; Native/shell: `managedSafetyProfile` null; Managed: `nativeProfile` null and `managedSafetyProfile` an explicit per-launch choice; fresh binding + eligibility + owner availability, explicit user action, no free argv                             |
+| `reconcileLaunch`                        | `launchOperationId,resolution`; `resolution` is `identified{terminalId,sessionId\|null}` (the user found the session an unknown launch started among those no association holds), `absent` (the owner is readable and shows nothing no association holds) or `retryManaged` (the Managed owner is asked again with the receipt's original intent); only the user sends it, and none of the three starts a new process |
 
 Reads `listProjects`, `getProject`, `getWorkspace`, `listSessions` are bounded/paginated
 (max100 rows/page, opaque store-revision cursor); return source revision, availability and
@@ -164,7 +169,7 @@ One app-coordinated input claim per host epoch/terminal, held by backend interpr
 lock and released on blur/detach/crash; mirror views are read-only. Taking input is explicit.
 Resize only by input owner; read cursors stay per viewer, gaps disclosed. Never stop or
 resize a terminal merely to select a project. This is cooperative client coordination,
-not isolation against legacy/direct same-UID writers; compatibility warning is visible.
+not isolation against older/direct same-UID writers; compatibility warning is visible.
 
 Launch journal: persist pending before dispatch, then committed only after exact owner
 receipt and association CAS. Refusal before dispatch => refused. Loss after possible
@@ -207,7 +212,8 @@ receipt whose `claim` no longer matches a live backend process is CAS-updated to
 is left alone. Transitions: `pending` to `committed`, `refused` or `ambiguous` only by the
 claim holder; `ambiguous` to `committed` or `refused` only by an explicit user reconciliation
 against the owner (target identified or confirmed absent), recorded by CAS. Any new launch
-needs a new `operationId`. `context_stale` is evaluated against the immutable captured
+needs a new `operationId`. A command that makes no receipt of its own may not reuse an ID a receipt owns or one
+already in `closedOperations`: it is refused `invalid_record`, effect `none` for an open receipt and `unknown` for a closed ID. `context_stale` is evaluated against the immutable captured
 context before any dispatch, never against current UI selection.
 
 Errors: `unsupported_schema`, `invalid_record`, `capacity_exceeded`, `revision_conflict`,
@@ -218,19 +224,19 @@ known effect `none|committed|unknown`, and safe next action; never raw provider/
 
 ## 4. Migration, preservation and rollback
 
-1. **Read-only preview.** Use bounded strict legacy registry schema1 (2 MiB,200 sessions,
+1. **Read-only preview.** Use bounded strict older registry schema1 (2 MiB,200 sessions,
    100 known folders) and saved layout v1 (64 KiB,16 tabs,16 panes/tab,depth6). Validate
    owner/mode/descriptor and consistent bytes/digest before/after read. If sources change,
    retry preview, never stop their writers. No Registry::open or HostLink lazy startup.
-2. Generate one migration UUID/storeId/HostId in preview memory; deterministic UUIDv5
-   mapping within that migration namespace from source kind + stable legacy key. Retry of
+2. Generate one migration UUID/storeId/HostId in preview memory; deterministic name-based
+   mapping (SHA-256, UUID version-8 layout, no new dependency) within that migration namespace from source kind + stable older key. Retry of
    that preview yields the same map. Canonical exact root duplicates coalesce after native
    validation; aliases/ambiguous roots require user resolution. Missing roots remain
    unverified/read-only. Do not infer projects from cwd prefixes, Git URL or directory names.
 3. Read current host through non-starting checked connection, validate every terminal/native
    tag against its live owner. Map known exact-root sessions; unmatched shells/native work
    stays in Scratch/unassigned recovery view (Native is not adoptable by adoptScratch).
-   Import each legacy tab into a separate named workspace (up to16), splitting mixed-project
+   Import each older tab into a separate named workspace (up to16), splitting mixed-project
    tabs by verified origin, and set the first as default. Preview must refuse any resulting
    workspace/leaf count above its bound; never truncate. Prune absent refs into empty leaves,
    never remake shells. Missing agents/history remain discoverable metadata. Never infer
@@ -239,25 +245,25 @@ known effect `none|committed|unknown`, and safe next action; never raw provider/
    workspace binding plus explicit project match can associate Managed work. Unknown/root-
    ambiguous work stays unassigned and cannot receive project-scoped commands. No SQLite
    read/write migration and no provider thread resume on import.
-5. On explicit commit, recheck preview digests/owner epochs and all bounds. Preserve legacy
+5. On explicit commit, recheck preview digests/owner epochs and all bounds. Preserve older
    registry/layout bytes in a private migration snapshot (no profile/auth/vault copy), hash
    manifest; stage new validated store and fsync, atomic publish last. Never overwrite the
    source. Crash before publication => old reader; after => fully valid new reader/map.
    A private snapshot contains user paths: never log, commit or attach it to a PR.
 6. New UI exclusively owns its new store; old windows continue owning old layout. Detect
-   legacy changes and offer incremental import with a **new** preview; never merge them
+   older changes and offer incremental import with a **new** preview; never merge them
    silently or overwrite newer workspace state. UI feature flag selects reader, not host
    lifecycle. Reopening old UI can still recreate missing shells by old behaviour: disclose
    this before rollback, prefer attach-only compatibility view if that risk is unacceptable.
 7. Rollback is an owner-reviewed GUI/metadata operation: record post-snapshot new records,
    export mapping privately, confirm no unaccounted/ambiguous operation, disable new reader.
-   Keep v1 store/tombstones/snapshot for forward recovery; never restore legacy bytes over
+   Keep v1 store/tombstones/snapshot for forward recovery; never restore older bytes over
    live writers. Installer rollback can close terminals and is **not** this UI rollback.
    No host stop, SQL downgrade, authority switch, provider-setting restoration or PID cleanup.
 
 M0 only prepares this procedure. It does not create snapshots of personal records, publish
 stores, install a GUI, or execute rollback. Observe before/after current service start
-identities/socket inodes and legacy metadata; differences require investigation, not
+identities/socket inodes and older metadata; differences require investigation, not
 cleanup. Absence of a difference is preservation evidence, not proof of provider fidelity.
 
 ## 5. Bounded implementation order and executable acceptance handoff
@@ -265,8 +271,9 @@ cleanup. Absence of a difference is preservation evidence, not proof of provider
 Build in separate reviewable increments: pure closed codec/schema + fixtures; locked
 store/CAS + failure injection; non-starting owner projection/checked transport; migration
 preview/commit; project/Scratch navigation; layouts/input coordination; launch/config
-context integration. ADR0052 accepts the identity/projection architecture; M1 design details and
-fixtures remain unimplemented beyond increment 1 (the schema and codec). Release/adoption still requires all applicable
+context integration. ADR0052 accepts the identity/projection architecture. Every increment above
+is implemented and feature-gated (§6 and `docs/acceptance/m1-delivery-2026-10-23.md`); none is
+adopted. Release/adoption still requires all applicable
 M1-01..13 acceptance evidence, performance budgets, review and a separately authorized
 preservation-aware deployment, not merely this ADR's approval. No dependency on Claude Managed,
 new remote transport, concurrency increase, parser helpers or OL3 implementation.
@@ -279,7 +286,7 @@ new remote transport, concurrency increase, parser helpers or OL3 implementation
 | M1-04            | Two windows CAS same revision => exactly one commit, other conflict; lock/crash/write/fsync/rename faults leave complete old or new bytes, never empty fallback                                                                                                                                                                                                                                                                                                                                                         | CTX01/04             |
 | M1-05            | Switch A→B during chooser, config plan, confirmation and delayed receipt => no B mutation; pending plan expires, confirmed effect/receipt remains A; cross-project Undo refuses                                                                                                                                                                                                                                                                                                                                         | CTX04                |
 | M1-06            | Duplicate/close/delete/archive/navigation/reopen => zero spawn/stop/resume/lease calls; default removal leaves empty replacement; detached sessions discoverable; Scratch no providers/authority                                                                                                                                                                                                                                                                                                                        | CTX01/03             |
-| M1-07            | Registry/layout corpus: duplicate roots, absent host, missing agents, malformed/newer files,16 tabs, changed sources, interrupted publication and second import; deterministic map; no Registry::open, no shell remake, no legacy writes                                                                                                                                                                                                                                                                                | CTX01..03            |
+| M1-07            | Registry/layout corpus: duplicate roots, absent host, missing agents, malformed/newer files,16 tabs, changed sources, interrupted publication and second import; deterministic map; no Registry::open, no shell remake, no older writes                                                                                                                                                                                                                                                                                 | CTX01..03            |
 | M1-08            | P1/P2 same-looking IDs never conflate; wrong store/epoch/generation/context or requested-vs-effective Managed safety profile denies attach/input/effect; project association never changes Managed binding or grant                                                                                                                                                                                                                                                                                                     | CTX01/04             |
 | M1-09            | Two mirror views => one input/resize claim, other read-only; owner crash frees claim; replaced socket/PID reuse/unreadable start ticks => refusal before send, zero reconnect replay                                                                                                                                                                                                                                                                                                                                    | CTX01/03             |
 | M1-10            | Native dispatch succeeds then association save/ACK lost => ambiguous, zero second launch; same `operationId` twice (identical => stored state, different => `invalid_record`) or from two windows => one dispatch; a different `operationId` on a busy leaf => `leaf_busy`; `pending` with a dead claim found at load => `ambiguous`, with a live claim untouched; compacted ID => refused; Managed receipt retains the explicit requested safety profile and retry uses original intent; startup never replays journal | CTX01/04             |
@@ -289,8 +296,9 @@ new remote transport, concurrency increase, parser helpers or OL3 implementation
 
 Fixtures must use synthetic metadata and fail-on-call spawn/stop/provider/config writers.
 No test requires real credentials, a live service restart or installed-store migration.
-Current fixture passes in the status register prove the old components only; the above
-new tests are **NOT_RUN** until implemented. Required native desktop journey after owner
+Current fixture passes in the status register prove the old components only; the results of
+the M1-01..13 tests are recorded in `docs/acceptance/m1-delivery-2026-10-23.md` (13 PASS; the GUI reference budgets of M1-13
+are proposed and await the owner). Required native desktop journey after owner
 acceptance: A/B/Scratch, Native Claude/Codex and existing F8 visible in correct scope,
 archive/reopen, GUI-only recovery, two windows, loss of owner connection. Zero duplicate
 processes/prompts and unchanged live ownership are explicit release oracles.
@@ -305,3 +313,135 @@ warmup/sample rules and machine/load/build disclosure. No numeric latency budget
 by M0. Before M1 release, agree measured reference budgets; refuse an unexplained regression
 outside baseline uncertainty and retain failed/outlier samples. A fixture-only latency pass
 cannot close the real-desktop performance requirement.
+
+## 6. As built
+
+What the implementation decided where the proposal left room, and what it does not do. Anything
+here that disagrees with the sections above is a defect to fix, not a second contract.
+
+**Release gate.** Every command, reads included, answers `unsupported_capability` (field
+`disabled`) until the owner turns the workspace on; the one exception is `projects_overview`, which
+only says it is off. With the gate off nothing is read or made: no `projects/` directory, no store
+file, no call to the terminal host, no Managed interface. The gate is the private file
+`$XDG_STATE_HOME/wyss-console/projects/feature`; it is switched by `projects_set_enabled`, which
+asks in a native confirmation window the page cannot draw on, and turning it off is refused while a
+launch of unknown outcome exists. The Projects entry in the navigation exists only while it is on.
+Turning it off changes no session, no store and no older window.
+
+**Windows.** Another window is `w-<id>`, opened by `projects_open_window`, and carries only the
+`projects` capability. Windows follow the store by one poll of its revision (2.5 s, only while the
+view is shown), not by a push; a change from another window or process is seen at the next poll. At most
+eight extra windows are open.
+
+**Owner reads.** The host is read through `HostSocket`: every connection checks the peer's uid,
+pid and process start time and the socket file's identity, and the epoch it yields
+(`h1:<device>:<inode>:<pid>:<start ticks>`) is compared on every later call. A different epoch is
+`host_changed`, an absent host `host_offline`; neither starts, retries or falls back. The terminals'
+output is read through the same socket (`projects_term_read`), so a recovered view never creates a
+shell. Managed sessions come from the desktop's own P1 and P2 interfaces, each under its
+authority's stream ID, bounded to eight pages.
+
+**Managed launch prepares a session and nothing else.** It first reads the one authority the launch
+would go to (the protocol-2 interface when it is active, the installed authority otherwise) and
+what that authority says of itself, and refuses with nothing written unless that shows it serves
+the requested profile. No wire field lists the profiles an authority supports (adding one would
+change the authority protocol, which this contract may not do), so a profile counts as advertised
+only when the authority's own status proves what it needs: Inference needs the greeting of that
+interface's own protocol and storage schema (protocol 1 / schema 7, protocol 2 / schema 8);
+Local Tools, the privileged profile, also needs the authority to report the same version of the product as this desktop
+(the rule the protocol-2 client already applies to everything; the version string is the only build identity an authority reports), so an older protocol-1 authority is
+offered Inference only. An authority that cannot be read, or that proves nothing, refuses
+`host_offline` or `unsupported_capability`; the window's state is never evidence. The receipt
+records the authority (`managedAuthority`: protocol and stream) before the owner is asked, the
+owner is sent that authority and refuses (`host_changed`, nothing sent) if the authority that would
+answer is another one, and a reply that names another authority is ambiguous, never recorded as
+this launch's. The operation ID is the intent, and the requested profile is recorded. Binding a
+workspace, starting a runtime, leases and turns stay in the Managed screens, which read the request
+as a hint and grant nothing from it. A launch whose outcome is unknown is retried only by the user
+(`reconcileLaunch retryManaged`), with the same intent, of the recorded authority and no other: a
+desktop that has moved between protocol 1 and 2 refuses (`host_changed`, effect unknown, nothing
+sent) rather than prepare a second session elsewhere, and the profile must be shown again. `absent`
+for a Managed launch is judged by that same authority's sessions. Claude Managed is
+`unsupported_capability`.
+
+**Launch journal.** `pending` carries a `claim` (`c1:<pid>:<start ticks>:<nonce>`); on start the
+service makes `pending` receipts of a gone process `ambiguous`. Receipts are compacted only by an
+explicit action (`projects_compact_receipts`); a compacted ID stays in `closedOperations` (at most 4096) so it can never be live again.
+
+**Terminals.** A Scratch shell starts in the host's own default directory. A session the window
+started takes input as its pane opens (a new shell asks the terminal questions only the holder of
+input may answer); every other view is a read-only mirror until input is taken, and input is
+released on blur, on detach and when the window or process ends. Input is sent one call at a time,
+in the order typed.
+
+**Migration.** Preview reads the files of the older windows as bytes (never `Registry::open`), twice, and refuses
+a source that changes under it. A folder that is missing or not usable is not imported and is not
+invented; an alias of a registered root needs an explicit acceptance; tabs with nothing alive are
+skipped; a tab that mixes origins becomes one workspace per origin; all Scratch panes share the one
+Scratch workspace in a balanced layout. Commit preserves the exact bytes in
+`migration-<id>/` with a hash manifest, then publishes the store last. A later preview is
+incremental: it adds registered folders and live sessions the store lacks and never changes or
+removes a record it has. Profile defaults of the older registry are not imported. A preview that has a blocking conflict is
+never committed, whatever aliases were accepted, and an update preview is committed at the store
+revision it was made against or not at all (`revision_conflict`, then a new preview).
+
+**Unknown launches.** A Native or shell launch of unknown outcome is resolved by looking
+(`projects_orphans` lists the running terminals no association holds, of the kind the launch asked
+for, by the last component of their folder) and picking one (`identified`), or by saying nothing
+started (`absent`, refused while the owner shows something nobody holds). Only a Managed launch
+offers to ask its owner again. A launch is settled from the project and workspace that made it. A
+store at its session ceiling refuses a launch before the owner is asked.
+
+**Operation IDs.** The ID is looked up under every command before the store's revision or the
+window's selection are weighed. A launch already known answers from its receipt (`replayed`, naming the
+association it made) whatever the store or the window has become since; the same ID with any other
+field of the request, or in `closedOperations`, is `invalid_record`. A command that makes no receipt of
+its own may not reuse an ID a receipt owns or one already closed. A window that loses the race to
+record the same launch (its compare-and-swap fails) reads what the winner recorded and answers from it,
+never with `revision_conflict`, and never sends anything.
+
+**Adopting a shell.** Where a Scratch shell really is is read from its process (`/proc/<pid>/cwd`, the
+user's own process, the same start time before and after, the pid the host reports) through
+`projects_adoption_preview`, never from where it started. The page shows that directory and whether it is
+the project's folder or inside it; `adoptScratch` goes through only with a directory shown for that
+association, project and binding, still the same directory of the same process when it is
+applied, and used once; a disclosure belongs to the process, not to a window, so selecting a project or
+workspace in any window drops it (the move then asks again). A directory that cannot be read, or has changed, or was not shown, refuses
+(`owner_refused` / `context_stale`, field `cwd`) and nothing moves.
+
+**Project folders.** A root is looked at through the descriptor opened on it (not the path). Besides
+the owner and no link, it must not be writable by anybody else, by its ACL, its mode bits or the
+default ACL it gives what is made in it, except the accounts the owner named in
+`configuration/trusted-writers`, the file the configuration engine already believes; an ACL that cannot
+be read or understood is not private. A folder refused for this is `root_ineligible` (field
+`foreignAcl`); in an import it is not imported (`root_shared`).
+
+**Efficiency as built.** One shared owner inventory: a display read of the host and of the Managed
+authorities is kept for one second for every window (one read under a lock serves windows that ask
+together) and forgotten after any command; whatever decides or does something reads the owner itself.
+No timer exists per workspace: one revision poll per shown window, none while hidden. A renderer and its
+reader exist only for a pane that is mounted, and a pane is mounted only while its workspace is in view
+and the view is visible. The project rail and the sessions list draw only the rows in view past 60 rows
+(fixed row height; whatever grows a row is shown outside the list). A divider moved is shown at once and
+saved once, 400 ms after the last move, flushed before anything else is sent, before the view goes
+quiet and before another project or workspace is selected; a move made on a workspace that has since
+changed is let go, so it never overwrites the change. One write to a terminal is at most 4 KiB, the host's own limit (the window sends a longer paste in
+pieces of that size, in order, and stops at the first one refused); at most eight extra windows are open.
+
+**The older terminal view and a second writer.** The host takes one write at a time for a terminal and
+refuses another as `busy`, before any byte is taken. The older Console view closes a terminal when one of
+its writes fails, so a pane holding input on a terminal the older view also shows could destroy it. A
+`busy` write is therefore offered again, 40 times 25 ms apart, by the older view and by the Projects
+side; any other refusal, or a terminal that stays busy, ends the attempt as before.
+
+**Not done here** (see the delivery record for why each is optional or a limit, not a contract
+requirement):
+
+- A push channel between windows; a way to browse Managed sessions older than the owner's first eight
+  pages; any change to the host, the authorities, their stores, the F8 capacity of one or the
+  installed package.
+- Agreement of the GUI reference budgets, which needs the owner's own installation (the figures and the
+  proposal are in the delivery record); the owner's installation has not been migrated.
+- A removed project whose folder is still in the older registry is offered again by an update preview,
+  and an accepted alias is asked again each time (explicit offers, never silent).
+- A launch of unknown outcome cannot be settled while the store is at its session ceiling.
