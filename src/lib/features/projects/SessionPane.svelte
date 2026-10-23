@@ -113,10 +113,15 @@
     // Taking input is explicit, and it is let go of when the window loses the keyboard.
     // Keystrokes reach the terminal in the order they were typed: one call at a time.
     let sending: Promise<unknown> = Promise.resolve();
+    // The host takes at most 4 KiB in one write: a longer paste goes in pieces of that size, in
+    // order, and stops at the first one that is refused.
+    const PIECE = 4096;
     const send = (bytes: Uint8Array) => {
-      sending = sending
-        .then(() => client.writeInput(session.id, bytes))
-        .catch(sayInput);
+      for (let at = 0; at < bytes.length; at += PIECE) {
+        const piece = bytes.subarray(at, at + PIECE);
+        sending = sending.then(() => client.writeInput(session.id, piece));
+      }
+      sending = sending.catch(sayInput);
     };
     // One claim at a time: a second click or the open-time claim while one is in flight is the
     // same claim, so the keyboard is wired once and a keystroke is sent once.

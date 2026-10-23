@@ -348,8 +348,8 @@ the requested profile. No wire field lists the profiles an authority supports (a
 change the authority protocol, which this contract may not do), so a profile counts as advertised
 only when the authority's own status proves what it needs: Inference needs the greeting of that
 interface's own protocol and storage schema (protocol 1 / schema 7, protocol 2 / schema 8);
-Local Tools, the privileged profile, also needs the authority to be the very build of this desktop
-(the rule the protocol-2 client already applies to everything), so an older protocol-1 authority is
+Local Tools, the privileged profile, also needs the authority to report the same version of the product as this desktop
+(the rule the protocol-2 client already applies to everything; the version string is the only build identity an authority reports), so an older protocol-1 authority is
 offered Inference only. An authority that cannot be read, or that proves nothing, refuses
 `host_offline` or `unsupported_capability`; the window's state is never evidence. The receipt
 records the authority (`managedAuthority`: protocol and stream) before the owner is asked, the
@@ -405,7 +405,8 @@ user's own process, the same start time before and after, the pid the host repor
 `projects_adoption_preview`, never from where it started. The page shows that directory and whether it is
 the project's folder or inside it; `adoptScratch` goes through only with a directory shown for that
 association, project and binding, still the same directory of the same process when it is
-applied, and used once. A directory that cannot be read, or has changed, or was not shown, refuses
+applied, and used once; a disclosure belongs to the process, not to a window, so selecting a project or
+workspace in any window drops it (the move then asks again). A directory that cannot be read, or has changed, or was not shown, refuses
 (`owner_refused` / `context_stale`, field `cwd`) and nothing moves.
 
 **Project folders.** A root is looked at through the descriptor opened on it (not the path). Besides
@@ -423,8 +424,9 @@ reader exist only for a pane that is mounted, and a pane is mounted only while i
 and the view is visible. The project rail and the sessions list draw only the rows in view past 60 rows
 (fixed row height; whatever grows a row is shown outside the list). A divider moved is shown at once and
 saved once, 400 ms after the last move, flushed before anything else is sent, before the view goes
-quiet and before another project or workspace is selected. One write to a terminal is at most 64 KiB;
-at most eight extra windows are open.
+quiet and before another project or workspace is selected; a move made on a workspace that has since
+changed is let go, so it never overwrites the change. One write to a terminal is at most 4 KiB, the host's own limit (the window sends a longer paste in
+pieces of that size, in order, and stops at the first one refused); at most eight extra windows are open.
 
 **The older terminal view and a second writer.** The host takes one write at a time for a terminal and
 refuses another as `busy`, before any byte is taken. The older Console view closes a terminal when one of

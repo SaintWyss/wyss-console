@@ -16,7 +16,6 @@ const WRITE_LIMIT = 4096;
 /** An empty answer that took at least this long was a wait the desktop made for us (host_read). */
 const LONG_POLL_SEEN_MS = 500;
 
-/** One local human-terminal owner. No command interpretation or domain authority. */
 /** How often, and how long apart, a write the host did not take is offered again. */
 const BUSY_RETRIES = 40;
 const BUSY_DELAY_MS = 25;
@@ -30,6 +29,7 @@ function isBusy(error: unknown): boolean {
   );
 }
 
+/** One local human-terminal owner. No command interpretation or domain authority. */
 export class TerminalController {
   private active = true;
   private focusPending = false;

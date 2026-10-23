@@ -17,7 +17,10 @@ use serde::Serialize;
 use std::{
     fs,
     path::PathBuf,
-    sync::{Arc, Mutex, OnceLock, PoisonError},
+    sync::{
+        Arc, Mutex, OnceLock, PoisonError,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 use wyss_console::contracts::m1::{
@@ -32,24 +35,31 @@ use wyss_console::contracts::m1::{
 /// Most rows a page returns.
 pub const PAGE: usize = 100;
 
-/// Most bytes one write to a terminal carries.
-pub const MAX_WRITE: usize = 64 * 1024;
+/// Most bytes one write to a terminal carries: the host's own limit for one write. A longer paste
+/// is sent by the window in pieces of this size, in order.
+pub const MAX_WRITE: usize = 4 * 1024;
 
 /// How long what the owners said is shown to every window before they are asked again. A display
 /// read inside this time costs the owners nothing, however many windows are open and however
 /// often they ask; anything that acts, or that decides what to do, reads the owner itself.
 pub const INVENTORY_TTL: Duration = Duration::from_millis(1000);
 
+/// When an answer was read, under which generation, and what it said.
+type Kept<T> = (Instant, u64, Result<T, OwnerError>);
+
 /// One owner's answer, kept for `INVENTORY_TTL`. The lock is held while it is read, so windows
-/// that ask together share a single read instead of making one each.
+/// that ask together share a single read instead of making one each. Forgetting never waits for
+/// that read: it moves a generation, and an answer read under an older generation is not used.
 struct Remembered<T> {
-    answer: Mutex<Option<(Instant, Result<T, OwnerError>)>>,
+    answer: Mutex<Option<Kept<T>>>,
+    generation: AtomicU64,
 }
 
 impl<T: Clone> Remembered<T> {
     fn new() -> Self {
         Self {
             answer: Mutex::new(None),
+            generation: AtomicU64::new(0),
         }
     }
 
@@ -59,18 +69,22 @@ impl<T: Clone> Remembered<T> {
         read: impl FnOnce() -> Result<T, OwnerError>,
     ) -> Result<T, OwnerError> {
         let mut held = self.answer.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((at, answer)) = held.as_ref()
+        let now = self.generation.load(Ordering::Acquire);
+        if let Some((at, generation, answer)) = held.as_ref()
+            && *generation == now
             && at.elapsed() < ttl
         {
             return answer.clone();
         }
+        // What is read began under `now`: if something forgot meanwhile, it is stored as of `now`
+        // and so is not used by the next ask.
         let answer = read();
-        *held = Some((Instant::now(), answer.clone()));
+        *held = Some((Instant::now(), now, answer.clone()));
         answer
     }
 
     fn forget(&self) {
-        *self.answer.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        self.generation.fetch_add(1, Ordering::AcqRel);
     }
 }
 
@@ -1139,7 +1153,7 @@ impl ProjectsService {
     /// Input and resize need the claim: a mirror view is read-only.
     pub fn write_input(&self, window: &str, association: &str, data: &[u8]) -> Result<(), Failure> {
         self.gated()?;
-        // A keystroke, a paste or a reply of the terminal: never a megabyte in one call.
+        // A keystroke or a reply of the terminal, or one piece of a paste: the host takes no more.
         if data.is_empty() || data.len() > MAX_WRITE {
             return Err(failure(ErrorCode::InvalidRecord).with_field("data"));
         }
@@ -1262,4 +1276,34 @@ pub struct RollbackReport {
     pub sessions: usize,
     pub mapped_older_records: usize,
     pub note: &'static str,
+}
+
+#[cfg(test)]
+mod remembered_tests {
+    use super::*;
+
+    #[test]
+    fn forgetting_never_waits_for_a_read_and_what_was_read_meanwhile_is_not_reused() {
+        let cache = Arc::new(Remembered::<u32>::new());
+        let (started, running) = std::sync::mpsc::channel();
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        let reader = {
+            let cache = cache.clone();
+            std::thread::spawn(move || {
+                cache.get(Duration::from_secs(60), || {
+                    started.send(()).unwrap();
+                    gate.recv().unwrap();
+                    Ok(1)
+                })
+            })
+        };
+        running.recv().unwrap();
+        // The read is in flight and holds the lock: forgetting must still return at once.
+        cache.forget();
+        release.send(()).unwrap();
+        assert_eq!(reader.join().unwrap(), Ok(1));
+        // What began before the forgetting is not served again; what is read after it is.
+        assert_eq!(cache.get(Duration::from_secs(60), || Ok(2)), Ok(2));
+        assert_eq!(cache.get(Duration::from_secs(60), || Ok(3)), Ok(2));
+    }
 }

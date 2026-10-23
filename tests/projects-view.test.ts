@@ -508,6 +508,32 @@ describe('a session in a pane', () => {
     expect(sent).toEqual(['a', 'b', 'c']);
   });
 
+  it('sends a long paste in pieces the host takes, in order, and stops at the first refusal', async () => {
+    const client = withSession();
+    await shown(client);
+    await click('Alpha');
+    await click('Take input');
+    const paste = 'x'.repeat(4096 * 2 + 100);
+    renderers[0]!.typing[0]!.text(paste);
+    await settle();
+    const sizes = vi
+      .mocked(client.writeInput)
+      .mock.calls.map(([, data]) => data.length);
+    expect(sizes).toEqual([4096, 4096, 100]);
+    // A refusal of one piece ends the paste: the rest is not sent after it.
+    const refusing = withSession();
+    refusing.writeInput = vi.fn(async () => {
+      throw failure('owner_refused');
+    });
+    document.body.innerHTML = '';
+    await shown(refusing);
+    await click('Alpha');
+    await click('Take input');
+    renderers.at(-1)!.typing[0]!.text(paste);
+    await settle();
+    expect(refusing.writeInput).toHaveBeenCalledTimes(1);
+  });
+
   it('wires the keyboard once when input is taken twice at the same moment', async () => {
     const client = withSession();
     await shown(client);

@@ -381,6 +381,75 @@ describe('panes', () => {
     }
   });
 
+  it('still saves a moved divider when the view goes away while a change is in flight', async () => {
+    const { controller, client } = withTwo();
+    await controller.refresh();
+    await controller.selectProject(PROJECT_A);
+    vi.useFakeTimers();
+    const release: (() => void)[] = [];
+    const realExecute = client.execute;
+    client.execute = vi.fn(async (envelope) => {
+      if (client.sent.length === 0) {
+        await new Promise<void>((resolve) => release.push(resolve));
+      }
+      return realExecute(envelope);
+    });
+    const first = controller.rename(PROJECT_A, 'Busy');
+    await vi.advanceTimersByTimeAsync(10);
+    controller.resizeSplit('', 0.7);
+    controller.dispose();
+    release.shift()!();
+    await first;
+    await vi.advanceTimersByTimeAsync(2000);
+    const kinds = client.sent.map((e) => e.command.kind);
+    expect(kinds).toContain('saveWorkspace');
+    const save = client.sent.find((e) => e.command.kind === 'saveWorkspace')!;
+    if (save.command.kind !== 'saveWorkspace') throw new Error('save');
+    expect(save.command.layout).toMatchObject({ ratio: 0.7 });
+  });
+
+  it('lets a move go when the workspace changed under it, instead of overwriting the change', async () => {
+    const { controller, client } = withTwo();
+    await controller.refresh();
+    await controller.selectProject(PROJECT_A);
+    vi.useFakeTimers();
+    const release: (() => void)[] = [];
+    const realExecute = client.execute;
+    client.execute = vi.fn(async (envelope) => {
+      if (client.sent.length === 0) {
+        await new Promise<void>((resolve) => release.push(resolve));
+      }
+      return realExecute(envelope);
+    });
+    const first = controller.rename(PROJECT_A, 'Busy');
+    await vi.advanceTimersByTimeAsync(10);
+    controller.resizeSplit('', 0.7);
+    // Another window moved the divider and saved: the store has a newer revision.
+    client.state.workspace = workspace({
+      revision: '9',
+      layout: {
+        kind: 'split',
+        dir: 'row',
+        ratio: 0.2,
+        a: { kind: 'leaf', id: LEAF_1 },
+        b: { kind: 'leaf', id: LEAF_2 },
+      },
+      leaves: [
+        { id: LEAF_1, title: 'Pane', session: session() },
+        { id: LEAF_2, title: 'Pane', session: null },
+      ],
+    });
+    // A read while the change is still in flight sees the newer workspace.
+    await controller.refresh();
+    release.shift()!();
+    await first;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(client.sent.map((e) => e.command.kind)).not.toContain(
+      'saveWorkspace',
+    );
+    expect(controller.state().workspace?.layout).toMatchObject({ ratio: 0.2 });
+  });
+
   it('does not let a read of the store undo a divider that is not saved yet', async () => {
     const { controller, client } = withTwo();
     await controller.refresh();

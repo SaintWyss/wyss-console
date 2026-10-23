@@ -195,49 +195,60 @@ impl ManagedPort for ManagedFromApp {
     fn prepare(&self, launch: &ManagedLaunch) -> Result<ManagedLaunched, LaunchError> {
         let intent = WireUuid::try_from(launch.intent.clone())
             .map_err(|_| LaunchError::NotDispatched(OwnerError::Refused))?;
-        // The authority that would answer now must be the one the launch is for.
+        // The authority that would answer now must be the one the launch is for, and which of the
+        // two interfaces it is decided once, from that, not read again.
         let now = self.advertised().map_err(LaunchError::NotDispatched)?;
         if now.authority != launch.authority {
             return Err(LaunchError::NotDispatched(OwnerError::HostChanged));
         }
-        if let Some(gui) = self.app.try_state::<F8Gui>()
-            && gui.is_active()
-        {
-            let stream = launch.authority.store_stream_id.clone();
-            return match gui.prepare(intent) {
-                Ok(receipt) => Ok(ManagedLaunched {
-                    protocol: ManagedProtocol::P2,
-                    store_stream_id: stream,
-                    session_id: receipt.id.as_str().to_owned(),
-                }),
-                // The authority may have taken the intent; the same intent settles it later.
-                Err(error) => Err(match error.code {
-                    F8Failure::Unavailable | F8Failure::Uncertain | F8Failure::Internal => {
-                        LaunchError::Ambiguous
-                    }
-                    F8Failure::Inactive => LaunchError::NotDispatched(OwnerError::Unsupported),
-                    _ => LaunchError::NotDispatched(OwnerError::Refused),
-                }),
-            };
-        }
-        let service = self
-            .app
-            .try_state::<SessionService>()
-            .ok_or(LaunchError::NotDispatched(OwnerError::Unsupported))?;
-        match service.prepare(intent) {
-            Ok(receipt) => Ok(ManagedLaunched {
-                protocol: ManagedProtocol::P1,
+        let prepared = match launch.authority.protocol {
+            ManagedProtocol::P2 => {
+                let gui = self
+                    .app
+                    .try_state::<F8Gui>()
+                    .filter(|gui| gui.is_active())
+                    .ok_or(LaunchError::NotDispatched(OwnerError::HostChanged))?;
+                match gui.prepare(intent) {
+                    Ok(receipt) => Ok(receipt.id.as_str().to_owned()),
+                    // The authority may have taken the intent; the same intent settles it later.
+                    Err(error) => Err(match error.code {
+                        F8Failure::Unavailable | F8Failure::Uncertain | F8Failure::Internal => {
+                            LaunchError::Ambiguous
+                        }
+                        F8Failure::Inactive => LaunchError::NotDispatched(OwnerError::Unsupported),
+                        _ => LaunchError::NotDispatched(OwnerError::Refused),
+                    }),
+                }
+            }
+            ManagedProtocol::P1 => {
+                let service = self
+                    .app
+                    .try_state::<SessionService>()
+                    .ok_or(LaunchError::NotDispatched(OwnerError::Unsupported))?;
+                match service.prepare(intent) {
+                    Ok(receipt) => Ok(receipt.id.as_str().to_owned()),
+                    // The authority may have taken the intent: never retried from here.
+                    Err(error) => Err(match error.code {
+                        SessionFailure::Unavailable
+                        | SessionFailure::Uncertain
+                        | SessionFailure::Internal => LaunchError::Ambiguous,
+                        SessionFailure::Incompatible => {
+                            LaunchError::NotDispatched(OwnerError::Unsupported)
+                        }
+                        _ => LaunchError::NotDispatched(OwnerError::Refused),
+                    }),
+                }
+            }
+        }?;
+        // The answer carries no identity of its own, so the authority is looked at again: if it is
+        // not the one asked, the session may have been prepared elsewhere and is unknown here.
+        match self.advertised() {
+            Ok(after) if after.authority == launch.authority => Ok(ManagedLaunched {
+                protocol: launch.authority.protocol,
                 store_stream_id: launch.authority.store_stream_id.clone(),
-                session_id: receipt.id.as_str().to_owned(),
+                session_id: prepared,
             }),
-            // The authority may have taken the intent: never retried from here.
-            Err(error) => Err(match error.code {
-                SessionFailure::Unavailable
-                | SessionFailure::Uncertain
-                | SessionFailure::Internal => LaunchError::Ambiguous,
-                SessionFailure::Incompatible => LaunchError::NotDispatched(OwnerError::Unsupported),
-                _ => LaunchError::NotDispatched(OwnerError::Refused),
-            }),
+            _ => Err(LaunchError::Ambiguous),
         }
     }
 }

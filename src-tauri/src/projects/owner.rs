@@ -166,9 +166,10 @@ pub struct ManagedAdvert {
 /// not the one that interface speaks to or cannot be verified as such.
 ///
 /// Inference needs the greeting of that interface's own protocol and storage schema. Local Tools
-/// is the privileged profile, so it also needs the authority to be the very build of this
-/// desktop, the build whose safety-profile handling is the one that was verified (the same
-/// rule protocol 2's own client applies to everything). An older build of the protocol-1
+/// is the privileged profile, so it also needs the authority to report the same version of the
+/// product as this desktop, the version whose safety-profile handling was verified (the same
+/// rule protocol 2's own client applies to everything; the version string is the only build
+/// identity an authority reports). An older build of the protocol-1
 /// authority is offered Inference only; any doubt offers nothing.
 pub fn advertised_profiles(
     protocol: ManagedProtocol,

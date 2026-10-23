@@ -155,7 +155,12 @@ export class ProjectsController {
   private pending: {
     workspaceId: string;
     layout: WorkspaceView['layout'];
+    /** The revision of the workspace the move was made on: the save is asked against that one. */
+    base: string;
   } | null = null;
+  private saveRetries = 0;
+  /** A change is being sent. Kept apart from the state shown, which stops moving once disposed. */
+  private inFlight = false;
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
@@ -233,7 +238,10 @@ export class ProjectsController {
   dispose() {
     void this.flushLayout();
     this.disposed = true;
-    if (this.saveTimer !== undefined) clearTimeout(this.saveTimer);
+    // A move that could not be sent yet (a change is in flight) is sent by its own timer once that
+    // one is over; only a timer with nothing to do is cleared.
+    if (!this.pending && this.saveTimer !== undefined)
+      clearTimeout(this.saveTimer);
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
   }
@@ -295,7 +303,17 @@ export class ProjectsController {
         this.again = true;
         return;
       }
-      const unsaved = this.pending;
+      let unsaved = this.pending;
+      // The workspace changed under a move that was not saved (another window, or a change of this
+      // one): the store's layout wins, and the move is let go instead of overwriting it.
+      if (
+        unsaved &&
+        unsaved.workspaceId === workspace.id &&
+        unsaved.base !== workspace.revision
+      ) {
+        this.pending = null;
+        unsaved = null;
+      }
       this.set({
         overview,
         phase: 'ready',
@@ -434,7 +452,7 @@ export class ProjectsController {
     envelope: Envelope,
     onReceipt?: (receipt: Receipt) => void,
   ): Promise<Receipt | Failure> {
-    if (this.s.busy) {
+    if (this.inFlight) {
       this.set({
         notice: {
           kind: 'info',
@@ -444,9 +462,11 @@ export class ProjectsController {
       });
       return this.refuse('leaf_busy', false);
     }
+    this.inFlight = true;
     this.set({ busy: true, notice: null });
     try {
       const receipt = await this.client.execute(envelope);
+      this.inFlight = false;
       this.set({ busy: false });
       onReceipt?.(receipt);
       await this.refresh();
@@ -456,6 +476,7 @@ export class ProjectsController {
         error instanceof ProjectsCallError
           ? error.failure
           : this.refuse('io_failure');
+      this.inFlight = false;
       this.set({ busy: false, notice: noticeOf(failure) });
       // What the window knew is stale: read again, and let the user decide again.
       await this.refresh();
@@ -691,7 +712,11 @@ export class ProjectsController {
     const workspace = this.s.workspace;
     if (!workspace?.layout) return this.refuse('context_stale');
     const layout = resize(workspace.layout, path, ratio);
-    this.pending = { workspaceId: workspace.id, layout };
+    const base =
+      this.pending?.workspaceId === workspace.id
+        ? this.pending.base
+        : workspace.revision;
+    this.pending = { workspaceId: workspace.id, layout, base };
     this.set({ workspace: { ...workspace, layout } });
     this.armSave();
   }
@@ -710,13 +735,23 @@ export class ProjectsController {
     this.saveTimer = undefined;
     const pending = this.pending;
     if (!pending) return;
-    // A change is still in flight: this one goes after it, as the latest.
-    if (this.s.busy) {
-      if (!this.disposed) this.armSave();
+    // A change is still in flight: this one goes after it, as the latest (for a while only).
+    if (this.inFlight) {
+      if (++this.saveRetries > 50) {
+        this.pending = null;
+        this.saveRetries = 0;
+        return;
+      }
+      this.armSave();
       return;
     }
+    this.saveRetries = 0;
     const workspace = this.s.workspace;
-    if (!workspace || workspace.id !== pending.workspaceId) {
+    if (
+      !workspace ||
+      workspace.id !== pending.workspaceId ||
+      workspace.revision !== pending.base
+    ) {
       this.pending = null;
       return;
     }

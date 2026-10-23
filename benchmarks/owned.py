@@ -166,8 +166,12 @@ class Owned:
                 if before is None or before[0] != parent:
                     continue
                 if pid in self.adopted:
-                    todo.append(pid)
-                    continue
+                    if self._send(self.adopted[pid], 0):
+                        todo.append(pid)
+                        continue
+                    # The descriptor's process is gone and the number is another process now: the
+                    # old handle is let go, and the new one is checked like any other.
+                    os.close(self.adopted.pop(pid))
                 try:
                     fd = os.pidfd_open(pid)
                 except OSError:
