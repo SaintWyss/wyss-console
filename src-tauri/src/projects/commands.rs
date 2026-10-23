@@ -35,6 +35,9 @@ use wyss_console::{
 
 // ---- the Managed owners, read and prepared through what the desktop already holds -----------
 
+/// Pages of Managed sessions read for one listing.
+const WALK_PAGES: usize = 8;
+
 /// P1 (the installed authority's sessions) and P2 (the protocol-2 interface, when the desktop
 /// was started against one). It can list and prepare; it has no way to bind, lease or run.
 struct ManagedFromApp {
@@ -60,9 +63,20 @@ impl ManagedPort for ManagedFromApp {
                 .authority
                 .map(|a| a.stream_id.as_str().to_owned())
                 .ok_or(OwnerError::HostOffline)?;
-            let view = gui.sessions(None).map_err(|_| OwnerError::HostOffline)?;
+            // A bounded walk of the pages, newest first: a session older than that is not shown
+            // as live, and attaching it is refused rather than guessed.
+            let mut sessions = Vec::new();
+            let mut before = None;
+            for _ in 0..WALK_PAGES {
+                let view = gui.sessions(before).map_err(|_| OwnerError::HostOffline)?;
+                sessions.extend(view.sessions);
+                before = view.older;
+                if before.is_none() {
+                    break;
+                }
+            }
             read_any = true;
-            for row in view.sessions {
+            for row in sessions {
                 let ready = row.runtime.actual == ActualState::Ready;
                 rows.push(ManagedRow {
                     protocol: ManagedProtocol::P2,
@@ -76,10 +90,30 @@ impl ManagedPort for ManagedFromApp {
         }
         if let Some(service) = self.app.try_state::<SessionService>()
             && let Ok(stream) = service.stream_id()
-            && let Ok(page) = service.page(None)
+            && let Ok(summaries) = {
+                let mut all = Vec::new();
+                let mut before = None;
+                let mut read = true;
+                for _ in 0..WALK_PAGES {
+                    match service.page(before) {
+                        Ok(page) => {
+                            all.extend(page.sessions);
+                            before = page.older;
+                            if before.is_none() {
+                                break;
+                            }
+                        }
+                        Err(_) => {
+                            read = false;
+                            break;
+                        }
+                    }
+                }
+                if read { Ok(all) } else { Err(()) }
+            }
         {
             read_any = true;
-            for summary in page.sessions {
+            for summary in summaries {
                 let attached = summary.binding
                     == wyss_console::contracts::binding::BindingState::BoundAttached;
                 rows.push(ManagedRow {

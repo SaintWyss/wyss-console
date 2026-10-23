@@ -13,12 +13,15 @@
     title,
     ondetach,
     onrefresh,
+    claimOnOpen = false,
   }: {
     session: SessionView;
     client: ProjectsClient;
     title: string;
     ondetach: () => void;
     onrefresh: () => void;
+    /** The window started this session a moment ago: it takes input as the pane opens. */
+    claimOnOpen?: boolean;
   } = $props();
 
   let host = $state<HTMLDivElement>();
@@ -34,7 +37,7 @@
   const WORDS: Record<string, string> = {
     host_changed: 'The terminal host is not the one this session lived in.',
     host_offline: 'No terminal host answers.',
-    owner_refused: 'Another window holds input.',
+    owner_refused: 'The terminal host refused that.',
     unsupported_capability: 'Not available for this session.',
   };
 
@@ -58,8 +61,11 @@
     let size: { rows: number; cols: number } | undefined;
 
     const words = (error: unknown, fallback: string) => {
-      const code = error instanceof ProjectsCallError ? error.failure.code : '';
-      return WORDS[code] ?? fallback;
+      const failure = error instanceof ProjectsCallError ? error.failure : null;
+      // A refused claim is its own thing: someone else types, and this view mirrors.
+      if (failure?.field === 'input_claim')
+        return 'Another window holds input.';
+      return WORDS[failure?.code ?? ''] ?? fallback;
     };
     const say = (error: unknown) => {
       note = words(error, 'Reading stopped.');
@@ -103,6 +109,13 @@
     fit();
 
     // Taking input is explicit, and it is let go of when the window loses the keyboard.
+    // Keystrokes reach the terminal in the order they were typed: one call at a time.
+    let sending: Promise<unknown> = Promise.resolve();
+    const send = (bytes: Uint8Array) => {
+      sending = sending
+        .then(() => client.writeInput(session.id, bytes))
+        .catch(sayInput);
+    };
     holdInput = async () => {
       try {
         await client.claimInput(session.id);
@@ -115,12 +128,8 @@
       inputNote = '';
       renderer.setInput(true);
       unlisten = renderer.input(
-        (text) =>
-          void client
-            .writeInput(session.id, encoder.encode(text))
-            .catch(sayInput),
-        (data) =>
-          void client.writeInput(session.id, binary(data)).catch(sayInput),
+        (text) => send(encoder.encode(text)),
+        (data) => send(binary(data)),
       );
       fit();
       renderer.focus();
@@ -138,6 +147,7 @@
     const blur = () => void letGo();
     window.addEventListener('blur', blur);
     void read();
+    if (claimOnOpen) void holdInput();
     return () => {
       stopped = true;
       window.removeEventListener('blur', blur);

@@ -11,8 +11,8 @@
   const enabled = $derived(projects.overview?.enabled ?? false);
 </script>
 
-<section class="settings-card" aria-label="Projects and workspaces">
-  <h3>Projects and workspaces</h3>
+<section class="settings-section" aria-labelledby="settings-projects">
+  <h3 id="settings-projects">Projects and workspaces</h3>
   <p class="setting-hint">
     {#if enabled}
       On. Projects and workspaces are shown in their own view. Turning them off

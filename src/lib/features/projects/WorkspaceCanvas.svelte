@@ -14,6 +14,7 @@
     profiles,
     managedAvailable,
     busy,
+    launched = null,
   }: {
     workspace: WorkspaceView;
     scratch: boolean;
@@ -22,6 +23,7 @@
     profiles: NativeProfileOption[];
     managedAvailable: boolean;
     busy: boolean;
+    launched?: string | null;
   } = $props();
 
   let area = $state<HTMLDivElement>();
@@ -107,6 +109,7 @@
               title={leaf.title}
               ondetach={() => void controller.detach(id, leaf.session!.id)}
               onrefresh={() => void controller.refresh()}
+              claimOnOpen={launched === leaf.session.id}
             />
           {:else if unfinished}
             <div class="projects-unfinished" role="status">

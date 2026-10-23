@@ -149,6 +149,7 @@
             {profiles}
             {managedAvailable}
             busy={projects.busy}
+            launched={projects.launched}
           />
         {/if}
         <section class="projects-sessions" aria-label="Sessions">

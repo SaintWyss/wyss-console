@@ -53,6 +53,12 @@ export interface ProjectsState {
   rollback: RollbackReport | null;
   notice: Notice | null;
   busy: boolean;
+  /**
+   * The session this window itself just started. Its pane takes input at once: a new shell
+   * asks the terminal questions that only the window holding input may answer, and nobody else
+   * can be typing into a terminal that was made a moment ago.
+   */
+  launched: string | null;
   /** The revision the window has read; a change elsewhere moves it. */
   revision: string | null;
 }
@@ -105,6 +111,7 @@ const initial = (): ProjectsState => ({
   rollback: null,
   notice: null,
   busy: false,
+  launched: null,
   revision: null,
 });
 
@@ -295,14 +302,14 @@ export class ProjectsController {
   async selectProject(project: string | null) {
     this.selection += 1;
     await this.client.forgetPicks().catch(() => undefined);
-    this.set({ project, workspaceId: null, notice: null });
+    this.set({ project, workspaceId: null, notice: null, launched: null });
     await this.refresh();
   }
 
   async selectWorkspace(id: string) {
     this.selection += 1;
     await this.client.forgetPicks().catch(() => undefined);
-    this.set({ workspaceId: id, notice: null });
+    this.set({ workspaceId: id, notice: null, launched: null });
     await this.refresh();
   }
 
@@ -331,6 +338,7 @@ export class ProjectsController {
   async send(
     command: Command,
     override?: Partial<Context>,
+    onReceipt?: (receipt: Receipt) => void,
   ): Promise<Receipt | Failure> {
     const store = this.ready();
     const context = this.context();
@@ -342,7 +350,7 @@ export class ProjectsController {
       context: { ...context, ...override },
       command,
     };
-    return this.dispatch(envelope);
+    return this.dispatch(envelope, onReceipt);
   }
 
   private refuse(code: Failure['code']): Failure {
@@ -358,12 +366,16 @@ export class ProjectsController {
     return failure;
   }
 
-  private async dispatch(envelope: Envelope): Promise<Receipt | Failure> {
+  private async dispatch(
+    envelope: Envelope,
+    onReceipt?: (receipt: Receipt) => void,
+  ): Promise<Receipt | Failure> {
     if (this.s.busy) return this.refuse('leaf_busy');
     this.set({ busy: true, notice: null });
     try {
       const receipt = await this.client.execute(envelope);
       this.set({ busy: false });
+      onReceipt?.(receipt);
       await this.refresh();
       return receipt;
     } catch (error) {
@@ -481,7 +493,14 @@ export class ProjectsController {
   launch(choice: Omit<LaunchChoice, 'workspaceId'>) {
     const workspaceId = this.s.workspaceId;
     if (!workspaceId) return this.refuse('context_stale');
-    return this.send({ kind: 'launch', workspaceId, ...choice });
+    return this.send(
+      { kind: 'launch', workspaceId, ...choice },
+      undefined,
+      (receipt) => {
+        const made = receipt.created.find((c) => c.role === 'association');
+        if (made) this.set({ launched: made.id });
+      },
+    );
   }
 
   reconcile(

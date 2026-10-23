@@ -414,6 +414,59 @@ describe('a session in a pane', () => {
     expect(renderers[0]!.inputEnabled).toBe(false);
   });
 
+  it('sends what is typed in the order it was typed, one call at a time', async () => {
+    const client = withSession();
+    const releases: (() => void)[] = [];
+    client.writeInput = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releases.push(resolve);
+        }),
+    );
+    await shown(client);
+    await click('Alpha');
+    await click('Take input');
+    renderers[0]!.typing[0]!.text('a');
+    renderers[0]!.typing[0]!.text('b');
+    renderers[0]!.typing[0]!.text('c');
+    await settle();
+    expect(client.writeInput).toHaveBeenCalledTimes(1);
+    releases.shift()!();
+    await settle();
+    expect(client.writeInput).toHaveBeenCalledTimes(2);
+    releases.shift()!();
+    await settle();
+    releases.shift()!();
+    await settle();
+    const sent = vi
+      .mocked(client.writeInput)
+      .mock.calls.map(([, data]) => new TextDecoder().decode(data));
+    expect(sent).toEqual(['a', 'b', 'c']);
+  });
+
+  it('takes input at once for the session this window just started, and for no other', async () => {
+    const client = readyClient();
+    await shown(client);
+    await click('Alpha');
+    await click('Start…');
+    client.state.receipt = {
+      ...client.state.receipt,
+      created: [{ role: 'association', id: ASSOCIATION_1 }],
+    };
+    // The refreshed workspace shows the new session.
+    client.execute = vi.fn(async (envelope) => {
+      client.sent.push(envelope);
+      client.state.workspace = workspace({
+        leaves: [{ id: LEAF_1, title: 'Pane', session: session() }],
+      });
+      return client.state.receipt;
+    });
+    await click('Start');
+    await settle();
+    expect(client.claimInput).toHaveBeenCalledWith(ASSOCIATION_1);
+    expect(renderers[0]!.inputEnabled).toBe(true);
+  });
+
   it('stays a mirror when another window holds input, with no way to type', async () => {
     const client = withSession({ input: 'other' });
     await shown(client);

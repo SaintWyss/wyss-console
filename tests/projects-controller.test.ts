@@ -242,6 +242,30 @@ describe('every change is a closed envelope in the context the window was lookin
   });
 });
 
+describe('a session this window started', () => {
+  it('is remembered, so its pane takes input at once, and forgotten when the view moves', async () => {
+    const { controller, client } = make();
+    await controller.refresh();
+    await controller.selectProject(PROJECT_A);
+    client.state.receipt = receipt({
+      created: [{ role: 'association', id: session().id }],
+    });
+    await controller.launch({
+      leafId: LEAF_1,
+      provider: 'shell',
+      mode: 'native',
+      nativeProfile: null,
+      managedSafetyProfile: null,
+    });
+    expect(controller.state().launched).toBe(session().id);
+    await controller.selectWorkspace(WORKSPACE_A);
+    expect(controller.state().launched).toBeNull();
+    // A change that created no session does not mark one.
+    await controller.rename(PROJECT_A, 'x');
+    expect(controller.state().launched).toBeNull();
+  });
+});
+
 describe('panes', () => {
   const withTwo = () => {
     const client = fakeClient();
