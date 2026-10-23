@@ -426,10 +426,10 @@ def build_world(root, shape, test_binary, log_dir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--binary", required=True)
-    ap.add_argument("--shape", choices=["a", "b", "c"], required=True)
+    ap.add_argument("--shape", choices=["a", "b", "c", "none"], required=True, help="none: no projects, and the release gate stays off")
     ap.add_argument("--run", type=int, required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--test-binary", required=True, help="the built unit-test executable")
+    ap.add_argument("--test-binary", default="", help="the built unit-test executable (not needed for shape none)")
     ap.add_argument("--steps", help="JSON list of calibration steps; no measurement is made")
     ap.add_argument("--idle-seconds", type=int, default=60)
     ap.add_argument("--switches", type=int, default=40)
@@ -470,7 +470,10 @@ def main():
                 if time.monotonic() > end or not host.alive():
                     raise RuntimeError("the disposable host did not come up")
                 time.sleep(0.1)
-            world = build_world(root, args.shape, os.path.realpath(args.test_binary), logs)
+            if args.shape == "none":
+                world = {"shape": "none", "projects": []}
+            else:
+                world = build_world(root, args.shape, os.path.realpath(args.test_binary), logs)
             result["world"] = {"shape": world["shape"], "projects": len(world["projects"]),
                                "terminals": sum(len(p["terminals"]) for p in world["projects"])}
             pointer = Pointer(x_env)

@@ -150,6 +150,7 @@ pub async fn credential_delete(
             &app,
             "Delete this API key?",
             &format!("“{name}” is removed from this computer. It cannot be brought back."),
+            "Delete",
         ) {
             return Ok(false);
         }

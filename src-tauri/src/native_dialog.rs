@@ -392,10 +392,11 @@ pub fn text_form_labeled(
     .flatten()
 }
 
-/// A yes or no in a window of its own. A dialog that could not be shown is a no.
-pub fn confirm_text(app: &AppHandle, heading: &str, body: &str) -> bool {
+/// A yes or no in a window of its own, whose affirmative button says what it does (`accept`).
+/// A dialog that could not be shown is a no.
+pub fn confirm_text(app: &AppHandle, heading: &str, body: &str, accept: &str) -> bool {
     use gtk::prelude::*;
-    let (heading, body) = (heading.to_owned(), body.to_owned());
+    let (heading, body, accept) = (heading.to_owned(), body.to_owned(), accept.to_owned());
     on_gtk(app, move |parent| {
         let dialog = gtk::MessageDialog::builder()
             .modal(true)
@@ -407,7 +408,7 @@ pub fn confirm_text(app: &AppHandle, heading: &str, body: &str) -> bool {
             dialog.set_transient_for(Some(parent));
         }
         dialog.add_button("Cancel", gtk::ResponseType::Cancel);
-        dialog.add_button("Delete", gtk::ResponseType::Accept);
+        dialog.add_button(&accept, gtk::ResponseType::Accept);
         dialog.set_default_response(gtk::ResponseType::Cancel);
         let accepted = dialog.run() == gtk::ResponseType::Accept;
         dialog.close();

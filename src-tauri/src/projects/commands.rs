@@ -664,6 +664,25 @@ pub async fn projects_compact_receipts(
     blocking(move || service.compact_receipts()).await
 }
 
+/// What the native window says when the workspace is turned on or off: its heading, its text and
+/// what the affirmative button is called. The button says what it does: it is never a word of
+/// another confirmation (a window that asked "Delete" to turn something on was the defect).
+fn gate_dialog(on: bool) -> (&'static str, &'static str, &'static str) {
+    if on {
+        (
+            "Use project workspaces",
+            "Turn on projects and workspaces. Your sessions and the older windows are not changed or stopped.",
+            "Turn on",
+        )
+    } else {
+        (
+            "Go back to the older windows",
+            "Turn off projects and workspaces. Nothing is stopped; the project data is kept.",
+            "Turn off",
+        )
+    }
+}
+
 /// Turns the project-centered workspace on or off. Both ways are confirmed in a native window
 /// the page cannot draw on, so the page cannot adopt (or drop) it by itself. Turning it off is
 /// refused while a launch of unknown outcome is unaccounted for. Nothing running is touched.
@@ -678,18 +697,8 @@ pub async fn projects_set_enabled(
         if !request.on && service.rollback_report().is_ok_and(|r| !r.can_disable) {
             return Err(Failure::new(ErrorCode::LeafBusy).with_field("unfinished_launches"));
         }
-        let (heading, body) = if request.on {
-            (
-                "Use project workspaces",
-                "Turn on projects and workspaces. Your sessions and the older windows are not changed or stopped.",
-            )
-        } else {
-            (
-                "Go back to the older windows",
-                "Turn off projects and workspaces. Nothing is stopped; the project data is kept.",
-            )
-        };
-        if !crate::native_dialog::confirm_text(&app, heading, body) {
+        let (heading, body, accept) = gate_dialog(request.on);
+        if !crate::native_dialog::confirm_text(&app, heading, body, accept) {
             return Err(Failure::new(ErrorCode::OwnerRefused).with_field("declined"));
         }
         service.set_enabled(request.on)?;
@@ -879,5 +888,24 @@ mod tests {
             serde_json::json!({"associationId": "a", "data": [1], "terminalId": "t"}),
         );
         assert!(parsed.is_err());
+    }
+}
+
+#[cfg(test)]
+mod gate_dialog_tests {
+    use super::gate_dialog;
+
+    #[test]
+    fn the_button_that_turns_the_workspace_on_or_off_says_so() {
+        let (on_heading, on_body, on) = gate_dialog(true);
+        let (off_heading, off_body, off) = gate_dialog(false);
+        assert_eq!((on, off), ("Turn on", "Turn off"));
+        for text in [on_heading, on_body, off_heading, off_body, on, off] {
+            assert!(!text.is_empty());
+            assert!(!text.to_lowercase().contains("delete"), "{text}");
+        }
+        // Both ways say that nothing running is stopped.
+        assert!(on_body.contains("not changed or stopped"));
+        assert!(off_body.contains("Nothing is stopped"));
     }
 }
