@@ -79,6 +79,7 @@
       while (!stopped) {
         try {
           const out = await client.readOutput(session.id, from, 1000);
+          if (stopped) return;
           note = '';
           truncated = out.truncated;
           if (out.data.length > 0) await renderer.write(out.data);
@@ -88,6 +89,7 @@
             return;
           }
         } catch (error) {
+          if (stopped) return;
           say(error);
           await new Promise((resolve) => setTimeout(resolve, 3000));
         }
@@ -116,12 +118,26 @@
         .then(() => client.writeInput(session.id, bytes))
         .catch(sayInput);
     };
+    // One claim at a time: a second click or the open-time claim while one is in flight is the
+    // same claim, so the keyboard is wired once and a keystroke is sent once.
+    let claiming = false;
     holdInput = async () => {
+      if (claiming || holding || stopped) return;
+      claiming = true;
       try {
         await client.claimInput(session.id);
       } catch (error) {
-        sayInput(error);
-        onrefresh();
+        claiming = false;
+        if (!stopped) {
+          sayInput(error);
+          onrefresh();
+        }
+        return;
+      }
+      claiming = false;
+      if (stopped) {
+        // The pane went away while the claim was in flight: give it straight back.
+        void client.releaseInput(session.id).catch(() => undefined);
         return;
       }
       holding = true;
@@ -131,6 +147,8 @@
         (text) => send(encoder.encode(text)),
         (data) => send(binary(data)),
       );
+      // The terminal's size is set by whoever holds input, so send it again on taking it.
+      size = undefined;
       fit();
       renderer.focus();
       onrefresh();
@@ -142,7 +160,7 @@
       unlisten = undefined;
       renderer.setInput(false);
       await client.releaseInput(session.id).catch(() => undefined);
-      onrefresh();
+      if (!stopped) onrefresh();
     };
     const blur = () => void letGo();
     window.addEventListener('blur', blur);

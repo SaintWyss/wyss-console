@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   parseFailure,
+  parseOrphans,
+  parseRollback,
   parseOutput,
   parseOverview,
   parsePage,
@@ -120,5 +123,25 @@ describe('what the desktop says about projects is checked, not believed', () => 
       workspace(),
     ]);
     expect(text).not.toMatch(/"(path|argv|args|env|prompt|password|secret)"/);
+  });
+});
+
+describe('what the desktop really sends', () => {
+  // Written by the Rust test `the_answers_the_window_parses_match_the_recorded_shapes`.
+  const recorded = JSON.parse(
+    readFileSync('tests/fixtures/projects-v1.json', 'utf8'),
+  ) as Record<string, unknown>;
+
+  it('is read by the window as the desktop wrote it', () => {
+    expect(parseOverview(recorded.overview).store.state).toBe('ready');
+    expect(parsePage(recorded.projects, parseProject).items).toHaveLength(1);
+    const view = parseWorkspace(recorded.workspace);
+    expect(view.unfinished).toEqual([
+      expect.objectContaining({ state: 'ambiguous', mode: 'native' }),
+    ]);
+    expect(parseOrphans(recorded.orphans)).toEqual([
+      expect.objectContaining({ folder: 'repo', nativeSessionId: null }),
+    ]);
+    expect(parseRollback(recorded.rollback).canDisable).toBe(false);
   });
 });

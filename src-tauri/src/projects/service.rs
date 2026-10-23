@@ -17,7 +17,7 @@ use serde::Serialize;
 use std::{
     fs,
     path::PathBuf,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, OnceLock, PoisonError},
 };
 use wyss_console::contracts::m1::{
     StoreV1,
@@ -152,6 +152,18 @@ pub struct UnfinishedView {
     pub operation_id: String,
     pub leaf_id: String,
     pub state: &'static str,
+    /// `native` (a terminal host) or `managed` (an authority): only Managed may ask again.
+    pub mode: &'static str,
+}
+
+/// A running terminal that no association holds: something an unknown launch could have started.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrphanView {
+    pub terminal_id: String,
+    pub native_session_id: Option<String>,
+    /// Only the last component of where it started: enough to tell it apart, never a path.
+    pub folder: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -178,13 +190,16 @@ struct Held {
 }
 
 pub struct ProjectsService {
-    store: Option<Store>,
+    /// Opened on first use, and only once the gate is on: a build with the workspace off makes
+    /// no directory and reads no file of it.
+    store_dir: Option<PathBuf>,
+    store: OnceLock<Option<Store>>,
     owner: Arc<dyn Owner>,
     env: Arc<dyn Env>,
     selections: Selections,
     claims: Claims,
     held: Mutex<Option<Held>>,
-    legacy_dir: Option<PathBuf>,
+    older_dir: Option<PathBuf>,
     gate: Option<PathBuf>,
 }
 
@@ -217,7 +232,7 @@ fn owner_code(error: OwnerError) -> ErrorCode {
 }
 
 impl ProjectsService {
-    /// `store_dir` is `…/projects/v1`; the feature gate sits beside it, and the legacy files
+    /// `store_dir` is `…/projects/v1`; the feature gate sits beside it, and the older files
     /// are in the Console's state directory two levels up.
     pub fn new(
         store_dir: Option<PathBuf>,
@@ -229,24 +244,32 @@ impl ProjectsService {
             .as_ref()
             .and_then(|dir| dir.parent())
             .map(|projects| projects.join("feature"));
-        let legacy_dir = store_dir
+        let older_dir = store_dir
             .as_ref()
             .and_then(|dir| dir.parent()?.parent())
             .map(PathBuf::from);
         Self {
-            store: store_dir.and_then(|dir| Store::open(dir).ok()),
+            store_dir,
+            store: OnceLock::new(),
             owner,
             env,
             selections: Selections::default(),
             claims,
             held: Mutex::new(None),
-            legacy_dir,
+            older_dir,
             gate,
         }
     }
 
+    /// The store, made private and opened on first use. Callers have passed the gate.
+    fn opened(&self) -> Option<&Store> {
+        self.store
+            .get_or_init(|| self.store_dir.clone().and_then(|dir| Store::open(dir).ok()))
+            .as_ref()
+    }
+
     fn engine(&self) -> Option<Engine<'_>> {
-        self.store.as_ref().map(|store| Engine {
+        self.opened().map(|store| Engine {
             store,
             owner: &*self.owner,
             env: &*self.env,
@@ -255,8 +278,7 @@ impl ProjectsService {
     }
 
     fn store(&self) -> Result<&Store, Failure> {
-        self.store
-            .as_ref()
+        self.opened()
             .ok_or_else(|| failure(ErrorCode::IoFailure).with_field("store"))
     }
 
@@ -321,6 +343,7 @@ impl ProjectsService {
     }
 
     fn shared(&self) -> Result<Shared, Failure> {
+        self.gated()?;
         self.store()?
             .read_shared()
             .map_err(|_| failure(ErrorCode::IoFailure))
@@ -331,7 +354,20 @@ impl ProjectsService {
     }
 
     pub fn overview(&self) -> Overview {
-        let store = match &self.store {
+        // With the workspace off nothing is read, made or asked: no directory, no store, no host.
+        if !self.enabled() {
+            return Overview {
+                enabled: false,
+                store: StoreStatus::Missing,
+                host: HostStatus {
+                    reachable: false,
+                    epoch: None,
+                    features: Vec::new(),
+                    reason: Some("off"),
+                },
+            };
+        }
+        let store = match self.opened() {
             None => StoreStatus::Unavailable,
             Some(_) => match self.shared() {
                 Ok(Shared::Ready(store)) => ready_status(&store),
@@ -678,6 +714,10 @@ impl ProjectsService {
                         wyss_console::contracts::m1::records::OperationState::Pending => "pending",
                         _ => "ambiguous",
                     },
+                    mode: match o.mode {
+                        wyss_console::contracts::m1::records::Mode::Native => "native",
+                        wyss_console::contracts::m1::records::Mode::Managed => "managed",
+                    },
                 })
                 .collect(),
         }
@@ -786,7 +826,7 @@ impl ProjectsService {
 
     fn sources(&self) -> Result<Sources, Failure> {
         let dir = self
-            .legacy_dir
+            .older_dir
             .as_ref()
             .ok_or_else(|| failure(ErrorCode::IoFailure))?;
         migration::read_sources(dir).map_err(|(kind, _)| {
@@ -798,7 +838,7 @@ impl ProjectsService {
         })
     }
 
-    /// Reads the legacy files and the host and offers a plan. Nothing is written or started.
+    /// Reads the older files and the host and offers a plan. Nothing is written or started.
     pub fn preview_migration(&self) -> Result<Summary, Failure> {
         self.gated()?;
         let sources = self.sources()?;
@@ -836,7 +876,7 @@ impl ProjectsService {
         Ok(summary)
     }
 
-    /// Commits exactly the preview that was shown: the legacy files must still have the bytes it
+    /// Commits exactly the preview that was shown: the older files must still have the bytes it
     /// was made from, and the host must be the one it read.
     pub fn commit_migration(
         &self,
@@ -896,10 +936,9 @@ impl ProjectsService {
                             .conflicts
                             .iter()
                             .any(|c| c.kind.blocks_commit());
-                let expected = match store.read().map_err(|_| failure(ErrorCode::IoFailure))? {
-                    Loaded::Ready(found) => found.revision,
-                    _ => return Err(failure(ErrorCode::InvalidRecord).with_field("store")),
-                };
+                // At the revision the preview was made against: a store that moved on is a
+                // conflict and a new preview, never additions worked out for another state.
+                let expected = plan.revision;
                 migration::commit_incremental(store, expected, &plan)?
             }
         };
@@ -1008,8 +1047,53 @@ impl ProjectsService {
 
     // ---- rollback -----------------------------------------------------------------------------
 
+    /// The running terminals no association holds that a launch of unknown outcome could have
+    /// started, for the user to pick from. A read: nothing is attached or started by it.
+    pub fn orphans(&self, launch_operation_id: &str) -> Result<Vec<OrphanView>, Failure> {
+        let store = self.ready()?;
+        let operation = store
+            .operations
+            .iter()
+            .find(|o| o.id.as_str() == launch_operation_id)
+            .ok_or_else(|| failure(ErrorCode::ContextStale))?;
+        if operation.mode != wyss_console::contracts::m1::records::Mode::Native {
+            return Err(failure(ErrorCode::UnsupportedCapability).with_field("mode"));
+        }
+        let shell =
+            operation.provider == wyss_console::contracts::m1::records::LaunchProvider::Shell;
+        let held: std::collections::HashSet<&str> = store
+            .sessions
+            .iter()
+            .filter_map(|a| match &a.target {
+                Target::Native { terminal_id, .. } | Target::Shell { terminal_id, .. } => {
+                    Some(terminal_id.as_str())
+                }
+                Target::Managed { .. } => None,
+            })
+            .collect();
+        let view = self.host_view().map_err(|e| failure(owner_code(e)))?;
+        Ok(view
+            .terminals
+            .iter()
+            .filter(|t| {
+                t.running
+                    && !held.contains(t.terminal_id.as_str())
+                    && shell == t.native_session.is_none()
+            })
+            .map(|t| OrphanView {
+                terminal_id: t.terminal_id.clone(),
+                native_session_id: t.native_session.clone(),
+                folder: t
+                    .cwd
+                    .as_deref()
+                    .and_then(|c| c.rsplit('/').find(|part| !part.is_empty()))
+                    .map(str::to_owned),
+            })
+            .collect())
+    }
+
     /// What a return to the older windows needs to account for: unfinished launches block it,
-    /// and everything the new store holds that the legacy state does not is counted. The report
+    /// and everything the new store holds that the older state does not is counted. The report
     /// is written privately beside the store; nothing is restored and no session is touched.
     pub fn rollback_report(&self) -> Result<RollbackReport, Failure> {
         let store = self.ready()?;
@@ -1031,10 +1115,10 @@ impl ProjectsService {
             projects: store.projects.len(),
             workspaces: store.workspaces.len(),
             sessions: store.sessions.len(),
-            mapped_legacy_records: mapped,
-            note: "Disabling returns to the older windows. The store, its tombstones and the migration snapshot are kept for forward recovery; no legacy file is restored over a live writer and no session is stopped. The older window can recreate missing shells by its own behaviour.",
+            mapped_older_records: mapped,
+            note: "Disabling returns to the older windows. The store, its tombstones and the migration snapshot are kept for forward recovery; no older file is restored over a live writer and no session is stopped. The older window can recreate missing shells by its own behaviour.",
         };
-        if let Some(store) = &self.store {
+        if let Some(store) = self.opened() {
             let path = store.dir().join("rollback-report.json");
             let bytes =
                 serde_json::to_vec_pretty(&report).map_err(|_| failure(ErrorCode::IoFailure))?;
@@ -1052,6 +1136,6 @@ pub struct RollbackReport {
     pub projects: usize,
     pub workspaces: usize,
     pub sessions: usize,
-    pub mapped_legacy_records: usize,
+    pub mapped_older_records: usize,
     pub note: &'static str,
 }

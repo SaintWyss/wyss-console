@@ -1,6 +1,6 @@
-//! M1-07: the legacy registry and layout corpus. Duplicate roots, an absent host, missing
+//! M1-07: the older registry and layout corpus. Duplicate roots, an absent host, missing
 //! agents, malformed or newer files, sixteen tabs, changed sources, interrupted publication and
-//! a second import; a deterministic map; no `Registry::open`; no remade shell; no legacy write.
+//! a second import; a deterministic map; no `Registry::open`; no remade shell; no older write.
 use super::*;
 use crate::projects::migration::{
     ConflictKind, Mode as ImportMode, Plan, Sources, commit_incremental, commit_initial, derive,
@@ -244,7 +244,7 @@ fn the_corpus_maps_projects_sessions_and_tabs_by_what_can_be_proven() {
             .iter()
             .any(|w| Some(&w.id) == b.default_workspace_id.as_ref() && w.leaves.is_empty())
     );
-    // Every legacy record that mapped is in the deterministic map, and the digests are the bytes'.
+    // Every older record that mapped is in the deterministic map, and the digests are the bytes'.
     let migration = p.store.migration.as_ref().unwrap();
     assert_eq!(migration.sources.len(), 2);
     assert_eq!(
@@ -447,10 +447,10 @@ fn more_unassigned_terminals_than_scratch_can_hold_is_refused_whole() {
     );
 }
 
-// ---- reading the legacy files --------------------------------------------------------------
+// ---- reading the older files --------------------------------------------------------------
 
 #[test]
-fn legacy_files_are_read_as_bytes_without_opening_the_registry() {
+fn files_of_the_older_windows_are_read_as_bytes_without_opening_the_registry() {
     let dir = TestDir::new();
     let state = dir.0.join("state");
     std::fs::create_dir_all(state.join("native")).unwrap();
@@ -506,7 +506,7 @@ fn empty_world() -> (TestDir, Store) {
 }
 
 #[test]
-fn commit_preserves_the_legacy_bytes_then_publishes_the_store_last() {
+fn commit_preserves_the_older_bytes_then_publishes_the_store_last() {
     let (_dir, store) = empty_world();
     let (sources, view) = corpus();
     let p = plan(&FakeEnv::new(), &owner(), &sources, Some(&view));
@@ -591,7 +591,7 @@ fn a_second_import_adds_only_what_appeared_and_touches_nothing_else() {
     )
     .unwrap();
     assert_eq!(
-        (same.summary.mode, same.summary.legacy_changed),
+        (same.summary.mode, same.summary.older_changed),
         (ImportMode::Incremental, false)
     );
     assert_eq!(
@@ -621,7 +621,7 @@ fn a_second_import_adds_only_what_appeared_and_touches_nothing_else() {
         "99999999-0000-4000-8000-000000000011",
     )
     .unwrap();
-    assert!(more.summary.legacy_changed);
+    assert!(more.summary.older_changed);
     assert_eq!(
         (more.summary.counts.projects, more.summary.counts.sessions),
         (1, 1)
@@ -661,7 +661,7 @@ fn a_second_import_adds_only_what_appeared_and_touches_nothing_else() {
         (
             again.summary.counts.projects,
             again.summary.counts.sessions,
-            again.summary.legacy_changed
+            again.summary.older_changed
         ),
         (0, 0, false)
     );

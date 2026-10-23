@@ -16,10 +16,32 @@
   } = $props();
 
   let accept = $state(false);
+  // A new preview is a new question: an acceptance given to an earlier one does not carry over.
+  let shownPreview = '';
+  $effect(() => {
+    const id = preview?.previewId ?? '';
+    if (id !== shownPreview) {
+      shownPreview = id;
+      accept = false;
+    }
+  });
+  const BLOCKING = [
+    'source_unreadable',
+    'source_unstable',
+    'source_oversized',
+    'over_bound',
+    'invalid',
+  ];
+  // Accepting spellings never overrides something that blocks the import.
+  const blocked = $derived(
+    (preview?.conflicts ?? []).some((c) => BLOCKING.includes(c.kind)),
+  );
   const KIND: Record<string, string> = {
-    source_unreadable: 'A legacy file cannot be read as the schema it claims',
-    source_unstable: 'A legacy file kept changing while it was read',
-    source_oversized: 'A legacy file is bigger than its bound',
+    source_unreadable:
+      'A file of the older state cannot be read as the schema it claims',
+    source_unstable:
+      'A file of the older state kept changing while it was read',
+    source_oversized: 'A file of the older state is bigger than its bound',
     alias: 'A registered folder is another spelling of a registered root',
     root_unavailable:
       'A registered folder is missing or cannot be used (not imported)',
@@ -86,7 +108,7 @@
       </label>
     {/if}
     <p class="projects-note">
-      The exact legacy files are kept in a private snapshot first. The older
+      The exact older files are kept in a private snapshot first. The older
       state is never overwritten, and no session is started, stopped or
       restarted.
     </p>
@@ -95,6 +117,7 @@
         type="button"
         class="action primary"
         disabled={busy ||
+          blocked ||
           !(preview.canCommit || (preview.needsAliasAcceptance && accept))}
         onclick={() => void controller.commitMigration(accept)}>Import</button
       >

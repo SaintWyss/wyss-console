@@ -337,9 +337,16 @@ impl Engine<'_> {
             Command::SaveWorkspace(save) => of_workspace(&save.workspace_id),
             Command::Launch(launch) => of_workspace(&launch.workspace_id),
             Command::AdoptScratch { project_id, .. } => Some(Some(project_id.clone())),
-            Command::RegisterExisting { .. }
-            | Command::CreateFolder { .. }
-            | Command::ReconcileLaunch { .. } => None,
+            // A launch is settled from the project it was made in.
+            Command::ReconcileLaunch {
+                launch_operation_id,
+                ..
+            } => store
+                .operations
+                .iter()
+                .find(|o| &o.id == launch_operation_id)
+                .map(|o| o.project_id.clone()),
+            Command::RegisterExisting { .. } | Command::CreateFolder { .. } => None,
         };
         match named {
             Some(project) if project.as_ref() != Some(inside) => fail(ErrorCode::ContextStale),
@@ -1146,6 +1153,11 @@ impl Engine<'_> {
                 if busy {
                     return fail(ErrorCode::LeafBusy);
                 }
+                // A ceiling is refused before anything is asked of the owner: a process started
+                // here that the store could not then record would be one nobody holds.
+                if store.sessions.len() >= wyss_console::contracts::m1::MAX_ASSOCIATIONS {
+                    return fail(ErrorCode::CapacityExceeded);
+                }
                 store.operations.push(pending);
                 Ok::<(), Failure>(())
             })
@@ -1593,6 +1605,15 @@ impl Engine<'_> {
         };
         if operation.state != OperationState::Ambiguous || operation.association_id.is_some() {
             return bad("operationId");
+        }
+        // The pane that shows the unknown launch is in the workspace that made it.
+        if envelope
+            .context
+            .workspace_id
+            .as_ref()
+            .is_some_and(|w| w != &operation.workspace_id)
+        {
+            return fail(ErrorCode::ContextStale);
         }
         let held: HashSet<&str> = current
             .sessions

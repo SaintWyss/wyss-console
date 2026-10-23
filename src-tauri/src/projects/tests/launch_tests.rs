@@ -603,6 +603,106 @@ fn an_ambiguous_dispatch_blocks_a_retry_and_absent_needs_an_empty_owner() {
 }
 
 #[test]
+fn a_store_at_its_session_ceiling_refuses_before_the_owner_is_asked() {
+    use wyss_console::contracts::m1::{
+        MAX_ASSOCIATIONS,
+        scalar::{AssociationId, NativeId, TerminalId},
+    };
+    let r = ready();
+    r.native_ok();
+    r.send_as(
+        &op_id(&r.world),
+        r.command("codex", "native", Value::Null, Value::Null),
+    )
+    .unwrap();
+    assert_eq!(r.world.owner.launches(), 1);
+    // The history fills the store, and the leaf is free again.
+    let revision = r.world.now().revision;
+    r.world
+        .store
+        .transact(revision, |s| {
+            let template = s.sessions[0].clone();
+            for n in 1..MAX_ASSOCIATIONS {
+                let mut more = template.clone();
+                more.id =
+                    AssociationId::parse(&format!("dddddddd-0000-4000-8000-{n:012x}")).unwrap();
+                more.operation_id = None;
+                if let Target::Native {
+                    session_id,
+                    terminal_id,
+                    ..
+                } = &mut more.target
+                {
+                    *terminal_id =
+                        TerminalId::parse(&format!("eeeeeeee-0000-4000-8000-{n:012x}")).unwrap();
+                    *session_id = NativeId::parse(&format!("{n:032x}")).unwrap();
+                }
+                s.sessions.push(more);
+            }
+            for workspace in &mut s.workspaces {
+                for leaf in &mut workspace.leaves {
+                    leaf.association_id = None;
+                }
+            }
+            Ok::<(), Failure>(())
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.world.now().sessions.len(), MAX_ASSOCIATIONS);
+    r.native_ok();
+    let before = r.world.now().operations.len();
+    refused(
+        r.send_as(
+            &op_id(&r.world),
+            r.command("codex", "native", Value::Null, Value::Null),
+        ),
+        ErrorCode::CapacityExceeded,
+    );
+    assert_eq!(r.world.owner.launches(), 1, "the owner was not asked");
+    assert_eq!(
+        r.world.now().operations.len(),
+        before,
+        "nothing was journalled"
+    );
+}
+
+#[test]
+fn an_unknown_launch_is_settled_only_from_the_project_that_made_it() {
+    let r = ready();
+    r.world
+        .owner
+        .script(|s| s.native.push(Err(LaunchError::Ambiguous)));
+    let op = op_id(&r.world);
+    refused(
+        r.send_as(&op, r.command("codex", "native", Value::Null, Value::Null)),
+        ErrorCode::EffectAmbiguous,
+    );
+    let (other, _, other_workspace) = r.world.register(ROOT_B);
+    r.world.owner.script(|s| s.host = Some(Ok(Vec::new())));
+    let revision = r.world.now().revision;
+    let from_elsewhere = r.world.engine().execute(r.world.envelope(
+        &op_id(&r.world),
+        revision,
+        r.world.context(Some(&other), Some(&other_workspace)),
+        json!({"kind": "reconcileLaunch", "launchOperationId": op, "resolution": {"kind": "absent"}}),
+    ));
+    refused(from_elsewhere, ErrorCode::ContextStale);
+    assert_eq!(r.operation(&op).unwrap().state, OperationState::Ambiguous);
+    // From its own project it is settled.
+    let revision = r.world.now().revision;
+    r.world
+        .engine()
+        .execute(r.world.envelope(
+            &op_id(&r.world),
+            revision,
+            r.world.context(Some(&r.project), Some(&r.workspace)),
+            json!({"kind": "reconcileLaunch", "launchOperationId": op, "resolution": {"kind": "absent"}}),
+        ))
+        .unwrap();
+    assert_eq!(r.operation(&op).unwrap().state, OperationState::Refused);
+}
+
+#[test]
 fn compacted_receipts_free_the_ceiling_but_their_ids_are_never_live_again() {
     let r = ready();
     let revision = r.world.now().revision;

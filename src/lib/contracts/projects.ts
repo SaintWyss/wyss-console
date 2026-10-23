@@ -135,6 +135,14 @@ export interface Unfinished {
   operationId: string;
   leafId: string;
   state: 'pending' | 'ambiguous';
+  /** Only a Managed launch may ask its owner again; a Native one is resolved by looking. */
+  mode: 'native' | 'managed';
+}
+/** A running terminal no association holds: what an unknown launch could have started. */
+export interface Orphan {
+  terminalId: string;
+  nativeSessionId: string | null;
+  folder: string | null;
 }
 export interface WorkspaceView {
   id: string;
@@ -203,7 +211,7 @@ export interface MigrationSummary {
   sources: { kind: string; digest: string }[];
   canCommit: boolean;
   needsAliasAcceptance: boolean;
-  legacyChanged: boolean;
+  olderChanged: boolean;
 }
 export interface RollbackReport {
   canDisable: boolean;
@@ -211,7 +219,7 @@ export interface RollbackReport {
   projects: number;
   workspaces: number;
   sessions: number;
-  mappedLegacyRecords: number;
+  mappedOlderRecords: number;
   note: string;
 }
 
@@ -513,9 +521,21 @@ export function parseWorkspace(value: unknown): WorkspaceView {
         operationId: str(o.operationId, 'op', 36),
         leafId: str(o.leafId, 'leaf', 36),
         state: oneOf(o.state, ['pending', 'ambiguous'] as const, 'state'),
+        mode: oneOf(o.mode, ['native', 'managed'] as const, 'mode'),
       };
     }),
   };
+}
+
+export function parseOrphans(value: unknown): Orphan[] {
+  return list(value, 'orphans', (item) => {
+    const o = rec(item, 'orphan');
+    return {
+      terminalId: str(o.terminalId, 'terminal', 36),
+      nativeSessionId: strOrNull(o.nativeSessionId, 'native'),
+      folder: strOrNull(o.folder, 'folder'),
+    };
+  });
 }
 
 export function parsePage<T>(value: unknown, item: (v: unknown) => T): Page<T> {
@@ -621,7 +641,7 @@ export function parseSummary(value: unknown): MigrationSummary {
     }),
     canCommit: bool(v.canCommit, 'can'),
     needsAliasAcceptance: bool(v.needsAliasAcceptance, 'alias'),
-    legacyChanged: bool(v.legacyChanged, 'changed'),
+    olderChanged: bool(v.olderChanged, 'changed'),
   };
 }
 
@@ -634,7 +654,7 @@ export function parseRollback(value: unknown): RollbackReport {
     projects: n(v.projects),
     workspaces: n(v.workspaces),
     sessions: n(v.sessions),
-    mappedLegacyRecords: n(v.mappedLegacyRecords),
+    mappedOlderRecords: n(v.mappedOlderRecords),
     note: str(v.note, 'note', 1024),
   };
 }

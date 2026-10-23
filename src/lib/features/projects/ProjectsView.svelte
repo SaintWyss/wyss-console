@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Profile } from '../../contracts/native';
-  import type { SessionView } from '../../contracts/projects';
+  import type { ProjectView, SessionView } from '../../contracts/projects';
   import type { ProjectsClient } from '../../desktop/projects-client';
   import type { NativeProfileOption } from './LaunchPanel.svelte';
   import MigrationPanel from './MigrationPanel.svelte';
@@ -41,6 +41,10 @@
   );
   const emptyLeaf = $derived(
     projects.workspace?.leaves.find((l) => !l.session) ?? null,
+  );
+  // Adopting a shell changes which project it belongs to: it is asked once, then done.
+  let adopting = $state<{ session: SessionView; project: ProjectView } | null>(
+    null,
   );
   const SESSION_KIND: Record<string, string> = {
     native: 'Agent',
@@ -105,8 +109,8 @@
     <div class="sessions-empty">
       <p class="empty-title">Projects and workspaces are off</p>
       <p>
-        They can be turned on in Settings. Until then nothing about them runs,
-        and your sessions and the older windows are untouched.
+        They can be turned on in Settings. Until then nothing about them is read
+        or run, and your sessions and the older windows are untouched.
       </p>
     </div>
   {:else if store?.state === 'missing'}
@@ -140,7 +144,8 @@
     <div class="projects-layout">
       <ProjectRail {projects} {controller} />
       <div class="projects-main">
-        {#if projects.workspace}
+        <!-- Hidden means unmounted: no pane keeps reading or holding input behind another view. -->
+        {#if projects.workspace && visible}
           <WorkspaceCanvas
             workspace={projects.workspace}
             {scratch}
@@ -195,11 +200,7 @@
                         );
                         event.currentTarget.value = '';
                         if (target?.root)
-                          void controller.adopt(
-                            session.id,
-                            target.id,
-                            target.root.bindingId,
-                          );
+                          adopting = { session, project: target };
                       }}
                     >
                       <option value="">Adopt into a project…</option>
@@ -207,6 +208,33 @@
                         <option value={p.id}>{p.label}</option>
                       {/each}
                     </select>
+                  {/if}
+                  {#if adopting?.session.id === session.id}
+                    <span class="projects-note" role="alert">
+                      Move this shell into {adopting.project.label}? It keeps
+                      running where it is; only the project it is listed under
+                      changes.
+                    </span>
+                    <button
+                      type="button"
+                      class="action primary"
+                      disabled={projects.busy}
+                      onclick={() => {
+                        const chosen = adopting;
+                        adopting = null;
+                        if (chosen?.project.root)
+                          void controller.adopt(
+                            chosen.session.id,
+                            chosen.project.id,
+                            chosen.project.root.bindingId,
+                          );
+                      }}>Move</button
+                    >
+                    <button
+                      type="button"
+                      class="action"
+                      onclick={() => (adopting = null)}>Cancel</button
+                    >
                   {/if}
                 </li>
               {/each}

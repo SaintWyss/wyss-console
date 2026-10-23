@@ -5,7 +5,6 @@ import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import {
   ASSOCIATION_1,
   LEAF_1,
-  LEAF_2,
   PROJECT_A,
   SCRATCH,
   WORKSPACE_A,
@@ -53,8 +52,12 @@ beforeEach(() => {
         return true;
       },
       input: (text, binary) => {
-        r.typing.push({ text, binary });
-        return () => r.typing.splice(0);
+        const mine = { text, binary };
+        r.typing.push(mine);
+        return () => {
+          const at = r.typing.indexOf(mine);
+          if (at >= 0) r.typing.splice(at, 1);
+        };
       },
       setInput: (enabled: boolean) => {
         r.inputEnabled = enabled;
@@ -345,6 +348,7 @@ describe('a launch of unknown outcome', () => {
           operationId: 'aaaaaaaa-0000-4000-8000-0000000000aa',
           leafId: LEAF_1,
           state: 'ambiguous',
+          mode: 'managed',
         },
       ],
     });
@@ -354,6 +358,8 @@ describe('a launch of unknown outcome', () => {
     expect(body).toContain('unknown outcome');
     expect(body).toContain('Nothing was started again');
     expect(button('Start…')).toBeUndefined();
+    // A Managed launch is not looked for in a terminal host.
+    expect(button('Look for what it started')).toBeUndefined();
     await click('Nothing started');
     expect(client.sent[0]!.command).toMatchObject({
       kind: 'reconcileLaunch',
@@ -362,6 +368,63 @@ describe('a launch of unknown outcome', () => {
     await click('Ask the Managed owner again');
     expect(client.sent[1]!.command).toMatchObject({
       resolution: { kind: 'retryManaged' },
+    });
+  });
+});
+
+describe('a Native launch of unknown outcome', () => {
+  const OP = 'aaaaaaaa-0000-4000-8000-0000000000aa';
+  const stuck = () => {
+    const client = readyClient();
+    client.state.workspace = workspace({
+      unfinished: [
+        { operationId: OP, leafId: LEAF_1, state: 'ambiguous', mode: 'native' },
+      ],
+    });
+    return client;
+  };
+
+  it('can be resolved by picking what it started, and never offers to ask a Managed owner', async () => {
+    const client = stuck();
+    client.orphans = vi.fn(async () => [
+      {
+        terminalId: 'tttttttt-0000-4000-8000-000000000001',
+        nativeSessionId: null,
+        folder: 'repo',
+      },
+    ]);
+    await shown(client);
+    await click('Alpha');
+    expect(button('Ask the Managed owner again')).toBeUndefined();
+    await click('Look for what it started');
+    expect(client.orphans).toHaveBeenCalledWith(OP);
+    expect(client.execute).not.toHaveBeenCalled();
+    expect(text(document.querySelector('.projects-unfinished'))).toContain(
+      'repo',
+    );
+    await click('This one');
+    expect(client.sent[0]!.command).toMatchObject({
+      kind: 'reconcileLaunch',
+      launchOperationId: OP,
+      resolution: {
+        kind: 'identified',
+        terminalId: 'tttttttt-0000-4000-8000-000000000001',
+        sessionId: null,
+      },
+    });
+  });
+
+  it('says so when nothing unshown is running, and Nothing started stays the way out', async () => {
+    const client = stuck();
+    await shown(client);
+    await click('Alpha');
+    await click('Look for what it started');
+    expect(text(document.querySelector('.projects-unfinished'))).toContain(
+      'Nothing is running that is not already shown',
+    );
+    await click('Nothing started');
+    expect(client.sent[0]!.command).toMatchObject({
+      resolution: { kind: 'absent' },
     });
   });
 });
@@ -442,6 +505,63 @@ describe('a session in a pane', () => {
       .mocked(client.writeInput)
       .mock.calls.map(([, data]) => new TextDecoder().decode(data));
     expect(sent).toEqual(['a', 'b', 'c']);
+  });
+
+  it('wires the keyboard once when input is taken twice at the same moment', async () => {
+    const client = withSession();
+    await shown(client);
+    await click('Alpha');
+    const take = button('Take input')!;
+    take.click();
+    take.click();
+    await settle();
+    expect(client.claimInput).toHaveBeenCalledTimes(1);
+    expect(renderers[0]!.typing).toHaveLength(1);
+    renderers[0]!.typing[0]!.text('x');
+    await settle();
+    expect(client.writeInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives input back and stops reading when the view is hidden or the pane goes away', async () => {
+    const client = withSession();
+    await shown(client);
+    await click('Alpha');
+    await click('Take input');
+    expect(renderers[0]!.typing).toHaveLength(1);
+    const reads = vi.mocked(client.readOutput).mock.calls.length;
+    document.querySelector<HTMLButtonElement>('.test-toggle')!.click();
+    await settle();
+    expect(client.releaseInput).toHaveBeenCalledWith(ASSOCIATION_1);
+    expect(renderers[0]!.typing).toHaveLength(0);
+    document.querySelector<HTMLButtonElement>('.test-toggle')!.click();
+    await settle();
+    // Back on screen: a new pane, read-only again, and it asked for nothing in between.
+    expect(renderers).toHaveLength(2);
+    expect(renderers[1]!.inputEnabled).toBe(false);
+    expect(vi.mocked(client.readOutput).mock.calls.length).toBeGreaterThan(
+      reads,
+    );
+  });
+
+  it('gives a claim back that arrives after the pane went away', async () => {
+    const client = withSession();
+    let grant: () => void = () => undefined;
+    client.claimInput = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          grant = resolve;
+        }),
+    );
+    await shown(client);
+    await click('Alpha');
+    button('Take input')!.click();
+    await settle();
+    document.querySelector<HTMLButtonElement>('.test-toggle')!.click();
+    await settle();
+    grant();
+    await settle();
+    expect(client.releaseInput).toHaveBeenCalledWith(ASSOCIATION_1);
+    expect(renderers[0]!.typing).toHaveLength(0);
   });
 
   it('takes input at once for the session this window just started, and for no other', async () => {
@@ -562,6 +682,15 @@ describe('the sessions list', () => {
     choose.value = PROJECT_A;
     choose.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
+    // Choosing only asks: nothing moves until it is confirmed, and Cancel moves nothing.
+    expect(client.execute).not.toHaveBeenCalled();
+    expect(text(row)).toContain('Move this shell into');
+    await click('Cancel');
+    expect(client.execute).not.toHaveBeenCalled();
+    choose.value = PROJECT_A;
+    choose.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    await click('Move');
     expect(client.sent[0]!.command).toMatchObject({
       kind: 'adoptScratch',
       projectId: PROJECT_A,
@@ -596,5 +725,4 @@ it('keeps a hidden view out of the way', async () => {
   expect(view.hidden).toBe(true);
   expect(view.inert).toBe(true);
   expect(client.overview).not.toHaveBeenCalled();
-  void LEAF_2;
 });

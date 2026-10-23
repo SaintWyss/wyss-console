@@ -5,13 +5,15 @@
 
   let {
     client,
-    visible = true,
+    visible: initiallyVisible = true,
     ids = () => crypto.randomUUID(),
   }: {
     client: ProjectsClient;
     visible?: boolean;
     ids?: () => string;
   } = $props();
+  // svelte-ignore state_referenced_locally
+  let visible = $state(initiallyVisible);
   // Built once for one client, as the application does.
   // svelte-ignore state_referenced_locally
   const controller = new ProjectsController(
@@ -29,4 +31,7 @@
   });
 </script>
 
+<button type="button" class="test-toggle" onclick={() => (visible = !visible)}
+  >toggle view</button
+>
 <ProjectsView {projects} {controller} {client} {visible} />

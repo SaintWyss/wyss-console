@@ -180,6 +180,7 @@ fn main() {
             "projects_term_read",
             "projects_term_write",
             "projects_term_resize",
+            "projects_orphans",
             "projects_rollback_report",
             "projects_compact_receipts",
             "projects_set_enabled",

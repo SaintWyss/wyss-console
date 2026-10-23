@@ -161,7 +161,7 @@ export const summary = (
   sources: [],
   canCommit: true,
   needsAliasAcceptance: false,
-  legacyChanged: false,
+  olderChanged: false,
   ...over,
 });
 
@@ -235,13 +235,14 @@ export function fakeClient(): Fake {
     }),
     writeInput: vi.fn(async () => undefined),
     resize: vi.fn(async () => undefined),
+    orphans: vi.fn(async () => []),
     rollbackReport: vi.fn(async () => ({
       canDisable: true,
       unfinishedLaunches: 0,
       projects: 1,
       workspaces: 2,
       sessions: 0,
-      mappedLegacyRecords: 0,
+      mappedOlderRecords: 0,
       note: 'kept',
     })),
     compactReceipts: vi.fn(async () => 0),

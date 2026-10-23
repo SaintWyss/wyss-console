@@ -20,6 +20,7 @@
     "allow-projects-term-read",
     "allow-projects-term-write",
     "allow-projects-term-resize",
+    "allow-projects-orphans",
     "allow-projects-rollback-report",
     "allow-projects-compact-receipts",
     "allow-projects-set-enabled",

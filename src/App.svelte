@@ -197,7 +197,8 @@
     nativeController.setVisible(
       activeView === 'workspace' ||
         activeView === 'profiles' ||
-        activeView === 'models',
+        activeView === 'models' ||
+        activeView === 'projects',
     );
   });
 

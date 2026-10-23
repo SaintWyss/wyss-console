@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import {
   parseFailure,
+  parseOrphans,
   parseOutput,
   parseOverview,
   parsePage,
@@ -15,6 +16,7 @@ import {
   type Envelope,
   type Failure,
   type MigrationSummary,
+  type Orphan,
   type Output,
   type Overview,
   type Page,
@@ -64,6 +66,7 @@ export interface ProjectsClient {
   ): Promise<Output>;
   writeInput(associationId: string, data: Uint8Array): Promise<void>;
   resize(associationId: string, rows: number, cols: number): Promise<void>;
+  orphans(launchOperationId: string): Promise<Orphan[]>;
   rollbackReport(): Promise<RollbackReport>;
   compactReceipts(): Promise<number>;
   setEnabled(on: boolean): Promise<Overview>;
@@ -169,6 +172,12 @@ export const desktopProjects: ProjectsClient = {
     await call('projects_term_resize', {
       request: { associationId, rows, cols },
     });
+  },
+  async orphans(launchOperationId) {
+    return checked(
+      await call('projects_orphans', { request: { launchOperationId } }),
+      parseOrphans,
+    );
   },
   async rollbackReport() {
     return checked(await call('projects_rollback_report'), parseRollback);

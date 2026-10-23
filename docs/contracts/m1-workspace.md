@@ -45,7 +45,7 @@ Propose `$XDG_STATE_HOME/wyss-console/projects/v1/store.json` (fallback
 `~/.local/state`), directory 0700, file 0600, user-owned non-symlink ancestors, atomic
 same-directory write + fsync file/directory. One transaction holds an interprocess file
 lock, rereads the current revision, validates and compare-and-swaps the entire store.
-No watcher writes a legacy file. Contending windows return `revision_conflict`; refetch,
+No watcher writes a older file. Contending windows return `revision_conflict`; refetch,
 never silently last-write-wins. Do not hold this lock across native dialogs/provider IO.
 
 Closed JSON types; reject unknown fields, duplicate JSON keys, unknown enums, nonfinite
@@ -169,7 +169,7 @@ One app-coordinated input claim per host epoch/terminal, held by backend interpr
 lock and released on blur/detach/crash; mirror views are read-only. Taking input is explicit.
 Resize only by input owner; read cursors stay per viewer, gaps disclosed. Never stop or
 resize a terminal merely to select a project. This is cooperative client coordination,
-not isolation against legacy/direct same-UID writers; compatibility warning is visible.
+not isolation against older/direct same-UID writers; compatibility warning is visible.
 
 Launch journal: persist pending before dispatch, then committed only after exact owner
 receipt and association CAS. Refusal before dispatch => refused. Loss after possible
@@ -223,19 +223,19 @@ known effect `none|committed|unknown`, and safe next action; never raw provider/
 
 ## 4. Migration, preservation and rollback
 
-1. **Read-only preview.** Use bounded strict legacy registry schema1 (2 MiB,200 sessions,
+1. **Read-only preview.** Use bounded strict older registry schema1 (2 MiB,200 sessions,
    100 known folders) and saved layout v1 (64 KiB,16 tabs,16 panes/tab,depth6). Validate
    owner/mode/descriptor and consistent bytes/digest before/after read. If sources change,
    retry preview, never stop their writers. No Registry::open or HostLink lazy startup.
 2. Generate one migration UUID/storeId/HostId in preview memory; deterministic name-based
-   mapping (SHA-256, UUID version-8 layout, no new dependency) within that migration namespace from source kind + stable legacy key. Retry of
+   mapping (SHA-256, UUID version-8 layout, no new dependency) within that migration namespace from source kind + stable older key. Retry of
    that preview yields the same map. Canonical exact root duplicates coalesce after native
    validation; aliases/ambiguous roots require user resolution. Missing roots remain
    unverified/read-only. Do not infer projects from cwd prefixes, Git URL or directory names.
 3. Read current host through non-starting checked connection, validate every terminal/native
    tag against its live owner. Map known exact-root sessions; unmatched shells/native work
    stays in Scratch/unassigned recovery view (Native is not adoptable by adoptScratch).
-   Import each legacy tab into a separate named workspace (up to16), splitting mixed-project
+   Import each older tab into a separate named workspace (up to16), splitting mixed-project
    tabs by verified origin, and set the first as default. Preview must refuse any resulting
    workspace/leaf count above its bound; never truncate. Prune absent refs into empty leaves,
    never remake shells. Missing agents/history remain discoverable metadata. Never infer
@@ -244,25 +244,25 @@ known effect `none|committed|unknown`, and safe next action; never raw provider/
    workspace binding plus explicit project match can associate Managed work. Unknown/root-
    ambiguous work stays unassigned and cannot receive project-scoped commands. No SQLite
    read/write migration and no provider thread resume on import.
-5. On explicit commit, recheck preview digests/owner epochs and all bounds. Preserve legacy
+5. On explicit commit, recheck preview digests/owner epochs and all bounds. Preserve older
    registry/layout bytes in a private migration snapshot (no profile/auth/vault copy), hash
    manifest; stage new validated store and fsync, atomic publish last. Never overwrite the
    source. Crash before publication => old reader; after => fully valid new reader/map.
    A private snapshot contains user paths: never log, commit or attach it to a PR.
 6. New UI exclusively owns its new store; old windows continue owning old layout. Detect
-   legacy changes and offer incremental import with a **new** preview; never merge them
+   older changes and offer incremental import with a **new** preview; never merge them
    silently or overwrite newer workspace state. UI feature flag selects reader, not host
    lifecycle. Reopening old UI can still recreate missing shells by old behaviour: disclose
    this before rollback, prefer attach-only compatibility view if that risk is unacceptable.
 7. Rollback is an owner-reviewed GUI/metadata operation: record post-snapshot new records,
    export mapping privately, confirm no unaccounted/ambiguous operation, disable new reader.
-   Keep v1 store/tombstones/snapshot for forward recovery; never restore legacy bytes over
+   Keep v1 store/tombstones/snapshot for forward recovery; never restore older bytes over
    live writers. Installer rollback can close terminals and is **not** this UI rollback.
    No host stop, SQL downgrade, authority switch, provider-setting restoration or PID cleanup.
 
 M0 only prepares this procedure. It does not create snapshots of personal records, publish
 stores, install a GUI, or execute rollback. Observe before/after current service start
-identities/socket inodes and legacy metadata; differences require investigation, not
+identities/socket inodes and older metadata; differences require investigation, not
 cleanup. Absence of a difference is preservation evidence, not proof of provider fidelity.
 
 ## 5. Bounded implementation order and executable acceptance handoff
@@ -270,8 +270,9 @@ cleanup. Absence of a difference is preservation evidence, not proof of provider
 Build in separate reviewable increments: pure closed codec/schema + fixtures; locked
 store/CAS + failure injection; non-starting owner projection/checked transport; migration
 preview/commit; project/Scratch navigation; layouts/input coordination; launch/config
-context integration. ADR0052 accepts the identity/projection architecture; M1 design details and
-fixtures remain unimplemented beyond increment 1 (the schema and codec). Release/adoption still requires all applicable
+context integration. ADR0052 accepts the identity/projection architecture. Every increment above
+is implemented and feature-gated (§6 and `docs/acceptance/m1-delivery-2026-10-23.md`); none is
+adopted. Release/adoption still requires all applicable
 M1-01..13 acceptance evidence, performance budgets, review and a separately authorized
 preservation-aware deployment, not merely this ADR's approval. No dependency on Claude Managed,
 new remote transport, concurrency increase, parser helpers or OL3 implementation.
@@ -284,7 +285,7 @@ new remote transport, concurrency increase, parser helpers or OL3 implementation
 | M1-04            | Two windows CAS same revision => exactly one commit, other conflict; lock/crash/write/fsync/rename faults leave complete old or new bytes, never empty fallback                                                                                                                                                                                                                                                                                                                                                         | CTX01/04             |
 | M1-05            | Switch A→B during chooser, config plan, confirmation and delayed receipt => no B mutation; pending plan expires, confirmed effect/receipt remains A; cross-project Undo refuses                                                                                                                                                                                                                                                                                                                                         | CTX04                |
 | M1-06            | Duplicate/close/delete/archive/navigation/reopen => zero spawn/stop/resume/lease calls; default removal leaves empty replacement; detached sessions discoverable; Scratch no providers/authority                                                                                                                                                                                                                                                                                                                        | CTX01/03             |
-| M1-07            | Registry/layout corpus: duplicate roots, absent host, missing agents, malformed/newer files,16 tabs, changed sources, interrupted publication and second import; deterministic map; no Registry::open, no shell remake, no legacy writes                                                                                                                                                                                                                                                                                | CTX01..03            |
+| M1-07            | Registry/layout corpus: duplicate roots, absent host, missing agents, malformed/newer files,16 tabs, changed sources, interrupted publication and second import; deterministic map; no Registry::open, no shell remake, no older writes                                                                                                                                                                                                                                                                                 | CTX01..03            |
 | M1-08            | P1/P2 same-looking IDs never conflate; wrong store/epoch/generation/context or requested-vs-effective Managed safety profile denies attach/input/effect; project association never changes Managed binding or grant                                                                                                                                                                                                                                                                                                     | CTX01/04             |
 | M1-09            | Two mirror views => one input/resize claim, other read-only; owner crash frees claim; replaced socket/PID reuse/unreadable start ticks => refusal before send, zero reconnect replay                                                                                                                                                                                                                                                                                                                                    | CTX01/03             |
 | M1-10            | Native dispatch succeeds then association save/ACK lost => ambiguous, zero second launch; same `operationId` twice (identical => stored state, different => `invalid_record`) or from two windows => one dispatch; a different `operationId` on a busy leaf => `leaf_busy`; `pending` with a dead claim found at load => `ambiguous`, with a live claim untouched; compacted ID => refused; Managed receipt retains the explicit requested safety profile and retry uses original intent; startup never replays journal | CTX01/04             |
@@ -294,8 +295,9 @@ new remote transport, concurrency increase, parser helpers or OL3 implementation
 
 Fixtures must use synthetic metadata and fail-on-call spawn/stop/provider/config writers.
 No test requires real credentials, a live service restart or installed-store migration.
-Current fixture passes in the status register prove the old components only; the above
-new tests are **NOT_RUN** until implemented. Required native desktop journey after owner
+Current fixture passes in the status register prove the old components only; the results of
+the M1-01..13 tests are recorded in `docs/acceptance/m1-delivery-2026-10-23.md` (11 PASS, 2
+PARTIAL). Required native desktop journey after owner
 acceptance: A/B/Scratch, Native Claude/Codex and existing F8 visible in correct scope,
 archive/reopen, GUI-only recovery, two windows, loss of owner connection. Zero duplicate
 processes/prompts and unchanged live ownership are explicit release oracles.
@@ -316,8 +318,10 @@ cannot close the real-desktop performance requirement.
 What the implementation decided where the proposal left room, and what it does not do. Anything
 here that disagrees with the sections above is a defect to fix, not a second contract.
 
-**Release gate.** Every command except the reads answers `unsupported_capability` (field
-`disabled`) until the owner turns the workspace on. The gate is the private file
+**Release gate.** Every command, reads included, answers `unsupported_capability` (field
+`disabled`) until the owner turns the workspace on; the one exception is `projects_overview`, which
+only says it is off. With the gate off nothing is read or made: no `projects/` directory, no store
+file, no call to the terminal host, no Managed interface. The gate is the private file
 `$XDG_STATE_HOME/wyss-console/projects/feature`; it is switched by `projects_set_enabled`, which
 asks in a native confirmation window the page cannot draw on, and turning it off is refused while a
 launch of unknown outcome exists. The Projects entry in the navigation exists only while it is on.
@@ -352,16 +356,43 @@ input may answer); every other view is a read-only mirror until input is taken, 
 released on blur, on detach and when the window or process ends. Input is sent one call at a time,
 in the order typed.
 
-**Migration.** Preview reads the legacy files as bytes (never `Registry::open`), twice, and refuses
+**Migration.** Preview reads the files of the older windows as bytes (never `Registry::open`), twice, and refuses
 a source that changes under it. A folder that is missing or not usable is not imported and is not
 invented; an alias of a registered root needs an explicit acceptance; tabs with nothing alive are
 skipped; a tab that mixes origins becomes one workspace per origin; all Scratch panes share the one
 Scratch workspace in a balanced layout. Commit preserves the exact bytes in
 `migration-<id>/` with a hash manifest, then publishes the store last. A later preview is
 incremental: it adds registered folders and live sessions the store lacks and never changes or
-removes a record it has. Profile defaults of the legacy registry are not imported.
+removes a record it has. Profile defaults of the older registry are not imported. A preview that has a blocking conflict is
+never committed, whatever aliases were accepted, and an update preview is committed at the store
+revision it was made against or not at all (`revision_conflict`, then a new preview).
 
-**Not done here.** A push channel between windows; a way to browse sessions older than the Managed
-owner's first eight pages; any change to the host, the authorities, their stores, the F8 capacity
-of one or the installed package. Real-desktop performance budgets are not set (the measurements in
-the delivery record are costs, not budgets), and the owner's own installation has not been migrated.
+**Unknown launches.** A Native or shell launch of unknown outcome is resolved by looking
+(`projects_orphans` lists the running terminals no association holds, of the kind the launch asked
+for, by the last component of their folder) and picking one (`identified`), or by saying nothing
+started (`absent`, refused while the owner shows something nobody holds). Only a Managed launch
+offers to ask its owner again. A launch is settled from the project and workspace that made it. A
+store at its session ceiling refuses a launch before the owner is asked.
+
+**Not done here.**
+
+- A push channel between windows; a way to browse sessions older than the Managed owner's first
+  eight pages; any change to the host, the authorities, their stores, the F8 capacity of one or the
+  installed package.
+- Real-desktop performance budgets (the measurements in the delivery record are costs, not
+  budgets); the owner's own installation has not been migrated.
+- Disclosure of the real working directory before a shell is adopted into a project: the window
+  asks for confirmation naming the project, not the folder the shell is in.
+- A foreign ACL on a project root (owner only is checked).
+- A Managed retry does not record which authority protocol the first attempt used, so after the
+  desktop changes between protocol 1 and 2 a retry could prepare a second, unused session in the
+  other authority. A prepared session starts nothing and grants nothing.
+- Managed capability checks: the requested safety profile is recorded and shown next to the
+  attached one, but the authority's announced capabilities are not verified before the request.
+- Every mutation looks up its operation ID: only `launch` and `reconcileLaunch` do; other commands
+  are protected by the expected store revision. Repeating a committed `launch` after the binding
+  moved answers `context_stale`, not the stored state.
+- Efficiency items of §5 that are not built: debounced layout saves, virtualized long lists and
+  lazy renderer attachment; panes are unmounted while the view is hidden instead.
+- A removed project whose folder is still in the older registry is offered again by an update
+  preview, and an accepted alias is asked again each time.

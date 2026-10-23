@@ -20,7 +20,7 @@ struct Fixture {
     env: Arc<FakeEnv>,
 }
 
-/// `<dir>/state/wyss-console/projects/v1` is the store, so the legacy files are in
+/// `<dir>/state/wyss-console/projects/v1` is the store, so the older files are in
 /// `<dir>/state/wyss-console`, as in the real layout.
 fn fixture() -> Fixture {
     let dir = TestDir::new();
@@ -182,6 +182,22 @@ fn everything_that_acts_is_off_until_the_owner_turns_it_on() {
     );
     assert_eq!(f.service.recover(), 0);
     assert_eq!(f.owner.launches(), 0);
+    // Off means inert: no view makes the store directory or asks the host.
+    assert_eq!(
+        f.service.rollback_report().unwrap_err().field,
+        Some("disabled")
+    );
+    assert_eq!(
+        f.service.compact_receipts().unwrap_err().field,
+        Some("disabled")
+    );
+    let off_view = f.service.overview();
+    assert!(!off_view.host.reachable && off_view.host.epoch.is_none());
+    assert!(
+        !f.dir.0.join("state/wyss-console/projects").exists(),
+        "the workspace off must not make its directory"
+    );
+    assert!(f.owner.calls().is_empty(), "{:?}", f.owner.calls());
     // The gate is a private file beside the store, not inside it, and turning it off is clean.
     f.service.set_enabled(true).unwrap();
     assert!(f.service.overview().enabled);
@@ -730,7 +746,7 @@ fn a_claim_held_by_another_console_process_blocks_and_dies_with_that_process() {
 
 // ---- migration through the service ---------------------------------------------------------------------
 
-fn legacy(f: &Fixture, registry: &str) {
+fn older(f: &Fixture, registry: &str) {
     let dir = f.dir.0.join("state/wyss-console/native");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("registry.json"), registry).unwrap();
@@ -744,7 +760,7 @@ fn registry_of(paths: &[&str]) -> String {
 fn a_preview_is_committed_only_as_shown_and_only_against_unchanged_files() {
     let f = fixture();
     f.service.set_enabled(true).unwrap();
-    legacy(&f, &registry_of(&[ROOT_A]));
+    older(&f, &registry_of(&[ROOT_A]));
     let summary = f.service.preview_migration().unwrap();
     assert_eq!((summary.counts.projects, summary.can_commit), (1, true));
     assert!(
@@ -761,7 +777,7 @@ fn a_preview_is_committed_only_as_shown_and_only_against_unchanged_files() {
     );
     // The old window changed its registry meanwhile: commit refuses and a new preview is needed.
     let again = f.service.preview_migration().unwrap();
-    legacy(&f, &registry_of(&[ROOT_A, ROOT_B]));
+    older(&f, &registry_of(&[ROOT_A, ROOT_B]));
     let changed = f
         .service
         .commit_migration(&again.preview_id, false)
@@ -781,7 +797,7 @@ fn a_preview_is_committed_only_as_shown_and_only_against_unchanged_files() {
         StoreStatus::Ready { .. }
     ));
     assert_eq!(f.service.list_projects(None).unwrap().items.len(), 2);
-    // The legacy file was never written, and its exact bytes are in the private snapshot.
+    // The older file was never written, and its exact bytes are in the private snapshot.
     let kept = std::fs::read_dir(f.dir.0.join("state/wyss-console/projects/v1"))
         .unwrap()
         .flatten()
@@ -794,10 +810,10 @@ fn a_preview_is_committed_only_as_shown_and_only_against_unchanged_files() {
     );
     // A later change is an incremental preview that adds only what is new.
     f.owner.add_root("/home/fixture/work/c", 64768, 1003);
-    legacy(&f, &registry_of(&[ROOT_A, ROOT_B, "/home/fixture/work/c"]));
+    older(&f, &registry_of(&[ROOT_A, ROOT_B, "/home/fixture/work/c"]));
     let next = f.service.preview_migration().unwrap();
     assert_eq!(
-        (next.mode, next.legacy_changed, next.counts.projects),
+        (next.mode, next.older_changed, next.counts.projects),
         (crate::projects::migration::Mode::Incremental, true, 1)
     );
     f.service.commit_migration(&next.preview_id, false).unwrap();
@@ -822,7 +838,7 @@ fn an_alias_is_committed_only_when_accepted() {
             }),
         );
     });
-    legacy(&f, &registry_of(&[ROOT_A, "/home/fixture/work/a-link"]));
+    older(&f, &registry_of(&[ROOT_A, "/home/fixture/work/a-link"]));
     let summary = f.service.preview_migration().unwrap();
     assert!(summary.needs_alias_acceptance && !summary.can_commit);
     assert_eq!(
@@ -842,7 +858,7 @@ fn an_alias_is_committed_only_when_accepted() {
 fn a_blocking_conflict_cannot_be_committed_even_when_aliases_are_accepted() {
     let f = fixture();
     f.service.set_enabled(true).unwrap();
-    legacy(&f, r#"{"schema":2,"sessions":[],"projects":[]}"#);
+    older(&f, r#"{"schema":2,"sessions":[],"projects":[]}"#);
     let summary = f.service.preview_migration().unwrap();
     assert!(!summary.can_commit);
     assert!(
@@ -854,12 +870,83 @@ fn a_blocking_conflict_cannot_be_committed_even_when_aliases_are_accepted() {
 }
 
 #[test]
+fn accepting_aliases_never_overrides_a_conflict_that_blocks() {
+    use crate::projects::owner::RootInfo;
+    use wyss_console::contracts::m1::records::CheckoutKind;
+    let f = fixture();
+    f.service.set_enabled(true).unwrap();
+    let alias = "/home/fixture/work/a-link";
+    f.owner.script(|s| {
+        s.roots.insert(
+            alias.to_owned(),
+            Ok(RootInfo {
+                path: ROOT_A.to_owned(),
+                device: 64768,
+                inode: 1001,
+                kind: CheckoutKind::Git,
+                native_eligible: true,
+                config_eligible: true,
+            }),
+        );
+    });
+    older(&f, &registry_of(&[ROOT_A, alias]));
+    // A tab file the import cannot read blocks it, whatever else is accepted.
+    std::fs::write(
+        f.dir.0.join("state/wyss-console/layout.json"),
+        br#"{"version":2,"tabs":[]}"#,
+    )
+    .unwrap();
+    let summary = f.service.preview_migration().unwrap();
+    assert!(summary.needs_alias_acceptance && !summary.can_commit);
+    assert!(
+        f.service
+            .commit_migration(&summary.preview_id, true)
+            .is_err()
+    );
+    assert!(matches!(f.service.overview().store, StoreStatus::Missing));
+}
+
+#[test]
+fn an_update_preview_is_committed_at_its_own_revision_or_not_at_all() {
+    let f = fixture();
+    f.service.set_enabled(true).unwrap();
+    older(&f, &registry_of(&[ROOT_A]));
+    let first = f.service.preview_migration().unwrap();
+    f.service
+        .commit_migration(&first.preview_id, false)
+        .unwrap();
+    // The older state gained a folder; an update preview offers it.
+    f.owner.add_root(ROOT_B, 64768, 1002);
+    older(&f, &registry_of(&[ROOT_A, ROOT_B]));
+    let update = f.service.preview_migration().unwrap();
+    assert_eq!(update.counts.projects, 1);
+    // Meanwhile another window registers that same folder by hand.
+    f.register(ROOT_B);
+    let before = f.store();
+    let refused = f
+        .service
+        .commit_migration(&update.preview_id, false)
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::RevisionConflict);
+    assert_eq!(f.store(), before, "nothing was added over the newer store");
+    assert_eq!(
+        before
+            .bindings
+            .iter()
+            .filter(|b| b.path.as_str() == ROOT_B)
+            .count(),
+        1,
+        "the folder is one project"
+    );
+}
+
+#[test]
 fn a_host_replaced_between_preview_and_commit_is_refused() {
     let f = fixture();
     f.service.set_enabled(true).unwrap();
     f.owner
         .script(|s| s.host = Some(Ok(vec![native_row(TERMINAL_1, None)])));
-    legacy(&f, &registry_of(&[ROOT_A]));
+    older(&f, &registry_of(&[ROOT_A]));
     let summary = f.service.preview_migration().unwrap();
     f.owner.script(|s| s.epoch = "h1:9:9:2:2".into());
     assert_eq!(
@@ -905,11 +992,98 @@ fn rollback_is_a_report_and_refuses_while_a_launch_is_unaccounted_for() {
     let blocked = f.service.rollback_report().unwrap();
     assert!(!blocked.can_disable);
     assert_eq!(blocked.unfinished_launches, 1);
+    // What it could have started is read, never attached: only running terminals no association
+    // holds, of the kind the launch asked for, and a folder name rather than a path.
+    let launch = f.store().operations[0].id.as_str().to_owned();
+    f.owner.script(|s| {
+        let mut shell = native_row(TERMINAL_2, None);
+        shell.cwd = Some("/home/user/work/repo/".to_owned());
+        let mut stopped = native_row(TERMINAL_1, None);
+        stopped.running = false;
+        s.host = Some(Ok(vec![
+            shell,
+            stopped,
+            native_row("aaaaaaaa-0000-4000-8000-000000000003", Some("native-1")),
+        ]));
+    });
+    let found = f.service.orphans(&launch).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].terminal_id, TERMINAL_2);
+    assert_eq!(found[0].folder.as_deref(), Some("repo"));
+    assert_eq!(
+        f.service.orphans(&f.env.uuid()).unwrap_err().code,
+        ErrorCode::ContextStale
+    );
     // Disabling the gate changes no session and no store.
     let before = f.store();
     f.service.set_enabled(false).unwrap();
     assert_eq!(f.store(), before);
     assert_eq!(f.owner.launches(), 1);
+}
+
+// ---- the shapes the window parses --------------------------------------------------------------
+
+/// What the desktop answers is written down once, here, and the window's parsers read the same
+/// file (`tests/projects-contract.test.ts`). `WYSS_UPDATE_FIXTURES=1` rewrites it.
+#[test]
+fn the_answers_the_window_parses_match_the_recorded_shapes() {
+    let f = fixture().enabled();
+    let (project, workspace) = f.register(ROOT_A);
+    let leaf = f.env.uuid();
+    f.send(f.context(Some(&project), Some(&workspace)), json!({"kind": "saveWorkspace", "workspaceId": workspace,
+        "expectedWorkspaceRevision": "1", "label": "Main", "layout": {"kind": "leaf", "id": leaf}, "focus": null,
+        "pinned": false, "leaves": [leaf_json(&leaf, Value::Null)],
+        "preferences": {"provider": null, "mode": "native", "nativeProfile": null, "managedSafetyProfile": null}})).unwrap();
+    f.owner
+        .script(|s| s.shell.push(Err(LaunchError::Ambiguous)));
+    assert!(f.send(f.context(Some(&project), Some(&workspace)), json!({"kind": "launch", "workspaceId": workspace,
+        "leafId": leaf, "provider": "shell", "mode": "native", "nativeProfile": null, "managedSafetyProfile": null})).is_err());
+    f.owner.script(|s| {
+        let mut row = native_row(TERMINAL_2, None);
+        row.cwd = Some("/home/user/work/repo".to_owned());
+        s.host = Some(Ok(vec![row]));
+    });
+    let launch = f.store().operations[0].id.as_str().to_owned();
+    let answers = json!({
+        "overview": f.service.overview(),
+        "projects": f.service.list_projects(None).unwrap(),
+        "workspace": f.service.get_workspace(&workspace, None).unwrap(),
+        "orphans": f.service.orphans(&launch).unwrap(),
+        "rollback": f.service.rollback_report().unwrap(),
+    });
+    // The test environment numbers its IDs from a counter shared by every test, so the IDs are
+    // renumbered by first appearance: the file does not depend on which tests ran before.
+    fn renumber(value: &mut Value, seen: &mut Vec<String>) {
+        match value {
+            Value::String(text) if text.starts_with("0000feed-0000-4000-8000-") => {
+                let at = seen.iter().position(|s| s == text).unwrap_or_else(|| {
+                    seen.push(text.clone());
+                    seen.len() - 1
+                });
+                *text = format!("0000feed-0000-4000-8000-{:012x}", at + 1);
+            }
+            Value::Array(items) => items.iter_mut().for_each(|v| renumber(v, seen)),
+            Value::Object(map) => map.values_mut().for_each(|v| renumber(v, seen)),
+            _ => {}
+        }
+    }
+    let mut answers = answers;
+    renumber(&mut answers, &mut Vec::new());
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/projects-v1.json");
+    let text = serde_json::to_string_pretty(&answers).unwrap() + "\n";
+    if std::env::var_os("WYSS_UPDATE_FIXTURES").is_some() {
+        std::fs::write(&path, &text).unwrap();
+    }
+    // By value: a formatter may lay the file out differently.
+    let recorded: Value = serde_json::from_str(
+        &std::fs::read_to_string(&path).expect("tests/fixtures/projects-v1.json"),
+    )
+    .unwrap();
+    assert_eq!(
+        recorded, answers,
+        "the recorded answers changed; rerun with WYSS_UPDATE_FIXTURES=1 and read the diff"
+    );
 }
 
 use std::os::unix::fs::PermissionsExt;

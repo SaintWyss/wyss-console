@@ -549,6 +549,22 @@ pub async fn projects_term_resize(
         .await
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OrphansRequest {
+    launch_operation_id: String,
+}
+
+#[tauri::command]
+pub async fn projects_orphans(
+    app: AppHandle,
+    projects: State<'_, Projects>,
+    request: OrphansRequest,
+) -> Result<Vec<super::service::OrphanView>, Failure> {
+    let service = projects.get(&app);
+    blocking(move || service.orphans(&request.launch_operation_id)).await
+}
+
 #[tauri::command]
 pub async fn projects_rollback_report(
     app: AppHandle,
@@ -641,6 +657,7 @@ const COMMANDS: &[&str] = &[
     "projects_term_read",
     "projects_term_write",
     "projects_term_resize",
+    "projects_orphans",
     "projects_rollback_report",
     "projects_compact_receipts",
     "projects_set_enabled",
@@ -667,6 +684,7 @@ pub fn extension() -> wyss_console::Extension {
             projects_term_read,
             projects_term_write,
             projects_term_resize,
+            projects_orphans,
             projects_rollback_report,
             projects_compact_receipts,
             projects_set_enabled,

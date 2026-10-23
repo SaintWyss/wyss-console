@@ -10,7 +10,7 @@
 //! * `command`: the closed command envelope, its results and its errors.
 //! * `apply`: what each command does to a store, given what the owners say.
 //! * `owner`: the checked, non-starting view of the host and the launch it can be asked for.
-//! * `migration`: the deterministic, read-only-first import of the legacy registry and layout.
+//! * `migration`: the deterministic, read-only-first import of the older registry and layout.
 //! * `claim`: the cooperative, exclusive terminal input claim.
 //! * `service`: the facade the window's commands use.
 pub mod apply;

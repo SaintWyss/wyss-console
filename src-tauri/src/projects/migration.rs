@@ -1,16 +1,16 @@
-//! The deterministic import of the legacy registry and saved layout (contract §4).
+//! The deterministic import of the older registry and saved layout (contract §4).
 //!
-//! The preview reads the two legacy files and the host without changing, locking, opening or
+//! The preview reads the two older files and the host without changing, locking, opening or
 //! starting any of them, and builds the whole new store in memory. Identities come from the
-//! migration's own namespace and the legacy keys, so the same inputs give the same store. A
+//! migration's own namespace and the older keys, so the same inputs give the same store. A
 //! root that is missing is not invented; a session that is not alive is not remade; a tab that
 //! mixes projects is split by the origin each terminal can be proven to have; what cannot be
 //! proven stays in Scratch or in an empty placement. Nothing is truncated: a plan over a bound
 //! is refused whole.
 //!
-//! Commit preserves the legacy bytes in a private snapshot with a hash manifest first, and
+//! Commit preserves the older bytes in a private snapshot with a hash manifest first, and
 //! publishes the new store last, atomically, so a crash leaves the old state or the complete
-//! new one. The legacy files are never written.
+//! new one. The older files are never written.
 use super::{
     apply::{Env, store_failure},
     command::{ErrorCode, Failure},
@@ -46,7 +46,7 @@ use wyss_console::contracts::{
     },
 };
 
-/// The legacy registry's bounds (schema 1): size, sessions and known folders.
+/// The older registry's bounds (schema 1): size, sessions and known folders.
 const REGISTRY_MAX_BYTES: u64 = 2 * 1024 * 1024;
 const REGISTRY_MAX_SESSIONS: usize = 200;
 const REGISTRY_MAX_PROJECTS: usize = 100;
@@ -59,11 +59,11 @@ const READ_TRIES: usize = 3;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConflictKind {
-    /// A legacy file is there but cannot be read as the schema it claims. Blocks.
+    /// A older file is there but cannot be read as the schema it claims. Blocks.
     SourceUnreadable,
-    /// A legacy file changed while it was being read. Blocks.
+    /// A older file changed while it was being read. Blocks.
     SourceUnstable,
-    /// A legacy file is bigger than its bound. Blocks.
+    /// A older file is bigger than its bound. Blocks.
     SourceOversized,
     /// A registered path is a spelling of another registered root. Blocks until accepted.
     Alias,
@@ -73,7 +73,7 @@ pub enum ConflictKind {
     HostOffline,
     /// A live terminal or tab cannot be placed within the bounds. Blocks, nothing truncated.
     OverBound,
-    /// An identity the legacy owner gave is not one the contract can hold. Not coerced.
+    /// An identity the older owner gave is not one the contract can hold. Not coerced.
     IncompatibleId,
     /// The assembled store failed the contract. Blocks.
     Invalid,
@@ -118,7 +118,7 @@ pub struct Counts {
 pub enum Mode {
     /// There is no store yet: this builds it.
     Initial,
-    /// There is a store; this adds only what appeared in the legacy state since.
+    /// There is a store; this adds only what appeared in the older state since.
     Incremental,
 }
 
@@ -134,8 +134,8 @@ pub struct Summary {
     /// Whether committing would be accepted now (aliases need an explicit acceptance).
     pub can_commit: bool,
     pub needs_alias_acceptance: bool,
-    /// The legacy state changed since the last committed import.
-    pub legacy_changed: bool,
+    /// The older state changed since the last committed import.
+    pub older_changed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -151,7 +151,7 @@ fn source_kind(kind: MigrationSourceKind) -> &'static str {
     }
 }
 
-/// The bytes read from the legacy files and the digests of exactly those bytes.
+/// The bytes read from the older files and the digests of exactly those bytes.
 #[derive(Clone, Debug)]
 pub struct Sources {
     pub registry: Option<Vec<u8>>,
@@ -210,7 +210,7 @@ fn read_consistent(path: &Path, most: u64) -> Result<Option<Vec<u8>>, SourceErro
     Err(SourceError::Unstable)
 }
 
-/// The legacy files, in the Console's own state directory. Reading them changes nothing:
+/// The older files, in the Console's own state directory. Reading them changes nothing:
 /// the registry is read as bytes, never opened through the Native service, whose open writes.
 pub fn read_sources(state_dir: &Path) -> Result<Sources, (ConflictKind, &'static str)> {
     let conflict = |e: SourceError, which: &'static str| {
@@ -234,7 +234,7 @@ pub fn read_sources(state_dir: &Path) -> Result<Sources, (ConflictKind, &'static
     })
 }
 
-// ---- parsing the legacy documents, strictly --------------------------------------------------
+// ---- parsing the older documents, strictly --------------------------------------------------
 
 struct RegistryDoc {
     projects: Vec<String>,
@@ -406,8 +406,8 @@ pub fn derive(namespace: &str, kind: &str, key: &str) -> String {
     )
 }
 
-fn key_of(kind: &str, legacy: &str) -> String {
-    sha256(format!("{kind}\0{legacy}").as_bytes())
+fn key_of(kind: &str, older: &str) -> String {
+    sha256(format!("{kind}\0{older}").as_bytes())
 }
 
 // ---- the plan ------------------------------------------------------------------------------
@@ -459,7 +459,7 @@ fn counter1() -> Counter {
 /// The terminals of one group of a tab, each with the association that shows there.
 type Placed = Vec<(String, Option<AssociationId>)>;
 
-/// The pure assembly of the new store from the legacy documents and a read of the host.
+/// The pure assembly of the new store from the older documents and a read of the host.
 #[allow(clippy::too_many_arguments)]
 pub fn plan_initial(
     env: &dyn Env,
@@ -543,7 +543,7 @@ pub fn plan_initial(
     // The canonical root of each folder, to find a session's project by exact root.
     let mut project_of_root: HashMap<String, ProjectId> = HashMap::new();
     let mut binding_of_project: HashMap<String, (BindingId, Counter)> = HashMap::new();
-    for (canonical, (root, legacy)) in &roots {
+    for (canonical, (root, older)) in &roots {
         let ids = (
             b.id("project", canonical, ProjectId::parse),
             b.id("binding", canonical, BindingId::parse),
@@ -557,10 +557,10 @@ pub fn plan_initial(
             b.conflict(ConflictKind::IncompatibleId);
             continue;
         };
-        for legacy_path in legacy {
+        for older_path in older {
             b.map.push(MigrationMapRow {
                 source_kind: MapSourceKind::RegistryProject,
-                source_key: text(&key_of("registry_project", legacy_path), "key"),
+                source_key: text(&key_of("registry_project", older_path), "key"),
                 target_id: MappedId::parse(project.as_str()).expect("a project ID is a UUID"),
             });
         }
@@ -630,7 +630,7 @@ pub fn plan_initial(
                         && session_project.contains_key(session.as_str())
                         && let Some(id) = b.id("session", session, AssociationId::parse)
                     {
-                        // The association's identity is derived from the legacy session.
+                        // The association's identity is derived from the older session.
                         b.map.push(MigrationMapRow {
                             source_kind: MapSourceKind::RegistrySession,
                             source_key: text(&key_of("registry_session", session), "key"),
@@ -663,7 +663,7 @@ pub fn plan_initial(
                 }
             };
             origin_of_terminal.insert(row.terminal_id.clone(), origin.clone());
-            let legacy_key = match &row.native_session {
+            let older_key = match &row.native_session {
                 Some(session) => session.clone(),
                 None => row.terminal_id.clone(),
             };
@@ -672,7 +672,7 @@ pub fn plan_initial(
             } else {
                 "shell"
             };
-            let Some(id) = b.id(kind, &legacy_key, AssociationId::parse) else {
+            let Some(id) = b.id(kind, &older_key, AssociationId::parse) else {
                 b.conflict(ConflictKind::IncompatibleId);
                 continue;
             };
@@ -974,7 +974,7 @@ pub fn plan_initial(
             sources: sources_view,
             can_commit: !blocked && !aliases,
             needs_alias_acceptance: aliases,
-            legacy_changed: false,
+            older_changed: false,
         },
         store: b.store,
         snapshot,
@@ -1087,7 +1087,7 @@ struct ManifestFile {
     bytes: usize,
 }
 
-/// Preserves the exact legacy bytes beside the store, privately, with a manifest of their
+/// Preserves the exact older bytes beside the store, privately, with a manifest of their
 /// hashes. It contains user paths: it is never logged, committed or attached to a report.
 pub fn write_snapshot(
     store_dir: &Path,
@@ -1148,7 +1148,8 @@ pub fn write_snapshot(
 /// Commits an initial plan: the snapshot first, the store last. A store that appeared meanwhile
 /// is never replaced.
 pub fn commit_initial(store: &Store, plan: Plan) -> Result<StoreV1, Failure> {
-    if !plan.summary.can_commit && !plan.summary.needs_alias_acceptance {
+    // `can_commit` is the whole answer: accepting spellings makes it true only when nothing blocks.
+    if !plan.summary.can_commit {
         return Err(Failure::new(ErrorCode::InvalidRecord).with_field("migration"));
     }
     if !plan.snapshot.is_empty() {
@@ -1161,7 +1162,7 @@ pub fn commit_initial(store: &Store, plan: Plan) -> Result<StoreV1, Failure> {
     })
 }
 
-/// What the store holds for a legacy source, to tell whether the legacy state moved on.
+/// What the store holds for a older source, to tell whether the older state moved on.
 pub fn committed_digest(store: &StoreV1, kind: MigrationSourceKind) -> Option<String> {
     store
         .migration
@@ -1187,6 +1188,8 @@ pub struct Additions {
 }
 
 pub struct IncrementalPlan {
+    /// The revision of the store the additions were worked out against.
+    pub revision: Counter,
     pub summary: Summary,
     pub additions: Additions,
     pub snapshot: Vec<(&'static str, Vec<u8>)>,
@@ -1211,7 +1214,7 @@ fn terminal_key(target: &Target) -> Option<(String, String)> {
     }
 }
 
-/// Builds the additions that bring `existing` up to the legacy state of now: registered folders
+/// Builds the additions that bring `existing` up to the older state of now: registered folders
 /// the store has no binding for, and live sessions and shells no association holds. Tabs are
 /// not imported again.
 pub fn plan_incremental(
@@ -1340,7 +1343,7 @@ pub fn plan_incremental(
             additions.sources.push((kind, sha256(bytes)));
         }
     }
-    summary.legacy_changed = additions.sources.iter().any(|(kind, digest)| {
+    summary.older_changed = additions.sources.iter().any(|(kind, digest)| {
         committed_digest(existing, *kind).as_deref() != Some(digest.as_str())
     });
     summary.counts = Counts {
@@ -1365,6 +1368,7 @@ pub fn plan_incremental(
         snapshot.push(("layout.json", bytes.clone()));
     }
     Ok(IncrementalPlan {
+        revision: existing.revision,
         summary,
         additions,
         snapshot,
@@ -1421,7 +1425,8 @@ pub fn commit_incremental(
     expected: Counter,
     plan: &IncrementalPlan,
 ) -> Result<StoreV1, Failure> {
-    if !plan.summary.can_commit && !plan.summary.needs_alias_acceptance {
+    // `can_commit` is the whole answer: accepting spellings makes it true only when nothing blocks.
+    if !plan.summary.can_commit {
         return Err(Failure::new(ErrorCode::InvalidRecord).with_field("migration"));
     }
     if !plan.snapshot.is_empty() {

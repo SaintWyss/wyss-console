@@ -5,7 +5,7 @@
 //! processes). Taking input is explicit; a mirror view without the claim is read-only; the claim
 //! is released on blur, on detach and when the window or the process ends, because the kernel
 //! drops the lock with the process. This coordinates Console clients with each other. It does
-//! not stop an older window, a legacy writer or any other process of the same user from
+//! not stop an older window, a older writer or any other process of the same user from
 //! writing to the terminal, and the interface says so.
 use nix::fcntl::{Flock, FlockArg};
 use sha2::{Digest, Sha256};

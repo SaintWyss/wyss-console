@@ -292,6 +292,11 @@ impl HostSocket {
         // The terminals are read on a connection of their own, checked against the epoch just
         // observed, so a host replaced between the two calls is refused rather than mixed.
         let epoch = self.epoch()?;
+        // The second observation is held to the expectation too: a host replaced between the two
+        // calls is not described with the new one's epoch.
+        if expected.is_some_and(|e| e != epoch) {
+            return Err(OwnerError::HostChanged);
+        }
         let list = self
             .call(Some(&epoch), "term_list", Value::Null)
             .map_err(CallFailure::before)?;

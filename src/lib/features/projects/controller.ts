@@ -13,6 +13,7 @@ import type {
   Failure,
   LaunchChoice,
   MigrationSummary,
+  Orphan,
   Overview,
   PickView,
   Preferences,
@@ -93,7 +94,11 @@ const WORDS: Record<string, string> = {
 export function noticeOf(failure: Failure): Notice {
   return {
     kind: 'error',
-    text: WORDS[failure.code] ?? 'Not done.',
+    // An unknown effect is said as such whatever the code: it is never shown as "not done".
+    text:
+      failure.effect === 'unknown'
+        ? WORDS['effect_ambiguous']!
+        : (WORDS[failure.code] ?? 'Not done.'),
     failure,
   };
 }
@@ -161,6 +166,8 @@ export class ProjectsController {
 
   private schedule() {
     if (this.disposed || !this.visible) return;
+    // One chain only: a second schedule replaces the first instead of running beside it.
+    if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       void this.tick().finally(() => this.schedule());
     }, this.timings.poll);
@@ -172,15 +179,17 @@ export class ProjectsController {
     try {
       const overview = await this.client.overview();
       const was = this.ready()?.revision;
+      const wasEnabled = this.s.overview?.enabled ?? false;
+      const wasEpoch = this.s.overview?.host.epoch ?? null;
       const now =
         overview.store.state === 'ready' ? overview.store.revision : null;
-      const hostMoved =
-        overview.host.epoch !== (this.s.overview?.host.epoch ?? null);
+      const hostMoved = overview.host.epoch !== wasEpoch;
       this.set({ overview });
       if (
-        overview.enabled !== (this.s.overview?.enabled ?? false) ||
+        overview.enabled !== wasEnabled ||
         was !== now ||
-        hostMoved
+        hostMoved ||
+        this.s.phase === 'failed'
       )
         await this.refresh();
     } catch {
@@ -213,6 +222,7 @@ export class ProjectsController {
 
   private async readAll() {
     if (this.s.phase === 'idle') this.set({ phase: 'loading' });
+    const chosen = this.selection;
     try {
       const overview = await this.client.overview();
       const store = overview.store;
@@ -242,6 +252,12 @@ export class ProjectsController {
         this.allSessions(project),
         this.allSessions(null),
       ]);
+      // The user chose something else while this was being read: what was read is of the old
+      // choice, so it is dropped and read again.
+      if (chosen !== this.selection) {
+        this.again = true;
+        return;
+      }
       this.set({
         overview,
         phase: 'ready',
@@ -346,14 +362,16 @@ export class ProjectsController {
     const envelope: Envelope = {
       schema: 1,
       operationId: this.newId(),
-      expectedStoreRevision: store.revision,
+      // The revision of the data on screen, not of a later poll: a change the user has not seen
+      // is a conflict to show, not something to act over.
+      expectedStoreRevision: this.s.revision ?? store.revision,
       context: { ...context, ...override },
       command,
     };
     return this.dispatch(envelope, onReceipt);
   }
 
-  private refuse(code: Failure['code']): Failure {
+  private refuse(code: Failure['code'], show = true): Failure {
     const failure: Failure = {
       code,
       effect: 'none',
@@ -362,7 +380,7 @@ export class ProjectsController {
       context: null,
       field: null,
     };
-    this.set({ notice: noticeOf(failure) });
+    if (show) this.set({ notice: noticeOf(failure) });
     return failure;
   }
 
@@ -370,7 +388,16 @@ export class ProjectsController {
     envelope: Envelope,
     onReceipt?: (receipt: Receipt) => void,
   ): Promise<Receipt | Failure> {
-    if (this.s.busy) return this.refuse('leaf_busy');
+    if (this.s.busy) {
+      this.set({
+        notice: {
+          kind: 'info',
+          text: 'Another change is still being sent.',
+          failure: null,
+        },
+      });
+      return this.refuse('leaf_busy', false);
+    }
     this.set({ busy: true, notice: null });
     try {
       const receipt = await this.client.execute(envelope);
@@ -503,6 +530,17 @@ export class ProjectsController {
     );
   }
 
+  /** What an unknown Native launch could have started. A read: it attaches and starts nothing. */
+  async orphans(launchOperationId: string): Promise<Orphan[] | null> {
+    try {
+      return await this.client.orphans(launchOperationId);
+    } catch (error) {
+      if (error instanceof ProjectsCallError)
+        this.set({ notice: noticeOf(error.failure) });
+      return null;
+    }
+  }
+
   reconcile(
     launchOperationId: string,
     resolution: Extract<Command, { kind: 'reconcileLaunch' }>['resolution'],
@@ -633,7 +671,7 @@ export class ProjectsController {
       await this.refresh();
     } catch (error) {
       if (error instanceof ProjectsCallError) {
-        // The legacy files or the host moved: a new preview is needed, never a stale commit.
+        // The older files or the host moved: a new preview is needed, never a stale commit.
         this.set({ notice: noticeOf(error.failure), preview: null });
       }
     }
