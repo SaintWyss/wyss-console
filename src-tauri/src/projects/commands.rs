@@ -401,7 +401,7 @@ pub async fn projects_forget_picks(
 }
 
 #[tauri::command]
-pub async fn projects_execute(
+pub async fn projects_change(
     app: AppHandle,
     projects: State<'_, Projects>,
     request: Envelope,
@@ -598,7 +598,7 @@ const COMMANDS: &[&str] = &[
     "projects_sessions",
     "projects_choose_folder",
     "projects_forget_picks",
-    "projects_execute",
+    "projects_change",
     "projects_initialize_empty",
     "projects_migration_preview",
     "projects_migration_commit",
@@ -624,7 +624,7 @@ pub fn extension() -> wyss_console::Extension {
             projects_sessions,
             projects_choose_folder,
             projects_forget_picks,
-            projects_execute,
+            projects_change,
             projects_initialize_empty,
             projects_migration_preview,
             projects_migration_commit,

@@ -22,7 +22,9 @@
   } = $props();
 
   let host = $state<HTMLDivElement>();
+  // What reading says, and what taking input says: a good read never hides a refusal.
   let note = $state('');
+  let inputNote = $state('');
   let truncated = $state(false);
   let holding = $state(false);
   // A terminal is drawn for Native and shell sessions. A Managed session has none: it shows what
@@ -55,9 +57,15 @@
     let unlisten: (() => void) | undefined;
     let size: { rows: number; cols: number } | undefined;
 
-    const say = (error: unknown) => {
+    const words = (error: unknown, fallback: string) => {
       const code = error instanceof ProjectsCallError ? error.failure.code : '';
-      note = WORDS[code] ?? 'Reading stopped.';
+      return WORDS[code] ?? fallback;
+    };
+    const say = (error: unknown) => {
+      note = words(error, 'Reading stopped.');
+    };
+    const sayInput = (error: unknown) => {
+      inputNote = words(error, 'Input was not sent.');
     };
 
     // One long-poll per pane that is on screen; the host keeps the scrollback.
@@ -88,7 +96,7 @@
       size = next;
       // Only the window that holds input sets the terminal's size; a mirror just fits itself.
       if (holding && changed)
-        void client.resize(session.id, next.rows, next.cols).catch(say);
+        void client.resize(session.id, next.rows, next.cols).catch(sayInput);
     };
     const observer = new ResizeObserver(fit);
     observer.observe(host);
@@ -99,17 +107,20 @@
       try {
         await client.claimInput(session.id);
       } catch (error) {
-        say(error);
+        sayInput(error);
         onrefresh();
         return;
       }
       holding = true;
-      note = '';
+      inputNote = '';
       renderer.setInput(true);
       unlisten = renderer.input(
         (text) =>
-          void client.writeInput(session.id, encoder.encode(text)).catch(say),
-        (data) => void client.writeInput(session.id, binary(data)).catch(say),
+          void client
+            .writeInput(session.id, encoder.encode(text))
+            .catch(sayInput),
+        (data) =>
+          void client.writeInput(session.id, binary(data)).catch(sayInput),
       );
       fit();
       renderer.focus();
@@ -213,4 +224,5 @@
     </p>
   {/if}
   {#if note}<p class="projects-note" role="status">{note}</p>{/if}
+  {#if inputNote}<p class="projects-note" role="alert">{inputNote}</p>{/if}
 </div>

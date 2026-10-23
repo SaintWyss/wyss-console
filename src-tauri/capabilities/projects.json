@@ -11,7 +11,7 @@
     "allow-projects-sessions",
     "allow-projects-choose-folder",
     "allow-projects-forget-picks",
-    "allow-projects-execute",
+    "allow-projects-change",
     "allow-projects-initialize-empty",
     "allow-projects-migration-preview",
     "allow-projects-migration-commit",

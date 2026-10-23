@@ -246,7 +246,7 @@ export class ProjectsController {
         unassigned,
         revision: store.revision,
       });
-    } catch (error) {
+    } catch {
       // A read that failed is not shown as an alert: nothing was asked for. The view says it
       // could not read, and the next poll asks again.
       this.set({ phase: 'failed' });

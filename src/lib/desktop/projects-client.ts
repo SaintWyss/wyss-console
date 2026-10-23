@@ -128,7 +128,7 @@ export const desktopProjects: ProjectsClient = {
   },
   async execute(envelope) {
     return checked(
-      await call('projects_execute', { request: envelope }),
+      await call('projects_change', { request: envelope }),
       parseReceipt,
     );
   },

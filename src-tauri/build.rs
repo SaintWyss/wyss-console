@@ -171,7 +171,7 @@ fn main() {
             "projects_sessions",
             "projects_choose_folder",
             "projects_forget_picks",
-            "projects_execute",
+            "projects_change",
             "projects_initialize_empty",
             "projects_migration_preview",
             "projects_migration_commit",
