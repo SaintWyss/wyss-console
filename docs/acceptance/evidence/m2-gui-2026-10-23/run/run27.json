@@ -1,0 +1,16 @@
+{
+  "run": 27,
+  "shape": "none",
+  "binary": "/home/saintwyss/Github_repos/wyss-console-m2/src-tauri/target/debug/wyss-console",
+  "loadavg": ["0.73", "0.80", "1.01"],
+  "mem_available_mib": 7877,
+  "screen": [1500, 1400],
+  "display": ":79",
+  "events": {},
+  "world": {
+    "shape": "none",
+    "projects": 0,
+    "terminals": 0
+  },
+  "leftovers": []
+}

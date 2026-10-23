@@ -58,21 +58,32 @@ contract.
   combine by their documented rule. Selection is explicit session choice, then the
   selected project's default, then As configured. A launch records the resolved
   profile revision; the preview token binds the complete inherited resolution and
-  launch plan. A stale token is refused. Restart validates and starts the replacement
-  before stopping the old session; failed validation or spawn leaves the old session
-  usable. Later edits/default changes do not relabel or alter a running session.
-  Saved versions and import/export preserve the accepted bounds.
+  launch plan. The Native view tracks the selected profile and each inherited parent
+  revision. A direct or inherited edit invalidates the old preview, hides its details,
+  disables Start and requests one fresh preview for the changed chain. Only the latest
+  matching response may be displayed or used to start. A stale token is refused.
+  Restart validates and starts the replacement before stopping the old session;
+  failed validation or spawn leaves the old session usable. Later edits/default
+  changes do not relabel or alter a running session. Saved versions and import/export
+  preserve the accepted bounds.
 - **Negative:** Missing parent/version, cycle, depth overflow, provider mismatch, or
   any unsupported field prevents launch with a specific reason. Import never grants
   a capability. Codex hook/skill exclusions remain refusals. A changed profile,
   inherited profile or selected default between preview and start/restart cannot use
-  the earlier preview token on an updated host. A legacy host without the token feature
-  may continue non-effort Native profiles with an explicit warning, but may apply the
-  latest saved profile instead of the revision shown in preview; this path does not
-  satisfy exact M2 preview/revision binding. An effort-bearing profile is refused
-  unless the host can preserve it.
-- **Evidence:** Rust profile/store/service tests and native view tests covering two
-  concurrent sessions with different revisions, then changed defaults and restart.
+  the earlier preview token on an updated host. An older asynchronous preview response
+  cannot replace a newer response. A failed preview keeps Start disabled and exposes
+  an explicit retry; unrelated state changes do not retry automatically. A legacy host
+  without the token feature may continue non-effort Native profiles with an explicit
+  warning, but may apply the latest saved profile instead of the revision shown in
+  preview; this path does not satisfy exact M2 preview/revision binding. An effort-
+  bearing profile is refused unless the host can preserve it.
+- **Evidence:** Rust profile/store/service tests and Native view tests cover direct and
+  inherited profile edits while navigating between Workspace and Profiles, stale
+  Start gating, latest-response ordering, explicit retry without reactive request
+  loops, and use of the refreshed token. Fake protocol-1 HostLink integration tests
+  cover non-effort legacy preview/start forwarding and refusal of inherited effort.
+  Native restart tests cover concurrent sessions with different revisions, changed
+  defaults and restart.
 - **Owners:** `src-tauri/src/native/{profile,profiles,service,registry}.rs`,
   `src/lib/features/native/`, `tests/native*.test.ts`.
 
@@ -258,10 +269,13 @@ FR-CFG-06, FR-HRS-04/09, FR-SEC-01..03; journeys JF-02, JF-03 and JF-06..08.
 - **Negative:** Dialog cancellation, stale project/version, unsupported profile,
   malformed inventory and failed apply leave fixture files/processes unchanged or
   explicitly recoverable. No provider prompt is auto-answered.
-- **Evidence:** A native desktop run with disposable HOME/XDG roots and fixture CLIs,
-  saved screenshots/logs, assertions for no unexpected process/config writes. Web
-  component and harness tests are recorded separately and cannot be substituted for
-  this native GUI evidence. Real provider workflow evidence remains separate and
+- **Evidence:** The 2026-10-23 isolated Tauri runs in
+  `docs/acceptance/evidence/m2-gui-2026-10-23/` use private HOME/XDG roots, a private
+  display/bus/keyring and fixture CLIs. Saved screenshots and SHA-256 checks cover
+  preview, chooser/plan cancellation, fixture start/restart, instruction authoring,
+  sealed template export/import, native confirmations and Undo; run records assert no
+  leftover processes. Web component tests and fake HostLink Rust integration tests
+  are recorded separately. Real provider workflow evidence remains separate and
   requires explicit authorization.
 - **Owners:** `src/lib/features/{native,configuration,models}/`, desktop command
   bridges, native dialogs, GUI harness and the Rust owners named above.

@@ -432,6 +432,8 @@ def main():
     ap.add_argument("--test-binary", default="", help="the built unit-test executable (not needed for shape none)")
     ap.add_argument("--steps", help="JSON list of calibration steps; no measurement is made")
     ap.add_argument("--seed", help="a directory whose layout.json, native/ and configuration/trusted-writers are copied into the run's own state (a rehearsal on a copy of real records)")
+    ap.add_argument("--m2-fixtures", action="store_true",
+                    help="put fixture-only Claude/Codex CLIs and a disposable instruction file in this run's HOME")
     ap.add_argument("--idle-seconds", type=int, default=60)
     ap.add_argument("--switches", type=int, default=40)
     ap.add_argument("--keys", type=int, default=40)
@@ -444,6 +446,27 @@ def main():
     os.chmod(root, 0o700)
     for sub in ("run", "state", "config", "data", "cache", "home", "logs"):
         os.makedirs(os.path.join(root, sub), mode=0o700, exist_ok=True)
+    fixture_bin = None
+    if args.m2_fixtures:
+        fixture_bin = os.path.join(root, "fixture-bin")
+        os.makedirs(fixture_bin, mode=0o700)
+        for name, version in (("claude", "2.1.309 (Claude Code)"),
+                              ("codex", "codex-cli 0.159.0")):
+            script = ("#!/bin/sh\n"
+                      "if [ \"${1-}\" = \"--version\" ]; then\n"
+                      f"  printf '%s\\n' '{version}'\n"
+                      "  exit 0\n"
+                      "fi\n"
+                      f"printf '%s\\n' 'M2_FIXTURE_{name.upper()}_STARTED'\n"
+                      f"while IFS= read -r line; do printf '%s\\n' 'M2_FIXTURE_{name.upper()}_INPUT' \"$line\"; done\n")
+            path = os.path.join(fixture_bin, name)
+            with open(path, "w") as f:
+                f.write(script)
+            os.chmod(path, 0o700)
+        os.makedirs(os.path.join(root, "home", ".claude"), mode=0o700)
+        with open(os.path.join(root, "home", ".claude", "CLAUDE.md"), "w") as f:
+            f.write("# Disposable M2 GUI fixture\n\nInitial instruction text for edit, template, and Undo checks.\n")
+        os.chmod(os.path.join(root, "home", ".claude", "CLAUDE.md"), 0o600)
     logs = os.path.join(root, "logs")
     if args.seed:
         # Copies, into the run's own private state: the originals are only read.
@@ -460,7 +483,7 @@ def main():
                 os.chmod(dirpath, 0o700)
                 for f in files:
                     os.chmod(os.path.join(dirpath, f), 0o600)
-    nest = host = app = frames = pointer = None
+    nest = host = app = frames = pointer = keyring = keyring_log = None
     result = {"run": args.run, "shape": args.shape, "binary": binary,
               "loadavg": open("/proc/loadavg").read().split()[:3],
               "mem_available_mib": int([l for l in open("/proc/meminfo") if l.startswith("MemAvailable")][0].split()[1]) // 1024,
@@ -469,7 +492,8 @@ def main():
         nest = Nest(root, logs)
         x_env = {"PATH": BASE_PATH, "DISPLAY": DISPLAY, "HOME": os.path.join(root, "nest-home")}
         app_env = {
-            "PATH": BASE_PATH, "HOME": os.path.join(root, "home"),
+            "PATH": f"{fixture_bin}:{BASE_PATH}" if fixture_bin else BASE_PATH,
+            "HOME": os.path.join(root, "home"),
             "XDG_RUNTIME_DIR": os.path.join(root, "run"), "XDG_STATE_HOME": os.path.join(root, "state"),
             "XDG_CONFIG_HOME": os.path.join(root, "config"), "XDG_DATA_HOME": os.path.join(root, "data"),
             "XDG_CACHE_HOME": os.path.join(root, "cache"), "DISPLAY": DISPLAY, "GDK_BACKEND": "x11",
@@ -477,6 +501,38 @@ def main():
             "KDE_SESSION_VERSION": "6", "LANG": "C.UTF-8", "SHELL": os.environ.get("SHELL", "/bin/sh"),
             "DBUS_SESSION_BUS_ADDRESS": nest.bus("app-bus"),
         }
+        if fixture_bin:
+            # Keep the disposable M2 GUI accessible to AT-SPI driven test tooling.
+            app_env.pop("NO_AT_BRIDGE", None)
+            # The isolated Secret Service lets the M2 GUI exercise sealed Undo without
+            # reading or using the account's real keyring. Its password exists only in this
+            # temporary HOME and the owned daemon is stopped before the private bus.
+            control = os.path.join(root, "run", "fixture-keyring")
+            os.makedirs(control, mode=0o700)
+            password = os.path.join(root, "home", ".fixture-keyring-passphrase")
+            with open(password, "w") as f:
+                f.write("M2 disposable keyring passphrase\n")
+            os.chmod(password, 0o600)
+            starter = os.path.join(root, "run", "start-fixture-keyring.sh")
+            with open(starter, "w") as f:
+                f.write("#!/bin/sh\n/usr/bin/gnome-keyring-daemon --components=secrets --foreground --unlock --control-directory \"$XDG_RUNTIME_DIR/fixture-keyring\" < \"$HOME/.fixture-keyring-passphrase\"\n")
+            os.chmod(starter, 0o700)
+            keyring_log = open(os.path.join(logs, "keyring.log"), "wb")
+            keyring = Owned(["/bin/sh", starter], "/bin/sh", env=app_env,
+                            log=keyring_log)
+            secret_attrs = ["service", "wyss-m2-fixture", "account", "integration-probe"]
+            stored = subprocess.run(
+                ["/usr/bin/secret-tool", "store", "--label", "M2 disposable fixture", *secret_attrs],
+                input=b"fixture marker only\n", capture_output=True, env=app_env,
+                timeout=8, check=False,
+            )
+            looked_up = subprocess.run(
+                ["/usr/bin/secret-tool", "lookup", *secret_attrs],
+                capture_output=True, env=app_env, timeout=8, check=False,
+            )
+            if stored.returncode != 0 or looked_up.returncode != 0 or looked_up.stdout != b"fixture marker only\n":
+                raise RuntimeError("the disposable M2 Secret Service fixture did not round trip")
+            print("M2 fixture Secret Service round trip: PASS", flush=True)
         # The host, apart from any window, as the application would have it.
         with open(os.path.join(logs, "host.log"), "wb") as hostlog:
             host = Owned([binary, "--wyss-host"], binary, env=app_env, log=hostlog)
@@ -498,7 +554,8 @@ def main():
                 time.sleep(7.0)
                 place_window(x_env)
                 time.sleep(1.5)
-                run_steps(json.load(open(args.steps)), x_env, pointer, args.out, args.run, world, socket_path, (app.pid,))
+                run_steps(json.load(open(args.steps)), x_env, pointer, args.out, args.run,
+                          world, socket_path, (app.pid,), root)
                 print("host alive:", host.alive(), "code:", host.proc.poll())
                 print(json.dumps(host_list(socket_path))[:1500])
                 return 0
@@ -516,17 +573,24 @@ def main():
         if host:
             host.adopt_tree()
             host.stop()
+        if keyring:
+            keyring.adopt_tree()
+            keyring.stop()
+        if keyring_log:
+            keyring_log.close()
         if nest:
             nest.stop()
         with open(os.path.join(args.out, f"run{args.run}.json"), "w") as f:
             json.dump(result, f, indent=1, default=str)
-        for name in ("app.log", "host.log", "world.log"):
+            f.write("\n")
+        for name in ("app.log", "host.log", "world.log", "keyring.log"):
             src = os.path.join(root, "logs", name)
             if os.path.exists(src):
                 shutil.copy(src, os.path.join(args.out, f"run{args.run}.{name}"))
         result["leftovers"] = leftovers(root)
         with open(os.path.join(args.out, f"run{args.run}.json"), "w") as f:
             json.dump(result, f, indent=1, default=str)
+            f.write("\n")
         mounted = [l.split()[1] for l in open("/proc/mounts") if l.split()[1].startswith(root)]
         if mounted:
             print(f"left {root}: still mounted {mounted}", file=sys.stderr)
@@ -552,8 +616,11 @@ def leftovers(root):
     return found
 
 
-def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None, session_pid=(None,)):
+def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None,
+              session_pid=(None,), fixture_root=None):
     """Calibration: click, type, wait and take pictures, to read the screen by eye."""
+    fixture_baseline = None
+    fixture_snapshots = {}
     for step in steps:
         kind = step[0]
         if os.environ.get("M1_TRACE_HOST") and socket_path:
@@ -583,6 +650,68 @@ def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None, ses
         elif kind == "hostwrite":
             host_write(socket_path, world["projects"][0]["terminals"][0]["terminal"],
                        step[1].encode().decode("unicode_escape").encode())
+        elif kind == "native-state":
+            rows = host_call(socket_path, "native_sessions", {"sample": False})
+            state = rows.get("ok", [])
+            summary = [{"id": row.get("id"), "restart_of": row.get("restart_of"),
+                        "terminal_id": row.get("terminal_id"),
+                        "agent_id": row.get("agent_id"), "state": row.get("state"),
+                        "version": row.get("version"), "profile": row.get("profile"),
+                        "restarts": row.get("restarts"), "error": row.get("error")}
+                       for row in state]
+            with open(os.path.join(out, f"native-{run}-{step[1]}.json"), "w") as f:
+                json.dump(summary, f, indent=2)
+                f.write("\n")
+            print(f"native state {step[1]}:", json.dumps(summary), flush=True)
+        elif kind == "assert-native-count":
+            rows = host_call(socket_path, "native_sessions", {"sample": False}).get("ok", [])
+            if len(rows) != step[1]:
+                raise AssertionError(f"expected {step[1]} Native sessions; got {len(rows)}")
+            if len(step) > 2 and rows[0].get("restarts") != step[2]:
+                raise AssertionError(f"expected restart count {step[2]}; got {rows[0].get('restarts')}")
+        elif kind == "assert-native-restart":
+            rows = host_call(socket_path, "native_sessions", {"sample": False}).get("ok", [])
+            replaced = [row for row in rows if row.get("restart_of")]
+            old = [row for row in rows if row.get("state") == "stopped"]
+            if (len(rows) != 2 or len(replaced) != 1 or len(old) != 1
+                    or replaced[0].get("state") != "running"
+                    or replaced[0].get("restarts") != 1
+                    or replaced[0].get("restart_of") != old[0].get("id")
+                    or replaced[0].get("terminal_id") == old[0].get("terminal_id")):
+                raise AssertionError(f"restart did not preserve/replace as expected: {rows}")
+        elif kind == "fixture-file-snapshot":
+            import hashlib
+            if fixture_root is None:
+                raise RuntimeError("fixture file checks require --m2-fixtures")
+            path = os.path.join(fixture_root, "home", ".claude", "CLAUDE.md")
+            data = open(path, "rb").read()
+            digest = hashlib.sha256(data).hexdigest()
+            if step[1] == "initial":
+                fixture_baseline = digest
+            elif step[2] == "same" and digest != fixture_baseline:
+                raise AssertionError(f"fixture file {step[1]} should match its initial SHA-256")
+            elif step[2] == "different" and digest == fixture_baseline:
+                raise AssertionError(f"fixture file {step[1]} should differ from its initial SHA-256")
+            elif step[2] == "same-as" and digest != fixture_snapshots.get(step[3]):
+                raise AssertionError(f"fixture file {step[1]} should match snapshot {step[3]}")
+            snapshot = {"label": step[1], "bytes": len(data), "sha256": digest}
+            fixture_snapshots[step[1]] = digest
+            with open(os.path.join(out, f"fixture-{run}-{step[1]}.json"), "w") as f:
+                json.dump(snapshot, f, indent=2)
+                f.write("\n")
+            print(f"fixture file {step[1]}: {json.dumps(snapshot)}", flush=True)
+        elif kind == "fixture-template-snapshot":
+            import hashlib
+            if fixture_root is None:
+                raise RuntimeError("fixture template checks require --m2-fixtures")
+            path = os.path.join(fixture_root, "home", "instructions.wyss-template")
+            data = open(path, "rb").read()
+            snapshot = {"label": step[1], "bytes": len(data),
+                        "sha256": hashlib.sha256(data).hexdigest()}
+            with open(os.path.join(out, f"template-{run}-{step[1]}.json"), "w") as f:
+                json.dump(snapshot, f, indent=2)
+                f.write("\n")
+            print(f"fixture template {step[1]}: {json.dumps(snapshot)}", flush=True)
         elif kind == "scroll":
             pointer.do(f"mousemove {step[1]} {step[2]} click --repeat {step[3]} --delay 20 {step[4]}")
 
@@ -618,6 +747,23 @@ def host_list(socket_path):
     import socket
     import struct
     body = json.dumps({"op": "term_list", "params": None}).encode()
+    with socket.socket(socket.AF_UNIX) as sock:
+        sock.settimeout(10)
+        sock.connect(socket_path)
+        sock.sendall(struct.pack(">I", len(body)) + body)
+        head = sock.recv(4)
+        size = struct.unpack(">I", head)[0]
+        data = b""
+        while len(data) < size:
+            data += sock.recv(size - len(data))
+    return json.loads(data)
+
+
+def host_call(socket_path, op, params):
+    """One bounded read-only host request used to record Native fixture state."""
+    import socket
+    import struct
+    body = json.dumps({"op": op, "params": params}).encode()
     with socket.socket(socket.AF_UNIX) as sock:
         sock.settimeout(10)
         sock.connect(socket_path)

@@ -2,7 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import NativeHarness from './NativeHarness.svelte';
 import type { NativeClient } from '../src/lib/features/native/controller';
-import { fakeClient, launcher, reply, session } from './native-harness';
+import type { Preview, Profile } from '../src/lib/contracts/native';
+import {
+  fakeClient,
+  launcher,
+  profiles,
+  reply,
+  session,
+} from './native-harness';
 
 let component: ReturnType<typeof mount> | undefined;
 afterEach(() => {
@@ -19,6 +26,79 @@ const button = (label: string) =>
   Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((b) =>
     text(b).includes(label),
   )!;
+const profileId = 'b'.repeat(32);
+const parentProfileId = 'c'.repeat(32);
+
+function preview(token: string, applied = `Model: ${token}.`): Preview {
+  return {
+    applied: [applied],
+    with_cost: [],
+    not_applicable: [],
+    can_start: true,
+    through_shell: true,
+    warnings: [],
+    plan_token: token,
+    provider_version: '2.1.309 (Claude Code)',
+  };
+}
+
+function updateProfile(
+  profiles: Profile[],
+  id: string,
+  body: Profile['body'],
+): Profile[] {
+  return profiles.map((profile) => {
+    if (profile.id !== id) return profile;
+    const next = profile.current + 1;
+    return {
+      ...profile,
+      current: next,
+      versions: [
+        ...profile.versions,
+        {
+          n: next,
+          saved_at: 1_700_000_200,
+          hash: `revision-${next}`,
+          name: body.name,
+        },
+      ],
+      body,
+    };
+  });
+}
+
+async function selectProfile(id: string) {
+  const select = document.querySelector<HTMLSelectElement>('#native-profile')!;
+  select.value = id;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+}
+
+async function editProfileInProfilesView(name: string, model: string) {
+  Array.from(document.querySelectorAll('.native-profile-item'))
+    .find((node) => text(node).includes(name))!
+    .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  await settle();
+  const input = document.querySelector<HTMLInputElement>('#p-model')!;
+  input.value = model;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  const save = button('Save as a new version');
+  expect(save.disabled).toBe(false);
+  save.click();
+  await settle();
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
 
 async function shown(
   client: NativeClient,
@@ -204,6 +284,191 @@ describe('the launcher', () => {
     expect(text(document.querySelector('.native-warning'))).toContain(
       'will not start',
     );
+  });
+
+  it('refreshes a selected profile after a direct edit while Profiles is open and starts only with the new token', async () => {
+    let savedProfiles = profiles();
+    const fresh = deferred<Preview>();
+    let previewCalls = 0;
+    const client = fakeClient({
+      profiles: vi.fn(async () => structuredClone(savedProfiles)),
+      saveProfile: vi.fn(async (id, body) => {
+        savedProfiles = updateProfile(savedProfiles, id, body);
+      }),
+      preview: vi.fn(async () => {
+        previewCalls++;
+        return previewCalls === 1 ? preview('old-token') : fresh.promise;
+      }),
+    });
+    await shown(client);
+    await selectProfile(profileId);
+    expect(previewCalls).toBe(1);
+    expect(button('Start Claude Code').disabled).toBe(false);
+
+    button('Profiles').click();
+    await settle();
+    await editProfileInProfilesView('Mine', 'opus');
+    await settle();
+    expect(client.saveProfile).toHaveBeenCalledTimes(1);
+    expect(previewCalls).toBe(2);
+
+    // WorkspaceView remains mounted while hidden, and its new token is required on return.
+    button('Workspace').click();
+    await settle();
+    expect(button('Start Claude Code').disabled).toBe(true);
+    expect(text(document.querySelector('[role="status"]'))).toContain(
+      'Refreshing the profile preview',
+    );
+    expect(document.querySelector('.native-preview')).toBeNull();
+
+    fresh.resolve(preview('new-token', 'Model: opus.'));
+    await settle();
+    expect(button('Start Claude Code').disabled).toBe(false);
+    expect(text(document.querySelector('.native-preview'))).toContain(
+      'Model: opus.',
+    );
+    expect(previewCalls).toBe(2);
+    button('Start Claude Code').click();
+    await settle();
+    expect(client.start).toHaveBeenCalledWith(
+      'claude_code',
+      '/home/u',
+      profileId,
+      null,
+      expect.objectContaining({ plan_token: 'new-token' }),
+    );
+  });
+
+  it('refreshes a selected child profile when an inherited parent changes', async () => {
+    const base = profiles();
+    const child = base.find((item) => item.id === profileId)!;
+    let savedProfiles: Profile[] = [
+      ...base.filter((item) => item.id !== profileId),
+      {
+        ...child,
+        current: 1,
+        versions: [
+          { n: 1, saved_at: 1_700_000_100, hash: 'child-v1', name: 'Child' },
+        ],
+        body: {
+          ...child.body,
+          name: 'Child',
+          model: null,
+          extends: parentProfileId,
+        },
+      },
+      {
+        ...child,
+        id: parentProfileId,
+        current: 1,
+        versions: [
+          { n: 1, saved_at: 1_700_000_100, hash: 'parent-v1', name: 'Parent' },
+        ],
+        body: { ...child.body, name: 'Parent', model: 'sonnet', extends: null },
+      },
+    ];
+    const fresh = deferred<Preview>();
+    let previewCalls = 0;
+    const client = fakeClient({
+      profiles: vi.fn(async () => structuredClone(savedProfiles)),
+      saveProfile: vi.fn(async (id, body) => {
+        savedProfiles = updateProfile(savedProfiles, id, body);
+      }),
+      preview: vi.fn(async () => {
+        previewCalls++;
+        return previewCalls === 1 ? preview('child-old') : fresh.promise;
+      }),
+    });
+    await shown(client);
+    await selectProfile(profileId);
+    expect(previewCalls).toBe(1);
+
+    button('Profiles').click();
+    await settle();
+    await editProfileInProfilesView('Parent', 'opus');
+    await settle();
+    expect(client.saveProfile).toHaveBeenCalledTimes(1);
+    expect(previewCalls).toBe(2);
+
+    button('Workspace').click();
+    await settle();
+    expect(button('Start Claude Code').disabled).toBe(true);
+    expect(document.querySelector('.native-preview')).toBeNull();
+    fresh.resolve(preview('child-new', 'Model: opus.'));
+    await settle();
+    expect(button('Start Claude Code').disabled).toBe(false);
+    expect(text(document.querySelector('.native-preview'))).toContain(
+      'Model: opus.',
+    );
+    expect(previewCalls).toBe(2);
+  });
+
+  it('ignores an older concurrent preview response and does not refetch an unchanged context', async () => {
+    const older = deferred<Preview>();
+    const newer = deferred<Preview>();
+    let previewCalls = 0;
+    const client = fakeClient({
+      preview: vi.fn(async () => {
+        previewCalls++;
+        return previewCalls === 1 ? older.promise : newer.promise;
+      }),
+    });
+    await shown(client);
+    await selectProfile('template-review');
+    expect(button('Start Claude Code').disabled).toBe(true);
+    await selectProfile(profileId);
+    expect(previewCalls).toBe(2);
+
+    newer.resolve(preview('newer-token', 'Newest selected profile.'));
+    await settle();
+    expect(button('Start Claude Code').disabled).toBe(false);
+    expect(text(document.querySelector('.native-preview'))).toContain(
+      'Newest selected profile.',
+    );
+    older.resolve(preview('older-token', 'Stale earlier selection.'));
+    await settle();
+    expect(button('Start Claude Code').disabled).toBe(false);
+    expect(text(document.querySelector('.native-preview'))).toContain(
+      'Newest selected profile.',
+    );
+    expect(text(document.querySelector('.native-preview'))).not.toContain(
+      'Stale earlier selection.',
+    );
+    expect(previewCalls).toBe(2);
+  });
+
+  it('retries a failed current preview only when requested and keeps Start gated until it succeeds', async () => {
+    const recovered = deferred<Preview>();
+    let previewCalls = 0;
+    const client = fakeClient({
+      preview: vi.fn(async () => {
+        previewCalls++;
+        if (previewCalls === 1) throw new Error('host unavailable');
+        return recovered.promise;
+      }),
+    });
+    await shown(client);
+    await selectProfile(profileId);
+    await settle();
+
+    expect(previewCalls).toBe(1);
+    expect(button('Start Claude Code').disabled).toBe(true);
+    expect(button('Retry preview')).toBeDefined();
+    await settle();
+    expect(previewCalls).toBe(1);
+
+    button('Retry preview').click();
+    await settle();
+    expect(previewCalls).toBe(2);
+    expect(button('Start Claude Code').disabled).toBe(true);
+    recovered.resolve(preview('recovered-token', 'Fresh after retry.'));
+    await settle();
+    expect(button('Start Claude Code').disabled).toBe(false);
+    expect(text(document.querySelector('.native-preview'))).toContain(
+      'Fresh after retry.',
+    );
+    await settle();
+    expect(previewCalls).toBe(2);
   });
 
   it('says what went wrong in words, not a code', async () => {

@@ -19,6 +19,7 @@
     sharedFolders,
     since,
     stateLabel,
+    profileRevisionKey,
   } from './present';
 
   let {
@@ -41,6 +42,10 @@
   let project = $state<string | null>(null);
   let profile = $state<string | null>(null);
   let preview = $state<Preview | null>(null);
+  let previewFor = $state<string | null>(null);
+  let previewPendingFor = $state<string | null>(null);
+  let previewFailedFor = $state<string | null>(null);
+  let previewRetry = $state(0);
   let now = $state(Date.now());
   let handingOff = $state<string | null>(null);
   const handoffSession = $derived(
@@ -51,6 +56,21 @@
   const entries = $derived(launcher?.agents ?? []);
   const chosen = $derived(entries.find((e) => e.agent_id === agent) ?? null);
   const profiles = $derived(agent ? profilesFor(native.profiles, agent) : []);
+  const previewContext = $derived(
+    agent && profile
+      ? JSON.stringify([
+          agent,
+          profile,
+          profileRevisionKey(native.profiles, profile),
+        ])
+      : null,
+  );
+  const previewCurrent = $derived(
+    !profile ||
+      (!!preview &&
+        previewFor === previewContext &&
+        previewPendingFor !== previewContext),
+  );
   const projects = $derived(launcher?.projects ?? []);
   const groups = $derived(groupByProject(native.sessions));
   const crowded = $derived(sharedFolders(native.sessions));
@@ -61,7 +81,7 @@
       !!project &&
       !!chosen?.installed &&
       !native.starting &&
-      (profile === null || preview?.can_start === true),
+      (profile === null || (previewCurrent && preview?.can_start === true)),
   );
 
   // The first time the launcher is known: an installed agent and the home folder.
@@ -90,23 +110,52 @@
   });
   // What the profile would do for this agent, read from the desktop before starting.
   let previewSeq = 0;
-  let previewFailed = $state(false);
+  let lastPreviewRequest: string | null = null;
+  let lastPreviewRetry = -1;
   $effect(() => {
     const a = agent;
     const p = profile;
+    const key = previewContext;
+    const retry = previewRetry;
+    if (!a || !p || !key) {
+      if (lastPreviewRequest !== null) {
+        previewSeq++;
+        lastPreviewRequest = null;
+        lastPreviewRetry = -1;
+        preview = null;
+        previewFor = null;
+        previewPendingFor = null;
+        previewFailedFor = null;
+      }
+      return;
+    }
+    if (key === lastPreviewRequest && retry === lastPreviewRetry) return;
+    lastPreviewRequest = key;
+    lastPreviewRetry = retry;
     const seq = ++previewSeq;
     preview = null;
-    previewFailed = false;
-    if (!a || !p) return;
+    previewFor = null;
+    previewPendingFor = key;
+    previewFailedFor = null;
     void controller.preview(a, p).then(
       (next) => {
-        if (seq === previewSeq) preview = next;
+        if (seq === previewSeq) {
+          preview = next;
+          previewFor = key;
+          previewPendingFor = null;
+        }
       },
       () => {
-        if (seq === previewSeq) previewFailed = true;
+        if (seq === previewSeq) {
+          previewPendingFor = null;
+          previewFailedFor = key;
+        }
       },
     );
   });
+  function retryPreview() {
+    if (previewFailedFor === previewContext) previewRetry++;
+  }
   $effect(() => {
     if (!visible) return;
     now = Date.now();
@@ -129,7 +178,7 @@
     }
   }
   async function launch() {
-    if (!agent || !project) return;
+    if (!canStart || !agent || !project) return;
     if (await controller.startAgent(agent, project, profile, null, preview))
       onconsole();
   }
@@ -273,11 +322,26 @@
             >
           </div>
         </div>
-        {#if profile && previewFailed}
+        {#if profile && !previewCurrent}
           <p class="native-warning" role="status">
-            Could not verify this profile preview. Refresh Native before
-            starting.
+            {#if previewFailedFor === previewContext}
+              Could not verify this profile preview. Start stays disabled until
+              a fresh preview succeeds.
+            {:else if previewPendingFor === previewContext}
+              Refreshing the profile preview…
+            {:else}
+              The selected profile changed. Checking a fresh preview before
+              Start.
+            {/if}
           </p>
+          {#if previewFailedFor === previewContext}
+            <button
+              type="button"
+              class="action"
+              disabled={native.starting}
+              onclick={retryPreview}>Retry preview</button
+            >
+          {/if}
         {/if}
 
         <div class="native-field">
@@ -301,7 +365,7 @@
               >
             {/if}
           </div>
-          {#if preview}
+          {#if preview && previewFor === previewContext}
             <ul class="native-preview" aria-label="What the profile does">
               {#each preview.applied as line (line)}<li>{line}</li>{/each}
               {#each preview.with_cost as line (line)}<li class="cost">

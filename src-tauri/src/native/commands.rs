@@ -256,25 +256,49 @@ pub struct PreviewRequest {
     profile_id: Option<String>,
 }
 
+fn preview_with_link(link: &HostLink, request: PreviewRequest) -> Answer {
+    let preview = link.call(
+        "native_preview",
+        json!({"agent_id": request.agent_id, "profile_id": request.profile_id}),
+    )?;
+    annotate_preview(
+        link,
+        preview,
+        request.agent_id,
+        request.profile_id.as_deref(),
+    )
+}
+
 #[tauri::command]
 pub async fn native_preview(link: State<'_, HostLink>, request: PreviewRequest) -> Answer {
     if let Some(id) = request.profile_id.as_deref() {
         profile_id(id)?;
     }
     let link = link.inner().clone();
-    blocking(move || {
-        let preview = link.call(
-            "native_preview",
-            json!({"agent_id": request.agent_id, "profile_id": request.profile_id}),
-        )?;
-        annotate_preview(
-            &link,
-            preview,
-            request.agent_id,
-            request.profile_id.as_deref(),
-        )
-    })
-    .await
+    blocking(move || preview_with_link(&link, request)).await
+}
+
+fn start_with_link(link: &HostLink, request: StartRequest) -> Answer {
+    check_start_capability(
+        link,
+        request.agent_id,
+        request.profile_id.as_deref(),
+        request.plan_token.as_deref(),
+        request.expected_cli_version.as_deref(),
+    )?;
+    let has_profile = request.profile_id.is_some();
+    let mut params = json!({
+        "agent_id": request.agent_id,
+        "project": request.project,
+        "profile_id": request.profile_id,
+        "size": request.size,
+        "brief": request.brief,
+    });
+    if has_profile && link.has_feature("native_profile_plan_token") {
+        params["plan_token"] = json!(request.plan_token);
+        params["expected_cli_version"] = json!(request.expected_cli_version);
+    }
+    link.call("native_start", params)
 }
 
 #[tauri::command]
@@ -283,29 +307,7 @@ pub async fn native_start(link: State<'_, HostLink>, request: StartRequest) -> A
         profile_id(id)?;
     }
     let link = link.inner().clone();
-    blocking(move || {
-        check_start_capability(
-            &link,
-            request.agent_id,
-            request.profile_id.as_deref(),
-            request.plan_token.as_deref(),
-            request.expected_cli_version.as_deref(),
-        )?;
-        let has_profile = request.profile_id.is_some();
-        let mut params = json!({
-            "agent_id": request.agent_id,
-            "project": request.project,
-            "profile_id": request.profile_id,
-            "size": request.size,
-            "brief": request.brief,
-        });
-        if has_profile && link.has_feature("native_profile_plan_token") {
-            params["plan_token"] = json!(request.plan_token);
-            params["expected_cli_version"] = json!(request.expected_cli_version);
-        }
-        link.call("native_start", params)
-    })
-    .await
+    blocking(move || start_with_link(&link, request)).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -699,8 +701,151 @@ pub fn extension() -> wyss_console::Extension {
 
 #[cfg(test)]
 mod capability_tests {
-    use super::{effectful_preview, profile_requires_effort_from_list};
+    use super::{
+        PreviewRequest, effectful_preview, preview_with_link, profile_requires_effort_from_list,
+        start_with_link,
+    };
+    use crate::{
+        host::{
+            client::HostLink,
+            protocol::{Answer as WireAnswer, Request, read_frame, write_frame},
+        },
+        native::{catalogue::AgentId, service::StartRequest},
+    };
+    use serde_json::Value;
     use serde_json::json;
+    use std::{
+        fs,
+        os::unix::{fs::PermissionsExt, net::UnixListener},
+        path::PathBuf,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+        thread,
+        time::Duration,
+    };
+    use wyss_console::terminal::contracts::TerminalSize;
+
+    const PROFILE_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const VERSION: &str = "2.1.309 (Claude Code)";
+
+    struct LegacyHost {
+        root: PathBuf,
+        stop: Arc<AtomicBool>,
+        seen: Arc<Mutex<Vec<(String, Value)>>>,
+        thread: Option<thread::JoinHandle<()>>,
+    }
+
+    impl LegacyHost {
+        fn new(inherited_effort: bool) -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "wyss-native-legacy-{}",
+                uuid::Uuid::new_v4().simple()
+            ));
+            fs::create_dir(&root).unwrap();
+            let socket = root.join("host.sock");
+            let listener = UnixListener::bind(&socket).unwrap();
+            listener.set_nonblocking(true).unwrap();
+
+            // The only executable the production command probes. Any launch attempt fails.
+            let cli = root.join("fixture-claude");
+            fs::write(
+                &cli,
+                format!(
+                    "#!/bin/sh\n[ \"$1\" = \"--version\" ] || exit 81\nprintf '%s\\n' '{VERSION}'\n"
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&cli, fs::Permissions::from_mode(0o700)).unwrap();
+
+            let stop = Arc::new(AtomicBool::new(false));
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let (server_stop, server_seen) = (stop.clone(), seen.clone());
+            let cli = cli.to_string_lossy().into_owned();
+            let thread = thread::spawn(move || {
+                while !server_stop.load(Ordering::Acquire) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            let Ok(request) = read_frame::<Request>(&mut stream) else {
+                                continue;
+                            };
+                            server_seen
+                                .lock()
+                                .unwrap()
+                                .push((request.op.clone(), request.params.clone()));
+                            let value = match request.op.as_str() {
+                                // A protocol-1 host without the additive `features` field.
+                                "hello" => json!({"protocol": 1}),
+                                "native_launcher" => json!({
+                                    "agents": [{"agent_id": "claude_code", "path": cli}],
+                                    "projects": [], "shell": null
+                                }),
+                                "native_preview" => json!({
+                                    "applied": ["Model: opus"], "with_cost": [],
+                                    "not_applicable": [], "can_start": true,
+                                    "through_shell": true, "plan_token": null
+                                }),
+                                "profiles" if inherited_effort => json!([{
+                                    "id": PROFILE_ID,
+                                    "body": {"effort": null},
+                                    "from": {"effort": "High"}
+                                }]),
+                                "profiles" => json!([{
+                                    "id": PROFILE_ID,
+                                    "body": {"effort": null}, "from": {}
+                                }]),
+                                "native_start" => json!({"fixture_started": true}),
+                                _ => Value::Null,
+                            };
+                            let answer = WireAnswer::Ok(value);
+                            let _ = write_frame(&mut stream, &answer);
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(2));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+            Self {
+                root,
+                stop,
+                seen,
+                thread: Some(thread),
+            }
+        }
+
+        fn link(&self) -> HostLink {
+            HostLink::remote_for_test(self.root.join("host.sock"))
+        }
+
+        fn requests(&self) -> Vec<(String, Value)> {
+            self.seen.lock().unwrap().clone()
+        }
+    }
+
+    impl Drop for LegacyHost {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Release);
+            if let Some(thread) = self.thread.take() {
+                thread.join().unwrap();
+            }
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn start_request() -> StartRequest {
+        StartRequest {
+            agent_id: AgentId::ClaudeCode,
+            project: "/tmp/fixture-project".into(),
+            profile_id: Some(PROFILE_ID.into()),
+            size: TerminalSize { rows: 24, cols: 80 },
+            brief: None,
+            plan_token: Some("old-preview-token".into()),
+            expected_cli_version: Some(VERSION.into()),
+        }
+    }
 
     #[test]
     fn preview_needs_version_evidence_for_applied_or_costly_profile_overrides() {
@@ -737,5 +882,73 @@ mod capability_tests {
             profile_requires_effort_from_list(&profiles, "missing"),
             None
         );
+    }
+
+    #[test]
+    fn protocol_one_host_preserves_non_effort_preview_and_start_compatibility() {
+        let host = LegacyHost::new(false);
+        let link = host.link();
+        let preview = preview_with_link(
+            &link,
+            PreviewRequest {
+                agent_id: AgentId::ClaudeCode,
+                profile_id: Some(PROFILE_ID.into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(preview["can_start"], true);
+        assert_eq!(preview["provider_version"], VERSION);
+        assert!(
+            preview["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|warning| warning.as_str().unwrap().contains("Legacy Native host"))
+        );
+
+        assert_eq!(
+            start_with_link(&link, start_request()).unwrap()["fixture_started"],
+            true
+        );
+        let requests = host.requests();
+        let start = requests
+            .iter()
+            .find(|(op, _)| op == "native_start")
+            .map(|(_, params)| params)
+            .expect("legacy native_start forwarded");
+        assert_eq!(start["profile_id"], PROFILE_ID);
+        assert!(start.get("plan_token").is_none());
+        assert!(start.get("expected_cli_version").is_none());
+        assert!(
+            requests
+                .iter()
+                .any(|(op, params)| op == "hello" && params.is_null())
+        );
+    }
+
+    #[test]
+    fn protocol_one_host_refuses_an_inherited_effort_profile_without_starting() {
+        let host = LegacyHost::new(true);
+        let link = host.link();
+        let preview = preview_with_link(
+            &link,
+            PreviewRequest {
+                agent_id: AgentId::ClaudeCode,
+                profile_id: Some(PROFILE_ID.into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(preview["can_start"], false);
+        assert!(
+            preview["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|warning| warning.as_str().unwrap().contains("effort-bearing profile"))
+        );
+
+        let error = start_with_link(&link, start_request()).unwrap_err();
+        assert_eq!(error.code, "host_outdated");
+        assert!(!host.requests().iter().any(|(op, _)| op == "native_start"));
     }
 }
