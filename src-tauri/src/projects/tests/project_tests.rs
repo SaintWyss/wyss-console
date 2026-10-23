@@ -837,3 +837,31 @@ fn only_an_unassigned_shell_is_adopted_into_a_project() {
     );
     let _ = NATIVE_1;
 }
+
+#[test]
+fn removing_a_project_never_touches_the_folder_it_was_made_from() {
+    let dir = TestDir::new();
+    let folder = std::fs::canonicalize(&dir.0).unwrap().join("keep");
+    std::fs::create_dir_all(folder.join(".git")).unwrap();
+    std::fs::write(folder.join("work.txt"), b"mine").unwrap();
+    let world = World::new();
+    let path = folder.to_str().unwrap();
+    world.owner.add_root(path, 64768, 4242);
+    let (project, _, _) = world.register(path);
+    for retain in [true, false] {
+        let (project, _) = if retain {
+            (project.clone(), ())
+        } else {
+            (world.register(path).0, ())
+        };
+        world
+            .send(
+                world.context(Some(&project), None),
+                json!({"kind": "removeProject", "projectId": project, "retainHistory": retain}),
+            )
+            .unwrap();
+        assert_eq!(std::fs::read(folder.join("work.txt")).unwrap(), b"mine");
+        assert!(folder.join(".git").is_dir());
+    }
+    assert_eq!(world.owner.launches(), 0);
+}

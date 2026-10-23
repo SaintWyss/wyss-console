@@ -1,12 +1,16 @@
 # M1 workspace implementation contract
 
-**Proposed; only increment 1 exists.** The closed schema, identities, strict codec and M1-01-level fixtures are implemented in `contracts::m1` (unwired, unreleased); everything else below is not implemented. Engineering baseline: main
-`d2ee8d2971ed50de2e39d73ad71f2a29f14c42b2`, 2026-10-22. Implements only
+**Implemented, feature-gated and not adopted.** The pure schema and codec are `contracts::m1`;
+the locked store, command engine, checked owner, migration, input claim, service and window
+commands are `src-tauri/src/projects/`; the Projects view is `src/lib/features/projects/`.
+Everything sits behind the release gate (§6). Engineering baseline: main
+`b3d3c0b455ac77c78eab3b007b36abddb019c889`, 2026-10-23. Implements only
 [FP-CTX-01..04](../product/functional-specification.md#fp-ctx-01), with
 [ADR0052 Accepted (architecture only)](../adr/0052-project-centered-workspace-identities.md).
 This is the detailed contract owned/referenced by [architecture](../product/architecture.md);
-current evidence stays in [status](../product/implementation-status.md#m0-engineering-baseline).
-All DTOs, filenames and tests below are implementation proposals, not existing APIs.
+current evidence stays in [status](../product/implementation-status.md#m0-engineering-baseline) and
+the [M1 delivery record](../acceptance/m1-delivery-2026-10-23.md). Where the build had to decide
+something the proposal left open, §6 says what it decided.
 
 ## 1. Ownership and compatibility
 
@@ -136,19 +140,20 @@ unconfirmed plans. Side-effect receipts always name their captured context.
 
 Closed Command variants (tag `kind`, exact remaining fields):
 
-| Kind                                     | Payload / rule                                                                                                                                                                                                                                                                                                                                                                            |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `registerExisting`                       | `selectionToken`; backend-owned one-use native chooser token, descriptor-revalidated root; duplicate canonical root on host returns existing project                                                                                                                                                                                                                                      |
-| `createFolder`                           | `selectionToken,name`; native-confirmed parent + one basename (no separators/dot segments); mkdir exclusively, no Git/launch; failed store commit leaves visible unregistered empty folder with explicit recovery, never deletes a now-nonempty folder                                                                                                                                    |
-| `relink`                                 | `projectId,oldBindingId,selectionToken`; display old/new comparison and per-operation eligibility before commit                                                                                                                                                                                                                                                                           |
-| `renameProject` / `archiveProject`       | `projectId,label` / `projectId,archived`; archive hides recent item, preserves attention/live work                                                                                                                                                                                                                                                                                        |
-| `removeProject`                          | `projectId,retainHistory:bool`; refuse active/ambiguous/unavailable-not-proven-ended targets; retainHistory keeps a tombstone Project (no active workspace/binding); otherwise remove proven-ended associations/workspaces/bindings. No filesystem/provider/vault deletion                                                                                                                |
-| `createWorkspace` / `duplicateWorkspace` | `projectId,label` / `sourceWorkspaceId,label`; duplicate uses new leaf IDs, all associations null; copy preferences only                                                                                                                                                                                                                                                                  |
-| `saveWorkspace`                          | `workspaceId,expectedWorkspaceRevision,label,layout,focus,pinned,leaves,preferences`; same-store CAS, all association origins must match project except explicit Scratch adoption                                                                                                                                                                                                         |
-| `closeWorkspace` / `deleteWorkspace`     | `workspaceId`; close releases views/input only; delete detaches associations, replaces deleted default with first remaining workspace or a new empty default                                                                                                                                                                                                                              |
-| `attach` / `detach`                      | `workspaceId,leafId,associationId`; verified owner lookup, never launch; detach does not close PTY/runtime                                                                                                                                                                                                                                                                                |
-| `adoptScratch`                           | `associationId,projectId,bindingId`; only origin-null ShellTarget, confirmed actual cwd disclosure; assignment of origin once, no cd/mode/permission change                                                                                                                                                                                                                               |
-| `launch`                                 | `workspaceId,leafId,provider:claude \| codex \| shell,mode:native \| managed,nativeProfile:ProfileRef \| null,managedSafetyProfile:ManagedSafetyProfile \| null`; Native/shell: `managedSafetyProfile` null; Managed: `nativeProfile` null and `managedSafetyProfile` an explicit per-launch choice; fresh binding + eligibility + owner availability, explicit user action, no free argv |
+| Kind                                     | Payload / rule                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `registerExisting`                       | `selectionToken`; backend-owned one-use native chooser token, descriptor-revalidated root; duplicate canonical root on host returns existing project                                                                                                                                                                                                                                                                  |
+| `createFolder`                           | `selectionToken,name`; native-confirmed parent + one basename (no separators/dot segments); mkdir exclusively, no Git/launch; failed store commit leaves visible unregistered empty folder with explicit recovery, never deletes a now-nonempty folder                                                                                                                                                                |
+| `relink`                                 | `projectId,oldBindingId,selectionToken`; display old/new comparison and per-operation eligibility before commit                                                                                                                                                                                                                                                                                                       |
+| `renameProject` / `archiveProject`       | `projectId,label` / `projectId,archived`; archive hides recent item, preserves attention/live work                                                                                                                                                                                                                                                                                                                    |
+| `removeProject`                          | `projectId,retainHistory:bool`; refuse active/ambiguous/unavailable-not-proven-ended targets; retainHistory keeps a tombstone Project (no active workspace/binding); otherwise remove proven-ended associations/workspaces/bindings. No filesystem/provider/vault deletion                                                                                                                                            |
+| `createWorkspace` / `duplicateWorkspace` | `projectId,label` / `sourceWorkspaceId,label`; duplicate uses new leaf IDs, all associations null; copy preferences only                                                                                                                                                                                                                                                                                              |
+| `saveWorkspace`                          | `workspaceId,expectedWorkspaceRevision,label,layout,focus,pinned,leaves,preferences`; same-store CAS, all association origins must match project except explicit Scratch adoption                                                                                                                                                                                                                                     |
+| `closeWorkspace` / `deleteWorkspace`     | `workspaceId`; close releases views/input only; delete detaches associations, replaces deleted default with first remaining workspace or a new empty default                                                                                                                                                                                                                                                          |
+| `attach` / `detach`                      | `workspaceId,leafId,associationId`; verified owner lookup, never launch; detach does not close PTY/runtime                                                                                                                                                                                                                                                                                                            |
+| `adoptScratch`                           | `associationId,projectId,bindingId`; only origin-null ShellTarget, confirmed actual cwd disclosure; assignment of origin once, no cd/mode/permission change                                                                                                                                                                                                                                                           |
+| `launch`                                 | `workspaceId,leafId,provider:claude \| codex \| shell,mode:native \| managed,nativeProfile:ProfileRef \| null,managedSafetyProfile:ManagedSafetyProfile \| null`; Native/shell: `managedSafetyProfile` null; Managed: `nativeProfile` null and `managedSafetyProfile` an explicit per-launch choice; fresh binding + eligibility + owner availability, explicit user action, no free argv                             |
+| `reconcileLaunch`                        | `launchOperationId,resolution`; `resolution` is `identified{terminalId,sessionId\|null}` (the user found the session an unknown launch started among those no association holds), `absent` (the owner is readable and shows nothing no association holds) or `retryManaged` (the Managed owner is asked again with the receipt's original intent); only the user sends it, and none of the three starts a new process |
 
 Reads `listProjects`, `getProject`, `getWorkspace`, `listSessions` are bounded/paginated
 (max100 rows/page, opaque store-revision cursor); return source revision, availability and
@@ -222,8 +227,8 @@ known effect `none|committed|unknown`, and safe next action; never raw provider/
    100 known folders) and saved layout v1 (64 KiB,16 tabs,16 panes/tab,depth6). Validate
    owner/mode/descriptor and consistent bytes/digest before/after read. If sources change,
    retry preview, never stop their writers. No Registry::open or HostLink lazy startup.
-2. Generate one migration UUID/storeId/HostId in preview memory; deterministic UUIDv5
-   mapping within that migration namespace from source kind + stable legacy key. Retry of
+2. Generate one migration UUID/storeId/HostId in preview memory; deterministic name-based
+   mapping (SHA-256, UUID version-8 layout, no new dependency) within that migration namespace from source kind + stable legacy key. Retry of
    that preview yields the same map. Canonical exact root duplicates coalesce after native
    validation; aliases/ambiguous roots require user resolution. Missing roots remain
    unverified/read-only. Do not infer projects from cwd prefixes, Git URL or directory names.
@@ -305,3 +310,58 @@ warmup/sample rules and machine/load/build disclosure. No numeric latency budget
 by M0. Before M1 release, agree measured reference budgets; refuse an unexplained regression
 outside baseline uncertainty and retain failed/outlier samples. A fixture-only latency pass
 cannot close the real-desktop performance requirement.
+
+## 6. As built
+
+What the implementation decided where the proposal left room, and what it does not do. Anything
+here that disagrees with the sections above is a defect to fix, not a second contract.
+
+**Release gate.** Every command except the reads answers `unsupported_capability` (field
+`disabled`) until the owner turns the workspace on. The gate is the private file
+`$XDG_STATE_HOME/wyss-console/projects/feature`; it is switched by `projects_set_enabled`, which
+asks in a native confirmation window the page cannot draw on, and turning it off is refused while a
+launch of unknown outcome exists. The Projects entry in the navigation exists only while it is on.
+Turning it off changes no session, no store and no older window.
+
+**Windows.** Another window is `w-<id>`, opened by `projects_open_window`, and carries only the
+`projects` capability. Windows follow the store by one poll of its revision (2.5 s, only while the
+view is shown), not by a push; a change from another window or process is seen at the next poll.
+
+**Owner reads.** The host is read through `HostSocket`: every connection checks the peer's uid,
+pid and process start time and the socket file's identity, and the epoch it yields
+(`h1:<device>:<inode>:<pid>:<start ticks>`) is compared on every later call. A different epoch is
+`host_changed`, an absent host `host_offline`; neither starts, retries or falls back. The terminals'
+output is read through the same socket (`projects_term_read`), so a recovered view never creates a
+shell. Managed sessions come from the desktop's own P1 and P2 interfaces, each under its
+authority's stream ID, bounded to eight pages.
+
+**Managed launch prepares a session and nothing else.** It asks the owner for a session with the
+receipt's operation ID as the intent (P2 when the protocol-2 interface is active, P1 otherwise) and
+records the requested profile. Binding a workspace, starting a runtime, leases and turns stay in
+the Managed screens, which read the request as a hint and grant nothing from it. A launch whose
+outcome is unknown is retried only by the user (`reconcileLaunch retryManaged`), with the same
+intent. Claude Managed is `unsupported_capability`.
+
+**Launch journal.** `pending` carries a `claim` (`c1:<pid>:<start ticks>:<nonce>`); on start the
+service makes `pending` receipts of a gone process `ambiguous`. Receipts are compacted only by an
+explicit action (`projects_compact_receipts`); a compacted ID stays in `closedOperations` (at most 4096) so it can never be live again.
+
+**Terminals.** A Scratch shell starts in the host's own default directory. A session the window
+started takes input as its pane opens (a new shell asks the terminal questions only the holder of
+input may answer); every other view is a read-only mirror until input is taken, and input is
+released on blur, on detach and when the window or process ends. Input is sent one call at a time,
+in the order typed.
+
+**Migration.** Preview reads the legacy files as bytes (never `Registry::open`), twice, and refuses
+a source that changes under it. A folder that is missing or not usable is not imported and is not
+invented; an alias of a registered root needs an explicit acceptance; tabs with nothing alive are
+skipped; a tab that mixes origins becomes one workspace per origin; all Scratch panes share the one
+Scratch workspace in a balanced layout. Commit preserves the exact bytes in
+`migration-<id>/` with a hash manifest, then publishes the store last. A later preview is
+incremental: it adds registered folders and live sessions the store lacks and never changes or
+removes a record it has. Profile defaults of the legacy registry are not imported.
+
+**Not done here.** A push channel between windows; a way to browse sessions older than the Managed
+owner's first eight pages; any change to the host, the authorities, their stores, the F8 capacity
+of one or the installed package. Real-desktop performance budgets are not set (the measurements in
+the delivery record are costs, not budgets), and the owner's own installation has not been migrated.
