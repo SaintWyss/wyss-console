@@ -431,6 +431,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--test-binary", default="", help="the built unit-test executable (not needed for shape none)")
     ap.add_argument("--steps", help="JSON list of calibration steps; no measurement is made")
+    ap.add_argument("--seed", help="a directory whose layout.json, native/ and configuration/trusted-writers are copied into the run's own state (a rehearsal on a copy of real records)")
     ap.add_argument("--idle-seconds", type=int, default=60)
     ap.add_argument("--switches", type=int, default=40)
     ap.add_argument("--keys", type=int, default=40)
@@ -444,6 +445,21 @@ def main():
     for sub in ("run", "state", "config", "data", "cache", "home", "logs"):
         os.makedirs(os.path.join(root, sub), mode=0o700, exist_ok=True)
     logs = os.path.join(root, "logs")
+    if args.seed:
+        # Copies, into the run's own private state: the originals are only read.
+        mine = os.path.join(root, "state", "wyss-console")
+        os.makedirs(os.path.join(mine, "configuration"), mode=0o700, exist_ok=True)
+        for name in ("layout.json", os.path.join("configuration", "trusted-writers")):
+            src = os.path.join(args.seed, name)
+            if os.path.exists(src):
+                shutil.copyfile(src, os.path.join(mine, name))
+                os.chmod(os.path.join(mine, name), 0o600)
+        if os.path.isdir(os.path.join(args.seed, "native")):
+            shutil.copytree(os.path.join(args.seed, "native"), os.path.join(mine, "native"))
+            for dirpath, dirs, files in os.walk(os.path.join(mine, "native")):
+                os.chmod(dirpath, 0o700)
+                for f in files:
+                    os.chmod(os.path.join(dirpath, f), 0o600)
     nest = host = app = frames = pointer = None
     result = {"run": args.run, "shape": args.shape, "binary": binary,
               "loadavg": open("/proc/loadavg").read().split()[:3],
