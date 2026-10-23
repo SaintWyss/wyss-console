@@ -40,3 +40,6 @@ pub mod approval;
 
 /// Pure B1 contract foundation. Not reachable from control protocol v1 or `METHODS`.
 pub mod b1;
+
+/// Pure M1 workspace-store contract. Not reachable from control protocol v1 or `METHODS`.
+pub mod m1;

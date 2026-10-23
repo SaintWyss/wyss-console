@@ -62,7 +62,7 @@ Verification/DoD: all AC-FP-CTX-01..04 and M1-01..13, including two windows, old
 no-effect navigation/restore, dispatch/association ambiguity, corrupt/newer stores and
 interrupted migration. Native desktop acceptance must show all existing sessions remain
 attributable, zero duplicate processes/prompts, no host restart/SQL migration, no project-
-switch effects, and measured performance budgets. M1 tests are NOT_RUN until implemented.
+switch effects, and measured performance budgets. M1-02..13 are NOT_RUN until implemented; M1-01 holds at codec level only (see status).
 
 Risk/rollback: existing registry open mutates and old layout restore can recreate shells;
 M1 requires non-starting checked observation and attach-only recovery. Preserve private

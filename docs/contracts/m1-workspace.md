@@ -72,8 +72,8 @@ Paths stay private/local; frontend DTOs use root label/eligibility, not trusted 
 `revision` is Counter; `label`/`title` are Text. `profileDefaults` is presentation for
 **Native** launches; Managed ignores it. `managedSafetyProfile` is a separate, closed
 requested-profile selector, never a Native `ProfileRef` or proof of the authority's
-actual attached profile. Preferences obey the same cross-field rule as launches (native mode requires `managedSafetyProfile=null`, managed mode requires `nativeProfile=null`) and prefill the launch choice only, never preselecting `local_tools`: the UI defaults to no selection and `local_tools` is chosen explicitly each launch; they
-never grant a lease, authorize tools, or trigger a launch. A new Managed launch must
+actual attached profile. Preferences obey the same cross-field rule as launches (native mode requires `managedSafetyProfile=null`, managed mode requires `nativeProfile=null`) and prefill the launch choice only, and never storing `local_tools` (a preference holds `inference` or null; `local_tools` is chosen
+explicitly on each launch). Preferences never grant a lease, authorize tools, or trigger a launch. A new Managed launch must
 explicitly choose `inference` or `local_tools` from capabilities advertised by that
 provider/authority; unsupported or unverified selections refuse with zero side effects.
 Native launches require `managedSafetyProfile=null` and use `nativeProfile` if present;
@@ -83,7 +83,7 @@ validated again against the current owner before effectful dispatch. Scratch has
 exactly one workspace with projectId null, native preferences, no binding and label Scratch;
 non-tombstone projects each have at least one workspace. Tombstones retain id/label/history only; defaultWorkspaceId is null for them (UUID otherwise). `NativeId` is exactly 32 lowercase hex characters (existing Native session/profile format),
 not the hyphenated UUID format of new metadata and terminal/Managed IDs. Preserve owner IDs
-byte-for-byte; an incompatible ID is an unresolved import, never coerced. Epoch text is an
+byte-for-byte; an incompatible ID is an unresolved import, never coerced. `hostEpoch` and `claim` are epoch text, not Text. Epoch text is an
 opaque bounded compatibility observation, max256 UTF-8 bytes. No runtime epoch survives
 validation against a changed host.
 
@@ -92,12 +92,23 @@ plus Scratch, <=16 bindings/project including relink history, <=2000 association
 <=512 operation receipts. Refuse admission at a ceiling; no automatic project/session
 history eviction. Explicitly compact only terminal operation receipts with no ambiguous
 work, preserving their associations and migration mapping; each compacted ID moves to `closedOperations` (<=4096, refuse compaction and admission at the ceiling). Text is 1..64 Unicode scalars,
-no controls; AbsolutePath <=4096 UTF-8 bytes; total migration mapping <=4096 rows.
+no controls; AbsolutePath <=4096 UTF-8 bytes, absolute, with no control character and no empty, `.` or `..` segment; total migration mapping <=4096 rows.
 Each workspace <=16 leaves, binary depth <=6 (root level0), ratio0.1..0.9, focus references
 its own leaf, no repeated leaf/association within one workspace. This preserves the current
 binary tree depth6, refining the earlier proposed depth8. Existing host limit16 PTYs is
 shared across workspaces/windows; this store cannot allocate another capacity pool.
 Managed still cap1 independently. Bounds are proposed safety ceilings, not measured costs.
+
+Store invariants, validated on decode and on encode: IDs unique per kind and on this store's
+host; every reference exists; a live project's default workspace and binding are its own,
+a tombstone has neither and owns no workspace or binding; exactly one Scratch workspace;
+each workspace's leaves are exactly the leaves its layout places, with focus and associations
+valid and no association twice in one workspace; one association per owner target; a bound
+association belongs to its binding's project; bindings chain inside one project without a
+cycle; `pending` has a `claim` and no association, only `committed` has an association; at
+most one unfinished receipt per leaf; the receipt and association that cite each other agree;
+a compacted ID is never live. Revisions at the end of the u64 range are refused.
+Preferences hold `inference` or null as the Managed profile, never `local_tools`.
 
 On corrupt/newer/oversized store: read-only recovery screen, preserve exact bytes, no empty
 fallback/save. Missing store: offer migration preview; no auto terminal. Deleted or older
