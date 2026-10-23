@@ -579,6 +579,15 @@ pub(crate) fn unique_json(bytes: &[u8]) -> ControlResult<Value> {
     if bytes.len() > MAX_FRAME {
         return Err(ControlError::FrameTooLarge);
     }
+    unique_value(bytes)
+}
+
+/// The duplicate-member check without a frame bound, for a caller that bounds its own input.
+/// The same recursion limit applies.
+pub(crate) fn unique_value(bytes: &[u8]) -> ControlResult<Value> {
+    if bytes.is_empty() {
+        return Err(ControlError::InvalidRequest);
+    }
     std::str::from_utf8(bytes).map_err(|_| ControlError::InvalidRequest)?;
     let mut d = serde_json::Deserializer::from_slice(bytes);
     let v = Unique::deserialize(&mut d)
