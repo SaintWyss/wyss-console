@@ -1,6 +1,6 @@
 # ADR 0052: Project-centered workspace identities and projections
 
-Status: **Accepted** by Santiago on 2026-10-22, following explicit authorization to complete the pending ADR0052 acceptance in the PR #17 discussion. The earlier WD-02 product direction alone did not accept this ADR.
+Status: **Accepted** by Santiago (decision dated 2026-10-22). The owner's authorization was confirmed in the PR #17 integration review on 2026-10-23 and recorded in [this PR comment](https://github.com/SaintWyss/wyss-console/pull/17#issuecomment-6356533896). The earlier WD-02 product direction alone did not accept this ADR.
 Date: 2026-10-22. Extends native project/default/layout semantics of ADR0035/0037;
 does not alter Managed authority, leases, database schema or execution permissions.
 

@@ -10,7 +10,7 @@ the completion target. Intermediate milestones are increments, not a reduced MVP
 | Milestone | Deliverable                                                                | Depends on                                                   | Baseline / priority                                          |
 | --------- | -------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | M0        | Qualification manifest and preservation plan                               | Phase1 consolidated docs                                     | Required evidence foundation; existing tests are inputs      |
-| M1        | Project-centered workspace and migration                                   | M0, ADR0052 acceptance before release                        | Highest UX priority; project records partly exist            |
+| M1        | Project-centered workspace and migration                                   | M0; ADR0052 Accepted (architecture only)                     | Highest UX priority; project records partly exist            |
 | M2        | Claude/Codex Native parity, configuration/profile closure                  | M0; M1 for contextual UI                                     | Highest provider priority; finish partial acceptance         |
 | M3        | Claude Managed parity and versioned model/effort contract                  | M0, M2 provider evidence; ADR0053 and separate selection ADR | Highest architecture priority; no Claude adapter yet         |
 | M4        | Faithful persistent terminal and bounded parser isolation                  | M0; M1 identity contracts                                    | Existing host preserved; new screen/lifecycle work           |
@@ -55,8 +55,8 @@ context/receipt handling, mixed-host compatibility, preservation and rollback. T
 the single detailed handoff; do not duplicate it in a new plan. Global administration and
 Scratch stay independent from Managed authority. M1 does not implement Claude Managed,
 OL3, new remote transport or concurrency above1. ADR0052 is **Accepted** for the
-project/workspace identity architecture; its validation and release gates remain. Explicit
-Santiago acceptance is required before release/adoption, not inferred from PR16 merge.
+project/workspace identity architecture only (not inferred from the PR16 merge); its
+validation and release gates remain, and release/adoption needs separate authorization.
 
 Verification/DoD: all AC-FP-CTX-01..04 and M1-01..13, including two windows, old host,
 no-effect navigation/restore, dispatch/association ambiguity, corrupt/newer stores and

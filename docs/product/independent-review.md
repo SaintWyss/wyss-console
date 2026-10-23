@@ -46,7 +46,7 @@ blocked design. No newly confirmed plan-as-implementation claim remained.
 The reviewer confirmed preservation of ADR0034 custody/fallback, ADR0041 kind-specific
 restoration, current Managed selection exclusion, ADR0018 credential/hardlink residuals,
 U/B1/M/P/A separation, partial PTY input and absence of a production remote transport.
-ADR0052/0053 remain Proposed. Author scope checks report accepted historical ADR bodies byte-identical; the reviewer
+ADR0052/0053 remain Proposed _as of this 2026-10-22 review_ (current status: each ADR). Author scope checks report accepted historical ADR bodies byte-identical; the reviewer
 did not independently execute that comparison.
 
 **Implementation readiness is conditional, not a blanket release approval.** The packet

@@ -14,7 +14,8 @@ The redesign adds a **project/workspace identity and projection layer**, not a r
 authority or terminal engine. Existing folder selection, project defaults, native grouping
 and layout persistence are inputs to migrate. They do not already provide this model.
 The owner-approved directions are WD-01/02 in [PRODUCT](../PRODUCT.md). Persistence and
-interface changes are proposed in [ADR 0052](../adr/0052-project-centered-workspace-identities.md).
+interface changes follow [ADR 0052](../adr/0052-project-centered-workspace-identities.md)
+(Accepted, architecture only; unimplemented).
 Claude Managed requires its own proposed
 [ADR 0053](../adr/0053-claude-code-managed-integration-boundary.md), not a new name for Native.
 

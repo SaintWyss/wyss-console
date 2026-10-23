@@ -599,8 +599,9 @@ Current canonical documents: [index](README.md), [functional specification](func
 [architecture](architecture.md), [provider matrix](provider-matrix.md),
 [implementation status](implementation-status.md), [roadmap](roadmap.md),
 [traceability](traceability.md), this inventory and [independent review](independent-review.md).
-Proposed [ADR0052](../adr/0052-project-centered-workspace-identities.md) and
-[ADR0053](../adr/0053-claude-code-managed-integration-boundary.md) are new design records, not accepted decisions.
+[ADR0052](../adr/0052-project-centered-workspace-identities.md) and
+[ADR0053](../adr/0053-claude-code-managed-integration-boundary.md) were new, Proposed design records when
+this inventory was written; each ADR holds its current status (0052 Accepted, architecture only; 0053 Proposed).
 
 Retained pre-consolidation [PRODUCT](../history/PRODUCT-before-phase-1-2026-10-22.md),
 [CHECKPOINT](../history/CHECKPOINT-before-phase-1-2026-10-22.md) and
