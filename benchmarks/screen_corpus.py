@@ -22,6 +22,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from owned import signal_pinned
 
 ROWS, COLS = 24, 80
 FORMAT = ("#{cursor_x} #{cursor_y} #{alternate_on} #{cursor_flag} #{origin_flag} #{wrap_flag} "
@@ -242,9 +245,21 @@ def run_entry(name, work, out_dir):
         pid = int(open(pidfile).read().strip())
     except (OSError, ValueError):
         pass
-    if stop and pid:
+    # Pin only the pane identified by this run's private tmux server, before signalling.
+    pidfd = None
+    if pid:
         try:
-            os.kill(pid, signal.SIGSTOP)
+            pidfd = os.pidfd_open(pid)
+            pane = int(tmux(sock, conf, "display-message", "-p", "-t", "c", "#{pane_pid}").strip())
+            if pane != pid:
+                os.close(pidfd)
+                pidfd = None
+                raise RuntimeError("pane identity changed")
+        except ProcessLookupError:
+            pass
+    if stop and pidfd is not None:
+        try:
+            signal_pinned(pidfd, signal.SIGSTOP)
         except ProcessLookupError:
             pass
         time.sleep(0.4)
@@ -256,11 +271,13 @@ def run_entry(name, work, out_dir):
     tmux(sock, conf, "kill-server", check=False)
     # The nested entry started a second server on a socket of its own: ended through that socket.
     subprocess.run(["tmux", "-L", f"inner-{os.getpid()}", "kill-server"], capture_output=True)
-    if pid:
+    if pidfd is not None:
         try:
-            os.kill(pid, signal.SIGKILL)
+            signal_pinned(pidfd, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        finally:
+            os.close(pidfd)
     data = open(stream, "rb").read()
     meta = dict(zip(FIELDS, [int(x) for x in facts]))
     meta.update(name=name, rows=ROWS, cols=COLS, bytes=len(data),

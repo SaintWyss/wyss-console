@@ -13,6 +13,7 @@ import signal
 import socket
 import struct
 import time
+from owned import signal_pinned
 
 
 def call(socket_path, op, params=None):
@@ -99,6 +100,7 @@ def check(step, ctx):
         pid = row["parser"].get("helper_pid") if row else None
         if not pid:
             return False, "no helper pid reported"
+        fd = os.pidfd_open(pid)
         try:
             # The helper is not dumpable (its /proc/<pid>/exe is not readable by anyone but root),
             # so the proof is its command name (it names itself: the host runs it from a verified
@@ -107,10 +109,12 @@ def check(step, ctx):
                 exe = f.read().strip()
             with open(f"/proc/{pid}/stat") as f:
                 ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+            if exe != "wyss-screen" or ppid != ctx["host_pid"]:
+                return False, f"refusing: comm={exe} ppid={ppid} host={ctx['host_pid']}"
+            signal_pinned(fd, signal.SIGKILL)
+            return True, f"killed helper {pid}"
         except OSError as e:
-            return False, f"cannot prove the helper is ours: {e}"
-        if exe != "wyss-screen" or ppid != ctx["host_pid"]:
-            return False, f"refusing: comm={exe} ppid={ppid} host={ctx['host_pid']}"
-        os.kill(pid, signal.SIGKILL)
-        return True, f"killed helper {pid}"
+            return False, f"cannot prove or signal the helper: {e}"
+        finally:
+            os.close(fd)
     return False, f"unknown check {kind}"

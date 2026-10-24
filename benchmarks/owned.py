@@ -32,6 +32,11 @@ class NotOurs(RuntimeError):
     """The process is not what this class launched; nothing outside the launch was signalled."""
 
 
+def signal_pinned(fd, sig):
+    """Signal an already-held pidfd. Caller must prove ownership after opening it. No PID lookup."""
+    signal.pidfd_send_signal(fd, sig)
+
+
 def _stat(pid):
     """(ppid, starttime) from /proc/<pid>/stat, or None when the process is not there."""
     try:
@@ -100,13 +105,20 @@ class Owned:
                 self.fd = None
 
     def _verify_launch(self):
-        try:
-            stat = _stat(self.pid)
-            exe = os.path.realpath(f"/proc/{self.pid}/exe")
-        except OSError:
-            stat, exe = None, None
-        if stat is None or stat[0] != os.getpid() or exe != self.expect_exe:
-            raise NotOurs(f"launch is not the expected binary {self.expect_exe}")
+        # posix_spawn may return before the child's exec is visible in /proc. The unreaped
+        # direct child and its pidfd remain ours while we wait; no descendant is adopted yet.
+        deadline = time.monotonic() + 1.0
+        while True:
+            try:
+                stat = _stat(self.pid)
+                exe = os.path.realpath(f"/proc/{self.pid}/exe")
+            except OSError:
+                stat, exe = None, None
+            if stat is not None and stat[0] == os.getpid() and exe == self.expect_exe:
+                return
+            if time.monotonic() >= deadline or stat is None:
+                raise NotOurs(f"launch is not the expected binary {self.expect_exe}")
+            time.sleep(0.005)
 
     # -- signalling: only through descriptors this object holds --------------------------------
     def _send(self, fd, sig):

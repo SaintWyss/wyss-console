@@ -551,6 +551,21 @@ def main():
             keyring_log = open(os.path.join(logs, "keyring.log"), "wb")
             keyring = Owned(["/bin/sh", starter], "/bin/sh", env=app_env,
                             log=keyring_log)
+            # A secret-tool request made before this owned daemon registers can D-Bus-activate
+            # a second, locked daemon. Wait on the private bus without activating the service.
+            ready_until = time.monotonic() + 8
+            while True:
+                ready = subprocess.run(
+                    ["/usr/bin/gdbus", "call", "--session", "--dest", "org.freedesktop.DBus",
+                     "--object-path", "/org/freedesktop/DBus", "--method",
+                     "org.freedesktop.DBus.NameHasOwner", "org.freedesktop.secrets"],
+                    capture_output=True, env=app_env, timeout=2, check=False,
+                )
+                if ready.returncode == 0 and ready.stdout.strip() == b"(true,)":
+                    break
+                if time.monotonic() >= ready_until or not keyring.alive():
+                    raise RuntimeError("the disposable Secret Service did not register")
+                time.sleep(0.05)
             secret_attrs = ["service", "wyss-m2-fixture", "account", "integration-probe"]
             stored = subprocess.run(
                 ["/usr/bin/secret-tool", "store", "--label", "M2 disposable fixture", *secret_attrs],
