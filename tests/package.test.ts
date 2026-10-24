@@ -114,3 +114,23 @@ it('does not deny what the product has', () => {
   expect(readme).not.toContain('No agent SDK, authority or agent UI');
   expect(readme).not.toContain('Codex is not usable through the Console UI');
 });
+
+it('never packages the B1 candidate: fixture feature off in every build the packager runs, binaries not listed', () => {
+  // The B1 launcher, shim and probe exist only with the `b1-fixture` feature. The guard is that no
+  // build path enables it (the packager passes no features, the manifest has no default feature set,
+  // the shim and probe are not in the package list); the fixture-marker scan is defence in depth.
+  const packager = read('scripts/package.mjs');
+  expect(packager).not.toMatch(/--features|b1-fixture|wyss-b1/);
+  const manifest = read('src-tauri/Cargo.toml');
+  expect(manifest).not.toMatch(/^default\s*=/m);
+  expect(manifest).toMatch(
+    /name = "wyss-b1-shim"[\s\S]*?required-features = \["b1-fixture"\]/,
+  );
+  expect(manifest).toMatch(
+    /name = "wyss-b1-probe"[\s\S]*?required-features = \["b1-fixture"\]/,
+  );
+  expect(read('src-tauri/src/lib.rs')).toMatch(
+    /cfg\(all\(target_os = "linux", feature = "b1-fixture"\)\)\]\s*pub mod b1;/,
+  );
+  expect(read('scripts/package-fixtures.mjs')).toContain('wyss-b1-synthetic-');
+});

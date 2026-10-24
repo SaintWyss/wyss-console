@@ -135,6 +135,21 @@ fn main() {
                 Err(_) => result(false, -2, json!("bad address")),
             }
         }
+        "socketpair" => {
+            let domain: i32 = a(1).parse().unwrap_or(-1);
+            let mut fds = [0i32; 2];
+            // SAFETY: a plain socketpair call into a local array of two.
+            let r = unsafe { libc::socketpair(domain, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) };
+            let e = errno();
+            if r == 0 {
+                // SAFETY: the descriptors created above.
+                unsafe {
+                    libc::close(fds[0]);
+                    libc::close(fds[1]);
+                }
+            }
+            result(r == 0, if r == 0 { 0 } else { e }, Value::Null)
+        }
         "socket" => {
             let domain: i32 = a(1).parse().unwrap_or(-1);
             // SAFETY: a plain socket call.
@@ -232,6 +247,16 @@ fn main() {
                     )
                 },
                 "setns" => unsafe { libc::syscall(libc::SYS_setns, 0, 0) },
+                // The x86_64 `socket` number with the x32 bit set: it skips every comparison of a
+                // filter that only knows the native numbers.
+                "x32-socket" => unsafe {
+                    libc::syscall(
+                        libc::SYS_socket | 0x4000_0000,
+                        libc::AF_INET,
+                        libc::SOCK_STREAM,
+                        0,
+                    )
+                },
                 _ => -2,
             };
             result(r >= 0, if r >= 0 { 0 } else { errno() }, json!(r))
@@ -268,18 +293,28 @@ fn main() {
         "double-fork" => {
             let target = a(1).to_owned();
             let delay: u64 = a(2).parse().unwrap_or(1000);
-            // SAFETY: fork in a single-threaded process; the child only sleeps and writes.
+            // SAFETY (both forks): the process is single-threaded; each child only sleeps, forks or
+            // writes, and leaves with _exit so no destructor of the parent's state runs.
             match unsafe { libc::fork() } {
                 0 => {
-                    // SAFETY: detach from the parent's session.
                     unsafe { libc::setsid() };
-                    std::thread::sleep(Duration::from_millis(delay));
-                    let _ = std::fs::write(&target, "the grandchild was still running");
-                    // SAFETY: leave without running destructors of the parent's state.
-                    unsafe { libc::_exit(0) };
+                    match unsafe { libc::fork() } {
+                        0 => {
+                            std::thread::sleep(Duration::from_millis(delay));
+                            let _ = std::fs::write(&target, "the grandchild was still running");
+                            unsafe { libc::_exit(0) };
+                        }
+                        // The middle process leaves at once: the grandchild is no one's child.
+                        _ => unsafe { libc::_exit(0) },
+                    }
                 }
                 -1 => result(false, errno(), Value::Null),
-                _ => result(true, 0, Value::Null),
+                pid => {
+                    // Reap the middle process only; the grandchild is not ours to wait for.
+                    let mut status = 0;
+                    unsafe { libc::waitpid(pid, &mut status, 0) };
+                    result(true, 0, Value::Null)
+                }
             }
         }
         "who" => result(

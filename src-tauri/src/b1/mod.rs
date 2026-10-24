@@ -12,6 +12,8 @@ pub mod confine;
 pub mod plan;
 pub mod workspace;
 
-/// Present in every binary that contains this module; the package check refuses it (the
-/// `wyss-b1-synthetic-` marker), so a packaged build cannot carry the candidate by accident.
+/// A marker the package check looks for (`wyss-b1-synthetic-`). Defence in depth only: a constant that
+/// nothing reads need not survive linking. The guard is that the module, the shim and the probe exist
+/// only with the `b1-fixture` feature and that no build the packager runs enables it
+/// (`tests/package.test.ts`).
 pub const FIXTURE_MARKER: &str = "wyss-b1-synthetic-candidate-build";

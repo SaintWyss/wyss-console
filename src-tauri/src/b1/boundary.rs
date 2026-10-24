@@ -11,6 +11,12 @@
 //! do not contain it; `tests/b1_process.rs` observes each, against a baseline that shows the same
 //! probe reaching it without B1). A stronger approval needs a principal the worker cannot be, which
 //! needs privileges this change does not have and does not ask for.
+//!
+//! What this module is: the *statement* of the requirements, the facts of today's channel, four
+//! constants that are `false`, and a regression check that fails if a named set of surfaces starts to
+//! mention the B1 module. It is not an enforcement point: nothing here decides an approval, and the
+//! source scan covers the surfaces it names, not every route a future change could add. When a
+//! stronger mode is built, the permission has to be checked where the effect happens.
 
 /// The trust lanes of the product (architecture §4). B1 is a *different* contract from U and M.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,8 +125,10 @@ pub fn gates_closed() -> bool {
         || PLANNER_EFFECT_AUTHORITY)
 }
 
-/// Data from a planner or a Native process. It can be looked at; it cannot be used as authority
-/// until a validator of the receiving side turns it into something typed.
+/// Data from a planner or a Native process, marked as such so that it is not passed around as if it
+/// were typed. It can be looked at; the one way out is a validator of the receiving side that can
+/// refuse. The type proves nothing by itself: a validator that accepts everything returns the data
+/// unchanged, and whether a validator is strict enough is for the code that writes it and its review.
 #[derive(Debug)]
 pub struct Untrusted<T>(T);
 
@@ -211,10 +219,10 @@ mod tests {
     }
 
     #[test]
-    fn every_gate_is_closed_and_nothing_outside_this_module_can_open_one() {
+    fn the_gates_are_declared_closed_and_their_declarations_are_checked_in_the_source() {
         assert!(gates_closed());
-        // The gates are constants: nothing reads them to enable a path (a source scan, so a later
-        // change that wires one in has to change this test and be reviewed).
+        // The declarations are `false` in the source. This does not stop another module from adding its
+        // own flag; it makes changing these four a visible, reviewed edit.
         let me = include_str!("boundary.rs");
         for gate in [
             "STRONGER_APPROVAL_MODE",
@@ -227,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn b1_is_not_reachable_from_the_control_protocol_the_desktop_or_the_provider_launches() {
+    fn the_named_surfaces_do_not_mention_the_b1_module() {
         // These are the surfaces that would make a B1 launch reachable. None names it.
         let scanned: [(&str, &str); 6] = [
             (

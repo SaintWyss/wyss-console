@@ -49,13 +49,22 @@ pub struct Profile {
     pub devices: Vec<PathBuf>,
     /// Layers that must hold or the worker is not started.
     pub require: u8,
-    /// The lowest Landlock ABI that is acceptable (0 = any that the layer set allows).
+    /// A higher Landlock ABI floor than `MIN_LANDLOCK_ABI`, if the launcher wants one.
     pub min_abi: u8,
     pub max_open_files: u64,
     pub max_file_bytes: u64,
 }
 
+/// The lowest Landlock ABI this shim runs a worker under, whatever the profile asks: ABI 6 is the first
+/// with the scopes that keep abstract unix sockets and signals inside the domain. Below it the
+/// worker is not started.
+pub const MIN_LANDLOCK_ABI: u8 = 6;
+
 impl Profile {
+    /// The ABI actually required: the profile may raise the floor, never lower it.
+    pub fn effective_min_abi(&self) -> u8 {
+        self.min_abi.max(MIN_LANDLOCK_ABI)
+    }
     pub const DEFAULT_OPEN_FILES: u64 = 256;
     pub const DEFAULT_FILE_BYTES: u64 = 64 * 1024 * 1024;
 }
@@ -127,7 +136,9 @@ pub fn landlock_abi() -> u8 {
     u8::try_from(v).unwrap_or(0)
 }
 
-/// Every filesystem right the ABI knows (all are *handled*, so all are denied unless granted).
+/// Every filesystem right up to ABI 5 (all are *handled*, so all are denied unless granted). Rights
+/// that later ABIs add (pathname unix sockets at ABI 9, for one) are not known to this shim and are
+/// not covered by it.
 fn handled_fs(abi: u8) -> u64 {
     let mut fs: u64 = (1 << 13) - 1;
     if abi >= 2 {
@@ -223,7 +234,7 @@ fn landlock(profile: &Profile) -> Result<u8, &'static str> {
     if abi == 0 {
         return Err("landlock_unavailable");
     }
-    if abi < profile.min_abi {
+    if abi < profile.effective_min_abi() {
         return Err("landlock_abi_too_old");
     }
     let net: u64 = if abi >= 4 { 0b11 } else { 0 }; // BIND_TCP | CONNECT_TCP: none granted
@@ -321,6 +332,8 @@ const JEQ_K: u16 = 0x15;
 const JSET_K: u16 = 0x45;
 const RET_K: u16 = 0x06;
 const OFF_NR: u32 = 0;
+/// x32 system calls are the x86_64 numbers with this bit set; the architecture check passes them.
+const X32_SYSCALL_BIT: u32 = 0x4000_0000;
 const OFF_ARCH: u32 = 4;
 const OFF_ARG0: u32 = 16;
 const AF_UNIX: u32 = 1;
@@ -421,6 +434,12 @@ fn program() -> Vec<libc::sock_filter> {
             code: LD_W_ABS,
             k: OFF_NR,
             jt: None,
+        },
+        // A call number with the x32 bit set would skip every comparison below: refused outright.
+        Insn {
+            code: JSET_K,
+            k: X32_SYSCALL_BIT,
+            jt: Some(To::Kill),
         },
     ];
     for nr in killed_syscalls() {
@@ -718,6 +737,26 @@ mod tests {
         // The architecture check kills foreign ABIs.
         assert_eq!(prog[1].k, AUDIT_ARCH);
         assert_eq!(prog[2].k, RET_KILL);
+    }
+
+    #[test]
+    fn x32_numbers_are_killed_before_any_comparison_and_the_abi_floor_cannot_be_lowered() {
+        let prog = program();
+        assert_eq!((prog[3].code, prog[3].k), (LD_W_ABS, OFF_NR));
+        assert_eq!((prog[4].code, prog[4].k), (JSET_K, X32_SYSCALL_BIT));
+        let target = 4 + 1 + prog[4].jt as usize;
+        assert_eq!((prog[target].code, prog[target].k), (RET_K, RET_KILL));
+        assert_eq!(Profile::default().effective_min_abi(), MIN_LANDLOCK_ABI);
+        let lower = Profile {
+            min_abi: 3,
+            ..Profile::default()
+        };
+        assert_eq!(lower.effective_min_abi(), MIN_LANDLOCK_ABI);
+        let higher = Profile {
+            min_abi: 9,
+            ..Profile::default()
+        };
+        assert_eq!(higher.effective_min_abi(), 9);
     }
 
     #[test]

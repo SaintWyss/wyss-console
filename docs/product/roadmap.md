@@ -159,6 +159,11 @@ not fulfillment of final acceptance.
 
 ### M5 — Boundaries, B1 feasibility and concurrency
 
+> **Engineering state (2026-10-24):** the fixtures, the constrained B1 candidate and the contracts exist on
+> `feat/m5-boundaries-concurrency` ([record](../acceptance/m5-engineering-2026-10-24.md)); capacity stays 1, B1 and FX-H01 stay
+> NOT_PROVEN, nothing is released. What remains is evidence and owner decisions, not more fixtures: provider refresh evidence per
+> provider, a trusted capture from a real repository, the `PENDING` publication, a reviewed implementation, and OD02.
+
 Two separate tracks: (a) qualify F8 capacity above1 with per-generation isolation,
 fairness, separate staging/catalogues, real provider shared-state/refresh compatibility
 and reference-PC resource measurements; (b) resolve useful B1/auth/egress and protected

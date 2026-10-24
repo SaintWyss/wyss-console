@@ -1164,20 +1164,30 @@ impl Engine {
                 verdicts.push((session.clone(), "budget_exceeded", Some(v.key.to_owned())));
             } else if self.scheduler.is_faulted(session) {
                 verdicts.push((session.clone(), "transport_failed", None));
-            } else if live.turn.is_some()
-                && live.interrupt_sent.is_some_and(|at| {
-                    u64::try_from(now.saturating_duration_since(at).as_millis()).unwrap_or(u64::MAX)
-                        > interrupt_answer
-                })
-            {
-                verdicts.push((
-                    session.clone(),
-                    "budget_exceeded",
-                    Some("interrupt_answer_ms".to_owned()),
-                ));
             }
         }
         self.pump(now_ms, &mut verdicts);
+        // A provider asked to interrupt gets its time, and the frames it has already sent are
+        // looked at first: they may be the very answer, read from its pipe this poll and still
+        // queued for the authority. This runs after the pump for that reason.
+        for (session, live) in &self.live {
+            if live.phase == Phase::Stopping || verdicts.iter().any(|(s, _, _)| s == session) {
+                continue;
+            }
+            if let (Some(_), Some(sent)) = (live.turn.as_ref(), live.interrupt_sent) {
+                let frames_waiting = self
+                    .scheduler
+                    .queued_bytes(session)
+                    .is_some_and(|(control, data)| control > 0 || data > 0);
+                if interrupt_unanswered(sent, now, interrupt_answer, frames_waiting) {
+                    verdicts.push((
+                        session.clone(),
+                        "budget_exceeded",
+                        Some("interrupt_answer_ms".to_owned()),
+                    ));
+                }
+            }
+        }
         for (session, live) in &self.live {
             if live.observed_dead.is_some()
                 && live.drain_empty
@@ -1326,6 +1336,14 @@ impl Engine {
     pub fn unrecorded_exits(&self) -> usize {
         self.unrecorded.len()
     }
+}
+
+/// Whether a provider that was asked to interrupt has used up its time. Frames it already sent that
+/// are still waiting for the authority are looked at first, because one of them may be the answer,
+/// but only for as long again: a provider that floods cannot hold the deadline off for ever.
+fn interrupt_unanswered(sent: Instant, now: Instant, answer_ms: u64, frames_waiting: bool) -> bool {
+    let waited = u64::try_from(now.saturating_duration_since(sent).as_millis()).unwrap_or(u64::MAX);
+    waited > answer_ms && (!frames_waiting || waited > answer_ms.saturating_mul(2))
 }
 
 #[cfg(test)]

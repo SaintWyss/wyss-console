@@ -48,6 +48,8 @@ pub enum PlanError {
     TooBroad,
     HelperNotTrusted,
     NameNotPlain,
+    /// The workspace is not the object the plan was made for.
+    WorkspaceChanged,
     Io,
 }
 
@@ -60,6 +62,7 @@ impl PlanError {
             Self::TooBroad => "too_broad",
             Self::HelperNotTrusted => "helper_not_trusted",
             Self::NameNotPlain => "name_not_plain",
+            Self::WorkspaceChanged => "workspace_changed",
             Self::Io => "io",
         }
     }
@@ -75,7 +78,11 @@ pub struct Plan {
     pub broker_dir: Option<PathBuf>,
     /// Layers that must hold or the worker does not run.
     pub require: u8,
+    /// A Landlock ABI floor above `confine::MIN_LANDLOCK_ABI`; it can never be lower.
     pub min_abi: u8,
+    /// The object the workspace must be (device, inode), when the plan was made for a materialized
+    /// workspace: a directory swapped in under the same path is refused.
+    pub workspace_identity: Option<(u64, u64)>,
 }
 
 /// A command ready to spawn, and the descriptors it needs to stay open until it has been.
@@ -100,16 +107,49 @@ fn plain(p: &Path) -> bool {
             .all(|c| !matches!(c, std::path::Component::ParentDir))
 }
 
-/// A directory that is the worker's to have: not a link, a real directory, ours, private.
-pub(crate) fn private_directory(p: &Path) -> Result<PathBuf, PlanError> {
+/// A directory held open: the object that was checked is the object that is used.
+pub(crate) struct Pinned {
+    pub fd: std::os::fd::OwnedFd,
+    /// The real path of that very object, read from the kernel through the descriptor.
+    pub real: PathBuf,
+    pub dev: u64,
+    pub ino: u64,
+}
+
+/// A directory that is the worker's to have: opened without following a link, a real directory,
+/// ours, private, and not a place that holds the user's own state or the machine's. The checks are
+/// made on the open descriptor (and on the path the kernel reports for it), so a path component
+/// swapped after this returns changes nothing: the descriptor is what is handed to `bwrap`.
+pub(crate) fn pin_directory(p: &Path) -> Result<Pinned, PlanError> {
+    use std::os::fd::{AsRawFd, FromRawFd};
     if !plain(p) {
         return Err(PlanError::PathNotPlain);
     }
-    let meta = std::fs::symlink_metadata(p).map_err(|_| PlanError::NotAPrivateDirectory)?;
+    let c = std::ffi::CString::new(p.as_os_str().as_encoded_bytes())
+        .map_err(|_| PlanError::PathNotPlain)?;
+    // SAFETY: a NUL-terminated path and integer flags.
+    let raw = unsafe {
+        nix::libc::open(
+            c.as_ptr(),
+            nix::libc::O_RDONLY
+                | nix::libc::O_DIRECTORY
+                | nix::libc::O_NOFOLLOW
+                | nix::libc::O_CLOEXEC,
+        )
+    };
+    if raw < 0 {
+        return Err(PlanError::NotAPrivateDirectory);
+    }
+    // SAFETY: a descriptor just opened and owned by nobody else.
+    let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) };
+    let meta = File::from(fd.try_clone().map_err(|_| PlanError::Io)?)
+        .metadata()
+        .map_err(|_| PlanError::Io)?;
     if !meta.is_dir() || meta.uid() != me() || meta.permissions().mode() & 0o077 != 0 {
         return Err(PlanError::NotAPrivateDirectory);
     }
-    let real = std::fs::canonicalize(p).map_err(|_| PlanError::Io)?;
+    let real = std::fs::read_link(format!("/proc/self/fd/{}", fd.as_raw_fd()))
+        .map_err(|_| PlanError::Io)?;
     if real != p {
         // A path that goes through a link names a different place than it reads as.
         return Err(PlanError::PathNotPlain);
@@ -140,7 +180,12 @@ pub(crate) fn private_directory(p: &Path) -> Result<PathBuf, PlanError> {
             return Err(PlanError::TooBroad);
         }
     }
-    Ok(real)
+    Ok(Pinned {
+        fd,
+        real,
+        dev: meta.dev(),
+        ino: meta.ino(),
+    })
 }
 
 fn nested(a: &Path, b: &Path) -> bool {
@@ -154,8 +199,16 @@ impl Plan {
             home: None,
             broker_dir: None,
             require: layer::ALL,
-            min_abi: 0,
+            min_abi: super::confine::MIN_LANDLOCK_ABI,
+            workspace_identity: None,
         }
+    }
+
+    /// A plan for the tree `materialize` built, bound to that very directory.
+    pub fn for_workspace(ws: &super::workspace::Workspace) -> Self {
+        let mut plan = Self::new(ws.path().to_path_buf());
+        plan.workspace_identity = Some(ws.identity());
+        plan
     }
 
     /// The command line. `shim` and every file in `programs` are verified the way the parser helper
@@ -170,16 +223,18 @@ impl Plan {
         args: &[OsString],
         receipt_fd: Option<&File>,
     ) -> Result<Launch, PlanError> {
-        let workspace = private_directory(&self.workspace)?;
-        let home = self.home.as_deref().map(private_directory).transpose()?;
-        let broker = self
-            .broker_dir
-            .as_deref()
-            .map(private_directory)
-            .transpose()?;
-        let mut dirs = vec![&workspace];
-        dirs.extend(home.iter());
-        dirs.extend(broker.iter());
+        let workspace = pin_directory(&self.workspace)?;
+        if self
+            .workspace_identity
+            .is_some_and(|id| id != (workspace.dev, workspace.ino))
+        {
+            return Err(PlanError::WorkspaceChanged);
+        }
+        let home = self.home.as_deref().map(pin_directory).transpose()?;
+        let broker = self.broker_dir.as_deref().map(pin_directory).transpose()?;
+        let mut dirs = vec![&workspace.real];
+        dirs.extend(home.iter().map(|h| &h.real));
+        dirs.extend(broker.iter().map(|b| &b.real));
         for (i, a) in dirs.iter().enumerate() {
             for b in &dirs[i + 1..] {
                 if nested(a, b) {
@@ -268,16 +323,21 @@ impl Plan {
             ]);
             held.push(file);
         }
-        a.extend([
-            "--bind".into(),
-            workspace.clone().into_os_string(),
-            WORK.into(),
-        ]);
-        if let Some(h) = &home {
-            a.extend(["--bind".into(), h.clone().into_os_string(), HOME.into()]);
-        }
-        if let Some(b) = &broker {
-            a.extend(["--bind".into(), b.clone().into_os_string(), BROKER.into()]);
+        // The directories are bound from the descriptors that were checked, not from their paths.
+        for (pinned, dest) in [
+            (Some(&workspace), WORK),
+            (home.as_ref(), HOME),
+            (broker.as_ref(), BROKER),
+        ] {
+            if let Some(p) = pinned {
+                let file = File::from(p.fd.try_clone().map_err(|_| PlanError::Io)?);
+                a.extend([
+                    "--bind-fd".into(),
+                    file.as_raw_fd().to_string().into(),
+                    dest.into(),
+                ]);
+                held.push(file);
+            }
         }
         let home_value = if home.is_some() { HOME } else { "/tmp" };
         for (k, v) in [

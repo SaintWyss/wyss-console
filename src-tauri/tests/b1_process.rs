@@ -8,7 +8,8 @@
 //! the user's home is named or touched, and no network packet leaves the machine.
 //!
 //! Where the machine cannot run a check (no user namespaces, Landlock older than ABI 6) the test
-//! prints `NOT_RUN: <why>` and passes without claiming anything: the gate stays where it was.
+//! prints `NOT_RUN: <why>`, records it in `b1-not-run.txt` and passes without claiming anything (the
+//! gate stays where it was); with `WYSS_B1_REQUIRE_RUN=1`, as in the acceptance run, it fails instead.
 #![cfg(all(target_os = "linux", feature = "b1-fixture"))]
 
 use serde_json::{Value, json};
@@ -110,7 +111,7 @@ impl Rig {
         workspace::materialize(&self.dir("tasks"), &snapshot, &context).expect("materialized")
     }
     fn plan(&self, ws: &Workspace) -> Plan {
-        Plan::new(ws.path().to_path_buf())
+        Plan::for_workspace(ws)
     }
     fn run(&self, plan: &Plan, worker: &str, args: &[&str]) -> Ran {
         self.run_with(plan, worker, args, &[])
@@ -255,24 +256,82 @@ fn outside(args: &[&str]) -> Probe {
     Probe::from(finish(child, Duration::from_secs(10)))
 }
 
-/// `NOT_RUN` when this machine cannot run user namespaces or lacks Landlock ABI 6.
+/// A check this machine cannot run. It is printed, **appended to a file** (cargo hides the output of a
+/// passing test) and, when `WYSS_B1_REQUIRE_RUN=1` (the acceptance run), it fails instead: a skipped
+/// attack is never a green one there.
+fn not_run(why: &str) {
+    eprintln!("NOT_RUN: {why}");
+    let dir = std::env::var_os("CARGO_TARGET_TMPDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let _ = fs::create_dir_all(&dir);
+    if let Ok(mut f) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("b1-not-run.txt"))
+    {
+        let _ = writeln!(f, "{why}");
+    }
+    assert!(
+        std::env::var_os("WYSS_B1_REQUIRE_RUN").is_none(),
+        "WYSS_B1_REQUIRE_RUN is set and this check could not run: {why}"
+    );
+}
+
+/// `false` (after recording `NOT_RUN`) only when the *machine* lacks something: Landlock ABI 6 or user
+/// namespaces, tried with a bare `bwrap` that does not involve the candidate. Once the machine is
+/// shown capable, a launch that does not work is a regression of the candidate and **fails**.
 fn machine_ok(rig: &Rig) -> bool {
     let abi = confine::landlock_abi();
-    if abi < 6 {
-        eprintln!("NOT_RUN: Landlock ABI {abi} < 6 (scoped sockets/signals not available)");
+    if abi < confine::MIN_LANDLOCK_ABI {
+        not_run(&format!(
+            "Landlock ABI {abi} < {}",
+            confine::MIN_LANDLOCK_ABI
+        ));
         return false;
     }
-    let ws = rig.dir("probe-ws");
-    let mut plan = Plan::new(ws);
-    plan.require = layer::ALL;
+    let bare = Command::new("/usr/bin/bwrap")
+        .env_clear()
+        .args([
+            "--unshare-user",
+            "--unshare-pid",
+            "--unshare-net",
+            "--ro-bind",
+            "/usr",
+            "/usr",
+            "--symlink",
+            "usr/bin",
+            "/bin",
+            "--symlink",
+            "usr/lib",
+            "/lib",
+            "--symlink",
+            "usr/lib",
+            "/lib64",
+            "/usr/bin/true",
+        ])
+        .stdin(Stdio::null())
+        .output();
+    if !bare.as_ref().is_ok_and(|o| o.status.success()) {
+        not_run(&format!(
+            "this machine cannot make user namespaces with bwrap: {:?}",
+            bare.map(|o| String::from_utf8_lossy(&o.stderr).trim().to_owned())
+        ));
+        return false;
+    }
+    // From here the machine can run the candidate: a failure below is the candidate's.
+    let ws = rig.workspace(PROJECT);
+    let plan = rig.plan(&ws);
     let p = rig.probe(&plan, &["who"]);
-    if p.value.is_none() {
-        eprintln!(
-            "NOT_RUN: cannot start a rootless sandbox here: {}",
-            p.stderr.trim()
-        );
-        return false;
-    }
+    assert!(
+        p.value.is_some(),
+        "the machine can run bwrap and Landlock ABI >= 6, but the candidate did not start a worker: \
+         code={:?} signal={:?} stderr={}",
+        p.code,
+        p.signal,
+        p.stderr.trim()
+    );
+    ws.remove();
     true
 }
 
@@ -550,7 +609,7 @@ fn start_authority(rig: &Rig) -> Option<Authority> {
 fn the_authority_socket_is_open_to_any_process_of_the_account_and_not_to_a_b1_worker() {
     let rig = rig!("authority");
     let Some(authority) = start_authority(&rig) else {
-        eprintln!("NOT_RUN: a private authority did not start here");
+        not_run("a private authority did not start here");
         return;
     };
     // The U boundary, as it is: a client of the same account connects and gets a session. This is
@@ -635,7 +694,9 @@ fn abstract_sockets_pathname_sockets_files_and_the_environment_of_the_host_are_n
     );
     let inside = rig.probe(&plan, &["read", signer.to_str().unwrap()]);
     assert!(inside.denied() && inside.errno() == 2, "{inside:?}");
-    // Home, runtime, container and bus paths are not in the worker's view at all.
+    // Home, runtime, container and bus paths are not in the worker's view at all. (Control: the ones
+    // that exist on this machine are visible unconfined.)
+    assert!(outside(&["exists", "/home"]).ok() && outside(&["exists", "/run"]).ok());
     for path in [
         "/home",
         "/run",
@@ -684,7 +745,10 @@ fn abstract_sockets_pathname_sockets_files_and_the_environment_of_the_host_are_n
         3,
         "ESRCH: no such process here"
     );
-    assert!(outside(&["kill", &me, "0"]).ok() || true);
+    assert!(
+        outside(&["kill", &me, "0"]).ok(),
+        "control: an unconfined process can signal it"
+    );
     ws.remove();
 }
 
@@ -708,7 +772,7 @@ fn the_ways_out_of_a_sandbox_end_the_process_or_are_refused() {
     // Control: an unconfined process of this account can make a user namespace.
     let free = outside(&["syscall", "unshare-user"]);
     assert!(free.ok(), "control: {free:?}");
-    for action in [
+    let killed = [
         "unshare-user",
         "unshare-net",
         "mount",
@@ -718,15 +782,27 @@ fn the_ways_out_of_a_sandbox_end_the_process_or_are_refused() {
         "process_vm_readv",
         "setns",
         "clone-newuser",
-    ] {
+        "x32-socket",
+    ];
+    for action in killed {
         let p = rig.probe(&plan, &["syscall", action]);
         assert!(p.killed_by_seccomp(), "{action}: {p:?}");
+        // Control: the same call without the filter is answered by the kernel, not by SIGSYS, so the
+        // kill above is the filter's. (`clone-newuser` is left out: unconfined it forks the probe.)
+        if action != "clone-newuser" {
+            let free = outside(&["syscall", action]);
+            assert!(
+                !free.killed_by_seccomp() && free.value.is_some(),
+                "control {action}: {free:?}"
+            );
+        }
     }
     // clone3 cannot be inspected, so it is refused as unsupported and libc falls back to clone.
     let p = rig.probe(&plan, &["syscall", "clone3"]);
     assert_eq!(p.errno(), 38, "ENOSYS: {p:?}");
     // Tracing another process, and making device nodes or FIFOs.
     assert!(rig.probe(&plan, &["ptrace", "1"]).killed_by_seccomp());
+    assert!(!outside(&["ptrace", "1"]).killed_by_seccomp(), "control");
     assert!(
         rig.probe(&plan, &["mknod-dev", "/work/null"])
             .killed_by_seccomp()
@@ -739,6 +815,18 @@ fn the_ways_out_of_a_sandbox_end_the_process_or_are_refused() {
     // Control: without the filter both work for this account.
     let node = rig.dir("host").join("control-fifo");
     assert!(outside(&["mkfifo", node.to_str().unwrap()]).ok());
+    // Sockets: one family only, for `socket` and for `socketpair`.
+    for family in ["2", "10", "16", "17"] {
+        assert_eq!(
+            rig.probe(&plan, &["socketpair", family]).errno(),
+            1,
+            "family {family}"
+        );
+    }
+    assert!(
+        rig.probe(&plan, &["socketpair", "1"]).ok(),
+        "AF_UNIX pairs are what tools use"
+    );
     // What tools do need still works.
     assert!(rig.probe(&plan, &["status"]).ok());
     ws.remove();
@@ -858,8 +946,8 @@ fn a_selected_file_that_was_a_hardlink_to_a_forbidden_signer_becomes_a_distinct_
 }
 
 #[test]
-fn a_tree_whose_files_are_aliased_is_refused_when_it_is_built_and_unselected_content_never_enters()
-{
+fn unselected_content_never_enters_and_a_link_that_leaves_the_tree_is_refused_before_anything_is_built()
+ {
     let rig = rig!("alias");
     let ws = rig.workspace(PROJECT);
     // Every file of a fresh workspace has one name; an unselected path is simply absent.
@@ -867,10 +955,41 @@ fn a_tree_whose_files_are_aliased_is_refused_when_it_is_built_and_unselected_con
         assert_eq!(fs::metadata(ws.path().join(e)).unwrap().nlink(), 1);
     }
     assert!(!ws.path().join("signer.key").exists());
-    // A link in the snapshot that leaves the tree is refused at build time.
-    let (snap, ctx) = snapshot(PROJECT);
-    assert!(snap.verify(&ctx).is_ok());
     ws.remove();
+    // A selection whose symlink target climbs out of the tree, or names an absolute path, never
+    // becomes a snapshot: the contract refuses it, so nothing could be materialized from it.
+    for target in [
+        &b"../../escape"[..],
+        b"/etc/passwd",
+        b"a/../../b",
+        b".git/config",
+    ] {
+        let link = serde_json::to_value(
+            wyss_console::contracts::b1::path::B1LinkTarget::from_bytes(target).unwrap(),
+        )
+        .unwrap();
+        let selection: B1SourceSelectionV1 = typed(json!({
+            "schema_version": 1, "task_id": TASK,
+            "selection_id": "22222222-2222-4222-8222-222222222222",
+            "repo_id": "33333333-3333-4333-8333-333333333333",
+            "base_commit_oid": BASE, "repo_object_format": "sha1",
+            "admitted_overlay": [{
+                "path": serde_json::to_value(B1RelPath::from_bytes(b"link").unwrap()).unwrap(),
+                "operation": "add", "origin": "untracked", "expected_base_oid": null,
+                "rename_from": null, "content": {"kind": "symlink", "target": link},
+                "reviewed_sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+            }],
+            "policy_id": "44444444-4444-4444-8444-444444444444",
+            "policy_sha256": "abababababababababababababababababababababababababababababababab",
+            "issued_at": "2026-10-16T10:00:00Z"
+        }));
+        assert_eq!(
+            selection.validate().expect_err("an unsafe link").code,
+            B1ErrorCode::LinkTargetUnsafe,
+            "{}",
+            String::from_utf8_lossy(target)
+        );
+    }
 }
 
 // ---- 8. quiescence (CG-10) -------------------------------------------------------------------
@@ -967,8 +1086,9 @@ git log --oneline | wc -l
     let _ = &export;
     // Quarantine: published once, to a store that is not the source and not the workspace.
     let store = rig.dir("quarantine");
-    let first = workspace::quarantine(&store, &export).expect("published");
-    let again = workspace::quarantine(&store, &export).expect_err("a second publication");
+    let first = workspace::quarantine(&store, &export, &[ws.path()]).expect("published");
+    let again =
+        workspace::quarantine(&store, &export, &[ws.path()]).expect_err("a second publication");
     assert_eq!(again.code, B1ErrorCode::QuarantineCasConflict);
     let record = store.join(TASK).join("1").join("export.json");
     assert!(record.is_file());
@@ -1244,8 +1364,13 @@ fn the_container_daemon_and_admin_delegation_are_reported_as_facts_and_are_not_i
         assert!(c.denied() && c.errno() == 2, "{path}: {c:?}");
     }
     // sudo and setuid helpers cannot raise anything inside: no new privileges, no capabilities.
-    let ran = rig.run(&plan, "/usr/bin/sudo", &["-n", "true"]);
-    assert_ne!(ran.status.code(), Some(0));
+    if Path::new("/usr/bin/sudo").exists() {
+        let ran = rig.run(&plan, "/usr/bin/sudo", &["-n", "true"]);
+        assert_ne!(ran.status.code(), Some(0));
+        assert!(!ran.stdout.contains("root"), "{}", ran.stdout);
+    } else {
+        not_run("no sudo on this machine to try");
+    }
     ws.remove();
 }
 
@@ -1281,10 +1406,192 @@ fn a_plan_over_the_account_itself_or_with_a_helper_anyone_can_edit_is_refused() 
 }
 
 #[test]
-fn the_digest_helpers_the_tests_rely_on_agree_with_the_standard_tool() {
+fn the_digest_the_tests_rely_on_matches_the_published_sha256_test_vector() {
     let sha: Sha256Hex = digest::raw_sha256(b"abc");
     assert_eq!(
         sha.as_str(),
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     );
+}
+
+// ---- 13. the exporter and the quarantine, without a sandbox (they run after the worker) --------
+
+use wyss_console::b1::workspace::Export;
+
+/// A workspace edited the way a finished worker would have, and its export.
+fn edited(rig: &Rig) -> (Workspace, Export) {
+    let ws = rig.workspace(PROJECT);
+    fs::write(ws.path().join("notes.txt"), "edited\n").unwrap();
+    fs::create_dir_all(ws.path().join("out")).unwrap();
+    fs::write(ws.path().join("out/new.txt"), "new\n").unwrap();
+    fs::remove_file(ws.path().join("remove-me.txt")).unwrap();
+    let export = ws.export().expect("an export");
+    export.verify().unwrap();
+    (ws, export)
+}
+
+#[test]
+fn the_quarantine_takes_exactly_the_content_the_record_names_and_writes_nothing_before_it_has_checked()
+ {
+    let rig = Rig::new("blobs");
+    let (ws, export) = edited(&rig);
+    let store = rig.dir("quarantine");
+    let extra = digest::raw_sha256(b"not named by any entry");
+    let mut with_extra = export.blobs.clone();
+    with_extra.push((extra.clone(), b"not named by any entry".to_vec()));
+    let bad = |blobs: Vec<(Sha256Hex, Vec<u8>)>| Export {
+        record: export.record.clone(),
+        blobs,
+        skipped_git_directories: 0,
+    };
+    // An extra blob, a missing one, a duplicate and a blob whose bytes are not its digest.
+    let mut duplicated = export.blobs.clone();
+    duplicated.push(export.blobs[0].clone());
+    let mut corrupt = export.blobs.clone();
+    corrupt[0].1.push(b'!');
+    let mut missing = export.blobs.clone();
+    missing.pop();
+    for (what, blobs) in [
+        ("extra", with_extra),
+        ("duplicate", duplicated),
+        ("corrupt", corrupt),
+        ("missing", missing),
+    ] {
+        let e = workspace::quarantine(&store, &bad(blobs), &[ws.path()]).expect_err(what);
+        assert!(
+            matches!(
+                e.code,
+                B1ErrorCode::ExportDigestMismatch
+                    | B1ErrorCode::ContentDigestMismatch
+                    | B1ErrorCode::ContentSizeMismatch
+            ),
+            "{what}: {e}"
+        );
+        assert_eq!(
+            fs::read_dir(&store).unwrap().count(),
+            0,
+            "{what}: something was written before the check"
+        );
+    }
+    // The real one goes in, once, with the record in place by rename (no half-written record).
+    workspace::quarantine(&store, &export, &[ws.path()]).unwrap();
+    let dir = store.join(TASK).join("1");
+    assert!(dir.join("export.json").is_file());
+    assert!(!dir.join("export.json.partial").exists());
+    let mut names: Vec<_> = fs::read_dir(dir.join("blobs"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    let mut expected: Vec<_> = export
+        .blobs
+        .iter()
+        .map(|(s, _)| s.as_str().to_owned())
+        .collect();
+    expected.sort();
+    assert_eq!(names, expected, "nothing else is in the store");
+    ws.remove();
+}
+
+#[test]
+fn the_quarantine_does_not_follow_a_link_in_its_store_and_stays_apart_from_the_workspace() {
+    let rig = Rig::new("store");
+    let (ws, export) = edited(&rig);
+    let elsewhere = rig.dir("elsewhere");
+    // A store that is a link is not a store.
+    let link = rig.root.join("store-link");
+    std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+    assert!(workspace::quarantine(&link, &export, &[ws.path()]).is_err());
+    // A task directory that is a link inside a real store leads nowhere.
+    let store = rig.dir("quarantine");
+    std::os::unix::fs::symlink(&elsewhere, store.join(TASK)).unwrap();
+    assert!(workspace::quarantine(&store, &export, &[ws.path()]).is_err());
+    assert_eq!(
+        fs::read_dir(&elsewhere).unwrap().count(),
+        0,
+        "nothing was written through a link"
+    );
+    // A store inside the workspace, or around it, is refused.
+    let inside = ws.path().join("store");
+    fs::DirBuilder::new().mode(0o700).create(&inside).unwrap();
+    assert!(workspace::quarantine(&inside, &export, &[ws.path()]).is_err());
+    assert!(workspace::quarantine(&rig.root, &export, &[ws.path()]).is_err());
+    ws.remove();
+}
+
+#[test]
+fn only_one_of_many_concurrent_publishers_of_a_task_and_generation_wins() {
+    let rig = Rig::new("cas");
+    let (ws, export) = edited(&rig);
+    let store = rig.dir("quarantine");
+    let export = Arc::new(export);
+    let results: Vec<_> = (0..8)
+        .map(|_| {
+            let (store, export) = (store.clone(), export.clone());
+            thread::spawn(move || workspace::quarantine(&store, &export, &[]))
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(|h| h.join().unwrap())
+        .collect();
+    let won = results.iter().filter(|r| r.is_ok()).count();
+    assert_eq!(won, 1, "{results:?}");
+    for r in results.iter().filter(|r| r.is_err()) {
+        let code = r.as_ref().unwrap_err().code;
+        assert!(
+            matches!(
+                code,
+                B1ErrorCode::QuarantineCasConflict | B1ErrorCode::QuarantineRecoveryNeeded
+            ),
+            "{code:?}"
+        );
+    }
+    // The winner's publication is whole.
+    assert!(store.join(TASK).join("1").join("export.json").is_file());
+    ws.remove();
+}
+
+#[test]
+fn a_tree_of_millions_of_nodes_is_refused_by_count_before_it_is_read() {
+    let rig = Rig::new("nodes");
+    let ws = rig.workspace(PROJECT);
+    // More directories than any export may contain, all empty: they are not entries, but they are
+    // work, and the exporter counts them.
+    let many = ws.path().join("many");
+    fs::create_dir(&many).unwrap();
+    for i in 0..17_000u32 {
+        fs::create_dir(many.join(format!("d{i}"))).unwrap();
+    }
+    let started = Instant::now();
+    let e = ws.export().expect_err("too many nodes");
+    assert_eq!(e.code, B1ErrorCode::LimitExceeded);
+    assert!(started.elapsed() < Duration::from_secs(10));
+    ws.remove();
+}
+
+#[test]
+fn a_plan_made_for_a_workspace_refuses_a_different_directory_at_the_same_path() {
+    let rig = Rig::new("swap");
+    let ws = rig.workspace(PROJECT);
+    let plan = rig.plan(&ws);
+    assert!(
+        plan.launch(&rig.shim, &[], "/usr/bin/true", &[], None)
+            .is_ok()
+    );
+    assert!(
+        plan.min_abi >= confine::MIN_LANDLOCK_ABI,
+        "the default floor is ABI 6"
+    );
+    // Move the real tree away and put another private directory where it was.
+    let away = rig.root.join("moved-away");
+    fs::rename(ws.path(), &away).unwrap();
+    fs::DirBuilder::new().mode(0o700).create(ws.path()).unwrap();
+    assert_eq!(
+        plan.launch(&rig.shim, &[], "/usr/bin/true", &[], None)
+            .err(),
+        Some(PlanError::WorkspaceChanged)
+    );
+    fs::remove_dir(ws.path()).unwrap();
+    fs::rename(&away, ws.path()).unwrap();
+    ws.remove();
 }
