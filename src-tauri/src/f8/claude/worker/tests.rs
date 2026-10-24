@@ -1068,6 +1068,48 @@ fn a_finished_action_is_reaped_and_the_next_turn_is_admitted() {
     );
 }
 
+/// Found in the integrated desktop: an interrupted turn kept offering its held command.
+#[test]
+fn an_action_still_waiting_when_its_turn_ends_is_withdrawn_in_the_log_and_offers_no_decision() {
+    // The turn is interrupted while a command waits for the owner.
+    let mut r = rig(Profile::LocalTools);
+    r.local_turn();
+    r.propose("act-1", "run_command", json!({"command":"echo hi"}));
+    r.notices();
+    assert_eq!(r.w.approval_decisions("claude-act-1").len(), 3);
+    r.w.send(br#"{"method":"turn/interrupt"}"#).unwrap();
+    let mut ev = fixture_event(TOOLS, "turn_result");
+    ev["turn"] = json!("t1");
+    ev["terminal_reason"] = json!("aborted_streaming");
+    r.bridge.push(ev);
+    r.bridge.push(json!({"v":1,"e":"turn_idle","turn":"t1"}));
+    assert_eq!(r.kinds(), ["turn_interrupted"]);
+    let state = |r: &Rig| r.w.provider_report().unwrap().actions[0].state;
+    assert_eq!(state(&r), ActionState::Cancelled);
+    assert!(r.w.approval_decisions("claude-act-1").is_empty());
+    assert!(r.exec.0.lock().unwrap().dispatched.is_empty());
+    // And a decision for it is refused: there is nothing left to decide.
+    assert_eq!(r.crit("claude-act-1", "accept"), Err(E::ApprovalNotFound));
+
+    // The same when the runtime is stopped (or fails) with the command still held.
+    let mut r = rig(Profile::LocalTools);
+    r.local_turn();
+    r.propose("act-1", "run_command", json!({"command":"echo hi"}));
+    r.notices();
+    r.w.begin_stop(Instant::now());
+    assert_eq!(state(&r), ActionState::Cancelled);
+
+    // An action that was decided keeps what was decided.
+    let mut r = rig(Profile::LocalTools);
+    r.local_turn();
+    r.propose("act-1", "run_command", json!({"command":"echo hi"}));
+    r.notices();
+    r.crit("claude-act-1", "decline").unwrap();
+    r.bridge.push(json!({"v":1,"e":"turn_idle","turn":"t1"}));
+    let _ = r.w.inbound(16);
+    assert_eq!(state(&r), ActionState::Declined);
+}
+
 #[test]
 fn a_second_answer_for_the_same_approval_dispatches_nothing() {
     let mut r = rig(Profile::LocalTools);

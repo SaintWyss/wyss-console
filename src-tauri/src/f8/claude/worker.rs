@@ -452,10 +452,25 @@ impl<W: Worker> ClaudeWorker<W> {
         self.detail.get_or_insert(d);
         self.fail(e)
     }
+    /// Actions still waiting for a decision when their turn (or the runtime) ends are withdrawn, and
+    /// the action log says so: found in the integrated desktop, where an interrupted turn kept
+    /// showing its command as "waiting for your decision" with live buttons.
+    fn withdraw_undecided(&mut self) {
+        let items: Vec<String> = self
+            .approvals
+            .iter()
+            .filter(|(_, a)| a.decision.is_none() && !a.inflight && !a.ended)
+            .map(|(item, _)| item.clone())
+            .collect();
+        for item in items {
+            self.log_action(&item, "", ActionState::Cancelled, None);
+        }
+    }
     fn fail<T>(&mut self, e: E) -> ControlResult<T> {
         self.stage = Stage::Failed;
         self.failure.get_or_insert(e);
         // Nothing held survives a failure: the provider can no longer be told anything.
+        self.withdraw_undecided();
         self.approvals.clear();
         Err(e)
     }
@@ -699,6 +714,7 @@ impl<W: Worker> ClaudeWorker<W> {
                 self.turn = None;
                 // Held approvals belong to a turn that no longer exists; an in-flight dispatch
                 // keeps running to its own end and is reported when it finishes.
+                self.withdraw_undecided();
                 self.approvals.retain(|_, a| a.inflight);
                 if let Some(notice) = terminal {
                     return self.notice(notice);
@@ -1245,6 +1261,7 @@ impl<W: Worker> Worker for ClaudeWorker<W> {
     fn begin_stop(&mut self, now: Instant) {
         self.stage = Stage::Failed;
         self.failure.get_or_insert(E::InvalidTransition);
+        self.withdraw_undecided();
         self.approvals.clear();
         if self.turn.take().is_some() {
             self.ledger.end_turn(Completeness::Interrupted);
