@@ -32,12 +32,21 @@ use sha2::{Digest, Sha256};
 use std::{
     fs,
     io::Write,
-    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
-    path::{Path, PathBuf},
+    os::unix::fs::PermissionsExt,
+    path::Path,
     time::{Duration, Instant},
 };
 
 pub const MAX_OUTPUT: usize = 16 * 1024;
+/// The largest existing file a write will compare itself against.
+const MAX_WRITE_TARGET: usize = 16 * 1024 * 1024;
+/// Where `write_file_with` is, for a test that has to act at that instant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteStep {
+    AfterFirstHash,
+    AfterTemp,
+    BeforeRename,
+}
 /// What the runner is told; the authority's own deadline is longer, so a runner that is stuck
 /// is distinguished from a command that was merely slow.
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
@@ -234,6 +243,26 @@ impl SandboxExecutor {
     }
 
     fn write_file(w: ApprovedWrite) -> Outcome {
+        Self::write_file_with(w, &mut |_| ())
+    }
+
+    /// The write, with `hook` told where it is, so a test can change the world at exactly the
+    /// point a concurrent writer would.
+    ///
+    /// The directories above the file are resolved **once, by descriptor, without following a link**,
+    /// and every later step is relative to the last descriptor: replacing a parent with a link or
+    /// moving it cannot redirect the write. The file is hashed, the replacement is prepared next to
+    /// it, and the file is hashed again immediately before an atomic `renameat`. What is *not*
+    /// excluded: a different writer changing the file itself in the instant between that last check
+    /// and the rename, which replaces it; the previous contents are not kept. A writer that is the
+    /// same user can always do the same without any of this.
+    fn write_file_with(w: ApprovedWrite, hook: &mut dyn FnMut(WriteStep)) -> Outcome {
+        use nix::{
+            fcntl::{OFlag, openat, renameat},
+            sys::stat::{FchmodatFlags, Mode, SFlag, fchmodat, fstat, fstatat},
+            unistd::{UnlinkatFlags, unlinkat},
+        };
+        use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
         let fail = |m: &str| Outcome::Failed(m.to_owned());
         if !path_is_plain(Path::new(&w.path))
             || touches_protected(&w.workspace, &w.path)
@@ -241,55 +270,139 @@ impl SandboxExecutor {
         {
             return fail("the path is no longer inside the workspace");
         }
-        let target = PathBuf::from(&w.path);
-        let current = match fs::symlink_metadata(&target) {
-            Ok(m) if m.is_file() && m.nlink() == 1 => Some(m),
-            Ok(_) => return fail("the target is not a plain file"),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(_) => return fail("the target cannot be inspected"),
+        let Ok(relative) = Path::new(&w.path).strip_prefix(&w.workspace) else {
+            return fail("the path is no longer inside the workspace");
         };
-        let actual = match &current {
-            Some(_) => match fs::read(&target) {
-                Ok(b) => Some(<[u8; 32]>::from(Sha256::digest(&b))),
-                Err(_) => return fail("the target cannot be read"),
-            },
-            None => None,
+        let Some(names) = relative
+            .components()
+            .map(|c| match c {
+                std::path::Component::Normal(n) => Some(n),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            return fail("the path is no longer inside the workspace");
         };
-        if actual != w.expected_old {
+        let Some((leaf, parents)) = names.split_last() else {
+            return fail("the path is no longer inside the workspace");
+        };
+        let directory = OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+        // The workspace, then each parent, by descriptor and without following a link.
+        let Ok(root) = nix::fcntl::open(Path::new(&w.workspace), directory, Mode::empty()) else {
+            return fail("the workspace cannot be opened");
+        };
+        // SAFETY: `open` just returned this descriptor and nothing else owns it.
+        let mut dir = unsafe { OwnedFd::from_raw_fd(root) };
+        let Ok(root_stat) = fstat(dir.as_raw_fd()) else {
+            return fail("the workspace cannot be inspected");
+        };
+        for name in parents {
+            let Ok(next) = openat(Some(dir.as_raw_fd()), *name, directory, Mode::empty()) else {
+                return fail("a directory above the file is not a plain directory");
+            };
+            // SAFETY: as above.
+            let next = unsafe { OwnedFd::from_raw_fd(next) };
+            match fstat(next.as_raw_fd()) {
+                Ok(m) if m.st_dev == root_stat.st_dev => dir = next,
+                _ => return fail("a directory above the file is on another filesystem"),
+            }
+        }
+        let dirfd = dir.as_raw_fd();
+        // Hashes what is there now: `Ok(None)` when nothing is, `Err` when it is not a plain file.
+        let read_hash = || -> Result<Option<[u8; 32]>, &'static str> {
+            match fstatat(Some(dirfd), *leaf, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) {
+                Err(nix::errno::Errno::ENOENT) => Ok(None),
+                Err(_) => Err("the target cannot be inspected"),
+                Ok(m)
+                    if SFlag::from_bits_truncate(m.st_mode) & SFlag::S_IFMT == SFlag::S_IFREG
+                        && m.st_nlink == 1 =>
+                {
+                    let fd = openat(
+                        Some(dirfd),
+                        *leaf,
+                        OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+                        Mode::empty(),
+                    )
+                    .map_err(|_| "the target cannot be read")?;
+                    // SAFETY: as above.
+                    let mut file = fs::File::from(unsafe { OwnedFd::from_raw_fd(fd) });
+                    let mut hasher = Sha256::new();
+                    let mut buffer = [0u8; 65536];
+                    let mut total = 0usize;
+                    loop {
+                        let n = std::io::Read::read(&mut file, &mut buffer)
+                            .map_err(|_| "the target cannot be read")?;
+                        if n == 0 {
+                            break;
+                        }
+                        total += n;
+                        if total > MAX_WRITE_TARGET {
+                            return Err("the target is too large to compare");
+                        }
+                        hasher.update(&buffer[..n]);
+                    }
+                    Ok(Some(<[u8; 32]>::from(hasher.finalize())))
+                }
+                Ok(_) => Err("the target is not a plain file"),
+            }
+        };
+        let before = match read_hash() {
+            Ok(h) => h,
+            Err(m) => return fail(m),
+        };
+        if before != w.expected_old {
             return fail("the file changed after the preview was made; nothing was written");
         }
-        let Some(dir) = target.parent() else {
-            return fail("no directory");
+        hook(WriteStep::AfterFirstHash);
+        let mode = fstatat(Some(dirfd), *leaf, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+            .map_or(0o644, |m| u32::from(m.st_mode) & 0o777);
+        let tmp = std::ffi::OsString::from(format!(".wyss-write-{:016x}", rand_u64()));
+        let discard = |why: &str| {
+            let _ = unlinkat(Some(dirfd), tmp.as_os_str(), UnlinkatFlags::NoRemoveDir);
+            fail(why)
         };
-        let tmp = dir.join(format!(".wyss-write-{:016x}", rand_u64()));
-        let mode = current.as_ref().map_or(0o644, |m| m.mode() & 0o777);
-        let written = (|| -> std::io::Result<()> {
-            let mut f = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_CLOEXEC)
-                .mode(0o600)
-                .open(&tmp)?;
+        let prepared = (|| -> std::io::Result<()> {
+            let fd = openat(
+                Some(dirfd),
+                tmp.as_os_str(),
+                OFlag::O_WRONLY
+                    | OFlag::O_CREAT
+                    | OFlag::O_EXCL
+                    | OFlag::O_NOFOLLOW
+                    | OFlag::O_CLOEXEC,
+                Mode::from_bits_truncate(0o600),
+            )?;
+            // SAFETY: as above.
+            let mut f = fs::File::from(unsafe { OwnedFd::from_raw_fd(fd) });
             f.write_all(w.content.as_bytes())?;
             f.sync_all()?;
-            fs::set_permissions(&tmp, fs::Permissions::from_mode(mode))?;
+            f.set_permissions(fs::Permissions::from_mode(mode))?;
             Ok(())
         })();
-        if written.is_err() {
-            let _ = fs::remove_file(&tmp);
-            return fail("the file could not be prepared; nothing was written");
+        if prepared.is_err() {
+            return discard("the file could not be prepared; nothing was written");
         }
-        // Check once more immediately before the rename: the proof is repeated at the effect.
-        if !confine(&w.workspace, &w.path, Leaf::FileOrMissing) {
-            let _ = fs::remove_file(&tmp);
-            return fail("the path is no longer inside the workspace");
-        }
-        match fs::rename(&tmp, &target) {
-            Ok(()) => Outcome::Completed(format!("wrote {} bytes to {}", w.content.len(), w.path)),
-            Err(_) => {
-                let _ = fs::remove_file(&tmp);
-                fail("the file could not be replaced; nothing was written")
+        hook(WriteStep::AfterTemp);
+        // The proof is repeated at the effect: the same hash, on the same directory descriptor.
+        match read_hash() {
+            Ok(h) if h == w.expected_old => (),
+            Ok(_) => {
+                return discard(
+                    "the file changed while the write was prepared; nothing was written",
+                );
             }
+            Err(m) => return discard(m),
+        }
+        hook(WriteStep::BeforeRename);
+        let _ = fchmodat(
+            Some(dirfd),
+            tmp.as_os_str(),
+            Mode::from_bits_truncate(mode),
+            FchmodatFlags::FollowSymlink,
+        );
+        match renameat(Some(dirfd), tmp.as_os_str(), Some(dirfd), *leaf) {
+            Ok(()) => Outcome::Completed(format!("wrote {} bytes to {}", w.content.len(), w.path)),
+            Err(_) => discard("the file could not be replaced; nothing was written"),
         }
     }
 

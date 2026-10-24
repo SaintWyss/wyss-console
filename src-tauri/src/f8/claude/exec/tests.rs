@@ -1,5 +1,8 @@
 use super::*;
-use std::os::unix::fs::{DirBuilderExt, symlink};
+use std::{
+    os::unix::fs::{DirBuilderExt, MetadataExt, symlink},
+    path::PathBuf,
+};
 
 fn workspace() -> PathBuf {
     let p = std::env::temp_dir().join(format!(
@@ -354,4 +357,157 @@ fn the_result_text_is_strict() {
         .unwrap(),
         "killed by signal 9\no"
     );
+}
+
+// ---- the write under a concurrent writer (the review's S1) ---------------------------------------
+fn write_acting(
+    ws: &Path,
+    rel: &str,
+    content: &str,
+    expected: Option<[u8; 32]>,
+    mut act: impl FnMut(WriteStep),
+) -> Outcome {
+    SandboxExecutor::write_file_with(
+        ApprovedWrite {
+            path: ws.join(rel).to_str().unwrap().into(),
+            workspace: ws.to_str().unwrap().into(),
+            content: content.into(),
+            expected_old: expected,
+        },
+        &mut act,
+    )
+}
+fn no_temp_left(dir: &Path) -> bool {
+    fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .all(|e| !e.file_name().to_string_lossy().starts_with(".wyss-write-"))
+}
+
+#[test]
+fn a_parent_replaced_by_a_link_after_the_check_cannot_redirect_the_write() {
+    let ws = workspace();
+    let outside = workspace();
+    fs::create_dir(ws.join("sub")).unwrap();
+    fs::write(ws.join("sub/f.txt"), "old\n").unwrap();
+    let swapped = |step: WriteStep| {
+        if step == WriteStep::AfterFirstHash {
+            // What a concurrent process would do: move the directory away, leave a link in its place.
+            fs::rename(ws.join("sub"), ws.join("sub-moved")).unwrap();
+            symlink(&outside, ws.join("sub")).unwrap();
+        }
+    };
+    let o = write_acting(&ws, "sub/f.txt", "new\n", Some(sha(b"old\n")), swapped);
+    assert!(matches!(o, Outcome::Completed(_)), "{o:?}");
+    // The descriptor held the directory that was checked; the link was never followed.
+    assert_eq!(
+        fs::read_to_string(ws.join("sub-moved/f.txt")).unwrap(),
+        "new\n"
+    );
+    assert!(!outside.join("f.txt").exists());
+    assert!(fs::read_dir(&outside).unwrap().next().is_none());
+}
+
+#[test]
+fn a_file_changed_while_the_replacement_is_prepared_is_not_clobbered() {
+    for step in [WriteStep::AfterFirstHash, WriteStep::AfterTemp] {
+        let ws = workspace();
+        fs::write(ws.join("f.txt"), "old\n").unwrap();
+        let o = write_acting(&ws, "f.txt", "approved\n", Some(sha(b"old\n")), |s| {
+            if s == step {
+                fs::write(ws.join("f.txt"), "intruder\n").unwrap();
+            }
+        });
+        assert!(matches!(o, Outcome::Failed(_)), "{step:?}: {o:?}");
+        assert_eq!(
+            fs::read_to_string(ws.join("f.txt")).unwrap(),
+            "intruder\n",
+            "{step:?}"
+        );
+        assert!(no_temp_left(&ws), "{step:?}");
+    }
+}
+
+#[test]
+fn a_file_created_or_deleted_or_linked_in_the_window_is_refused_and_leaves_nothing_behind() {
+    // Expected absent, but somebody creates it.
+    let ws = workspace();
+    let o = write_acting(&ws, "new.txt", "approved\n", None, |s| {
+        if s == WriteStep::AfterTemp {
+            fs::write(ws.join("new.txt"), "intruder\n").unwrap();
+        }
+    });
+    assert!(matches!(o, Outcome::Failed(_)), "{o:?}");
+    assert_eq!(
+        fs::read_to_string(ws.join("new.txt")).unwrap(),
+        "intruder\n"
+    );
+    assert!(no_temp_left(&ws));
+    // Expected present, but it is deleted.
+    let ws = workspace();
+    fs::write(ws.join("f.txt"), "old\n").unwrap();
+    let o = write_acting(&ws, "f.txt", "approved\n", Some(sha(b"old\n")), |s| {
+        if s == WriteStep::AfterTemp {
+            fs::remove_file(ws.join("f.txt")).unwrap();
+        }
+    });
+    assert!(matches!(o, Outcome::Failed(_)), "{o:?}");
+    assert!(!ws.join("f.txt").exists() && no_temp_left(&ws));
+    // Replaced by a link to a file outside, with the same bytes (so a hash alone would not notice).
+    let ws = workspace();
+    let outside = workspace();
+    fs::write(outside.join("victim.txt"), "old\n").unwrap();
+    fs::write(ws.join("f.txt"), "old\n").unwrap();
+    let o = write_acting(&ws, "f.txt", "approved\n", Some(sha(b"old\n")), |s| {
+        if s == WriteStep::AfterTemp {
+            fs::remove_file(ws.join("f.txt")).unwrap();
+            symlink(outside.join("victim.txt"), ws.join("f.txt")).unwrap();
+        }
+    });
+    assert!(matches!(o, Outcome::Failed(_)), "{o:?}");
+    assert_eq!(
+        fs::read_to_string(outside.join("victim.txt")).unwrap(),
+        "old\n"
+    );
+    assert!(no_temp_left(&ws));
+    // Given a second name outside the workspace.
+    let ws = workspace();
+    let outside = workspace();
+    fs::write(ws.join("f.txt"), "old\n").unwrap();
+    let o = write_acting(&ws, "f.txt", "approved\n", Some(sha(b"old\n")), |s| {
+        if s == WriteStep::AfterTemp {
+            fs::hard_link(ws.join("f.txt"), outside.join("alias.txt")).unwrap();
+        }
+    });
+    assert!(matches!(o, Outcome::Failed(_)), "{o:?}");
+    assert_eq!(
+        fs::read_to_string(outside.join("alias.txt")).unwrap(),
+        "old\n"
+    );
+}
+
+#[test]
+fn an_undisturbed_write_still_replaces_atomically_keeps_the_mode_and_leaves_no_temporary() {
+    let ws = workspace();
+    fs::write(ws.join("f.txt"), "old\n").unwrap();
+    fs::set_permissions(ws.join("f.txt"), fs::Permissions::from_mode(0o640)).unwrap();
+    let mut steps = Vec::new();
+    let o = write_acting(&ws, "f.txt", "new\n", Some(sha(b"old\n")), |s| {
+        steps.push(s)
+    });
+    assert!(matches!(o, Outcome::Completed(_)), "{o:?}");
+    assert_eq!(
+        steps,
+        [
+            WriteStep::AfterFirstHash,
+            WriteStep::AfterTemp,
+            WriteStep::BeforeRename
+        ]
+    );
+    assert_eq!(fs::read_to_string(ws.join("f.txt")).unwrap(), "new\n");
+    assert_eq!(
+        fs::metadata(ws.join("f.txt")).unwrap().permissions().mode() & 0o777,
+        0o640
+    );
+    assert!(no_temp_left(&ws));
 }

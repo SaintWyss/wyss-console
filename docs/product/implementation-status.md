@@ -153,15 +153,18 @@ was refused; corrected closed schema2 hello succeeded, with no operational reque
 
 M3 scope is frozen in [the contract](../contracts/m3-managed-parity.md); the result is in
 [the acceptance record](../acceptance/m3-engineering-2026-10-23.md): `ENGINEERING_COMPLETE_RELEASE_BLOCKED`.
-A Claude Managed adapter now exists on the pinned official SDK (`claude-agent-sdk==0.2.173`, Claude
-Code `2.1.309`) with both profiles, tested offline with the real SDK and CLI against a mock provider
-and in the real window in an isolated display; it is `IMPLEMENTED_BUT_UNQUALIFIED` (no real-provider run,
-auth route not accepted: [ADR0053](../adr/0053-claude-code-managed-integration-boundary.md)). It cannot be
-admitted by the installed authority: the V8 store only holds Codex ([ADR0055](../adr/0055-multi-provider-managed-runtime-store.md),
-proposed). Managed model/effort is implemented with its gate closed ([ADR0054](../adr/0054-managed-model-selection-and-effort.md),
-proposed); the metrics history store is implemented, default off, pending the owner's
-[privacy/store decision](../contracts/m3-model-usage-history.md). Every live gate (`m3::gate`) is false and
-no release or installation claim is made.
+A Claude Managed adapter exists on the pinned official SDK (`claude-agent-sdk==0.2.173`, Claude Code
+`2.1.309`) with both profiles, tested offline with the real SDK and CLI against a mock provider and in the
+real window in an isolated display. It is `IMPLEMENTED_BUT_UNQUALIFIED`: no real-provider run, and no
+source of a real credential ([ADR0056](../adr/0056-claude-credential-delivery.md), proposed). It cannot be
+admitted by the installed authority, and that is enforced where Claude starts (`Admission`) as well as
+displayed: the V8 store only holds Codex, and the V8→V9 migration of
+[ADR0055](../adr/0055-multi-provider-managed-runtime-store.md) is only rehearsed on synthetic images in
+test builds. The runtime runs in a network namespace whose single exit is a credential broker's socket.
+Managed model/effort is implemented with its gate closed ([ADR0054](../adr/0054-managed-model-selection-and-effort.md),
+amended: model per turn, effort at runtime start); the metrics history store has a producer in the worker,
+is off, and is gated by the owner's [privacy/store decision](../contracts/m3-model-usage-history.md). Every
+live gate (`m3::gate`) is false and no release or installation claim is made.
 
 ### F8 resource enforcement reconciliation
 

@@ -11,6 +11,11 @@
   and no provider is contacted.
 - Fixes found by running the window end to end: the Providers view could not read its state, and a runtime
   refused every turn after an approved command.
+- Corrective pass after a security review: a Claude runtime cannot start unless every decision it needs has
+  been taken (enforced where it starts, not only shown); it runs in a network namespace whose only exit is a
+  credential broker that holds any key, connects to one origin over verified TLS and re-checks every request;
+  no key is read from a file; and the namespace no longer exposes the launcher's environment to what runs in
+  it (this also applied to approved commands).
 
 ## 2026-10-23 — M1: project-centered workspace (engineering complete, behind an off gate)
 
