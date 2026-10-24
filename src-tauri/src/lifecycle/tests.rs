@@ -1233,19 +1233,31 @@ fn desktop_observer_never_installs_starts_or_retries_even_after_authority_loss()
     assert_eq!(absent.failure, Some(Failure::SocketUnavailable));
     assert!(!absent.retry);
     assert_eq!(observer.retry(), absent);
-    assert!(manager.asked().is_empty(), "GUI cannot mutate systemd state");
-    assert!(account.tree("data").is_empty(), "GUI cannot install authority files");
+    assert!(
+        manager.asked().is_empty(),
+        "GUI cannot mutate systemd state"
+    );
+    assert!(
+        account.tree("data").is_empty(),
+        "GUI cannot install authority files"
+    );
 
     link.set(LinkState::Connected);
     let deadline = Instant::now() + Duration::from_secs(3);
     while observer.view().phase != Phase::Ready {
-        assert!(Instant::now() < deadline, "observer did not detect connection");
+        assert!(
+            Instant::now() < deadline,
+            "observer did not detect connection"
+        );
         thread::sleep(Duration::from_millis(10));
     }
     link.set(LinkState::Absent);
     let deadline = Instant::now() + Duration::from_secs(3);
     while observer.view().failure != Some(Failure::Stopped) {
-        assert!(Instant::now() < deadline, "observer did not detect authority loss");
+        assert!(
+            Instant::now() < deadline,
+            "observer did not detect authority loss"
+        );
         thread::sleep(Duration::from_millis(10));
     }
     assert!(!observer.view().retry);
