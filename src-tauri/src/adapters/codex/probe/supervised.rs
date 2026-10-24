@@ -512,8 +512,7 @@ impl ProbeIo for RuntimeIo<'_> {
                 .and_then(serde_json::Value::as_object)
                 .ok_or(ProbeError::Protocol)?;
             if p.len() != 2
-                || p
-                    .get("threadId")
+                || p.get("threadId")
                     .and_then(serde_json::Value::as_str)
                     .is_none_or(|s| CodexThreadId::parse(s).is_err())
             {
@@ -589,8 +588,7 @@ impl ProbeIo for RuntimeIo<'_> {
             let v = message.vendor_value();
             let p = v["params"].as_object().ok_or(ProbeError::Protocol)?;
             if p.len() != 1
-                || p
-                    .get("threadId")
+                || p.get("threadId")
                     .and_then(|v| v.as_str())
                     .is_none_or(|id| CodexThreadId::parse(id).is_err())
             {
