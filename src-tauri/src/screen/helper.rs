@@ -235,6 +235,24 @@ pub fn probe(layers: u8, action: &str) -> String {
     let cstr = |s: &str| std::ffi::CString::new(s).unwrap();
     match action {
         "applied" => format!("layers={} abi={}", applied.layers, applied.landlock_abi),
+        #[cfg(target_arch = "x86_64")]
+        "x32_socket" => {
+            // No pointer arguments: exercise the alternate syscall ABI using the real filter.
+            let fd = unsafe {
+                libc::syscall(
+                    0x4000_0000 | libc::SYS_socket,
+                    libc::AF_INET,
+                    libc::SOCK_STREAM,
+                    0,
+                )
+            };
+            if fd >= 0 {
+                unsafe { libc::close(fd as i32) };
+                "created".to_owned()
+            } else {
+                format!("errno={}", errno())
+            }
+        }
         "open_passwd" => {
             let fd = unsafe { libc::open(cstr("/etc/passwd").as_ptr(), libc::O_RDONLY) };
             if fd >= 0 {

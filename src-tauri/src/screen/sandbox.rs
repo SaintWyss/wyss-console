@@ -237,6 +237,18 @@ fn filter() -> Vec<libc::sock_filter> {
         stmt(BPF_RET_K, SECCOMP_RET_KILL_PROCESS),
         stmt(BPF_LD_W_ABS, 0), // seccomp_data.nr
     ];
+    // x32 shares AUDIT_ARCH_X86_64, but its syscall numbers carry bit 30. Native-number
+    // comparisons below cannot constrain that ABI. Refuse it before the deny-list.
+    #[cfg(target_arch = "x86_64")]
+    prog.extend([
+        libc::sock_filter {
+            code: 0x45, // BPF_JMP | BPF_JSET | BPF_K
+            jt: 0,
+            jf: 1,
+            k: 0x4000_0000,
+        },
+        stmt(BPF_RET_K, SECCOMP_RET_KILL_PROCESS),
+    ]);
     for (i, nr) in denied.iter().enumerate() {
         // The kill is the last instruction: after this one, the rest of the list and the allow.
         let to_kill = (n - i) as u8;
@@ -320,10 +332,11 @@ mod tests {
     fn the_filter_is_well_formed_and_every_denied_call_jumps_to_the_kill() {
         let prog = filter();
         let n = denied_syscalls().len();
-        assert_eq!(prog.len(), 4 + n + 2);
+        let start = if cfg!(target_arch = "x86_64") { 6 } else { 4 };
+        assert_eq!(prog.len(), start + n + 2);
         let kill = prog.len() - 1;
-        for (i, insn) in prog[4..4 + n].iter().enumerate() {
-            assert_eq!(4 + i + 1 + usize::from(insn.jt), kill);
+        for (i, insn) in prog[start..start + n].iter().enumerate() {
+            assert_eq!(start + i + 1 + usize::from(insn.jt), kill);
             assert_eq!(insn.code, BPF_JEQ_K);
         }
         assert_eq!(prog[kill].k, SECCOMP_RET_KILL_PROCESS);

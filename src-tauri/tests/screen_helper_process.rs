@@ -409,6 +409,18 @@ fn probe(layers: u8, action: &str) -> (Option<i32>, Option<i32>, String) {
     )
 }
 
+#[test]
+#[cfg(target_arch = "x86_64")]
+fn seccomp_kills_x32_calls_even_when_the_kernel_does_not_implement_them() {
+    let (code, signal, output) = probe(0, "x32_socket");
+    assert_eq!(code, Some(0), "unconfined control: {output}");
+    assert_eq!(signal, None);
+    assert!(output == "created" || output == "errno=38", "{output}");
+    let (code, signal, output) = probe(layer::NO_NEW_PRIVS | layer::SECCOMP, "x32_socket");
+    assert_eq!(code, None, "must be killed, not return: {output}");
+    assert_eq!(signal, Some(nix::libc::SIGSYS));
+}
+
 const EACCES: &str = "errno=13";
 const SIGSYS: i32 = 31;
 
