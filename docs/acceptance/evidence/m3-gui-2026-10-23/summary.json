@@ -1,0 +1,61 @@
+{
+  "scenarios": {
+    "cancel-stream": {
+      "exit": 0,
+      "steps": 17,
+      "failed_steps": [],
+      "leftovers": [],
+      "seconds": 35.6,
+      "ok": true
+    },
+    "inference": {
+      "exit": 0,
+      "steps": 23,
+      "failed_steps": [],
+      "leftovers": [],
+      "seconds": 32.6,
+      "ok": true
+    },
+    "local-tools-accept": {
+      "exit": 0,
+      "steps": 31,
+      "failed_steps": [],
+      "leftovers": [],
+      "seconds": 51.9,
+      "ok": true
+    },
+    "local-tools-cancel-turn": {
+      "exit": 0,
+      "steps": 17,
+      "failed_steps": [],
+      "leftovers": [],
+      "seconds": 39.9,
+      "ok": true
+    },
+    "local-tools-decline": {
+      "exit": 0,
+      "steps": 29,
+      "failed_steps": [],
+      "leftovers": [],
+      "seconds": 54.5,
+      "ok": true
+    },
+    "refused": {
+      "exit": 0,
+      "steps": 3,
+      "failed_steps": [],
+      "leftovers": [],
+      "seconds": 20.9,
+      "ok": true
+    },
+    "stop-restart": {
+      "exit": 0,
+      "steps": 24,
+      "failed_steps": [],
+      "leftovers": [],
+      "seconds": 47.3,
+      "ok": true
+    }
+  },
+  "all_ok": true
+}

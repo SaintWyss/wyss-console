@@ -1,0 +1,64 @@
+{
+  "boot": 10,
+  "workspace": {
+    "notes.txt": "before\n"
+  },
+  "mock": [
+    {
+      "tool_use": {
+        "name": "mcp__wyss__run_command",
+        "input": {
+          "command": "printf 'made by the sandbox' > made.txt"
+        }
+      }
+    },
+    {
+      "text": "The command was held and I have its result."
+    },
+    {
+      "tool_use": {
+        "name": "mcp__wyss__write_file",
+        "input": {
+          "path": "notes.txt",
+          "content": "after\n"
+        }
+      }
+    },
+    {
+      "text": "The file change was handled."
+    }
+  ],
+  "steps": [
+    ["click", 80, 467],
+    ["wait", 2],
+    ["click", 640, 356],
+    ["wait", 7],
+    ["click", 857, 490],
+    ["type", "Run"],
+    ["key", "space"],
+    ["type", "it"],
+    ["wait", 1],
+    ["click", 276, 549],
+    ["wait", 8],
+    ["shot", "01-held-command"],
+    ["expect_no_file", "made.txt"],
+    ["click", 296, 639],
+    ["expect_file", "made.txt", "made by the sandbox", 20],
+    ["wait", 4],
+    ["shot", "02-command-done"],
+    ["expect_tool_result", "made by the sandbox"],
+    ["click", 857, 750],
+    ["type", "Edit"],
+    ["key", "space"],
+    ["type", "it"],
+    ["wait", 1],
+    ["click", 276, 805],
+    ["wait", 8],
+    ["shot", "03-held-diff"],
+    ["expect_file", "notes.txt", "before\n", 3],
+    ["click", 296, 993],
+    ["expect_file", "notes.txt", "after\n", 20],
+    ["wait", 4],
+    ["shot", "04-file-done"]
+  ]
+}

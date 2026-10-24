@@ -1,0 +1,50 @@
+{
+  "boot": 10,
+  "workspace": {
+    "notes.txt": "before\n"
+  },
+  "mock": [
+    {
+      "tool_use": {
+        "name": "mcp__wyss__run_command",
+        "input": {
+          "command": "printf 'made by the sandbox' > made.txt"
+        }
+      }
+    },
+    {
+      "text": "The command was held and I have its result."
+    },
+    {
+      "tool_use": {
+        "name": "mcp__wyss__write_file",
+        "input": {
+          "path": "notes.txt",
+          "content": "after\n"
+        }
+      }
+    },
+    {
+      "text": "The file change was handled."
+    }
+  ],
+  "steps": [
+    ["click", 80, 467],
+    ["wait", 2],
+    ["click", 640, 356],
+    ["wait", 7],
+    ["click", 857, 490],
+    ["type", "Run"],
+    ["key", "space"],
+    ["type", "it"],
+    ["wait", 1],
+    ["click", 276, 549],
+    ["wait", 8],
+    ["shot", "01-held-command"],
+    ["expect_no_file", "made.txt"],
+    ["click", 384, 794],
+    ["wait", 5],
+    ["shot", "02-turn-cancelled"],
+    ["expect_no_file", "made.txt"]
+  ]
+}
