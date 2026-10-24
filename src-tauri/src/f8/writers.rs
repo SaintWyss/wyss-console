@@ -1190,17 +1190,15 @@ fn delivery_in(
             params![a.managed_approval_id.as_str(), word],
         )
         .map_err(db)?;
-    } else {
-        if tx
-            .execute(
-                "UPDATE managed_approval_delivery SET state=?2 WHERE managed_approval_id=?1",
-                params![a.managed_approval_id.as_str(), word],
-            )
-            .map_err(db)?
-            != 1
-        {
-            return Err(E::InvalidTransition);
-        }
+    } else if tx
+        .execute(
+            "UPDATE managed_approval_delivery SET state=?2 WHERE managed_approval_id=?1",
+            params![a.managed_approval_id.as_str(), word],
+        )
+        .map_err(db)?
+        != 1
+    {
+        return Err(E::InvalidTransition);
     }
     append(
         tx,

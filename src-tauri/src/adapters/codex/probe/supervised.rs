@@ -512,10 +512,10 @@ impl ProbeIo for RuntimeIo<'_> {
                 .and_then(serde_json::Value::as_object)
                 .ok_or(ProbeError::Protocol)?;
             if p.len() != 2
-                || !p
+                || p
                     .get("threadId")
                     .and_then(serde_json::Value::as_str)
-                    .is_some_and(|s| CodexThreadId::parse(s).is_ok())
+                    .is_none_or(|s| CodexThreadId::parse(s).is_err())
             {
                 return Err(ProbeError::Protocol);
             }
@@ -534,10 +534,10 @@ impl ProbeIo for RuntimeIo<'_> {
                 {
                     return Err(ProbeError::Protocol);
                 }
-            } else if !p
+            } else if p
                 .get("turnId")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|s| CodexTurnId::parse(s).is_ok())
+                .is_none_or(|s| CodexTurnId::parse(s).is_err())
             {
                 return Err(ProbeError::Protocol);
             }
@@ -589,10 +589,10 @@ impl ProbeIo for RuntimeIo<'_> {
             let v = message.vendor_value();
             let p = v["params"].as_object().ok_or(ProbeError::Protocol)?;
             if p.len() != 1
-                || !p
+                || p
                     .get("threadId")
                     .and_then(|v| v.as_str())
-                    .is_some_and(|id| CodexThreadId::parse(id).is_ok())
+                    .is_none_or(|id| CodexThreadId::parse(id).is_err())
             {
                 return Err(ProbeError::Protocol);
             }
