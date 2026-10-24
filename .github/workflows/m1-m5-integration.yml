@@ -71,16 +71,19 @@ jobs:
             --prefix "$RUNNER_TEMP/bwrap" -Dman=disabled
           meson compile -C "$RUNNER_TEMP/bwrap-build"
           meson install -C "$RUNNER_TEMP/bwrap-build"
-          echo "$RUNNER_TEMP/bwrap/bin" >> "$GITHUB_PATH"
+          # Wyss intentionally launches the fixed, root-owned /usr/bin/bwrap.
+          # Install the verified build to that exact path ONLY on this disposable runner.
+          sudo install -o root -g root -m 0755 "$RUNNER_TEMP/bwrap/bin/bwrap" /usr/bin/bwrap
+          test "$(sha256sum "$RUNNER_TEMP/bwrap/bin/bwrap" | cut -d' ' -f1)" = "$(sha256sum /usr/bin/bwrap | cut -d' ' -f1)"
       - name: Qualify real unprivileged namespace and overlay support on disposable CI VM
         run: |
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
-          command -v bwrap
-          bwrap --version
-          bwrap --help | grep -F -- '--overlay-src'
-          bwrap --unshare-user --unshare-net --ro-bind / / -- /usr/bin/true
+          test "$(command -v bwrap)" = /usr/bin/bwrap
+          /usr/bin/bwrap --version
+          /usr/bin/bwrap --help | grep -F -- '--overlay-src'
+          /usr/bin/bwrap --unshare-user --unshare-net --ro-bind / / -- /usr/bin/true
       - name: Formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - name: Clippy (production and fixture code)
