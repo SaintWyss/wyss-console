@@ -1,0 +1,104 @@
+{
+  "capability": "m3",
+  "claude_install": {
+    "state": "not_configured"
+  },
+  "fixture": {
+    "approvals": [],
+    "conversation": [],
+    "detail": "the runtime stopped responding",
+    "label": "FIXTURE HOST — hosted by this window, not the authority",
+    "phase": "failed",
+    "profile": "claude_local_tools_v1",
+    "report": null,
+    "turn": null
+  },
+  "history": {
+    "can_enable": false,
+    "enabled": false,
+    "max_records": 10000,
+    "reasons": ["metrics_policy_not_accepted"],
+    "records": null,
+    "retention_days": 30,
+    "state": "off"
+  },
+  "model_selection": {
+    "available": false,
+    "capability": "m3.model_selection",
+    "reasons": ["adr0054_not_accepted"],
+    "version": 1
+  },
+  "profiles": [
+    {
+      "availability": "available",
+      "build": null,
+      "can_start": true,
+      "evidence": {
+        "fixture": "passed",
+        "real_provider": "passed"
+      },
+      "id": "codex_inference",
+      "mode": "inference",
+      "name": "codex_inference_v1",
+      "provider": "codex",
+      "reasons": []
+    },
+    {
+      "availability": "available",
+      "build": null,
+      "can_start": true,
+      "evidence": {
+        "fixture": "passed",
+        "real_provider": "passed"
+      },
+      "id": "codex_local_tools",
+      "mode": "local_tools",
+      "name": "codex_local_tools_v1",
+      "provider": "codex",
+      "reasons": []
+    },
+    {
+      "availability": "blocked",
+      "build": null,
+      "can_start": false,
+      "evidence": {
+        "fixture": "passed",
+        "real_provider": "not_run"
+      },
+      "id": "claude_inference",
+      "mode": "inference",
+      "name": "claude_inference_v1",
+      "provider": "claude",
+      "reasons": [
+        "adr0053_not_accepted",
+        "store_cannot_hold_claude",
+        "real_provider_evidence_missing",
+        "credential_delivery_not_accepted",
+        "independent_review_missing",
+        "sdk_not_configured"
+      ]
+    },
+    {
+      "availability": "blocked",
+      "build": null,
+      "can_start": false,
+      "evidence": {
+        "fixture": "passed",
+        "real_provider": "not_run"
+      },
+      "id": "claude_local_tools",
+      "mode": "local_tools",
+      "name": "claude_local_tools_v1",
+      "provider": "claude",
+      "reasons": [
+        "adr0053_not_accepted",
+        "store_cannot_hold_claude",
+        "real_provider_evidence_missing",
+        "credential_delivery_not_accepted",
+        "independent_review_missing",
+        "sdk_not_configured"
+      ]
+    }
+  ],
+  "version": "m3.1"
+}

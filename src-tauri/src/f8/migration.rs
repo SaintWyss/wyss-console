@@ -364,7 +364,7 @@ pub(super) fn clone_database(c: &Connection) -> ControlResult<Connection> {
     integrity(&copy)?;
     Ok(copy)
 }
-fn insert_rows(c: &Connection, name: &str, data: &[Vec<Value>]) -> ControlResult<()> {
+pub(super) fn insert_rows(c: &Connection, name: &str, data: &[Vec<Value>]) -> ControlResult<()> {
     for row in data {
         let marks = vec!["?"; row.len()].join(",");
         c.execute(
@@ -375,7 +375,7 @@ fn insert_rows(c: &Connection, name: &str, data: &[Vec<Value>]) -> ControlResult
     }
     Ok(())
 }
-fn rows(c: &Connection) -> ControlResult<BTreeMap<String, Vec<Vec<Value>>>> {
+pub(super) fn rows(c: &Connection) -> ControlResult<BTreeMap<String, Vec<Vec<Value>>>> {
     let mut result = BTreeMap::new();
     for (name, sql) in objects(c)? {
         if !sql.starts_with("CREATE TABLE") {

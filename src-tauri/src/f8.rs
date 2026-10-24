@@ -6,6 +6,8 @@ pub mod audit;
 #[cfg(target_os = "linux")]
 pub mod authority;
 pub mod budget;
+#[cfg(target_os = "linux")]
+pub mod claude;
 #[cfg(all(feature = "f8-dev", target_os = "linux"))]
 pub mod dev;
 #[cfg(target_os = "linux")]
@@ -37,6 +39,8 @@ pub mod service;
 pub mod staging;
 #[cfg(target_os = "linux")]
 pub mod v8;
+#[cfg(test)]
+pub(crate) mod v9_candidate;
 #[cfg(target_os = "linux")]
 pub mod writers;
 

@@ -1,0 +1,39 @@
+{
+  "boot": 10,
+  "mock": [
+    {
+      "text": "Hello from the mock provider. This reply was scripted; no model produced it.",
+      "usage": {
+        "input_tokens": 21,
+        "output_tokens": 14,
+        "cache_creation_input_tokens": 3,
+        "cache_read_input_tokens": 5
+      }
+    }
+  ],
+  "steps": [
+    ["click", 80, 467],
+    ["wait", 2],
+    ["shot", "00-providers"],
+    ["click", 427, 356],
+    ["wait", 7],
+    ["shot", "01-ready"],
+    ["click", 857, 490],
+    ["type", "Say"],
+    ["key", "space"],
+    ["type", "hello"],
+    ["wait", 1],
+    ["shot", "02-typed"],
+    ["click", 276, 549],
+    ["expect_generations", 1, 40],
+    ["wait", 4],
+    ["shot", "03-answered"],
+    ["scroll", 14],
+    ["wait", 1],
+    ["shot", "04-usage"],
+    ["scroll", 14],
+    ["wait", 1],
+    ["shot", "05-bottom"],
+    ["expect_tools", []]
+  ]
+}

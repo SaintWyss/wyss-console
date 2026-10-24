@@ -9,6 +9,7 @@ export const FIXTURE_MARKERS = [
   'WYSS_RUNTIME_SCENARIO',
   'codex_runtime.py',
   'wyss-b1-synthetic-',
+  'WYSS_M3_FIXTURE_HOST',
 ];
 const CHUNK_BYTES = 64 * 1024;
 const MAX_BINARY_BYTES = 512 * 1024 * 1024;

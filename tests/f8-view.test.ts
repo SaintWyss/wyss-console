@@ -214,6 +214,23 @@ it('lists the sessions with the state of their runtime and opens one with its se
   ).toContain('not reported');
 });
 
+it('reports Claude Managed as unavailable without offering a provider fallback', async () => {
+  const ipc = await select();
+  button('Overview').click();
+  await flush();
+  const availability = view().querySelector(
+    '[data-testid="claude-managed-unavailable"]',
+  );
+  expect(availability).not.toBeNull();
+  expect(text(availability)).toContain(
+    'Claude Code Managed is not implemented',
+  );
+  expect(text(availability)).toContain('This session remains Codex');
+  expect(text(availability)).toContain('separate, explicit launch');
+  expect(button('Start Claude Code')).toBeUndefined();
+  expect(ipc.count('f8_runtime_start')).toBe(0);
+});
+
 it('moves between sections with the arrow keys, as a tab list does', async () => {
   await select();
   const tabs = () =>

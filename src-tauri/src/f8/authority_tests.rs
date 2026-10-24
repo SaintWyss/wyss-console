@@ -71,12 +71,15 @@ impl Worker for Recorder {
         *self.exited.lock().unwrap()
     }
 }
+type Factory = Arc<dyn Fn(&RuntimeRef) -> Box<dyn Worker> + Send + Sync>;
 struct Spawn {
     inbound: Inbound,
     sent: Sent,
     exited: Arc<Mutex<bool>>,
     refuse_critical: Arc<Mutex<bool>>,
     ambiguous_send: Arc<Mutex<bool>>,
+    /// When set, the workers come from here (the provider-parity tests put a Claude worker in).
+    factory: Option<Factory>,
 }
 impl Spawner for Spawn {
     fn descendant_containment(&self) -> bool {
@@ -87,6 +90,11 @@ impl Spawner for Spawn {
         launch: &RuntimeRef,
         _staging: Option<&mut super::super::staging::LaunchStaging>,
     ) -> ControlResult<Spawned> {
+        if let Some(factory) = &self.factory {
+            return Ok(Spawned {
+                worker: factory(launch),
+            });
+        }
         Ok(Spawned {
             worker: Box::new(Recorder {
                 session: launch.managed_session_id.as_str().to_owned(),
@@ -141,6 +149,7 @@ impl Rig {
                 exited: Arc::default(),
                 refuse_critical: Arc::default(),
                 ambiguous_send: Arc::default(),
+                factory: None,
             },
             sessions,
             workspace,
@@ -2356,3 +2365,6 @@ fn review_turn_start_exact_replay_survives_authority_succession_without_dispatch
     );
     validate_v8(successor.engine().connection()).unwrap();
 }
+
+#[path = "claude/parity_tests.rs"]
+mod claude_parity;

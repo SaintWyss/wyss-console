@@ -1,0 +1,28 @@
+{
+  "boot": 10,
+  "mock": [
+    {
+      "text": "A scripted answer that streams slowly so the window can stop it while it is still being written, one line only, slow slow slow.",
+      "delay": 1.0
+    }
+  ],
+  "steps": [
+    ["click", 80, 467],
+    ["wait", 2],
+    ["click", 427, 356],
+    ["wait", 7],
+    ["click", 857, 490],
+    ["type", "Stream"],
+    ["wait", 1],
+    ["click", 276, 549],
+    ["wait", 5],
+    ["shot", "00-streaming"],
+    ["click", 384, 640],
+    ["wait", 4],
+    ["shot", "01-cancelled"],
+    ["click", 857, 570],
+    ["type", "After"],
+    ["wait", 1],
+    ["shot", "02-composer-free"]
+  ]
+}

@@ -86,6 +86,11 @@ pub trait Worker: Send {
     fn pid_for_diagnostics(&self) -> Option<i32> {
         None
     }
+    /// Provider-side facts for the M3 views (attestation outcome, usage, models observed).
+    /// Only a projection: never an input to any decision. `None` for a worker with nothing to say.
+    fn provider_report(&self) -> Option<crate::m3::report::ProviderReport> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

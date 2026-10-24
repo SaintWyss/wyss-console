@@ -53,7 +53,7 @@ reported as recorded evidence, not newly reproduced proof.
 | F8 broad conformance/real tool effects                 | P              | `f8/native_approvals.rs`, tests and 29-method routes                                                 | [method matrix](../acceptance/f8-protocol2-method-matrix.md), [delivery](../acceptance/f8-delivery-2026-10-21.md): integrated fixtures/GUI; production result does not prove every29-method/error/tool case                             | M3/M8                               |
 | Managed concurrency above one                          | B              | `docs/contracts/f8/resources.json`, `f8/budget.rs`, registry                                         | Cap1 enforced; multi-process credential refresh NOT_PROVEN; two/four active runtime resource/provider compatibility not qualified                                                                                                       | M5                                  |
 | G-INF/native hooks independent of Managed inference    | D/B/P research | `scripts/research/f1b/`, existing isolated Local Tools path, F8 worker                               | [F1b](../research/inference-isolation-2026-10-19.md): E1/E2/E4/E8 recorded; E3 partial, E5/E6 missing then; F8 Local Tools production is not full E9/policy/inference isolation acceptance                                              | M2/M3                               |
-| Claude Code Managed                                    | D/B            | `native/catalogue.rs` has Claude; no Managed Claude adapter                                          | Official SDK/headless surfaces documented; auth, effect mediation, no-tool profile, cancellation and consumption unproven                                                                                                               | M3                                  |
+| Claude Code Managed                                    | P (offline)    | `adapters/claude/`, `f8/claude/`, `src-tauri/claude-bridge/`, `m3/`                                  | [M3 record](../acceptance/m3-engineering-2026-10-23.md): both profiles built and tested offline, in the isolated window; real provider, auth route (ADR0053) and durable store (ADR0055) not accepted; admission closed                 | M3                                  |
 | Manual handoff F11a                                    | I/P            | `handoff.rs`, Native handoff UI                                                                      | [F14/F11a/F13](../acceptance/f14-f11a-f13-closure-2026-10-19.md) and [GUI record](../acceptance/f4a-f5-f6-f1b-2026-10-19.md): reviewed Native brief, new recipient, not internal context transfer or confirmed recipient model response | M6                                  |
 | OL3 coordinator/write arbitration                      | D/B            | No production scheduler/run journal                                                                  | Architecture34 finite DAG contract; same-UID/native output trust gates remain, no full OL3 implementation                                                                                                                               | M6                                  |
 | B1 restricted staged/quarantined worker                | D/B            | `contracts/b1.rs`, `contracts/b1/`, fixtures where tracked                                           | Architecture49–52/reviews: reviewed pure contracts, no production launcher/capture/promotion; FX-H01 auth/egress open                                                                                                                   | M5 design track                     |
@@ -148,6 +148,23 @@ was refused; corrected closed schema2 hello succeeded, with no operational reque
   The retained ordinary 0.2.0 artifact in the other checkout has different digests;
   version labels alone do not prove binary equivalence. Neither was rebuilt/replaced.
   Installed binary-to-source reproducibility remains NOT_PROVEN.
+
+## M3 engineering pass — 2026-10-23
+
+M3 scope is frozen in [the contract](../contracts/m3-managed-parity.md); the result is in
+[the acceptance record](../acceptance/m3-engineering-2026-10-23.md): `ENGINEERING_COMPLETE_RELEASE_BLOCKED`.
+A Claude Managed adapter exists on the pinned official SDK (`claude-agent-sdk==0.2.173`, Claude Code
+`2.1.309`) with both profiles, tested offline with the real SDK and CLI against a mock provider and in the
+real window in an isolated display. It is `IMPLEMENTED_BUT_UNQUALIFIED`: no real-provider run, and no
+source of a real credential ([ADR0056](../adr/0056-claude-credential-delivery.md), proposed). It cannot be
+admitted by the installed authority, and that is enforced where Claude starts (`Admission`) as well as
+displayed: the V8 store only holds Codex, and the V8→V9 migration of
+[ADR0055](../adr/0055-multi-provider-managed-runtime-store.md) is only rehearsed on synthetic images in
+test builds. The runtime runs in a network namespace whose single exit is a credential broker's socket.
+Managed model/effort is implemented with its gate closed ([ADR0054](../adr/0054-managed-model-selection-and-effort.md),
+amended: model per turn, effort at runtime start); the metrics history store has a producer in the worker,
+is off, and is gated by the owner's [privacy/store decision](../contracts/m3-model-usage-history.md). Every
+live gate (`m3::gate`) is false and no release or installation claim is made.
 
 ### F8 resource enforcement reconciliation
 

@@ -4,6 +4,7 @@ export type ViewId =
   | 'sessions'
   | 'agents'
   | 'runtimes'
+  | 'providers'
   | 'projects'
   | 'approvals'
   | 'events'
@@ -103,6 +104,17 @@ export const RUNTIMES_NAV_ITEM: NavItem = {
 };
 
 /**
+ * Which provider profiles can start and why not, the model facts, usage and the optional history.
+ * Always offered: it only reads, and it is where "Claude is blocked, and why" is told.
+ */
+export const PROVIDERS_NAV_ITEM: NavItem = {
+  id: 'providers',
+  label: 'Providers',
+  subtitle: 'What each provider profile can do, and why not',
+  icon: 'M4 5h7v6H4zM13 5h7v6h-7zM4 13h7v6H4zM13 16h7M16.5 13v6',
+};
+
+/**
  * The project-centered workspace. Offered only after the owner turned it on, so that the
  * navigation of a Console that has not adopted it is the one it always was.
  */
@@ -120,8 +132,13 @@ export const PROJECTS_NAV_ITEM: NavItem = {
 export function navItems(
   runtimes: boolean,
   projects = false,
+  providers = false,
 ): readonly NavItem[] {
   let items: NavItem[] = [...NAV_ITEMS];
+  if (providers) {
+    const at = items.findIndex((item) => item.id === 'models') + 1;
+    items = [...items.slice(0, at), PROVIDERS_NAV_ITEM, ...items.slice(at)];
+  }
   if (runtimes) {
     const at = items.findIndex((item) => item.id === 'agents') + 1;
     items = [...items.slice(0, at), RUNTIMES_NAV_ITEM, ...items.slice(at)];
@@ -130,5 +147,5 @@ export function navItems(
     const at = items.findIndex((item) => item.id === 'console') + 1;
     items = [...items.slice(0, at), PROJECTS_NAV_ITEM, ...items.slice(at)];
   }
-  return runtimes || projects ? items : NAV_ITEMS;
+  return runtimes || projects || providers ? items : NAV_ITEMS;
 }
