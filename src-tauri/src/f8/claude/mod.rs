@@ -14,6 +14,7 @@ pub mod diff;
 #[cfg(test)]
 pub(crate) mod doubles;
 pub mod exec;
+pub mod handoff;
 pub mod launch;
 pub mod proposal;
 pub mod sandbox;

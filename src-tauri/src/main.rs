@@ -6,6 +6,8 @@
 mod agentconfig;
 // The window commands of the above: the one place that names both it and the toolkit.
 #[cfg(target_os = "linux")]
+mod activation;
+#[cfg(target_os = "linux")]
 mod configuration;
 #[cfg(target_os = "linux")]
 mod credentials;
@@ -31,6 +33,15 @@ mod remote;
 mod m3_fixture;
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    match activation::select(&std::env::args_os().skip(1).collect::<Vec<_>>()) {
+        Ok(true) => return,
+        Ok(false) => (),
+        Err(message) => {
+            eprintln!("wyss-console: {message}");
+            std::process::exit(2);
+        }
+    }
     // The host (F9): the same executable, started apart from any window, owns the terminals.
     #[cfg(target_os = "linux")]
     if std::env::args_os()
@@ -55,7 +66,10 @@ fn main() {
     }
     // Set by the packaging command, which builds the authority first: a build made any
     // other way has no authority of its own to install.
-    let digest = option_env!("WYSS_AUTHORITY_SHA256");
+    let _packaged_digest = std::hint::black_box(option_env!("WYSS_AUTHORITY_SHA256"));
+    // GUI activation never installs, restarts or replaces an authority. Explicit operator
+    // service activation remains separate from opening a window.
+    let digest = None;
     // Protocol 2 is selected by the command line alone: `--f8-authority <directory>`. Without
     // it the interface is inactive and nothing is sent to any authority but the installed one.
     #[cfg(target_os = "linux")]

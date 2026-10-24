@@ -597,6 +597,16 @@ impl ClaudeLauncher {
             Mode::Production,
         )
     }
+    /// Protected production delivery. The authority chooses the store/record and verified helper;
+    /// neither a page nor the provider can supply a credential path or receive the key.
+    pub fn prepare_protected(
+        install: &ClaudeInstall,
+        runtime: &Path,
+        state: &Path,
+        source: super::handoff::ProcessCredentialSource,
+    ) -> Result<Self, Unverified> {
+        Self::build(install, runtime, state, Box::new(source), Mode::Production)
+    }
     /// A launcher for tests and the isolated fixture, with its own credential source.
     #[cfg(any(test, feature = "m3-fixture"))]
     pub fn prepare_fixture(
@@ -731,7 +741,7 @@ impl ClaudeLauncher {
             (Profile::Inference, None) => SANDBOX_CWD.to_owned(),
             _ => return Err(E::InvalidRequest),
         };
-        let key = self.credential.key()?;
+        let key = self.credential.key_for(&identity, profile)?;
         if key.is_none() && self.origin == Origin::Anthropic {
             // The real provider without a credential would only fail later, and loudly.
             return Err(E::GateDenied);

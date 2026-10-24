@@ -86,7 +86,7 @@ impl<'c> Writer<'c> {
                 |r| r.get(0),
             )
             .map_err(invalid)?;
-        if version != 8 {
+        if !matches!(version, 8 | 9) {
             return Err(E::StorageIncompatible);
         }
         conn.pragma_update(None, "foreign_keys", true).map_err(db)?;
@@ -1021,7 +1021,12 @@ impl<'c> Writer<'c> {
     pub fn recover_as(&mut self, shutdown: bool) -> ControlResult<(usize, usize)> {
         let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
         let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
-        let mut replay = AuditReplay::with_boundary(super::migration::verify_boundary(&tx)?);
+        let boundary = super::migration::verify_boundary(&tx)?;
+        let mut replay = if super::provider::version(&tx)? == 9 {
+            AuditReplay::with_v9_boundary(boundary)
+        } else {
+            AuditReplay::with_boundary(boundary)
+        };
         {
             let mut q = tx
                 .prepare("SELECT envelope FROM control_events ORDER BY sequence")

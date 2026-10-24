@@ -398,11 +398,13 @@ fn session_mutation(engine: &mut Engine, r: &Request) -> ControlResult<Value> {
     attest(&tx, &authority, &stream, &now)?;
     let (s, kind, changed) = match r.operation() {
         v1::Operation::Prepare(p) => {
-            if p.adapter_id.as_str() != "codex"
-                || p.runtime_kind != crate::contracts::agent_adapter::AgentRuntimeKind::Codex
-            {
-                return Err(E::Unsupported);
-            }
+            let kind = serde_json::to_value(p.runtime_kind).map_err(invalid)?;
+            let provider = super::provider::Provider::parse(
+                p.adapter_id.as_str(),
+                kind.as_str().ok_or(E::InvalidRequest)?,
+            )?;
+            super::provider::admit(&tx, provider)?;
+            let (adapter, runtime_kind) = provider.fields();
             let count: i64 = tx
                 .query_row("SELECT count(*) FROM managed_sessions", [], |r| r.get(0))
                 .map_err(db)?;
@@ -422,8 +424,14 @@ fn session_mutation(engine: &mut Engine, r: &Request) -> ControlResult<Value> {
                 .ok_or(E::CapacityExceeded)?;
             let session_id = crate::control::store::uuid();
             tx.execute(
-                "INSERT INTO managed_sessions VALUES(?1,'codex','codex','prepared',1,?2,?2,?3)",
-                params![session_id.as_str(), now, format!("{sequence:020}")],
+                "INSERT INTO managed_sessions VALUES(?1,?4,?5,'prepared',1,?2,?2,?3)",
+                params![
+                    session_id.as_str(),
+                    now,
+                    format!("{sequence:020}"),
+                    adapter,
+                    runtime_kind
+                ],
             )
             .map_err(db)?;
             (
@@ -511,7 +519,7 @@ fn binding_status(engine: &Engine, id: &str) -> ControlResult<Value> {
             .is_some_and(|i| require_bound_launch(engine, &i.reference().fence()).is_ok());
     result(
         "binding_status",
-        json!({"managed_session_id":id,"state":if attached{"bound_attached"}else if b.is_some(){"bound_detached"}else if pending.as_ref().is_some_and(|p|p.1=="indeterminate"){"indeterminate"}else if pending.is_some(){"creating"}else{"unbound"},"binding":b,"runtime_instance_id":if attached{identity.as_ref().map(|i|i.runtime_instance_id.clone())}else{None},"runtime_identity":if attached{identity}else{None},"operation_id":pending.map(|p|p.0),"attachment_profile":if attached{attachment.map(|a|if a.profile=="codex_local_tools_v1"{"local_tools_v1"}else{"inference_only_v1"})}else{None},"observed_model":null}),
+        json!({"managed_session_id":id,"state":if attached{"bound_attached"}else if b.is_some(){"bound_detached"}else if pending.as_ref().is_some_and(|p|p.1=="indeterminate"){"indeterminate"}else if pending.is_some(){"creating"}else{"unbound"},"binding":b,"runtime_instance_id":if attached{identity.as_ref().map(|i|i.runtime_instance_id.clone())}else{None},"runtime_identity":if attached{identity}else{None},"operation_id":pending.map(|p|p.0),"attachment_profile":if attached{attachment.map(|a|if matches!(a.profile.as_str(),"codex_local_tools_v1"|"claude_local_tools_v1"){"local_tools_v1"}else{"inference_only_v1"})}else{None},"observed_model":null}),
     )
 }
 fn gate(engine: &Engine, p: &v1::GateQuery) -> ControlResult<v1::GateReason> {
@@ -553,10 +561,12 @@ fn gate(engine: &Engine, p: &v1::GateQuery) -> ControlResult<v1::GateReason> {
     if matches!(
         p.action,
         v1::ExecutionScope::CommandExecute | v1::ExecutionScope::FileChange
-    ) && engine
-        .attachment(p.session_id.as_str())
-        .is_none_or(|a| a.profile != "codex_local_tools_v1")
-    {
+    ) && engine.attachment(p.session_id.as_str()).is_none_or(|a| {
+        !matches!(
+            a.profile.as_str(),
+            "codex_local_tools_v1" | "claude_local_tools_v1"
+        )
+    }) {
         return Ok(LocalToolsProfileMissing);
     }
     Ok(Allowed)
@@ -776,6 +786,14 @@ pub fn confirm_binding(
     operation_id: &WireUuid,
     provider_thread_id: &str,
 ) -> ControlResult<()> {
+    let provider =
+        super::provider::session(engine.connection(), origin.managed_session_id.as_str())?;
+    if provider == super::provider::Provider::Claude
+        && !crate::adapters::claude::frames::uuid_ok(provider_thread_id)
+    {
+        return Err(E::InvalidRequest);
+    }
+    let (adapter, runtime_kind) = provider.fields();
     let thread = crate::adapters::codex::CodexThreadId::parse(provider_thread_id)
         .map_err(|_| E::InvalidRequest)?;
     let identity = engine.observe_fence(&origin.fence())?;
@@ -846,8 +864,8 @@ pub fn confirm_binding(
     let b = if kind == "create" {
         let collision: bool = tx
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM managed_session_bindings WHERE runtime_session_id=?1)",
-                [thread.as_str()],
+                "SELECT EXISTS(SELECT 1 FROM managed_session_bindings WHERE runtime_session_id=?1 AND adapter_id=?2 AND runtime_kind=?3)",
+                params![thread.as_str(), adapter, runtime_kind],
                 |r| r.get(0),
             )
             .map_err(db)?;
@@ -855,8 +873,8 @@ pub fn confirm_binding(
             return Err(E::BindingAlreadyExists);
         }
         tx.execute(
-            "INSERT INTO managed_session_bindings VALUES(?1,'codex','codex',?2,?3,1,?4,?4)",
-            params![sid, thread.as_str(), workspace, now],
+            "INSERT INTO managed_session_bindings VALUES(?1,?5,?6,?2,?3,1,?4,?4)",
+            params![sid, thread.as_str(), workspace, now, adapter, runtime_kind],
         )
         .map_err(db)?;
         binding(&tx, &sid)?.ok_or(E::StorageIncompatible)?
@@ -880,7 +898,7 @@ pub fn confirm_binding(
             correlation: Some(&id),
             version: 1,
             payload: if kind == "create" {
-                json!({"adapter_id":"codex","runtime_kind":"codex","runtime_session_id":thread,"binding_revision":1})
+                json!({"adapter_id":adapter,"runtime_kind":runtime_kind,"runtime_session_id":thread,"binding_revision":1})
             } else {
                 json!({"runtime_session_id":thread,"runtime_instance_id":origin.runtime_instance_id})
             },

@@ -29,6 +29,7 @@ pub mod process_worker;
 #[cfg(target_os = "linux")]
 pub mod production;
 pub mod protocol;
+pub mod provider;
 #[cfg(target_os = "linux")]
 pub mod provider_adapter;
 pub mod registry;
@@ -39,6 +40,8 @@ pub mod service;
 pub mod staging;
 #[cfg(target_os = "linux")]
 pub mod v8;
+#[cfg(target_os = "linux")]
+pub mod v9;
 #[cfg(test)]
 pub(crate) mod v9_candidate;
 #[cfg(target_os = "linux")]

@@ -67,6 +67,7 @@ gtk = "=0.18.2"
 
 [dependencies]
 sha2 = "0.10.9"
+hmac = "=0.12.1"
 tauri = { version = "=2.12.1", features = [] }
 serde = { version = "1", features = ["derive"] }
 # `float_roundtrip`: a split ratio must decode to the exact f64 that was encoded (contracts::m1).

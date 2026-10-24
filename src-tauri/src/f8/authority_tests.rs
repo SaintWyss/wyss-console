@@ -82,6 +82,9 @@ struct Spawn {
     factory: Option<Factory>,
 }
 impl Spawner for Spawn {
+    fn supports_provider(&self, p: crate::f8::provider::Provider) -> bool {
+        p == crate::f8::provider::Provider::Codex || self.factory.is_some()
+    }
     fn descendant_containment(&self) -> bool {
         true
     }

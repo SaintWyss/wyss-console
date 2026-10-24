@@ -366,6 +366,9 @@ pub async fn host_lingering(
     link: State<'_, HostLink>,
     request: LingeringRequest,
 ) -> Result<Value, WireError> {
+    if std::env::var_os("WYSS_GUI_ONLY_ROOT").is_some() {
+        return Err(invalid());
+    }
     if request.confirm.len() > 32 {
         return Err(invalid());
     }

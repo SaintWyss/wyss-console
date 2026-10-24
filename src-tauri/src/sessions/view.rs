@@ -25,8 +25,12 @@ pub enum AgentMode {
 impl AgentMode {
     pub(crate) fn of_profile(profile: RuntimeSafetyProfile) -> Self {
         match profile {
-            RuntimeSafetyProfile::CodexInferenceV1 => Self::Inference,
-            RuntimeSafetyProfile::CodexLocalToolsV1 => Self::LocalTools,
+            RuntimeSafetyProfile::CodexInferenceV1 | RuntimeSafetyProfile::ClaudeInferenceV1 => {
+                Self::Inference
+            }
+            RuntimeSafetyProfile::CodexLocalToolsV1 | RuntimeSafetyProfile::ClaudeLocalToolsV1 => {
+                Self::LocalTools
+            }
         }
     }
     pub(crate) fn of_attachment(profile: AttachmentProfile) -> Self {

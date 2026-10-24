@@ -5,10 +5,8 @@
 //   <out>/libexec/wyss-console/wyss-screen
 //   <out>/share/wyss-console/package.json
 //
-// The desktop installs and starts only the authority whose SHA-256 it was compiled
-// with (`WYSS_AUTHORITY_SHA256`), and finds it beside itself. So the authority is built
-// first, its digest is taken, and the desktop is built again knowing it. A build made
-// any other way (`desktop:build`, `desktop:dev`) carries no authority and manages none.
+// The embedded authority digest identifies the shipped binary. Opening the desktop never
+// installs or starts an authority; service activation is an explicit operator action.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -95,6 +93,10 @@ const files = [
   [desktop, 'bin/wyss-console'],
   [authority, 'libexec/wyss-console/wyss-control'],
   [screenHelper, 'libexec/wyss-console/wyss-screen'],
+  [
+    join(release, 'wyss-credential-agent'),
+    'libexec/wyss-console/wyss-credential-agent',
+  ],
 ];
 for (const [, target] of files) {
   mkdirSync(dirname(join(staging, target)), { recursive: true });

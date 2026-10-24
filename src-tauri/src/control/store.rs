@@ -54,21 +54,35 @@ impl Store {
     /// Read-only canonical validation for an offline in-memory image. No open/migrate,
     /// vocabulary update, journal configuration or runtime reconciliation occurs.
     pub(crate) fn validate_offline_connection(conn: Connection) -> ControlResult<Connection> {
-        Self::validate_offline(conn, false)
+        Self::validate_offline(conn, 7)
     }
     /// The same verification for an offline schema-8 image, including new work. Generation
     /// attribution, runtime rows, launches and sidecars are verified by the F8 validator.
     pub(crate) fn validate_offline_connection_v8(conn: Connection) -> ControlResult<Connection> {
-        Self::validate_offline(conn, true)
+        Self::validate_offline(conn, 8)
     }
-    fn validate_offline(conn: Connection, v8: bool) -> ControlResult<Connection> {
+    pub(crate) fn validate_offline_connection_v9(conn: Connection) -> ControlResult<Connection> {
+        Self::validate_offline(conn, 9)
+    }
+    fn validate_offline(conn: Connection, expected: i64) -> ControlResult<Connection> {
         if conn.path() != Some("") {
             return Err(ControlError::UnsafePath);
         }
         let (version, stream, head, vocabulary): (i64, String, String, i64) = conn.query_row(
             "SELECT schema_version,stream_id,last_sequence,event_vocabulary FROM authority_metadata WHERE id=1",
             [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).map_err(invalid)?;
-        if version != if v8 { 8 } else { 7 } || vocabulary < if v8 { 2 } else { 1 } {
+        let v8 = expected >= 8;
+        if version != expected
+            || vocabulary
+                < if expected == 9 {
+                    3
+                } else if v8 {
+                    2
+                } else {
+                    1
+                }
+            || (expected == 9 && vocabulary != 3)
+        {
             return Err(ControlError::StorageIncompatible);
         }
         let store = Self {
@@ -215,6 +229,17 @@ impl Store {
                 || order != key(n)
                 || e.sequence().get() != n
                 || serde_json::to_value(session).map_err(invalid)? != v["session_id"]
+            {
+                return Err(ControlError::StorageIncompatible);
+            }
+            if v8
+                && self
+                    .conn
+                    .pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
+                    .map_err(invalid)?
+                    == 8
+                && v["payload"].get("adapter_id").is_some()
+                && v["payload"]["adapter_id"] != "codex"
             {
                 return Err(ControlError::StorageIncompatible);
             }
@@ -786,8 +811,7 @@ fn validate_audit(v: &Value) -> ControlResult<()> {
         };
         if p.len() != keys.len()
             || keys.iter().any(|k| !p.contains_key(*k))
-            || p["adapter_id"] != "codex"
-            || p["runtime_kind"] != "codex"
+            || crate::f8::provider::payload(&v["payload"]).is_err()
         {
             return Err(ControlError::StorageIncompatible);
         }

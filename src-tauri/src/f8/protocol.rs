@@ -465,6 +465,7 @@ impl Response {
         )?;
         canonical_ids(&v)?;
         let authority: WireUuid = decode(v["authority_instance_id"].clone())?;
+        let mut store_version = 8;
         let mut projection = Projection::None;
         let mut budget_exceeded = false;
         if result {
@@ -479,12 +480,15 @@ impl Response {
                     if data["protocol_version"].as_u64() != Some(2) {
                         return Err(E::ProtocolVersionUnsupported);
                     }
-                    if data["storage_schema_version"].as_u64() != Some(8) {
+                    if !matches!(data["storage_schema_version"].as_u64(), Some(8 | 9)) {
                         return Err(E::StorageIncompatible);
                     }
                     if data["authority_instance_id"] != json!(authority) {
                         return Err(E::CorrelationError);
                     }
+                    store_version = data["storage_schema_version"]
+                        .as_u64()
+                        .ok_or(E::StorageIncompatible)? as u8;
                     data["protocol_version"] = json!(1);
                     data["storage_schema_version"] = json!(7);
                 }
@@ -603,7 +607,7 @@ impl Response {
         let mut base = v1::Response::parse(&encode(&v)?)?;
         if let Ok(v1::ResultValue::Hello(s) | v1::ResultValue::Status(s)) = &mut base.outcome {
             s.protocol_version = 2;
-            s.storage_schema_version = 8;
+            s.storage_schema_version = store_version;
         }
         let response = Self {
             request_id: base.request_id,
@@ -865,7 +869,7 @@ impl Response {
                 let d = &mut v["result"]["value"];
                 if matches!(kind.as_str(), "hello" | "status") {
                     d["protocol_version"] = json!(2);
-                    d["storage_schema_version"] = json!(8);
+                    // Storage version is carried by the authority outcome, never guessed.
                 }
                 match &self.projection {
                     Projection::None => (),

@@ -533,19 +533,19 @@ impl KeyStore for SecretToolStore {
 }
 
 /// A key store for tests: in memory, and able to fail the way the real one can.
-#[cfg(test)]
+#[cfg(any(test, feature = "f8-fixture"))]
 pub struct MemoryStore {
     state: Mutex<MemoryState>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "f8-fixture"))]
 struct MemoryState {
     key: Option<[u8; KEY_LEN]>,
     unavailable: bool,
     refuses_writes: bool,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "f8-fixture"))]
 impl MemoryStore {
     pub fn new() -> std::sync::Arc<Self> {
         std::sync::Arc::new(Self {
@@ -574,7 +574,7 @@ impl MemoryStore {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "f8-fixture"))]
 impl KeyStore for std::sync::Arc<MemoryStore> {
     fn load(&self) -> Result<Option<Key>, KeyStoreError> {
         let state = self.state.lock().unwrap();

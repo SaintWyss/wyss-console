@@ -194,6 +194,15 @@ fn disposable_v9_crash_child() {
 
 #[test]
 fn a_real_process_crash_during_the_disposable_table_rebuild_recovers_the_original_v8() {
+    disposable_crash(rebuild_statements);
+}
+#[test]
+fn production_v9_process_crash_restores_original_v8() {
+    disposable_crash(crate::f8::v9::rebuild_statements);
+}
+fn disposable_crash(
+    statements: fn(&Connection) -> crate::contracts::control::ControlResult<Vec<String>>,
+) {
     let root = std::env::temp_dir().join(format!("wyss-release-v9-crash-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&root).unwrap();
     std::fs::write(root.join("fixture-marker"), b"disposable-v9-only").unwrap();
@@ -206,7 +215,7 @@ fn a_real_process_crash_during_the_disposable_table_rebuild_recovers_the_origina
     .unwrap();
     std::fs::write(
         root.join("statements.json"),
-        serde_json::to_vec(&rebuild_statements(&v8).unwrap()).unwrap(),
+        serde_json::to_vec(&statements(&v8).unwrap()).unwrap(),
     )
     .unwrap();
     let status = std::process::Command::new(std::env::current_exe().unwrap())
@@ -554,4 +563,202 @@ fn the_migration_algorithm_reads_no_path_and_is_not_compiled_into_a_package() {
     }
     let f8 = include_str!("../../f8.rs");
     assert!(f8.contains("#[cfg(test)]\npub(crate) mod v9_candidate;"));
+}
+
+#[test]
+fn production_v9_persists_real_claude_identity_turns_approvals_and_recovers_mixed_history() {
+    use crate::f8::{allocator::Allocator, engine::Engine, registry::Registry, v9};
+    let v8 = synthetic_v8(true);
+    let old_rows = rows(&v8).unwrap();
+    let mut connection = v9::migrate(&v8, |_| Ok(())).unwrap();
+    let authority = wire(AUTH);
+    let (used, generations) = Allocator::new(&mut connection, authority.clone())
+        .unwrap()
+        .registry_history()
+        .unwrap();
+    let engine = Engine::new(
+        connection,
+        authority.clone(),
+        Registry::with_history(authority, used, generations).unwrap(),
+        None,
+    )
+    .unwrap();
+    let mut rig = Rig::new();
+    rig.authority = Authority::new(engine);
+    rig.client = Client::default();
+    rig.hello();
+    let prepared = rig.call(
+        "managedSession/prepare",
+        json!({"intent_id":uuid(),"adapter_id":"claude","runtime_kind":"claude_code"}),
+    );
+    assert_eq!(prepared["result"]["kind"], "session", "{prepared}");
+    let s = prepared["result"]["value"]["managed_session_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let workers = install_presenting(&mut rig, None);
+    let answer=rig.call("runtime/start",json!({"intent_id":uuid(),"adapter_id":"claude","runtime_kind":"claude_code","managed_session_id":s,"expected_generation":0,"expected_revision":0,"safety_profile":"claude_local_tools_v1","workspace_root":rig.workspace.to_str().unwrap()}));
+    assert_eq!(answer["result"]["kind"], "runtime_control", "{answer}");
+    let (bridge, exec) = workers.lock().unwrap().get(&s).cloned().unwrap();
+    bridge.push(json!({"v":1,"e":"hello","proto":1,"python":"3.14.8","sdk_version":"0.2.173"}));
+    bridge.push(fixture_event("ready"));
+    tick_until(&mut rig, "Claude ready", |r| {
+        runtime_state(r, &s) == Some("ready")
+    });
+    let reference = rig.authority.engine().reference(&s).unwrap();
+    let l = Live {
+        reference: reference.clone(),
+        fence: json!({"managed_session_id":s,"generation":reference.generation,"runtime_instance_id":reference.runtime_instance_id}),
+        bridge,
+        exec,
+        session: s.clone(),
+    };
+    grant(&mut rig, &l);
+    bind_new(&mut rig, &l);
+    let t = begin_turn(&mut rig, &l, "synthetic Claude approval");
+    attest(&l, &t);
+    proposal(&l, &t, "act-1", "echo synthetic");
+    tick_until(&mut rig, "pending", |r| {
+        r.authority.engine().pending_approvals(&s) == 1
+    });
+    let a = pending_approval(&mut rig, &t);
+    decide(&mut rig, &l, &a, "decline");
+    finish_turn(&mut rig, &l, &t);
+    v9::validate_v9(rig.authority.engine().connection()).unwrap();
+    assert!(v9::v8_view(rig.authority.engine().connection()).is_err());
+    for (table, update) in [
+        (
+            "managed_session_bindings",
+            format!(
+                "UPDATE managed_session_bindings SET adapter_id='codex',runtime_kind='codex' WHERE managed_session_id='{s}'"
+            ),
+        ),
+        (
+            "managed_session_bindings",
+            format!(
+                "UPDATE managed_session_bindings SET runtime_session_id='not-a-uuid' WHERE managed_session_id='{s}'"
+            ),
+        ),
+        (
+            "control_events",
+            format!(
+                "UPDATE control_events SET envelope=json_set(envelope,'$.payload.adapter_id','codex','$.payload.runtime_kind','codex') WHERE session_id='{s}' AND json_extract(envelope,'$.payload.adapter_id')='claude'"
+            ),
+        ),
+    ] {
+        let tampered = clone_database(rig.authority.engine().connection()).unwrap();
+        let mut q = tampered
+            .prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name=?1")
+            .unwrap();
+        let triggers: Vec<(String, String)> = q
+            .query_map([table], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        drop(q);
+        for (name, _) in &triggers {
+            tampered
+                .execute_batch(&format!("DROP TRIGGER {name}"))
+                .unwrap();
+        }
+        assert!(tampered.execute(&update, []).unwrap() > 0);
+        for (_, sql) in &triggers {
+            tampered.execute_batch(sql).unwrap();
+        }
+        assert!(v9::validate_v9(&tampered).is_err(), "{table}");
+    }
+    let all = rows(rig.authority.engine().connection()).unwrap();
+    assert!(all["control_events"].starts_with(&old_rows["control_events"]));
+    let path = std::env::temp_dir().join(format!("wyss-v9-mixed-{}.sqlite", uuid()));
+    v9::write_new_image(rig.authority.engine().connection(), &path).unwrap();
+    let mut persisted = Connection::open(&path).unwrap();
+    v9::validate_v9(&persisted).unwrap();
+    assert!(validate_v8(&persisted).is_err());
+    let next = wire(&uuid());
+    let (used, generations) = Allocator::new(&mut persisted, next.clone())
+        .unwrap()
+        .registry_history()
+        .unwrap();
+    let engine = Engine::new(
+        persisted,
+        next.clone(),
+        Registry::with_history(next, used, generations).unwrap(),
+        None,
+    )
+    .unwrap();
+    let mut recovered = Authority::new(engine);
+    recovered.tick(Instant::now()).unwrap();
+    v9::validate_v9(recovered.engine().connection()).unwrap();
+    assert!(recovered.engine().reference(&s).is_none());
+    let record: (String, String) = recovered
+        .engine()
+        .connection()
+        .query_row(
+            "SELECT adapter_id,runtime_kind FROM managed_runtimes WHERE managed_session_id=?1",
+            [&s],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(record, ("claude".into(), "claude_code".into()));
+    drop(recovered);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn production_v9_interruptions_backup_restore_and_refusal_preserve_codex_history() {
+    use crate::f8::v9 as production;
+    let mut source = synthetic_v8(true);
+    let before = rows(&source).unwrap();
+    let statements = production::rebuild_statements(&source).unwrap().len();
+    for index in 0..statements {
+        assert!(
+            production::migrate(&source, |stage| {
+                if stage == production::Stage::Statement(index) {
+                    Err(E::StorageUnavailable)
+                } else {
+                    Ok(())
+                }
+            })
+            .is_err()
+        );
+        assert_eq!(rows(&source).unwrap(), before);
+        validate_v8(&source).unwrap();
+    }
+    let (backup, candidate) = production::prepare(&mut source).unwrap();
+    assert_eq!(rows(&backup).unwrap(), before);
+    production::validate_v9(&candidate).unwrap();
+    assert!(Store::validate_offline_connection_v8(clone_database(&candidate).unwrap()).is_err());
+    assert!(crate::f8::v8::validate_v8(&candidate).is_err());
+    assert_eq!(
+        rows(&production::v8_view(&candidate).unwrap()).unwrap(),
+        before
+    );
+    let root = std::env::temp_dir().join(format!("wyss-v9-rollback-{}", uuid()));
+    std::fs::create_dir(&root).unwrap();
+    let source_path = root.join("source.sqlite3");
+    production::write_new_image(&source, &source_path).unwrap();
+    let bytes = std::fs::read(&source_path).unwrap();
+    let backup_path = root.join("backup-v8.sqlite3");
+    let candidate_path = root.join("candidate-v9.sqlite3");
+    production::prepare_copy_arguments([
+        source_path.as_os_str().to_owned(),
+        backup_path.as_os_str().to_owned(),
+        candidate_path.as_os_str().to_owned(),
+    ])
+    .unwrap();
+    assert_eq!(std::fs::read(&source_path).unwrap(), bytes);
+    validate_v8(&Connection::open(&backup_path).unwrap()).unwrap();
+    production::validate_v9(&Connection::open(&candidate_path).unwrap()).unwrap();
+    assert!(production::write_new_image(&candidate, &backup_path).is_err());
+    // Restoration is a separate new V8 image, never binary replacement over a V9 database.
+    production::write_new_image(
+        &Connection::open(&backup_path).unwrap(),
+        &root.join("restored-v8.sqlite3"),
+    )
+    .unwrap();
+    assert_eq!(
+        rows(&Connection::open(root.join("restored-v8.sqlite3")).unwrap()).unwrap(),
+        before
+    );
+    std::fs::remove_dir_all(root).unwrap();
 }

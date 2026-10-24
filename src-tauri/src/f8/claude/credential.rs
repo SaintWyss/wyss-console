@@ -1,15 +1,5 @@
-//! How a provider credential could reach a Claude runtime, and why it cannot yet.
-//!
-//! ADR0038 seals API keys and returns none; it says how a key reaches a provider "needs its own
-//! decision". That decision is the proposed ADR0056, so this build has **no source of a real
-//! credential**: `CredentialSource` has no production implementation, the launcher in production
-//! mode asks none, and a runtime whose origin is the provider is refused without one. Nothing here
-//! reads a file, a keyring or an environment variable.
-//!
-//! What exists for tests and the isolated fixture is a synthetic key held in memory. A key, when
-//! one exists, is handed once to the credential broker's stdin and is never in an environment, a
-//! command line, a log, a bridge frame or a window. This type does not zeroize its memory and no
-//! claim of that kind is made: a process of the same user that can read another's memory can read it.
+//! Broker credential types. A protected source is delivered by the separate native-consent
+//! agent over authenticated inherited pipes; real provider policy gates remain closed.
 use crate::contracts::control::{ControlError as E, ControlResult};
 
 /// A credential's text. It never appears in `Debug`.
@@ -27,6 +17,11 @@ impl ApiKey {
         &self.0
     }
 }
+impl Drop for ApiKey {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
 impl std::fmt::Debug for ApiKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("ApiKey(<redacted>)")
@@ -37,9 +32,16 @@ impl std::fmt::Debug for ApiKey {
 /// owned by the authority's operator, never named by a client.
 pub trait CredentialSource: Send + Sync {
     fn key(&self) -> ControlResult<Option<ApiKey>>;
+    fn key_for(
+        &self,
+        _identity: &super::worker::Identity,
+        _profile: crate::adapters::claude::Profile,
+    ) -> ControlResult<Option<ApiKey>> {
+        self.key()
+    }
 }
 
-/// The only source in a production build: there is none.
+/// Default source until an operator explicitly selects the reviewed protected handoff.
 pub struct NoCredential;
 impl CredentialSource for NoCredential {
     fn key(&self) -> ControlResult<Option<ApiKey>> {

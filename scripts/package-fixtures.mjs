@@ -10,6 +10,7 @@ export const FIXTURE_MARKERS = [
   'codex_runtime.py',
   'wyss-b1-synthetic-',
   'WYSS_M3_FIXTURE_HOST',
+  'WYSS_CREDENTIAL_AGENT_FIXTURE',
   // The real binary's own fixture arguments (feature m3-fixture): a packaged build has none of them.
   '--m3-fixture-sdk-root',
   '--m3-fixture-script',
@@ -87,6 +88,7 @@ export function verifyPackageFixtures(directory) {
     join(directory, 'bin', 'wyss-console'),
     join(directory, 'libexec', 'wyss-console', 'wyss-control'),
     join(directory, 'libexec', 'wyss-console', 'wyss-screen'),
+    join(directory, 'libexec', 'wyss-console', 'wyss-credential-agent'),
   ];
   for (const binary of binaries) {
     const hits = fixtureHitsInFile(binary);

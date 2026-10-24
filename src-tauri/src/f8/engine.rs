@@ -115,6 +115,9 @@ pub struct Spawned {
 /// Creates the worker for a launch the allocator already reserved. The engine never spawns
 /// anything for a launch that has no committed reservation.
 pub trait Spawner {
+    fn supports_provider(&self, provider: super::provider::Provider) -> bool {
+        provider == super::provider::Provider::Codex
+    }
     fn supports_profile(&self, _profile: v1::RuntimeSafetyProfile) -> bool {
         true
     }
@@ -204,6 +207,7 @@ struct Live {
     attachment: Option<Attachment>,
     exit: Option<(String, Option<String>)>,
     requires_containment: bool,
+    expected_profile: &'static str,
     requested_workspace: Option<String>,
     observed_dead: Option<Instant>,
     drained_frames: usize,
@@ -544,18 +548,39 @@ impl Engine {
             ),
             _ => return Err(E::InvalidRequest),
         };
-        if let v1::Operation::RuntimeStart(m) = request.operation()
-            && !spawner.supports_profile(
+        let provider = super::provider::session(&self.conn, &session)?;
+        super::provider::admit(&self.conn, provider)?;
+        if !spawner.supports_provider(provider) {
+            return Err(E::GateDenied);
+        }
+        if let v1::Operation::RuntimeStart(m) = request.operation() {
+            let profile =
                 m.safety_profile
-                    .unwrap_or(v1::RuntimeSafetyProfile::CodexInferenceV1),
-            )
+                    .unwrap_or(if provider == super::provider::Provider::Claude {
+                        v1::RuntimeSafetyProfile::ClaudeInferenceV1
+                    } else {
+                        v1::RuntimeSafetyProfile::CodexInferenceV1
+                    });
+            if profile.provider() != provider {
+                return Err(E::InvalidRequest);
+            }
+        }
+        if let v1::Operation::RuntimeStart(m) = request.operation()
+            && !spawner.supports_profile(m.safety_profile.unwrap_or(
+                if provider == super::provider::Provider::Claude {
+                    v1::RuntimeSafetyProfile::ClaudeInferenceV1
+                } else {
+                    v1::RuntimeSafetyProfile::CodexInferenceV1
+                },
+            ))
         {
             return Err(E::Unsupported);
         }
         // Execution paths whose required containment cannot be provided are refused outright:
         // nothing is reserved, spawned or recorded for them.
         if let v1::Operation::RuntimeStart(m) = request.operation()
-            && m.safety_profile == Some(v1::RuntimeSafetyProfile::CodexLocalToolsV1)
+            && m.safety_profile
+                .is_some_and(v1::RuntimeSafetyProfile::local_tools)
             && !spawner.descendant_containment()
         {
             return Err(E::Unsupported);
@@ -601,7 +626,7 @@ impl Engine {
         // `launch` records it now (or queues the record), so no phantom slot remains.
         let tools = matches!(
             request.operation(),
-            v1::Operation::RuntimeStart(m) if m.safety_profile == Some(v1::RuntimeSafetyProfile::CodexLocalToolsV1)
+            v1::Operation::RuntimeStart(m) if m.safety_profile.is_some_and(v1::RuntimeSafetyProfile::local_tools)
         );
         self.launch(&reference, spawner, tools, workspace)?;
         Ok(outcome)
@@ -646,6 +671,7 @@ impl Engine {
                 attachment: None,
                 exit: None,
                 requires_containment: tools,
+                expected_profile: super::provider::session(&self.conn, &session)?.profile(tools),
                 requested_workspace,
                 observed_dead: None,
                 drained_frames: 0,
@@ -689,11 +715,7 @@ impl Engine {
             .live
             .get(reference.managed_session_id.as_str())
             .ok_or(E::StaleRevision)?;
-        let profile = if expected.requires_containment {
-            "codex_local_tools_v1"
-        } else {
-            "codex_inference_v1"
-        };
+        let profile = expected.expected_profile;
         if attachment.profile != profile
             || attachment.revision == 0
             || expected
@@ -792,11 +814,7 @@ impl Engine {
     ) -> ControlResult<()> {
         let now = self.ms(Instant::now());
         let live = self.fenced_mut(fence)?;
-        let profile = if live.requires_containment {
-            "codex_local_tools_v1"
-        } else {
-            "codex_inference_v1"
-        };
+        let profile = live.expected_profile;
         if next.profile != profile
             || live
                 .requested_workspace

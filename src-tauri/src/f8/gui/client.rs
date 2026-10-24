@@ -136,7 +136,7 @@ pub struct Answer {
 /// versions are not assumed to agree on anything the protocol does not state.
 pub(crate) fn compatible(status: &AuthorityStatus) -> bool {
     status.protocol_version == 2
-        && status.storage_schema_version == 8
+        && matches!(status.storage_schema_version, 8 | 9)
         && status.service_version == env!("CARGO_PKG_VERSION")
 }
 

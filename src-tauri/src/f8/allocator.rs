@@ -78,7 +78,7 @@ impl<'c> Allocator<'c> {
                 |r| r.get(0),
             )
             .map_err(invalid)?;
-        if version != 8 {
+        if !matches!(version, 8 | 9) {
             return Err(E::StorageIncompatible);
         }
         conn.pragma_update(None, "foreign_keys", true).map_err(db)?;
@@ -170,6 +170,14 @@ impl<'c> Allocator<'c> {
             )
             .optional()
             .map_err(db)?;
+        let provider = super::provider::session(&tx, &session)?;
+        super::provider::admit(&tx, provider)?;
+        let (adapter, runtime_kind) = provider.fields();
+        if mutation.adapter_id.as_str() != adapter
+            || serde_json::to_value(mutation.runtime_kind).map_err(invalid)? != runtime_kind
+        {
+            return Err(E::InvalidRequest);
+        }
         let closed = match state.as_deref() {
             None => return Err(E::SessionNotFound),
             Some("prepared") => false,
@@ -297,13 +305,15 @@ impl<'c> Allocator<'c> {
             .map_err(db)?;
         } else {
             tx.execute(
-                "INSERT INTO managed_runtimes VALUES(?1,'codex','codex',?2,?3,?4,?5,?5)",
+                "INSERT INTO managed_runtimes VALUES(?1,?6,?7,?2,?3,?4,?5,?5)",
                 params![
                     session,
                     desired_text,
                     next_revision as i64,
                     new_generation as i64,
-                    now
+                    now,
+                    adapter,
+                    runtime_kind
                 ],
             )
             .map_err(db)?;
@@ -311,8 +321,16 @@ impl<'c> Allocator<'c> {
         step(&mut self.fault, 0)?;
         if reserved {
             tx.execute(
-                "INSERT INTO managed_runtime_launches VALUES(?1,'codex','codex',?2,?3,?4,?5)",
-                params![session, new_generation as i64, new_instance, authority, now],
+                "INSERT INTO managed_runtime_launches VALUES(?1,?6,?7,?2,?3,?4,?5)",
+                params![
+                    session,
+                    new_generation as i64,
+                    new_instance,
+                    authority,
+                    now,
+                    adapter,
+                    runtime_kind
+                ],
             )
             .map_err(db)?;
         }
@@ -324,13 +342,13 @@ impl<'c> Allocator<'c> {
                 session: Some(&session),
                 kind: "authority.runtime.desired_state_changed",
                 correlation: Some(&intent),
-                payload: json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":desired_text,
+                payload: json!({"adapter_id":adapter,"runtime_kind":runtime_kind,"desired_state":desired_text,
                     "revision":next_revision,"generation":new_generation,"runtime_instance_id":new_instance}),
                 version: 2,
             },
         )?;
         step(&mut self.fault, 2)?;
-        let record = json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":desired_text,
+        let record = json!({"adapter_id":adapter,"runtime_kind":runtime_kind,"desired_state":desired_text,
             "revision":next_revision,"created_at":created,"updated_at":now});
         let mut result = record.clone();
         result["managed_session_id"] = json!(session);
@@ -370,8 +388,10 @@ impl<'c> Allocator<'c> {
         runtime_version: &str,
         compatibility: &str,
     ) -> ControlResult<()> {
+        let (adapter, runtime_kind) =
+            super::provider::session(self.conn, launch.managed_session_id.as_str())?.fields();
         self.observe(launch, "authority.runtime.instance_ready", |_| {
-            Ok(json!({"adapter_id":"codex","runtime_kind":"codex",
+            Ok(json!({"adapter_id":adapter,"runtime_kind":runtime_kind,
                 "runtime_instance_id":launch.runtime_instance_id,"generation":launch.generation,
                 "runtime_version":runtime_version,"compatibility":compatibility}))
         })
@@ -385,8 +405,10 @@ impl<'c> Allocator<'c> {
         expected: bool,
         budget_failure: Option<&str>,
     ) -> ControlResult<()> {
+        let (adapter, runtime_kind) =
+            super::provider::session(self.conn, launch.managed_session_id.as_str())?.fields();
         self.observe(launch, "authority.runtime.instance_exited", |desired| {
-            Ok(json!({"adapter_id":"codex","runtime_kind":"codex",
+            Ok(json!({"adapter_id":adapter,"runtime_kind":runtime_kind,
                 "runtime_instance_id":launch.runtime_instance_id,"generation":launch.generation,
                 "exit_kind":exit_kind,"expected":expected,"desired_state":desired,
                 "budget_failure":budget_failure}))
@@ -496,7 +518,11 @@ impl<'c> Allocator<'c> {
 
     /// Everything the durable log leaves unresolved on launches that are not live. Read-only.
     pub fn unresolved_work(&self) -> ControlResult<audit::Unresolved> {
-        let mut replay = AuditReplay::default();
+        let mut replay = if super::provider::version(self.conn)? == 9 {
+            AuditReplay::v9()
+        } else {
+            AuditReplay::default()
+        };
         let mut q = self
             .conn
             .prepare("SELECT envelope FROM control_events ORDER BY sequence")
@@ -697,6 +723,12 @@ pub(super) fn append(
         "correlation_id":correlation,"causation_id":null,"payload":payload,
         "persistence":"durable","sensitivity":"internal","redaction":"none"});
     audit::validate_event(&value)?;
+    if super::provider::version(tx)? == 8
+        && value["payload"].get("adapter_id").is_some()
+        && value["payload"]["adapter_id"] != "codex"
+    {
+        return Err(E::Unsupported);
+    }
     let raw = serde_json::to_string(&value).map_err(invalid)?;
     // Durable security metadata is never truncated: an oversized event fails its mutation.
     if raw.len() > MAX_EVENT_BYTES {

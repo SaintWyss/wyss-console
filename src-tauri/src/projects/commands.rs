@@ -57,8 +57,12 @@ fn advert_of(protocol: ManagedProtocol, facts: AuthorityFacts, own: &str) -> Man
 
 fn profile_of(profile: RuntimeSafetyProfile) -> ManagedSafetyProfile {
     match profile {
-        RuntimeSafetyProfile::CodexInferenceV1 => ManagedSafetyProfile::Inference,
-        RuntimeSafetyProfile::CodexLocalToolsV1 => ManagedSafetyProfile::LocalTools,
+        RuntimeSafetyProfile::CodexInferenceV1 | RuntimeSafetyProfile::ClaudeInferenceV1 => {
+            ManagedSafetyProfile::Inference
+        }
+        RuntimeSafetyProfile::CodexLocalToolsV1 | RuntimeSafetyProfile::ClaudeLocalToolsV1 => {
+            ManagedSafetyProfile::LocalTools
+        }
     }
 }
 

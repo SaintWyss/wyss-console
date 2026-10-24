@@ -662,6 +662,14 @@ impl RuntimeTarget {
             runtime_kind: AgentRuntimeKind::Codex,
         }
     }
+    pub fn known(&self) -> ControlResult<()> {
+        let kind = match self.runtime_kind {
+            AgentRuntimeKind::Codex => "codex",
+            AgentRuntimeKind::ClaudeCode => "claude_code",
+            _ => return Err(ControlError::Unsupported),
+        };
+        crate::f8::provider::Provider::parse(self.adapter_id.as_str(), kind).map(|_| ())
+    }
     pub fn supported(&self) -> ControlResult<()> {
         if self == &Self::codex() {
             Ok(())
@@ -688,7 +696,9 @@ pub struct RuntimeMutation {
 impl RuntimeMutation {
     /// A local-tools start names exactly one workspace; nothing else names any.
     pub fn validate(&self, start: bool) -> ControlResult<()> {
-        let local = self.safety_profile == Some(RuntimeSafetyProfile::CodexLocalToolsV1);
+        let local = self
+            .safety_profile
+            .is_some_and(RuntimeSafetyProfile::local_tools);
         if (!start && self.safety_profile.is_some()) || local != self.workspace_root.is_some() {
             return Err(ControlError::InvalidRequest);
         }
@@ -735,7 +745,7 @@ impl RuntimeControlRecord {
             adapter_id: self.adapter_id.clone(),
             runtime_kind: self.runtime_kind,
         }
-        .supported()?;
+        .known()?;
         if self.revision == 0 || self.revision > i64::MAX as u64 {
             return Err(ControlError::StorageIncompatible);
         }
@@ -816,7 +826,7 @@ impl RuntimeStatus {
             adapter_id: self.adapter_id.clone(),
             runtime_kind: self.runtime_kind,
         }
-        .supported()?;
+        .known()?;
         if self.model_count > 50
             || self
                 .runtime_version
@@ -832,7 +842,9 @@ impl RuntimeStatus {
             return Err(ControlError::InvalidRequest);
         }
         if self.workspace_root.is_some()
-            != (self.runtime_safety_profile == Some(RuntimeSafetyProfile::CodexLocalToolsV1))
+            != self
+                .runtime_safety_profile
+                .is_some_and(RuntimeSafetyProfile::local_tools)
         {
             return Err(ControlError::InvalidRequest);
         }
@@ -970,7 +982,23 @@ pub struct RuntimeModels {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeSafetyProfile {
     CodexInferenceV1,
+    ClaudeInferenceV1,
+    ClaudeLocalToolsV1,
     /// Isolated generation offering exactly one-shot command execution and patch
     /// application, each mediated by the authority.
     CodexLocalToolsV1,
+}
+
+impl RuntimeSafetyProfile {
+    pub fn local_tools(self) -> bool {
+        matches!(self, Self::CodexLocalToolsV1 | Self::ClaudeLocalToolsV1)
+    }
+    pub fn provider(self) -> crate::f8::provider::Provider {
+        match self {
+            Self::CodexInferenceV1 | Self::CodexLocalToolsV1 => {
+                crate::f8::provider::Provider::Codex
+            }
+            _ => crate::f8::provider::Provider::Claude,
+        }
+    }
 }

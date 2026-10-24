@@ -45,13 +45,25 @@ pub fn validate_v8(c: &Connection) -> ControlResult<V8Summary> {
     {
         return Err(bad());
     }
+    validate_data(c, 8)
+}
+
+pub(crate) fn validate_data(c: &Connection, version: i64) -> ControlResult<V8Summary> {
     integrity(c)?;
     // Baseline canonical verification of sessions, leases, bindings, turns, approvals,
     // receipts and the legacy runtime, on a private copy so the caller's connection is untouched.
-    Store::validate_offline_connection_v8(clone_database(c)?)?;
+    if version == 9 {
+        Store::validate_offline_connection_v9(clone_database(c)?)?;
+    } else {
+        Store::validate_offline_connection_v8(clone_database(c)?)?;
+    }
 
     let upto = super::migration::verify_boundary(c)?;
-    let mut replay = AuditReplay::with_boundary(upto);
+    let mut replay = if version == 9 {
+        AuditReplay::with_v9_boundary(upto)
+    } else {
+        AuditReplay::with_boundary(upto)
+    };
     let mut events = 0u64;
     {
         let mut q = c
