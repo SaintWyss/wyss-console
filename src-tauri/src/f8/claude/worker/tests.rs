@@ -1839,12 +1839,13 @@ fn the_action_log_is_bounded_and_holds_no_action_content() {
 mod history_wiring {
     use super::*;
     use crate::m3::history::{
-        History, HistoryError, Limits, Record as HRecord, Recorder, SinkState,
+        AsyncRecorder, History, HistoryError, Limits, Record as HRecord, Recorder, SinkState,
     };
     use std::{
         os::unix::fs::DirBuilderExt,
         path::PathBuf,
-        sync::{Arc, Mutex},
+        sync::{Arc, mpsc},
+        time::{Duration, Instant},
     };
 
     fn parent() -> PathBuf {
@@ -1855,13 +1856,22 @@ mod history_wiring {
         std::fs::DirBuilder::new().mode(0o700).create(&p).unwrap();
         std::fs::canonicalize(p).unwrap()
     }
-    /// A worker whose usage goes to a real history store in a private directory. The store is
-    /// opened through the test-only door: the policy gate is closed in this source.
-    fn recording(limits: Limits) -> (Rig, HistorySink, PathBuf) {
+    /// A worker whose usage goes, through the bounded queue, to a real history store in a private
+    /// directory. The store is opened through the test-only door: the policy gate is closed in
+    /// this source.
+    fn recording_with(
+        limits: Limits,
+        capacity: usize,
+        hold: Option<mpsc::Receiver<()>>,
+    ) -> (Rig, HistorySink, PathBuf) {
         let parent = parent();
         History::enable_with_gate(&parent).unwrap();
         let store = History::open_with(&parent, limits).unwrap();
-        let sink: HistorySink = Arc::new(Mutex::new(Recorder::with(store)));
+        let sink: HistorySink = Arc::new(AsyncRecorder::spawn_with(
+            Recorder::with(store),
+            capacity,
+            hold,
+        ));
         let mut r = rig(Profile::Inference);
         r.w = std::mem::replace(
             &mut r.w,
@@ -1876,10 +1886,13 @@ mod history_wiring {
         .with_history(sink.clone());
         (r, sink, parent)
     }
-    fn records(sink: &HistorySink) -> Vec<HRecord> {
-        sink.lock()
-            .unwrap()
-            .store()
+    fn recording(limits: Limits) -> (Rig, HistorySink, PathBuf) {
+        recording_with(limits, 64, None)
+    }
+    /// What the store holds once everything offered has been written, read through a second handle.
+    fn records(sink: &HistorySink, parent: &std::path::Path) -> Vec<HRecord> {
+        sink.flush();
+        History::open_with(parent, Limits::default())
             .unwrap()
             .page(0, 100)
             .unwrap()
@@ -1902,7 +1915,7 @@ mod history_wiring {
 
     #[test]
     fn a_finished_turns_provider_reported_usage_is_recorded_once_and_never_while_it_runs() {
-        let (mut r, sink, _) = recording(Limits::default());
+        let (mut r, sink, parent) = recording(Limits::default());
         r.ready(INFERENCE);
         r.bind();
         r.start_turn("t1");
@@ -1910,9 +1923,9 @@ mod history_wiring {
         r.bridge.push(usage_frame("t1"));
         r.notices();
         // Provisional figures are not history.
-        assert!(records(&sink).is_empty());
+        assert!(records(&sink, &parent).is_empty());
         finish(&mut r, "t1");
-        let got = records(&sink);
+        let got = records(&sink, &parent);
         assert_eq!(got.len(), 1);
         let rec = &got[0];
         assert_eq!(
@@ -1939,16 +1952,16 @@ mod history_wiring {
                 .push(json!({"v":1,"e":"notice","subtype":"status","turn":"t1"}));
             let _ = r.w.inbound(16);
         }
-        assert_eq!(records(&sink).len(), 1);
-        assert_eq!(sink.lock().unwrap().counts().0, 1);
+        assert_eq!(records(&sink, &parent).len(), 1);
+        assert_eq!(sink.counts().0, 1);
         // The record has counters and ids and nothing else: no prompt, no answer.
-        let text = serde_json::to_string(&records(&sink)).unwrap();
+        let text = serde_json::to_string(&records(&sink, &parent)).unwrap();
         assert!(!text.contains("hello") && !text.contains("sk-"), "{text}");
     }
 
     #[test]
     fn a_figure_the_provider_did_not_report_is_recorded_as_unknown_not_zero() {
-        let (mut r, sink, _) = recording(Limits::default());
+        let (mut r, sink, parent) = recording(Limits::default());
         r.ready(INFERENCE);
         r.bind();
         r.start_turn("t1");
@@ -1956,7 +1969,7 @@ mod history_wiring {
         // The turn ends without a result: nothing was reported.
         r.bridge.push(json!({"v":1,"e":"turn_idle","turn":"t1"}));
         assert_eq!(r.kinds(), ["turn_failed"]);
-        let got = records(&sink);
+        let got = records(&sink, &parent);
         assert_eq!(got.len(), 1);
         assert_eq!(
             (
@@ -1972,7 +1985,7 @@ mod history_wiring {
 
     #[test]
     fn a_limit_observation_is_recorded_once_with_its_own_provenance() {
-        let (mut r, sink, _) = recording(Limits::default());
+        let (mut r, sink, parent) = recording(Limits::default());
         r.ready(INFERENCE);
         r.bind();
         r.start_turn("t1");
@@ -1986,7 +1999,7 @@ mod history_wiring {
         for _ in 0..3 {
             let _ = r.w.inbound(16);
         }
-        let limits: Vec<_> = records(&sink)
+        let limits: Vec<_> = records(&sink, &parent)
             .into_iter()
             .filter(|rec| rec.limit_window.is_some())
             .collect();
@@ -2011,7 +2024,7 @@ mod history_wiring {
             generation: 1,
         };
         for n in 0..5000 {
-            if sink.lock().unwrap().state() != SinkState::Recording {
+            if sink.state() != SinkState::Recording {
                 break;
             }
             let t = crate::m3::usage::TurnUsage {
@@ -2026,14 +2039,21 @@ mod history_wiring {
                 completeness: Completeness::Complete,
                 estimate: None,
             };
-            let rec = HRecord::turn_usage(&origin, &t, 1_800_000_000).unwrap();
-            sink.lock().unwrap().record(&rec, 1_800_000_000);
+            sink.offer(
+                HRecord::turn_usage(&origin, &t, 1_800_000_000).unwrap(),
+                1_800_000_000,
+            );
+            if n % 16 == 0 {
+                sink.flush();
+            }
         }
-        assert!(matches!(
-            sink.lock().unwrap().state(),
-            SinkState::Partial(_)
-        ));
-        let dropped_before = sink.lock().unwrap().counts().1;
+        sink.flush();
+        assert!(
+            matches!(sink.state(), SinkState::Partial(_)),
+            "{:?}",
+            sink.state()
+        );
+        let dropped_before = sink.counts().1;
         // The turn still runs, completes and streams exactly as without a history.
         r.ready(INFERENCE);
         r.bind();
@@ -2041,12 +2061,56 @@ mod history_wiring {
         r.attest_turn(INFERENCE, "t1");
         r.bridge.push(usage_frame("t1"));
         finish(&mut r, "t1");
+        sink.flush();
         assert!(
-            sink.lock().unwrap().counts().1 > dropped_before,
+            sink.counts().1 > dropped_before,
             "the figure was dropped, not raised"
         );
         r.start_turn("t2");
         r.attest_turn(INFERENCE, "t2");
+    }
+
+    /// The review's S5: the event path used to take a mutex and run SQLite in line.
+    #[test]
+    fn a_stalled_store_costs_history_never_a_turn_a_cancellation_or_a_stop() {
+        let (hold, held) = mpsc::channel::<()>();
+        let (mut r, sink, parent) = recording_with(Limits::default(), 2, Some(held));
+        r.ready(INFERENCE);
+        r.bind();
+        let started = Instant::now();
+        // Six turns, one record each, with a writer that is not writing at all.
+        for n in 1..=6 {
+            let t = format!("t{n}");
+            r.start_turn(&t);
+            r.attest_turn(INFERENCE, &t);
+            r.bridge.push(usage_frame(&t));
+            finish(&mut r, &t);
+        }
+        // A turn that is cancelled while the queue is full is cancelled.
+        r.start_turn("t7");
+        r.attest_turn(INFERENCE, "t7");
+        r.w.send(br#"{"method":"turn/interrupt"}"#).unwrap();
+        let begun = Instant::now();
+        r.w.begin_stop(Instant::now());
+        assert!(
+            begun.elapsed() < Duration::from_millis(500),
+            "stopping waited for storage"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the events waited for storage: {:?}",
+            started.elapsed()
+        );
+        // Not everything fit, and that is said, not hidden.
+        let (_, dropped) = sink.counts();
+        assert!(dropped >= 3, "dropped {dropped}");
+        assert_eq!(sink.state(), SinkState::Partial("queue_full"));
+        // Let the writer go: what fit is stored, nothing else.
+        for _ in 0..20 {
+            let _ = hold.send(());
+        }
+        let stored = records(&sink, &parent).len();
+        assert!((2..=4).contains(&stored), "stored {stored}");
     }
 
     #[test]
@@ -2058,11 +2122,9 @@ mod history_wiring {
         r.attest_turn(INFERENCE, "t1");
         r.bridge.push(usage_frame("t1"));
         finish(&mut r, "t1");
+        sink.flush();
         let mut out = Vec::new();
-        let n = sink
-            .lock()
-            .unwrap()
-            .store()
+        let n = History::open_with(&parent, Limits::default())
             .unwrap()
             .export(&mut out)
             .unwrap();
@@ -2070,7 +2132,7 @@ mod history_wiring {
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("\"provider\":\"claude\"") && text.contains("\"turn_id\":\"t1\""));
         assert!(!text.contains("hello"), "no prompt in an export");
-        drop(sink);
+        drop(sink.finish());
         assert!(History::reset(&parent).unwrap() > 0);
         assert!(!History::is_enabled(&parent));
     }

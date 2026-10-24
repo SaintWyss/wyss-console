@@ -13,7 +13,7 @@
       "steps": 23,
       "failed_steps": [],
       "leftovers": [],
-      "seconds": 32.5,
+      "seconds": 32.6,
       "ok": true
     },
     "local-tools-accept": {
@@ -29,7 +29,7 @@
       "steps": 17,
       "failed_steps": [],
       "leftovers": [],
-      "seconds": 39.8,
+      "seconds": 39.9,
       "ok": true
     },
     "local-tools-decline": {
@@ -37,7 +37,7 @@
       "steps": 29,
       "failed_steps": [],
       "leftovers": [],
-      "seconds": 54.3,
+      "seconds": 54.5,
       "ok": true
     },
     "refused": {

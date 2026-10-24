@@ -47,7 +47,7 @@ use std::{
     time::Instant,
 };
 
-pub const BRIDGE_FILES: [(&str, &str); 4] = [
+pub const BRIDGE_FILES: [(&str, &str); 5] = [
     (
         "api_tap.py",
         include_str!("../../../claude-bridge/api_tap.py"),
@@ -59,6 +59,10 @@ pub const BRIDGE_FILES: [(&str, &str); 4] = [
     (
         "bridge.py",
         include_str!("../../../claude-bridge/bridge.py"),
+    ),
+    (
+        "httpguard.py",
+        include_str!("../../../claude-bridge/httpguard.py"),
     ),
     (
         "profiles.py",
@@ -86,6 +90,7 @@ pub enum Unverified {
     RecordMismatch,
     UnlistedFile,
     ManagedPolicy,
+    FixtureNeedsLoopback,
 }
 impl Unverified {
     pub const fn code(self) -> &'static str {
@@ -100,6 +105,7 @@ impl Unverified {
             Self::RecordMismatch => "record_mismatch",
             Self::UnlistedFile => "unlisted_file",
             Self::ManagedPolicy => "managed_policy_present",
+            Self::FixtureNeedsLoopback => "fixture_needs_loopback",
         }
     }
 }
@@ -608,6 +614,12 @@ impl ClaudeLauncher {
         credential: Box<dyn CredentialSource>,
         mode: Mode,
     ) -> Result<Self, Unverified> {
+        // A fixture reaches a mock on this machine and nothing else: it can never be pointed at the
+        // real provider, with or without a key, whatever a caller supplies.
+        #[cfg(any(test, feature = "m3-fixture"))]
+        if mode == Mode::Fixture && install.origin == Origin::Anthropic {
+            return Err(Unverified::FixtureNeedsLoopback);
+        }
         let verified = install.verify()?;
         let bridge_dir = materialize_bridge(runtime).map_err(|_| Unverified::UnsafePath)?;
         Ok(Self {
@@ -630,8 +642,8 @@ impl ClaudeLauncher {
         }
     }
 
-    /// The command line of the bridge's namespace for one session: a loopback and nothing else.
-    pub fn command(&self, home: &Path, cwd: &Path, broker: &Path) -> std::process::Command {
+    /// The namespace the bridge and the CLI run in: a loopback and nothing else.
+    fn bridge_sandbox(&self, home: &Path, cwd: &Path, broker: &Path) -> Sandbox {
         let mut sb = Sandbox::new(false);
         sb.ro_bind(&self.verified.sdk_root, &self.verified.sdk_root)
             .ro_bind(&self.bridge_dir, &self.bridge_dir)
@@ -643,9 +655,14 @@ impl ClaudeLauncher {
             .setenv("HOME", SANDBOX_HOME)
             .setenv("LANG", "C.UTF-8")
             .setenv("TMPDIR", "/tmp");
+        sb
+    }
+
+    /// The command line of the bridge's namespace for one session.
+    fn command(&self, home: &Path, cwd: &Path, broker: &Path) -> std::process::Command {
         // An administrator's policy, if present, would have refused the launch already; it is
         // deliberately not hidden from the process either.
-        sb.command(
+        self.bridge_sandbox(home, cwd, broker).command(
             self.verified.python.to_str().unwrap_or("/usr/bin/python3"),
             &[
                 "-I".into(),
@@ -656,7 +673,7 @@ impl ClaudeLauncher {
 
     /// The command line of the credential broker: the network, the standard library and its own
     /// directory, with nothing of the user's home or of the provider's state.
-    pub fn broker_command(&self, broker: &Path) -> std::process::Command {
+    fn broker_command(&self, broker: &Path) -> std::process::Command {
         let mut sb = Sandbox::new(true);
         sb.ro_bind(&self.bridge_dir, &self.bridge_dir)
             .bind(broker, Path::new(BROKER_DIR))
@@ -702,6 +719,10 @@ impl ClaudeLauncher {
         effort: Option<String>,
     ) -> ControlResult<ClaudeWorker<PairedWorker>> {
         let admission = self.admission(profile)?;
+        #[cfg(any(test, feature = "m3-fixture"))]
+        if self.mode == Mode::Fixture && self.origin == Origin::Anthropic {
+            return Err(E::GateDenied);
+        }
         if !crate::adapters::claude::frames::uuid_ok(conversation) {
             return Err(E::InvalidRequest);
         }

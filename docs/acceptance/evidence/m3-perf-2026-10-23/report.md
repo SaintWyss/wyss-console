@@ -9,19 +9,19 @@ owner, not an enforced budget.
 
 | figure                                                        | min    | p50    | p95    | max    | proposed   |
 | ------------------------------------------------------------- | ------ | ------ | ------ | ------ | ---------- |
-| launch to runtime ready (cold: bridge, SDK import, CLI start) | 2210.4 | 2224.2 | 2242.4 | 2242.4 | 3364 ms    |
+| launch to runtime ready (cold: bridge, SDK import, CLI start) | 2218.8 | 2229.6 | 2242.5 | 2242.5 | 3364 ms    |
 | bind a conversation                                           | 0.0    | 0.0    | 0.1    | 0.1    | 1 ms       |
-| turn start to first streamed text                             | 40.8   | 41.0   | 41.1   | 41.1   | 62 ms      |
-| turn start to completed (short answer)                        | 51.2   | 51.4   | 51.7   | 51.7   | 78 ms      |
-| stop request to whole tree reaped                             | 502.8  | 503.6  | 524.1  | 524.1  | 787 ms     |
-| process-tree PSS when ready                                   | 303229 | 303723 | 304102 | 304102 | 456153 KiB |
-| process-tree PSS after a turn                                 | 319275 | 319384 | 320274 | 320274 | 480411 KiB |
-| process-tree RSS when ready                                   | 337688 | 338168 | 338580 | 338580 | 507870 KiB |
+| turn start to first streamed text                             | 40.9   | 41.0   | 41.1   | 41.1   | 62 ms      |
+| turn start to completed (short answer)                        | 51.2   | 51.3   | 51.5   | 51.5   | 78 ms      |
+| stop request to whole tree reaped                             | 483.1  | 502.5  | 523.0  | 523.0  | 785 ms     |
+| process-tree PSS when ready                                   | 303512 | 304123 | 304585 | 304585 | 456878 KiB |
+| process-tree PSS after a turn                                 | 319463 | 319672 | 319957 | 319957 | 479936 KiB |
+| process-tree RSS when ready                                   | 337500 | 338156 | 338504 | 338504 | 507756 KiB |
 | processes in the tree                                         | 7      | 7      | 7      | 7      | 11         |
-| threads in the tree                                           | 19     | 20     | 20     | 20     | 30         |
+| threads in the tree                                           | 19     | 19     | 20     | 20     | 30         |
 | open file descriptors in the tree                             | 47     | 47     | 47     | 47     | 71         |
-| CPU of the tree while idle (5 s)                              | 2.8    | 2.8    | 3.0    | 3.0    | 5 %        |
-| context switches of the tree while idle                       | 16.9   | 19.9   | 21.5   | 21.5   | 33 /s      |
+| CPU of the tree while idle (5 s)                              | 2.6    | 2.8    | 3.0    | 3.0    | 5 %        |
+| context switches of the tree while idle                       | 18.7   | 19.3   | 20.5   | 20.5   | 31 /s      |
 | processes left after stop                                     | 0      | 0      | 0      | 0      | 0          |
 
 Idle CPU by process (p50 %): `bwrap` 0.0, `claude` 2.8, `python` 0.0, `python3` 0.0
@@ -30,26 +30,26 @@ Idle CPU by process (p50 %): `bwrap` 0.0, `claude` 2.8, `python` 0.0, `python3` 
 
 | figure                                                        | min    | p50    | p95    | max    | proposed   |
 | ------------------------------------------------------------- | ------ | ------ | ------ | ------ | ---------- |
-| launch to runtime ready (cold: bridge, SDK import, CLI start) | 2236.9 | 2246.2 | 2264.3 | 2264.3 | 3397 ms    |
+| launch to runtime ready (cold: bridge, SDK import, CLI start) | 2243.9 | 2252.8 | 2432.7 | 2432.7 | 3650 ms    |
 | bind a conversation                                           | 0.0    | 0.0    | 0.0    | 0.0    | 0 ms       |
-| turn start to first streamed text                             | 40.9   | 40.9   | 41.2   | 41.2   | 62 ms      |
-| turn start to completed (short answer)                        | 51.1   | 51.3   | 51.6   | 51.6   | 78 ms      |
-| stop request to whole tree reaped                             | 483.4  | 503.1  | 523.4  | 523.4  | 786 ms     |
-| process-tree PSS when ready                                   | 315132 | 315574 | 315826 | 315826 | 473739 KiB |
-| process-tree PSS after a turn                                 | 331243 | 331489 | 331918 | 331918 | 497877 KiB |
-| process-tree RSS when ready                                   | 349628 | 350016 | 350188 | 350188 | 525282 KiB |
+| turn start to first streamed text                             | 40.9   | 40.9   | 41.0   | 41.0   | 62 ms      |
+| turn start to completed (short answer)                        | 51.2   | 51.2   | 51.5   | 51.5   | 78 ms      |
+| stop request to whole tree reaped                             | 482.8  | 503.1  | 504.2  | 504.2  | 757 ms     |
+| process-tree PSS when ready                                   | 315996 | 316141 | 316640 | 316640 | 474960 KiB |
+| process-tree PSS after a turn                                 | 331848 | 331970 | 332485 | 332485 | 498728 KiB |
+| process-tree RSS when ready                                   | 349884 | 350180 | 350608 | 350608 | 525912 KiB |
 | processes in the tree                                         | 7      | 7      | 7      | 7      | 11         |
-| threads in the tree                                           | 19     | 19     | 20     | 20     | 30         |
+| threads in the tree                                           | 19     | 20     | 20     | 20     | 30         |
 | open file descriptors in the tree                             | 47     | 47     | 47     | 47     | 71         |
 | CPU of the tree while idle (5 s)                              | 3.0    | 3.2    | 3.2    | 3.2    | 5 %        |
-| context switches of the tree while idle                       | 20.5   | 22.9   | 24.6   | 24.6   | 37 /s      |
+| context switches of the tree while idle                       | 22.6   | 23.8   | 26.8   | 26.8   | 41 /s      |
 | processes left after stop                                     | 0      | 0      | 0      | 0      | 0          |
 
 Idle CPU by process (p50 %): `bwrap` 0.0, `claude` 3.2, `python` 0.0, `python3` 0.0
 
 ## Cancel while streaming (n=7)
 
-request to the interruption notice: min 10.3 · p50 10.3 · p95 10.3 · max 10.3 ms
+request to the interruption notice: min 10.3 · p50 10.3 · p95 10.6 · max 10.6 ms
 
 ## Not measured here
 

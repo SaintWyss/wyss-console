@@ -61,6 +61,22 @@ The unit that is returned is a **new image**; the V8 source is only read. Publis
 is not part of this ADR's engineering: it would be an atomic rename of a validated file after a backup,
 which is the part that needs the owner's release decision.
 
+## Inventory of the Codex-only sites (non-test source)
+
+Command: `grep -rnE "'codex'|\"codex\"|CodexInferenceV1|CodexLocalToolsV1|codex_(inference|local_tools)_v1" src/control src/f8 src/contracts`
+excluding test, acceptance, fixture and `f8/claude` files. 72 matches in 19 files (a few are comments or
+error text); every one is a place V9 has to turn from a literal into the closed set, or consciously keep:
+
+| File                     | Matches | File                                                                                                | Matches |
+| ------------------------ | ------- | --------------------------------------------------------------------------------------------------- | ------- |
+| `control/store.rs`       | 8       | `f8/launcher.rs`                                                                                    | 4       |
+| `control/runtime.rs`     | 8       | `control/bindings.rs`                                                                               | 4       |
+| `f8/engine.rs`           | 7       | `f8/authority.rs`                                                                                   | 3       |
+| `f8/operations.rs`       | 6       | `control/gate.rs`                                                                                   | 3       |
+| `f8/allocator.rs`        | 6       | `control/turn_approvals.rs`, `control/schema.rs`, `control/conversations.rs`                        | 2 each  |
+| `contracts/control.rs`   | 5       | `f8/production.rs`, `f8/gui/service.rs`, `f8/audit.rs`, `control/server.rs`, `contracts/binding.rs` | 1 each  |
+| `f8/provider_adapter.rs` | 4       |                                                                                                     |         |
+
 ## Results of the rehearsal (10 tests, all passing)
 
 | Property                                                                   | Result                                                                                                                                                                                       |

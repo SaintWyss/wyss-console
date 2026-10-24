@@ -1,126 +1,123 @@
-# M3 Engineering acceptance record — 2026-10-23
+# M3 Engineering acceptance record — 2026-10-24
 
-**Branch:** `feat/m3-managed-parity-2026-10-23` · **PR #23** · **M2 PR #22:** separate, observed open, not
-merged and not touched. **Result:** `ENGINEERING_COMPLETE_RELEASE_BLOCKED`.
+**Branch:** `feat/m3-managed-parity-2026-10-23` · **PR #23** · **M2 PR #22:** separate, not merged and not
+touched by this branch.
 
-Everything that does not need an authorization only Santiago can give is built and tested. What is left
-is a decision, a provider run or a release, and each one is listed in
-[Owner decisions](#owner-decisions-and-pending-real-provider-tests). Implementation completeness is not
-production authorization: every live gate (`m3::gate`) is `false`, and nothing here installs, restarts or
-admits anything on the owner's machine.
+**Result:** `ENGINEERING_TESTS_PASSED` for everything an author can test, **`SECURITY_REVIEW_PENDING`** and
+`RELEASE_BLOCKED`. The one independent review made so far returned **FAIL** for real-credential admission
+(findings S1–S8 below); all eight are fixed in code with regression tests, but no follow-up review has passed,
+so the review gate stays closed. Nothing here installs, restarts or admits anything: every live gate
+(`m3::gate`) is `false`.
 
 ## Status matrix
 
 Status words: `IMPLEMENTED_AND_TESTED`, `IMPLEMENTED_BUT_UNQUALIFIED`, `PROVIDER_EVIDENCE_REQUIRED`,
 `OWNER_APPROVAL_REQUIRED`, `NOT_IMPLEMENTED`, `DEMONSTRATED_TECHNICAL_BLOCKER`.
 
-| Oracle                                                 | Status                        | What exists                                                                                                                                                                                                                                      | What is still needed                                                                             |
-| ------------------------------------------------------ | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| M3-01 Claude interface, version, auth, capability      | `IMPLEMENTED_BUT_UNQUALIFIED` | Exact pair pinned and verified against the pip RECORD files and the bundled CLI hash; hash-locked install; capability discovery and a three-leg attestation; E1–E9 run offline ([report](../research/claude-managed-feasibility-2026-10-23.md)). | Supported auth route: ADR0053. A real-provider run.                                              |
-| M3-02 Claude Inference                                 | `IMPLEMENTED_BUT_UNQUALIFIED` | `claude_inference_v1`: no tools offered in any request (checked in three places), hostile configuration changes nothing, nothing outside the workspace changes.                                                                                  | Same as M3-01.                                                                                   |
-| M3-03 Claude Local Tools                               | `IMPLEMENTED_BUT_UNQUALIFIED` | `claude_local_tools_v1`: only two authority-owned proposal tools; a proposal blocks until the authority decides; only the authority's executor has an effect; declined, cancelled, failed, indeterminate; no replay.                             | Same as M3-01.                                                                                   |
-| M3-04 Provider-neutral lifecycle and Codex regression  | `IMPLEMENTED_AND_TESTED`      | The Claude worker plugs in at the engine's `Worker` seam; nine authority-level tests run the real engine, authority and schema-8 writers with a Claude factory. Codex F8 suites unchanged and green.                                             | —                                                                                                |
-| M3-05 Identity, leases, receipts, recovery, capacity 1 | `OWNER_APPROVAL_REQUIRED`     | Fences, receipts, lost-runtime-is-indeterminate and capacity 1 hold with a Claude worker at the seam. **The V8 store cannot hold a Claude runtime** (CHECK `adapter_id='codex'`): ADR0055, demonstrated below.                                   | Accept ADR0055 (V9 migration, rehearsal on a copy), then run the parity suite on the real store. |
-| M3-06 Managed model/effort extension                   | `OWNER_APPROVAL_REQUIRED`     | `m3::model` with the gate closed; four facts kept apart; reroute from the provider message; per-turn model and runtime-start effort as the build allows.                                                                                         | Accept ADR0054.                                                                                  |
-| M3-07 Provider usage and limits                        | `IMPLEMENTED_BUT_UNQUALIFIED` | Provider-reported counters with provenance and completeness; a figure not reported is "not reported", never zero; estimates labelled and never billing. Codex reports no usage in F8, so none is shown for it.                                   | Real-provider figures. A Codex usage source does not exist yet.                                  |
-| M3-08 Optional local usage history                     | `OWNER_APPROVAL_REQUIRED`     | Separate SQLite file, closed schema, 1,024-byte rows, quotas, dedupe, export, reset, failure isolation, default off.                                                                                                                             | Accept the privacy and retention policy.                                                         |
-| M3-09 GUI, provenance, project/session context         | `IMPLEMENTED_BUT_UNQUALIFIED` | Providers window (profiles with reasons, four model facts, usage, history settings, fixture console) with a strict decoder; run end to end in the real Tauri window (7 scenarios).                                                               | Claude sessions inside the installed authority wait for ADR0055.                                 |
-| M3-10 Adversarial security and recovery                | `IMPLEMENTED_BUT_UNQUALIFIED` | 51 bridge/tap tests, strict-frame and policy suites, 14 real SDK/CLI tests, hostile-config and built-in-tool-demand tests; review finding fixed. The review was by the author, with the repo's review skill.                                     | An independent reviewer other than the author; real-provider adversarial runs.                   |
-| M3-11 Performance and resource qualification           | `PROVIDER_EVIDENCE_REQUIRED`  | Claude arm: 7 repeated runs per profile, raw samples kept ([report](evidence/m3-perf-2026-10-23/report.md)).                                                                                                                                     | Codex arm on the same workload (needs a Codex runtime started here).                             |
-| M3-12 Compatibility, release, rollback                 | `OWNER_APPROVAL_REQUIRED`     | Rollback disables new Claude admissions only; Codex, Native, history and the installed Console are untouched by this branch.                                                                                                                     | Santiago's release decision.                                                                     |
+| Oracle                                                 | Status                        | What exists                                                                                                                                                                                                                                                                                                 | What is still needed                                                                  |
+| ------------------------------------------------------ | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| M3-01 Claude interface, version, auth, capability      | `IMPLEMENTED_BUT_UNQUALIFIED` | Exact pair pinned and verified against pip RECORD files and the CLI hash; hash-locked install; three-leg attestation; E1–E9 run offline ([report](../research/claude-managed-feasibility-2026-10-23.md)). **No source of a real credential exists** ([ADR0056](../adr/0056-claude-credential-delivery.md)). | ADR0053 and ADR0056; a real-provider run.                                             |
+| M3-02 Claude Inference                                 | `IMPLEMENTED_BUT_UNQUALIFIED` | `claude_inference_v1`: no tools offered (checked by the tap and again by the broker, outside the sandbox), hostile configuration changes nothing, nothing outside the workspace changes.                                                                                                                    | Same as M3-01.                                                                        |
+| M3-03 Claude Local Tools                               | `IMPLEMENTED_BUT_UNQUALIFIED` | `claude_local_tools_v1`: two authority-owned proposal tools; a proposal blocks until the authority decides; only the authority's executor has an effect (bwrap, no network; writes resolved by descriptor and re-checked before the rename).                                                                | Same as M3-01; independent review of S1's fix.                                        |
+| M3-04 Provider-neutral lifecycle, Codex regression     | `IMPLEMENTED_BUT_UNQUALIFIED` | The Claude worker behaves under the real engine, authority and schema-8 writers **only while presenting itself as Codex** (a test-only override). Negative tests show the wire, the handshake and the V8 store refuse every real Claude identity. Codex suites green.                                       | ADR0055: admission through the production authority is not possible until a V9 store. |
+| M3-05 Identity, leases, receipts, recovery, capacity 1 | `OWNER_APPROVAL_REQUIRED`     | Fences, receipts, lost-runtime-is-indeterminate and capacity 1 hold at the seam. V8→V9 rehearsed on synthetic images (10 tests); the writers and replay validators are still Codex-only ([ADR0055](../adr/0055-multi-provider-managed-runtime-store.md)).                                                   | Accept ADR0055; widen writers/validators; a V9 verifier; publication rehearsal.       |
+| M3-06 Managed model/effort extension                   | `OWNER_APPROVAL_REQUIRED`     | `m3::model` with the gate closed; four facts kept apart; per-turn model, runtime-start effort ([ADR0054](../adr/0054-managed-model-selection-and-effort.md) amended); the start path now gates and validates a model or effort chosen at runtime start.                                                     | Accept ADR0054.                                                                       |
+| M3-07 Provider usage and limits                        | `IMPLEMENTED_BUT_UNQUALIFIED` | Provider-reported counters with provenance and completeness; an unreported figure is "not reported", never zero; estimates labelled. Codex reports no usage in F8.                                                                                                                                          | Real-provider figures.                                                                |
+| M3-08 Optional local usage history                     | `OWNER_APPROVAL_REQUIRED`     | Separate SQLite file, closed schema, every field judged at insertion, quotas, dedupe, export, reset, default off. **A producer now exists** in the worker: a bounded queue to a writer thread, so storage never delays an event.                                                                            | Accept the privacy and retention policy.                                              |
+| M3-09 GUI, provenance, project/session context         | `IMPLEMENTED_BUT_UNQUALIFIED` | Providers window with a strict decoder, run end to end in the real Tauri window (7 scenarios); the Tauri permission it needed was missing and is fixed.                                                                                                                                                     | Claude sessions in the installed authority wait for ADR0055.                          |
+| M3-10 Adversarial security and recovery                | `IMPLEMENTED_BUT_UNQUALIFIED` | 71 bridge/tap/broker/guard tests, strict-frame and policy suites, 16 real SDK/CLI tests; the review's S1–S8 fixed with regression tests. **The one independent review is FAIL; no passing follow-up exists.**                                                                                               | A follow-up review by someone other than the author, ideally with working namespaces. |
+| M3-11 Performance and resource qualification           | `PROVIDER_EVIDENCE_REQUIRED`  | Claude arm: 7 repeated runs per profile, with the broker ([report](evidence/m3-perf-2026-10-23/report.md)).                                                                                                                                                                                                 | Codex arm on the same workload.                                                       |
+| M3-12 Compatibility, release, rollback                 | `OWNER_APPROVAL_REQUIRED`     | Rollback disables new Claude admissions only; Codex, Native and the installed Console are untouched by this branch.                                                                                                                                                                                         | Santiago's release decision.                                                          |
 
-## The blocker, demonstrated
+## Review findings and what became of them
 
-`docs/contracts/f8/v7-to-v8.sql` declares `CHECK(adapter_id='codex')` and `CHECK(runtime_kind='codex')` on
-`managed_runtimes` and on `managed_runtime_launches`; `RuntimeTarget::supported()`, `RuntimeSafetyProfile`,
-`complete_handshake` and the `"adapter_id":"codex"` literals in the allocator and operations are Codex-only.
-M3 does not migrate without an accepted ADR, so the integration stops at the `Worker` seam and the admission
-is closed by construction (`m3::gate::STORE_HOLDS_CLAUDE = false`, shown in the window). Options and a
-recommendation: [ADR0055](../adr/0055-multi-provider-managed-runtime-store.md). A V9 rehearsal on a copy
-of a store was **not** run.
+Two reviews were made. The first (inside this session) was by the author and does not count as independent.
+The second was by Codex, a separate model, over `530c49e`; it returned **FAIL for real-credential
+admission**, no CRITICAL finding. Every finding was treated as a hypothesis and checked in the code.
 
-## Executable evidence
+| Finding                                                                                                                                        | Status                 | What changed                                                                                                                                                                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Author review H1: ADR0053 claimed a sealed credential store; the code read a plaintext `0600` file                                             | FIXED                  | The file route is gone; `CredentialSource` has no production implementation; ADR0056 proposed; ADR0053 rewritten.                                                                                                                                                                               |
+| Author review H2: M3-04 overclaimed (test-only Codex aliasing)                                                                                 | FIXED                  | Row corrected; negative tests against the wire, handshake and V8 store.                                                                                                                                                                                                                         |
+| Author review H3: ADR0055 incomplete                                                                                                           | FIXED                  | Rewritten, inventory of 72 Codex-only sites in 19 files, V8→V9 rehearsal.                                                                                                                                                                                                                       |
+| Author review M1: gates displayed, not enforced                                                                                                | FIXED                  | `Admission` required by `ClaudeLauncher::start` and `ClaudeWorker::new`.                                                                                                                                                                                                                        |
+| Author review M2: no network confinement, comment overclaimed                                                                                  | FIXED (see residual)   | Network namespace with a loopback only; one exit, the broker's socket; observed with real sockets, a positive control and the real launch plan's own binds.                                                                                                                                     |
+| Author review M3: tap accepted any upstream                                                                                                    | FIXED                  | Broker: one origin, verified TLS, no credential over plain HTTP.                                                                                                                                                                                                                                |
+| Author review M4: ADR0054 contradicted the code                                                                                                | FIXED                  | ADR amended; runtime-start effort gated and validated.                                                                                                                                                                                                                                          |
+| Author review M5: history had no producer                                                                                                      | FIXED                  | Worker producer through a bounded queue (see S5).                                                                                                                                                                                                                                               |
+| Author review L1 (dangling reference), L4 (`--unshare-user-try`)                                                                               | FIXED                  | Reference corrected; the user namespace is required.                                                                                                                                                                                                                                            |
+| Author review L2 (key lifetime), L5 (no seccomp)                                                                                               | ACCEPTED_RESIDUAL_RISK | No zeroization and no protection from a same-user process that can read memory are claimed. No seccomp filter: namespaces and `--new-session` only.                                                                                                                                             |
+| Author review L3 (`.claude` unprotected for commands)                                                                                          | NOT_REPRODUCED         | The executor's own list already includes `.claude`.                                                                                                                                                                                                                                             |
+| New: the namespace's init process kept the launcher's environment, readable via `/proc/1/environ` by the bridge, the CLI and approved commands | FIXED                  | `bwrap` starts with an empty environment; test inside the namespace.                                                                                                                                                                                                                            |
+| New: runtime-start model/effort validated by a function nothing called                                                                         | FIXED                  | Gated and validated in `ClaudeWorker::new`.                                                                                                                                                                                                                                                     |
+| **S1 (HIGH)**: race in the approved file write                                                                                                 | FIXED                  | Parents resolved once by descriptor without following links; the target hashed again on that descriptor immediately before an atomic `renameat`. Deterministic tests act at each step. **Not excluded:** another writer changing the file in the instant between the last check and the rename. |
+| **S2**: CRLF/header injection through a tool name                                                                                              | FIXED                  | Violations are closed words (`tool_not_allowed`, …); header values are re-validated; tested with CRLF, controls and Unicode at both hops.                                                                                                                                                       |
+| **S3**: unbounded connections, reads, bodies and responses                                                                                     | FIXED                  | Bounded connections (closed unread beyond the limit), a read deadline, bytes in flight, a request budget taken before the body is read, response and stream caps; each tested.                                                                                                                  |
+| **S4**: the fixture API could reach the real origin; public command builders                                                                   | FIXED                  | A fixture launcher refuses the real origin with or without a key (before verifying anything); `command`, `broker_command` and `broker_frame` are private; a test reads the source.                                                                                                              |
+| **S5**: history written synchronously on the event path                                                                                        | FIXED                  | `AsyncRecorder`: bounded queue, writer thread, `offer` never blocks; a stalled writer costs records (`Partial("queue_full")`), not turns, cancellations or stops (tested).                                                                                                                      |
+| **S6**: record fields public, validation incomplete, ungated open helpers                                                                      | FIXED                  | `validate` judges every field at insertion (ids, charset, secrets, provider, build, provenance↔kind); the helpers that skip the gate are `cfg(test)`.                                                                                                                                           |
+| **S7**: parser errors reflected input; duplicate `Content-Length` accepted                                                                     | FIXED                  | `send_error` is a closed word; one length, no chunking, no folded or control-bearing headers; raw-socket tests.                                                                                                                                                                                 |
+| **S8**: network test accepted any errno; overbroad claims                                                                                      | FIXED                  | Only ENETUNREACH/ECONNREFUSED/ENOENT count; a test runs the **real** launch plan's namespace with its own binds; ADR0053/0055/0056 and this record corrected (e.g. the broker token authorizes spending through the broker; the rehearsal builds a temporary workspace directory).              |
 
-| Area                       | Command                                                 | Result                                                                                         |
-| -------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Rust format, check, clippy | `npm run check:rust`                                    | PASS (clippy `-D warnings`, also with `--features m3-fixture --examples`)                      |
-| Rust tests                 | `npm run rust:test`                                     | PASS: 1,312 lib (25 ignored), 493 bins, 1 + 10 + 8 contract/process                            |
-| Real SDK and CLI, offline  | `npm run test:claude-real` (`WYSS_CLAUDE_SDK_ROOT` set) | PASS: 14 of 14                                                                                 |
-| Bridge and tap             | `npm run test:claude-bridge`                            | PASS: 51                                                                                       |
-| Frontend                   | `npm run format:check`, `lint`, `typecheck`, `npm test` | PASS: 1,028 tests, 0 lint or type errors                                                       |
-| Store/security harness     | `npm run test:harness`                                  | PASS: 16                                                                                       |
-| Repository scan            | `npm run scan:repo`                                     | PASS: 5 of 5                                                                                   |
-| Isolated desktop           | `python3 -I benchmarks/m3_gui_suite.py …`               | PASS: 7 of 7 scenarios, no process or directory left ([evidence](evidence/m3-gui-2026-10-23/)) |
-| Performance                | `npm run perf:m3 -- --sdk-root … --runs 7 --out …`      | 7 runs per profile ([evidence](evidence/m3-perf-2026-10-23/))                                  |
+**Limits of the independent review, as it reported them:** its environment could not create a bubblewrap
+namespace, so it did not reproduce the confinement, the environment test or the full tap→broker chain, and
+the Rust results it quotes are from a pre-existing binary. The dynamic confinement evidence below is the
+author's alone.
 
-### Isolated desktop
+**Follow-up review:** one focused independent review of the final security-relevant diff is requested after
+this head is published; until it exists and passes, `m3::gate::INDEPENDENT_REVIEW_PASSED` stays `false`.
 
-The real window (Tauri, WebKit) ran in a nested compositor on a private display with its own session bus,
-HOME and XDG directories, the real SDK and CLI behind it and a mock provider on loopback. Scenarios:
-`inference`, `local-tools-accept` (command run only after Accept, result reaches the model, then a file diff
-accepted), `local-tools-decline` (decline and cancel: nothing written), `local-tools-cancel-turn`,
-`cancel-stream` (interrupted mid-stream, partial text kept, runtime stays ready), `stop-restart` (two lives of
-the runtime), `refused` (an installation the verifier refuses is shown in plain words). Each scenario checks
-the disk and the mock's request log, not only the picture.
+## Network confinement: what is and is not demonstrated
 
-Defects it found, all fixed with a regression test: (1) the window could not read the state because
-`m3_state` was missing from the Tauri ACL (new capability `m3`; the fixture commands are granted at run time
-by the fixture binary only, and the package grants none); (2) after an approved command the next turn was
-refused for good because the finished executor was never reaped; (3) a 240 px empty box in the history
-card and "1 turns". Codex in the window is covered by the existing F8 fixture suites, which are unchanged.
+**Demonstrated** (author's runs): inside the namespace the bridge and the CLI live in, only `lo` exists; a
+listener on the host's loopback, a host abstract socket and an internet address are all unreachable (specific
+errnos), with a positive control showing the same probe reaches them with the host's network; the one unix
+socket that was bound in is reachable; the provider's home and cwd are writable, the broker's directory is
+read-only; the launcher's environment is not readable (`/proc/1/environ` is empty). The broker connects to
+`https://api.anthropic.com` only, over verified TLS, and applies the request policy itself.
 
-### Performance (Claude arm, offline, 7 runs per profile)
+**Not claimed:** a kernel escape from a user namespace; protection against another process of the same user
+(it can read memory and sockets of its own user); that the CLI cannot do something to the _tap's_ loopback
+inside its own namespace; seccomp. Real-credential admission stays blocked (`INDEPENDENT_REVIEW_PASSED`,
+`CREDENTIAL_DELIVERY_ACCEPTED`, ADR0053, ADR0055, real-provider evidence).
 
-| Figure                      | Inference p50 / max | Local Tools p50 / max | Proposed budget (1.5 × p95) |
-| --------------------------- | ------------------- | --------------------- | --------------------------- |
-| Launch to ready (cold)      | 2,227 / 2,249 ms    | 2,256 / 2,269 ms      | 3,400 ms                    |
-| First streamed text         | 41.0 / 41.1 ms      | 41.0 / 41.1 ms        | 62 ms                       |
-| Stop, whole tree reaped     | 503 / 523 ms        | 503 / 522 ms          | 790 ms                      |
-| Cancel while streaming      | 10.4 / 10.6 ms      | —                     | 16 ms                       |
-| Process-tree PSS when ready | 290 / 291 MiB       | 302 / 303 MiB         | 450 / 460 MiB               |
-| Processes, FDs              | 4, 34               | 4, 34                 | 6, 51                       |
-| Idle CPU of the tree        | 3.0 / 3.2 %         | 3.2 / 3.2 %           | 5 %                         |
-| Left after stop             | 0                   | 0                     | 0                           |
+## Executable evidence (final code)
 
-The idle CPU belongs entirely to the `claude` process; the bridge and the sandbox use none. A budget is a
-proposal for Santiago to accept or change; nothing enforces it. Codex was not measured (see below).
+| Area                       | Command                                                 | Result                                                                               |
+| -------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Rust format, check, clippy | `npm run check:rust`                                    | PASS (`-D warnings`, also with `--features m3-fixture --examples --all-targets`)     |
+| Rust tests                 | `npm run rust:test`                                     | PASS: 1,355 lib (27 ignored), 493 bins, 1 + 10 + 8 contract/process                  |
+| Real SDK and CLI, offline  | `npm run test:claude-real` (`WYSS_CLAUDE_SDK_ROOT` set) | PASS: 16 of 16                                                                       |
+| Bridge, tap, broker, guard | `npm run test:claude-bridge`                            | PASS: 71                                                                             |
+| Frontend                   | `format:check`, `lint`, `typecheck`, `npm test`         | PASS: 1,028 tests                                                                    |
+| Repository scan            | `npm run scan:repo`                                     | PASS                                                                                 |
+| Isolated desktop           | `python3 -I benchmarks/m3_gui_suite.py …`               | PASS: 7 of 7, no process or directory left ([evidence](evidence/m3-gui-2026-10-23/)) |
+| V8→V9 rehearsal            | in `npm run rust:test` (`v9_rehearsal`)                 | PASS: 10 tests ([ADR0055](../adr/0055-multi-provider-managed-runtime-store.md))      |
+| Performance                | `npm run perf:m3 -- --sdk-root … --runs 7 --out …`      | 7 runs per profile ([evidence](evidence/m3-perf-2026-10-23/))                        |
 
-## Independent review
-
-One review pass over the security-relevant code (tap, bridge, executor, launcher, sandbox, ACL) was made by
-the author with the repository's security-review skill; **it is not independent**, and an independent
-reviewer remains a release gate. Findings:
-
-| Finding                                                                                                                    | Severity | Fix                                                                                                                                                |
-| -------------------------------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The tap listens on the host's loopback and injects the real credential into any request: any local process could spend it. | Medium   | The CLI is given a per-run key that is also the tap's password; a stranger gets a silent 401 (no event, no budget, nothing upstream). Tests added. |
-| The tap checked `tools` but not body fields that make the provider run something on its side.                              | Low      | `mcp_servers` and `container` are refused. Test added.                                                                                             |
-| The `refused` path of the example aborted instead of showing the refusal.                                                  | Low      | The window opens and says why.                                                                                                                     |
-
-Residual risks, not fixed because they are the design: the CLI runs with the host's network (the tap is a
-check on what the model is offered, not a network boundary); an administrator's managed policy makes the
-installation be refused, never overridden; the 50 notice subtypes seen on this build are the ones classified,
-and an unknown one stops the runtime; a later CLI needs a new qualification.
+Performance on the final code (7 runs per profile; the broker makes the tree 7 processes): ready p50 2.23 s
+(Inference) and 2.25 s (Local Tools); first text 41 ms; cancel p50 10.3 ms; about 304 and 316 MiB PSS;
+idle CPU about 3 %, all of it the `claude` process; 0 processes left after stop. Budgets are proposals for
+the owner (1.5 × p95); Codex was not measured.
 
 ## Owner decisions and pending real-provider tests
 
-| Decision / test                                    | Evidence                                                       | Recommendation                                                                    | Risks                                         | Unlocks                                    |
-| -------------------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------ |
-| ADR0053: Claude auth route and exact build         | ADR0053 evidence section                                       | A: API key held by Wyss, injected by the tap; only for the recorded build         | Per-token cost; one real run to prove 401/529 | Real Inference and Local Tools runs        |
-| ADR0054: model and effort selection                | ADR0054 evidence section                                       | Accept, with Claude's effort as a runtime-start setting                           | New protocol version and negotiation          | Live selection tests and controls          |
-| ADR0055: a store that can hold a non-Codex runtime | [ADR0055](../adr/0055-multi-provider-managed-runtime-store.md) | A: V9 migration, rehearsed on a copy, downgrade refused                           | Older Consoles cannot open a V9 store         | Claude sessions in the installed authority |
-| Usage-history privacy and retention policy         | [contract](../contracts/m3-model-usage-history.md)             | Accept as written (off by default, 10,000 records or 30 days)                     | Local metadata on disk                        | History on                                 |
-| Real-provider Inference run                        | —                                                              | One short turn, owner-supplied key, rollback = stop runtime and delete the key    | Paid; leaves a provider-side record           | M3-01/02 qualification                     |
-| Real-provider Local Tools run                      | —                                                              | One command and one file change, in a throwaway directory                         | Same                                          | M3-03 qualification                        |
-| Codex runtime on the same workload                 | Harness is symmetrical                                         | Run `perf:m3` shape against a Codex runtime started for the purpose               | Starts a Codex process                        | M3-11 comparison                           |
-| Independent security review                        | Findings above                                                 | A reviewer other than the author, before any release                              | —                                             | M3-10 as `IMPLEMENTED_AND_TESTED`          |
-| Release and installation                           | —                                                              | Install the new package only after the above; rollback disables Claude admissions | —                                             | M3-12                                      |
+| Decision / test                                    | Recommendation                                                                          | Unlocks                                    |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------ |
+| ADR0053: the boundary and the exact build          | A: accept the boundary now; the credential route is ADR0056                             | Real runs (with ADR0056)                   |
+| ADR0054: model and effort selection                | Accept as amended (model per turn, effort at runtime start)                             | Live selection tests and controls          |
+| ADR0055: a store that can hold a non-Codex runtime | Accept for engineering after widening writers/validators and a V9 verifier              | Claude sessions in the installed authority |
+| ADR0056: how a credential reaches a runtime        | A: a native, user-present unseal at each runtime start                                  | Real-provider runs                         |
+| Usage-history privacy and retention policy         | Accept as written (off by default, 10,000 records or 30 days)                           | History on                                 |
+| Real-provider Inference and Local Tools runs       | One short turn each, owner-supplied key, rollback = stop the runtime, delete the record | M3-01/02/03 qualification                  |
+| Codex runtime on the same workload                 | Run the same harness against a Codex runtime started for the purpose                    | M3-11 comparison                           |
+| A follow-up independent review                     | Someone other than the author, with working namespaces                                  | `INDEPENDENT_REVIEW_PASSED`                |
+| Release and installation                           | After the above; rollback disables Claude admissions                                    | M3-12                                      |
 
 ## Preservation
 
 Nothing installed, restarted or admitted: no installed Console file, host, authority, session, provider
 credential or configuration, production database or provider quota was touched. The experiments ran in
 disposable directories, a private display and a private bus; every process was a direct child ended by its
-handle (no process was found or killed by name). Global runtime capacity stays 1, the P1/P2/Codex code paths
-and the V8 schema are unchanged, and the fixture host is absent from the package (see
-`scripts/package-fixtures.mjs` and the ACL tests).
+handle. Global runtime capacity stays 1; the P1/P2/Codex code paths and the V8 schema are unchanged; the
+fixture host is absent from the package (`scripts/package-fixtures.mjs`, the ACL tests).

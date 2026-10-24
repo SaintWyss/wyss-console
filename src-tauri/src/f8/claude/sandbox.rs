@@ -225,13 +225,12 @@ print(json.dumps({{"host_loopback": tcp(("127.0.0.1", {tcp_port})), "internet": 
         let closed = run_inside(false, &[(dir_ref, "/run/wyss/broker")], &probe);
         assert_eq!(closed["granted_socket"], "ok", "{closed}");
         for escaped in ["host_loopback", "internet", "host_abstract_socket"] {
-            // A real refusal from the kernel (an errno), not a timeout: the route does not exist.
+            // A real refusal from the kernel, not a timeout and not "some error": the route is not
+            // there (ENETUNREACH), nothing listens at the address in this namespace (ECONNREFUSED)
+            // or the name does not exist in it (ENOENT).
             let said = closed[escaped].as_str().unwrap();
-            assert!(
-                said.strip_prefix("refused:")
-                    .is_some_and(|n| n.parse::<i32>().is_ok()),
-                "{escaped}: {closed}"
-            );
+            let errno: Option<i32> = said.strip_prefix("refused:").and_then(|n| n.parse().ok());
+            assert!(matches!(errno, Some(101 | 111 | 2)), "{escaped}: {closed}");
         }
         assert_eq!(closed["interfaces"], serde_json::json!(["lo"]), "{closed}");
         answer.join().unwrap();

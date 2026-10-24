@@ -39,7 +39,7 @@ use crate::{
     },
     m3::{
         gate,
-        history::{Origin, Record, Recorder},
+        history::{AsyncRecorder, Origin, Record},
         model::{self, Catalogue, ModelRequest, Requested, Scope, Source, Validated},
         report::{
             ActionRecord, ActionState, Build, OfferedModel, Phase, ProviderReport, TapSummary,
@@ -135,8 +135,9 @@ enum Stage {
 }
 
 /// Where provider-reported usage may be recorded, if the owner has opted in and the policy is
-/// accepted. A recorder never fails its caller, so nothing a turn does depends on it.
-pub type HistorySink = std::sync::Arc<std::sync::Mutex<Recorder>>;
+/// accepted. Records go through a bounded queue to a writer thread: the event path never waits for
+/// storage, so nothing a turn, a cancellation or a reap does depends on it.
+pub type HistorySink = std::sync::Arc<AsyncRecorder>;
 
 /// What has already gone to the history sink, so a figure is handed over once per worker (the
 /// store deduplicates as well, across workers and restarts).
@@ -335,9 +336,6 @@ impl<W: Worker> ClaudeWorker<W> {
         };
         let snapshot = self.ledger.snapshot();
         let now = now_secs() as i64;
-        let Ok(mut recorder) = sink.lock() else {
-            return;
-        };
         for turn in snapshot
             .turns
             .iter()
@@ -346,7 +344,7 @@ impl<W: Worker> ClaudeWorker<W> {
             if self.handed.turns.insert(turn.turn_id.clone())
                 && let Ok(record) = Record::turn_usage(&origin, turn, now)
             {
-                recorder.record(&record, now);
+                sink.offer(record, now);
             }
         }
         let last_turn = snapshot.turns.last().map(|t| t.turn_id.clone());
@@ -355,7 +353,7 @@ impl<W: Worker> ClaudeWorker<W> {
                 && self.handed.limits.insert((limit.window, limit.observed_at))
                 && let Ok(record) = Record::limit(&origin, turn, limit, now)
             {
-                recorder.record(&record, now);
+                sink.offer(record, now);
             }
         }
     }

@@ -884,3 +884,257 @@ fn error_codes_are_unique_snake_case() {
     let codes: std::collections::BTreeSet<_> = all.iter().map(|e| e.code()).collect();
     assert_eq!(codes.len(), all.len());
 }
+
+/// The review's S6: `Record`'s fields are public, and `insert` used to trust a validation that only
+/// looked at the numbers. Every field is judged at the boundary, so a record changed after it was
+/// built cannot carry text, a path or a secret into the store.
+#[test]
+fn every_field_is_judged_at_the_insertion_boundary_whatever_was_changed_after_construction() {
+    let p = parent();
+    let mut h = open(&p, Limits::default());
+    let key_like = ["sk", "-ant-api03-", "abcdefghijklmnopqrstuvwxyz0123"].concat();
+    let usage_case = || rec("t-ok", 1, NOW);
+    let limit_case = || {
+        let l = crate::m3::usage::LimitObservation {
+            window: LimitWindow::FiveHour,
+            status: LimitStatus::Allowed,
+            resets_at: Some(1_893_456_000),
+            utilization: Some(0.5),
+            observed_at: 1_800_000_000,
+        };
+        Record::limit(&origin(1), "t-ok", &l, NOW).unwrap()
+    };
+    let mutations: Vec<(&str, Record, HistoryError)> = vec![
+        (
+            "session with a space",
+            {
+                let mut r = usage_case();
+                r.session_id = "has space".into();
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "session with a newline",
+            {
+                let mut r = usage_case();
+                r.session_id = "a\nb".into();
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "session with a path",
+            {
+                let mut r = usage_case();
+                r.session_id = "../../etc/passwd".into();
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "session too long",
+            {
+                let mut r = usage_case();
+                r.session_id = "s".repeat(65);
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "session empty",
+            {
+                let mut r = usage_case();
+                r.session_id = String::new();
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "session that is a key",
+            {
+                let mut r = usage_case();
+                r.session_id = key_like.clone();
+                r
+            },
+            HistoryError::SecretLooking,
+        ),
+        (
+            "runtime that is text",
+            {
+                let mut r = usage_case();
+                r.runtime_id = "please summarize my repository".into();
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "runtime that is a key",
+            {
+                let mut r = usage_case();
+                r.runtime_id = key_like.clone();
+                r
+            },
+            HistoryError::SecretLooking,
+        ),
+        (
+            "turn that is unicode",
+            {
+                let mut r = usage_case();
+                r.turn_id = "t\u{e9}".into();
+                r.origin_event_id = "t\u{e9}".into();
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "turn that is a key",
+            {
+                let mut r = usage_case();
+                r.turn_id = key_like.clone();
+                r.origin_event_id = key_like.clone();
+                r
+            },
+            HistoryError::SecretLooking,
+        ),
+        (
+            "origin event unlike its turn",
+            {
+                let mut r = usage_case();
+                r.origin_event_id = "other".into();
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "provider that is not one",
+            {
+                let mut r = usage_case();
+                r.provider = "openai";
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "build that is text",
+            {
+                let mut r = usage_case();
+                r.provider_build = "1.2.x".into();
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "build empty",
+            {
+                let mut r = usage_case();
+                r.provider_build = String::new();
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "build too long",
+            {
+                let mut r = usage_case();
+                r.provider_build = "9".repeat(65);
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "usage with limit provenance",
+            {
+                let mut r = usage_case();
+                r.provenance = Provenance::ProviderLimitEvent;
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "usage with a catalogue provenance",
+            {
+                let mut r = usage_case();
+                r.provenance = Provenance::ProviderCatalogue;
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "limit with usage provenance",
+            {
+                let mut r = limit_case();
+                r.provenance = Provenance::ProviderUsageEvent;
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "limit whose origin is not one",
+            {
+                let mut r = limit_case();
+                r.origin_event_id = "evil".into();
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "negative counter",
+            {
+                let mut r = usage_case();
+                r.input_tokens = Some(-1);
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "utilization over a hundred percent",
+            {
+                let mut r = limit_case();
+                r.limit_utilization_permille = Some(1001);
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+        (
+            "a usage record with a limit window",
+            {
+                let mut r = usage_case();
+                r.limit_window = Some(LimitWindowName::FiveHour);
+                r
+            },
+            HistoryError::InvalidRecord,
+        ),
+    ];
+    let before = h.status().unwrap().records;
+    for (name, record, expected) in &mutations {
+        assert_eq!(h.insert(record, NOW), Err(*expected), "{name}");
+    }
+    assert_eq!(h.status().unwrap().records, before, "nothing was stored");
+    // The unmodified records are accepted: the boundary refuses mutations, not the producer.
+    assert_eq!(h.insert(&usage_case(), NOW), Ok(Inserted::New));
+    assert_eq!(h.insert(&limit_case(), NOW), Ok(Inserted::New));
+}
+
+#[test]
+fn the_doors_that_skip_the_policy_gate_exist_only_in_test_and_fixture_builds() {
+    let source = include_str!("../history.rs");
+    let code = source.split("#[cfg(test)]\nmod tests;").next().unwrap();
+    for door in [
+        "fn enable_with_gate(",
+        "fn open_with_gate(",
+        "fn open_with(",
+    ] {
+        let at = code.find(door).unwrap_or_else(|| panic!("{door}"));
+        let above = &code[..at];
+        let attr = above
+            .lines()
+            .rev()
+            .find(|l| l.trim_start().starts_with("#["))
+            .unwrap();
+        assert!(
+            attr.contains("cfg(test)") || attr.contains("cfg(any(test, feature = \"m3-fixture\"))"),
+            "{door} is not test/fixture only: {attr}"
+        );
+    }
+}

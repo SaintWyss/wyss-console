@@ -691,3 +691,91 @@ fn the_broker_directory_is_private_and_a_loose_one_is_refused() {
     fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(broker_dir(&state, SID), Err(E::UnsafePath));
 }
+
+/// What the *real* launch plan's namespace reaches (the review's S8): not a stand-in sandbox but the
+/// one `start` builds, with its own binds: the SDK tree, the bridge, the provider's home and cwd,
+/// and the broker's directory read-only.
+#[test]
+fn the_real_bridge_namespace_reaches_only_the_broker_socket_and_its_own_directories() {
+    use std::os::unix::net::UnixListener;
+    let v = venv();
+    let (l, _, state) = launcher(&v);
+    let sid = "5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40";
+    let (home, cwd) = session_dirs(&state, sid).unwrap();
+    // A unix socket path is limited to about 100 bytes, which the nested state directory of a test
+    // exceeds; in the real namespace the socket is at `/run/wyss/broker/broker.sock`.
+    let broker = PathBuf::from("/tmp").join(format!(
+        "wb-{}",
+        &crate::control::store::uuid().as_str()[..8]
+    ));
+    fs::DirBuilder::new().mode(0o700).create(&broker).unwrap();
+    let granted = UnixListener::bind(broker.join("broker.sock")).unwrap();
+    let answer = std::thread::spawn(move || {
+        if let Ok((mut c, _)) = granted.accept() {
+            let _ = std::io::Write::write_all(&mut c, b"ok");
+        }
+    });
+    let host_tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = host_tcp.local_addr().unwrap().port();
+    let probe = format!(
+        r#"
+import json, os, socket
+def tcp(addr):
+    try:
+        socket.create_connection(addr, timeout=2).close()
+        return "connected"
+    except OSError as e:
+        return e.errno
+out = {{"host_loopback": tcp(("127.0.0.1", {port})), "internet": tcp(("1.1.1.1", 443))}}
+s = socket.socket(socket.AF_UNIX); s.settimeout(2)
+s.connect("{BROKER_DIR}/broker.sock")
+out["broker"] = s.recv(2).decode()
+out["interfaces"] = sorted(n for _, n in socket.if_nameindex())
+def writable(path):
+    try:
+        open(os.path.join(path, "probe"), "w").close()
+        return True
+    except OSError as e:
+        return e.errno
+out["home_writable"] = writable("{SANDBOX_HOME}")
+out["cwd_writable"] = writable("{SANDBOX_CWD}")
+out["broker_dir_writable"] = writable("{BROKER_DIR}")
+out["init_environment"] = open("/proc/1/environ", "rb").read().decode()
+print(json.dumps(out))
+"#
+    );
+    let run = l
+        .bridge_sandbox(&home, &cwd, &broker)
+        .command(
+            "/usr/bin/python3",
+            &["-I".into(), "-c".into(), probe.into()],
+        )
+        .output()
+        .expect("bubblewrap runs");
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    answer.join().unwrap();
+    let seen: serde_json::Value = serde_json::from_slice(&run.stdout).unwrap();
+    // Only a loopback; the host's loopback and the internet are not there (ECONNREFUSED, ENETUNREACH).
+    assert_eq!(seen["interfaces"], serde_json::json!(["lo"]), "{seen}");
+    assert!(
+        matches!(seen["host_loopback"].as_i64(), Some(111)),
+        "{seen}"
+    );
+    assert!(matches!(seen["internet"].as_i64(), Some(101)), "{seen}");
+    // The one door out works, and what is bound where it should be is writable and nothing else is.
+    assert_eq!(seen["broker"], "ok", "{seen}");
+    assert_eq!(seen["home_writable"], true, "{seen}");
+    assert_eq!(seen["cwd_writable"], true, "{seen}");
+    assert!(
+        matches!(seen["broker_dir_writable"].as_i64(), Some(30)),
+        "the broker's directory is read-only here (EROFS): {seen}"
+    );
+    // The launcher's environment (this process's) is not what init holds.
+    assert_eq!(seen["init_environment"], "", "{seen}");
+    drop(host_tcp);
+    let _ = fs::remove_dir_all(&broker);
+}

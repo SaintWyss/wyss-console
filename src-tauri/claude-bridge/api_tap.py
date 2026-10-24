@@ -19,13 +19,19 @@ Standard library only; one thread per connection; bounded body, bounded request 
 import hmac
 import http.client
 import json
+import os
 import socket
+import socketserver
+import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-MAX_BODY = 8 * 1024 * 1024
-MAX_REQUESTS = 512
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `-I` does not add the script's directory
+import httpguard  # noqa: E402
+from httpguard import BoundedServerMixin, Gauge, GuardedHandler, Limits, closed_code  # noqa: E402
+
+MAX_BODY = Limits.max_body
+MAX_REQUESTS = Limits.max_requests
 ALLOWED_PATHS = ("/v1/messages", "/v1/messages/count_tokens")
 
 
@@ -51,10 +57,12 @@ def check_request(path, body, allowed_tools, model=None):
     # Fields that make the provider run something on its side, outside the tool list.
     for field in ("mcp_servers", "container"):
         if body.get(field):
-            raise Violation("server_side:" + field)
+            raise Violation("server_side")
     extra = sorted(set(names) - set(allowed_tools))
     if extra:
-        raise Violation("tool_not_allowed:" + ",".join(extra[:4]))
+        # Which names is deliberately not said: they are the client's bytes, and a violation is
+        # a closed word that travels in a header and an event.
+        raise Violation("tool_not_allowed")
     # Server-side tools (web search etc.) are typed entries with a `type`; refuse any.
     if any("type" in t and t.get("type") not in (None, "custom") for t in tools):
         raise Violation("server_tool")
@@ -97,22 +105,35 @@ class UnixHTTPConnection(http.client.HTTPConnection):
 
 
 class ApiTap:
-    def __init__(self, *, broker_socket, broker_token, allowed_tools, model=None, on_event=None, client_key=None):
+    def __init__(self, *, broker_socket, broker_token, allowed_tools, model=None, on_event=None, client_key=None,
+                 limits=Limits()):
         self.broker_socket = broker_socket
         self.broker_token = broker_token
         self.allowed_tools = frozenset(allowed_tools)
         self.client_key = client_key
         self.model = model
         self.on_event = on_event or (lambda e: None)
+        self.limits = limits
         self.count = 0
         self.lock = threading.Lock()
+        self.gauge = Gauge(limits.max_inflight_bytes)
         outer = self
+        configured = limits
 
-        class Handler(BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"
+        class Handler(GuardedHandler):
+            timeout = configured.read_timeout
+            limits = configured
 
-            def log_message(self, *_):
-                pass
+            # ---- answers: closed words only, and nothing a client sent -----------------------------
+            def _say(self, code, word, violation=None):
+                raw = json.dumps({"type": "error", "error": {"type": "permission_error", "message": "wyss tap: " + word}}).encode()
+                self.send_response(code)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(raw)))
+                if self.close_connection:
+                    self.send_header("connection", "close")
+                self.end_headers()
+                self.wfile.write(raw)
 
             def _authorized(self):
                 """Only the CLI this tap was made for, which holds the per-run key. A refusal says
@@ -120,21 +141,18 @@ class ApiTap:
                 the connection without reading a body."""
                 if outer.client_key is None:
                     return True
-                given = self.headers.get("x-api-key") or ""
-                if hmac.compare_digest(given.encode(), outer.client_key.encode()):
+                given = self.headers.get_all("x-api-key") or []
+                if len(given) == 1 and hmac.compare_digest(given[0].encode(), outer.client_key.encode()):
                     return True
-                self.close_connection = True
-                self._refuse(401, "key")
+                self.refuse(401, "key")
                 return False
 
-            def _refuse(self, code, why):
-                raw = json.dumps({"type": "error", "error": {"type": "permission_error", "message": "wyss tap: " + why}}).encode()
-                self.send_response(code)
-                self.send_header("content-type", "application/json")
-                self.send_header("content-length", str(len(raw)))
-                self.end_headers()
-                self.wfile.write(raw)
+            def _counted(self):
+                with outer.lock:
+                    outer.count += 1
+                    return outer.count <= outer.limits.max_requests
 
+            # ---- forwarding to the broker --------------------------------------------------------
             def _forward(self, method, body):
                 conn = UnixHTTPConnection(outer.broker_socket)
                 # The CLI's own (synthetic) key never goes on; the broker adds the real one.
@@ -143,94 +161,106 @@ class ApiTap:
                 headers["x-wyss-broker"] = outer.broker_token
                 if body is not None:
                     headers["content-length"] = str(len(body))
-                conn.request(method, self.path, body=body, headers=headers)
-                resp = conn.getresponse()
-                if resp.status == 403 and resp.getheader("x-wyss-violation"):
-                    outer.on_event({"e": "tap_violation", "why": "broker:" + resp.getheader("x-wyss-violation")[:100]})
-                self.send_response(resp.status)
-                streaming = "text/event-stream" in (resp.getheader("content-type") or "")
-                for k, v in resp.getheaders():
-                    if k.lower() in ("content-length", "transfer-encoding", "connection", "keep-alive", "x-wyss-violation"):
-                        continue
-                    self.send_header(k, v)
-                if streaming:
-                    self.send_header("transfer-encoding", "chunked")
-                    self.end_headers()
-                    while True:
-                        chunk = resp.read1(8192) if hasattr(resp, "read1") else resp.read(8192)
-                        if not chunk:
-                            break
-                        self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
-                        self.wfile.flush()
-                    self.wfile.write(b"0\r\n\r\n")
-                else:
-                    data = resp.read()
-                    self.send_header("content-length", str(len(data)))
-                    self.end_headers()
-                    self.wfile.write(data)
-                conn.close()
+                try:
+                    conn.request(method, self.path, body=body, headers=headers)
+                    resp = conn.getresponse()
+                    violation = resp.getheader("x-wyss-violation")
+                    if resp.status == 403 and violation:
+                        outer.on_event({"e": "tap_violation", "why": "broker:" + closed_code(violation)})
+                    streaming = "text/event-stream" in (resp.getheader("content-type") or "")
+                    passed = [(k, v) for k, v in resp.getheaders()
+                              if k.lower() not in ("content-length", "transfer-encoding", "connection", "keep-alive", "x-wyss-violation")]
+                    if not streaming:
+                        data = resp.read(outer.limits.max_response + 1)
+                        if len(data) > outer.limits.max_response:
+                            return self.refuse(502, "response_too_large")
+                    self.send_response(resp.status)
+                    for k, v in passed:
+                        self.send_header(k, v)
+                    if streaming:
+                        self.send_header("transfer-encoding", "chunked")
+                        self.end_headers()
+                        sent = 0
+                        while True:
+                            chunk = resp.read1(8192) if hasattr(resp, "read1") else resp.read(8192)
+                            if not chunk:
+                                break
+                            sent += len(chunk)
+                            if sent > outer.limits.max_stream:
+                                self.close_connection = True
+                                return
+                            self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+                            self.wfile.flush()
+                        self.wfile.write(b"0\r\n\r\n")
+                    else:
+                        self.send_header("content-length", str(len(data)))
+                        self.end_headers()
+                        self.wfile.write(data)
+                finally:
+                    conn.close()
 
             def _method_not_allowed(self):
                 if self._authorized():
-                    self.close_connection = True
-                    self._refuse(405, "method")
+                    self.refuse(405, "method")
 
             do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = _method_not_allowed
 
             def do_POST(self):
                 if not self._authorized():
                     return
-                length = self.headers.get("content-length") or "0"
-                if self.headers.get("transfer-encoding") is not None or not length.isdigit() or len(length) > 9:
-                    outer.on_event({"e": "tap_violation", "why": "framing"})
-                    self.close_connection = True
-                    return self._refuse(400, "framing")
-                n = int(length)
-                if n > MAX_BODY:
-                    outer.on_event({"e": "tap_violation", "why": "body_too_large"})
-                    self.close_connection = True
-                    return self._refuse(413, "body")
-                raw = self.rfile.read(n) if n else b""
-                if len(raw) != n:
-                    self.close_connection = True
-                    return self._refuse(400, "framing")
-                with outer.lock:
-                    outer.count += 1
-                    over = outer.count > MAX_REQUESTS
-                if over:
+                n = self.length()
+                if n is None:
+                    return
+                # Budget first: a refused request is never read.
+                if not self._counted():
                     outer.on_event({"e": "tap_violation", "why": "request_budget"})
-                    return self._refuse(429, "budget")
+                    return self.refuse(429, "budget")
+                raw = self.body(n, outer.gauge)
+                if raw is None:
+                    return
                 try:
                     body = json.loads(raw)
                     summary = check_request(self.path, body, outer.allowed_tools, outer.model)
                 except (ValueError, Violation) as e:
-                    why = str(e) if isinstance(e, Violation) else "json"
-                    outer.on_event({"e": "tap_violation", "why": why[:120]})
-                    return self._refuse(403, why[:120])
+                    why = closed_code(str(e)) if isinstance(e, Violation) else "json"
+                    outer.on_event({"e": "tap_violation", "why": why})
+                    return self._say(403, why)
                 outer.on_event({"e": "tap_request", **summary})
                 try:
                     self._forward("POST", raw)
                 except (OSError, http.client.HTTPException):
                     outer.on_event({"e": "tap_upstream_error"})
                     try:
-                        self._refuse(502, "upstream")
+                        self.refuse(502, "upstream")
                     except OSError:
                         pass
 
             def do_GET(self):
                 if not self._authorized():
                     return
-                # The CLI may list models; a read-only listing cannot carry tools.
-                if self.path.split("?", 1)[0] != "/v1/models":
+                n = self.length()
+                if n is None:
+                    return
+                # The CLI may list models; a read-only listing cannot carry tools or a body.
+                if n != 0 or self.path.split("?", 1)[0] != "/v1/models":
                     outer.on_event({"e": "tap_violation", "why": "path"})
-                    return self._refuse(403, "path")
+                    return self.refuse(403, "path")
+                if not self._counted():
+                    return self.refuse(429, "budget")
                 try:
                     self._forward("GET", None)
                 except (OSError, http.client.HTTPException):
-                    self._refuse(502, "upstream")
+                    try:
+                        self.refuse(502, "upstream")
+                    except OSError:
+                        pass
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.server.daemon_threads = True
+        class Server(BoundedServerMixin, socketserver.ThreadingMixIn, socketserver.TCPServer):
+            daemon_threads = True
+            allow_reuse_address = True
+
+        self.server = Server(("127.0.0.1", 0), Handler)
+        self.server.bound(limits)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
     @property

@@ -33,11 +33,10 @@ from http.server import BaseHTTPRequestHandler
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `-I` does not add the script's directory
 import api_tap  # noqa: E402
 import profiles  # noqa: E402
+from httpguard import BoundedServerMixin, Gauge, GuardedHandler, Limits, closed_code  # noqa: E402
 
 ALLOWED_ORIGINS = ("https://api.anthropic.com",)
 SOCKET_NAME = "broker.sock"
-MAX_BODY = api_tap.MAX_BODY
-MAX_REQUESTS = api_tap.MAX_REQUESTS
 UPSTREAM_TIMEOUT = 600
 # Hop-by-hop, identity and routing headers that never cross the broker.
 DROPPED_HEADERS = frozenset((
@@ -73,7 +72,7 @@ def parse_origin(origin, has_credential, origins=ALLOWED_ORIGINS):
 
 
 class Broker:
-    def __init__(self, *, directory, token, origin, profile, api_key=None, _origins=ALLOWED_ORIGINS, _context=None):
+    def __init__(self, *, directory, token, origin, profile, api_key=None, limits=Limits(), _origins=ALLOWED_ORIGINS, _context=None):
         # `_origins` and `_context` exist for the tests (a local TLS server); `main()` never passes
         # them, so no frame can widen the allowlist.
         if profile not in profiles.PROFILES:
@@ -87,8 +86,10 @@ class Broker:
         self.token = token
         self.allowed_tools = profiles.allowed_api_tools(profile)
         self.api_key = api_key
+        self.limits = limits
         self.count = 0
         self.lock = threading.Lock()
+        self.gauge = Gauge(limits.max_inflight_bytes)
         self.path = os.path.join(directory, SOCKET_NAME)
         st = os.lstat(directory)
         if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o077:
@@ -99,38 +100,36 @@ class Broker:
         except FileNotFoundError:
             pass
         outer = self
+        configured = limits
         self.context = (_context or ssl.create_default_context()) if self.scheme == "https" else None
 
-        class Handler(BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"
+        class Handler(GuardedHandler):
+            timeout = configured.read_timeout
+            limits = configured
 
-            def log_message(self, *_):
-                pass
-
-            # ---- answers: fixed words only ------------------------------------------------
+            # ---- answers: closed words only, and nothing a client sent -----------------------------
             def _say(self, code, word, violation=None):
                 raw = json.dumps({"type": "error", "error": {"type": "api_error", "message": "wyss broker: " + word}}).encode()
                 self.send_response(code)
                 self.send_header("content-type", "application/json")
                 self.send_header("content-length", str(len(raw)))
                 if violation:
-                    self.send_header("x-wyss-violation", violation[:120])
-                self.send_header("connection", "close")
+                    self.send_header("x-wyss-violation", closed_code(violation))
+                if self.close_connection:
+                    self.send_header("connection", "close")
                 self.end_headers()
-                self.close_connection = True
                 self.wfile.write(raw)
 
             def _authorized(self):
-                given = (self.headers.get("x-wyss-broker") or "").encode()
-                if hmac.compare_digest(given, outer.token.encode()):
+                given = self.headers.get_all("x-wyss-broker") or []
+                if len(given) == 1 and hmac.compare_digest(given[0].encode(), outer.token.encode()):
                     return True
-                self.close_connection = True
-                self._say(401, "key")
+                self.refuse(401, "key")
                 return False
 
             def _method_not_allowed(self):
                 if self._authorized():
-                    self._say(405, "method")
+                    self.refuse(405, "method")
 
             do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = _method_not_allowed
 
@@ -140,60 +139,66 @@ class Broker:
                     conn = http.client.HTTPSConnection(outer.host, outer.port, timeout=UPSTREAM_TIMEOUT, context=outer.context)
                 else:
                     conn = http.client.HTTPConnection(outer.host, outer.port, timeout=UPSTREAM_TIMEOUT)
-                headers = {k: v for k, v in self.headers.items() if k.lower() not in DROPPED_HEADERS}
-                if outer.api_key:
-                    headers["x-api-key"] = outer.api_key
-                if body is not None:
-                    headers["content-length"] = str(len(body))
-                conn.request(method, self.path, body=body, headers=headers)
-                resp = conn.getresponse()
-                if 300 <= resp.status < 400:
+                try:
+                    headers = {k: v for k, v in self.headers.items() if k.lower() not in DROPPED_HEADERS}
+                    if outer.api_key:
+                        headers["x-api-key"] = outer.api_key
+                    if body is not None:
+                        headers["content-length"] = str(len(body))
+                    conn.request(method, self.path, body=body, headers=headers)
+                    resp = conn.getresponse()
+                    if 300 <= resp.status < 400:
+                        return self.refuse(502, "redirect")
+                    streaming = "text/event-stream" in (resp.getheader("content-type") or "")
+                    passed = [(k, v) for k, v in resp.getheaders()
+                              if k.lower() not in ("content-length", "transfer-encoding", "connection", "keep-alive", "x-wyss-violation")
+                              and not any(c in v for c in ("\r", "\n", "\x00"))]
+                    if not streaming:
+                        data = resp.read(outer.limits.max_response + 1)
+                        if len(data) > outer.limits.max_response:
+                            return self.refuse(502, "response_too_large")
+                    self.send_response(resp.status)
+                    for k, v in passed:
+                        self.send_header(k, v)
+                    if streaming:
+                        self.send_header("transfer-encoding", "chunked")
+                        self.end_headers()
+                        sent = 0
+                        while True:
+                            chunk = resp.read1(8192) if hasattr(resp, "read1") else resp.read(8192)
+                            if not chunk:
+                                break
+                            sent += len(chunk)
+                            if sent > outer.limits.max_stream:
+                                self.close_connection = True
+                                return
+                            self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+                            self.wfile.flush()
+                        self.wfile.write(b"0\r\n\r\n")
+                    else:
+                        self.send_header("content-length", str(len(data)))
+                        self.end_headers()
+                        self.wfile.write(data)
+                finally:
                     conn.close()
-                    return self._say(502, "redirect")
-                self.send_response(resp.status)
-                streaming = "text/event-stream" in (resp.getheader("content-type") or "")
-                for k, v in resp.getheaders():
-                    if k.lower() in ("content-length", "transfer-encoding", "connection", "keep-alive", "x-wyss-violation"):
-                        continue
-                    self.send_header(k, v)
-                if streaming:
-                    self.send_header("transfer-encoding", "chunked")
-                    self.end_headers()
-                    while True:
-                        chunk = resp.read1(8192) if hasattr(resp, "read1") else resp.read(8192)
-                        if not chunk:
-                            break
-                        self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
-                        self.wfile.flush()
-                    self.wfile.write(b"0\r\n\r\n")
-                else:
-                    data = resp.read()
-                    self.send_header("content-length", str(len(data)))
-                    self.end_headers()
-                    self.wfile.write(data)
-                conn.close()
 
-            def _budget(self):
+            def _counted(self):
                 with outer.lock:
                     outer.count += 1
-                    return outer.count <= MAX_REQUESTS
+                    return outer.count <= outer.limits.max_requests
 
             def do_POST(self):
                 if not self._authorized():
                     return
-                if self.headers.get("transfer-encoding") is not None:
-                    return self._say(400, "framing")
-                length = self.headers.get("content-length") or "0"
-                if not length.isdigit() or len(length) > 9:
-                    return self._say(400, "framing")
-                n = int(length)
-                if n > MAX_BODY:
-                    return self._say(413, "body")
-                raw = self.rfile.read(n) if n else b""
-                if len(raw) != n:
-                    return self._say(400, "framing")
-                if not self._budget():
-                    return self._say(429, "budget")
+                n = self.length()
+                if n is None:
+                    return
+                # Budget first: a refused request is never read.
+                if not self._counted():
+                    return self.refuse(429, "budget")
+                raw = self.body(n, outer.gauge)
+                if raw is None:
+                    return
                 try:
                     body = json.loads(raw)
                     api_tap.check_request(self.path, body, outer.allowed_tools)
@@ -205,27 +210,29 @@ class Broker:
                     self._forward("POST", raw)
                 except (OSError, http.client.HTTPException, ssl.SSLError):
                     try:
-                        self._say(502, "upstream")
+                        self.refuse(502, "upstream")
                     except OSError:
                         pass
 
             def do_GET(self):
                 if not self._authorized():
                     return
-                if self.path.split("?", 1)[0] != "/v1/models" or self.headers.get("content-length") not in (None, "0") \
-                        or self.headers.get("transfer-encoding") is not None:
+                n = self.length()
+                if n is None:
+                    return
+                if n != 0 or self.path.split("?", 1)[0] != "/v1/models":
                     return self._say(403, "refused", violation="path")
-                if not self._budget():
-                    return self._say(429, "budget")
+                if not self._counted():
+                    return self.refuse(429, "budget")
                 try:
                     self._forward("GET", None)
                 except (OSError, http.client.HTTPException, ssl.SSLError):
                     try:
-                        self._say(502, "upstream")
+                        self.refuse(502, "upstream")
                     except OSError:
                         pass
 
-        class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+        class Server(BoundedServerMixin, socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
             daemon_threads = True
 
         old = os.umask(0o177)
@@ -233,6 +240,7 @@ class Broker:
             self.server = Server(self.path, Handler)
         finally:
             os.umask(old)
+        self.server.bound(limits)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
     def start(self):

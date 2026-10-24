@@ -19,8 +19,9 @@ removed. This ADR is the decision ADR0038 asked for.
   (`Admission`, ADR0053 gates), and refuses the real provider without a key.
 - When a key exists it is handed once to the **credential broker** (`claude-bridge/broker.py`), a separate
   owned process on its stdin. It is never in an environment, a command line, a log, a frame to the bridge, a
-  diagnostic or a window. The bridge and the CLI hold a per-run password for the broker's socket and nothing
-  that spends money. The broker connects to `https://api.anthropic.com` only, over verified TLS; plain HTTP
+  diagnostic or a window. The bridge and the CLI hold a per-run password for the broker's socket. It is not the
+  provider key, but it authorizes requests the broker will pay for, so whatever holds it (the runtime
+  itself, and a process that can read its memory) can spend through the broker for that runtime's life. The broker connects to `https://api.anthropic.com` only, over verified TLS; plain HTTP
   can never carry a key, and the origin is an enum in Rust and a one-element list in the broker.
 - Tests cover the broker's refusals (origin, scheme, port, userinfo, path, malformed key/token/profile), a key
   reaching a TLS provider only when the certificate verifies, no key in `/proc/<pid>/cmdline` or `environ`,

@@ -373,6 +373,48 @@ impl Record {
         {
             return Err(HistoryError::InvalidRecord);
         }
+        // Every field is judged here, whoever built the record and whatever was changed in it since:
+        // the store trusts nothing a caller could have set.
+        let build_ok = !self.provider_build.is_empty()
+            && self.provider_build.len() <= 64
+            && self
+                .provider_build
+                .split('.')
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+        if !matches!(self.provider, "claude" | "codex")
+            || !build_ok
+            || !ident_ok(&self.session_id, 64)
+            || !ident_ok(&self.runtime_id, 64)
+            || !ident_ok(&self.turn_id, 128)
+            || !ident_ok(&self.origin_event_id, 128)
+        {
+            return Err(HistoryError::InvalidRecord);
+        }
+        // Provenance is a function of the kind, and so is the shape of the origin event.
+        let consistent = match self.kind {
+            Kind::TurnUsage => {
+                self.provenance == Provenance::ProviderUsageEvent
+                    && self.origin_event_id == self.turn_id
+            }
+            Kind::Limit => {
+                self.provenance == Provenance::ProviderLimitEvent
+                    && self.origin_event_id.starts_with("limit:")
+            }
+        };
+        if !consistent {
+            return Err(HistoryError::InvalidRecord);
+        }
+        if [
+            &self.session_id,
+            &self.runtime_id,
+            &self.turn_id,
+            &self.origin_event_id,
+        ]
+        .iter()
+        .any(|s| looks_secret(s))
+        {
+            return Err(HistoryError::SecretLooking);
+        }
         if self.canonical()?.len() > MAX_RECORD_BYTES {
             return Err(HistoryError::RecordTooLarge);
         }
@@ -523,9 +565,14 @@ impl History {
         if !gate::metrics_history_blockers().is_empty() {
             return Err(HistoryError::NotAccepted);
         }
-        Self::enable_with_gate(parent)
+        Self::enable_unchecked(parent)
     }
+    /// Without the policy gate: tests only.
+    #[cfg(test)]
     pub(crate) fn enable_with_gate(parent: &Path) -> Result<(), HistoryError> {
+        Self::enable_unchecked(parent)
+    }
+    fn enable_unchecked(parent: &Path) -> Result<(), HistoryError> {
         let dir = private_dir(parent, true)?;
         fs::OpenOptions::new()
             .write(true)
@@ -546,14 +593,22 @@ impl History {
         if !gate::metrics_history_blockers().is_empty() {
             return Err(HistoryError::NotAccepted);
         }
-        Self::open_with_gate(parent)
+        Self::open_unchecked(parent, Limits::default())
     }
 
+    /// Without the policy gate: tests only.
+    #[cfg(test)]
     pub(crate) fn open_with_gate(parent: &Path) -> Result<Self, HistoryError> {
-        Self::open_with(parent, Limits::default())
+        Self::open_unchecked(parent, Limits::default())
     }
 
+    /// Without the policy gate and with chosen bounds: tests only.
+    #[cfg(test)]
     pub(crate) fn open_with(parent: &Path, limits: Limits) -> Result<Self, HistoryError> {
+        Self::open_unchecked(parent, limits)
+    }
+
+    fn open_unchecked(parent: &Path, limits: Limits) -> Result<Self, HistoryError> {
         // A directory that exists but is not safe is an attack to report; no directory is "off".
         let dir = match private_dir(parent, false) {
             Ok(d) => d,
@@ -919,6 +974,136 @@ impl Recorder {
     }
     pub fn store(&self) -> Option<&History> {
         self.store.as_ref()
+    }
+}
+
+/// Records handed from the event path to a writer thread through a bounded queue. The event path
+/// never takes a lock the writer holds, never touches SQLite and never waits: `offer` either puts
+/// the record in the queue or counts it as dropped and says so (`Partial("queue_full")`). A slow
+/// or stuck disk therefore costs history, never a turn, a cancellation or a reap.
+pub struct AsyncRecorder {
+    tx: std::sync::mpsc::SyncSender<Job>,
+    shared: std::sync::Arc<std::sync::Mutex<Shared>>,
+    overflowed: std::sync::atomic::AtomicU64,
+    writer: std::sync::Mutex<Option<std::thread::JoinHandle<Recorder>>>,
+}
+struct Shared {
+    state: SinkState,
+    accepted: u64,
+    dropped: u64,
+}
+enum Job {
+    Record(Box<Record>, i64),
+    /// Answers once every earlier record has been written (tests and shutdown, never the event path).
+    Flush(std::sync::mpsc::SyncSender<()>),
+    Stop,
+}
+/// Records the queue holds before it starts dropping.
+pub const QUEUE_CAPACITY: usize = 256;
+
+impl AsyncRecorder {
+    pub fn spawn(recorder: Recorder) -> Self {
+        Self::spawn_with(recorder, QUEUE_CAPACITY, None)
+    }
+    /// `hold`: a receiver the writer waits on before each record (a test makes the disk "slow").
+    pub(crate) fn spawn_with(
+        recorder: Recorder,
+        capacity: usize,
+        hold: Option<std::sync::mpsc::Receiver<()>>,
+    ) -> Self {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Job>(capacity);
+        let shared = std::sync::Arc::new(std::sync::Mutex::new(Shared {
+            state: recorder.state(),
+            accepted: 0,
+            dropped: 0,
+        }));
+        let seen = shared.clone();
+        let writer = std::thread::Builder::new()
+            .name("m3-history-writer".into())
+            .spawn(move || {
+                let mut recorder = recorder;
+                while let Ok(job) = rx.recv() {
+                    match job {
+                        Job::Record(rec, now) => {
+                            if let Some(hold) = &hold {
+                                let _ = hold.recv();
+                            }
+                            recorder.record(&rec, now);
+                            if let Ok(mut s) = seen.lock() {
+                                let (accepted, dropped) = recorder.counts();
+                                s.state = recorder.state();
+                                s.accepted = accepted;
+                                s.dropped = dropped;
+                            }
+                        }
+                        Job::Flush(ack) => {
+                            let _ = ack.send(());
+                        }
+                        Job::Stop => break,
+                    }
+                }
+                recorder
+            })
+            .expect("a thread can be started");
+        Self {
+            tx,
+            shared,
+            overflowed: 0.into(),
+            writer: std::sync::Mutex::new(Some(writer)),
+        }
+    }
+
+    /// Never blocks. A full queue (or a writer that is gone) drops the record and is counted.
+    pub fn offer(&self, rec: Record, now: i64) {
+        use std::sync::mpsc::TrySendError;
+        match self.tx.try_send(Job::Record(Box::new(rec), now)) {
+            Ok(()) => (),
+            Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
+                self.overflowed
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// What the sink is doing, truthfully: a storage failure or an overflowing queue is `Partial`.
+    pub fn state(&self) -> SinkState {
+        let s = self
+            .shared
+            .lock()
+            .map_or(SinkState::Partial("poisoned"), |s| s.state);
+        match (
+            s,
+            self.overflowed.load(std::sync::atomic::Ordering::Relaxed),
+        ) {
+            (SinkState::Recording, n) if n > 0 => SinkState::Partial("queue_full"),
+            (state, _) => state,
+        }
+    }
+    /// (records the store accepted, records dropped for any reason, including a full queue).
+    pub fn counts(&self) -> (u64, u64) {
+        let (accepted, dropped) = self
+            .shared
+            .lock()
+            .map_or((0, 0), |s| (s.accepted, s.dropped));
+        (
+            accepted,
+            dropped + self.overflowed.load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
+    /// Waits until everything offered before this call has been written. Not for the event path.
+    pub fn flush(&self) {
+        let (ack, done) = std::sync::mpsc::sync_channel(1);
+        if self.tx.send(Job::Flush(ack)).is_ok() {
+            let _ = done.recv();
+        }
+    }
+
+    /// Ends the writer and hands back the recorder (and its store). Waits for the queue to drain.
+    pub fn finish(&self) -> Option<Recorder> {
+        let _ = self.tx.send(Job::Stop);
+        let handle = self.writer.lock().ok()?.take()?;
+        handle.join().ok()
     }
 }
 
