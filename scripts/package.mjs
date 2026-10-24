@@ -114,6 +114,7 @@ copyFileSync(
   join(root, 'src-tauri', 'icons', '128x128.png'),
   join(staging, 'share', 'wyss-console', 'icon.png'),
 );
+chmodSync(join(staging, 'share', 'wyss-console', 'icon.png'), 0o644);
 writeFileSync(
   join(staging, 'share', 'wyss-console', 'package.json'),
   `${JSON.stringify(
