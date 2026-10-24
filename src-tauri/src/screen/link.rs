@@ -111,6 +111,8 @@ pub struct LinkConfig {
     pub restart_window: Duration,
     /// How long one exchange with the helper may take before it is killed.
     pub exchange: Duration,
+    /// A few characters to tell this link's thread apart in a process listing.
+    pub label: String,
 }
 
 impl Default for LinkConfig {
@@ -122,6 +124,7 @@ impl Default for LinkConfig {
             max_restarts: 3,
             restart_window: Duration::from_secs(60),
             exchange: Duration::from_secs(3),
+            label: String::new(),
         }
     }
 }
@@ -178,6 +181,8 @@ pub enum LinkError {
 
 enum Command {
     Wake,
+    /// The helper with this number ended on its own (its output closed).
+    Gone(u64),
     Snapshot {
         scrollback: u32,
         reply: SyncSender<Result<Snap, LinkError>>,
@@ -224,12 +229,17 @@ impl ScreenLink {
             have: size,
             shared: shared.clone(),
             commands: rx,
+            serial: 0,
+            commands_tx: tx.clone(),
             session: None,
             next: 0,
             starts: VecDeque::new(),
         };
         let thread = thread::Builder::new()
-            .name("wyss-screen-link".into())
+            .name(format!(
+                "wyss-sl-{}",
+                worker.config.label.chars().take(7).collect::<String>()
+            ))
             .spawn(move || worker.run())
             .ok();
         ScreenLink {
@@ -284,6 +294,7 @@ enum Fail {
 }
 
 struct Session {
+    id: u64,
     /// Frames to the helper go through a thread of their own, so that a helper that stopped
     /// reading cannot stop this one from enforcing its deadline.
     out: Sender<Vec<u8>>,
@@ -313,6 +324,9 @@ struct Worker {
     shared: Arc<Mutex<Status>>,
     commands: Receiver<Command>,
     session: Option<Session>,
+    /// Number of the next helper to start, and the way the reader threads tell this worker.
+    serial: u64,
+    commands_tx: SyncSender<Command>,
     /// Offset of the next byte to give the helper.
     next: u64,
     starts: VecDeque<Instant>,
@@ -326,11 +340,18 @@ impl Worker {
     fn run(mut self) {
         // Start eagerly: a helper is ready before the first snapshot is asked for.
         let _ = self.ensure();
+        // Nothing here polls: an idle terminal's link sleeps until output, a snapshot request, or
+        // its helper ending wakes it.
         loop {
-            match self.commands.recv_timeout(Duration::from_millis(500)) {
-                Ok(Command::Stop) | Err(RecvTimeoutError::Disconnected) => break,
-                Ok(Command::Wake) | Err(RecvTimeoutError::Timeout) => {
+            match self.commands.recv() {
+                Ok(Command::Stop) | Err(_) => break,
+                Ok(Command::Wake) => {
                     let _ = self.pump();
+                }
+                Ok(Command::Gone(id)) => {
+                    if self.session.as_ref().is_some_and(|s| s.id == id) {
+                        let _ = self.lose("exited");
+                    }
                 }
                 Ok(Command::Snapshot { scrollback, reply }) => {
                     let result = self.snapshot(scrollback);
@@ -411,6 +432,9 @@ impl Worker {
                 }
             }
         });
+        self.serial += 1;
+        let id = self.serial;
+        let gone = self.commands_tx.clone();
         let reader = thread::spawn(move || {
             loop {
                 match ipc::read_frame(&mut output, MAX_RESPONSE) {
@@ -429,8 +453,11 @@ impl Worker {
                     }
                 }
             }
+            // Whoever is waiting for an answer has it (an error); a link that is asleep is told.
+            let _ = gone.try_send(Command::Gone(id));
         });
         self.session = Some(Session {
+            id,
             out: out_tx,
             responses: resp_rx,
             handle: spawned.handle,

@@ -400,7 +400,10 @@ impl HostCore {
                 spawner,
                 Arc::new(RingSource(Arc::downgrade(&entry))),
                 (entry_rows(&entry), entry_cols(&entry)),
-                LinkConfig::default(),
+                LinkConfig {
+                    label: id.as_str().chars().take(7).collect(),
+                    ..LinkConfig::default()
+                },
             );
             *lock(&entry.screen) = Some(Arc::new(link));
         }

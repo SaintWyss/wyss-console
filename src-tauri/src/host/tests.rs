@@ -632,11 +632,14 @@ fn a_host_with_an_idle_terminal_waits_instead_of_polling() {
     // The shell has started and printed what it prints; from here on nothing happens.
     read_until(&client, &id, "$");
     std::thread::sleep(Duration::from_secs(2));
-    let pumps = threads_named("wyss-pump");
-    let ptys = threads_named("wyss-pty");
+    // Only this terminal's own threads (other tests of this process run in parallel).
+    let pumps = threads_named(&format!("wyss-pump-{}", &id[..5]));
+    let ptys = threads_named(&format!("wyss-pty-{}", &id[..6]));
+    let links = threads_named(&format!("wyss-sl-{}", &id[..7]));
     assert!(!pumps.is_empty() && !ptys.is_empty());
     let all = |tids: &[String]| tids.iter().filter_map(|t| wakeups(t)).sum::<u64>();
     let before = (wakeups(&accept).unwrap(), all(&pumps), all(&ptys));
+    let link_before = all(&links);
     let window = 4.0;
     std::thread::sleep(Duration::from_secs(4));
     let after = (wakeups(&accept).unwrap(), all(&pumps), all(&ptys));
@@ -646,8 +649,10 @@ fn a_host_with_an_idle_terminal_waits_instead_of_polling() {
         rate(before.1, after.1),
         rate(before.2, after.2),
     );
+    let link_rate = (all(&links) - link_before) as f64 / window;
     println!(
-        "idle wake-ups per second: accept {accept_rate:.1}, pump {pump_rate:.1}, pty {pty_rate:.1}"
+        "idle wake-ups per second: accept {accept_rate:.1}, pump {pump_rate:.1}, pty {pty_rate:.1}, parser link {link_rate:.1} ({} thread)",
+        links.len()
     );
     let _ = client.call("term_close", json!({"terminal_id": id}));
     let _ = client.call("shutdown", Value::Null);
@@ -658,6 +663,8 @@ fn a_host_with_an_idle_terminal_waits_instead_of_polling() {
     assert!(pump_rate < 4.0, "the pump polls: {pump_rate}/s");
     // The PTY worker still looks at its child a few times a second, to see it exit.
     assert!(pty_rate < 12.0, "the PTY worker polls: {pty_rate}/s");
+    // The parser link has nothing to wake for while the terminal is idle.
+    assert!(link_rate < 0.5, "the parser link polls: {link_rate}/s");
 }
 
 // ---- M4: the screen a terminal keeps in a parser helper ---------------------------------------
@@ -806,6 +813,172 @@ mod screen {
         assert!(after["parser"]["restarts"].as_u64().unwrap() >= 1);
         assert_eq!(after["parser"]["fidelity"], "exact");
         let _ = wait_parser(&client, &id, "healthy");
+    }
+
+    #[test]
+    fn a_burst_of_resizes_while_output_flows_leaves_the_parser_at_the_ptys_final_size() {
+        let host = Host::start(Duration::from_secs(600));
+        if !helper_there(&host) {
+            eprintln!("NOT_RUN: no wyss-screen next to the test binary");
+            return;
+        }
+        let client = host.client();
+        let id = client.call("term_create", json!({"size": size()})).unwrap()["terminal_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        type_line(
+            &client,
+            &id,
+            "for i in $(seq 1 300); do echo line-$i; done; echo flood-done",
+        );
+        let sizes = [
+            (24, 80),
+            (30, 100),
+            (10, 40),
+            (50, 132),
+            (24, 80),
+            (40, 120),
+            (12, 60),
+        ];
+        for (rows, cols) in sizes.iter().cycle().take(40) {
+            client
+                .call(
+                    "term_resize",
+                    json!({"terminal_id": id, "size": {"rows": rows, "cols": cols}}),
+                )
+                .unwrap();
+        }
+        read_until(&client, &id, "flood-done");
+        let info = client
+            .call("term_status", json!({"terminal_id": id}))
+            .unwrap();
+        let answer = screen_of(&client, &id);
+        assert_eq!(answer["available"], true, "{answer}");
+        assert_eq!(
+            answer["size"], info["size"],
+            "the parser follows the one size the PTY has"
+        );
+        assert_eq!(answer["parser"]["health"], "healthy");
+    }
+
+    #[test]
+    fn attaching_again_and_again_creates_nothing_and_changes_no_process() {
+        let host = Host::start(Duration::from_secs(600));
+        if !helper_there(&host) {
+            eprintln!("NOT_RUN: no wyss-screen next to the test binary");
+            return;
+        }
+        let client = host.client();
+        let made = client
+            .call("term_create", json!({"size": size(), "title": "Work"}))
+            .unwrap();
+        let id = made["terminal_id"].as_str().unwrap().to_owned();
+        let pid = made["observed_pid"].as_u64();
+        type_line(&client, &id, "echo once-only-9");
+        read_until(&client, &id, "once-only-9");
+        for _ in 0..8 {
+            let answer = screen_of(&host.client(), &id);
+            assert_eq!(answer["available"], true);
+        }
+        let list = client.call("term_list", Value::Null).unwrap();
+        assert_eq!(
+            list.as_array().unwrap().len(),
+            1,
+            "no second terminal was made"
+        );
+        assert_eq!(
+            client
+                .call("term_status", json!({"terminal_id": id}))
+                .unwrap()["observed_pid"]
+                .as_u64(),
+            pid
+        );
+        // Nothing was typed to the program by attaching: the command ran exactly once.
+        let ring = read_until(&client, &id, "once-only-9");
+        assert_eq!(
+            ring.matches("once-only-9").count(),
+            2,
+            "the typed line and its one output: {ring:?}"
+        );
+    }
+
+    #[test]
+    fn an_exited_terminal_keeps_its_last_screen_and_says_it_exited() {
+        let host = Host::start(Duration::from_secs(600));
+        if !helper_there(&host) {
+            eprintln!("NOT_RUN: no wyss-screen next to the test binary");
+            return;
+        }
+        let client = host.client();
+        let id = client.call("term_create", json!({"size": size()})).unwrap()["terminal_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        type_line(&client, &id, "echo last-words-3; exit 7");
+        read_until(&client, &id, "last-words-3");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let state = loop {
+            let info = client
+                .call("term_status", json!({"terminal_id": id}))
+                .unwrap();
+            if info["state"] == "exited" || Instant::now() > deadline {
+                break info;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert_eq!(state["state"], "exited");
+        assert_eq!(state["exit"]["code"], 7);
+        let answer = screen_of(&client, &id);
+        assert_eq!(answer["available"], true, "{answer}");
+        assert!(rows_of(&answer, 24, 80).join("\n").contains("last-words-3"));
+        // Nothing relaunched it.
+        assert_eq!(
+            client
+                .call("term_status", json!({"terminal_id": id}))
+                .unwrap()["state"],
+            "exited"
+        );
+    }
+
+    #[test]
+    fn input_still_reaches_the_program_while_nobody_is_reading_its_flood() {
+        let host = Host::start(Duration::from_secs(600));
+        let client = host.client();
+        let id = client.call("term_create", json!({"size": size()})).unwrap()["terminal_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        // A flood of about 3 MiB that nobody reads (the ring keeps its bound), then a command.
+        type_line(
+            &client,
+            &id,
+            "head -c 3000000 /dev/zero | tr '\\0' 'x'; echo",
+        );
+        std::thread::sleep(Duration::from_millis(500));
+        type_line(&client, &id, "echo after-the-flood-8");
+        let late = host.client();
+        // A slow reader that starts at the oldest byte it can still have is told what it missed.
+        let mut from = 0u64;
+        let mut truncated = false;
+        let mut seen = String::new();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !seen.contains("after-the-flood-8") && Instant::now() < deadline {
+            let out = late
+                .call(
+                    "term_read",
+                    json!({"terminal_id": id, "from": from, "wait_ms": 300}),
+                )
+                .unwrap();
+            truncated |= out["truncated"] == true;
+            from = out["next"].as_u64().unwrap();
+            seen.push_str(&text(&out));
+        }
+        assert!(
+            seen.contains("after-the-flood-8"),
+            "the command typed during the flood ran"
+        );
+        assert!(truncated, "and the reader was told that it missed output");
     }
 
     #[test]
