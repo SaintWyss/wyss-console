@@ -203,6 +203,9 @@ pub struct ScreenLink {
     /// The PTY's size as the host last set it. A command could be lost to a full queue; a value
     /// cannot: the worker compares it with what its helper has at every step.
     size: Arc<Mutex<(u16, u16)>>,
+    /// A wake is already waiting in the queue (or about to be): further ones add nothing, and must
+    /// not fill the queue a snapshot request needs.
+    woken: Arc<std::sync::atomic::AtomicBool>,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -229,11 +232,13 @@ impl ScreenLink {
         }));
         let (tx, rx) = mpsc::sync_channel(64);
         let want = Arc::new(Mutex::new(size));
+        let woken = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker = Worker {
             spawner,
             source,
             config,
             want: want.clone(),
+            woken: woken.clone(),
             have: size,
             shared: shared.clone(),
             commands: rx,
@@ -255,13 +260,17 @@ impl ScreenLink {
             commands: tx,
             shared,
             size: want,
+            woken,
             thread: Mutex::new(thread),
         }
     }
 
     /// New output is in the ring. Never blocks; a link that is behind already knows.
     pub fn wake(&self) {
-        let _ = self.commands.try_send(Command::Wake);
+        use std::sync::atomic::Ordering::SeqCst;
+        if !self.woken.swap(true, SeqCst) && self.commands.try_send(Command::Wake).is_err() {
+            // The queue is full of other work, which pumps whatever has arrived anyway.
+        }
     }
 
     pub fn resize(&self, rows: u16, cols: u16) {
@@ -329,6 +338,7 @@ struct Worker {
     config: LinkConfig,
     /// The size wanted, and the size the helper in service has.
     want: Arc<Mutex<(u16, u16)>>,
+    woken: Arc<std::sync::atomic::AtomicBool>,
     have: (u16, u16),
     shared: Arc<Mutex<Status>>,
     commands: Receiver<Command>,
@@ -354,7 +364,10 @@ impl Worker {
         // Nothing here polls: an idle terminal's link sleeps until output, a snapshot request, or
         // its helper ending wakes it.
         loop {
-            match self.commands.recv() {
+            let command = self.commands.recv();
+            // Whatever arrives from now on is a new wake; this command pumps all there is.
+            self.woken.store(false, std::sync::atomic::Ordering::SeqCst);
+            match command {
                 Ok(Command::Stop) | Err(_) => break,
                 Ok(Command::Wake) => {
                     let _ = self.pump();

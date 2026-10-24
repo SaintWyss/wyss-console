@@ -876,7 +876,7 @@ mod screen {
         let id = made["terminal_id"].as_str().unwrap().to_owned();
         let pid = made["observed_pid"].as_u64();
         type_line(&client, &id, "echo once-only-9");
-        read_until(&client, &id, "once-only-9");
+        read_until(&client, &id, "\u{1b}[?2004l\ronce-only-9\r\n");
         for _ in 0..8 {
             let answer = screen_of(&host.client(), &id);
             assert_eq!(answer["available"], true);
@@ -895,11 +895,14 @@ mod screen {
             pid
         );
         // Nothing was typed to the program by attaching: the command ran exactly once.
-        let ring = read_until(&client, &id, "once-only-9");
+        let ring = read_until(&client, &id, "\u{1b}[?2004l\ronce-only-9\r\n");
+        // The echo of the typed line shows more than once (the line discipline and the shell's
+        // own redisplay); what the command *printed* is the line that follows the end of the
+        // bracketed-paste mode and a carriage return, and there is exactly one.
         assert_eq!(
-            ring.matches("once-only-9").count(),
-            2,
-            "the typed line and its one output: {ring:?}"
+            ring.matches("\u{1b}[?2004l\ronce-only-9\r\n").count(),
+            1,
+            "the command ran once: {ring:?}"
         );
     }
 
@@ -1165,13 +1168,13 @@ mod perf {
         v.sort_by(|a, b| a.partial_cmp(b).unwrap());
         v[((v.len() as f64 * q) as usize).min(v.len() - 1)]
     }
-    fn line(what: &str, unit: &str, samples: &mut Vec<f64>, extra: &str) {
+    fn line(what: &str, unit: &str, samples: &mut [f64], extra: &str) {
         let raw: Vec<f64> = samples
             .iter()
             .map(|v| (v * 1000.0).round() / 1000.0)
             .collect();
         println!(
-            "{{\"measure\":\"{what}\",\"unit\":\"{unit}\",\"n\":{},\"p50\":{:.3},\"p95\":{:.3},{extra}\"raw\":{raw:?}}}",
+            "\n{{\"measure\":\"{what}\",\"unit\":\"{unit}\",\"n\":{},\"p50\":{:.3},\"p95\":{:.3},{extra}\"raw\":{raw:?}}}",
             samples.len(),
             pct(samples, 0.5),
             pct(samples, 0.95)
@@ -1213,8 +1216,8 @@ mod perf {
                 .call("term_screen", json!({"terminal_id": busy}))
                 .unwrap();
             ms.push(started.elapsed().as_secs_f64() * 1000.0);
+            assert_eq!(answer["available"], true, "{answer}");
             bytes = answer["repaint"].as_str().unwrap().len() * 3 / 4;
-            assert_eq!(answer["available"], true);
         }
         line(
             "term_screen_latency_24x80_history_500",
@@ -1245,7 +1248,8 @@ mod perf {
             rss.push(kib(pid, "VmRSS:") / 1024.0);
             peak.push(kib(pid, "VmHWM:") / 1024.0);
             threads += fs::read_dir(format!("/proc/{pid}/task")).unwrap().count();
-            fds += fs::read_dir(format!("/proc/{pid}/fd")).unwrap().count();
+            // Not readable for a non-dumpable helper: counted only where it can be read.
+            fds += fs::read_dir(format!("/proc/{pid}/fd")).map_or(0, |d| d.count());
         }
         let total: f64 = rss.iter().sum();
         line(
@@ -1265,14 +1269,20 @@ mod perf {
         // The host's own threads per terminal (pump, PTY worker, link, its two pipe threads).
         let host_threads = fs::read_dir("/proc/self/task").unwrap().count();
         println!(
-            "{{\"measure\":\"threads_in_the_host_process_with_16_terminals\",\"threads\":{host_threads}}}"
+            "\n{{\"measure\":\"threads_in_the_host_process_with_16_terminals\",\"threads\":{host_threads}}}"
         );
+        // The sixteenth place is needed below.
+        let spare = ids.pop().unwrap();
+        client
+            .call("term_close", json!({"terminal_id": spare}))
+            .unwrap();
 
         // Start of a terminal to a first screen the window could attach to.
         let mut first = Vec::new();
         for _ in 0..10 {
             let started = Instant::now();
             let id = make();
+            let deadline = Instant::now() + Duration::from_secs(15);
             loop {
                 let a = client
                     .call("term_screen", json!({"terminal_id": id}))
@@ -1280,6 +1290,7 @@ mod perf {
                 if a["available"] == true {
                     break;
                 }
+                assert!(Instant::now() < deadline, "never attachable: {a}");
                 std::thread::sleep(Duration::from_millis(5));
             }
             first.push(started.elapsed().as_secs_f64() * 1000.0);
@@ -1296,7 +1307,8 @@ mod perf {
 
         // Recovery: a helper killed, to a screen that is exact again.
         let mut recover = Vec::new();
-        for _ in 0..8 {
+        // Three: the restart budget is three in a minute, and a measurement must not use it up.
+        for _ in 0..3 {
             let p = client
                 .call("term_parser", json!({"terminal_id": ids[0]}))
                 .unwrap();
@@ -1308,6 +1320,7 @@ mod perf {
                 nix::sys::signal::Signal::SIGKILL,
             )
             .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(15);
             loop {
                 let p = client
                     .call("term_parser", json!({"terminal_id": ids[0]}))
@@ -1318,6 +1331,7 @@ mod perf {
                 {
                     break;
                 }
+                assert!(Instant::now() < deadline, "never recovered: {p}");
                 std::thread::sleep(Duration::from_millis(2));
             }
             recover.push(started.elapsed().as_secs_f64() * 1000.0);

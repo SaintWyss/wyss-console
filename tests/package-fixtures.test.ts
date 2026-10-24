@@ -46,7 +46,7 @@ describe('package fixture exclusion', () => {
     }
   });
 
-  it('accepts only the two exact product files and catches contamination in either', () => {
+  it('accepts only the three exact product files and catches contamination in any', () => {
     const directory = root();
     const desktop = binary(directory, 'bin/wyss-console', 'REAL-DESKTOP');
     const authority = binary(
@@ -54,8 +54,17 @@ describe('package fixture exclusion', () => {
       'libexec/wyss-console/wyss-control',
       'REAL-AUTHORITY',
     );
-    expect(verifyPackageFixtures(directory)).toEqual([desktop, authority]);
-    for (const path of [desktop, authority]) {
+    const parser = binary(
+      directory,
+      'libexec/wyss-console/wyss-screen',
+      'REAL-PARSER',
+    );
+    expect(verifyPackageFixtures(directory)).toEqual([
+      desktop,
+      authority,
+      parser,
+    ]);
+    for (const path of [desktop, authority, parser]) {
       writeFileSync(path, FIXTURE_MARKERS[0]);
       expect(() => verifyPackageFixtures(directory)).toThrow('Fixture backend');
       writeFileSync(path, 'REAL-BINARY');
@@ -85,6 +94,7 @@ describe('package fixture exclusion', () => {
       );
     expect(run().status).toBe(1);
     binary(directory, 'bin/wyss-console', 'REAL-DESKTOP');
+    binary(directory, 'libexec/wyss-console/wyss-screen', 'PARSER');
     const path = binary(
       directory,
       'libexec/wyss-console/wyss-control',

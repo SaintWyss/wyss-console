@@ -19,8 +19,15 @@ impl Bytes {
             inner: Mutex::new((0, Vec::new())),
         })
     }
+    /// Appends, and forgets the oldest bytes beyond 256 KiB, as the host's ring does.
     fn push(&self, data: &[u8]) {
-        lock(&self.inner).1.extend_from_slice(data);
+        let mut g = lock(&self.inner);
+        g.1.extend_from_slice(data);
+        if g.1.len() > 256 * 1024 {
+            let drop = g.1.len() - 256 * 1024;
+            g.1.drain(..drop);
+            g.0 += drop as u64;
+        }
     }
     /// Forgets everything before `offset`, as a full ring does.
     fn evict_to(&self, offset: u64) {
@@ -454,4 +461,33 @@ fn a_helper_that_ends_while_the_link_is_idle_is_replaced_without_being_asked() {
         (Health::Healthy, Fidelity::Exact)
     );
     assert_eq!(status.fed, SCREEN.len() as u64);
+}
+
+#[test]
+fn a_snapshot_is_not_refused_as_busy_while_the_terminal_floods_the_link_with_wakes() {
+    let source = Bytes::new();
+    let link = Arc::new(ScreenLink::start(
+        Scripted::new(vec![]),
+        source.clone(),
+        (6, 20),
+        quick(),
+    ));
+    let stop = Arc::new(AtomicBool::new(false));
+    let flood = {
+        let (link, source, stop) = (link.clone(), source.clone(), stop.clone());
+        thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                source.push(b"flooding output line\r\n");
+                for _ in 0..50 {
+                    link.wake();
+                }
+            }
+        })
+    };
+    for _ in 0..20 {
+        let snap = link.snapshot(10, Duration::from_secs(10));
+        assert!(snap.is_ok(), "{:?}", snap.err());
+    }
+    stop.store(true, Ordering::SeqCst);
+    flood.join().unwrap();
 }

@@ -221,7 +221,7 @@ pub fn probe(layers: u8, action: &str) -> String {
     };
     let errno = || std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
     let cstr = |s: &str| std::ffi::CString::new(s).unwrap();
-    let outcome = match action {
+    match action {
         "applied" => format!("layers={} abi={}", applied.layers, applied.landlock_abi),
         "open_passwd" => {
             let fd = unsafe { libc::open(cstr("/etc/passwd").as_ptr(), libc::O_RDONLY) };
@@ -339,6 +339,5 @@ pub fn probe(layers: u8, action: &str) -> String {
             format!("dups={opened}")
         }
         _ => "unknown_action".to_owned(),
-    };
-    outcome
+    }
 }

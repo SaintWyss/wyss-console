@@ -269,14 +269,17 @@ fn helper_startup_memory_round_trip_and_throughput() {
         vec![status_kib(c.id(), "VmHWM:") / 1024.0],
         "",
     );
+    // A helper is not dumpable, so its /proc/<pid>/fd is not readable by its own user: unknown is
+    // reported as null, not as zero (the ceiling itself is shown by the sandbox probe tests).
     let fds = std::fs::read_dir(format!("/proc/{}/fd", c.id()))
-        .map(|d| d.count())
-        .unwrap_or(0);
+        .ok()
+        .map(|d| d.count());
     let threads = std::fs::read_dir(format!("/proc/{}/task", c.id()))
         .unwrap()
         .count();
     println!(
-        "{{\"measure\":\"helper_descriptors_and_threads\",\"descriptors\":{fds},\"threads\":{threads}}}"
+        "\n{{\"measure\":\"helper_descriptors_and_threads\",\"descriptors\":{},\"threads\":{threads}}}",
+        fds.map_or("null".to_owned(), |n| n.to_string())
     );
     // Idle: a helper that is waiting for the next frame uses no processor.
     let stat = |pid: u32| -> u64 {

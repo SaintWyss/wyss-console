@@ -76,6 +76,13 @@ def check(step, ctx):
             return False, f"no screen: {answer.get('reason')}"
         repaint = base64.b64decode(answer["repaint"])
         return args[0].encode() in repaint, f"{len(repaint)} bytes, fidelity {answer['parser']['fidelity']}"
+    if kind == "host_write":
+        # Setup, never the thing observed: input typed through the host's own protocol, to leave a
+        # full-screen program that the window's keys did not reach in time.
+        tid = _first(sp)["terminal"]["terminal_id"]
+        data = args[0].encode().decode("unicode_escape").encode()
+        answer = call(sp, "term_write", {"terminal_id": tid, "data": list(data)})
+        return "ok" in answer, f"{len(data)} bytes"
     if kind == "assert_output":
         tid = _first(sp)["terminal"]["terminal_id"]
         seen, frm = b"", 0
