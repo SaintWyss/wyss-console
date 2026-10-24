@@ -629,6 +629,10 @@ mod tests {
             // The project workspace's commands belong to capability `projects`, which the
             // test of its own routing holds (`projects::commands`).
             .filter(|c| !c.starts_with("projects_"))
+            // The providers window's read and the fixture runtime's actions belong to capability
+            // `m3` and to the fixture binary's own grant (tests/m3-capability.test.ts, the `acl`
+            // tests of `m3::gui`).
+            .filter(|c| !c.starts_with("m3_"))
             .collect();
         let permitted: Vec<String> = expected
             .iter()
