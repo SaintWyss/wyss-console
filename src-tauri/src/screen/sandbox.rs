@@ -129,7 +129,14 @@ fn landlock() -> Option<u8> {
         _ => 24,
     };
     // SAFETY: `attr` is a valid, fully initialised #[repr(C)] struct and `size` never exceeds it.
-    let fd = unsafe { libc::syscall(SYS_LANDLOCK_CREATE_RULESET, &attr as *const RulesetAttr, size, 0u32) };
+    let fd = unsafe {
+        libc::syscall(
+            SYS_LANDLOCK_CREATE_RULESET,
+            &attr as *const RulesetAttr,
+            size,
+            0u32,
+        )
+    };
     if fd < 0 {
         return None;
     }
@@ -211,7 +218,12 @@ pub fn denied_syscalls() -> Vec<i64> {
 }
 
 fn filter() -> Vec<libc::sock_filter> {
-    let stmt = |code: u16, k: u32| libc::sock_filter { code, jt: 0, jf: 0, k };
+    let stmt = |code: u16, k: u32| libc::sock_filter {
+        code,
+        jt: 0,
+        jf: 0,
+        k,
+    };
     let denied = denied_syscalls();
     let n = denied.len();
     let mut prog = vec![
@@ -326,11 +338,23 @@ mod tests {
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), d.len());
-        for needed in [libc::SYS_socket, libc::SYS_connect, libc::SYS_execve, libc::SYS_ptrace, libc::SYS_clone3] {
+        for needed in [
+            libc::SYS_socket,
+            libc::SYS_connect,
+            libc::SYS_execve,
+            libc::SYS_ptrace,
+            libc::SYS_clone3,
+        ] {
             assert!(d.contains(&needed));
         }
         // What the parser itself needs is not denied.
-        for allowed in [libc::SYS_read, libc::SYS_write, libc::SYS_mmap, libc::SYS_exit_group, libc::SYS_futex] {
+        for allowed in [
+            libc::SYS_read,
+            libc::SYS_write,
+            libc::SYS_mmap,
+            libc::SYS_exit_group,
+            libc::SYS_futex,
+        ] {
             assert!(!d.contains(&allowed));
         }
     }

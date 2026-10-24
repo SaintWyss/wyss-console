@@ -23,6 +23,11 @@ pub struct Read {
 }
 
 impl Ring {
+    /// Offset of the oldest byte kept.
+    pub fn start(&self) -> u64 {
+        self.start
+    }
+
     pub fn end(&self) -> u64 {
         self.start + self.bytes.len() as u64
     }

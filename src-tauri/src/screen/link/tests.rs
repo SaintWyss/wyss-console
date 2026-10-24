@@ -108,7 +108,9 @@ impl Scripted {
 impl Spawner for Scripted {
     fn spawn(&self) -> std::io::Result<Spawned> {
         self.spawned.fetch_add(1, Ordering::SeqCst);
-        let next = lock(&self.script).pop_front().unwrap_or(Ok(Behavior::Normal));
+        let next = lock(&self.script)
+            .pop_front()
+            .unwrap_or(Ok(Behavior::Normal));
         let behavior = next.map_err(|()| std::io::Error::other("no helper"))?;
         let (host, helper_side) = UnixStream::pair()?;
         let host_reader = host.try_clone()?;
@@ -118,15 +120,25 @@ impl Spawner for Scripted {
         };
         thread::spawn(move || {
             let mut writer = helper_side.try_clone().unwrap();
-            let layers = if matches!(behavior, Behavior::Weak) { layer::NO_NEW_PRIVS } else { layer::ALL };
-            let applied = Applied { layers, landlock_abi: 6 };
+            let layers = if matches!(behavior, Behavior::Weak) {
+                layer::NO_NEW_PRIVS
+            } else {
+                layer::ALL
+            };
+            let applied = Applied {
+                layers,
+                landlock_abi: 6,
+            };
             match behavior {
                 Behavior::Normal | Behavior::Weak => {
                     let mut reader = std::io::BufReader::new(helper_side);
                     helper::serve(&mut reader, &mut writer, applied);
                 }
                 Behavior::EndsAfter(n) => {
-                    let mut reader = std::io::BufReader::new(CountingReader { inner: helper_side, left: n });
+                    let mut reader = std::io::BufReader::new(CountingReader {
+                        inner: helper_side,
+                        left: n,
+                    });
                     helper::serve(&mut reader, &mut writer, applied);
                 }
                 Behavior::Hangs => {
@@ -175,7 +187,10 @@ fn a_link_feeds_the_ring_and_a_snapshot_redraws_the_screen_exactly() {
     source.push(SCREEN);
     link.wake();
     let snap = link.snapshot(100, Duration::from_secs(5)).unwrap();
-    assert_eq!(text_of(&snap.body.repaint, 6, 20)[..3], ["one", "two red", "three"]);
+    assert_eq!(
+        text_of(&snap.body.repaint, 6, 20)[..3],
+        ["one", "two red", "three"]
+    );
     assert_eq!(snap.status.health, Health::Healthy);
     assert_eq!(snap.status.fidelity, Fidelity::Exact);
     assert_eq!(snap.status.fed, SCREEN.len() as u64);
@@ -193,7 +208,10 @@ fn a_helper_that_dies_is_replaced_and_the_history_replayed_into_the_new_one_only
     source.push(SCREEN);
     source.push(b"\r\nfour");
     let snap = link.snapshot(100, Duration::from_secs(10)).unwrap();
-    assert_eq!(text_of(&snap.body.repaint, 6, 20)[..4], ["one", "two red", "three", "four"]);
+    assert_eq!(
+        text_of(&snap.body.repaint, 6, 20)[..4],
+        ["one", "two red", "three", "four"]
+    );
     assert_eq!(spawner.spawned.load(Ordering::SeqCst), 2);
     assert_eq!(snap.status.restarts, 1);
     assert!(snap.status.last_failure.is_some());
@@ -223,7 +241,10 @@ fn a_helper_that_stops_answering_is_killed_at_the_deadline_and_replaced() {
     let started = Instant::now();
     let snap = link.snapshot(100, Duration::from_secs(10)).unwrap();
     assert!(started.elapsed() < Duration::from_secs(5));
-    assert!(spawner.killed.load(Ordering::SeqCst), "the stuck helper was ended through its handle");
+    assert!(
+        spawner.killed.load(Ordering::SeqCst),
+        "the stuck helper was ended through its handle"
+    );
     assert_eq!(snap.status.last_failure, Some("timeout"));
     assert_eq!(text_of(&snap.body.repaint, 6, 20)[0], "one");
 }
@@ -242,12 +263,21 @@ fn a_helper_that_answers_with_garbage_is_replaced() {
 #[test]
 fn a_helper_without_the_required_isolation_is_not_used() {
     let source = Bytes::new();
-    let spawner = Scripted::new(vec![Ok(Behavior::Weak), Ok(Behavior::Weak), Ok(Behavior::Weak), Ok(Behavior::Weak)]);
+    let spawner = Scripted::new(vec![
+        Ok(Behavior::Weak),
+        Ok(Behavior::Weak),
+        Ok(Behavior::Weak),
+        Ok(Behavior::Weak),
+    ]);
     let link = ScreenLink::start(spawner, source.clone(), (6, 20), quick());
     source.push(SCREEN);
     // Every helper it can get is too weak: it ends with no screen, never with a degraded one.
     let result = link.snapshot(100, Duration::from_secs(10));
-    assert!(matches!(result, Err(LinkError::Unavailable(_))), "{:?}", result.map(|s| s.status));
+    assert!(
+        matches!(result, Err(LinkError::Unavailable(_))),
+        "{:?}",
+        result.map(|s| s.status)
+    );
     let status = link.status();
     assert_ne!(status.health, Health::Healthy);
     assert_eq!(status.fidelity, Fidelity::Unavailable);
@@ -312,17 +342,28 @@ fn a_resize_reaches_the_screen_and_dropping_the_link_ends_the_helper() {
     let snap = link.snapshot(10, Duration::from_secs(5)).unwrap();
     assert_eq!((snap.body.rows, snap.body.cols), (8, 30));
     drop(link);
-    assert!(spawner.killed.load(Ordering::SeqCst), "the helper is ended with the link");
+    assert!(
+        spawner.killed.load(Ordering::SeqCst),
+        "the helper is ended with the link"
+    );
 }
 
 #[test]
 fn a_flood_of_wakes_does_not_block_the_caller() {
     let source = Bytes::new();
-    let link = ScreenLink::start(Scripted::new(vec![Ok(Behavior::Hangs)]), source.clone(), (6, 20), quick());
+    let link = ScreenLink::start(
+        Scripted::new(vec![Ok(Behavior::Hangs)]),
+        source.clone(),
+        (6, 20),
+        quick(),
+    );
     source.push(SCREEN);
     let started = Instant::now();
     for _ in 0..100_000 {
         link.wake();
     }
-    assert!(started.elapsed() < Duration::from_secs(2), "the pump thread was held up");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "the pump thread was held up"
+    );
 }

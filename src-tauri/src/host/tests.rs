@@ -274,7 +274,11 @@ fn it_says_what_it_is_and_refuses_what_it_does_not_know() {
     // It names what it has beyond protocol 1, so a newer window can tell an older host.
     assert_eq!(
         hello["features"],
-        json!(["profile_effort", "native_profile_plan_token"])
+        json!([
+            "profile_effort",
+            "native_profile_plan_token",
+            "screen_snapshot"
+        ])
     );
     assert_eq!(
         client.call("exec", json!({"cmd": "id"})).unwrap_err(),
@@ -654,4 +658,210 @@ fn a_host_with_an_idle_terminal_waits_instead_of_polling() {
     assert!(pump_rate < 4.0, "the pump polls: {pump_rate}/s");
     // The PTY worker still looks at its child a few times a second, to see it exit.
     assert!(pty_rate < 12.0, "the PTY worker polls: {pty_rate}/s");
+}
+
+// ---- M4: the screen a terminal keeps in a parser helper ---------------------------------------
+
+mod screen {
+    use super::*;
+    use wyss_console::screen::{Limits, Terminal, b64};
+
+    fn helper_there(host: &Host) -> bool {
+        let id = host
+            .client()
+            .call("term_create", json!({"size": size(), "title": "probe"}))
+            .unwrap();
+        let id = id["terminal_id"].as_str().unwrap().to_owned();
+        let parser = host
+            .client()
+            .call("term_parser", json!({"terminal_id": id}))
+            .unwrap();
+        let there = parser["health"] != "unavailable" || parser["reason"] != "helper_missing";
+        host.client()
+            .call("term_close", json!({"terminal_id": id}))
+            .unwrap();
+        there
+    }
+
+    fn screen_of(client: &Remote, id: &str) -> Value {
+        client
+            .call("term_screen", json!({"terminal_id": id}))
+            .unwrap()
+    }
+    fn rows_of(answer: &Value, rows: usize, cols: usize) -> Vec<String> {
+        let bytes = b64::decode(answer["repaint"].as_str().unwrap()).unwrap();
+        let mut t = Terminal::new(rows, cols, Limits::default());
+        t.feed(&bytes);
+        t.text()
+    }
+    fn wait_parser(client: &Remote, id: &str, health: &str) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let p = client
+                .call("term_parser", json!({"terminal_id": id}))
+                .unwrap();
+            if p["health"] == health || Instant::now() > deadline {
+                return p;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn a_late_client_receives_the_screen_a_repaint_and_where_in_the_output_it_is() {
+        let host = Host::start(Duration::from_secs(600));
+        if !helper_there(&host) {
+            eprintln!("NOT_RUN: no wyss-screen next to the test binary");
+            return;
+        }
+        let first = host.client();
+        let made = first
+            .call("term_create", json!({"size": size(), "title": "Work"}))
+            .unwrap();
+        let id = made["terminal_id"].as_str().unwrap().to_owned();
+        type_line(
+            &first,
+            &id,
+            "printf '\\033[2J\\033[Hscreen-marker \\033[1;31mred\\033[0m\\n'",
+        );
+        read_until(&first, &id, "red\u{1b}[0m");
+        drop(first);
+
+        let late = host.client();
+        let answer = screen_of(&late, &id);
+        assert_eq!(answer["available"], true, "{answer}");
+        assert_eq!(answer["parser"]["health"], "healthy");
+        assert_eq!(answer["parser"]["fidelity"], "exact");
+        assert_eq!(answer["parser"]["sandbox"]["layers"], 15);
+        assert!(
+            rows_of(&answer, 24, 80)[0].starts_with("screen-marker red"),
+            "{:?}",
+            rows_of(&answer, 24, 80)
+        );
+        // From `at`, the bytes that follow are exactly the ones the repaint does not contain.
+        let at = answer["at"].as_u64().unwrap();
+        type_line(&late, &id, "echo after-attach-77");
+        let mut from = at;
+        let mut seen = String::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !seen.contains("after-attach-77") && Instant::now() < deadline {
+            let out = late
+                .call(
+                    "term_read",
+                    json!({"terminal_id": id, "from": from, "wait_ms": 300}),
+                )
+                .unwrap();
+            from = out["next"].as_u64().unwrap();
+            seen.push_str(&text(&out));
+        }
+        assert!(seen.contains("after-attach-77"));
+        assert!(
+            !seen.contains("screen-marker"),
+            "the repaint's content is not delivered a second time"
+        );
+    }
+
+    #[test]
+    fn killing_the_parser_helper_does_not_touch_the_terminal_and_the_screen_comes_back() {
+        let host = Host::start(Duration::from_secs(600));
+        if !helper_there(&host) {
+            eprintln!("NOT_RUN: no wyss-screen next to the test binary");
+            return;
+        }
+        let client = host.client();
+        let made = client
+            .call("term_create", json!({"size": size(), "title": "Work"}))
+            .unwrap();
+        let id = made["terminal_id"].as_str().unwrap().to_owned();
+        let shell_pid = made["observed_pid"].as_u64();
+        type_line(&client, &id, "echo first-marker-1");
+        read_until(&client, &id, "first-marker-1");
+        let before = screen_of(&client, &id);
+        assert_eq!(before["available"], true);
+        // The helper this host started, ended the way a memory killer would end it.
+        let helper_pid = before["parser"]["helper_pid"]
+            .as_i64()
+            .expect("the link reports its helper") as i32;
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(helper_pid),
+            nix::sys::signal::Signal::SIGKILL,
+        )
+        .unwrap();
+        // The shell never noticed.
+        type_line(&client, &id, "echo second-marker-2");
+        read_until(&client, &id, "second-marker-2");
+        let info = client
+            .call("term_status", json!({"terminal_id": id}))
+            .unwrap();
+        assert_eq!(info["state"], "running");
+        assert_eq!(info["observed_pid"].as_u64(), shell_pid);
+        // And the screen is rebuilt from the ring, with both lines.
+        let after = screen_of(&client, &id);
+        assert_eq!(after["available"], true, "{after}");
+        let rows = rows_of(&after, 24, 80).join("\n");
+        assert!(
+            rows.contains("first-marker-1") && rows.contains("second-marker-2"),
+            "{rows}"
+        );
+        assert!(after["parser"]["restarts"].as_u64().unwrap() >= 1);
+        assert_eq!(after["parser"]["fidelity"], "exact");
+        let _ = wait_parser(&client, &id, "healthy");
+    }
+
+    #[test]
+    fn without_a_helper_a_terminal_still_works_and_the_window_is_told_to_replay() {
+        let host = Host::start(Duration::from_secs(600));
+        host.core.use_screen_spawner(None);
+        let client = host.client();
+        let made = client
+            .call("term_create", json!({"size": size(), "title": "Work"}))
+            .unwrap();
+        let id = made["terminal_id"].as_str().unwrap().to_owned();
+        type_line(&client, &id, "echo replay-marker-5");
+        read_until(&client, &id, "replay-marker-5");
+        let answer = screen_of(&client, &id);
+        assert_eq!(answer["available"], false);
+        assert_eq!(answer["reason"], "helper_missing");
+        assert_eq!(answer["parser"]["health"], "unavailable");
+        let list = client.call("term_list", Value::Null).unwrap();
+        assert_eq!(list[0]["parser"]["fidelity"], "unavailable");
+    }
+
+    #[test]
+    fn the_parser_follows_the_ptys_size_and_ends_with_the_terminal() {
+        let host = Host::start(Duration::from_secs(600));
+        if !helper_there(&host) {
+            eprintln!("NOT_RUN: no wyss-screen next to the test binary");
+            return;
+        }
+        let client = host.client();
+        let made = client
+            .call("term_create", json!({"size": size(), "title": "Work"}))
+            .unwrap();
+        let id = made["terminal_id"].as_str().unwrap().to_owned();
+        client
+            .call(
+                "term_resize",
+                json!({"terminal_id": id, "size": {"rows": 30, "cols": 100}}),
+            )
+            .unwrap();
+        let answer = screen_of(&client, &id);
+        assert_eq!(answer["size"], json!({"rows": 30, "cols": 100}));
+        let pid = answer["parser"]["helper_pid"].as_i64().unwrap();
+        client
+            .call("term_close", json!({"terminal_id": id}))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Path::new(&format!("/proc/{pid}")).exists()
+            && std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .is_ok_and(|s| !s.contains(") Z"))
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let gone = !Path::new(&format!("/proc/{pid}")).exists()
+            || std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .is_ok_and(|s| s.contains(") Z"));
+        assert!(gone, "the helper of a closed terminal is gone");
+    }
 }

@@ -577,12 +577,24 @@ mod tests {
         assert_eq!(read_frame(&mut cursor, MAX_REQUEST), Ok(None));
         // An end in the middle is not an end of conversation.
         let cut = &wire[..wire.len() - 1];
-        assert_eq!(read_frame(&mut &cut[..], MAX_REQUEST), Err(IpcError::Truncated));
-        assert_eq!(read_frame(&mut &wire[..2], MAX_REQUEST), Err(IpcError::Truncated));
+        assert_eq!(
+            read_frame(&mut &cut[..], MAX_REQUEST),
+            Err(IpcError::Truncated)
+        );
+        assert_eq!(
+            read_frame(&mut &wire[..2], MAX_REQUEST),
+            Err(IpcError::Truncated)
+        );
         // A length over the bound or zero is refused before anything is allocated.
         let lie = (MAX_REQUEST as u32 + 1).to_be_bytes();
-        assert_eq!(read_frame(&mut &lie[..], MAX_REQUEST), Err(IpcError::TooLarge));
-        assert_eq!(read_frame(&mut &[0u8, 0, 0, 0][..], MAX_REQUEST), Err(IpcError::TooLarge));
+        assert_eq!(
+            read_frame(&mut &lie[..], MAX_REQUEST),
+            Err(IpcError::TooLarge)
+        );
+        assert_eq!(
+            read_frame(&mut &[0u8, 0, 0, 0][..], MAX_REQUEST),
+            Err(IpcError::TooLarge)
+        );
         assert!(write_frame(&mut Vec::new(), &vec![1; MAX_REQUEST + 1], MAX_REQUEST).is_err());
     }
 }

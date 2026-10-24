@@ -143,7 +143,9 @@ pub enum Fidelity {
     Exact,
     /// The parser was rebuilt from the bytes the host still keeps: `missing` bytes at the start of
     /// the history (and whatever state they set) are not in the screen.
-    Tail { missing: u64 },
+    Tail {
+        missing: u64,
+    },
     Unavailable,
 }
 
@@ -163,6 +165,9 @@ pub struct Status {
 pub struct Snap {
     pub body: SnapshotBody,
     pub status: Status,
+    /// The offset in the terminal's output where this screen is: bytes from here on are the
+    /// ones a window that draws it must still read.
+    pub at: u64,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -173,7 +178,6 @@ pub enum LinkError {
 
 enum Command {
     Wake,
-    Resize(u16, u16),
     Snapshot {
         scrollback: u32,
         reply: SyncSender<Result<Snap, LinkError>>,
@@ -184,6 +188,9 @@ enum Command {
 pub struct ScreenLink {
     commands: SyncSender<Command>,
     shared: Arc<Mutex<Status>>,
+    /// The PTY's size as the host last set it. A command could be lost to a full queue; a value
+    /// cannot: the worker compares it with what its helper has at every step.
+    size: Arc<Mutex<(u16, u16)>>,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -208,11 +215,13 @@ impl ScreenLink {
             fed: 0,
         }));
         let (tx, rx) = mpsc::sync_channel(64);
+        let want = Arc::new(Mutex::new(size));
         let worker = Worker {
             spawner,
             source,
             config,
-            size,
+            want: want.clone(),
+            have: size,
             shared: shared.clone(),
             commands: rx,
             session: None,
@@ -226,6 +235,7 @@ impl ScreenLink {
         ScreenLink {
             commands: tx,
             shared,
+            size: want,
             thread: Mutex::new(thread),
         }
     }
@@ -236,7 +246,8 @@ impl ScreenLink {
     }
 
     pub fn resize(&self, rows: u16, cols: u16) {
-        let _ = self.commands.try_send(Command::Resize(rows, cols));
+        *lock(&self.size) = (rows, cols);
+        self.wake();
     }
 
     pub fn status(&self) -> Status {
@@ -296,7 +307,9 @@ struct Worker {
     spawner: Arc<dyn Spawner>,
     source: Arc<dyn ByteSource>,
     config: LinkConfig,
-    size: (u16, u16),
+    /// The size wanted, and the size the helper in service has.
+    want: Arc<Mutex<(u16, u16)>>,
+    have: (u16, u16),
     shared: Arc<Mutex<Status>>,
     commands: Receiver<Command>,
     session: Option<Session>,
@@ -318,11 +331,6 @@ impl Worker {
                 Ok(Command::Stop) | Err(RecvTimeoutError::Disconnected) => break,
                 Ok(Command::Wake) | Err(RecvTimeoutError::Timeout) => {
                     let _ = self.pump();
-                }
-                Ok(Command::Resize(rows, cols)) => {
-                    self.size = (rows, cols);
-                    let _ = self.pump();
-                    let _ = self.apply_size();
                 }
                 Ok(Command::Snapshot { scrollback, reply }) => {
                     let result = self.snapshot(scrollback);
@@ -374,7 +382,11 @@ impl Worker {
             thread::sleep(Duration::from_millis(50 * u64::from(restarts)));
         }
         self.set(|s| {
-            s.health = if restarts == 0 { Health::Starting } else { Health::Restarting };
+            s.health = if restarts == 0 {
+                Health::Starting
+            } else {
+                Health::Restarting
+            };
             s.restarts = restarts;
         });
         let spawned = match self.spawner.spawn() {
@@ -425,16 +437,21 @@ impl Worker {
             threads: vec![writer, reader],
         });
         self.set(|s| s.helper_pid = pid);
+        self.have = *lock(&self.want);
         let hello = Request::Hello {
             version: PROTOCOL,
-            rows: self.size.0,
-            cols: self.size.1,
+            rows: self.have.0,
+            cols: self.have.1,
             scrollback_lines: self.config.scrollback_lines,
             width_table: self.config.width_table,
             require: self.config.require,
         };
         match self.exchange(&hello)? {
-            Response::Ready { applied, landlock_abi, .. } => {
+            Response::Ready {
+                applied,
+                landlock_abi,
+                ..
+            } => {
                 if applied & self.config.require != self.config.require {
                     return Err(self.lose("sandbox_unavailable"));
                 }
@@ -498,7 +515,7 @@ impl Worker {
             self.ensure()?;
             let end = self.source.end();
             if self.next >= end {
-                return Ok(());
+                return self.apply_size();
             }
             let start = self.source.start();
             if self.next < start {
@@ -507,7 +524,7 @@ impl Worker {
             }
             let bytes = self.source.read(self.next, MAX_FEED);
             if bytes.is_empty() {
-                return Ok(());
+                return self.apply_size();
             }
             let len = bytes.len() as u64;
             let offset = self.next;
@@ -521,10 +538,15 @@ impl Worker {
         }
     }
 
+    /// The helper's size follows the PTY's, after the bytes that came before the change.
     fn apply_size(&mut self) -> Result<(), Fail> {
-        self.ensure()?;
-        let (rows, cols) = self.size;
-        self.exchange(&Request::Resize { rows, cols }).map(|_| ())
+        let (rows, cols) = *lock(&self.want);
+        if (rows, cols) == self.have {
+            return Ok(());
+        }
+        self.exchange(&Request::Resize { rows, cols })?;
+        self.have = (rows, cols);
+        Ok(())
     }
 
     fn snapshot(&mut self, scrollback: u32) -> Result<Snap, LinkError> {
@@ -532,7 +554,9 @@ impl Worker {
         for attempt in 0..2 {
             let result = (|| {
                 self.pump()?;
-                match self.exchange(&Request::Snapshot { scrollback_lines: scrollback })? {
+                match self.exchange(&Request::Snapshot {
+                    scrollback_lines: scrollback,
+                })? {
                     Response::Snapshot(body) => Ok(*body),
                     _ => Err(self.lose("bad_ack")),
                 }
@@ -542,6 +566,7 @@ impl Worker {
                     return Ok(Snap {
                         body,
                         status: lock(&self.shared).clone(),
+                        at: self.next,
                     });
                 }
                 Err(Fail::Helper(why)) => {

@@ -86,7 +86,11 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write, applied: Applied) -
         usize::from(rows),
         usize::from(cols),
         Limits {
-            width: if width_table == 0 { Table::Xterm6 } else { Table::Modern },
+            width: if width_table == 0 {
+                Table::Xterm6
+            } else {
+                Table::Modern
+            },
             scrollback_lines: scrollback_lines as usize,
             ..Limits::default()
         },
@@ -132,7 +136,8 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write, applied: Applied) -
                 }
             }
             Request::Resize { rows, cols } => {
-                if !(1..=MAX_ROWS as u16).contains(&rows) || !(1..=MAX_COLS as u16).contains(&cols) {
+                if !(1..=MAX_ROWS as u16).contains(&rows) || !(1..=MAX_COLS as u16).contains(&cols)
+                {
                     return refuse(output, Refusal::Size);
                 }
                 screen.resize(usize::from(rows), usize::from(cols));
@@ -183,7 +188,9 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write, applied: Applied) -
 pub fn parse_require(args: &[String]) -> Option<u8> {
     match args {
         [] => Some(layer::ALL),
-        [flag, value] if flag == "--require" => value.parse::<u8>().ok().filter(|v| v & !layer::ALL == 0),
+        [flag, value] if flag == "--require" => {
+            value.parse::<u8>().ok().filter(|v| v & !layer::ALL == 0)
+        }
         _ => None,
     }
 }
@@ -202,10 +209,20 @@ pub fn probe(layers: u8, action: &str) -> String {
         "applied" => format!("layers={} abi={}", applied.layers, applied.landlock_abi),
         "open_passwd" => {
             let fd = unsafe { libc::open(cstr("/etc/passwd").as_ptr(), libc::O_RDONLY) };
-            if fd >= 0 { "opened".to_owned() } else { format!("errno={}", errno()) }
+            if fd >= 0 {
+                "opened".to_owned()
+            } else {
+                format!("errno={}", errno())
+            }
         }
         "create_file" => {
-            let fd = unsafe { libc::open(cstr("/tmp/wyss-screen-probe").as_ptr(), libc::O_WRONLY | libc::O_CREAT, 0o600) };
+            let fd = unsafe {
+                libc::open(
+                    cstr("/tmp/wyss-screen-probe").as_ptr(),
+                    libc::O_WRONLY | libc::O_CREAT,
+                    0o600,
+                )
+            };
             if fd >= 0 {
                 unsafe { libc::unlink(cstr("/tmp/wyss-screen-probe").as_ptr()) };
                 "created".to_owned()
@@ -215,7 +232,11 @@ pub fn probe(layers: u8, action: &str) -> String {
         }
         "read_proc_environ" => {
             let fd = unsafe { libc::open(cstr("/proc/self/environ").as_ptr(), libc::O_RDONLY) };
-            if fd >= 0 { "opened".to_owned() } else { format!("errno={}", errno()) }
+            if fd >= 0 {
+                "opened".to_owned()
+            } else {
+                format!("errno={}", errno())
+            }
         }
         "tcp_connect" => {
             let s = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
@@ -225,22 +246,38 @@ pub fn probe(layers: u8, action: &str) -> String {
             let addr = libc::sockaddr_in {
                 sin_family: libc::AF_INET as u16,
                 sin_port: 9u16.to_be(),
-                sin_addr: libc::in_addr { s_addr: u32::from_be_bytes([127, 0, 0, 1]).to_be() },
+                sin_addr: libc::in_addr {
+                    s_addr: u32::from_be_bytes([127, 0, 0, 1]).to_be(),
+                },
                 sin_zero: [0; 8],
             };
-            let r = unsafe { libc::connect(s, &addr as *const _ as *const libc::sockaddr, std::mem::size_of::<libc::sockaddr_in>() as u32) };
+            let r = unsafe {
+                libc::connect(
+                    s,
+                    &addr as *const _ as *const libc::sockaddr,
+                    std::mem::size_of::<libc::sockaddr_in>() as u32,
+                )
+            };
             format!("connect={} errno={}", r, errno())
         }
         "unix_socket" => {
             let s = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
-            if s >= 0 { "created".to_owned() } else { format!("errno={}", errno()) }
+            if s >= 0 {
+                "created".to_owned()
+            } else {
+                format!("errno={}", errno())
+            }
         }
         "fork" => {
             let pid = unsafe { libc::fork() };
             if pid == 0 {
                 unsafe { libc::_exit(0) };
             }
-            if pid > 0 { "forked".to_owned() } else { format!("errno={}", errno()) }
+            if pid > 0 {
+                "forked".to_owned()
+            } else {
+                format!("errno={}", errno())
+            }
         }
         "exec" => {
             let program = cstr("/usr/bin/true");
@@ -258,9 +295,20 @@ pub fn probe(layers: u8, action: &str) -> String {
         }
         "allocate_gib" => {
             let p = unsafe {
-                libc::mmap(std::ptr::null_mut(), 1 << 30, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_PRIVATE | libc::MAP_ANONYMOUS, -1, 0)
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    1 << 30,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                    -1,
+                    0,
+                )
             };
-            if p == libc::MAP_FAILED { format!("errno={}", errno()) } else { "mapped".to_owned() }
+            if p == libc::MAP_FAILED {
+                format!("errno={}", errno())
+            } else {
+                "mapped".to_owned()
+            }
         }
         "write_big_file" => "skipped".to_owned(),
         "descriptors" => {

@@ -15,11 +15,18 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
-    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak},
     time::{Duration, Instant},
 };
 use wyss_console::{
     contracts::identities::TerminalId,
+    screen::{
+        b64,
+        link::{
+            ByteSource, Fidelity, Health, LinkConfig, LinkError, ProcessSpawner, ScreenLink,
+            Spawner, Status as ParserStatus,
+        },
+    },
     terminal::{
         TerminalService,
         contracts::{CreateTerminal, ErrorCode, Launch, TerminalError, TerminalInfo, TerminalSize},
@@ -48,6 +55,93 @@ struct Entry {
     created_at: u64,
     inner: Mutex<Inner>,
     changed: Condvar,
+    /// The parser helper that keeps this terminal's screen (M4); none when there is no helper.
+    screen: Mutex<Option<Arc<ScreenLink>>>,
+}
+
+/// The host's ring as the parser link's source of bytes. It holds the entry weakly: the link must
+/// never keep a closed terminal alive.
+struct RingSource(Weak<Entry>);
+impl ByteSource for RingSource {
+    fn start(&self) -> u64 {
+        self.0.upgrade().map_or(0, |e| lock(&e.inner).ring.start())
+    }
+    fn end(&self) -> u64 {
+        self.0.upgrade().map_or(0, |e| lock(&e.inner).ring.end())
+    }
+    fn read(&self, from: u64, max: usize) -> Vec<u8> {
+        self.0
+            .upgrade()
+            .map(|e| lock(&e.inner).ring.read(from, max).data)
+            .unwrap_or_default()
+    }
+}
+
+/// The helper executable next to this one (the package's `libexec`, or a development build's
+/// target directory): a regular file, executable, not writable by others, and ours or root's. Anything else is not used.
+fn screen_helper_path() -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let (uid, gid) = (
+        nix::unistd::getuid().as_raw(),
+        nix::unistd::getgid().as_raw(),
+    );
+    [
+        dir.join("../libexec/wyss-console/wyss-screen"),
+        dir.join("wyss-screen"),
+        dir.join("../wyss-screen"),
+    ]
+    .into_iter()
+    .find_map(|candidate| {
+        let real = std::fs::canonicalize(&candidate).ok()?;
+        let meta = std::fs::metadata(&real).ok()?;
+        let ok = meta.is_file()
+            && meta.permissions().mode() & 0o111 != 0
+            // Not writable by others; by the group only when that group is the user's own (a
+            // private-group account whose umask is 002).
+            && meta.permissions().mode() & 0o002 == 0
+            && (meta.permissions().mode() & 0o020 == 0 || meta.gid() == gid)
+            && (meta.uid() == uid || meta.uid() == 0);
+        ok.then_some(real)
+    })
+}
+
+fn health_word(h: Health) -> &'static str {
+    match h {
+        Health::Starting => "starting",
+        Health::Healthy => "healthy",
+        Health::Restarting => "restarting",
+        Health::Unavailable(_) => "unavailable",
+    }
+}
+
+/// What a window may be told about a terminal's parser: closed words and numbers.
+fn parser_json(status: Option<&ParserStatus>, reason: Option<&str>) -> Value {
+    let Some(s) = status else {
+        return json!({"health": "unavailable", "reason": reason.unwrap_or("helper_missing"),
+                      "fidelity": "unavailable", "restarts": 0, "sandbox": null});
+    };
+    let (fidelity, missing) = match s.fidelity {
+        Fidelity::Exact => ("exact", 0),
+        Fidelity::Tail { missing } => ("tail", missing),
+        Fidelity::Unavailable => ("unavailable", 0),
+    };
+    let why = match s.health {
+        Health::Unavailable(w) => Some(w),
+        _ => reason.map(|_| "").and(None),
+    };
+    json!({
+        "health": health_word(s.health),
+        "reason": why.or(reason),
+        "fidelity": fidelity,
+        "missing_bytes": missing,
+        "restarts": s.restarts,
+        "last_failure": s.last_failure,
+        "sandbox": s.sandbox.map(|(layers, abi)| json!({"layers": layers, "landlock_abi": abi})),
+        "helper_pid": s.helper_pid,
+        "fed": s.fed,
+    })
 }
 
 pub struct HostCore {
@@ -57,6 +151,8 @@ pub struct HostCore {
     idle_since: Mutex<Option<Instant>>,
     /// A shell standing in for the user's. Never set outside tests.
     shell: Mutex<Option<std::path::PathBuf>>,
+    /// Starts the parser helper of a terminal; `None` when no helper executable was found.
+    screen: Mutex<Option<Arc<dyn Spawner>>>,
 }
 
 fn terminal_error(error: &TerminalError) -> HostError {
@@ -124,6 +220,13 @@ struct ReadFrom {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct ScreenRequest {
+    terminal_id: String,
+    #[serde(default)]
+    scrollback_lines: Option<u32>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Id {
     id: String,
 }
@@ -177,6 +280,13 @@ struct Text {
     text: String,
 }
 
+fn entry_rows(entry: &Entry) -> u16 {
+    lock(&entry.inner).status.size.rows
+}
+fn entry_cols(entry: &Entry) -> u16 {
+    lock(&entry.inner).status.size.cols
+}
+
 fn title_ok(title: &str) -> bool {
     !title.trim().is_empty() && title.chars().count() <= 80 && !title.chars().any(char::is_control)
 }
@@ -189,7 +299,19 @@ impl HostCore {
             table: Mutex::new(HashMap::new()),
             idle_since: Mutex::new(Some(Instant::now())),
             shell: Mutex::new(None),
+            screen: Mutex::new(screen_helper_path().map(|path| {
+                Arc::new(ProcessSpawner {
+                    path,
+                    require: wyss_console::screen::ipc::layer::ALL,
+                }) as Arc<dyn Spawner>
+            })),
         })
+    }
+
+    /// Replaces the way parser helpers are started (tests only).
+    #[cfg(test)]
+    pub fn use_screen_spawner(&self, spawner: Option<Arc<dyn Spawner>>) {
+        *lock(&self.screen) = spawner;
     }
 
     #[cfg(test)]
@@ -234,7 +356,17 @@ impl HostCore {
                 status: info,
             }),
             changed: Condvar::new(),
+            screen: Mutex::new(None),
         });
+        if let Some(spawner) = lock(&self.screen).clone() {
+            let link = ScreenLink::start(
+                spawner,
+                Arc::new(RingSource(Arc::downgrade(&entry))),
+                (entry_rows(&entry), entry_cols(&entry)),
+                LinkConfig::default(),
+            );
+            *lock(&entry.screen) = Some(Arc::new(link));
+        }
         lock(&self.table).insert(id.as_str().to_ascii_lowercase(), entry.clone());
         let terminals = self.terminals.clone();
         let host = Arc::downgrade(self);
@@ -279,6 +411,10 @@ impl HostCore {
                     "title": entry.title,
                     "created_at": entry.created_at,
                     "native": native,
+                    "parser": parser_json(
+                        lock(&entry.screen).as_ref().map(|l| l.status()).as_ref(),
+                        None,
+                    ),
                 }),
             ));
         }
@@ -341,11 +477,17 @@ impl HostCore {
             }
             "term_resize" => {
                 let request: Resize = params(value)?;
-                to_value(
-                    self.terminals
-                        .resize(&terminal_id(&request.terminal_id)?, request.size)
-                        .map_err(|e| terminal_error(&e))?,
-                )
+                let info = self
+                    .terminals
+                    .resize(&terminal_id(&request.terminal_id)?, request.size)
+                    .map_err(|e| terminal_error(&e))?;
+                // The PTY's size is the one size there is; the parser follows what it ended as.
+                if let Ok(entry) = self.entry(&request.terminal_id)
+                    && let Some(link) = lock(&entry.screen).clone()
+                {
+                    link.resize(info.size.rows, info.size.cols);
+                }
+                to_value(info)
             }
             "term_redraw" => {
                 // A program that drew its screen before a client attached gets the chance to
@@ -376,7 +518,12 @@ impl HostCore {
                 let id = terminal_id(&request.terminal_id)?;
                 let closed = self.terminals.close(&id);
                 // Whatever the answer, the host keeps nothing for a terminal the client closed.
-                lock(&self.table).remove(&request.terminal_id.to_ascii_lowercase());
+                let removed = lock(&self.table).remove(&request.terminal_id.to_ascii_lowercase());
+                // Its parser helper ends with it (the link joins its threads: no lock is held).
+                if let Some(entry) = removed {
+                    let link = lock(&entry.screen).take();
+                    drop(link);
+                }
                 to_value(closed.map_err(|e| terminal_error(&e))?)
             }
             "term_status" => {
@@ -392,6 +539,19 @@ impl HostCore {
                 self.read(&request)
             }
             "term_list" => self.list(),
+            "term_screen" => {
+                let request: ScreenRequest = params(value)?;
+                self.screen(&request)
+            }
+            "term_parser" => {
+                let request: Target = params(value)?;
+                let entry = self.entry(&request.terminal_id)?;
+                let link = lock(&entry.screen).clone();
+                Ok(parser_json(
+                    link.as_ref().map(|l| l.status()).as_ref(),
+                    None,
+                ))
+            }
 
             // ---- native sessions ----
             "native_launcher" => to_value(self.native()?.launcher()),
@@ -581,6 +741,57 @@ impl HostCore {
         self.track(info.clone(), format!("{agent} · {folder}"));
     }
 
+    /// The screen a window attaches to: the repaint that redraws it, where in the output it is,
+    /// and what is and is not known about it. Never writes to the terminal.
+    fn screen(&self, request: &ScreenRequest) -> Result<Value, HostError> {
+        let entry = self.entry(&request.terminal_id)?;
+        let Some(link) = lock(&entry.screen).clone() else {
+            return Ok(json!({"available": false, "reason": "helper_missing",
+                             "parser": parser_json(None, Some("helper_missing"))}));
+        };
+        // Bounded: the answer travels in one protocol frame.
+        let lines = request.scrollback_lines.unwrap_or(500).min(1000);
+        match link.snapshot(lines, Duration::from_secs(6)) {
+            Ok(snap) if snap.body.repaint.len() <= 600 * 1024 => {
+                let b = &snap.body;
+                let parser = parser_json(Some(&snap.status), None);
+                Ok(json!({
+                    "available": true,
+                    "at": snap.at,
+                    "size": {"rows": b.rows, "cols": b.cols},
+                    "alt_active": b.alt_active,
+                    "title": b.title,
+                    "repaint": b64::encode(&b.repaint),
+                    "history": {
+                        "included": b.scrollback_included,
+                        "omitted": b.scrollback_omitted,
+                        "evicted": b.history_evicted,
+                    },
+                    "refused": {
+                        "clipboard": b.counters.clipboard,
+                        "hyperlink": b.counters.hyperlink,
+                        "window_op": b.counters.window_op,
+                        "query": b.counters.query,
+                        "oversized": b.counters.oversized,
+                        "string": b.counters.string,
+                        "invalid_utf8": b.counters.invalid_utf8,
+                    },
+                    "parser": parser,
+                }))
+            }
+            Ok(snap) => Ok(json!({"available": false, "reason": "too_large",
+                                  "parser": parser_json(Some(&snap.status), None)})),
+            Err(error) => {
+                let reason = match error {
+                    LinkError::Unavailable(why) => why,
+                    LinkError::Timeout => "timeout",
+                };
+                Ok(json!({"available": false, "reason": reason,
+                          "parser": parser_json(Some(&link.status()), Some(reason))}))
+            }
+        }
+    }
+
     fn read(&self, request: &ReadFrom) -> Result<Value, HostError> {
         let entry = self.entry(&request.terminal_id)?;
         let deadline = Instant::now() + Duration::from_millis(request.wait_ms).min(MAX_WAIT);
@@ -637,6 +848,9 @@ fn pump(terminals: &TerminalService, id: &TerminalId, entry: &Entry) {
                     inner.eof = done;
                 }
                 entry.changed.notify_all();
+                if had && let Some(link) = lock(&entry.screen).clone() {
+                    link.wake();
+                }
                 if done {
                     // Its last bytes are in the ring; the reader holds nothing more.
                     return;

@@ -14,10 +14,9 @@ use wyss_console::screen::{
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--sandbox-probe") {
-        let (Some(layers), Some(action)) = (
-            args.get(1).and_then(|v| v.parse::<u8>().ok()),
-            args.get(2),
-        ) else {
+        let (Some(layers), Some(action)) =
+            (args.get(1).and_then(|v| v.parse::<u8>().ok()), args.get(2))
+        else {
             std::process::exit(2);
         };
         println!("{}", helper::probe(layers, action));
