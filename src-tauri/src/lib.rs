@@ -12,6 +12,7 @@ pub mod events;
 pub mod lifecycle;
 #[cfg(target_os = "linux")]
 pub mod m3;
+pub mod screen;
 #[cfg(target_os = "linux")]
 pub mod sessions;
 #[cfg(target_os = "linux")]
