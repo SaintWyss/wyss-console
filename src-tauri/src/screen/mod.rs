@@ -6,6 +6,7 @@
 //! `sandbox` is what that process does to itself before it reads a byte.
 pub mod helper;
 pub mod ipc;
+pub mod link;
 pub mod repaint;
 pub mod sandbox;
 pub mod terminal;
