@@ -43,3 +43,40 @@ independent security review and Santiago's explicit ADR acceptance exist. If the
 surface cannot preserve necessary functionality safely, return an evidenced product
 trade-off, not fabricated support. See [provider matrix](../product/provider-matrix.md)
 for fetched official sources and [roadmap M3](../product/roadmap.md#m3--managed-provider-parity-and-model-contract).
+
+## Implementation evidence (2026-10-23) — status stays Proposed
+
+The adapter exists, offline and unqualified. It is the evidence package for Santiago's decision; it does
+not accept anything. Measurements and the full E1–E9 table are in the
+[feasibility report](../research/claude-managed-feasibility-2026-10-23.md) and the
+[acceptance record](../acceptance/m3-engineering-2026-10-23.md).
+
+| Mandatory output        | Engineering result (offline, pinned `claude-agent-sdk==0.2.173` / Claude Code `2.1.309`)                                                                                                                                                                                                        | Still needed                                                     |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| No-tool inference       | `claude_inference_v1`: tools, settings sources, plugins, skills, slash commands and `@path` expansion closed by a frozen option set whose digest is pinned; three independent legs attest it (init inventory, pre-turn queries, request bodies seen by the tap).                                | Real-provider run; accepted auth route.                          |
+| Local tool mediation    | `claude_local_tools_v1`: only two authority-owned proposal tools exist; a proposal blocks until the authority decides; only the authority's executor has an effect (bwrap, no network; atomic expected-old-hash writes). Declined, cancelled, failed and indeterminate paths tested; no replay. | Independent review; real-provider run.                           |
+| Authentication/settings | Credential never enters the CLI environment (a synthetic key does; a loopback tap swaps it in). Managed policy present → the installation is refused.                                                                                                                                           | **Santiago: which route is supported** (see choices below).      |
+| Lifecycle/cancel        | Owned process handle, bounded frames (64 KiB), queues and time, interrupt-vs-cut-off mapping, retry cap 3, whole-tree reap (0 left in 7 runs), cancel p50 10.4 ms.                                                                                                                              | —                                                                |
+| Resume/recovery         | Authority-minted session id, resume across processes tested, no prompt/approval replay, ambiguous dispatch is indeterminate.                                                                                                                                                                    | Durable store integration: **ADR0055**.                          |
+| Models/effort           | Offered / configured / requested / reported-in-use kept apart; reroute detected from the provider message model. Selection stays gated (ADR0054).                                                                                                                                               | ADR0054 acceptance.                                              |
+| Resource/feature parity | 4 processes, about 290–320 MiB PSS, 34 FDs, idle CPU about 3 % (all of it the `claude` process), ready in about 2.2 s (7 runs). Codex comparison not measured.                                                                                                                                  | Codex arm of the comparison (needs an authorized Codex runtime). |
+
+### Owner decision packet
+
+**Decision.** Which authentication route may a Claude Managed runtime use, and may the exact build above be
+accepted for the two profiles?
+
+| Choice                                                                      | What it means                                                                                                                                                                    | Risks                                                                                                                                                                                    |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A. Console API key** held by Wyss, injected only by the tap (recommended) | The adapter as built. A key is stored in the existing credentials store (ADR0038) and reaches the provider only through the tap; the CLI sees a synthetic key. Billed per token. | Per-token cost; the key lives with the authority; needs a real-provider run to prove the 401/529 handling.                                                                               |
+| B. Cloud-provider credentials                                               | Same shape with Bedrock/Vertex variables the tap would have to understand.                                                                                                       | Not built; each provider has its own signing, so the tap check on request bodies would need a new design.                                                                                |
+| C. Subscription sign-in (claude.ai login)                                   | Reuse the owner's Native login.                                                                                                                                                  | The official overview says third parties cannot offer claude.ai login without approval; would mean copying or re-homing Native credentials, which this ADR forbids. **Not recommended.** |
+| D. Do not accept                                                            | Claude Managed stays absent; Native remains the way to use Claude Code.                                                                                                          | Loses the Managed parity goal (M3).                                                                                                                                                      |
+
+**Recommendation: A**, accepted only for the exact build recorded in `adapters/claude/pins.rs`, host
+platform and the two profile digests; a later CLI needs a new qualification. **Tests it unlocks:** a real
+Inference turn and a real Local Tools turn with an owner-supplied key (each paid, each with an exact
+rollback: stop the runtime, delete the key from the store), plus the real-provider part of the adversarial
+matrix. **Install/provider effects of accepting:** none by itself; the live gates (`m3::gate`) stay closed
+until a release decision, and admission needs ADR0055 as well (a Claude runtime cannot be persisted today).
+**Rollback:** disabling new Claude admissions; Native sessions, Codex Managed state and history are untouched.

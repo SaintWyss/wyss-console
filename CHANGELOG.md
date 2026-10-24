@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-23 — M3: Claude Managed adapter, built offline (release blocked)
+
+- New **Providers** view: what each profile (Codex and Claude, Inference and Local tools) can do and exactly why
+  it is or is not available, the four model facts (offered, configured, requested, reported in use), provider
+  usage ("not reported" is never shown as zero) and the optional usage history (off by default).
+- A Claude Managed runtime on the official Agent SDK, pinned and verified, supervised in its own namespace,
+  with the model offered no tools (Inference) or two proposal tools whose actions only Wyss runs after you
+  accept them (Local tools). It is a development fixture only: nothing is admitted in the installed Console,
+  and no provider is contacted.
+- Fixes found by running the window end to end: the Providers view could not read its state, and a runtime
+  refused every turn after an approved command.
+
 ## 2026-10-23 — M1: project-centered workspace (engineering complete, behind an off gate)
 
 - New **Projects** view (shown only after the owner turns it on in Settings, confirmed in a native window):

@@ -36,6 +36,14 @@ dependency; this branch is based on `main` and carries no M2 changes.
 | M3-11 Performance and resource qualification    | F8 cap 1; partial project-level measurements                                    | Comparable bounded startup, first event, stream/backpressure, cancel, recovery and idle samples       | F8 benches/acceptance, fixture harness                                                                                    | NOT_RUN for M3 comparison                              |
 | M3-12 Compatibility and release/rollback        | Codex runtime pinned; Claude absent; M2 PR #22 open                             | Accepted ADRs, provider evidence, review, recovery and explicit rollback; no implicit Native fallback | Compatibility matrix, release record, PR                                                                                  | BLOCKED                                                |
 
+### Disposition after the implementation pass (2026-10-23)
+
+The "Initial disposition" column above is the starting point. The result of the pass, with the exact
+status words and the evidence, is in the [acceptance record](../acceptance/m3-engineering-2026-10-23.md):
+M3-04 `IMPLEMENTED_AND_TESTED`; M3-01, 02, 03, 07, 09, 10 `IMPLEMENTED_BUT_UNQUALIFIED`; M3-05, 06, 08, 12
+`OWNER_APPROVAL_REQUIRED`; M3-11 `PROVIDER_EVIDENCE_REQUIRED` (Codex arm). The V8 store cannot hold a
+non-Codex runtime: [ADR0055](../adr/0055-multi-provider-managed-runtime-store.md).
+
 ## M3-01 — Claude SDK, protocol, auth and capability discovery
 
 **Requirements:** FP-SES-02/03, FP-CFG-05, FP-SEC-01/03, FR-MAN-01..09, FR-ADP-01..05.

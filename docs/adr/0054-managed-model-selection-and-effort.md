@@ -70,3 +70,24 @@ accepted protocols or claim account entitlement. Santiago must accept or reject 
 before any new authority capability is advertised or used. Until then, Managed model and
 effort selection remain disabled. The extension and ADR may be revised only through a new
 versioned contract; no caller can force compatibility by sending extra fields.
+
+## Implementation evidence (2026-10-23) — status stays Proposed
+
+`m3::model` implements this contract's engineering semantics with the gate **closed**
+(`m3::gate::ADR0054_ACCEPTED = false`): a request is refused with `gate_closed` before anything is
+validated, so no field reaches the P2 schema and no live selection exists. With the gate forced open in
+tests: strict request shape, canonical model and effort enums, catalogue freshness (15 min), revalidation at
+dispatch, generation fence, no substitution, four facts kept apart, reroute recorded as a new observation on
+the same turn. The capability is versioned on its own (`m3.model_selection`, version 1), separate from
+the authority's protocol number.
+
+What the pinned Claude build allows (measured): the model can change **per turn** (`set_model`); effort is read
+**once, when the runtime starts** (`--effort`). The adapter therefore publishes `model_per_turn` and
+`effort_per_runtime`, and refuses a per-turn effort instead of pretending (`Caps::CLAUDE`). Codex's row claims
+no support today. The window shows both selects disabled with the reason.
+
+**Decision packet.** _Choices:_ (1) accept as written; (2) accept with Claude's effort as a runtime-start
+setting only (what the build can do; **recommended**, it is already how `Caps` is expressed); (3) reject.
+_Risks:_ an authority extension is a new protocol version and a negotiation; the catalogue is an
+observation, not entitlement. _Unlocks:_ the live selection tests and the GUI controls. _Effects:_ none until
+a protocol-version release; Codex P2 untouched.

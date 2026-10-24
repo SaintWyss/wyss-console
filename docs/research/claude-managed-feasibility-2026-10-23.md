@@ -1,10 +1,15 @@
 # Claude Managed feasibility — 2026-10-23
 
-**Scope:** read-only feasibility; no SDK installation, provider operation,
+**Scope of the first pass:** read-only feasibility; no SDK installation, provider operation,
 credential/config inspection, sign-in, provider turn or state mutation. A separate
 read-only local `--version` check was run after the research pass. **Repository baseline:**
-`def69fe35ddfe8b696b65a12d2f2babe296c8247`. **Verdict:** official local SDK is a viable
-candidate, but neither Claude Inference nor Local Tools is qualified for Wyss today.
+`def69fe35ddfe8b696b65a12d2f2babe296c8247`. **Verdict of that pass:** official local SDK is a
+viable candidate, but neither Claude Inference nor Local Tools is qualified for Wyss today.
+
+> **Update 2026-10-23 (implementation pass).** The experiments below were then run for real, offline,
+> against the pinned SDK and CLI; see [Results of E1–E9](#results-of-e1e9-offline-pinned-build). The
+> verdict changed from "feasible candidate" to "implemented and tested offline, unqualified against
+> the real provider". Nothing in this document is provider evidence.
 
 ## Candidate pin and process model
 
@@ -117,3 +122,47 @@ identity only, not account entitlement, authentication, Managed compatibility or
 > history.
 
 This text is a proposal only. Only Santiago can accept ADR0053.
+
+## Results of E1–E9 (offline, pinned build)
+
+**Build under test:** Python `claude-agent-sdk==0.2.173` with its bundled Claude Code `2.1.309`
+(bundled binary sha256 `4d704a8aecbe038affa3000f498ae17c1b4f753add8facb8764120affc99b658`, identical to
+the installed `claude`). The TypeScript SDK `0.3.308` (CLI `2.1.308`) was evaluated on paper only; Python
+was chosen because its closure is 30 hash-pinned wheels (the TypeScript tree had 105 packages) and its CLI
+equals the installed one.
+
+**Method.** Every experiment ran the real SDK and the real CLI inside `bwrap --unshare-all` with a
+disposable HOME, a synthetic credential and a mock Messages API on loopback. **The ground truth is the
+mock's log of the request bodies the CLI actually sent** (tool definitions, system prompt, model, effort),
+never what the SDK says about itself. No network, no real credential, no Native configuration and no
+provider account was involved. The probes are in `src-tauri/claude-bridge/probe/`; the captured frames that
+the tests replay are in `src-tauri/claude-bridge/fixtures/`.
+
+| Experiment                       | Result on the pinned build                                                                                                                                                                                                                                                                                                                        | Consequence in the adapter                                                                                                                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E1 user/project/local hooks      | `disallowed_tools=["*"]` alone does **not** stop user/project/local hooks, MCP launch, `apiKeyHelper` or memory loading; they all ran. `tools=[]` with `setting_sources=[]` does stop them.                                                                                                                                                       | The frozen option set (`profiles.py`) uses both, plus `--bare`, `--safe-mode`, no plugins/skills. Its digest is pinned in Rust (`adapters/claude/pins.rs`).                                       |
+| E2 system/managed policy         | `/etc/claude-code/managed-settings.json` and `managed-mcp.json` still apply after the above, and `--strict-mcp-config` fails when an enterprise MCP list exists.                                                                                                                                                                                  | The installation check refuses to start when a managed policy exists (`launch.rs`). It is never overridden or edited.                                                                             |
+| E3 authentication/refresh        | Only a synthetic key was used. The CLI retries 401/529 without a bound.                                                                                                                                                                                                                                                                           | The CLI environment holds only a synthetic key; the loopback tap swaps in the real one. The authority cuts a failing turn off after 3 retries. **The real auth route is not exercised: ADR0053.** |
+| E4 project trust/config          | With `setting_sources=[]` project settings are not read. A prompt containing `@/path` makes the CLI read that local file with **no tool involved**.                                                                                                                                                                                               | `verbatim_prompts=True` closes `@path` expansion (tested with a hostile prompt).                                                                                                                  |
+| E5 complete attestation          | Three independent legs agree or the runtime is refused: the `init` inventory of the turn, the pre-turn `get_server_info` / `get_mcp_status` / `get_context_usage` answers, and the request bodies seen by the loopback tap. About 50 `system` message subtypes exist; unknown ones fail closed.                                                   | `policy.rs` (`verify_ready`, `verify_turn_started`, `verify_tap`, `classify_notice`).                                                                                                             |
+| E6 turn/resume                   | An authority-minted `session_id` is honoured; resuming in a new process puts the earlier turn's content into the second request; a prompt is never replayed. `DeferredToolPlaceholder` is inert.                                                                                                                                                  | Operation receipts stay authoritative; an ambiguous dispatch is indeterminate and never re-sent.                                                                                                  |
+| E7 prior session bindings        | Native sessions are not visible to a Wyss-owned home.                                                                                                                                                                                                                                                                                             | Provider homes live under Wyss state, keyed by managed session; no Native session is read or migrated.                                                                                            |
+| E8 namespace/policy              | The namespace and the visible policy coexist in the supervised tree; a hidden/mismatched policy invalidates attestation.                                                                                                                                                                                                                          | `bwrap --unshare-pid --die-with-parent`; stop reaps the whole tree (0 left in 7 measured runs).                                                                                                   |
+| E9 policy/auth/plugin precedence | Plugins, skills, slash commands, subagents, MCP and connectors are all inventoried and closed by flags; effort can be set **only** when the CLI starts (`--effort`), the model can change per turn (`set_model`). `ResultMessage.modelUsage` is keyed by the _requested_ model, so only `AssistantMessage.model` is evidence of the model in use. | Model "reported in use" comes from the provider message; a different echoed model is a reroute, never a silent substitution.                                                                      |
+
+**What these results do not show.** They do not show that a real account, entitlement or refresh
+route works, that a future CLI keeps these properties, or that the 50 observed notice subtypes are the
+complete set a real provider can produce. That is the real-provider evidence the owner has to authorize.
+
+## Qualification decision (updated)
+
+**Inference:** `IMPLEMENTED_BUT_UNQUALIFIED`. Offline, with the exact build, the model is offered no
+tools in every request (checked in 3 places), no hook/MCP/plugin/subagent/memory effect ran against
+hostile configuration, and nothing outside the workspace changed. Qualification needs the supported auth
+route (ADR0053) and a real-provider run the owner authorizes.
+
+**Local Tools:** `IMPLEMENTED_BUT_UNQUALIFIED`. The only tools the model is offered are the two
+authority-owned proposal tools; a proposal blocks until the authority has decided, and only the authority's
+own executor (bwrap, no network, expected-old-hash atomic file writes) ever has an effect. A model
+that demands a built-in tool gets nothing and the workspace is untouched (test
+`a_model_demanding_a_builtin_tool_gets_nothing_and_the_workspace_is_untouched`).
