@@ -355,7 +355,7 @@ impl SandboxExecutor {
         }
         hook(WriteStep::AfterFirstHash);
         let mode = fstatat(Some(dirfd), *leaf, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-            .map_or(0o644, |m| u32::from(m.st_mode) & 0o777);
+            .map_or(0o644, |m| m.st_mode & 0o777);
         let tmp = std::ffi::OsString::from(format!(".wyss-write-{:016x}", rand_u64()));
         let discard = |why: &str| {
             let _ = unlinkat(Some(dirfd), tmp.as_os_str(), UnlinkatFlags::NoRemoveDir);
