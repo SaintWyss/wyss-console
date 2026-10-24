@@ -60,12 +60,18 @@ jobs:
           rustup toolchain install 1.90.0 --profile minimal --component clippy --component rustfmt
           rustup default 1.90.0
           rustc --version
+      - name: Qualify real unprivileged namespace support on disposable CI VM
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-user --unshare-net --ro-bind / / -- /usr/bin/true
       - name: Formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - name: Clippy (production and fixture code)
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - name: Full default-feature Rust regression
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
       - name: Focused V9 provider-aware persistence tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib production_v9 -- --test-threads=1
       - name: Credential handoff process regression
