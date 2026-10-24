@@ -203,7 +203,7 @@ fn a_real_terminal_is_launched_attached_read_and_typed_into_through_the_checked_
         ("unknown", Some("host_offline"))
     );
     assert!(
-        !HostSocket::new(Real::socket(&dir.0)).epoch().is_ok(),
+        HostSocket::new(Real::socket(&dir.0)).epoch().is_err(),
         "reading never starts a host"
     );
     let _second = Real::start(&dir.0);
