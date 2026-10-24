@@ -1,0 +1,8 @@
+{"protocol": "shared-unlocked", "processes": 2, "rounds": 20, "rounds_with_a_reuse_failure": 20, "reuse_failures": 20}
+{"protocol": "shared-unlocked", "processes": 4, "rounds": 20, "rounds_with_a_reuse_failure": 20, "reuse_failures": 60}
+{"protocol": "shared-flock", "processes": 2, "rounds": 20, "rounds_with_a_reuse_failure": 0, "reuse_failures": 0}
+{"protocol": "shared-flock", "processes": 4, "rounds": 20, "rounds_with_a_reuse_failure": 0, "reuse_failures": 0}
+{"protocol": "private-copies", "processes": 2, "rounds": 20, "rounds_with_a_reuse_failure": 20, "reuse_failures": 20}
+{"protocol": "private-copies", "processes": 4, "rounds": 20, "rounds_with_a_reuse_failure": 20, "reuse_failures": 59}
+{"protocol": "broker-refresh", "processes": 2, "rounds": 20, "rounds_with_a_reuse_failure": 0, "reuse_failures": 0}
+{"protocol": "broker-refresh", "processes": 4, "rounds": 20, "rounds_with_a_reuse_failure": 0, "reuse_failures": 0}

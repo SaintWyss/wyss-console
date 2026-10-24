@@ -19,6 +19,10 @@ f8-fixture = []
 # this process (not the authority) against a mock provider API, to look at and drive the M3 window
 # with the real SDK offline. No packaged build enables it, and the package check refuses its marker.
 m3-fixture = ["tauri/custom-protocol"]
+# The constrained B1 candidate (launch plan, pre-exec shim, workspace materializer/exporter) and its
+# probe. Development and isolated acceptance only: no packaged build enables it, nothing in the
+# product reaches it, and the package check refuses its marker.
+b1-fixture = []
 
 [[example]]
 name = "f8_local_gui"
@@ -32,6 +36,21 @@ required-features = ["m3-fixture"]
 name = "wyss-f8-fixture"
 path = "src/bin/wyss-f8-fixture.rs"
 required-features = ["f8-fixture"]
+
+[[bin]]
+name = "wyss-b1-shim"
+path = "src/bin/wyss-b1-shim.rs"
+required-features = ["b1-fixture"]
+
+[[bin]]
+name = "wyss-b1-probe"
+path = "src/bin/wyss-b1-probe.rs"
+required-features = ["b1-fixture"]
+
+[[test]]
+name = "b1_process"
+path = "tests/b1_process.rs"
+required-features = ["b1-fixture"]
 
 [[test]]
 name = "f8_fixture_process"

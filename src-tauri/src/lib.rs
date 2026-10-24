@@ -2,6 +2,10 @@ pub mod adapters;
 mod application;
 #[cfg(target_os = "linux")]
 pub mod authority;
+/// The constrained B1 candidate: present only in fixture builds, so no packaged binary carries a B1
+/// launcher (ADR 0058, doc 51: no production launch before an independent review).
+#[cfg(all(target_os = "linux", feature = "b1-fixture"))]
+pub mod b1;
 pub mod contracts;
 #[cfg(target_os = "linux")]
 pub mod control;

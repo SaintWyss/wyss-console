@@ -41,6 +41,14 @@ impl Verified {
     pub fn exec_path(&self) -> PathBuf {
         PathBuf::from(format!("/proc/self/fd/{}", self.file.as_raw_fd()))
     }
+    /// A new read-only description of the very file that was verified (offset 0), for a consumer
+    /// that reads it to the end. Reopened through the held descriptor, never through the path.
+    pub fn reopen(&self) -> std::io::Result<File> {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(nix::libc::O_CLOEXEC)
+            .open(self.exec_path())
+    }
     /// The real path it was found at, for messages and tests; never executed.
     pub fn real_path(&self) -> &Path {
         &self.real
