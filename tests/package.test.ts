@@ -45,7 +45,7 @@ it('bundles no installer, no updater and no signing claim', () => {
   // answer `unsupported_capability` until the owner turns it on in a native confirmation.
   expect(
     (tauriConfig.app.security as { capabilities: string[] }).capabilities,
-  ).toEqual(['main', 'f8', 'projects']);
+  ).toEqual(['main', 'f8', 'projects', 'm3']);
 });
 
 it('opens in a window wide enough for a full-width shell greeting', () => {

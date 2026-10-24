@@ -1,0 +1,273 @@
+{
+  "capability": "m3",
+  "claude_install": {
+    "state": "not_configured"
+  },
+  "fixture": {
+    "approvals": [
+      {
+        "action": {
+          "command": "cargo build --release",
+          "cwd": "/tmp/wyss-m3-golden-ws",
+          "kind": "command",
+          "parsed_actions": []
+        },
+        "decisions": ["accept", "decline", "cancel"],
+        "fingerprint": "87e08dc0d69e1290881ab3d22131b8df2c6bdedaf775479629b10feb1446c2e6",
+        "item": "claude-act-1",
+        "kind": "command_execution",
+        "state": "pending"
+      }
+    ],
+    "conversation": [
+      {
+        "role": "user",
+        "text": "run the build"
+      }
+    ],
+    "detail": null,
+    "label": "FIXTURE HOST — hosted by this window, not the authority",
+    "phase": "ready",
+    "profile": "claude_local_tools_v1",
+    "report": {
+      "actions": [
+        {
+          "item": "claude-act-1",
+          "refusal": null,
+          "state": "held",
+          "tool": "run_command"
+        }
+      ],
+      "build": {
+        "cli_version": "2.1.309",
+        "sdk_version": "0.2.173"
+      },
+      "denied_attempts": 0,
+      "failure": null,
+      "indeterminate_actions": 0,
+      "model": {
+        "configured": null,
+        "effort": {
+          "state": "not_requested"
+        },
+        "offered": {
+          "complete": true,
+          "entitlement": "not_checked",
+          "entries": [
+            {
+              "alias": "opus",
+              "efforts": ["low", "medium", "high", "xhigh", "max"],
+              "is_default": true,
+              "model_id": "claude-opus-5-5"
+            },
+            {
+              "alias": "fable",
+              "efforts": ["low", "medium", "high", "xhigh", "max"],
+              "is_default": false,
+              "model_id": "claude-fable-5-1"
+            },
+            {
+              "alias": "sonnet",
+              "efforts": ["low", "medium", "high", "xhigh", "max"],
+              "is_default": false,
+              "model_id": "claude-sonnet-5-5"
+            },
+            {
+              "alias": "haiku",
+              "efforts": ["low", "medium", "high", "xhigh", "max"],
+              "is_default": false,
+              "model_id": "claude-haiku-5-5"
+            }
+          ],
+          "freshness": "fresh",
+          "observed_at": 1800000000,
+          "provider": "claude",
+          "revision": 1,
+          "source": "claude_server_info"
+        },
+        "reported_in_use": [],
+        "requested": null,
+        "reroute": {
+          "state": "not_requested"
+        }
+      },
+      "offered": [
+        {
+          "alias": "opus",
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "is_default": true,
+          "model_id": "claude-opus-5-5"
+        },
+        {
+          "alias": "fable",
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "is_default": false,
+          "model_id": "claude-fable-5-1"
+        },
+        {
+          "alias": "sonnet",
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "is_default": false,
+          "model_id": "claude-sonnet-5-5"
+        },
+        {
+          "alias": "haiku",
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "is_default": false,
+          "model_id": "claude-haiku-5-5"
+        }
+      ],
+      "pending_approvals": 1,
+      "phase": "ready",
+      "profile": "claude_local_tools_v1",
+      "provider": "claude",
+      "provider_error": null,
+      "refusal": null,
+      "refused_proposals": 0,
+      "tap": {
+        "efforts_seen": [],
+        "models_seen": [],
+        "requests": 0,
+        "tools_seen": [],
+        "violations": 0
+      },
+      "usage": {
+        "dropped_turns": 0,
+        "limits": [],
+        "provider": "claude",
+        "running": {
+          "cache_creation": {
+            "reported_turns": 0,
+            "sum": 0,
+            "unreported_turns": 0
+          },
+          "cache_read": {
+            "reported_turns": 0,
+            "sum": 0,
+            "unreported_turns": 0
+          },
+          "input": {
+            "reported_turns": 0,
+            "sum": 0,
+            "unreported_turns": 0
+          },
+          "output": {
+            "reported_turns": 0,
+            "sum": 0,
+            "unreported_turns": 0
+          },
+          "reasoning": {
+            "reported_turns": 0,
+            "sum": 0,
+            "unreported_turns": 0
+          }
+        },
+        "turns": [
+          {
+            "by_model": {},
+            "completeness": "running",
+            "echoed_models": [],
+            "estimate": null,
+            "provider": "claude",
+            "total": {
+              "cache_creation": null,
+              "cache_read": null,
+              "input": null,
+              "output": null,
+              "reasoning": null
+            },
+            "turn_id": "t0000003-0000-4000-8000-000000000003"
+          }
+        ]
+      }
+    },
+    "turn": {
+      "id": "t0000003-0000-4000-8000-000000000003",
+      "state": "running"
+    }
+  },
+  "history": {
+    "can_enable": false,
+    "enabled": false,
+    "max_records": 10000,
+    "reasons": ["metrics_policy_not_accepted"],
+    "records": null,
+    "retention_days": 30,
+    "state": "off"
+  },
+  "model_selection": {
+    "available": false,
+    "capability": "m3.model_selection",
+    "reasons": ["adr0054_not_accepted"],
+    "version": 1
+  },
+  "profiles": [
+    {
+      "availability": "available",
+      "build": null,
+      "can_start": true,
+      "evidence": {
+        "fixture": "passed",
+        "real_provider": "passed"
+      },
+      "id": "codex_inference",
+      "mode": "inference",
+      "name": "codex_inference_v1",
+      "provider": "codex",
+      "reasons": []
+    },
+    {
+      "availability": "available",
+      "build": null,
+      "can_start": true,
+      "evidence": {
+        "fixture": "passed",
+        "real_provider": "passed"
+      },
+      "id": "codex_local_tools",
+      "mode": "local_tools",
+      "name": "codex_local_tools_v1",
+      "provider": "codex",
+      "reasons": []
+    },
+    {
+      "availability": "blocked",
+      "build": null,
+      "can_start": false,
+      "evidence": {
+        "fixture": "passed",
+        "real_provider": "not_run"
+      },
+      "id": "claude_inference",
+      "mode": "inference",
+      "name": "claude_inference_v1",
+      "provider": "claude",
+      "reasons": [
+        "adr0053_not_accepted",
+        "store_cannot_hold_claude",
+        "real_provider_evidence_missing",
+        "sdk_not_configured"
+      ]
+    },
+    {
+      "availability": "blocked",
+      "build": null,
+      "can_start": false,
+      "evidence": {
+        "fixture": "passed",
+        "real_provider": "not_run"
+      },
+      "id": "claude_local_tools",
+      "mode": "local_tools",
+      "name": "claude_local_tools_v1",
+      "provider": "claude",
+      "reasons": [
+        "adr0053_not_accepted",
+        "store_cannot_hold_claude",
+        "real_provider_evidence_missing",
+        "sdk_not_configured"
+      ]
+    }
+  ],
+  "version": "m3.1"
+}

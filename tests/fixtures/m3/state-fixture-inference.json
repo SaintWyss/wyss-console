@@ -1,0 +1,303 @@
+{
+  "capability": "m3",
+  "claude_install": {
+    "state": "not_configured"
+  },
+  "fixture": {
+    "approvals": [],
+    "conversation": [
+      {
+        "role": "user",
+        "text": "and the tests?"
+      },
+      {
+        "role": "user",
+        "text": "please explain this repository"
+      },
+      {
+        "role": "assistant",
+        "text": "It is a desktop console for managed agents."
+      }
+    ],
+    "detail": null,
+    "label": "FIXTURE HOST — hosted by this window, not the authority",
+    "phase": "ready",
+    "profile": "claude_inference_v1",
+    "report": {
+      "actions": [],
+      "build": {
+        "cli_version": "2.1.309",
+        "sdk_version": "0.2.173"
+      },
+      "denied_attempts": 0,
+      "failure": null,
+      "indeterminate_actions": 0,
+      "model": {
+        "configured": null,
+        "effort": {
+          "state": "not_requested"
+        },
+        "offered": {
+          "complete": true,
+          "entitlement": "not_checked",
+          "entries": [
+            {
+              "alias": "opus",
+              "efforts": ["low", "medium", "high", "xhigh", "max"],
+              "is_default": true,
+              "model_id": "claude-opus-5-5"
+            },
+            {
+              "alias": "fable",
+              "efforts": ["low", "medium", "high", "xhigh", "max"],
+              "is_default": false,
+              "model_id": "claude-fable-5-1"
+            },
+            {
+              "alias": "sonnet",
+              "efforts": ["low", "medium", "high", "xhigh", "max"],
+              "is_default": false,
+              "model_id": "claude-sonnet-5-5"
+            },
+            {
+              "alias": "haiku",
+              "efforts": ["low", "medium", "high", "xhigh", "max"],
+              "is_default": false,
+              "model_id": "claude-haiku-5-5"
+            }
+          ],
+          "freshness": "fresh",
+          "observed_at": 1800000000,
+          "provider": "claude",
+          "revision": 1,
+          "source": "claude_server_info"
+        },
+        "reported_in_use": ["claude-haiku-5-5"],
+        "requested": {
+          "generation": 1,
+          "request": {
+            "effort": null,
+            "model": "sonnet"
+          },
+          "resolved_model": "claude-sonnet-5-5",
+          "turn_id": "t0000002-0000-4000-8000-000000000002"
+        },
+        "reroute": {
+          "reported": ["claude-haiku-5-5"],
+          "requested": "claude-sonnet-5-5",
+          "state": "rerouted"
+        }
+      },
+      "offered": [
+        {
+          "alias": "opus",
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "is_default": true,
+          "model_id": "claude-opus-5-5"
+        },
+        {
+          "alias": "fable",
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "is_default": false,
+          "model_id": "claude-fable-5-1"
+        },
+        {
+          "alias": "sonnet",
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "is_default": false,
+          "model_id": "claude-sonnet-5-5"
+        },
+        {
+          "alias": "haiku",
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "is_default": false,
+          "model_id": "claude-haiku-5-5"
+        }
+      ],
+      "pending_approvals": 0,
+      "phase": "ready",
+      "profile": "claude_inference_v1",
+      "provider": "claude",
+      "provider_error": null,
+      "refusal": null,
+      "refused_proposals": 0,
+      "tap": {
+        "efforts_seen": ["medium"],
+        "models_seen": ["claude-sonnet-5-5"],
+        "requests": 1,
+        "tools_seen": [],
+        "violations": 0
+      },
+      "usage": {
+        "dropped_turns": 0,
+        "limits": [
+          {
+            "observed_at": 1800000000,
+            "resets_at": 1900000000,
+            "status": "allowed_warning",
+            "utilization": 0.72,
+            "window": "five_hour"
+          }
+        ],
+        "provider": "claude",
+        "running": {
+          "cache_creation": {
+            "reported_turns": 1,
+            "sum": 3,
+            "unreported_turns": 1
+          },
+          "cache_read": {
+            "reported_turns": 1,
+            "sum": 5,
+            "unreported_turns": 1
+          },
+          "input": {
+            "reported_turns": 1,
+            "sum": 11,
+            "unreported_turns": 1
+          },
+          "output": {
+            "reported_turns": 1,
+            "sum": 7,
+            "unreported_turns": 1
+          },
+          "reasoning": {
+            "reported_turns": 1,
+            "sum": 0,
+            "unreported_turns": 1
+          }
+        },
+        "turns": [
+          {
+            "by_model": {},
+            "completeness": "unreported",
+            "echoed_models": [],
+            "estimate": null,
+            "provider": "claude",
+            "total": {
+              "cache_creation": null,
+              "cache_read": null,
+              "input": null,
+              "output": null,
+              "reasoning": null
+            },
+            "turn_id": "t0000001-0000-4000-8000-000000000001"
+          },
+          {
+            "by_model": {
+              "claude-opus-5-5": {
+                "cache_creation": 3,
+                "cache_read": 5,
+                "input": 11,
+                "output": 7,
+                "reasoning": null
+              }
+            },
+            "completeness": "complete",
+            "echoed_models": ["claude-haiku-5-5"],
+            "estimate": {
+              "usd": 0.00019999999999999998
+            },
+            "provider": "claude",
+            "total": {
+              "cache_creation": 3,
+              "cache_read": 5,
+              "input": 11,
+              "output": 7,
+              "reasoning": 0
+            },
+            "turn_id": "t0000002-0000-4000-8000-000000000002"
+          }
+        ]
+      }
+    },
+    "turn": {
+      "id": "t0000002-0000-4000-8000-000000000002",
+      "state": "completed"
+    }
+  },
+  "history": {
+    "can_enable": false,
+    "enabled": false,
+    "max_records": 10000,
+    "reasons": ["metrics_policy_not_accepted"],
+    "records": null,
+    "retention_days": 30,
+    "state": "off"
+  },
+  "model_selection": {
+    "available": false,
+    "capability": "m3.model_selection",
+    "reasons": ["adr0054_not_accepted"],
+    "version": 1
+  },
+  "profiles": [
+    {
+      "availability": "available",
+      "build": null,
+      "can_start": true,
+      "evidence": {
+        "fixture": "passed",
+        "real_provider": "passed"
+      },
+      "id": "codex_inference",
+      "mode": "inference",
+      "name": "codex_inference_v1",
+      "provider": "codex",
+      "reasons": []
+    },
+    {
+      "availability": "available",
+      "build": null,
+      "can_start": true,
+      "evidence": {
+        "fixture": "passed",
+        "real_provider": "passed"
+      },
+      "id": "codex_local_tools",
+      "mode": "local_tools",
+      "name": "codex_local_tools_v1",
+      "provider": "codex",
+      "reasons": []
+    },
+    {
+      "availability": "blocked",
+      "build": null,
+      "can_start": false,
+      "evidence": {
+        "fixture": "passed",
+        "real_provider": "not_run"
+      },
+      "id": "claude_inference",
+      "mode": "inference",
+      "name": "claude_inference_v1",
+      "provider": "claude",
+      "reasons": [
+        "adr0053_not_accepted",
+        "store_cannot_hold_claude",
+        "real_provider_evidence_missing",
+        "sdk_not_configured"
+      ]
+    },
+    {
+      "availability": "blocked",
+      "build": null,
+      "can_start": false,
+      "evidence": {
+        "fixture": "passed",
+        "real_provider": "not_run"
+      },
+      "id": "claude_local_tools",
+      "mode": "local_tools",
+      "name": "claude_local_tools_v1",
+      "provider": "claude",
+      "reasons": [
+        "adr0053_not_accepted",
+        "store_cannot_hold_claude",
+        "real_provider_evidence_missing",
+        "sdk_not_configured"
+      ]
+    }
+  ],
+  "version": "m3.1"
+}

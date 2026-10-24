@@ -425,6 +425,7 @@ button:focus-visible {
 .configuration-feature[hidden],
 .settings-feature[hidden],
 .native-feature[hidden],
+.providers-feature[hidden],
 .runtimes-feature[hidden] {
   display: none;
 }
@@ -701,6 +702,7 @@ button:focus-visible {
 .approvals-feature .action,
 .events-feature .action,
 .settings-feature .action,
+.providers-feature .action,
 .runtimes-feature .action {
   flex-shrink: 0;
   min-height: 36px;
@@ -714,6 +716,7 @@ button:focus-visible {
 .approvals-feature .action:hover:not(:disabled),
 .events-feature .action:hover:not(:disabled),
 .settings-feature .action:hover:not(:disabled),
+.providers-feature .action:hover:not(:disabled),
 .runtimes-feature .action:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
 }
@@ -722,6 +725,7 @@ button:focus-visible {
 .approvals-feature .action:disabled,
 .events-feature .action:disabled,
 .settings-feature .action:disabled,
+.providers-feature .action:disabled,
 .runtimes-feature .action:disabled {
   opacity: 0.5;
 }
@@ -730,6 +734,7 @@ button:focus-visible {
 .approvals-feature .action.primary,
 .events-feature .action.primary,
 .settings-feature .action.primary,
+.providers-feature .action.primary,
 .runtimes-feature .action.primary {
   border-color: rgba(95, 212, 245, 0.35);
   background: var(--accent-soft);
@@ -741,6 +746,7 @@ button:focus-visible {
 .approvals-feature .action.primary:hover:not(:disabled),
 .events-feature .action.primary:hover:not(:disabled),
 .settings-feature .action.primary:hover:not(:disabled),
+.providers-feature .action.primary:hover:not(:disabled),
 .runtimes-feature .action.primary:hover:not(:disabled) {
   background: rgba(95, 212, 245, 0.22);
 }
@@ -749,6 +755,7 @@ button:focus-visible {
 .approvals-feature .action.danger,
 .events-feature .action.danger,
 .settings-feature .action.danger,
+.providers-feature .action.danger,
 .runtimes-feature .action.danger {
   border-color: rgba(248, 113, 113, 0.3);
   background: rgba(248, 113, 113, 0.1);
@@ -760,6 +767,7 @@ button:focus-visible {
 .approvals-feature .action.danger:hover:not(:disabled),
 .events-feature .action.danger:hover:not(:disabled),
 .settings-feature .action.danger:hover:not(:disabled),
+.providers-feature .action.danger:hover:not(:disabled),
 .runtimes-feature .action.danger:hover:not(:disabled) {
   background: rgba(248, 113, 113, 0.18);
 }
@@ -1927,6 +1935,7 @@ html[data-glass='transparent'] .shell {
 
 /* Settings: the desktop's own preferences, and what the authority is, read-only */
 .settings-feature,
+.providers-feature,
 .runtimes-feature {
   flex: 1;
   min-height: 0;
@@ -3260,4 +3269,214 @@ li.native-row .native-note {
 .projects-window {
   height: 100vh;
   padding: 12px;
+}
+
+/* Providers (M3): the profiles, the model facts, usage, history and the fixture runtime */
+.m3-body {
+  gap: 14px;
+}
+.m3-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.m3-card {
+  min-width: 0;
+}
+.m3-meta {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.m3-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 10px 8px 26px;
+  font-size: 12px;
+  color: var(--text);
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-radius: var(--radius-sm);
+  background: rgba(251, 191, 36, 0.06);
+}
+.m3-four {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+.m3-four section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-md);
+}
+.m3-four h5 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+.m3-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: flex-end;
+}
+.m3-select label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.m3-select select,
+.m3-compose textarea {
+  min-height: 36px;
+  padding: 6px 10px;
+  color: var(--text);
+  font: inherit;
+  border: 1px solid var(--glass-line-strong);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+}
+.m3-select select:disabled,
+.m3-compose textarea:disabled {
+  opacity: 0.55;
+}
+.m3-select .m3-reasons,
+.m3-select .m3-meta {
+  flex-basis: 100%;
+}
+.m3-table {
+  width: 100%;
+  max-width: 560px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.m3-table caption {
+  padding-bottom: 6px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--muted);
+}
+.m3-table th {
+  width: 140px;
+  text-align: left;
+  font-weight: 500;
+  color: var(--muted);
+}
+.m3-table th,
+.m3-table td {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--glass-line);
+}
+.m3-turns,
+.m3-limits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.m3-estimate summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+}
+.m3-actions,
+.m3-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.m3-fixture {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.m3-banner {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text);
+  border: 1px dashed rgba(251, 191, 36, 0.55);
+  border-radius: var(--radius-md);
+  background: rgba(251, 191, 36, 0.08);
+}
+.m3-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  margin: 0;
+  padding: 10px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.18);
+}
+.m3-transcript li[data-role='user'] .m3-role {
+  color: var(--accent-strong);
+}
+.m3-role {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.m3-text {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.m3-empty {
+  font-size: 12px;
+  color: var(--faint);
+}
+.m3-code {
+  max-height: 260px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-sm);
+  background: var(--terminal-bg);
+}
+.m3-approval[data-state='indeterminate'] {
+  border-color: rgba(248, 113, 113, 0.5);
+}
+.m3-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.m3-compose label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.m3-compose textarea {
+  resize: vertical;
+}
+.m3-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* The option is a flex item of a row elsewhere (basis 240px); in this column it is one line. */
+.m3-history .mode-option {
+  flex: 0 0 auto;
 }
