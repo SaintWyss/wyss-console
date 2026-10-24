@@ -1018,9 +1018,7 @@ fn impostor(account: &Account) -> (thread::JoinHandle<()>, Arc<Mutex<usize>>) {
             let _ = stream.write_all(&(answer.len() as u32).to_be_bytes());
             let _ = stream.write_all(answer.as_bytes());
             let mut count = count.lock().unwrap();
-            if *count != usize::MAX {
-                *count += 1;
-            }
+            *count = count.saturating_add(1);
         }
     });
     (handle, answered)
