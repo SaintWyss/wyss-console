@@ -5,6 +5,8 @@
 //! operation that returns a key, and no key is ever in a window command's answer, a log or a
 //! diagnostic. Nothing here uses a key to start a provider (that needs its own decision).
 pub mod commands;
+#[allow(dead_code)] // ADR0056 candidate; production launcher remains NoCredential.
+mod delivery;
 use crate::agentconfig::vault::{RecordKind, Sealed, Vault, VaultError};
 use crate::native::store;
 use serde::{Deserialize, Serialize};
@@ -238,6 +240,29 @@ impl CredentialStore {
             Err(VaultError::KeyStoreUnavailable) => Err(CredentialError::KeyStoreUnavailable),
             Err(_) => Ok(false),
         }
+    }
+
+    /// Internal delivery to the broker only. The exact metadata shown by the native prompt
+    /// must still match, so replacement, rename or deletion during consent revokes the grant.
+    /// This is deliberately not a window command and is never serialized.
+    pub(crate) fn unseal_for_broker(
+        &self,
+        approved: &Meta,
+    ) -> Result<Zeroizing<String>, CredentialError> {
+        let _g = self.lock();
+        let file = self.read(&approved.id).ok_or(CredentialError::Unknown)?;
+        if file.meta != *approved || file.meta.provider != Provider::Anthropic {
+            return Err(CredentialError::Damaged);
+        }
+        let bytes = self
+            .vault
+            .open(RecordKind::Credential, &approved.id, &file.sealed)
+            .map_err(from_vault)?;
+        if fingerprint(&bytes) != approved.fingerprint {
+            return Err(CredentialError::Damaged);
+        }
+        let text = std::str::from_utf8(&bytes).map_err(|_| CredentialError::SecretInvalid)?;
+        Ok(Zeroizing::new(text.to_owned()))
     }
 }
 
