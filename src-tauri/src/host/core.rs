@@ -116,6 +116,19 @@ fn health_word(h: Health) -> &'static str {
     }
 }
 
+/// The three words a window shows about a terminal's parser on every read.
+fn parser_brief(status: Option<&ParserStatus>) -> Value {
+    let Some(s) = status else {
+        return json!({"health": "unavailable", "fidelity": "unavailable", "restarts": 0});
+    };
+    let fidelity = match s.fidelity {
+        Fidelity::Exact => "exact",
+        Fidelity::Tail { .. } => "tail",
+        Fidelity::Unavailable => "unavailable",
+    };
+    json!({"health": health_word(s.health), "fidelity": fidelity, "restarts": s.restarts})
+}
+
 /// What a window may be told about a terminal's parser: closed words and numbers.
 fn parser_json(status: Option<&ParserStatus>, reason: Option<&str>) -> Value {
     let Some(s) = status else {
@@ -810,14 +823,23 @@ impl HostCore {
         }
         let read = inner.ring.read(request.from, MAX_READ);
         let finished = read.next >= inner.ring.end();
-        Ok(json!({
+        let answer = json!({
             "data": read.data,
             "next": read.next,
             "truncated": read.truncated || inner.truncated,
             "eof": inner.eof && finished,
             "closed": inner.closed && finished,
             "status": inner.status,
-        }))
+        });
+        drop(inner);
+        // The parser's health rides on every read (a status the window already waits for): no
+        // extra call, no extra wake-up per terminal.
+        let mut answer = answer;
+        answer["parser"] = {
+            let link = lock(&entry.screen).clone();
+            parser_brief(link.as_ref().map(|l| l.status()).as_ref())
+        };
+        Ok(answer)
     }
 }
 

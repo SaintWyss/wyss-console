@@ -255,6 +255,8 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-host-terminals',
     'allow-host-info',
     'allow-terminal-redraw',
+    // M4: the screen a terminal kept while the window was away, to draw before reading on.
+    'allow-terminal-attach',
     // The layout of tabs and panes (T2): one read, one bounded write of a JSON object.
     'allow-layout-read',
     'allow-layout-write',

@@ -152,6 +152,7 @@ fn main() {
             "host_terminals",
             "host_info",
             "terminal_redraw",
+            "terminal_attach",
             "layout_read",
             "layout_write",
             "credentials_list",

@@ -595,6 +595,7 @@ mod tests {
             "allow-host-terminals",
             "allow-host-info",
             "allow-terminal-redraw",
+            "allow-terminal-attach",
             // The layout of tabs and panes (T2).
             "allow-layout-read",
             "allow-layout-write",

@@ -60,6 +60,7 @@ export type ControllerFactory = (
   adopted?: TerminalInfo,
   title?: string,
   cwd?: string,
+  attach?: boolean,
 ) => TerminalController;
 interface OwnedSession extends TerminalSession {
   controller?: TerminalController;
@@ -94,6 +95,7 @@ export class TerminalSessionManager {
       adopted,
       title,
       cwd,
+      attach,
     ) =>
       new TerminalController(
         host,
@@ -102,6 +104,7 @@ export class TerminalSessionManager {
         adopted,
         title,
         cwd,
+        attach,
       ),
     /**
      * Terminals belong to a host that outlives this window: they are listed from it when the
@@ -369,13 +372,21 @@ export class TerminalSessionManager {
         session.adopted,
         session.title,
         session.cwd,
+        session.restored,
       );
       session.controller = controller;
       controller.setActive(this.shown(id), this.active === id);
       void controller.start().finally(() => {
         this.created(id);
         const info = session.adopted;
-        if (session.restored && info && session.view.state === 'running')
+        // A screen the host's parser kept was drawn already; only when none was, the program is
+        // asked to draw its own again.
+        if (
+          session.restored &&
+          info &&
+          session.view.state === 'running' &&
+          session.view.attach?.mode !== 'screen'
+        )
           void desktop.redrawTerminal(info.terminal_id);
       });
     } catch {

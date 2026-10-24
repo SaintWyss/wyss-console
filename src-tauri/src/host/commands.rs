@@ -186,6 +186,56 @@ pub async fn terminal_redraw(
     blocking(move || link.call("term_redraw", json!({"terminal_id": request.terminal_id}))).await
 }
 
+/// A window attaches to a terminal that kept running without it: the host's parser helper has the
+/// screen, and the answer is the bytes that redraw it plus where in the output they end, so that
+/// the next read starts there and nothing is drawn twice or missed. A host that has no parser (an
+/// older one kept running across an upgrade, or one without its helper) answers `replay`, and the
+/// window does what it always did: reads what the host kept from the start.
+#[tauri::command]
+pub async fn terminal_attach(
+    link: State<'_, HostLink>,
+    cursors: State<'_, Cursors>,
+    request: TargetRequest,
+) -> Result<Value, WireError> {
+    if !id_ok(&request.terminal_id) {
+        return Err(invalid());
+    }
+    let key = request.terminal_id.to_ascii_lowercase();
+    let link = link.inner().clone();
+    let terminal_id = request.terminal_id.clone();
+    let answer = blocking(move || {
+        match link.call("term_screen", json!({"terminal_id": terminal_id, "scrollback_lines": 500})) {
+            Err(error) if error.code == "unknown_op" => Ok(json!({
+                "available": false,
+                "reason": "host_without_screen",
+                "parser": null,
+            })),
+            other => other,
+        }
+    })
+    .await?;
+    let mut map = cursors
+        .by_terminal
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let cursor = map.entry(key).or_default();
+    cursor.pending = None;
+    if answer["available"] == true {
+        // Reading continues exactly where the screen the window draws now ends.
+        cursor.committed = answer["at"].as_u64().unwrap_or(0);
+        let mut out = answer;
+        out["mode"] = json!("screen");
+        Ok(out)
+    } else {
+        cursor.committed = 0;
+        Ok(json!({
+            "mode": "replay",
+            "reason": answer["reason"],
+            "parser": answer["parser"],
+        }))
+    }
+}
+
 /// How long a read that finds nothing new waits for something before it answers empty. The page
 /// used to ask again every 320 ms at rest, three times a second per terminal, through the webview,
 /// the desktop and the host; now it asks once and is answered when there is output, or after this
@@ -250,6 +300,7 @@ pub async fn terminal_read_output(
         "eof": answer["eof"],
         "truncated": answer["truncated"],
         "status": answer["status"],
+        "parser": answer["parser"],
     }))
 }
 
@@ -318,6 +369,7 @@ const COMMANDS: &[&str] = &[
     "close_terminal",
     "terminal_status",
     "terminal_redraw",
+    "terminal_attach",
     "host_terminals",
     "host_info",
     "layout_read",
@@ -334,6 +386,7 @@ pub fn extension() -> wyss_console::Extension {
             close_terminal,
             terminal_status,
             terminal_redraw,
+            terminal_attach,
             terminal_read_output,
             host_terminals,
             host_info,
