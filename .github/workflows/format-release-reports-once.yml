@@ -1,0 +1,34 @@
+# Temporary, narrowly scoped formatter; remove after the documentation correction.
+name: One-time release report formatting
+on:
+  push:
+    branches: [release/m1-m5-production-candidate]
+permissions:
+  contents: write
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - run: npm ci
+      - name: Format exactly two release reports
+        run: |
+          ./node_modules/.bin/prettier --write \
+            docs/acceptance/m1-m5-blockers-independent-review.md \
+            docs/acceptance/m1-m5-blockers-safe-stop-2026-10-24.md
+          git add -- \
+            docs/acceptance/m1-m5-blockers-independent-review.md \
+            docs/acceptance/m1-m5-blockers-safe-stop-2026-10-24.md
+          if ! git diff --cached --quiet; then
+            git -c user.name='wyss-release-ci' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m 'docs: format M1-M5 safe-stop acceptance reports'
+            git push origin HEAD:release/m1-m5-production-candidate
+          fi
