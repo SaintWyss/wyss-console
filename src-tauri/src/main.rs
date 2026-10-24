@@ -26,6 +26,9 @@ mod projects;
 // constructs it outside its tests, and it is not in the library the authority links.
 #[cfg(target_os = "linux")]
 mod remote;
+// The Claude Managed fixture hosted by this binary: development and isolated acceptance only.
+#[cfg(all(target_os = "linux", feature = "m3-fixture"))]
+mod m3_fixture;
 
 fn main() {
     // The host (F9): the same executable, started apart from any window, owns the terminals.
@@ -57,22 +60,30 @@ fn main() {
     // it the interface is inactive and nothing is sent to any authority but the installed one.
     #[cfg(target_os = "linux")]
     {
-        let f8 =
-            wyss_console::f8_from_arguments(std::env::args_os().skip(1)).unwrap_or_else(|error| {
-                eprintln!("wyss-console: {error}");
-                std::process::exit(2);
-            });
-        wyss_console::run_with_f8(
-            digest,
-            Some(
-                configuration::extension()
-                    .merge(host::commands::extension())
-                    .merge(native::extension())
-                    .merge(projects::commands::extension())
-                    .merge(credentials::commands::extension()),
-            ),
-            f8,
-        );
+        #[cfg(feature = "m3-fixture")]
+        let (fixture, arguments) = m3_fixture::take(std::env::args_os().skip(1));
+        #[cfg(not(feature = "m3-fixture"))]
+        let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+        let f8 = wyss_console::f8_from_arguments(arguments).unwrap_or_else(|error| {
+            eprintln!("wyss-console: {error}");
+            std::process::exit(2);
+        });
+        let extension = configuration::extension()
+            .merge(host::commands::extension())
+            .merge(native::extension())
+            .merge(projects::commands::extension())
+            .merge(credentials::commands::extension());
+        #[cfg(feature = "m3-fixture")]
+        if let Some((service, fixture_extension)) = fixture {
+            wyss_console::run_with_m3(
+                digest,
+                Some(extension.merge(fixture_extension)),
+                f8,
+                service,
+            );
+            return;
+        }
+        wyss_console::run_with_f8(digest, Some(extension), f8);
     }
     #[cfg(not(target_os = "linux"))]
     wyss_console::run(digest);

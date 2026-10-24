@@ -43,6 +43,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from owned import NotOurs, Owned  # noqa: E402
+import m3_steps  # noqa: E402
 
 SCREEN = (1500, 1400)
 DISPLAY = ":79"
@@ -432,6 +433,12 @@ def main():
     ap.add_argument("--test-binary", default="", help="the built unit-test executable (not needed for shape none)")
     ap.add_argument("--steps", help="JSON list of calibration steps; no measurement is made")
     ap.add_argument("--seed", help="a directory whose layout.json, native/ and configuration/trusted-writers are copied into the run's own state (a rehearsal on a copy of real records)")
+    ap.add_argument("--m3-fixture", action="store_true",
+                    help="also host the Claude Managed fixture runtime in the application (needs --m3-sdk-root and --m3-script; the binary must be built with --features m3-fixture)")
+    ap.add_argument("--m3-sdk-root", default="", help="the hash-locked virtual environment the Managed fixture runs (read-only)")
+    ap.add_argument("--m3-script", default="", help="the mock provider's script (a JSON list of responses)")
+    ap.add_argument("--m3-seed", action="append", default=[], metavar="NAME=TEXT",
+                    help="a file to create in the Managed fixture's workspace (\\n is a newline); repeatable")
     ap.add_argument("--m2-fixtures", action="store_true",
                     help="put fixture-only Claude/Codex CLIs and a disposable instruction file in this run's HOME")
     ap.add_argument("--idle-seconds", type=int, default=60)
@@ -446,6 +453,23 @@ def main():
     os.chmod(root, 0o700)
     for sub in ("run", "state", "config", "data", "cache", "home", "logs"):
         os.makedirs(os.path.join(root, sub), mode=0o700, exist_ok=True)
+    app_args = []
+    if args.m3_fixture:
+        if not (args.m3_sdk_root and args.m3_script):
+            raise SystemExit("--m3-fixture needs --m3-sdk-root and --m3-script")
+        for sub in ("m3-state", "m3-ws"):
+            os.makedirs(os.path.join(root, sub), mode=0o700, exist_ok=True)
+        shutil.copy(args.m3_script, os.path.join(root, "m3-script.json"))
+        for seed in args.m3_seed:
+            name, _, text = seed.partition("=")
+            if "/" in name or not name:
+                raise SystemExit("--m3-seed names a file in the workspace root")
+            with open(os.path.join(root, "m3-ws", name), "w") as f:
+                f.write(text.replace("\\n", "\n"))
+        app_args = ["--m3-fixture-sdk-root", os.path.realpath(args.m3_sdk_root),
+                    "--m3-fixture-state", os.path.join(root, "m3-state"),
+                    "--m3-fixture-workspace", os.path.join(root, "m3-ws"),
+                    "--m3-fixture-script", os.path.join(root, "m3-script.json")]
     fixture_bin = None
     if args.m2_fixtures:
         fixture_bin = os.path.join(root, "fixture-bin")
@@ -550,8 +574,8 @@ def main():
                                "terminals": sum(len(p["terminals"]) for p in world["projects"])}
             pointer = Pointer(x_env)
             if args.steps:
-                app = Session(binary, app_env, logs, "app")
-                time.sleep(7.0)
+                app = Session(binary, app_env, logs, "app", app_args)
+                time.sleep(7.0 if not app_args else 10.0)
                 place_window(x_env)
                 time.sleep(1.5)
                 run_steps(json.load(open(args.steps)), x_env, pointer, args.out, args.run,
@@ -599,6 +623,22 @@ def main():
     return 0
 
 
+def real_paths_state():
+    """Metadata only (never contents) of the installed Console's own directories, which a disposable
+    run must not touch: existence, change time, size and entry count."""
+    out = {}
+    home = os.path.expanduser("~")
+    for rel in (".config/wyss-console", ".local/state/wyss-console", ".local/share/wyss-console", ".local/opt/wyss-console"):
+        p = os.path.join(home, rel)
+        try:
+            st = os.lstat(p)
+            entries = len(os.listdir(p)) if os.path.isdir(p) else None
+            out[rel] = {"mtime_ns": st.st_mtime_ns, "size": st.st_size, "entries": entries}
+        except OSError:
+            out[rel] = None
+    return out
+
+
 def leftovers(root):
     """Processes of this user that still carry this run's directory in their environment. Only
     read: it reports, it ends nothing."""
@@ -621,6 +661,7 @@ def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None,
     """Calibration: click, type, wait and take pictures, to read the screen by eye."""
     fixture_baseline = None
     fixture_snapshots = {}
+    fs_baseline = None
     for step in steps:
         kind = step[0]
         if os.environ.get("M1_TRACE_HOST") and socket_path:
@@ -650,6 +691,37 @@ def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None,
         elif kind == "hostwrite":
             host_write(socket_path, world["projects"][0]["terminals"][0]["terminal"],
                        step[1].encode().decode("unicode_escape").encode())
+        elif kind.startswith("m3-"):
+            if fixture_root is None:
+                raise RuntimeError("m3 checks need --m3-fixture")
+            ctx = {"state": os.path.join(fixture_root, "m3-state"), "ws": os.path.join(fixture_root, "m3-ws"),
+                   "root": fixture_root}
+            ok, detail = m3_steps.check((kind[3:].replace("-", "_"), *step[1:]), ctx)
+            print(f"{kind} {step[1:]}: {'ok' if ok else 'FAILED'} {detail}", flush=True)
+            if not ok:
+                raise AssertionError(f"{kind} {step[1:]} failed: {detail}")
+        elif kind == "fs-baseline":
+            fs_baseline = real_paths_state()
+        elif kind == "fs-compare":
+            now = real_paths_state()
+            changed = {k: [fs_baseline.get(k), now[k]] for k in now if fs_baseline is None or fs_baseline.get(k) != now[k]}
+            with open(os.path.join(out, f"fs-{run}-{step[1]}.json"), "w") as f:
+                json.dump({"compared": sorted(now), "changed": changed}, f, indent=2)
+                f.write("\n")
+            if changed:
+                raise AssertionError(f"the installed Console's own directories changed: {sorted(changed)}")
+        elif kind == "fs-tree":
+            tree = []
+            for d, dirs, files in os.walk(fixture_root):
+                for n in sorted(dirs + files):
+                    p = os.path.join(d, n)
+                    if os.path.islink(p) or os.path.isdir(p):
+                        tree.append([os.path.relpath(p, fixture_root), "dir" if os.path.isdir(p) else "link"])
+                    elif os.path.isfile(p):
+                        tree.append([os.path.relpath(p, fixture_root), os.path.getsize(p)])
+            with open(os.path.join(out, f"tree-{run}-{step[1]}.json"), "w") as f:
+                json.dump(tree, f, indent=1)
+                f.write("\n")
         elif kind == "native-state":
             rows = host_call(socket_path, "native_sessions", {"sample": False})
             state = rows.get("ok", [])
@@ -780,9 +852,9 @@ class Session:
     """The application on the nested display, started over the run's host and store, on the bus
     made for the run."""
 
-    def __init__(self, binary, app_env, logs, name):
+    def __init__(self, binary, app_env, logs, name, args=()):
         self.log = open(os.path.join(logs, f"{name}.log"), "wb")
-        self.owned = Owned([binary], binary, env=app_env, log=self.log)
+        self.owned = Owned([binary, *args], binary, env=app_env, log=self.log)
         self.pid = self.owned.pid
 
     def stop(self):

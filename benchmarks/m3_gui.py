@@ -34,15 +34,11 @@ DISPLAY = m1_gui.DISPLAY
 SCREEN = m1_gui.SCREEN
 
 
-def mock_requests(state):
-    path = os.path.join(state, "mock-requests.jsonl")
-    if not os.path.exists(path):
-        return []
-    return [json.loads(l) for l in open(path) if l.strip()]
+import m3_steps  # noqa: E402
 
 
 def generations(state):
-    return [r for r in mock_requests(state) if r["path"].startswith("/v1/messages") and isinstance(r.get("body"), dict) and r["body"].get("stream")]
+    return m3_steps.generations(state)
 
 
 def windows(x_env):
@@ -74,36 +70,8 @@ def run_steps(steps, ctx):
             time.sleep(step[1])
         elif kind == "shot":
             m1_gui.shot(ctx["x_env"], os.path.join(ctx["out"], f"{ctx['scenario']}-{step[1]}.png"))
-        elif kind == "expect_file":
-            path = os.path.join(ctx["ws"], step[1])
-            end = time.monotonic() + (step[3] if len(step) > 3 else 30)
-            want = step[2] if len(step) > 2 else None
-
-            def holds():
-                return os.path.exists(path) and (want is None or open(path).read() == want)
-
-            while time.monotonic() < end and not holds():
-                time.sleep(0.1)
-            ok = holds()
-            detail = os.path.relpath(path, ctx["ws"])
-        elif kind == "expect_no_file":
-            time.sleep(0.8)
-            ok = not os.path.exists(os.path.join(ctx["ws"], step[1]))
-            detail = step[1]
-        elif kind == "expect_generations":
-            end = time.monotonic() + (step[2] if len(step) > 2 else 30)
-            while time.monotonic() < end and len(generations(ctx["state"])) < step[1]:
-                time.sleep(0.2)
-            ok = len(generations(ctx["state"])) == step[1]
-            detail = f"{len(generations(ctx['state']))} generation requests"
-        elif kind == "expect_tools":
-            tools = [t["name"] for t in generations(ctx["state"])[-1]["body"].get("tools", [])] if generations(ctx["state"]) else None
-            ok = tools is not None and sorted(tools) == sorted(step[1])
-            detail = f"tools offered: {tools}"
-        elif kind == "expect_tool_result":
-            body = json.dumps(generations(ctx["state"])[-1]["body"]["messages"]) if generations(ctx["state"]) else ""
-            ok = step[1] in body
-            detail = step[1]
+        elif kind.startswith("expect_"):
+            ok, detail = m3_steps.check(step, ctx)
         else:
             raise SystemExit(f"unknown step {kind}")
         results.append({"n": n, "step": step, "ok": ok, "detail": detail})
@@ -160,7 +128,7 @@ def main():
         time.sleep(1.5)
         result["windows_after"] = windows(x_env)
         pointer = m1_gui.Pointer(x_env)
-        ctx = {"pointer": pointer, "x_env": x_env, "out": args.out, "scenario": args.scenario, "ws": os.path.join(root, "ws"), "state": state}
+        ctx = {"pointer": pointer, "x_env": x_env, "out": args.out, "scenario": args.scenario, "ws": os.path.join(root, "ws"), "state": state, "root": root}
         result["steps"] = run_steps(scenario["steps"], ctx)
         if args.hold:
             time.sleep(args.hold)

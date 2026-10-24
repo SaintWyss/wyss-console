@@ -10,6 +10,9 @@ export const FIXTURE_MARKERS = [
   'codex_runtime.py',
   'wyss-b1-synthetic-',
   'WYSS_M3_FIXTURE_HOST',
+  // The real binary's own fixture arguments (feature m3-fixture): a packaged build has none of them.
+  '--m3-fixture-sdk-root',
+  '--m3-fixture-script',
 ];
 const CHUNK_BYTES = 64 * 1024;
 const MAX_BINARY_BYTES = 512 * 1024 * 1024;
