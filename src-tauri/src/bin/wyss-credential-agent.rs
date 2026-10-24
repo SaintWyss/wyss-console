@@ -175,6 +175,9 @@ fn deliver() -> ControlResult<()> {
         if meta.fingerprint != request.binding.fingerprint {
             return Err(E::GateDenied);
         }
+        if request.native_consent {
+            native_consent(&request, &meta)?;
+        }
         let key = store.unseal_for_broker(&meta).map_err(|_| E::GateDenied)?;
         let frame = Delivery {
             binding: request.binding.clone(),

@@ -741,7 +741,7 @@ impl ClaudeLauncher {
             (Profile::Inference, None) => SANDBOX_CWD.to_owned(),
             _ => return Err(E::InvalidRequest),
         };
-        let key = self.credential.key_for(&identity, profile)?;
+        let key = self.credential.key_for(identity, profile)?;
         if key.is_none() && self.origin == Origin::Anthropic {
             // The real provider without a credential would only fail later, and loudly.
             return Err(E::GateDenied);

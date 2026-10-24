@@ -396,13 +396,12 @@ fn validate_providers(c: &Connection) -> ControlResult<()> {
         {
             return Err(E::StorageIncompatible);
         }
-        if let Some(id) = v["correlation_id"].as_str() {
-            if correlations
+        if let Some(id) = v["correlation_id"].as_str()
+            && correlations
                 .insert(id.to_owned(), expected)
                 .is_some_and(|p| p != expected)
-            {
-                return Err(E::StorageIncompatible);
-            }
+        {
+            return Err(E::StorageIncompatible);
         }
     }
     fn walk(
@@ -418,10 +417,10 @@ fn validate_providers(c: &Connection) -> ControlResult<()> {
                     .and_then(|id| sessions.get(id))
                     .copied()
                     .unwrap_or(expected);
-                if o.contains_key("adapter_id") || o.contains_key("runtime_kind") {
-                    if super::provider::payload(v).map_err(invalid)? != context {
-                        return Err(E::StorageIncompatible);
-                    }
+                if (o.contains_key("adapter_id") || o.contains_key("runtime_kind"))
+                    && super::provider::payload(v).map_err(invalid)? != context
+                {
+                    return Err(E::StorageIncompatible);
                 }
                 for val in o.values() {
                     walk(val, context, sessions)?;

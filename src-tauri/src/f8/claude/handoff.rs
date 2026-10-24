@@ -67,6 +67,8 @@ pub struct Request {
     pub store: PathBuf,
     #[cfg(feature = "f8-fixture")]
     pub synthetic: Option<String>,
+    #[cfg(feature = "f8-fixture")]
+    pub native_consent: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -127,6 +129,8 @@ pub struct ProcessCredentialSource {
     used: Mutex<bool>,
     #[cfg(feature = "f8-fixture")]
     synthetic: Option<String>,
+    #[cfg(feature = "f8-fixture")]
+    native_consent: bool,
 }
 impl ProcessCredentialSource {
     pub fn new(
@@ -145,7 +149,14 @@ impl ProcessCredentialSource {
             used: Mutex::new(false),
             #[cfg(feature = "f8-fixture")]
             synthetic: None,
+            #[cfg(feature = "f8-fixture")]
+            native_consent: false,
         }
+    }
+    #[cfg(feature = "f8-fixture")]
+    pub fn with_synthetic_consent(mut self) -> Self {
+        self.native_consent = true;
+        self
     }
     #[cfg(feature = "f8-fixture")]
     pub fn synthetic(mut self, secret: String) -> Self {
@@ -194,6 +205,8 @@ impl CredentialSource for ProcessCredentialSource {
             store: self.store.clone(),
             #[cfg(feature = "f8-fixture")]
             synthetic: self.synthetic.clone(),
+            #[cfg(feature = "f8-fixture")]
+            native_consent: self.native_consent,
         };
         let frame = zeroize::Zeroizing::new(serde_json::to_vec(&req).map_err(|_| E::GateDenied)?);
         if frame.len() > MAX_FRAME {

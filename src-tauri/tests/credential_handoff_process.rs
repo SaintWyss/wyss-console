@@ -34,6 +34,11 @@ fn a_sealed_synthetic_credential_reaches_only_the_owned_broker_and_verified_tls_
     let source =
         ProcessCredentialSource::new(verified, store.clone(), id(), "ab".repeat(16), fingerprint)
             .synthetic(secret.into());
+    let source = if std::env::var_os("WYSS_TEST_NATIVE_CONSENT").is_some() {
+        source.with_synthetic_consent()
+    } else {
+        source
+    };
     let identity = Identity {
         managed_session: id(),
         runtime_instance: id(),
