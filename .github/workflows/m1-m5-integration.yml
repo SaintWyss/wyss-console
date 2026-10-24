@@ -1,0 +1,64 @@
+# Engineering gate only. No credentials, provider calls, service deployment or migrations.
+name: M1-M5 integration checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [release/m1-m5-production-candidate]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m1-m5-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-and-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: npm ci
+      - run: npm run check
+      - run: npm run scan:repo
+
+  rust-core-and-v9:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tauri Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf bubblewrap
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy --component rustfmt
+          rustup default stable
+          rustc --version
+      - name: Formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - name: Clippy (production and fixture code)
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: Full default-feature Rust regression
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Focused V9 provider-aware persistence tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib production_v9 -- --test-threads=1
+      - name: Credential handoff process regression
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --test credential_handoff_process -- --test-threads=1
