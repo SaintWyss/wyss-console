@@ -395,7 +395,17 @@ pub fn layout_write(layout: Value) -> Result<(), WireError> {
     let path = layout_path().ok_or_else(invalid)?;
     let dir = path.parent().ok_or_else(invalid)?;
     crate::native::store::private_dir(dir).map_err(|_| invalid())?;
-    crate::native::store::write_atomic(&path, &bytes).map_err(|_| invalid())
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    // A layout a newer Console wrote is left as it is; an unreadable one is kept aside.
+    super::layout::write(&path, &bytes, now).map_err(|refused| match refused {
+        super::layout::Refused::Newer => WireError {
+            code: "layout_newer".to_owned(),
+            bytes_written: 0,
+        },
+        super::layout::Refused::Io => invalid(),
+    })
 }
 
 const COMMANDS: &[&str] = &[

@@ -248,3 +248,132 @@ fn a_repaint_of_every_corpus_screen_redraws_it_exactly() {
         }
     }
 }
+
+// ---- mutation fuzzing on real streams ---------------------------------------------------------
+
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n.max(1) as u64) as usize
+    }
+}
+
+/// A corpus stream with a few bytes flipped, dropped, inserted, repeated or cut, as a corrupted
+/// or hostile program might write it.
+fn mutate(rng: &mut Rng, original: &[u8]) -> Vec<u8> {
+    let mut bytes = original.to_vec();
+    for _ in 0..1 + rng.below(12) {
+        if bytes.is_empty() {
+            break;
+        }
+        let at = rng.below(bytes.len());
+        match rng.below(6) {
+            0 => bytes[at] ^= 1 << rng.below(8),
+            1 => {
+                bytes.remove(at);
+            }
+            2 => bytes.insert(at, rng.next() as u8),
+            3 => {
+                let end = (at + 1 + rng.below(64)).min(bytes.len());
+                let chunk = bytes[at..end].to_vec();
+                bytes.splice(at..at, chunk);
+            }
+            4 => bytes.truncate(at.max(1)),
+            _ => {
+                let esc = [0x1b, b'[', b'?', b'1', b'0', b'4', b'9', b'h'];
+                bytes.splice(at..at, esc);
+            }
+        }
+    }
+    bytes
+}
+
+fn check_bounds(t: &Terminal, name: &str, seed: u64) {
+    let (rows, cols) = (t.rows(), t.cols());
+    for alt in [false, true] {
+        let b = t.buffer(alt);
+        assert_eq!(b.rows.len(), rows, "{name} seed {seed}");
+        assert!(
+            b.rows.iter().all(|r| r.cells.len() == cols),
+            "{name} seed {seed}"
+        );
+        assert!(
+            b.cursor.row < rows && b.cursor.col < cols,
+            "{name} seed {seed}"
+        );
+        assert!(b.top <= b.bottom && b.bottom < rows, "{name} seed {seed}");
+    }
+    assert!(t.scrollback_len() <= Limits::default().scrollback_lines);
+    assert!(t.scrollback_cells() <= Limits::default().scrollback_cells);
+    assert!(!t.title().chars().any(char::is_control));
+}
+
+fn mutation_run(iterations: u64) -> u64 {
+    let streams: Vec<(String, Vec<u8>, usize, usize)> = names()
+        .into_iter()
+        .map(|n| {
+            let meta: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(dir().join(format!("{n}.ref.json"))).unwrap(),
+            )
+            .unwrap();
+            let bytes = std::fs::read(dir().join(format!("{n}.bin"))).unwrap();
+            (
+                n,
+                bytes,
+                meta["rows"].as_u64().unwrap() as usize,
+                meta["cols"].as_u64().unwrap() as usize,
+            )
+        })
+        .collect();
+    let mut total = 0u64;
+    for seed in 1..=iterations {
+        let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        let (name, original, rows, cols) = &streams[rng.below(streams.len())];
+        let bytes = mutate(&mut rng, original);
+        let mut t = Terminal::new(*rows, *cols, limits());
+        let mut at = 0;
+        while at < bytes.len() {
+            let n = 1 + rng.below(700);
+            t.feed(&bytes[at..(at + n).min(bytes.len())]);
+            at += n;
+        }
+        check_bounds(&t, name, seed);
+        // The repaint of whatever came out is itself valid and redraws the same screen.
+        let r = t.repaint(500);
+        assert!(r.bytes.len() <= wyss_console::screen::repaint::MAX_REPAINT);
+        let mut again = Terminal::new(*rows, *cols, limits());
+        again.feed(&r.bytes);
+        check_bounds(&again, name, seed);
+        assert_eq!(again.text(), t.text(), "{name} seed {seed}");
+        assert_eq!(again.modes(), t.modes(), "{name} seed {seed}");
+        total += bytes.len() as u64;
+    }
+    total
+}
+
+#[test]
+fn mutated_real_streams_keep_every_bound_and_still_round_trip() {
+    mutation_run(600);
+}
+
+/// `cargo test --release --test screen_corpus -- --ignored long_mutation_fuzz --nocapture`
+#[test]
+#[ignore = "long: run in release for the acceptance record"]
+fn long_mutation_fuzz() {
+    let n: u64 = std::env::var("FUZZ_ITERATIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100_000);
+    let started = std::time::Instant::now();
+    let bytes = mutation_run(n);
+    eprintln!(
+        "fuzz: {n} mutated streams, {bytes} bytes, {:?}",
+        started.elapsed()
+    );
+}
