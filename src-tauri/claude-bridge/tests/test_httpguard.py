@@ -38,6 +38,14 @@ def raw_exchange(connect, payload, read_for=1.0):
     return out
 
 
+class ClosedCode(unittest.TestCase):
+    def test_only_a_whole_lowercase_word_is_a_closed_code(self):
+        self.assertEqual(closed_code("tool_not_allowed"), "tool_not_allowed")
+        for bad in ("tool_not_allowed\n", "tool_not_allowed\r\n", "a\x00", "TOOL", "tool allowed", "ñ", "a" * 41, "", None, 7, b"tool"):
+            self.assertEqual(closed_code(bad), "violation", repr(bad))
+        self.assertEqual(closed_code("a" * 40), "a" * 40)
+
+
 class Chain(unittest.TestCase):
     def setUp(self):
         self.log = tempfile.mktemp()
@@ -145,6 +153,60 @@ class Chain(unittest.TestCase):
         # And a clean request through the same door still works.
         wire = raw_exchange(self.to_tap(tap), b"POST /v1/messages HTTP/1.1\r\nhost: x\r\n" + key + b"content-length: " + n + b"\r\n\r\n" + body)
         self.assertTrue(wire.startswith(b"HTTP/1.1 200"), wire[:80])
+
+    # ---- review F2: a header the parser cannot read must not hide the ones after it -------------
+    def test_a_malformed_header_line_cannot_hide_the_headers_after_it(self):
+        tap, broker = self.chain()
+        body = b'{"model":"m","tools":[]}'
+        n = str(len(body)).encode()
+        key = b"x-api-key: " + KEY.encode() + b"\r\n"
+        tok = b"x-wyss-broker: " + TOKEN.encode() + b"\r\n"
+        for connect, auth in ((self.to_tap(tap), key), (self.to_broker(broker), tok)):
+            bad = [
+                b"X-\xff: bad\r\ntransfer-encoding: chunked\r\ncontent-length: " + n + b"\r\n",
+                b"bad header line\r\ncontent-length: " + n + b"\r\n",
+                b"x bad: v\r\ncontent-length: " + n + b"\r\n",
+                b"content-length: " + n + b"\r\nx-ctl: a\x01b\r\n",
+                b"content-length: " + n + b"\r\nx-del: a\x7fb\r\n",
+                b"content-length: " + n + b"\r\n x-leading-space: v\r\n",
+                b"content-length: " + n + b"\r\n:empty-name\r\n",
+            ]
+            for extra in bad:
+                wire = raw_exchange(connect, b"POST /v1/messages HTTP/1.1\r\nhost: x\r\n" + auth + extra + b"\r\n" + body)
+                self.assertRegex(wire.split(b"\r\n", 1)[0], rb"^HTTP/1\.[01] 4\d\d ", (extra, wire))
+                self.assertNotIn(b"bad", wire.split(b"\r\n\r\n", 1)[-1].replace(b"bad_request", b""))
+        self.assertEqual(self.provider_saw(), 0)
+
+    def test_a_head_response_carries_no_body(self):
+        tap, broker = self.chain()
+        for connect, auth in ((self.to_tap(tap), b"x-api-key: " + KEY.encode() + b"\r\n"),
+                              (self.to_broker(broker), b"x-wyss-broker: " + TOKEN.encode() + b"\r\n")):
+            wire = raw_exchange(connect, b"HEAD /v1/messages HTTP/1.1\r\nhost: x\r\n" + auth + b"\r\n")
+            head, _, rest = wire.partition(b"\r\n\r\n")
+            self.assertTrue(head.startswith(b"HTTP/1."), wire[:60])
+            self.assertEqual(rest, b"", wire)
+
+    # ---- review F3: a deadline for the whole request, not only for idleness ---------------------
+    def test_a_client_that_drips_bytes_is_dropped_at_the_total_request_deadline(self):
+        tap, broker = self.chain(limits=Limits(read_timeout=0.5, request_deadline=1.2))
+        for connect, auth in ((self.to_tap(tap), b"x-api-key: " + KEY.encode() + b"\r\n"),
+                              (self.to_broker(broker), b"x-wyss-broker: " + TOKEN.encode() + b"\r\n")):
+            s = connect()
+            s.settimeout(0.2)
+            started = time.monotonic()
+            payload = b"POST /v1/messages HTTP/1.1\r\nhost: x\r\n" + auth + b"content-length: 100000\r\n\r\n"
+            closed = False
+            try:
+                s.sendall(payload)
+                # a byte every 0.3 s: never idle for the 0.5 s timeout
+                while time.monotonic() - started < 6:
+                    s.sendall(b"a")
+                    time.sleep(0.3)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                closed = True
+            self.assertTrue(closed, "the server accepted a request that never finished")
+            self.assertLess(time.monotonic() - started, 4.0)
+            s.close()
 
     # ---- S3: what is spent is bounded -----------------------------------------------------------
     def test_connections_beyond_the_limit_are_closed_unread_and_the_slot_is_given_back(self):

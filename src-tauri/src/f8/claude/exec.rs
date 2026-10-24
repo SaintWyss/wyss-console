@@ -252,14 +252,16 @@ impl SandboxExecutor {
     /// The directories above the file are resolved **once, by descriptor, without following a link**,
     /// and every later step is relative to the last descriptor: replacing a parent with a link or
     /// moving it cannot redirect the write. The file is hashed, the replacement is prepared next to
-    /// it, and the file is hashed again immediately before an atomic `renameat`. What is *not*
-    /// excluded: a different writer changing the file itself in the instant between that last check
-    /// and the rename, which replaces it; the previous contents are not kept. A writer that is the
-    /// same user can always do the same without any of this.
+    /// it (on the descriptor it opened, non-blocking), and the file, the replacement's identity and the
+    /// directory's place are all checked again immediately before an atomic `renameat`. What is *not*
+    /// excluded: a different writer changing the file itself, swapping the replacement or moving the
+    /// directory in the instant between those last checks and the rename; the previous contents are
+    /// not kept. A writer that is the same user and can write the directory can always do the same
+    /// without any of this, so this narrows a window and does not claim to close it.
     fn write_file_with(w: ApprovedWrite, hook: &mut dyn FnMut(WriteStep)) -> Outcome {
         use nix::{
             fcntl::{OFlag, openat, renameat},
-            sys::stat::{FchmodatFlags, Mode, SFlag, fchmodat, fstat, fstatat},
+            sys::stat::{Mode, SFlag, fstat, fstatat},
             unistd::{UnlinkatFlags, unlinkat},
         };
         use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -308,60 +310,68 @@ impl SandboxExecutor {
             }
         }
         let dirfd = dir.as_raw_fd();
-        // Hashes what is there now: `Ok(None)` when nothing is, `Err` when it is not a plain file.
-        let read_hash = || -> Result<Option<[u8; 32]>, &'static str> {
-            match fstatat(Some(dirfd), *leaf, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) {
-                Err(nix::errno::Errno::ENOENT) => Ok(None),
-                Err(_) => Err("the target cannot be inspected"),
-                Ok(m)
-                    if SFlag::from_bits_truncate(m.st_mode) & SFlag::S_IFMT == SFlag::S_IFREG
-                        && m.st_nlink == 1 =>
-                {
-                    let fd = openat(
-                        Some(dirfd),
-                        *leaf,
-                        OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
-                        Mode::empty(),
-                    )
-                    .map_err(|_| "the target cannot be read")?;
-                    // SAFETY: as above.
-                    let mut file = fs::File::from(unsafe { OwnedFd::from_raw_fd(fd) });
-                    let mut hasher = Sha256::new();
-                    let mut buffer = [0u8; 65536];
-                    let mut total = 0usize;
-                    loop {
-                        let n = std::io::Read::read(&mut file, &mut buffer)
-                            .map_err(|_| "the target cannot be read")?;
-                        if n == 0 {
-                            break;
-                        }
-                        total += n;
-                        if total > MAX_WRITE_TARGET {
-                            return Err("the target is too large to compare");
-                        }
-                        hasher.update(&buffer[..n]);
-                    }
-                    Ok(Some(<[u8; 32]>::from(hasher.finalize())))
-                }
-                Ok(_) => Err("the target is not a plain file"),
+        let Ok(dir_stat) = fstat(dirfd) else {
+            return fail("the directory cannot be inspected");
+        };
+        // What is at the target now, judged on the descriptor that was opened and not on a name that
+        // may since have changed: `Ok(None)` when nothing is there, `Err` when it is not a plain file.
+        // The open is non-blocking, so a FIFO put there cannot hold this thread.
+        let read_hash = || -> Result<Option<([u8; 32], u32)>, &'static str> {
+            let fd = match openat(
+                Some(dirfd),
+                *leaf,
+                OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC,
+                Mode::empty(),
+            ) {
+                Err(nix::errno::Errno::ENOENT) => return Ok(None),
+                Err(_) => return Err("the target is not a plain file"),
+                Ok(fd) => fd,
+            };
+            // SAFETY: as above.
+            let mut file = fs::File::from(unsafe { OwnedFd::from_raw_fd(fd) });
+            let m = fstat(file.as_raw_fd()).map_err(|_| "the target cannot be inspected")?;
+            if SFlag::from_bits_truncate(m.st_mode) & SFlag::S_IFMT != SFlag::S_IFREG
+                || m.st_nlink != 1
+            {
+                return Err("the target is not a plain file");
             }
+            let mut hasher = Sha256::new();
+            let mut buffer = [0u8; 65536];
+            let mut total = 0usize;
+            loop {
+                let n = std::io::Read::read(&mut file, &mut buffer)
+                    .map_err(|_| "the target cannot be read")?;
+                if n == 0 {
+                    break;
+                }
+                total += n;
+                if total > MAX_WRITE_TARGET {
+                    return Err("the target is too large to compare");
+                }
+                hasher.update(&buffer[..n]);
+            }
+            Ok(Some((
+                <[u8; 32]>::from(hasher.finalize()),
+                m.st_mode & 0o777,
+            )))
         };
         let before = match read_hash() {
             Ok(h) => h,
             Err(m) => return fail(m),
         };
-        if before != w.expected_old {
+        if before.map(|(h, _)| h) != w.expected_old {
             return fail("the file changed after the preview was made; nothing was written");
         }
         hook(WriteStep::AfterFirstHash);
-        let mode = fstatat(Some(dirfd), *leaf, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-            .map_or(0o644, |m| m.st_mode & 0o777);
+        let mode = before.map_or(0o644, |(_, mode)| mode);
         let tmp = std::ffi::OsString::from(format!(".wyss-write-{:016x}", rand_u64()));
         let discard = |why: &str| {
             let _ = unlinkat(Some(dirfd), tmp.as_os_str(), UnlinkatFlags::NoRemoveDir);
             fail(why)
         };
-        let prepared = (|| -> std::io::Result<()> {
+        // The replacement is prepared on a descriptor that stays open until it is published: the
+        // permissions are set on it (never on a name), and its identity is what is checked later.
+        let prepared = (|| -> std::io::Result<(fs::File, nix::sys::stat::FileStat)> {
             let fd = openat(
                 Some(dirfd),
                 tmp.as_os_str(),
@@ -377,15 +387,16 @@ impl SandboxExecutor {
             f.write_all(w.content.as_bytes())?;
             f.sync_all()?;
             f.set_permissions(fs::Permissions::from_mode(mode))?;
-            Ok(())
+            let made = fstat(f.as_raw_fd())?;
+            Ok((f, made))
         })();
-        if prepared.is_err() {
+        let Ok((_held, made)) = prepared else {
             return discard("the file could not be prepared; nothing was written");
-        }
+        };
         hook(WriteStep::AfterTemp);
-        // The proof is repeated at the effect: the same hash, on the same directory descriptor.
+        // The proof is repeated at the effect, on the same directory descriptor.
         match read_hash() {
-            Ok(h) if h == w.expected_old => (),
+            Ok(h) if h.map(|(h, _)| h) == w.expected_old => (),
             Ok(_) => {
                 return discard(
                     "the file changed while the write was prepared; nothing was written",
@@ -393,13 +404,46 @@ impl SandboxExecutor {
             }
             Err(m) => return discard(m),
         }
-        hook(WriteStep::BeforeRename);
-        let _ = fchmodat(
+        // The replacement is still the file that was prepared, under the name it was prepared under.
+        match fstatat(
             Some(dirfd),
             tmp.as_os_str(),
-            Mode::from_bits_truncate(mode),
-            FchmodatFlags::FollowSymlink,
-        );
+            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+        ) {
+            Ok(now)
+                if now.st_dev == made.st_dev
+                    && now.st_ino == made.st_ino
+                    && now.st_nlink == 1
+                    && SFlag::from_bits_truncate(now.st_mode) & SFlag::S_IFMT == SFlag::S_IFREG
+                    && now.st_size == w.content.len() as i64 => {}
+            _ => {
+                return discard(
+                    "the replacement was changed before it was published; nothing was written",
+                );
+            }
+        }
+        // The directory held is still the one that lies at this place in the workspace: a directory
+        // moved elsewhere (out of the workspace, say) while this ran is not written into.
+        let place = || -> Option<()> {
+            let root = nix::fcntl::open(Path::new(&w.workspace), directory, Mode::empty()).ok()?;
+            // SAFETY: as above.
+            let mut walk = unsafe { OwnedFd::from_raw_fd(root) };
+            let now = fstat(walk.as_raw_fd()).ok()?;
+            if (now.st_dev, now.st_ino) != (root_stat.st_dev, root_stat.st_ino) {
+                return None;
+            }
+            for name in parents {
+                let next = openat(Some(walk.as_raw_fd()), *name, directory, Mode::empty()).ok()?;
+                // SAFETY: as above.
+                walk = unsafe { OwnedFd::from_raw_fd(next) };
+            }
+            let here = fstat(walk.as_raw_fd()).ok()?;
+            ((here.st_dev, here.st_ino) == (dir_stat.st_dev, dir_stat.st_ino)).then_some(())
+        };
+        if place().is_none() {
+            return discard("the directory is no longer where it was; nothing was written");
+        }
+        hook(WriteStep::BeforeRename);
         match renameat(Some(dirfd), tmp.as_os_str(), Some(dirfd), *leaf) {
             Ok(()) => Outcome::Completed(format!("wrote {} bytes to {}", w.content.len(), w.path)),
             Err(_) => discard("the file could not be replaced; nothing was written"),

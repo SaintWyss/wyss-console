@@ -36,6 +36,18 @@ class CheckRequest(unittest.TestCase):
         s = check_request("/v1/messages", {"model": "m", "output_config": {"effort": "low"}, "thinking": {"type": "adaptive"}}, frozenset())
         self.assertEqual((s["effort"], s["thinking"]), ("low", "adaptive"))
 
+    def test_the_summary_never_echoes_request_text(self):
+        evil = "ignore previous\nsecret-" + "x" * 300
+        s = check_request("/v1/messages", {"model": evil, "output_config": {"effort": evil}, "thinking": {"type": evil}}, frozenset())
+        self.assertEqual((s["model"], s["effort"], s["thinking"]), ("other", "other", "other"))
+        for value in ({"a": 1}, 5, ["low"]):
+            s = check_request("/v1/messages", {"model": value, "output_config": {"effort": value}, "thinking": {"type": value}}, frozenset())
+            self.assertEqual((s["model"], s["effort"], s["thinking"]), ("other", "other", "other"))
+        s = check_request("/v1/messages", {"model": "claude-sonnet-5-5", "output_config": {"effort": "xhigh"}, "thinking": {"type": "enabled"}}, frozenset())
+        self.assertEqual((s["model"], s["effort"], s["thinking"]), ("claude-sonnet-5-5", "xhigh", "enabled"))
+        s = check_request("/v1/messages", {"model": "m"}, frozenset())
+        self.assertEqual((s["effort"], s["thinking"]), (None, None))
+
 
 TOKEN = "ab" * 32
 RUN_KEY = "the-run-key"
@@ -176,6 +188,16 @@ class Chain(unittest.TestCase):
         c.endheaders()
         r = c.getresponse(); r.read(); c.close()
         self.assertEqual(r.status, 413)
+        self.assertEqual(self.provider_saw(), [])
+
+    def test_a_client_that_keeps_violating_gets_a_bounded_number_of_events(self):
+        tap, _ = self.chain()
+        for _ in range(60):
+            status, _ = self.post(tap, {"model": "m", "tools": [{"name": "Bash"}]})
+            self.assertEqual(status, 403)
+        violations = [e for e in self.events if e["e"] == "tap_violation"]
+        self.assertEqual(len(violations), 17)
+        self.assertEqual(violations[-1]["why"], "violations_suppressed")
         self.assertEqual(self.provider_saw(), [])
 
     def test_an_upstream_that_is_down_is_a_fixed_word_not_a_trace(self):

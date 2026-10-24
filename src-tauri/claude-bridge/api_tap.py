@@ -19,6 +19,7 @@ Standard library only; one thread per connection; bounded body, bounded request 
 import hmac
 import http.client
 import json
+import re
 import os
 import socket
 import socketserver
@@ -70,13 +71,38 @@ def check_request(path, body, allowed_tools, model=None):
         raise Violation("model_mismatch")
     out = body.get("output_config") or {}
     thinking = body.get("thinking") or {}
+    effort = out.get("effort") if isinstance(out, dict) else None
+    mode = thinking.get("type") if isinstance(thinking, dict) else None
     return {
         "path": base,
         "tools": sorted(names),
-        "model": body.get("model") if isinstance(body.get("model"), str) else None,
-        "effort": out.get("effort") if isinstance(out, dict) else None,
-        "thinking": thinking.get("type") if isinstance(thinking, dict) else None,
+        "model": _model_word(body.get("model")),
+        "effort": _word(effort, EFFORTS),
+        "thinking": _word(mode, THINKING),
     }
+
+
+# What the summary of a request may carry. The request is the model's bytes; the summary is an event
+# that reaches the authority's record, so a value outside these sets is reported as "other", never echoed.
+EFFORTS = frozenset(("low", "medium", "high", "xhigh", "max"))
+THINKING = frozenset(("enabled", "disabled", "adaptive"))
+_OTHER = "other"
+_MODEL = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
+
+
+def _word(value, allowed):
+    if value is None:
+        return None
+    return value if isinstance(value, str) and value in allowed else _OTHER
+
+
+def _model_word(value):
+    if value is None:
+        return None
+    return value if isinstance(value, str) and _MODEL.fullmatch(value) else _OTHER
+
+
+MAX_VIOLATION_EVENTS = 16
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
@@ -105,6 +131,20 @@ class UnixHTTPConnection(http.client.HTTPConnection):
 
 
 class ApiTap:
+    def on_event(self, event):
+        """Deliver an event to the bridge. Violations are capped: a client that keeps misbehaving
+        gets the first `MAX_VIOLATION_EVENTS` reported and one closing word, not an unbounded queue
+        of work on the bridge's loop. Refusals themselves are unaffected."""
+        if event.get("e") == "tap_violation":
+            with self.lock:
+                self.violations += 1
+                n = self.violations
+            if n > MAX_VIOLATION_EVENTS + 1:
+                return
+            if n == MAX_VIOLATION_EVENTS + 1:
+                event = {"e": "tap_violation", "why": "violations_suppressed"}
+        self._deliver(event)
+
     def __init__(self, *, broker_socket, broker_token, allowed_tools, model=None, on_event=None, client_key=None,
                  limits=Limits()):
         self.broker_socket = broker_socket
@@ -112,9 +152,10 @@ class ApiTap:
         self.allowed_tools = frozenset(allowed_tools)
         self.client_key = client_key
         self.model = model
-        self.on_event = on_event or (lambda e: None)
+        self._deliver = on_event or (lambda e: None)
         self.limits = limits
         self.count = 0
+        self.violations = 0
         self.lock = threading.Lock()
         self.gauge = Gauge(limits.max_inflight_bytes)
         outer = self
@@ -133,7 +174,8 @@ class ApiTap:
                 if self.close_connection:
                     self.send_header("connection", "close")
                 self.end_headers()
-                self.wfile.write(raw)
+                if self.command != "HEAD":
+                    self.wfile.write(raw)
 
             def _authorized(self):
                 """Only the CLI this tap was made for, which holds the per-run key. A refusal says
@@ -181,7 +223,11 @@ class ApiTap:
                         self.send_header("transfer-encoding", "chunked")
                         self.end_headers()
                         sent = 0
+                        until = self.exchange_started()
                         while True:
+                            if time.monotonic() > until:
+                                self.close_connection = True
+                                return
                             chunk = resp.read1(8192) if hasattr(resp, "read1") else resp.read(8192)
                             if not chunk:
                                 break

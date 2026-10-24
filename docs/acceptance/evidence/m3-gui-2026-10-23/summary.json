@@ -21,7 +21,7 @@
       "steps": 31,
       "failed_steps": [],
       "leftovers": [],
-      "seconds": 51.8,
+      "seconds": 51.7,
       "ok": true
     },
     "local-tools-cancel-turn": {
@@ -37,7 +37,7 @@
       "steps": 29,
       "failed_steps": [],
       "leftovers": [],
-      "seconds": 54.5,
+      "seconds": 54.4,
       "ok": true
     },
     "refused": {
@@ -45,7 +45,7 @@
       "steps": 3,
       "failed_steps": [],
       "leftovers": [],
-      "seconds": 20.9,
+      "seconds": 21.0,
       "ok": true
     },
     "stop-restart": {

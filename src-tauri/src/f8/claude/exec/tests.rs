@@ -398,14 +398,132 @@ fn a_parent_replaced_by_a_link_after_the_check_cannot_redirect_the_write() {
         }
     };
     let o = write_acting(&ws, "sub/f.txt", "new\n", Some(sha(b"old\n")), swapped);
-    assert!(matches!(o, Outcome::Completed(_)), "{o:?}");
-    // The descriptor held the directory that was checked; the link was never followed.
+    // The directory that was checked is no longer where it was: nothing is written, anywhere.
+    assert!(matches!(o, Outcome::Failed(_)), "{o:?}");
     assert_eq!(
         fs::read_to_string(ws.join("sub-moved/f.txt")).unwrap(),
-        "new\n"
+        "old\n"
     );
-    assert!(!outside.join("f.txt").exists());
-    assert!(fs::read_dir(&outside).unwrap().next().is_none());
+    assert!(no_temp_left(&ws.join("sub-moved")));
+    assert!(
+        fs::read_dir(&outside).unwrap().next().is_none(),
+        "the link was never followed"
+    );
+}
+
+/// The review's F1: a directory moved *out* of the workspace while the write ran.
+#[test]
+fn a_directory_moved_out_of_the_workspace_is_not_written_into() {
+    let ws = workspace();
+    let outside = workspace();
+    fs::create_dir(ws.join("sub")).unwrap();
+    fs::write(ws.join("sub/f.txt"), "old\n").unwrap();
+    let o = write_acting(&ws, "sub/f.txt", "new\n", Some(sha(b"old\n")), |s| {
+        if s == WriteStep::AfterTemp {
+            fs::rename(ws.join("sub"), outside.join("sub")).unwrap();
+        }
+    });
+    assert!(matches!(o, Outcome::Failed(_)), "{o:?}");
+    assert_eq!(
+        fs::read_to_string(outside.join("sub/f.txt")).unwrap(),
+        "old\n"
+    );
+    assert!(no_temp_left(&outside.join("sub")));
+}
+
+/// The review's F1: the replacement is swapped, by name, between its preparation and its publication.
+#[test]
+fn a_replacement_swapped_before_it_is_published_is_never_published() {
+    let temp_of = |ws: &Path| {
+        fs::read_dir(ws)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(".wyss-write-")
+            })
+            .expect("the replacement exists")
+    };
+    // By other bytes.
+    let ws = workspace();
+    fs::write(ws.join("f.txt"), "old\n").unwrap();
+    let o = write_acting(&ws, "f.txt", "approved\n", Some(sha(b"old\n")), |s| {
+        if s == WriteStep::AfterTemp {
+            let t = temp_of(&ws);
+            fs::remove_file(&t).unwrap();
+            fs::write(&t, "evil!!!!!\n").unwrap();
+        }
+    });
+    assert!(matches!(o, Outcome::Failed(_)), "{o:?}");
+    assert_eq!(fs::read_to_string(ws.join("f.txt")).unwrap(), "old\n");
+    assert!(no_temp_left(&ws));
+    // By a link to a file outside: nothing is published, and nothing outside is touched (it used to
+    // be reachable by the permission change that followed the name).
+    let ws = workspace();
+    let outside = workspace();
+    fs::write(ws.join("f.txt"), "old\n").unwrap();
+    fs::write(outside.join("victim.txt"), "keep\n").unwrap();
+    fs::set_permissions(
+        outside.join("victim.txt"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    let o = write_acting(&ws, "f.txt", "approved\n", Some(sha(b"old\n")), |s| {
+        if s == WriteStep::AfterTemp {
+            let t = temp_of(&ws);
+            fs::remove_file(&t).unwrap();
+            symlink(outside.join("victim.txt"), &t).unwrap();
+        }
+    });
+    assert!(matches!(o, Outcome::Failed(_)), "{o:?}");
+    assert_eq!(fs::read_to_string(ws.join("f.txt")).unwrap(), "old\n");
+    assert_eq!(
+        fs::read_to_string(outside.join("victim.txt")).unwrap(),
+        "keep\n"
+    );
+    assert_eq!(
+        fs::metadata(outside.join("victim.txt"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert!(no_temp_left(&ws));
+}
+
+/// The review's F1: the type was checked by name and then opened; a FIFO put there in between
+/// could hold the thread. It is opened non-blocking and judged on the descriptor.
+#[test]
+fn a_special_file_put_at_the_target_cannot_hold_the_write() {
+    let ws = workspace();
+    fs::write(ws.join("f.txt"), "old\n").unwrap();
+    let outcome = std::thread::scope(|scope| {
+        let ws = &ws;
+        let worker = scope.spawn(move || {
+            write_acting(ws, "f.txt", "approved\n", Some(sha(b"old\n")), |s| {
+                if s == WriteStep::AfterFirstHash {
+                    fs::remove_file(ws.join("f.txt")).unwrap();
+                    nix::unistd::mkfifo(
+                        &ws.join("f.txt"),
+                        nix::sys::stat::Mode::from_bits_truncate(0o600),
+                    )
+                    .unwrap();
+                }
+            })
+        });
+        let end = Instant::now() + Duration::from_secs(10);
+        while !worker.is_finished() {
+            assert!(Instant::now() < end, "the write is stuck on a FIFO");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        worker.join().unwrap()
+    });
+    assert!(matches!(outcome, Outcome::Failed(_)), "{outcome:?}");
+    assert!(no_temp_left(&ws));
 }
 
 #[test]
