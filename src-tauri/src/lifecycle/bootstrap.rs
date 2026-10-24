@@ -410,10 +410,16 @@ impl Inner {
         // manager's to restart. Either way it is not this desktop's to start again.
         let mut connected_once = false;
         loop {
+            let previous = revision;
             let (next, state) = self.link.observe(revision, WATCH);
             revision = Some(next);
             if self.stopping() || state == LinkState::Stopped {
                 return;
+            }
+            // A read-only GUI never polls the system service manager on a timer.
+            // Only an actual link revision change requires refreshed diagnostics.
+            if !self.mutations_allowed && previous == Some(next) {
+                continue;
             }
             let attempting = self.attempting.load(Ordering::Acquire);
             match state {
