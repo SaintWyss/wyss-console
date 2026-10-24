@@ -1155,3 +1155,179 @@ mod lifecycle {
         let _ = fs::remove_dir_all(dir);
     }
 }
+
+// ---- M4 measurements (run in release: see docs/acceptance/m4-engineering-2026-10-24.md) -------
+
+mod perf {
+    use super::*;
+
+    fn pct(v: &mut [f64], q: f64) -> f64 {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v[((v.len() as f64 * q) as usize).min(v.len() - 1)]
+    }
+    fn line(what: &str, unit: &str, samples: &mut Vec<f64>, extra: &str) {
+        let raw: Vec<f64> = samples
+            .iter()
+            .map(|v| (v * 1000.0).round() / 1000.0)
+            .collect();
+        println!(
+            "{{\"measure\":\"{what}\",\"unit\":\"{unit}\",\"n\":{},\"p50\":{:.3},\"p95\":{:.3},{extra}\"raw\":{raw:?}}}",
+            samples.len(),
+            pct(samples, 0.5),
+            pct(samples, 0.95)
+        );
+    }
+    fn kib(pid: i64, key: &str) -> f64 {
+        fs::read_to_string(format!("/proc/{pid}/status"))
+            .unwrap()
+            .lines()
+            .find(|l| l.starts_with(key))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+
+    #[test]
+    #[ignore = "measurement"]
+    fn attach_latency_and_sixteen_terminals() {
+        let host = Host::start(Duration::from_secs(600));
+        let client = host.client();
+        let make = || {
+            let made = client.call("term_create", json!({"size": size()})).unwrap();
+            made["terminal_id"].as_str().unwrap().to_owned()
+        };
+        // One busy terminal: a screenful and a long history.
+        let busy = make();
+        type_line(
+            &client,
+            &busy,
+            "for i in $(seq 1 1500); do echo \"history line $i with some text to fill a row of the screen\"; done; echo ready-now",
+        );
+        read_until(&client, &busy, "ready-now");
+        let mut ms = Vec::new();
+        let mut bytes = 0usize;
+        for _ in 0..40 {
+            let started = Instant::now();
+            let answer = client
+                .call("term_screen", json!({"terminal_id": busy}))
+                .unwrap();
+            ms.push(started.elapsed().as_secs_f64() * 1000.0);
+            bytes = answer["repaint"].as_str().unwrap().len() * 3 / 4;
+            assert_eq!(answer["available"], true);
+        }
+        line(
+            "term_screen_latency_24x80_history_500",
+            "ms",
+            &mut ms,
+            &format!("\"repaint_bytes\":{bytes},"),
+        );
+
+        // Sixteen terminals, each with a parser helper: what they cost at rest.
+        let mut ids = vec![busy];
+        while ids.len() < 16 {
+            ids.push(make());
+        }
+        for id in &ids {
+            type_line(&client, id, "echo sixteen-$((6*7))");
+            read_until(&client, id, "sixteen-42");
+        }
+        std::thread::sleep(Duration::from_secs(2));
+        let mut rss = Vec::new();
+        let mut peak = Vec::new();
+        let (mut threads, mut fds) = (0usize, 0usize);
+        for id in &ids {
+            let p = client
+                .call("term_parser", json!({"terminal_id": id}))
+                .unwrap();
+            assert_eq!(p["health"], "healthy", "{p}");
+            let pid = p["helper_pid"].as_i64().unwrap();
+            rss.push(kib(pid, "VmRSS:") / 1024.0);
+            peak.push(kib(pid, "VmHWM:") / 1024.0);
+            threads += fs::read_dir(format!("/proc/{pid}/task")).unwrap().count();
+            fds += fs::read_dir(format!("/proc/{pid}/fd")).unwrap().count();
+        }
+        let total: f64 = rss.iter().sum();
+        line(
+            "helper_rss_per_terminal_16_terminals",
+            "MiB",
+            &mut rss,
+            &format!(
+                "\"sum_mib\":{total:.2},\"helper_threads\":{threads},\"helper_descriptors\":{fds},"
+            ),
+        );
+        line(
+            "helper_peak_rss_per_terminal_16_terminals",
+            "MiB",
+            &mut peak,
+            "",
+        );
+        // The host's own threads per terminal (pump, PTY worker, link, its two pipe threads).
+        let host_threads = fs::read_dir("/proc/self/task").unwrap().count();
+        println!(
+            "{{\"measure\":\"threads_in_the_host_process_with_16_terminals\",\"threads\":{host_threads}}}"
+        );
+
+        // Start of a terminal to a first screen the window could attach to.
+        let mut first = Vec::new();
+        for _ in 0..10 {
+            let started = Instant::now();
+            let id = make();
+            loop {
+                let a = client
+                    .call("term_screen", json!({"terminal_id": id}))
+                    .unwrap();
+                if a["available"] == true {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            first.push(started.elapsed().as_secs_f64() * 1000.0);
+            client
+                .call("term_close", json!({"terminal_id": id}))
+                .unwrap();
+        }
+        line(
+            "terminal_create_to_first_attachable_screen",
+            "ms",
+            &mut first,
+            "",
+        );
+
+        // Recovery: a helper killed, to a screen that is exact again.
+        let mut recover = Vec::new();
+        for _ in 0..8 {
+            let p = client
+                .call("term_parser", json!({"terminal_id": ids[0]}))
+                .unwrap();
+            let before = p["restarts"].as_u64().unwrap();
+            let pid = p["helper_pid"].as_i64().unwrap() as i32;
+            let started = Instant::now();
+            nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(pid),
+                nix::sys::signal::Signal::SIGKILL,
+            )
+            .unwrap();
+            loop {
+                let p = client
+                    .call("term_parser", json!({"terminal_id": ids[0]}))
+                    .unwrap();
+                if p["health"] == "healthy"
+                    && p["restarts"].as_u64().unwrap() > before
+                    && p["fed"].as_u64().unwrap() > 0
+                {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            recover.push(started.elapsed().as_secs_f64() * 1000.0);
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        line(
+            "helper_killed_to_healthy_and_fed_again",
+            "ms",
+            &mut recover,
+            "",
+        );
+    }
+}

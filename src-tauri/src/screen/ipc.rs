@@ -67,6 +67,11 @@ pub enum Request {
         nonce: u64,
     },
     Shutdown,
+    /// The host's ring moved past bytes this screen was never given: the next byte it gets is at
+    /// `to`. The parser forgets any sequence it was in the middle of and counts the bytes missed.
+    Skip {
+        to: u64,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -94,6 +99,8 @@ pub struct SnapshotBody {
     pub title: String,
     pub counters: Counters,
     pub history_evicted: u64,
+    /// Output bytes the screen never saw because the ring moved on (see `Request::Skip`).
+    pub skipped: u64,
     pub scrollback_included: u32,
     pub scrollback_omitted: u32,
     pub repaint: Vec<u8>,
@@ -259,6 +266,10 @@ impl Request {
                 o.u64(*nonce);
             }
             Request::Shutdown => o.u8(6),
+            Request::Skip { to } => {
+                o.u8(7);
+                o.u64(*to);
+            }
         }
         o.0
     }
@@ -289,6 +300,7 @@ impl Request {
             },
             5 => Request::Ping { nonce: i.u64()? },
             6 => Request::Shutdown,
+            7 => Request::Skip { to: i.u64()? },
             other => return Err(IpcError::UnknownKind(other)),
         };
         i.done()?;
@@ -340,6 +352,7 @@ impl Response {
                     o.u64(c);
                 }
                 o.u64(s.history_evicted);
+                o.u64(s.skipped);
                 o.u32(s.scrollback_included);
                 o.u32(s.scrollback_omitted);
                 o.bytes(&s.repaint);
@@ -395,6 +408,7 @@ impl Response {
                     invalid_utf8: i.u64()?,
                 };
                 let history_evicted = i.u64()?;
+                let skipped = i.u64()?;
                 let scrollback_included = i.u32()?;
                 let scrollback_omitted = i.u32()?;
                 let repaint = i.bytes(MAX_RESPONSE)?.to_vec();
@@ -410,6 +424,7 @@ impl Response {
                     title,
                     counters,
                     history_evicted,
+                    skipped,
                     scrollback_included,
                     scrollback_omitted,
                     repaint,
@@ -496,6 +511,7 @@ mod tests {
             },
             Request::Ping { nonce: 7 },
             Request::Shutdown,
+            Request::Skip { to: 1 << 33 },
         ] {
             assert_eq!(Request::decode(&r.encode()).unwrap(), r);
         }
@@ -519,6 +535,7 @@ mod tests {
                 invalid_utf8: 7,
             },
             history_evicted: 9,
+            skipped: 12,
             scrollback_included: 10,
             scrollback_omitted: 11,
             repaint: vec![1, 2, 3],

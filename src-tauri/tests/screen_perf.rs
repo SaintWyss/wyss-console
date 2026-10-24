@@ -36,6 +36,7 @@ fn pct(sorted: &[f64], q: f64) -> f64 {
 }
 fn report(what: &str, unit: &str, mut samples: Vec<f64>, extra: &str) {
     let raw = samples.clone();
+    println!();
     samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
     println!(
         "{{\"measure\":\"{what}\",\"unit\":\"{unit}\",\"n\":{},\"p50\":{:.3},\"p95\":{:.3},\"min\":{:.3},\"max\":{:.3},{extra}\"raw\":{:?}}}",

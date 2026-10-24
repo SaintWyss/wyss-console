@@ -144,6 +144,11 @@ pub enum Health {
 pub enum Fidelity {
     /// The parser has consumed every byte the terminal ever printed.
     Exact,
+    /// The parser has everything since the start except `skipped` bytes it was too slow to be given
+    /// before the ring moved on: the screen may differ from the program's until it draws again.
+    Gap {
+        skipped: u64,
+    },
     /// The parser was rebuilt from the bytes the host still keeps: `missing` bytes at the start of
     /// the history (and whatever state they set) are not in the screen.
     Tail {
@@ -163,6 +168,8 @@ pub struct Status {
     pub helper_pid: Option<u32>,
     /// Offset after the last byte the screen consumed.
     pub fed: u64,
+    /// Bytes skipped since this helper started (see `Fidelity::Gap`).
+    pub skipped: u64,
 }
 
 pub struct Snap {
@@ -218,6 +225,7 @@ impl ScreenLink {
             sandbox: None,
             helper_pid: None,
             fed: 0,
+            skipped: 0,
         }));
         let (tx, rx) = mpsc::sync_channel(64);
         let want = Arc::new(Mutex::new(size));
@@ -513,6 +521,7 @@ impl Worker {
                 Fidelity::Tail { missing: start }
             };
             s.fed = start;
+            s.skipped = 0;
         });
         self.set(|s| s.health = Health::Healthy);
         Ok(())
@@ -563,8 +572,26 @@ impl Worker {
             }
             let start = self.source.start();
             if self.next < start {
-                // The ring moved on past bytes the helper never got: rebuild from what is left.
-                return Err(self.lose("fell_behind"));
+                // The ring moved on past bytes this helper never got (a flood faster than it
+                // parses). Replaying from the ring would only fall behind again: the helper is
+                // told to go on from the oldest byte there is, and the loss is stated.
+                match self.exchange(&Request::Skip { to: start })? {
+                    Response::Fed { end, .. } if end == start => {
+                        let lost = start - self.next;
+                        self.next = start;
+                        self.set(|s| {
+                            s.fed = start;
+                            s.skipped += lost;
+                            if let Fidelity::Exact = s.fidelity {
+                                s.fidelity = Fidelity::Gap { skipped: s.skipped };
+                            } else if let Fidelity::Gap { .. } = s.fidelity {
+                                s.fidelity = Fidelity::Gap { skipped: s.skipped };
+                            }
+                        });
+                        continue;
+                    }
+                    _ => return Err(self.lose("bad_ack")),
+                }
             }
             let bytes = self.source.read(self.next, MAX_FEED);
             if bytes.is_empty() {

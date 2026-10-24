@@ -268,6 +268,79 @@ fn after_hello_a_second_hello_a_gap_in_the_stream_and_a_bad_size_are_refused() {
 }
 
 #[test]
+fn a_skip_goes_forward_only_after_the_stream_began_and_counts_what_it_missed() {
+    let hello = Request::Hello {
+        version: PROTOCOL,
+        rows: 4,
+        cols: 20,
+        scrollback_lines: 1,
+        width_table: 0,
+        require: 0,
+    };
+    // Before any byte: refused (the helper does not yet know where it is).
+    let mut h = spawn(&["--require", "0"]);
+    h.send(&hello);
+    h.recv().unwrap();
+    h.send(&Request::Skip { to: 50 });
+    assert_eq!(
+        h.recv().unwrap(),
+        Response::Refused {
+            code: Refusal::OutOfOrder
+        }
+    );
+    assert_eq!(h.finish().code(), Some(3));
+    // Backwards: refused.
+    let mut h = spawn(&["--require", "0"]);
+    h.send(&hello);
+    h.recv().unwrap();
+    h.send(&Request::Feed {
+        offset: 10,
+        bytes: b"abcdef".to_vec(),
+    });
+    h.recv().unwrap();
+    h.send(&Request::Skip { to: 12 });
+    assert_eq!(
+        h.recv().unwrap(),
+        Response::Refused {
+            code: Refusal::OutOfOrder
+        }
+    );
+    assert_eq!(h.finish().code(), Some(3));
+    // Forward: the sequence in progress is dropped, the loss counted, and the stream goes on there.
+    let mut h = spawn(&["--require", "0"]);
+    h.send(&hello);
+    h.recv().unwrap();
+    h.send(&Request::Feed {
+        offset: 0,
+        bytes: b"one\x1b[3".to_vec(),
+    });
+    h.recv().unwrap();
+    h.send(&Request::Skip { to: 100 });
+    let Response::Fed { end, .. } = h.recv().unwrap() else {
+        panic!()
+    };
+    assert_eq!(end, 100);
+    h.send(&Request::Feed {
+        offset: 100,
+        bytes: b"1mtwo".to_vec(),
+    });
+    h.recv().unwrap();
+    h.send(&Request::Snapshot {
+        scrollback_lines: 10,
+    });
+    let Response::Snapshot(s) = h.recv().unwrap() else {
+        panic!()
+    };
+    assert_eq!(s.skipped, 94, "100 minus the 6 bytes it had");
+    let mut t = Terminal::new(4, 20, Limits::default());
+    t.feed(&s.repaint);
+    // The half sequence did not swallow what came after: "1mtwo" is text, as the parser saw it.
+    assert_eq!(t.text()[0], "one1mtwo");
+    h.send(&Request::Shutdown);
+    h.finish();
+}
+
+#[test]
 fn an_oversized_or_empty_frame_is_refused_before_it_is_read() {
     for header in [
         (MAX_REQUEST as u32 + 1).to_be_bytes(),

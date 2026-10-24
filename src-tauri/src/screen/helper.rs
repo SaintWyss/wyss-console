@@ -170,10 +170,26 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write, applied: Applied) -
                         invalid_utf8: r.invalid_utf8,
                     },
                     history_evicted: screen.history().lines_evicted,
+                    skipped: screen.history().bytes_skipped,
                     scrollback_included: repaint.scrollback_lines as u32,
                     scrollback_omitted: repaint.scrollback_omitted as u32,
                     repaint: repaint.bytes,
                 }))
+            }
+            Request::Skip { to } => {
+                // Only forwards, and only after the stream began.
+                let Some(at) = next else {
+                    return refuse(output, Refusal::OutOfOrder);
+                };
+                if to < at {
+                    return refuse(output, Refusal::OutOfOrder);
+                }
+                screen.skip(to - at);
+                next = Some(to);
+                Response::Fed {
+                    end: to,
+                    generation: screen.generation(),
+                }
             }
             Request::Ping { nonce } => Response::Pong { nonce },
             Request::Shutdown => return Exit::Clean,

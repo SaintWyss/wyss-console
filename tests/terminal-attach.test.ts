@@ -34,6 +34,7 @@ const parser = (extra: Record<string, unknown> = {}) => ({
   restarts: 0,
   reason: null,
   missing_bytes: 0,
+  skipped_bytes: 0,
   last_failure: null,
   sandbox: { layers: 15, landlock_abi: 6 },
   ...extra,
@@ -271,6 +272,22 @@ it('says what is missing and never "restored" alone when it is not whole', () =>
   );
   expect(tail?.tone).toBe('warn');
   expect(tail?.text).toMatch(/3 KiB before it is not included/);
+  const gap = parserNote(
+    view(
+      parseAttach(
+        screenAnswer({
+          parser: parser({ fidelity: 'gap', skipped_bytes: 5 * 1024 }),
+        }),
+      ),
+    ),
+  );
+  expect(gap?.tone).toBe('warn');
+  expect(gap?.text).toMatch(/5 KiB of output was missed/);
+  expect(
+    parserNote(
+      view(undefined, { health: 'healthy', fidelity: 'gap', restarts: 0 }),
+    )?.text,
+  ).toMatch(/missed/);
   const replay = parserNote(
     view({ mode: 'replay', reason: 'helper_missing', parser: null }),
   );

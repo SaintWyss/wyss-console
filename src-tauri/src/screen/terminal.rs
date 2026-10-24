@@ -227,6 +227,8 @@ pub struct Refusals {
 pub struct History {
     /// Lines that scrolled out of the kept scrollback.
     pub lines_evicted: u64,
+    /// Output bytes the screen never saw (the host's ring moved past them).
+    pub bytes_skipped: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -635,6 +637,50 @@ impl Terminal {
         }
     }
 
+    /// Printable ASCII, many characters at once: the same result as `print` for each, without the
+    /// per-character work when nothing special applies (no insert mode, no line-drawing set, not
+    /// waiting to wrap). Anything else goes character by character.
+    fn print_run(&mut self, run: &[u8]) {
+        let plain =
+            !self.has(mode::INSERT) && self.charset[usize::from(self.shifted)] == Charset::Ascii;
+        let mut at = 0;
+        while at < run.len() {
+            let cur = self.buf().cursor;
+            if !plain || cur.pending_wrap {
+                self.print(run[at] as char);
+                at += 1;
+                continue;
+            }
+            let (cols, pen) = (self.cols, self.pen);
+            let n = (cols - cur.col).min(run.len() - at);
+            let row = &mut self.buf_mut().rows[cur.row];
+            let from = cur.col.saturating_sub(1);
+            let to = (cur.col + n + 1).min(cols);
+            let touches_wide = row.cells[from..to].iter().any(|c| c.width != 1);
+            for (k, &b) in run[at..at + n].iter().enumerate() {
+                row.cells[cur.col + k] = Cell {
+                    ch: b as char,
+                    mark: '\0',
+                    width: 1,
+                    style: pen,
+                };
+            }
+            if touches_wide {
+                row.whole();
+            }
+            let next = cur.col + n;
+            let b = self.buf_mut();
+            if next >= cols {
+                b.cursor.col = cols - 1;
+                b.cursor.pending_wrap = true;
+            } else {
+                b.cursor.col = next;
+            }
+            self.last = Some(run[at + n - 1] as char);
+            at += n;
+        }
+    }
+
     fn combine(&mut self, mark: char) {
         let cur = self.buf().cursor;
         let col = if cur.pending_wrap {
@@ -917,6 +963,18 @@ impl Terminal {
 
     // ---------------------------------------------------------------- the byte stream
 
+    /// `bytes` of the output were never given to this screen: whatever sequence was in progress is
+    /// dropped (the next byte may be in the middle of anything) and the loss is counted, so that
+    /// whoever draws this screen can say it may differ from the program's.
+    pub fn skip(&mut self, bytes: u64) {
+        self.state = State::Ground;
+        self.utf8_need = 0;
+        self.osc.clear();
+        self.osc_over = false;
+        self.intermediate = 0;
+        self.history.bytes_skipped = self.history.bytes_skipped.saturating_add(bytes);
+    }
+
     pub fn feed(&mut self, bytes: &[u8]) {
         self.fed += bytes.len() as u64;
         let mut i = 0;
@@ -927,9 +985,7 @@ impl Terminal {
                 while i < bytes.len() && (0x20..0x7F).contains(&bytes[i]) {
                     i += 1;
                 }
-                for &b in &bytes[start..i] {
-                    self.print(b as char);
-                }
+                self.print_run(&bytes[start..i]);
                 if i >= bytes.len() {
                     break;
                 }

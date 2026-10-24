@@ -17,6 +17,14 @@ const kib = (bytes: number) => Math.max(1, Math.round(bytes / 1024));
 export function parserNote(view: TerminalViewState): ParserNote | null {
   const attach = view.attach;
   if (attach?.mode === 'screen') {
+    if (attach.parser.fidelity === 'gap') {
+      return {
+        text: `Screen restored · ${kib(attach.parser.skipped_bytes)} KiB of output was missed while it was kept`,
+        tone: 'warn',
+        title:
+          'The program printed faster than the screen could be kept, so part of its output never reached it. What is drawn may differ from the program until the program draws again.',
+      };
+    }
     if (attach.parser.fidelity === 'tail') {
       return {
         text: `Screen rebuilt from the end of the output · ${kib(attach.parser.missing_bytes)} KiB before it is not included`,
@@ -40,6 +48,14 @@ export function parserNote(view: TerminalViewState): ParserNote | null {
       text: 'Output replayed · no screen state was kept',
       tone: 'warn',
       title: `The host had no screen for this terminal (${attach.reason.replaceAll('_', ' ')}), so what it kept of the output was replayed and the program was asked to draw again.`,
+    };
+  }
+  if (view.parser?.fidelity === 'gap' && view.parser.health === 'healthy') {
+    return {
+      text: 'Output was missed while the screen was kept',
+      tone: 'warn',
+      title:
+        'The program printed faster than the screen could be kept. The terminal itself is complete; a window opened later may show a screen that differs until the program draws again.',
     };
   }
   const health = view.parser?.health;

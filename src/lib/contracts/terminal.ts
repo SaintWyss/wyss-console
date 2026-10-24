@@ -21,7 +21,7 @@ export interface TerminalInfo {
 export type ParserHealth =
   'starting' | 'healthy' | 'restarting' | 'unavailable';
 /** What a screen drawn from the parser can claim: all of the output, only the end of it, or none. */
-export type ParserFidelity = 'exact' | 'tail' | 'unavailable';
+export type ParserFidelity = 'exact' | 'gap' | 'tail' | 'unavailable';
 export interface ParserBrief {
   health: ParserHealth;
   fidelity: ParserFidelity;
@@ -31,6 +31,8 @@ export interface ParserStatus extends ParserBrief {
   reason: string | null;
   /** Output bytes at the start of the history that the screen does not account for. */
   missing_bytes: number;
+  /** Output bytes the screen never saw because it was too slow while the program printed. */
+  skipped_bytes: number;
   last_failure: string | null;
   sandbox: { layers: number; landlock_abi: number } | null;
 }
@@ -52,7 +54,7 @@ const HEALTH: readonly string[] = [
   'restarting',
   'unavailable',
 ];
-const FIDELITY: readonly string[] = ['exact', 'tail', 'unavailable'];
+const FIDELITY: readonly string[] = ['exact', 'gap', 'tail', 'unavailable'];
 
 export function parseParserBrief(value: unknown): ParserBrief | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
@@ -83,6 +85,10 @@ function parseParserStatus(value: unknown): ParserStatus | null {
     missing_bytes:
       typeof v.missing_bytes === 'number' && v.missing_bytes >= 0
         ? v.missing_bytes
+        : 0,
+    skipped_bytes:
+      typeof v.skipped_bytes === 'number' && v.skipped_bytes >= 0
+        ? v.skipped_bytes
         : 0,
     last_failure: typeof v.last_failure === 'string' ? v.last_failure : null,
     sandbox:

@@ -318,7 +318,7 @@ fn a_helper_that_cannot_be_started_is_unavailable_not_retried_in_a_loop() {
 }
 
 #[test]
-fn a_ring_that_moved_past_what_the_helper_had_is_a_rebuild_with_a_stated_gap() {
+fn a_ring_that_moved_past_what_the_helper_had_is_a_skip_with_a_stated_gap_not_a_restart() {
     let source = Bytes::new();
     let spawner = Scripted::new(vec![]);
     let link = ScreenLink::start(spawner.clone(), source.clone(), (6, 20), quick());
@@ -331,8 +331,17 @@ fn a_ring_that_moved_past_what_the_helper_had_is_a_rebuild_with_a_stated_gap() {
     source.push(b"gap gap gap\r\nlate output");
     source.evict_to(end + 4);
     let second = link.snapshot(10, Duration::from_secs(10)).unwrap();
-    assert_eq!(second.status.fidelity, Fidelity::Tail { missing: end + 4 });
-    assert_eq!(second.status.last_failure, Some("fell_behind"));
+    // No restart: the helper goes on from the oldest byte there is, and the gap is stated.
+    assert_eq!(second.status.fidelity, Fidelity::Gap { skipped: 4 });
+    assert_eq!(second.status.restarts, 0);
+    assert_eq!(second.body.skipped, 4);
+    assert_eq!(second.status.last_failure, None);
+    assert_eq!(spawner.spawned.load(Ordering::SeqCst), 1);
+    assert!(
+        text_of(&second.body.repaint, 6, 20)
+            .join("\n")
+            .contains("late output")
+    );
 }
 
 #[test]

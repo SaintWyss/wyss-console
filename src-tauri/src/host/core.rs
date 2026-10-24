@@ -123,6 +123,7 @@ fn parser_brief(status: Option<&ParserStatus>) -> Value {
     };
     let fidelity = match s.fidelity {
         Fidelity::Exact => "exact",
+        Fidelity::Gap { .. } => "gap",
         Fidelity::Tail { .. } => "tail",
         Fidelity::Unavailable => "unavailable",
     };
@@ -137,6 +138,7 @@ fn parser_json(status: Option<&ParserStatus>, reason: Option<&str>) -> Value {
     };
     let (fidelity, missing) = match s.fidelity {
         Fidelity::Exact => ("exact", 0),
+        Fidelity::Gap { .. } => ("gap", 0),
         Fidelity::Tail { missing } => ("tail", missing),
         Fidelity::Unavailable => ("unavailable", 0),
     };
@@ -149,6 +151,7 @@ fn parser_json(status: Option<&ParserStatus>, reason: Option<&str>) -> Value {
         "reason": why.or(reason),
         "fidelity": fidelity,
         "missing_bytes": missing,
+        "skipped_bytes": s.skipped,
         "restarts": s.restarts,
         "last_failure": s.last_failure,
         "sandbox": s.sandbox.map(|(layers, abi)| json!({"layers": layers, "landlock_abi": abi})),
