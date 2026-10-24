@@ -230,6 +230,7 @@ impl ScreenLink {
             shared: shared.clone(),
             commands: rx,
             serial: 0,
+            gave_up_at: None,
             commands_tx: tx.clone(),
             session: None,
             next: 0,
@@ -327,6 +328,8 @@ struct Worker {
     /// Number of the next helper to start, and the way the reader threads tell this worker.
     serial: u64,
     commands_tx: SyncSender<Command>,
+    /// When the link last gave up; after the restart window it tries again.
+    gave_up_at: Option<Instant>,
     /// Offset of the next byte to give the helper.
     next: u64,
     starts: VecDeque<Instant>,
@@ -351,6 +354,9 @@ impl Worker {
                 Ok(Command::Gone(id)) => {
                     if self.session.as_ref().is_some_and(|s| s.id == id) {
                         let _ = self.lose("exited");
+                        // Replaced at once (within the restart budget): the screen is rebuilt from
+                        // the ring while it is all still there, not when someone asks for it.
+                        let _ = self.pump();
                     }
                 }
                 Ok(Command::Snapshot { scrollback, reply }) => {
@@ -382,7 +388,16 @@ impl Worker {
             return Ok(());
         }
         if let Some(why) = self.unavailable() {
-            return Err(Fail::Helper(why));
+            // Giving up is not for ever: after the restart window it is tried again.
+            let waited = self
+                .gave_up_at
+                .is_some_and(|t| t.elapsed() > self.config.restart_window);
+            if !waited {
+                return Err(Fail::Helper(why));
+            }
+            self.gave_up_at = None;
+            self.starts.clear();
+            self.set(|s| s.health = Health::Starting);
         }
         // A restart budget: a helper that keeps dying is not restarted for ever.
         let now = Instant::now();
@@ -394,6 +409,7 @@ impl Worker {
             self.starts.pop_front();
         }
         if self.starts.len() as u32 > self.config.max_restarts {
+            self.gave_up_at = Some(now);
             self.set(|s| s.health = Health::Unavailable("restart_budget"));
             return Err(Fail::Helper("restart_budget"));
         }
@@ -413,6 +429,7 @@ impl Worker {
         let spawned = match self.spawner.spawn() {
             Ok(s) => s,
             Err(_) => {
+                self.gave_up_at = Some(now);
                 self.set(|s| {
                     s.health = Health::Unavailable("spawn_failed");
                     s.last_failure = Some("spawn_failed");

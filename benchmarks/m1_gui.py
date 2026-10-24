@@ -44,6 +44,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from owned import NotOurs, Owned  # noqa: E402
 import m3_steps  # noqa: E402
+import m4_steps  # noqa: E402
 
 SCREEN = (1500, 1400)
 DISPLAY = ":79"
@@ -574,12 +575,16 @@ def main():
                                "terminals": sum(len(p["terminals"]) for p in world["projects"])}
             pointer = Pointer(x_env)
             if args.steps:
-                app = Session(binary, app_env, logs, "app", app_args)
+                app_ctl = AppCtl(binary, app_env, logs, app_args)
+                app = app_ctl.app
                 time.sleep(7.0 if not app_args else 10.0)
                 place_window(x_env)
                 time.sleep(1.5)
-                run_steps(json.load(open(args.steps)), x_env, pointer, args.out, args.run,
-                          world, socket_path, (app.pid,), root)
+                try:
+                    run_steps(json.load(open(args.steps)), x_env, pointer, args.out, args.run,
+                              world, socket_path, (app.pid,), root, app_ctl, host.pid)
+                finally:
+                    app = app_ctl.app
                 print("host alive:", host.alive(), "code:", host.proc.poll())
                 print(json.dumps(host_list(socket_path))[:1500])
                 return 0
@@ -657,11 +662,12 @@ def leftovers(root):
 
 
 def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None,
-              session_pid=(None,), fixture_root=None):
+              session_pid=(None,), fixture_root=None, app_ctl=None, host_pid=None):
     """Calibration: click, type, wait and take pictures, to read the screen by eye."""
     fixture_baseline = None
     fixture_snapshots = {}
     fs_baseline = None
+    m4_ctx = {}
     for step in steps:
         kind = step[0]
         if os.environ.get("M1_TRACE_HOST") and socket_path:
@@ -691,6 +697,20 @@ def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None,
         elif kind == "hostwrite":
             host_write(socket_path, world["projects"][0]["terminals"][0]["terminal"],
                        step[1].encode().decode("unicode_escape").encode())
+        elif kind == "restart-app":
+            # The window ends and a new one opens over the same host and state; the host and its
+            # terminals are not touched. The new window is waited for like the first.
+            app_ctl.restart()
+            session_pid = (app_ctl.app.pid,)
+            time.sleep(7.0 if not app_ctl.args else 10.0)
+            place_window(x_env)
+            time.sleep(1.5)
+        elif kind.startswith("m4-"):
+            ctx = {"socket": socket_path, "host_pid": host_pid, "m4": m4_ctx}
+            ok, detail = m4_steps.check((kind[3:].replace("-", "_"), *step[1:]), ctx)
+            print(f"{kind} {step[1:]}: {'ok' if ok else 'FAILED'} {detail}", flush=True)
+            if not ok:
+                raise AssertionError(f"{kind} {step[1:]} failed: {detail}")
         elif kind.startswith("m3-"):
             if fixture_root is None:
                 raise RuntimeError("m3 checks need --m3-fixture")
@@ -846,6 +866,24 @@ def host_call(socket_path, op, params):
         while len(data) < size:
             data += sock.recv(size - len(data))
     return json.loads(data)
+
+
+class AppCtl:
+    """The application window of a scenario, which a step may end and open again over the same host
+    and state (the host and its terminals are not part of it)."""
+
+    def __init__(self, binary, env, logs, args):
+        self.binary, self.env, self.logs, self.args = binary, env, logs, list(args)
+        self.count = 0
+        self.app = self._start()
+
+    def _start(self):
+        self.count += 1
+        return Session(self.binary, self.env, self.logs, "app" if self.count == 1 else f"app{self.count}", self.args)
+
+    def restart(self):
+        self.app.stop()
+        self.app = self._start()
 
 
 class Session:

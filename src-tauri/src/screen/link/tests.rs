@@ -133,6 +133,7 @@ impl Spawner for Scripted {
                 Behavior::Normal | Behavior::Weak => {
                     let mut reader = std::io::BufReader::new(helper_side);
                     helper::serve(&mut reader, &mut writer, applied);
+                    let _ = writer.shutdown(std::net::Shutdown::Both);
                 }
                 Behavior::EndsAfter(n) => {
                     let mut reader = std::io::BufReader::new(CountingReader {
@@ -140,6 +141,8 @@ impl Spawner for Scripted {
                         left: n,
                     });
                     helper::serve(&mut reader, &mut writer, applied);
+                    // A process that ends closes its pipes, whoever else holds a copy.
+                    let _ = writer.shutdown(std::net::Shutdown::Both);
                 }
                 Behavior::Hangs => {
                     let mut reader = helper_side;
@@ -366,4 +369,80 @@ fn a_flood_of_wakes_does_not_block_the_caller() {
         started.elapsed() < Duration::from_secs(2),
         "the pump thread was held up"
     );
+}
+
+#[test]
+fn a_link_that_gave_up_tries_again_after_the_restart_window() {
+    let source = Bytes::new();
+    // Three helpers that fail to start properly use the whole budget (two restarts); the fourth,
+    // after the window, is a good one.
+    let mut script: Vec<Result<Behavior, ()>> =
+        (0..3).map(|_| Ok(Behavior::EndsAfter(8))).collect();
+    script.push(Ok(Behavior::Normal));
+    let spawner = Scripted::new(script);
+    let config = LinkConfig {
+        restart_window: Duration::from_millis(600),
+        ..quick()
+    };
+    let link = ScreenLink::start(spawner, source.clone(), (6, 20), config);
+    source.push(SCREEN);
+    for _ in 0..3 {
+        let _ = link.snapshot(10, Duration::from_secs(10));
+    }
+    assert_eq!(link.status().health, Health::Unavailable("restart_budget"));
+    std::thread::sleep(Duration::from_millis(900));
+    // Anything that asks for the screen again finds a helper, and the terminal's history intact.
+    let mut tried = None;
+    for _ in 0..6 {
+        tried = link.snapshot(10, Duration::from_secs(10)).ok();
+        if tried.is_some() {
+            break;
+        }
+    }
+    let snap = tried.unwrap_or_else(|| panic!("the link recovered: {:?}", link.status()));
+    assert_eq!(snap.status.health, Health::Healthy);
+    assert_eq!(text_of(&snap.body.repaint, 6, 20)[0], "one");
+}
+
+#[test]
+fn a_helper_that_ends_while_the_link_is_idle_is_replaced_without_being_asked() {
+    let source = Bytes::new();
+    // The first helper's input ends exactly after its hello and the first bytes, once answered.
+    let hello = 4 + Request::Hello {
+        version: PROTOCOL,
+        rows: 6,
+        cols: 20,
+        scrollback_lines: 2000,
+        width_table: 0,
+        require: layer::ALL,
+    }
+    .encode()
+    .len();
+    let feed = 4 + Request::Feed {
+        offset: 0,
+        bytes: SCREEN.to_vec(),
+    }
+    .encode()
+    .len();
+    let spawner = Scripted::new(vec![
+        Ok(Behavior::EndsAfter(hello + feed)),
+        Ok(Behavior::Normal),
+    ]);
+    let link = ScreenLink::start(spawner.clone(), source.clone(), (6, 20), quick());
+    // Nobody asks for anything after the first bytes.
+    source.push(SCREEN);
+    link.wake();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while (spawner.spawned.load(Ordering::SeqCst) < 2 || link.status().health != Health::Healthy)
+        && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let status = link.status();
+    assert_eq!(spawner.spawned.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        (status.health, status.fidelity),
+        (Health::Healthy, Fidelity::Exact)
+    );
+    assert_eq!(status.fed, SCREEN.len() as u64);
 }
