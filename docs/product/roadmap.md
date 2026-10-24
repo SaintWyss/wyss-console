@@ -279,3 +279,7 @@ work and post-backup loss window. Fixture PASS, installed PASS and owner accepta
 separate columns. Historical blanket private-HOME/VM procedures are not current recipes;
 follow the normal owner environment policy, permitted unit fixtures and intrinsic
 Managed isolation. Never run blanket `cargo test`/`lifecycle_process` as a shortcut.
+
+**M2 + M3 integration, 2026-10-24:** one integration PR carries M2 (#22) and M3 (#23); `CODE_INTEGRATED`,
+`ENGINEERING_TESTS_PASSED`, `SECURITY_REVIEW_PENDING`, `RELEASE_BLOCKED`
+([record](../acceptance/integration-m2-m3-2026-10-24.md)). M4 is not started.

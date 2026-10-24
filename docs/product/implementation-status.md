@@ -284,3 +284,12 @@ syntax is recorded without claiming provider-resolved/effective model use. Nativ
 workflow and real-provider consumption acceptance remain NOT_RUN. OD-M2-01 remains a
 separate owner decision under accepted ADR0034. The existing live installation, host,
 authority, sessions, provider configuration and credentials were not changed.
+
+## M2 + M3 integration — 2026-10-24
+
+One branch (`integration/m2-m3`) carries M2 PR #22 and the corrected M3 PR #23 with both histories. Result:
+`CODE_INTEGRATED`, `ENGINEERING_TESTS_PASSED`, `SECURITY_REVIEW_PENDING`, `RELEASE_BLOCKED` — see the
+[integration record](../acceptance/integration-m2-m3-2026-10-24.md): 13 of 13 isolated desktop scenarios (Native and
+Managed fixture together), Rust, frontend, Python and real-SDK suites green, production package free of fixture
+markers. Both independent reviews of M3 returned FAIL and the fixes after the second are unreviewed; ADR0053–0056,
+the history policy and real-provider evidence are the owner's. Nothing was installed or migrated.

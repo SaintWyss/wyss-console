@@ -1,86 +1,22 @@
 [
- [
-  "fs-baseline"
- ],
- [
-  "click",
-  80,
-  467
- ],
- [
-  "wait",
-  2
- ],
- [
-  "click",
-  640,
-  356
- ],
- [
-  "wait",
-  7
- ],
- [
-  "click",
-  857,
-  490
- ],
- [
-  "type",
-  "Run"
- ],
- [
-  "key",
-  "space"
- ],
- [
-  "type",
-  "it"
- ],
- [
-  "wait",
-  1
- ],
- [
-  "click",
-  276,
-  549
- ],
- [
-  "wait",
-  8
- ],
- [
-  "shot",
-  "01-held"
- ],
- [
-  "click",
-  384,
-  794
- ],
- [
-  "wait",
-  5
- ],
- [
-  "shot",
-  "02-turn-cancelled"
- ],
- [
-  "m3-expect-no-file",
-  "third.txt"
- ],
- [
-  "m3-expect-no-path",
-  "m3-history"
- ],
- [
-  "fs-tree",
-  "final"
- ],
- [
-  "fs-compare",
-  "installed-console-untouched"
- ]
+  ["fs-baseline"],
+  ["click", 80, 467],
+  ["wait", 2],
+  ["click", 640, 356],
+  ["wait", 7],
+  ["click", 857, 490],
+  ["type", "Run"],
+  ["key", "space"],
+  ["type", "it"],
+  ["wait", 1],
+  ["click", 276, 549],
+  ["wait", 8],
+  ["shot", "01-held"],
+  ["click", 384, 794],
+  ["wait", 5],
+  ["shot", "02-turn-cancelled"],
+  ["m3-expect-no-file", "third.txt"],
+  ["m3-expect-no-path", "m3-history"],
+  ["fs-tree", "final"],
+  ["fs-compare", "installed-console-untouched"]
 ]

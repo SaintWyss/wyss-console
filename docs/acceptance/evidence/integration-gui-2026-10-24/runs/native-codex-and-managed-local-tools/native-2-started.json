@@ -1,0 +1,13 @@
+[
+  {
+    "id": "13557795e04e427f8a1fdad319867710",
+    "restart_of": null,
+    "terminal_id": "ef9ced51-da7c-412c-96c4-040e890a948e",
+    "agent_id": "codex",
+    "state": "running",
+    "version": "codex-cli 0.159.0",
+    "profile": null,
+    "restarts": 0,
+    "error": null
+  }
+]

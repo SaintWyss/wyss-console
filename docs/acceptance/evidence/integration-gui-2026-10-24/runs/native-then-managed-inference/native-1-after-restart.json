@@ -1,0 +1,32 @@
+[
+  {
+    "id": "2362fc7f12a24370bdcf68b9ba9dd4cf",
+    "restart_of": null,
+    "terminal_id": null,
+    "agent_id": "claude_code",
+    "state": "stopped",
+    "version": "2.1.309 (Claude Code)",
+    "profile": {
+      "id": "template-review",
+      "name": "Review, read only",
+      "version": 0
+    },
+    "restarts": 0,
+    "error": null
+  },
+  {
+    "id": "bf88c7c4c41247b2b40d1f345fa466d5",
+    "restart_of": "2362fc7f12a24370bdcf68b9ba9dd4cf",
+    "terminal_id": "9b20ac1c-d47b-4546-af7d-7af9259eb495",
+    "agent_id": "claude_code",
+    "state": "running",
+    "version": "2.1.309 (Claude Code)",
+    "profile": {
+      "id": "template-review",
+      "name": "Review, read only",
+      "version": 0
+    },
+    "restarts": 1,
+    "error": null
+  }
+]

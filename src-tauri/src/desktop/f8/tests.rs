@@ -265,7 +265,17 @@ fn only_the_command_line_selects_an_authority_and_the_entry_points_name_no_conne
             );
         }
     }
-    assert!(include_str!("../../main.rs").contains("f8_from_arguments(std::env::args_os()"));
+    // The command line reaches that one function whole: in the package, `arguments` is exactly
+    // `args_os().skip(1)`; only a build with the M3 fixture feature first takes out the fixture
+    // host's own `--m3-fixture-*` arguments, and that feature is not in the package.
+    let main = include_str!("../../main.rs");
+    assert!(main.contains("wyss_console::f8_from_arguments(arguments)"));
+    assert!(main.contains(
+        "#[cfg(not(feature = \"m3-fixture\"))]\n        let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();"
+    ));
+    assert!(main.contains(
+        "#[cfg(feature = \"m3-fixture\")]\n        let (fixture, arguments) = m3_fixture::take(std::env::args_os().skip(1));"
+    ));
     // Nothing else reads the selection: no environment variable names an authority, a socket
     // or a protocol.
     let select = include_str!("../select.rs");

@@ -1,0 +1,83 @@
+{
+  "scenarios": {
+    "native-then-managed-inference": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 63.1,
+      "ok": true
+    },
+    "native-codex-and-managed-local-tools": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 66.7,
+      "ok": true
+    },
+    "managed-cancel-turn": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 39.2,
+      "ok": true
+    },
+    "managed-recovery-after-stop": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 62.1,
+      "ok": true
+    },
+    "m2-edit-undo-then-managed-inference": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 61.4,
+      "ok": true
+    },
+    "managed-refused-native-still-works": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 31.6,
+      "ok": true
+    },
+    "m2-native-preview-start": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 26.4,
+      "ok": true
+    },
+    "m2-native-restart": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 33.4,
+      "ok": true
+    },
+    "m2-config-edit-cancel": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 27.2,
+      "ok": true
+    },
+    "m2-config-edit-apply": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 32.0,
+      "ok": true
+    },
+    "m2-config-edit-undo-apply": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 44.0,
+      "ok": true
+    },
+    "m2-config-template-export": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 41.2,
+      "ok": true
+    },
+    "m2-config-template-import-undo": {
+      "exit": 0,
+      "leftovers": [],
+      "seconds": 110.8,
+      "ok": true
+    }
+  },
+  "all_ok": true
+}
