@@ -11,22 +11,32 @@
 //! - an administrator's managed policy for Claude Code (`/etc/claude-code`) is never hidden or
 //!   overridden: its mere presence makes the runtime unavailable, because it can add hooks and
 //!   MCP servers that no option of the SDK can turn off (probe matrix, `managed` cases);
-//! - the credential, if any, is a file of this user, mode 0600, read once and handed to the
-//!   bridge in memory. It is never in an environment, a command line or a log.
+//! - the bridge and the CLI run in a network namespace with a loopback and nothing else. The only
+//!   route out is the unix socket of a credential broker, a second owned process which holds the
+//!   credential (if there is one), applies the request policy again outside the sandbox the model's
+//!   process lives in, and connects only to a closed set of origins (`Origin`). The credential is
+//!   handed to the broker's stdin once and is never in an environment, a command line, a log or a
+//!   frame of the bridge. Where a credential would come from is not decided (`credential`): this
+//!   build has no source of a real one;
+//! - starting is refused unless an `Admission` can be made: in a production build, only when every
+//!   gate of `m3::gate` is open.
 use super::{
+    admission::Admission,
+    credential::{ApiKey, CredentialSource, NoCredential},
     exec::{ActionExecutor, SandboxExecutor},
     sandbox::{Sandbox, path_is_plain},
     worker::{ClaudeConfig, ClaudeWorker, Identity},
 };
 use crate::{
-    adapters::claude::{Profile, frames::ApiKey, pins},
+    adapters::claude::{Profile, frames::BrokerToken, pins},
     contracts::control::{ControlError as E, ControlResult},
     f8::{
-        engine::StopState,
+        engine::{Attachment, Containment, StopState, Worker},
         ownership::{ContainmentPolicy, Grace},
         process_worker::DeferredProcessWorker,
     },
 };
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -37,10 +47,14 @@ use std::{
     time::Instant,
 };
 
-pub const BRIDGE_FILES: [(&str, &str); 3] = [
+pub const BRIDGE_FILES: [(&str, &str); 4] = [
     (
         "api_tap.py",
         include_str!("../../../claude-bridge/api_tap.py"),
+    ),
+    (
+        "broker.py",
+        include_str!("../../../claude-bridge/broker.py"),
     ),
     (
         "bridge.py",
@@ -55,6 +69,9 @@ pub const POLICY_DIR: &str = "/etc/claude-code";
 /// Where the provider process sees its own directories.
 pub const SANDBOX_HOME: &str = "/home/wyss";
 pub const SANDBOX_CWD: &str = "/run/wyss/cwd";
+/// Where the broker's directory is seen from the broker (writable: it makes its socket there) and
+/// from the bridge (read-only: connecting to a socket needs no write to the filesystem).
+pub const BROKER_DIR: &str = "/run/wyss/broker";
 
 /// Why a launch is not possible: stable text for the GUI's "Unverified" explanation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -69,7 +86,6 @@ pub enum Unverified {
     RecordMismatch,
     UnlistedFile,
     ManagedPolicy,
-    Credential,
 }
 impl Unverified {
     pub const fn code(self) -> &'static str {
@@ -84,7 +100,26 @@ impl Unverified {
             Self::RecordMismatch => "record_mismatch",
             Self::UnlistedFile => "unlisted_file",
             Self::ManagedPolicy => "managed_policy_present",
-            Self::Credential => "credential_unusable",
+        }
+    }
+}
+
+/// Where the provider is: a closed set, never a string a client or a file can supply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// `https://api.anthropic.com`, the only origin a credential may ever be sent to.
+    Anthropic,
+    /// A plain-HTTP port on this machine, for a mock provider. It cannot carry a credential (the
+    /// broker refuses the combination) and exists only in test and fixture builds.
+    #[cfg(any(test, feature = "m3-fixture"))]
+    LoopbackPlain(u16),
+}
+impl Origin {
+    pub fn url(self) -> String {
+        match self {
+            Self::Anthropic => "https://api.anthropic.com".to_owned(),
+            #[cfg(any(test, feature = "m3-fixture"))]
+            Self::LoopbackPlain(port) => format!("http://127.0.0.1:{port}"),
         }
     }
 }
@@ -94,10 +129,8 @@ impl Unverified {
 pub struct ClaudeInstall {
     /// The virtual environment holding `claude-agent-sdk`.
     pub sdk_root: PathBuf,
-    /// A credential file: one line, mode 0600, owned by this user. Absent means none.
-    pub api_key_file: Option<PathBuf>,
-    /// The provider API base URL; `None` is the provider's own.
-    pub upstream: Option<String>,
+    /// The provider. Defaults to the real one.
+    pub origin: Origin,
     /// Where an administrator's Claude Code policy would live (tests point it elsewhere).
     pub policy_dir: PathBuf,
 }
@@ -105,8 +138,7 @@ impl ClaudeInstall {
     pub fn new(sdk_root: PathBuf) -> Self {
         Self {
             sdk_root,
-            api_key_file: None,
-            upstream: None,
+            origin: Origin::Anthropic,
             policy_dir: PathBuf::from(POLICY_DIR),
         }
     }
@@ -346,28 +378,6 @@ impl ClaudeInstall {
             cli_sha256: hex(digest),
         })
     }
-
-    pub fn read_key(&self) -> Result<Option<ApiKey>, Unverified> {
-        let Some(path) = &self.api_key_file else {
-            return Ok(None);
-        };
-        let mut f = fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_CLOEXEC)
-            .open(path)
-            .map_err(|_| Unverified::Credential)?;
-        let m = f.metadata().map_err(|_| Unverified::Credential)?;
-        if !m.is_file() || m.uid() != me() || m.mode() & 0o077 != 0 || m.len() == 0 || m.len() > 600
-        {
-            return Err(Unverified::Credential);
-        }
-        let mut text = String::new();
-        f.read_to_string(&mut text)
-            .map_err(|_| Unverified::Credential)?;
-        ApiKey::new(text.trim_end_matches('\n').to_owned())
-            .map(Some)
-            .map_err(|_| Unverified::Credential)
-    }
 }
 
 /// Writes the compiled-in bridge into a private directory named by its own digest and returns
@@ -457,44 +467,175 @@ pub fn session_dirs(state: &Path, managed_session: &str) -> ControlResult<(PathB
     Ok((home, cwd))
 }
 
+/// The directory of one Managed session's credential broker socket (private, mode 0700).
+pub fn broker_dir(state: &Path, managed_session: &str) -> ControlResult<PathBuf> {
+    if !crate::adapters::claude::frames::uuid_ok(managed_session) {
+        return Err(E::InvalidRequest);
+    }
+    let p = state.join("claude").join(managed_session).join("broker");
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&p)
+        .map_err(|_| E::UnsafePath)?;
+    let m = fs::symlink_metadata(&p).map_err(|_| E::UnsafePath)?;
+    if !m.is_dir() || m.uid() != me() || m.mode() & 0o077 != 0 {
+        return Err(E::UnsafePath);
+    }
+    Ok(p)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// Every gate must be open for a runtime to start.
+    Production,
+    /// Tests and the isolated fixture: nothing real is reached.
+    #[cfg(any(test, feature = "m3-fixture"))]
+    Fixture,
+}
+
 /// A verified installation, ready to start runtimes.
 pub struct ClaudeLauncher {
     verified: Verified,
     bridge_dir: PathBuf,
     state: PathBuf,
-    key: Option<ApiKey>,
-    upstream: Option<String>,
+    origin: Origin,
+    credential: Box<dyn CredentialSource>,
+    mode: Mode,
+}
+
+/// The bridge and the credential broker as one owned worker: bytes go to and from the bridge, the
+/// broker is stopped, reaped and watched with it, and its own few frames are consumed here.
+pub struct PairedWorker {
+    bridge: DeferredProcessWorker,
+    broker: DeferredProcessWorker,
+    broker_ready: bool,
+}
+impl PairedWorker {
+    fn broker_frames(&mut self) -> ControlResult<()> {
+        for frame in self.broker.inbound(4)? {
+            let v: serde_json::Value =
+                serde_json::from_slice(&frame).map_err(|_| E::TransportError)?;
+            match v["e"].as_str() {
+                Some("broker_ready") if !self.broker_ready => self.broker_ready = true,
+                // A refusal carries a fixed word; nothing else is believed or kept.
+                _ => return Err(E::TransportError),
+            }
+        }
+        Ok(())
+    }
+}
+impl Worker for PairedWorker {
+    fn preflight(&mut self, context: &Attachment) -> ControlResult<()> {
+        self.bridge.preflight(context)
+    }
+    fn send(&mut self, frame: &[u8]) -> ControlResult<()> {
+        self.bridge.send(frame)
+    }
+    fn send_critical(&mut self, frame: &[u8]) -> ControlResult<()> {
+        self.bridge.send_critical(frame)
+    }
+    fn flush(&mut self) -> ControlResult<()> {
+        self.broker.flush()?;
+        self.bridge.flush()
+    }
+    fn inbound(&mut self, max_frames: usize) -> ControlResult<Vec<Vec<u8>>> {
+        self.broker_frames()?;
+        self.bridge.inbound(max_frames)
+    }
+    fn has_exited(&mut self) -> bool {
+        // Either one ending unasked makes the runtime unusable: without the broker every request fails.
+        self.bridge.has_exited() || self.broker.has_exited()
+    }
+    fn begin_stop(&mut self, now: Instant) {
+        self.broker.begin_stop(now);
+        self.bridge.begin_stop(now);
+    }
+    fn poll_stop(&mut self, now: Instant) -> StopState {
+        match (self.bridge.poll_stop(now), self.broker.poll_stop(now)) {
+            (StopState::Reaped, StopState::Reaped) => StopState::Reaped,
+            (StopState::Stuck, _) | (_, StopState::Stuck) => StopState::Stuck,
+            _ => StopState::Pending,
+        }
+    }
+    fn descendants(&self) -> usize {
+        self.bridge.descendants() + self.broker.descendants()
+    }
+    fn containment(&mut self) -> Containment {
+        if self.bridge.containment() == Containment::PidNamespace
+            && self.broker.containment() == Containment::PidNamespace
+        {
+            Containment::PidNamespace
+        } else {
+            Containment::DirectChildOnly
+        }
+    }
+    fn pid_for_diagnostics(&self) -> Option<i32> {
+        self.bridge.pid_for_diagnostics()
+    }
 }
 
 impl ClaudeLauncher {
+    /// A launcher for a production build. It has no credential source and no admission: `start`
+    /// refuses until every gate of `m3::gate` is open and an accepted source exists.
     pub fn prepare(
         install: &ClaudeInstall,
         runtime: &Path,
         state: &Path,
     ) -> Result<Self, Unverified> {
+        Self::build(
+            install,
+            runtime,
+            state,
+            Box::new(NoCredential),
+            Mode::Production,
+        )
+    }
+    /// A launcher for tests and the isolated fixture, with its own credential source.
+    #[cfg(any(test, feature = "m3-fixture"))]
+    pub fn prepare_fixture(
+        install: &ClaudeInstall,
+        runtime: &Path,
+        state: &Path,
+        credential: Box<dyn CredentialSource>,
+    ) -> Result<Self, Unverified> {
+        Self::build(install, runtime, state, credential, Mode::Fixture)
+    }
+    fn build(
+        install: &ClaudeInstall,
+        runtime: &Path,
+        state: &Path,
+        credential: Box<dyn CredentialSource>,
+        mode: Mode,
+    ) -> Result<Self, Unverified> {
         let verified = install.verify()?;
-        let key = install.read_key()?;
         let bridge_dir = materialize_bridge(runtime).map_err(|_| Unverified::UnsafePath)?;
         Ok(Self {
             verified,
             bridge_dir,
             state: state.to_owned(),
-            key,
-            upstream: install.upstream.clone(),
+            origin: install.origin,
+            credential,
+            mode,
         })
     }
     pub fn verified(&self) -> &Verified {
         &self.verified
     }
-    pub fn has_credential(&self) -> bool {
-        self.key.is_some()
+    fn admission(&self, profile: Profile) -> ControlResult<Admission> {
+        match self.mode {
+            Mode::Production => Admission::production(profile).map_err(|_| E::GateDenied),
+            #[cfg(any(test, feature = "m3-fixture"))]
+            Mode::Fixture => Ok(Admission::fixture()),
+        }
     }
 
-    /// The command line of the bridge's namespace for one session.
-    pub fn command(&self, home: &Path, cwd: &Path) -> std::process::Command {
-        let mut sb = Sandbox::new(true);
+    /// The command line of the bridge's namespace for one session: a loopback and nothing else.
+    pub fn command(&self, home: &Path, cwd: &Path, broker: &Path) -> std::process::Command {
+        let mut sb = Sandbox::new(false);
         sb.ro_bind(&self.verified.sdk_root, &self.verified.sdk_root)
             .ro_bind(&self.bridge_dir, &self.bridge_dir)
+            .ro_bind(broker, Path::new(BROKER_DIR))
             .bind(home, Path::new(SANDBOX_HOME))
             .bind(cwd, Path::new(SANDBOX_CWD))
             .chdir(Path::new(SANDBOX_CWD))
@@ -513,9 +654,44 @@ impl ClaudeLauncher {
         )
     }
 
+    /// The command line of the credential broker: the network, the standard library and its own
+    /// directory, with nothing of the user's home or of the provider's state.
+    pub fn broker_command(&self, broker: &Path) -> std::process::Command {
+        let mut sb = Sandbox::new(true);
+        sb.ro_bind(&self.bridge_dir, &self.bridge_dir)
+            .bind(broker, Path::new(BROKER_DIR))
+            .chdir(Path::new(BROKER_DIR))
+            .setenv("PATH", "/usr/bin")
+            .setenv("LANG", "C.UTF-8")
+            .setenv("TMPDIR", "/tmp");
+        sb.command(
+            "/usr/bin/python3",
+            &[
+                "-I".into(),
+                self.bridge_dir.join("broker.py").into_os_string(),
+            ],
+        )
+    }
+
+    /// The one line the broker is configured with, on its stdin.
+    fn broker_frame(
+        &self,
+        token: &BrokerToken,
+        profile: Profile,
+        key: Option<&ApiKey>,
+    ) -> ControlResult<Vec<u8>> {
+        let mut v = json!({"v":1,"dir":BROKER_DIR,"token":token.as_str(),
+            "origin":self.origin.url(),"profile":profile.bridge_name()});
+        if let Some(k) = key {
+            v["api_key"] = json!(k.expose());
+        }
+        serde_json::to_vec(&v).map_err(|_| E::InvalidRequest)
+    }
+
     /// Starts one runtime of a Managed session (`identity` is the authority's own). `workspace` is the canonical folder a local-tools
     /// runtime acts on (the provider process never sees it); Inference has none. `conversation`
-    /// is the id this runtime mints for a new binding.
+    /// is the id this runtime mints for a new binding. Refused unless an `Admission` can be made
+    /// and, for the real provider, a credential source exists.
     pub fn start(
         &self,
         profile: Profile,
@@ -524,21 +700,51 @@ impl ClaudeLauncher {
         conversation: &str,
         pinned_model: Option<String>,
         effort: Option<String>,
-    ) -> ControlResult<ClaudeWorker<DeferredProcessWorker>> {
+    ) -> ControlResult<ClaudeWorker<PairedWorker>> {
+        let admission = self.admission(profile)?;
         if !crate::adapters::claude::frames::uuid_ok(conversation) {
             return Err(E::InvalidRequest);
         }
-        let (home, cwd) = session_dirs(&self.state, &identity.managed_session)?;
         let attachment_workspace = match (profile, workspace) {
             (Profile::LocalTools, Some(w)) if path_is_plain(Path::new(w)) => w.to_owned(),
             (Profile::Inference, None) => SANDBOX_CWD.to_owned(),
             _ => return Err(E::InvalidRequest),
         };
-        let inner = DeferredProcessWorker::spawn(
-            self.command(&home, &cwd),
+        let key = self.credential.key()?;
+        if key.is_none() && self.origin == Origin::Anthropic {
+            // The real provider without a credential would only fail later, and loudly.
+            return Err(E::GateDenied);
+        }
+        let (home, cwd) = session_dirs(&self.state, &identity.managed_session)?;
+        let broker_dir = broker_dir(&self.state, &identity.managed_session)?;
+        let token = BrokerToken::generate()?;
+        let frame = self.broker_frame(&token, profile, key.as_ref())?;
+        drop(key);
+        let mut broker = DeferredProcessWorker::spawn(
+            self.broker_command(&broker_dir),
             Grace::default(),
             ContainmentPolicy::DescendantsContained,
         )?;
+        if let Err(e) = broker.send(&frame) {
+            reap(&mut broker);
+            return Err(e);
+        }
+        let bridge = match DeferredProcessWorker::spawn(
+            self.command(&home, &cwd, &broker_dir),
+            Grace::default(),
+            ContainmentPolicy::DescendantsContained,
+        ) {
+            Ok(b) => b,
+            Err(e) => {
+                reap(&mut broker);
+                return Err(e);
+            }
+        };
+        let inner = PairedWorker {
+            bridge,
+            broker,
+            broker_ready: false,
+        };
         let executor: Box<dyn ActionExecutor> = match profile {
             Profile::LocalTools => Box::new(SandboxExecutor::new()),
             Profile::Inference => Box::new(NoExecutor),
@@ -552,18 +758,26 @@ impl ClaudeLauncher {
             session: conversation.to_owned(),
             pinned_model,
             effort,
-            upstream: self.upstream.clone(),
-            api_key: self.key.clone(),
+            broker_token: token,
+            admission,
             turn_timeout_s: 600,
             #[cfg(test)]
             attachment_profile: None,
         };
         ClaudeWorker::new(inner, cfg, executor).map_err(|(e, mut inner)| {
-            // The owned child is retained and reaped by the same bounded path as any other.
-            use crate::f8::engine::Worker;
+            // The owned children are retained and reaped by the same bounded path as any other.
             inner.begin_stop(Instant::now());
             e
         })
+    }
+}
+
+/// Stops a process this module started and has not handed on, within a short bound.
+fn reap(w: &mut DeferredProcessWorker) {
+    w.begin_stop(Instant::now());
+    let end = Instant::now() + std::time::Duration::from_secs(3);
+    while Instant::now() < end && w.poll_stop(Instant::now()) != StopState::Reaped {
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
 
@@ -587,9 +801,3 @@ impl ActionExecutor for NoExecutor {
 
 #[cfg(test)]
 mod tests;
-
-/// Test support: the SHA-256 the mock provider logs for a key it received.
-#[cfg(test)]
-pub(crate) fn tests_support_sha(key: &str) -> String {
-    hex(&Sha256::digest(key.as_bytes()))
-}

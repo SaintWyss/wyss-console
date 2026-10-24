@@ -6,10 +6,12 @@ body must be bounded JSON, and `tools` must be a subset of the profile's allowed
 violation is answered with 403 and never reaches the provider. Whatever the SDK reports
 about itself, this is what the provider receives.
 
-It also holds the upstream credential: the CLI is given a synthetic key and the tap swaps in
-the real one, so the CLI process environment never contains it. The synthetic key is minted per
-run and is also the tap's own password (`client_key`): the tap listens on the host's loopback,
-so without it any local process could spend the credential the tap injects.
+It holds no credential and has no route to the provider. The CLI runs in a network namespace
+with nothing but a loopback, the tap listens there, and what passes the checks is handed to the
+credential broker (`broker.py`) over a unix socket, which re-applies the same policy outside this
+sandbox, adds the credential and is the only process that connects to the provider. The CLI is
+given a per-run synthetic key that is also the tap's password (`client_key`), so nothing else that
+shares the loopback of the namespace can use it.
 
 Standard library only; one thread per connection; bounded body, bounded request count.
 """
@@ -17,8 +19,9 @@ Standard library only; one thread per connection; bounded body, bounded request 
 import hmac
 import http.client
 import json
+import socket
 import threading
-import urllib.parse
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MAX_BODY = 8 * 1024 * 1024
@@ -68,11 +71,36 @@ def check_request(path, body, allowed_tools, model=None):
     }
 
 
+class UnixHTTPConnection(http.client.HTTPConnection):
+    """HTTP over the broker's unix socket. A socket that is not there yet (the broker is still
+    starting) is retried briefly; anything else is the caller's error."""
+
+    def __init__(self, path, timeout=600):
+        super().__init__("localhost", timeout=timeout)
+        self._path = path
+
+    def connect(self):
+        last = None
+        for _ in range(30):
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(self.timeout)
+            try:
+                sock.connect(self._path)
+            except (FileNotFoundError, ConnectionRefusedError) as e:
+                sock.close()
+                last = e
+                time.sleep(0.1)
+                continue
+            self.sock = sock
+            return
+        raise last
+
+
 class ApiTap:
-    def __init__(self, *, upstream, allowed_tools, api_key=None, model=None, on_event=None, client_key=None):
-        self.upstream = urllib.parse.urlsplit(upstream)
+    def __init__(self, *, broker_socket, broker_token, allowed_tools, model=None, on_event=None, client_key=None):
+        self.broker_socket = broker_socket
+        self.broker_token = broker_token
         self.allowed_tools = frozenset(allowed_tools)
-        self.api_key = api_key
         self.client_key = client_key
         self.model = model
         self.on_event = on_event or (lambda e: None)
@@ -108,22 +136,21 @@ class ApiTap:
                 self.wfile.write(raw)
 
             def _forward(self, method, body):
-                up = outer.upstream
-                conn_cls = http.client.HTTPSConnection if up.scheme == "https" else http.client.HTTPConnection
-                conn = conn_cls(up.hostname, up.port, timeout=600)
+                conn = UnixHTTPConnection(outer.broker_socket)
+                # The CLI's own (synthetic) key never goes on; the broker adds the real one.
                 headers = {k: v for k, v in self.headers.items()
                            if k.lower() not in ("host", "content-length", "connection", "x-api-key", "authorization", "transfer-encoding")}
-                key = outer.api_key or self.headers.get("x-api-key")
-                if key:
-                    headers["x-api-key"] = key
+                headers["x-wyss-broker"] = outer.broker_token
                 if body is not None:
                     headers["content-length"] = str(len(body))
                 conn.request(method, self.path, body=body, headers=headers)
                 resp = conn.getresponse()
+                if resp.status == 403 and resp.getheader("x-wyss-violation"):
+                    outer.on_event({"e": "tap_violation", "why": "broker:" + resp.getheader("x-wyss-violation")[:100]})
                 self.send_response(resp.status)
                 streaming = "text/event-stream" in (resp.getheader("content-type") or "")
                 for k, v in resp.getheaders():
-                    if k.lower() in ("content-length", "transfer-encoding", "connection", "keep-alive"):
+                    if k.lower() in ("content-length", "transfer-encoding", "connection", "keep-alive", "x-wyss-violation"):
                         continue
                     self.send_header(k, v)
                 if streaming:
@@ -143,14 +170,30 @@ class ApiTap:
                     self.wfile.write(data)
                 conn.close()
 
+            def _method_not_allowed(self):
+                if self._authorized():
+                    self.close_connection = True
+                    self._refuse(405, "method")
+
+            do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = _method_not_allowed
+
             def do_POST(self):
                 if not self._authorized():
                     return
-                n = int(self.headers.get("content-length") or 0)
+                length = self.headers.get("content-length") or "0"
+                if self.headers.get("transfer-encoding") is not None or not length.isdigit() or len(length) > 9:
+                    outer.on_event({"e": "tap_violation", "why": "framing"})
+                    self.close_connection = True
+                    return self._refuse(400, "framing")
+                n = int(length)
                 if n > MAX_BODY:
                     outer.on_event({"e": "tap_violation", "why": "body_too_large"})
+                    self.close_connection = True
                     return self._refuse(413, "body")
                 raw = self.rfile.read(n) if n else b""
+                if len(raw) != n:
+                    self.close_connection = True
+                    return self._refuse(400, "framing")
                 with outer.lock:
                     outer.count += 1
                     over = outer.count > MAX_REQUESTS

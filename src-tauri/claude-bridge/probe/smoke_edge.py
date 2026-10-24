@@ -8,7 +8,7 @@ def run(name, script, interrupt_after_text=False):
     seen = []
     try:
         s.recv()
-        s.send(c="configure", profile="inference", cwd="/work/ws", session=SESSION, upstream="http://127.0.0.1:18080")
+        s.send(c="configure", profile="inference", cwd="/work/ws", session=SESSION, broker_token="abababababababababababababababababababababababababababababababab")
         s.until(lambda e: e["e"] == "ready")
         s.send(c="prompt", turn="t1", text="hi")
         if interrupt_after_text:

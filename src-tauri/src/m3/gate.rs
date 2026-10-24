@@ -16,6 +16,14 @@ pub const METRICS_POLICY_ACCEPTED: bool = false;
 /// has `CHECK(adapter_id='codex')` on `managed_runtimes` and `managed_runtime_launches`.
 pub const STORE_HOLDS_CLAUDE: bool = false;
 
+/// ADR0056 — how a provider credential reaches a Claude runtime. ADR0038 keeps keys sealed and
+/// never returns one; delivering one to a provider is a decision of its own. Until it is accepted
+/// no production code path can obtain a credential (`f8::claude::credential`).
+pub const CREDENTIAL_DELIVERY_ACCEPTED: bool = false;
+/// A reviewer other than the author inspected the final code and the network confinement of the
+/// runtime. Real-credential admission stays closed until this is recorded.
+pub const INDEPENDENT_REVIEW_PASSED: bool = false;
+
 /// Evidence that the exact provider build passed the qualification the profile needs. These
 /// are set by recording real-provider evidence in the acceptance record, never by fixtures.
 pub const REAL_PROVIDER_INFERENCE_PASSED: bool = false;
@@ -28,6 +36,8 @@ pub enum Blocker {
     RealProviderEvidenceMissing,
     Adr0054NotAccepted,
     MetricsPolicyNotAccepted,
+    CredentialDeliveryNotAccepted,
+    IndependentReviewMissing,
 }
 impl Blocker {
     pub const fn code(self) -> &'static str {
@@ -37,6 +47,8 @@ impl Blocker {
             Self::RealProviderEvidenceMissing => "real_provider_evidence_missing",
             Self::Adr0054NotAccepted => "adr0054_not_accepted",
             Self::MetricsPolicyNotAccepted => "metrics_policy_not_accepted",
+            Self::CredentialDeliveryNotAccepted => "credential_delivery_not_accepted",
+            Self::IndependentReviewMissing => "independent_review_missing",
         }
     }
 }
@@ -53,6 +65,7 @@ pub fn claude_inference_blockers() -> Vec<Blocker> {
     if !REAL_PROVIDER_INFERENCE_PASSED {
         b.push(Blocker::RealProviderEvidenceMissing);
     }
+    b.extend(credential_blockers());
     b
 }
 pub fn claude_local_tools_blockers() -> Vec<Blocker> {
@@ -65,6 +78,18 @@ pub fn claude_local_tools_blockers() -> Vec<Blocker> {
     }
     if !REAL_PROVIDER_LOCAL_TOOLS_PASSED {
         b.push(Blocker::RealProviderEvidenceMissing);
+    }
+    b.extend(credential_blockers());
+    b
+}
+/// What stands between a Claude runtime and a real provider credential.
+fn credential_blockers() -> Vec<Blocker> {
+    let mut b = Vec::new();
+    if !CREDENTIAL_DELIVERY_ACCEPTED {
+        b.push(Blocker::CredentialDeliveryNotAccepted);
+    }
+    if !INDEPENDENT_REVIEW_PASSED {
+        b.push(Blocker::IndependentReviewMissing);
     }
     b
 }
@@ -94,6 +119,7 @@ mod tests {
         // test, the acceptance record and the owner's decision together.
         assert!(!ADR0053_ACCEPTED && !ADR0054_ACCEPTED && !METRICS_POLICY_ACCEPTED);
         assert!(!STORE_HOLDS_CLAUDE);
+        assert!(!CREDENTIAL_DELIVERY_ACCEPTED && !INDEPENDENT_REVIEW_PASSED);
         assert!(!REAL_PROVIDER_INFERENCE_PASSED && !REAL_PROVIDER_LOCAL_TOOLS_PASSED);
         assert!(!claude_inference_blockers().is_empty());
         assert!(!claude_local_tools_blockers().is_empty());
@@ -115,6 +141,8 @@ mod tests {
             Blocker::RealProviderEvidenceMissing,
             Blocker::Adr0054NotAccepted,
             Blocker::MetricsPolicyNotAccepted,
+            Blocker::CredentialDeliveryNotAccepted,
+            Blocker::IndependentReviewMissing,
         ];
         let codes: std::collections::BTreeSet<_> = all.iter().map(|b| b.code()).collect();
         assert_eq!(codes.len(), all.len());

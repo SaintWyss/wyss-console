@@ -333,6 +333,8 @@
         "adr0053_not_accepted",
         "store_cannot_hold_claude",
         "real_provider_evidence_missing",
+        "credential_delivery_not_accepted",
+        "independent_review_missing",
         "sdk_not_configured"
       ]
     },
@@ -352,6 +354,8 @@
         "adr0053_not_accepted",
         "store_cannot_hold_claude",
         "real_provider_evidence_missing",
+        "credential_delivery_not_accepted",
+        "independent_review_missing",
         "sdk_not_configured"
       ]
     }

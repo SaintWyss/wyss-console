@@ -301,38 +301,36 @@ fn the_real_policy_directory_of_this_machine_is_the_default() {
 }
 
 #[test]
-fn the_credential_file_must_be_private_plain_and_non_empty() {
-    let d = dir();
-    let mut i = ClaudeInstall::new(d.clone());
-    assert!(i.read_key().unwrap().is_none());
-    let good = d.join("key");
-    fs::write(
-        &good,
-        format!("{}\n", ["sk", "-ant-api03-", "abc"].concat()),
-    )
-    .unwrap();
-    fs::set_permissions(&good, std::fs::Permissions::from_mode(0o600)).unwrap();
-    i.api_key_file = Some(good.clone());
-    assert!(i.read_key().unwrap().is_some());
-    fs::set_permissions(&good, std::fs::Permissions::from_mode(0o640)).unwrap();
-    assert_eq!(i.read_key().err(), Some(Unverified::Credential));
-    fs::set_permissions(&good, std::fs::Permissions::from_mode(0o600)).unwrap();
-    let link = d.join("keylink");
-    symlink(&good, &link).unwrap();
-    i.api_key_file = Some(link);
-    assert_eq!(i.read_key().err(), Some(Unverified::Credential));
-    let empty = d.join("empty");
-    fs::write(&empty, "").unwrap();
-    fs::set_permissions(&empty, std::fs::Permissions::from_mode(0o600)).unwrap();
-    i.api_key_file = Some(empty);
-    assert_eq!(i.read_key().err(), Some(Unverified::Credential));
-    let spaced = d.join("spaced");
-    fs::write(&spaced, "two words\n").unwrap();
-    fs::set_permissions(&spaced, std::fs::Permissions::from_mode(0o600)).unwrap();
-    i.api_key_file = Some(spaced);
-    assert_eq!(i.read_key().err(), Some(Unverified::Credential));
-    i.api_key_file = Some(d.join("missing"));
-    assert_eq!(i.read_key().err(), Some(Unverified::Credential));
+fn this_build_has_no_way_to_read_a_credential_from_disk() {
+    // ADR0038 does not authorize delivering a key to a provider and ADR0056 is only proposed: the
+    // install description has no credential file, the launcher no reader, the module no file access.
+    let source = include_str!("../launch.rs");
+    let code = source.split("#[cfg(test)]").next().unwrap();
+    for gone in [
+        "api_key_file",
+        "read_key",
+        "O_NOFOLLOW)\n            .open(path)",
+    ] {
+        assert!(
+            !code
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("//"))
+                .any(|l| l.contains(gone)),
+            "{gone}"
+        );
+    }
+    assert_eq!(
+        ClaudeInstall::new(PathBuf::from("/x")).origin,
+        Origin::Anthropic
+    );
+}
+
+#[test]
+fn the_bridge_files_include_the_broker_and_the_materialized_copy_is_exact() {
+    assert!(BRIDGE_FILES.iter().any(|(n, _)| *n == "broker.py"));
+    let parent = dir();
+    let d = materialize_bridge(&parent).unwrap();
+    assert!(d.join("broker.py").is_file());
 }
 
 #[test]
@@ -409,46 +407,81 @@ fn session_directories_are_private_per_managed_session_and_the_cwd_is_empty() {
     assert_eq!(session_dirs(&state, s).err(), Some(E::UnsafePath));
 }
 
-fn launcher(v: &Venv) -> (ClaudeLauncher, PathBuf, PathBuf) {
+fn launcher_in(
+    v: &Venv,
+    mode: Mode,
+    origin: Origin,
+    credential: Box<dyn CredentialSource>,
+) -> (ClaudeLauncher, PathBuf, PathBuf) {
     let (runtime, state) = (dir(), dir());
     let verified = verify(v).unwrap();
     let l = ClaudeLauncher {
         verified,
         bridge_dir: materialize_bridge(&runtime).unwrap(),
         state: state.clone(),
-        key: None,
-        upstream: None,
+        origin,
+        credential,
+        mode,
     };
     (l, runtime, state)
 }
+/// What the production constructor makes: no credential source, gates enforced.
+fn launcher(v: &Venv) -> (ClaudeLauncher, PathBuf, PathBuf) {
+    launcher_in(
+        v,
+        Mode::Production,
+        Origin::Anthropic,
+        Box::new(NoCredential),
+    )
+}
+/// A fixture launcher against a loopback mock, with no credential.
+fn fixture_launcher(v: &Venv) -> (ClaudeLauncher, PathBuf, PathBuf) {
+    launcher_in(
+        v,
+        Mode::Fixture,
+        Origin::LoopbackPlain(9),
+        Box::new(NoCredential),
+    )
+}
+
+fn args_of(c: &std::process::Command) -> Vec<String> {
+    c.get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect()
+}
 
 #[test]
-fn the_bridge_command_names_only_what_it_needs() {
+fn the_bridge_command_names_only_what_it_needs_and_has_no_network() {
     let v = venv();
     let (l, _, state) = launcher(&v);
-    let (home, cwd) = session_dirs(&state, "5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40").unwrap();
-    let c = l.command(&home, &cwd);
+    let sid = "5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40";
+    let (home, cwd) = session_dirs(&state, sid).unwrap();
+    let broker = broker_dir(&state, sid).unwrap();
+    let c = l.command(&home, &cwd, &broker);
     assert_eq!(c.get_program(), super::super::sandbox::BWRAP);
-    let args: Vec<String> = c
-        .get_args()
-        .map(|a| a.to_string_lossy().into_owned())
-        .collect();
+    let args = args_of(&c);
     let joined = args.join(" ");
     for must in [
         "--unshare-pid",
+        "--unshare-user",
+        "--unshare-net",
         "--die-with-parent",
         "--new-session",
         "--clearenv",
     ] {
         assert!(args.iter().any(|a| a == must), "{must}");
     }
-    // The provider needs the network, so it gets the host's; nothing else of the host.
-    assert!(!args.iter().any(|a| a == "--unshare-net"));
+    assert!(!args.iter().any(|a| a == "--unshare-user-try"));
+    // No DNS configuration either: there is nothing to resolve.
+    assert!(!joined.contains("resolv.conf") && !joined.contains("/etc/hosts"));
     assert!(joined.contains(&format!(
         "--ro-bind {} {}",
         v.root.display(),
         v.root.display()
     )));
+    // The broker's directory is read-only here: connecting to its socket needs no write.
+    assert!(joined.contains(&format!("--ro-bind {} {BROKER_DIR}", broker.display())));
+    assert!(!joined.contains(&format!("--bind {} {BROKER_DIR}", broker.display())));
     assert!(joined.contains(&format!("--bind {} {SANDBOX_HOME}", home.display())));
     assert!(joined.contains(&format!("--bind {} {SANDBOX_CWD}", cwd.display())));
     assert!(
@@ -456,7 +489,7 @@ fn the_bridge_command_names_only_what_it_needs() {
             && !joined.contains(".claude")
             && !joined.contains(".codex")
     );
-    for var in ["ANTHROPIC", "TOKEN", "SECRET", "DISPLAY", "DBUS"] {
+    for var in ["ANTHROPIC", "TOKEN", "SECRET", "DISPLAY", "DBUS", "API_KEY"] {
         assert!(!joined.contains(var), "{var}");
     }
     assert_eq!(
@@ -468,9 +501,65 @@ fn the_bridge_command_names_only_what_it_needs() {
 }
 
 #[test]
-fn start_refuses_a_profile_workspace_mismatch_before_any_process_exists() {
+fn the_broker_is_the_only_process_with_a_network_and_has_nothing_of_the_runtime() {
     let v = venv();
     let (l, _, state) = launcher(&v);
+    let sid = "5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40";
+    let (home, cwd) = session_dirs(&state, sid).unwrap();
+    let broker = broker_dir(&state, sid).unwrap();
+    let c = l.broker_command(&broker);
+    let args = args_of(&c);
+    let joined = args.join(" ");
+    assert!(
+        !args.iter().any(|a| a == "--unshare-net"),
+        "it has to reach the provider"
+    );
+    for must in [
+        "--unshare-pid",
+        "--unshare-user",
+        "--die-with-parent",
+        "--clearenv",
+    ] {
+        assert!(args.iter().any(|a| a == must), "{must}");
+    }
+    assert!(joined.contains(&format!("--bind {} {BROKER_DIR}", broker.display())));
+    assert!(joined.contains(&format!(
+        "--ro-bind {} {}",
+        l.bridge_dir.display(),
+        l.bridge_dir.display()
+    )));
+    // Not the SDK, not the provider's home, not the workspace: a standard-library script.
+    for absent in [
+        v.root.display().to_string(),
+        home.display().to_string(),
+        cwd.display().to_string(),
+    ] {
+        assert!(!joined.contains(&absent), "{absent}");
+    }
+    assert_eq!(args[args.len() - 3], "/usr/bin/python3");
+    assert_eq!(
+        args[args.len() - 1],
+        l.bridge_dir.join("broker.py").to_str().unwrap()
+    );
+    // The credential is on the broker's stdin, in nothing a process listing shows.
+    let token = BrokerToken::new("ab".repeat(32)).unwrap();
+    let key = ApiKey::new(["sk", "-ant-api03-", "ZZZSECRETZZZ"].concat()).unwrap();
+    let frame = String::from_utf8(
+        l.broker_frame(&token, Profile::Inference, Some(&key))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(frame.contains("ZZZSECRETZZZ") && frame.contains("api.anthropic.com"));
+    assert!(!joined.contains("ZZZSECRETZZZ"));
+    let none =
+        String::from_utf8(l.broker_frame(&token, Profile::LocalTools, None).unwrap()).unwrap();
+    assert!(!none.contains("api_key") && none.contains("local_tools"));
+}
+
+#[test]
+fn start_refuses_a_profile_workspace_mismatch_before_any_process_exists() {
+    let v = venv();
+    let (l, _, state) = fixture_launcher(&v);
     let s = "5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40";
     let c = "7a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
     let id = |m: &str| Identity {
@@ -533,4 +622,72 @@ fn the_real_installation_verifies_against_the_real_pin() {
         ("0.2.173", "2.1.309")
     );
     assert_eq!(ok.cli_sha256, pins::BUILDS[0].cli_sha256);
+}
+
+struct Counting(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+impl CredentialSource for Counting {
+    fn key(&self) -> ControlResult<Option<ApiKey>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Some(
+            ApiKey::new(["sk", "-ant-api03-", "synthetic-for-a-test"].concat()).unwrap(),
+        ))
+    }
+}
+
+const SID: &str = "5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40";
+const CONV: &str = "7a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+fn ident() -> Identity {
+    Identity {
+        managed_session: SID.into(),
+        runtime_instance: "r".into(),
+        generation: 1,
+    }
+}
+
+/// The finding behind this test: the gates were shown in a window and enforced nowhere.
+#[test]
+fn a_production_launcher_cannot_start_a_claude_runtime_while_any_gate_is_closed() {
+    let v = venv();
+    let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (l, _, state) = launcher_in(
+        &v,
+        Mode::Production,
+        Origin::Anthropic,
+        Box::new(Counting(asked.clone())),
+    );
+    for (profile, ws) in [
+        (Profile::Inference, None),
+        (Profile::LocalTools, Some("/w")),
+    ] {
+        assert_eq!(
+            l.start(profile, ws, &ident(), CONV, None, None).err(),
+            Some(E::GateDenied),
+            "{profile:?}"
+        );
+    }
+    // Refused before anything exists: no credential was asked for, no directory or process made.
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(!state.join("claude").exists());
+}
+
+#[test]
+fn the_real_provider_without_a_credential_is_refused_even_by_a_fixture_launcher() {
+    let v = venv();
+    let (l, _, state) = launcher_in(&v, Mode::Fixture, Origin::Anthropic, Box::new(NoCredential));
+    assert_eq!(
+        l.start(Profile::Inference, None, &ident(), CONV, None, None)
+            .err(),
+        Some(E::GateDenied)
+    );
+    assert!(!state.join("claude").exists());
+}
+
+#[test]
+fn the_broker_directory_is_private_and_a_loose_one_is_refused() {
+    let state = dir();
+    let p = broker_dir(&state, SID).unwrap();
+    assert_eq!(fs::metadata(&p).unwrap().mode() & 0o777, 0o700);
+    assert_eq!(broker_dir(&state, "../x"), Err(E::InvalidRequest));
+    fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(broker_dir(&state, SID), Err(E::UnsafePath));
 }

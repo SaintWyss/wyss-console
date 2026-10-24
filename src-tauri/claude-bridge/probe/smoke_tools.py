@@ -7,7 +7,7 @@ def scenario(name, script, decide):
     seen = []
     try:
         s.recv()
-        s.send(c="configure", profile="local_tools", cwd="/work/ws", session="5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40", upstream="http://127.0.0.1:18080")
+        s.send(c="configure", profile="local_tools", cwd="/work/ws", session="5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40", broker_token="abababababababababababababababababababababababababababababababab")
         ready = s.until(lambda e: e["e"] in ("ready", "fatal"))
         att = ready.get("attestation", {})
         print("[%s] ready mcp_tools=%s mcp=%s" % (name, att.get("mcp_tools"), att.get("mcp_servers")))

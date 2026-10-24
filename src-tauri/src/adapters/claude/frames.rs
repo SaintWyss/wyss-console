@@ -391,20 +391,33 @@ impl ActionOutcome {
     }
 }
 
-/// Credential handed to the bridge once, in `configure`. It never appears in `Debug`.
+/// The password the bridge's tap must present to the credential broker: 32 random bytes, hex.
+/// It authorizes nothing but this runtime's own route to the broker, and is never the credential.
 #[derive(Clone, PartialEq, Eq)]
-pub struct ApiKey(String);
-impl ApiKey {
+pub struct BrokerToken(String);
+impl BrokerToken {
     pub fn new(value: String) -> ControlResult<Self> {
-        if value.is_empty() || value.len() > 512 || !value.bytes().all(|b| b.is_ascii_graphic()) {
+        if value.len() != 64
+            || !value
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
             return Err(E::InvalidRequest);
         }
         Ok(Self(value))
     }
+    pub fn generate() -> ControlResult<Self> {
+        let mut raw = [0u8; 32];
+        getrandom::fill(&mut raw).map_err(|_| E::StorageUnavailable)?;
+        Self::new(raw.iter().map(|b| format!("{b:02x}")).collect())
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
-impl std::fmt::Debug for ApiKey {
+impl std::fmt::Debug for BrokerToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("ApiKey(<redacted>)")
+        f.write_str("BrokerToken(<redacted>)")
     }
 }
 
@@ -417,8 +430,9 @@ pub struct Configure {
     pub resume: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
-    pub upstream: Option<String>,
-    pub api_key: Option<ApiKey>,
+    /// How the tap authenticates to the credential broker. The bridge is given no credential and
+    /// no address of the provider: it has neither field.
+    pub broker_token: BrokerToken,
     pub turn_timeout_s: u32,
 }
 
@@ -460,16 +474,9 @@ impl Command {
                 {
                     return bad();
                 }
-                let mut v = json!({"v":BRIDGE_PROTOCOL,"c":"configure","profile":c.profile.bridge_name(),
+                json!({"v":BRIDGE_PROTOCOL,"c":"configure","profile":c.profile.bridge_name(),
                     "cwd":c.cwd,"session":c.session,"resume":c.resume,"model":c.model,"effort":c.effort,
-                    "turn_timeout_s":c.turn_timeout_s});
-                if let Some(u) = &c.upstream {
-                    v["upstream"] = json!(u);
-                }
-                if let Some(k) = &c.api_key {
-                    v["api_key"] = json!(k.0);
-                }
-                v
+                    "broker_token":c.broker_token.as_str(),"turn_timeout_s":c.turn_timeout_s})
             }
             Self::Bind { resume } => {
                 if !uuid_ok(resume) {

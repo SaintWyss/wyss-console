@@ -103,8 +103,9 @@ impl Host {
             session: CONV.into(),
             pinned_model: None,
             effort: None,
-            upstream: None,
-            api_key: None,
+            broker_token: crate::adapters::claude::frames::BrokerToken::new("ab".repeat(32))
+                .unwrap(),
+            admission: crate::f8::claude::admission::Admission::fixture(),
             turn_timeout_s: 600,
             attachment_profile: None,
         };

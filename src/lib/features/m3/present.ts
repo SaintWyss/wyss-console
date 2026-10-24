@@ -35,6 +35,10 @@ const REASON: Record<string, string> = {
     'The authority’s store only accepts Codex runtimes; holding a Claude runtime needs a store change the owner has not approved.',
   real_provider_evidence_missing:
     'No authorized run against the real provider has been recorded for this profile.',
+  credential_delivery_not_accepted:
+    'How a provider key would reach a Claude runtime has not been decided; keys stay sealed and none is delivered.',
+  independent_review_missing:
+    'No reviewer other than the author has inspected this runtime and its network confinement.',
   adr0054_not_accepted:
     'Choosing a model or reasoning effort for a Managed turn needs a decision the owner has not accepted.',
   metrics_policy_not_accepted:

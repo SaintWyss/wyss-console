@@ -2,8 +2,8 @@
 
 Nothing here is configurable by the authority's client: the authority picks a profile *name*
 and the bridge builds the options from this file, which the authority has hashed. The sets
-come from the exact-build experiments in `probe/matrix*.py` (see
-docs/research/claude-sdk-isolation-evidence-2026-10-23.md): each option exists because the
+come from the exact-build experiments in `probe/matrix*.py` (results: the "Results of E1-E9"
+section of docs/research/claude-managed-feasibility-2026-10-23.md): each option exists because the
 experiment showed a hidden effect path that the option closes, and `disallowed_tools` alone
 was shown NOT to close hooks, MCP launch, apiKeyHelper or memory loading.
 """
@@ -76,8 +76,9 @@ def option_kwargs(profile, *, cwd, session_id=None, resume=None, model=None, eff
     return kw
 
 # Environment the CLI is started with, merged over the (already empty) bridge environment.
-# None of these is a credential. They stop the CLI contacting anything but the configured
-# API base URL (which is the loopback tap).
+# None of these is a credential. They ask the CLI for no optional traffic; they do not confine it.
+# What confines it is the network namespace it runs in (a loopback and nothing else, see
+# `f8/claude/launch.rs`), which a test observes.
 CLI_ENV = {
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "DISABLE_AUTOUPDATER": "1",
@@ -87,6 +88,9 @@ CLI_ENV = {
 }
 # The key the CLI is given is minted per run (`bridge.py`) and is the tap's password; only its shape is
 # fixed. Written in two pieces so no source line looks like a credential to a scanner; it is not one.
+# Where the credential broker's socket is seen from inside the sandbox of the bridge and the CLI.
+BROKER_DIR = "/run/wyss/broker"
+BROKER_SOCKET = BROKER_DIR + "/broker.sock"
 SYNTHETIC_PREFIX = "sk" + "-ant-api03-wyss-tap-"
 
 

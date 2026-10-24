@@ -37,7 +37,7 @@ def run(coro):
 
 
 SESSION = "5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40"
-CONF = {"c": "configure", "profile": "inference", "cwd": "/work", "session": SESSION, "upstream": "http://127.0.0.1:9"}
+CONF = {"c": "configure", "profile": "inference", "cwd": "/work", "session": SESSION, "broker_token": "abababababababababababababababababababababababababababababababab"}
 
 
 class Framing(unittest.TestCase):
@@ -97,11 +97,26 @@ class Ready(unittest.TestCase):
         self.assertTrue(opts.env["ANTHROPIC_BASE_URL"].startswith("http://127.0.0.1:"))
         self.assertNotIn("sk-", json.dumps(att))
 
-    def test_real_key_never_reaches_the_cli_environment(self):
+    def test_the_bridge_has_no_credential_to_leak_and_refuses_one(self):
+        # The credential goes to the broker, never here: a frame that carries one is not a frame.
         sdk = F.make_sdk()
-        run(drive(frames({**CONF, "api_key": "sk-REAL-SECRET"}), sdk))
-        opts = F.FakeClient.instances[0].options
-        self.assertNotIn("sk-REAL-SECRET", json.dumps(opts.env))
+        rc, ev, _ = run(drive(frames({**CONF, "api_key": "sk-REAL-SECRET"}), sdk))
+        self.assertEqual((rc, ev[-1]["e"]), (3, "fatal"))
+        self.assertNotIn("sk-REAL-SECRET", json.dumps(ev))
+        self.assertFalse(F.FakeClient.instances and "sk-REAL-SECRET" in json.dumps(F.FakeClient.instances[-1].options.env))
+
+    def test_a_missing_or_malformed_broker_token_is_fatal(self):
+        for bad in (None, "", "ab" * 31, "zz" * 32, 7):
+            conf = {k: v for k, v in CONF.items() if k != "broker_token"}
+            if bad is not None:
+                conf["broker_token"] = bad
+            rc, ev, _ = run(drive(frames(conf)))
+            self.assertEqual((rc, ev[-1]["e"], ev[-1]["code"]), (3, "fatal", "bad_broker_token"), bad)
+
+    def test_the_tap_points_at_the_broker_socket_and_nothing_else(self):
+        sdk = F.make_sdk()
+        _, _, b = run(drive(frames(CONF), sdk))
+        self.assertEqual((b.tap.broker_socket, b.tap.broker_token), (B.profiles.BROKER_SOCKET, "ab" * 32))
 
     def test_local_tools_registers_only_authority_tools(self):
         sdk = F.make_sdk()

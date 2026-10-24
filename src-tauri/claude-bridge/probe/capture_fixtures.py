@@ -12,7 +12,7 @@ def record(name, profile, script, decide=None, prompt="say hi", extra_cmds=()):
     frames = []
     try:
         frames.append(s.recv())
-        s.send(c="configure", profile=profile, cwd="/work/ws", session="5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40", upstream="http://127.0.0.1:18080")
+        s.send(c="configure", profile=profile, cwd="/work/ws", session="5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40", broker_token="abababababababababababababababababababababababababababababababab")
         s.until(lambda e: e["e"] in ("ready", "fatal"), collect=frames)
         s.send(c="prompt", turn="turn-1", text=prompt)
         while True:

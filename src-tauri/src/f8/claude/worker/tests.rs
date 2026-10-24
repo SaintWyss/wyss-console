@@ -43,8 +43,8 @@ fn config(profile: Profile, workspace: &str) -> ClaudeConfig {
         session: SESSION.into(),
         pinned_model: None,
         effort: None,
-        upstream: None,
-        api_key: None,
+        broker_token: crate::adapters::claude::frames::BrokerToken::new("ab".repeat(32)).unwrap(),
+        admission: crate::f8::claude::admission::Admission::fixture(),
         turn_timeout_s: 600,
         attachment_profile: None,
     }
@@ -159,7 +159,63 @@ fn configure_is_sent_once_with_the_frozen_profile_and_the_minted_session() {
     assert_eq!(sent[0]["session"], SESSION);
     assert!(uuid_ok(SESSION));
     assert_eq!(sent[0]["model"], Value::Null);
-    assert!(sent[0].get("api_key").is_none());
+    // The bridge's frame has no field for a credential or for the provider's address.
+    assert!(sent[0].get("api_key").is_none() && sent[0].get("upstream").is_none());
+    assert_eq!(sent[0]["broker_token"].as_str().unwrap().len(), 64);
+}
+
+#[test]
+fn a_worker_whose_admission_is_for_another_profile_is_not_made_and_nothing_is_sent() {
+    let bridge = Bridge::default();
+    let mut c = config(Profile::LocalTools, "/w");
+    c.admission = Admission::production_unchecked(Profile::Inference);
+    let (e, _w) = ClaudeWorker::new(bridge.clone(), c, Box::new(Exec::default()))
+        .err()
+        .expect("refused");
+    assert_eq!(e, E::GateDenied);
+    assert!(bridge.sent().is_empty(), "the bridge was never configured");
+    // The same admission for the right profile is accepted.
+    let mut c = config(Profile::Inference, "/w");
+    c.admission = Admission::production_unchecked(Profile::Inference);
+    assert!(ClaudeWorker::new(bridge, c, Box::new(Exec::default())).is_ok());
+}
+
+/// The runtime-start selection was validated by a function nothing called: found by the review.
+#[test]
+fn a_model_or_effort_chosen_at_runtime_start_needs_the_decision_and_a_listed_level() {
+    let bridge = Bridge::default();
+    // A production-kind admission is the only kind that is held to the gate.
+    for (model, effort) in [(None, Some("high")), (Some("claude-opus-5-5"), None)] {
+        let mut c = config(Profile::Inference, "/w");
+        c.admission = Admission::production_unchecked(Profile::Inference);
+        c.pinned_model = model.map(str::to_owned);
+        c.effort = effort.map(str::to_owned);
+        let (e, _w) = ClaudeWorker::new(bridge.clone(), c, Box::new(Exec::default()))
+            .err()
+            .expect("refused");
+        assert_eq!(e, E::GateDenied, "{model:?} {effort:?}");
+    }
+    assert!(bridge.sent().is_empty());
+    // With no selection at all the same admission is fine.
+    let mut c = config(Profile::Inference, "/w");
+    c.admission = Admission::production_unchecked(Profile::Inference);
+    assert!(ClaudeWorker::new(bridge.clone(), c, Box::new(Exec::default())).is_ok());
+    // In the fixture a listed level passes and an unlisted one never does.
+    for level in ["low", "medium", "high", "xhigh", "max"] {
+        let mut c = config(Profile::Inference, "/w");
+        c.effort = Some(level.into());
+        assert!(ClaudeWorker::new(Bridge::default(), c, Box::new(Exec::default())).is_ok());
+    }
+    for level in ["ultra", "HIGH", "", "high ", "0"] {
+        let mut c = config(Profile::Inference, "/w");
+        c.effort = Some(level.into());
+        let refused = ClaudeWorker::new(Bridge::default(), c, Box::new(Exec::default()));
+        assert_eq!(
+            refused.err().map(|(e, _)| e),
+            Some(E::InvalidRequest),
+            "{level:?}"
+        );
+    }
 }
 
 #[test]
@@ -1283,7 +1339,7 @@ fn the_report_holds_no_prompt_output_or_credential() {
     let ws = workspace();
     let bridge = Bridge::default();
     let mut c = config(Profile::Inference, &ws);
-    c.api_key = Some(ApiKey::new("sk-ant-SECRETKEYVALUE".into()).unwrap());
+    c.broker_token = BrokerToken::new("cd".repeat(32)).unwrap();
     let mut w = ClaudeWorker::new(bridge.clone(), c, Box::new(Exec::default()))
         .ok()
         .unwrap();
@@ -1304,7 +1360,7 @@ fn the_report_holds_no_prompt_output_or_credential() {
     )
     .unwrap();
     let report = serde_json::to_string(&w.provider_report().unwrap()).unwrap();
-    for secret in ["PRIVATE PROMPT TEXT", "SECRETKEYVALUE", "sk-ant"] {
+    for secret in ["PRIVATE PROMPT TEXT", "cdcdcdcd", "sk-ant"] {
         assert!(!report.contains(secret), "{secret}");
     }
 }
@@ -1777,4 +1833,260 @@ fn the_action_log_is_bounded_and_holds_no_action_content() {
     assert_eq!(rep.actions.len(), 32);
     assert_eq!(rep.actions[0].item, "claude-act-8");
     assert!(!serde_json::to_string(&rep).unwrap().contains("SECRET-"));
+}
+
+// ---- the usage history's producer ----------------------------------------------------------
+mod history_wiring {
+    use super::*;
+    use crate::m3::history::{
+        History, HistoryError, Limits, Record as HRecord, Recorder, SinkState,
+    };
+    use std::{
+        os::unix::fs::DirBuilderExt,
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    };
+
+    fn parent() -> PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "wyss-m3-wiring-{}",
+            crate::control::store::uuid().as_str()
+        ));
+        std::fs::DirBuilder::new().mode(0o700).create(&p).unwrap();
+        std::fs::canonicalize(p).unwrap()
+    }
+    /// A worker whose usage goes to a real history store in a private directory. The store is
+    /// opened through the test-only door: the policy gate is closed in this source.
+    fn recording(limits: Limits) -> (Rig, HistorySink, PathBuf) {
+        let parent = parent();
+        History::enable_with_gate(&parent).unwrap();
+        let store = History::open_with(&parent, limits).unwrap();
+        let sink: HistorySink = Arc::new(Mutex::new(Recorder::with(store)));
+        let mut r = rig(Profile::Inference);
+        r.w = std::mem::replace(
+            &mut r.w,
+            ClaudeWorker::new(
+                Bridge::default(),
+                config(Profile::Inference, &r.ws),
+                Box::new(Exec::default()),
+            )
+            .ok()
+            .unwrap(),
+        )
+        .with_history(sink.clone());
+        (r, sink, parent)
+    }
+    fn records(sink: &HistorySink) -> Vec<HRecord> {
+        sink.lock()
+            .unwrap()
+            .store()
+            .unwrap()
+            .page(0, 100)
+            .unwrap()
+            .into_iter()
+            .map(|(_, r)| r)
+            .collect()
+    }
+    fn usage_frame(turn: &str) -> Value {
+        let mut ev = fixture_event(INFERENCE, "usage");
+        ev["turn"] = json!(turn);
+        ev
+    }
+    fn finish(r: &mut Rig, turn: &str) {
+        let mut result = fixture_event(INFERENCE, "turn_result");
+        result["turn"] = json!(turn);
+        r.bridge.push(result);
+        r.bridge.push(json!({"v":1,"e":"turn_idle","turn":turn}));
+        assert_eq!(r.kinds(), ["turn_completed"]);
+    }
+
+    #[test]
+    fn a_finished_turns_provider_reported_usage_is_recorded_once_and_never_while_it_runs() {
+        let (mut r, sink, _) = recording(Limits::default());
+        r.ready(INFERENCE);
+        r.bind();
+        r.start_turn("t1");
+        r.attest_turn(INFERENCE, "t1");
+        r.bridge.push(usage_frame("t1"));
+        r.notices();
+        // Provisional figures are not history.
+        assert!(records(&sink).is_empty());
+        finish(&mut r, "t1");
+        let got = records(&sink);
+        assert_eq!(got.len(), 1);
+        let rec = &got[0];
+        assert_eq!(
+            (
+                rec.provider,
+                rec.turn_id.as_str(),
+                rec.provider_build.as_str()
+            ),
+            ("claude", "t1", "2.1.309")
+        );
+        assert_eq!(
+            (
+                rec.input_tokens,
+                rec.output_tokens,
+                rec.cache_creation_tokens,
+                rec.cache_read_tokens
+            ),
+            (Some(11), Some(7), Some(3), Some(5))
+        );
+        // Nothing the worker does afterwards hands the same turn over again.
+        for _ in 0..3 {
+            r.notices();
+            r.bridge
+                .push(json!({"v":1,"e":"notice","subtype":"status","turn":"t1"}));
+            let _ = r.w.inbound(16);
+        }
+        assert_eq!(records(&sink).len(), 1);
+        assert_eq!(sink.lock().unwrap().counts().0, 1);
+        // The record has counters and ids and nothing else: no prompt, no answer.
+        let text = serde_json::to_string(&records(&sink)).unwrap();
+        assert!(!text.contains("hello") && !text.contains("sk-"), "{text}");
+    }
+
+    #[test]
+    fn a_figure_the_provider_did_not_report_is_recorded_as_unknown_not_zero() {
+        let (mut r, sink, _) = recording(Limits::default());
+        r.ready(INFERENCE);
+        r.bind();
+        r.start_turn("t1");
+        r.attest_turn(INFERENCE, "t1");
+        // The turn ends without a result: nothing was reported.
+        r.bridge.push(json!({"v":1,"e":"turn_idle","turn":"t1"}));
+        assert_eq!(r.kinds(), ["turn_failed"]);
+        let got = records(&sink);
+        assert_eq!(got.len(), 1);
+        assert_eq!(
+            (
+                got[0].input_tokens,
+                got[0].output_tokens,
+                got[0].cache_creation_tokens,
+                got[0].cache_read_tokens,
+                got[0].reasoning_tokens
+            ),
+            (None, None, None, None, None)
+        );
+    }
+
+    #[test]
+    fn a_limit_observation_is_recorded_once_with_its_own_provenance() {
+        let (mut r, sink, _) = recording(Limits::default());
+        r.ready(INFERENCE);
+        r.bind();
+        r.start_turn("t1");
+        r.attest_turn(INFERENCE, "t1");
+        finish(&mut r, "t1");
+        r.bridge.push(
+            json!({"v":1,"e":"rate_limit","status":"allowed_warning","type":"five_hour",
+            "resets_at":1_893_456_000u64,"utilization":0.5}),
+        );
+        r.notices();
+        for _ in 0..3 {
+            let _ = r.w.inbound(16);
+        }
+        let limits: Vec<_> = records(&sink)
+            .into_iter()
+            .filter(|rec| rec.limit_window.is_some())
+            .collect();
+        assert_eq!(limits.len(), 1, "{limits:?}");
+        assert_eq!(limits[0].limit_utilization_permille, Some(500));
+        assert_eq!(limits[0].turn_id, "t1");
+    }
+
+    #[test]
+    fn a_store_that_fails_turns_recording_off_and_the_work_is_unaffected() {
+        // A store with room for a handful of records.
+        let (mut r, sink, _) = recording(Limits {
+            db_bytes: 48 * 1024,
+            ..Limits::default()
+        });
+        // Fill it from outside until it refuses (records the worker never made).
+        let origin = crate::m3::history::Origin {
+            provider: Provider::Claude,
+            provider_build: "2.1.309",
+            session_id: "0d0d0d0d-1111-4222-8333-444444444444",
+            runtime_id: "1e1e1e1e-1111-4222-8333-555555555555",
+            generation: 1,
+        };
+        for n in 0..5000 {
+            if sink.lock().unwrap().state() != SinkState::Recording {
+                break;
+            }
+            let t = crate::m3::usage::TurnUsage {
+                turn_id: format!("filler-{n}"),
+                provider: Provider::Claude,
+                total: Tokens {
+                    input: Some(1),
+                    ..Tokens::default()
+                },
+                by_model: BTreeMap::new(),
+                echoed_models: vec![],
+                completeness: Completeness::Complete,
+                estimate: None,
+            };
+            let rec = HRecord::turn_usage(&origin, &t, 1_800_000_000).unwrap();
+            sink.lock().unwrap().record(&rec, 1_800_000_000);
+        }
+        assert!(matches!(
+            sink.lock().unwrap().state(),
+            SinkState::Partial(_)
+        ));
+        let dropped_before = sink.lock().unwrap().counts().1;
+        // The turn still runs, completes and streams exactly as without a history.
+        r.ready(INFERENCE);
+        r.bind();
+        r.start_turn("t1");
+        r.attest_turn(INFERENCE, "t1");
+        r.bridge.push(usage_frame("t1"));
+        finish(&mut r, "t1");
+        assert!(
+            sink.lock().unwrap().counts().1 > dropped_before,
+            "the figure was dropped, not raised"
+        );
+        r.start_turn("t2");
+        r.attest_turn(INFERENCE, "t2");
+    }
+
+    #[test]
+    fn what_was_recorded_can_be_exported_without_content_and_reset_removes_it() {
+        let (mut r, sink, parent) = recording(Limits::default());
+        r.ready(INFERENCE);
+        r.bind();
+        r.start_turn("t1");
+        r.attest_turn(INFERENCE, "t1");
+        r.bridge.push(usage_frame("t1"));
+        finish(&mut r, "t1");
+        let mut out = Vec::new();
+        let n = sink
+            .lock()
+            .unwrap()
+            .store()
+            .unwrap()
+            .export(&mut out)
+            .unwrap();
+        assert!(n > 0);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"provider\":\"claude\"") && text.contains("\"turn_id\":\"t1\""));
+        assert!(!text.contains("hello"), "no prompt in an export");
+        drop(sink);
+        assert!(History::reset(&parent).unwrap() > 0);
+        assert!(!History::is_enabled(&parent));
+    }
+
+    #[test]
+    fn without_a_sink_nothing_is_recorded_and_the_production_door_is_shut() {
+        let mut r = rig(Profile::Inference);
+        r.ready(INFERENCE);
+        r.bind();
+        r.start_turn("t1");
+        r.attest_turn(INFERENCE, "t1");
+        finish(&mut r, "t1");
+        assert!(r.w.history.is_none());
+        // And the policy that would allow a store to exist at all is not accepted in this source.
+        let parent = parent();
+        assert_eq!(History::enable(&parent), Err(HistoryError::NotAccepted));
+        assert!(History::open(&parent).is_err());
+    }
 }

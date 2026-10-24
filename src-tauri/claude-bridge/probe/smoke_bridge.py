@@ -7,7 +7,7 @@ s = driver.BridgeSession(venv, script=script)
 try:
     t0 = time.monotonic()
     print("hello", s.recv()); 
-    s.send(c="configure", profile=profile, cwd="/work/ws", session="5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40", upstream="http://127.0.0.1:18080")
+    s.send(c="configure", profile=profile, cwd="/work/ws", session="5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40", broker_token="abababababababababababababababababababababababababababababababab")
     ready = s.until(lambda e: e["e"] in ("ready", "fatal"))
     print("ready after %.2fs" % (time.monotonic() - t0)); print(json.dumps(ready)[:2500])
     seen = []

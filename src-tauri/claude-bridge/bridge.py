@@ -25,6 +25,7 @@ if HERE not in sys.path:  # the authority hashes every file in this directory be
 import profiles  # noqa: E402
 from api_tap import ApiTap  # noqa: E402
 
+CONFIGURE_FIELDS = frozenset(("v", "c", "profile", "cwd", "session", "resume", "model", "effort", "turn_timeout_s", "broker_token"))
 PROTO = 1
 MAX_FRAME = 65536
 TEXT_CHUNK = 4000  # characters; at most 16,000 UTF-8 bytes
@@ -284,6 +285,10 @@ class Bridge:
     # ---- lifecycle ------------------------------------------------------------------
     async def configure(self, cmd):
         profile = cmd.get("profile")
+        # A closed frame: a credential or an upstream address has no field here, so one that arrives
+        # is refused rather than ignored.
+        if set(cmd) - CONFIGURE_FIELDS:
+            raise Fatal("bad_configure")
         if profile not in profiles.PROFILES or self.client is not None:
             raise Fatal("bad_configure")
         cwd, resume, session = cmd.get("cwd"), cmd.get("resume"), cmd.get("session")
@@ -301,17 +306,22 @@ class Bridge:
         kw = profiles.option_kwargs(profile, cwd=cwd, session_id=None if resume else session, resume=resume, model=model, effort=effort)
         digest = profiles.frozen_digest(profile)
         self.digest = digest
-        # The tap is the independent verifier of what the model is offered. Its credential
-        # swap keeps the real key out of the CLI's environment.
-        api_key = cmd.get("api_key")
-        upstream = cmd.get("upstream") or "https://api.anthropic.com"
+        # The tap is the first check of what the model is offered; the broker (outside this
+        # sandbox) repeats it, holds the credential and is the only route to the provider. This
+        # process never sees the credential.
+        broker_token = cmd.get("broker_token")
+        if (not isinstance(broker_token, str) or len(broker_token) != 64
+                or not all(c in "0123456789abcdef" for c in broker_token)):
+            raise Fatal("bad_broker_token")
         loop = asyncio.get_running_loop()
 
         def on_tap(ev):
             asyncio.run_coroutine_threadsafe(self.emit(ev), loop)
 
         client_key = profiles.SYNTHETIC_PREFIX + secrets.token_urlsafe(24)
-        self.tap = ApiTap(upstream=upstream, allowed_tools=profiles.allowed_api_tools(profile), api_key=api_key, model=model, on_event=on_tap, client_key=client_key).start()
+        self.tap = ApiTap(broker_socket=profiles.BROKER_SOCKET, broker_token=broker_token,
+                          allowed_tools=profiles.allowed_api_tools(profile), model=model,
+                          on_event=on_tap, client_key=client_key).start()
         env = dict(profiles.CLI_ENV)
         env["ANTHROPIC_BASE_URL"] = self.tap.url
         env["ANTHROPIC_API_KEY"] = client_key

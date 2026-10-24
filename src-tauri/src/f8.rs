@@ -39,6 +39,8 @@ pub mod service;
 pub mod staging;
 #[cfg(target_os = "linux")]
 pub mod v8;
+#[cfg(test)]
+pub(crate) mod v9_candidate;
 #[cfg(target_os = "linux")]
 pub mod writers;
 

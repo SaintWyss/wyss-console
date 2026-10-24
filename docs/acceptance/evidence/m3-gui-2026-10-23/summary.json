@@ -5,7 +5,7 @@
       "steps": 17,
       "failed_steps": [],
       "leftovers": [],
-      "seconds": 35.6,
+      "seconds": 36.3,
       "ok": true
     },
     "inference": {
@@ -13,7 +13,7 @@
       "steps": 23,
       "failed_steps": [],
       "leftovers": [],
-      "seconds": 32.6,
+      "seconds": 32.5,
       "ok": true
     },
     "local-tools-accept": {
@@ -21,7 +21,7 @@
       "steps": 31,
       "failed_steps": [],
       "leftovers": [],
-      "seconds": 51.9,
+      "seconds": 51.8,
       "ok": true
     },
     "local-tools-cancel-turn": {
@@ -29,7 +29,7 @@
       "steps": 17,
       "failed_steps": [],
       "leftovers": [],
-      "seconds": 39.9,
+      "seconds": 39.8,
       "ok": true
     },
     "local-tools-decline": {
@@ -37,7 +37,7 @@
       "steps": 29,
       "failed_steps": [],
       "leftovers": [],
-      "seconds": 54.5,
+      "seconds": 54.3,
       "ok": true
     },
     "refused": {
@@ -53,7 +53,7 @@
       "steps": 24,
       "failed_steps": [],
       "leftovers": [],
-      "seconds": 47.3,
+      "seconds": 47.2,
       "ok": true
     }
   },

@@ -5,11 +5,11 @@ use crate::{
     adapters::claude::Profile,
     f8::{
         claude::{
-            launch::{ClaudeInstall, ClaudeLauncher},
+            credential::NoCredential,
+            launch::{ClaudeInstall, ClaudeLauncher, Origin, PairedWorker},
             worker::{ClaudeWorker, Identity},
         },
         engine::{StopState, Worker},
-        process_worker::DeferredProcessWorker,
     },
     m3::{
         gui::{FixtureSource, FixtureView},
@@ -44,7 +44,7 @@ pub struct FixtureOptions {
 }
 
 struct Live {
-    worker: ClaudeWorker<DeferredProcessWorker>,
+    worker: ClaudeWorker<PairedWorker>,
     /// The attachment's workspace, which the binding must name.
     workspace: String,
     stopping: bool,
@@ -113,12 +113,17 @@ impl FixtureHost {
             .and_then(|p| p.parse().ok())
             .ok_or("the mock provider did not report a port")?;
         let mut install = ClaudeInstall::new(opts.sdk_root);
-        install.upstream = Some(format!("http://127.0.0.1:{port}"));
+        install.origin = Origin::LoopbackPlain(port);
         // An administrator's policy would be refused; a development machine has none.
         let runtime = opts.state_dir.join("runtime");
         fs::create_dir_all(&runtime).map_err(|e| e.to_string())?;
-        let launcher = ClaudeLauncher::prepare(&install, &runtime, &opts.state_dir)
-            .map_err(|e| format!("installation refused: {}", e.code()))?;
+        let launcher = ClaudeLauncher::prepare_fixture(
+            &install,
+            &runtime,
+            &opts.state_dir,
+            Box::new(NoCredential),
+        )
+        .map_err(|e| format!("installation refused: {}", e.code()))?;
         let host = Self {
             shared: Arc::new(Shared {
                 inner: Mutex::new(Inner {

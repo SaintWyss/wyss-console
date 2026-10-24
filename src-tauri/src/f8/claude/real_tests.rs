@@ -6,16 +6,14 @@
 //! Needs the installation the operator builds with `claude-bridge/install-sdk.sh`:
 //! `WYSS_CLAUDE_SDK_ROOT=<dir> cargo test --lib f8::claude::real_tests -- --ignored`
 use super::{
-    launch::{ClaudeInstall, ClaudeLauncher, SANDBOX_HOME},
+    credential::{ApiKey, NoCredential, SyntheticCredential},
+    launch::{ClaudeInstall, ClaudeLauncher, Origin, PairedWorker, SANDBOX_HOME},
     worker::ClaudeWorker,
 };
 use crate::{
     adapters::claude::Profile,
     contracts::control::ControlResult,
-    f8::{
-        engine::{StopState, Worker},
-        process_worker::DeferredProcessWorker,
-    },
+    f8::engine::{StopState, Worker},
     m3::usage::Completeness,
 };
 use serde_json::{Value, json};
@@ -75,9 +73,6 @@ impl Mock {
         let port = line.trim().strip_prefix("PORT ").unwrap().parse().unwrap();
         Self { child, port, log }
     }
-    fn url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
-    }
     fn requests(&self) -> Vec<Value> {
         fs::read_to_string(&self.log)
             .unwrap_or_default()
@@ -104,8 +99,32 @@ impl Drop for Mock {
     }
 }
 
+/// Every descendant of `root`, from the kernel's own child lists.
+fn descendants(root: u32) -> Vec<u32> {
+    let mut found = Vec::new();
+    let mut todo = vec![root];
+    while let Some(pid) = todo.pop() {
+        let Ok(tasks) = fs::read_dir(format!("/proc/{pid}/task")) else {
+            continue;
+        };
+        for t in tasks.flatten() {
+            let kids = fs::read_to_string(t.path().join("children")).unwrap_or_default();
+            for k in kids
+                .split_whitespace()
+                .filter_map(|k| k.parse::<u32>().ok())
+            {
+                if !found.contains(&k) {
+                    found.push(k);
+                    todo.push(k);
+                }
+            }
+        }
+    }
+    found
+}
+
 struct Real {
-    w: ClaudeWorker<DeferredProcessWorker>,
+    w: ClaudeWorker<PairedWorker>,
     ws: PathBuf,
     state: PathBuf,
     notices: Vec<Value>,
@@ -113,8 +132,9 @@ struct Real {
 fn launcher(mock: &Mock, state: &Path) -> ClaudeLauncher {
     let mut install = ClaudeInstall::new(sdk_root());
     install.policy_dir = dir("nopolicy").join("none");
-    install.upstream = Some(mock.url());
-    ClaudeLauncher::prepare(&install, &dir("runtime"), state).unwrap()
+    install.origin = Origin::LoopbackPlain(mock.port);
+    ClaudeLauncher::prepare_fixture(&install, &dir("runtime"), state, Box::new(NoCredential))
+        .unwrap()
 }
 /// Every runtime of one Managed session shares its home; a runtime mints its own conversation.
 const MANAGED: &str = "0d0d0d0d-1111-4222-8333-444444444444";
@@ -764,21 +784,20 @@ fn stopping_reaps_the_whole_process_tree_and_leaves_nothing_behind() {
 
 #[test]
 #[ignore = "needs WYSS_CLAUDE_SDK_ROOT"]
-fn the_bridge_is_started_with_an_empty_environment_and_the_key_is_not_in_it() {
+fn a_credential_is_never_sent_to_a_plain_http_origin_and_never_reaches_the_bridge() {
     let mock = Mock::start(mock_text("x"));
     let state = dir("state");
-    let keyfile = dir("key").join("key");
-    fs::write(&keyfile, format!("{}\n", looking_secret())).unwrap();
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&keyfile, fs::Permissions::from_mode(0o600)).unwrap();
-    }
     let mut install = ClaudeInstall::new(sdk_root());
     install.policy_dir = dir("nopolicy").join("none");
-    install.upstream = Some(mock.url());
-    install.api_key_file = Some(keyfile);
-    let l = ClaudeLauncher::prepare(&install, &dir("runtime"), &state).unwrap();
-    assert!(l.has_credential());
+    install.origin = Origin::LoopbackPlain(mock.port);
+    let key = ApiKey::new(looking_secret()).unwrap();
+    let l = ClaudeLauncher::prepare_fixture(
+        &install,
+        &dir("runtime"),
+        &state,
+        Box::new(SyntheticCredential(key)),
+    )
+    .unwrap();
     let w = l
         .start(Profile::Inference, None, &identity(), SESSION, None, None)
         .unwrap();
@@ -788,24 +807,90 @@ fn the_bridge_is_started_with_an_empty_environment_and_the_key_is_not_in_it() {
         state,
         notices: Vec::new(),
     };
+    // The broker refuses to start with a credential and a plain origin, which ends the runtime
+    // before it is ready; nothing is sent to the mock and no notice carries the key.
+    assert!(
+        r.pump(|n| n.iter().any(|x| x["kind"] == "models"), 30)
+            .is_err()
+    );
+    assert!(mock.requests().is_empty(), "nothing reached the provider");
+    let all = serde_json::to_string(&r.notices).unwrap();
+    assert!(!all.contains(&looking_secret()) && !all.contains("REALLOOKING"));
+    let report = serde_json::to_string(&r.w.provider_report()).unwrap();
+    assert!(!report.contains("REALLOOKING"));
+    r.stop();
+}
+
+#[test]
+#[ignore = "needs WYSS_CLAUDE_SDK_ROOT"]
+fn the_bridge_is_started_with_an_empty_environment_and_no_credential_of_any_kind() {
+    let mock = Mock::start(mock_text("x"));
+    let state = dir("state");
+    let mut r = start(&mock, Profile::Inference, SESSION, &state, |_| ());
     r.ready();
     r.bind(SESSION);
     r.turn("t1", "hello");
     r.pump(|n| n.iter().any(|x| x["kind"] == "turn_completed"), 60)
         .unwrap();
-    // The provider received the real key from the tap, while the CLI only ever held a synthetic one.
+    // The provider saw no credential at all: none was configured, and the CLI's own per-run key,
+    // which authenticates it to the tap, was dropped at the tap and is not the broker's concern.
     let got = &mock.generations()[0];
-    assert_eq!(
-        got["key_sha256"],
-        crate::f8::claude::launch::tests_support_sha(&looking_secret())
+    assert_eq!(got["has_key"], false);
+    // What runs inside the namespace (everything below the launcher, which is outside it and has
+    // the authority's own environment) has an environment that names no credential. Only names are
+    // looked at and reported, never values.
+    let launcher_pid = r.w.pid_for_diagnostics().expect("the bridge is running");
+    let inside = descendants(launcher_pid as u32);
+    assert!(
+        !inside.is_empty(),
+        "the payload is running below the launcher"
     );
-    let pid = r.w.pid_for_diagnostics().unwrap();
-    let env = fs::read(format!("/proc/{pid}/environ")).unwrap_or_default();
-    assert!(!String::from_utf8_lossy(&env).contains("REALLOOKINGSECRET"));
-    let report = serde_json::to_string(&r.w.provider_report().unwrap()).unwrap();
-    assert!(!report.contains("REALLOOKINGSECRET"));
+    let mut saw_the_sandbox_home = false;
+    for pid in inside {
+        let environ = fs::read(format!("/proc/{pid}/environ")).unwrap_or_default();
+        for entry in environ.split(|b| *b == 0).filter(|e| !e.is_empty()) {
+            let name = String::from_utf8_lossy(entry.split(|b| *b == b'=').next().unwrap_or(b""))
+                .to_uppercase();
+            saw_the_sandbox_home |= entry == format!("HOME={SANDBOX_HOME}").as_bytes();
+            for bad in ["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"] {
+                // The CLI is given its per-run key under the name the SDK reads; that is the one
+                // allowed name and it holds the tap's password, never the provider's.
+                if name == "ANTHROPIC_API_KEY" {
+                    continue;
+                }
+                assert!(
+                    !name.contains(bad),
+                    "process {pid} has a variable named {name}"
+                );
+            }
+        }
+    }
+    assert!(
+        saw_the_sandbox_home,
+        "the payload's own environment was the one examined"
+    );
     r.stop();
 }
 
 #[allow(dead_code)]
 fn unused(_: &mut dyn Write) {}
+
+#[test]
+#[ignore = "needs WYSS_CLAUDE_SDK_ROOT"]
+fn the_public_constructor_makes_a_production_launcher_that_cannot_start_anything() {
+    let mut install = ClaudeInstall::new(sdk_root());
+    install.policy_dir = dir("nopolicy").join("none");
+    let state = dir("state");
+    let l = ClaudeLauncher::prepare(&install, &dir("runtime"), &state).unwrap();
+    for (profile, ws) in [
+        (Profile::Inference, None),
+        (Profile::LocalTools, Some("/w")),
+    ] {
+        assert_eq!(
+            l.start(profile, ws, &identity(), SESSION, None, None).err(),
+            Some(crate::contracts::control::ControlError::GateDenied),
+            "{profile:?}"
+        );
+    }
+    assert!(!state.join("claude").exists(), "nothing was created");
+}

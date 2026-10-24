@@ -255,8 +255,7 @@ fn configure() -> Configure {
         resume: None,
         model: None,
         effort: None,
-        upstream: None,
-        api_key: None,
+        broker_token: BrokerToken::new("ab".repeat(32)).unwrap(),
         turn_timeout_s: 600,
     }
 }
@@ -379,17 +378,39 @@ fn bound_events_carry_a_canonical_uuid_only() {
 }
 
 #[test]
-fn the_api_key_never_shows_in_debug_and_is_validated() {
-    let key = ApiKey::new("sk-ant-api03-SECRETVALUE".into()).unwrap();
-    let mut c = configure();
-    c.api_key = Some(key);
-    let shown = format!("{:?}", Command::Configure(Box::new(c.clone())));
-    assert!(!shown.contains("SECRET"), "{shown}");
-    let encoded = Command::Configure(Box::new(c)).encode().unwrap();
-    assert!(String::from_utf8(encoded).unwrap().contains("SECRETVALUE"));
-    assert!(ApiKey::new(String::new()).is_err());
-    assert!(ApiKey::new("has space".into()).is_err());
-    assert!(ApiKey::new("x".repeat(513)).is_err());
+fn the_bridge_frame_has_no_field_for_a_credential_or_an_address() {
+    let encoded = Command::Configure(Box::new(configure())).encode().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+    let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "broker_token",
+            "c",
+            "cwd",
+            "effort",
+            "model",
+            "profile",
+            "resume",
+            "session",
+            "turn_timeout_s",
+            "v"
+        ]
+    );
+}
+
+#[test]
+fn the_broker_token_is_validated_random_and_never_shows_in_debug() {
+    assert!(BrokerToken::new("ab".repeat(31)).is_err());
+    assert!(BrokerToken::new("AB".repeat(32)).is_err());
+    assert!(BrokerToken::new("zz".repeat(32)).is_err());
+    let (a, b) = (
+        BrokerToken::generate().unwrap(),
+        BrokerToken::generate().unwrap(),
+    );
+    assert_ne!(a, b);
+    assert!(!format!("{:?}", Command::Configure(Box::new(configure()))).contains(&"ab".repeat(32)));
 }
 
 #[test]

@@ -15,6 +15,7 @@
 //! - unknown events, wrong turns, text outside an attested turn and anything over a bound fail
 //!   the worker instead of being skipped.
 use super::{
+    admission::Admission,
     exec::{ActionExecutor, Approved, Outcome},
     proposal::{self, Refuse},
 };
@@ -22,7 +23,7 @@ use crate::{
     adapters::claude::{
         Profile,
         frames::{
-            ActionOutcome, ApiKey, Attestation, Command, Configure, Counters, Event,
+            ActionOutcome, Attestation, BrokerToken, Command, Configure, Counters, Event,
             MAX_PROMPT_BYTES,
         },
         pins,
@@ -37,6 +38,8 @@ use crate::{
         operations::ProviderAction,
     },
     m3::{
+        gate,
+        history::{Origin, Record, Recorder},
         model::{self, Catalogue, ModelRequest, Requested, Scope, Source, Validated},
         report::{
             ActionRecord, ActionState, Build, OfferedModel, Phase, ProviderReport, TapSummary,
@@ -85,8 +88,10 @@ pub struct ClaudeConfig {
     pub session: String,
     pub pinned_model: Option<String>,
     pub effort: Option<String>,
-    pub upstream: Option<String>,
-    pub api_key: Option<ApiKey>,
+    /// The password of this runtime's route to the credential broker.
+    pub broker_token: BrokerToken,
+    /// The permission to exist: a production worker cannot be made while a gate is closed.
+    pub admission: Admission,
     pub turn_timeout_s: u32,
     /// Test only: the engine's handshake still expects Codex's profile strings, so engine-level
     /// tests of this worker present one. Production builds have no such field.
@@ -129,7 +134,21 @@ enum Stage {
     Failed,
 }
 
+/// Where provider-reported usage may be recorded, if the owner has opted in and the policy is
+/// accepted. A recorder never fails its caller, so nothing a turn does depends on it.
+pub type HistorySink = std::sync::Arc<std::sync::Mutex<Recorder>>;
+
+/// What has already gone to the history sink, so a figure is handed over once per worker (the
+/// store deduplicates as well, across workers and restarts).
+#[derive(Default)]
+struct Handed {
+    turns: BTreeSet<String>,
+    limits: BTreeSet<(LimitWindow, u64)>,
+}
+
 pub struct ClaudeWorker<W: Worker> {
+    history: Option<HistorySink>,
+    handed: Handed,
     inner: W,
     cfg: ClaudeConfig,
     attachment: Attachment,
@@ -198,6 +217,9 @@ impl<W: Worker> ClaudeWorker<W> {
         executor: Box<dyn ActionExecutor>,
     ) -> Result<Self, (E, W)> {
         let mut inner = inner;
+        if !cfg.admission.permits(cfg.profile) {
+            return Err((E::GateDenied, inner));
+        }
         let version = pins::BUILDS[0].cli_version.to_owned();
         #[cfg(test)]
         let profile_name = cfg
@@ -206,6 +228,22 @@ impl<W: Worker> ClaudeWorker<W> {
             .unwrap_or_else(|| cfg.profile.attachment_name().to_owned());
         #[cfg(not(test))]
         let profile_name = cfg.profile.attachment_name().to_owned();
+        // A model or effort chosen when the runtime starts is a selection like any other: it needs
+        // the decision on ADR0054 (the fixture and tests are exempt), and an effort must be one of
+        // the levels the pinned build lists. Neither is left to the word check below.
+        if (cfg.pinned_model.is_some() || cfg.effort.is_some())
+            && !cfg.admission.is_fixture()
+            && !gate::model_selection_blockers().is_empty()
+        {
+            return Err((E::GateDenied, inner));
+        }
+        if cfg
+            .effort
+            .as_deref()
+            .is_some_and(|e| model::validate_runtime_effort_with_gate(Provider::Claude, e).is_err())
+        {
+            return Err((E::InvalidRequest, inner));
+        }
         if cfg.revision == 0
             || !cfg.workspace.starts_with('/')
             || cfg
@@ -226,8 +264,7 @@ impl<W: Worker> ClaudeWorker<W> {
             resume: None,
             model: cfg.pinned_model.clone(),
             effort: cfg.effort.clone(),
-            upstream: cfg.upstream.clone(),
-            api_key: cfg.api_key.clone(),
+            broker_token: cfg.broker_token.clone(),
             turn_timeout_s: cfg.turn_timeout_s,
         }));
         let sent = configure.encode().and_then(|f| inner.send(&f));
@@ -270,7 +307,57 @@ impl<W: Worker> ClaudeWorker<W> {
             catalogue_revision: 0,
             pending_request: None,
             last_requested: None,
+            history: None,
+            handed: Handed::default(),
         })
+    }
+
+    /// Records finished turns' provider-reported usage and limit observations into `sink`. Off
+    /// unless this is called; nothing else about the worker changes, and the sink cannot fail it.
+    pub fn with_history(mut self, sink: HistorySink) -> Self {
+        self.history = Some(sink);
+        self
+    }
+
+    /// Hands every finished turn and limit observation not yet handed on to the history sink. A
+    /// turn still running is never recorded (its figures are provisional), a figure the provider
+    /// did not report stays unknown, and nothing but counters and window names leaves the ledger.
+    fn record_history(&mut self) {
+        let Some(sink) = self.history.clone() else {
+            return;
+        };
+        let origin = Origin {
+            provider: Provider::Claude,
+            provider_build: &self.version,
+            session_id: &self.cfg.identity.managed_session,
+            runtime_id: &self.cfg.identity.runtime_instance,
+            generation: self.cfg.identity.generation,
+        };
+        let snapshot = self.ledger.snapshot();
+        let now = now_secs() as i64;
+        let Ok(mut recorder) = sink.lock() else {
+            return;
+        };
+        for turn in snapshot
+            .turns
+            .iter()
+            .filter(|t| t.completeness != Completeness::Running)
+        {
+            if self.handed.turns.insert(turn.turn_id.clone())
+                && let Ok(record) = Record::turn_usage(&origin, turn, now)
+            {
+                recorder.record(&record, now);
+            }
+        }
+        let last_turn = snapshot.turns.last().map(|t| t.turn_id.clone());
+        for limit in &snapshot.limits {
+            if let Some(turn) = &last_turn
+                && self.handed.limits.insert((limit.window, limit.observed_at))
+                && let Ok(record) = Record::limit(&origin, turn, limit, now)
+            {
+                recorder.record(&record, now);
+            }
+        }
     }
 
     pub fn refusal(&self) -> Option<Refusal> {
@@ -437,6 +524,12 @@ impl<W: Worker> ClaudeWorker<W> {
     }
 
     fn on_event(&mut self, ev: Event) -> ControlResult<()> {
+        let outcome = self.on_event_inner(ev);
+        self.record_history();
+        outcome
+    }
+
+    fn on_event_inner(&mut self, ev: Event) -> ControlResult<()> {
         match ev {
             Event::Hello { .. } => {
                 if std::mem::replace(&mut self.hello, true) {
@@ -1157,6 +1250,7 @@ impl<W: Worker> Worker for ClaudeWorker<W> {
         self.approvals.clear();
         if self.turn.take().is_some() {
             self.ledger.end_turn(Completeness::Interrupted);
+            self.record_history();
         }
         self.exec.begin_stop(now);
         self.inner.begin_stop(now);

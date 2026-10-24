@@ -8,14 +8,14 @@ SESSION = "5f0c1f3e-8a42-4b0e-9a6f-0b6c1d2e3f40"
 try:
     import os; [os.makedirs(root + "/" + d, exist_ok=True) for d in ("home", "ws", "markers")]
     a = driver.BridgeSession(venv, script=[{"text": "first answer"}], root=root)
-    a.recv(); a.send(c="configure", profile="inference", cwd="/work/ws", session=SESSION, upstream="http://127.0.0.1:18080")
+    a.recv(); a.send(c="configure", profile="inference", cwd="/work/ws", session=SESSION, broker_token="abababababababababababababababababababababababababababababababab")
     a.until(lambda e: e["e"] == "ready")
     a.send(c="prompt", turn="t1", text="remember the word PINEAPPLE")
     ev = a.until(lambda e: e["e"] == "turn_started")
     print("first provider session:", ev["provider_session"], "== minted:", ev["provider_session"] == SESSION)
     a.until(lambda e: e["e"] == "turn_idle"); a.send(c="shutdown"); print("rc a", a.close())
     b = driver.BridgeSession(venv, script=[{"text": "second answer"}], root=root)
-    b.recv(); b.send(c="configure", profile="inference", cwd="/work/ws", session="9d7e2a10-1111-4222-8333-444455556666", upstream="http://127.0.0.1:18080")
+    b.recv(); b.send(c="configure", profile="inference", cwd="/work/ws", session="9d7e2a10-1111-4222-8333-444455556666", broker_token="abababababababababababababababababababababababababababababababab")
     b.until(lambda e: e["e"] == "ready")
     b.send(c="bind", resume=SESSION)
     seen = []

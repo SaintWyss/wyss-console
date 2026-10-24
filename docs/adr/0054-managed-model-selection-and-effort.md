@@ -19,10 +19,18 @@ ADR and the corresponding authority extension are explicitly accepted and negoti
 1. Introduce a distinct `ManagedModelSelectionV1` authority capability in a new protocol
    version. An older authority rejects/does not advertise the capability; callers never
    infer it from a model catalogue. Existing P2 Codex behavior and DTOs remain unchanged.
-2. A caller may request a canonical provider model identifier and optional provider-defined
-   effort value for exactly one new turn. No free-form provider arguments, fallback chain,
-   prompt-derived setting or persistent session default is accepted.
-3. The authority records the exact request, current runtime identity/generation, current
+2. A caller may request a canonical provider model identifier for exactly one new turn. A
+   provider-defined **effort** is requested per turn **only for a provider whose build can change it
+   per turn**; for a provider that reads it once, when its runtime starts, it is instead a field of the
+   runtime-start request (item 2a). No free-form provider arguments, fallback chain, prompt-derived
+   setting or persistent _model_ default is accepted.
+   2a. **Effort at runtime start.** For such a provider, one effort value may be named in the runtime
+   start request and is fixed for that runtime generation: it cannot change, a different effort is a
+   different runtime, and a per-turn effort is refused (`effort_not_per_turn`). It is validated against
+   the levels the pinned build lists, with the same gate as every other selection, before the process
+   exists. It is the only default this ADR admits, and it is a property of the runtime, not of the session.
+3. The authority records the exact request (or, for item 2a, the runtime-start effort in the runtime's
+   launch record), current runtime identity/generation, current
    model catalogue revision, capability source/freshness, provider, turn and idempotent
    admission receipt. Provider/account entitlement is `unknown` unless an authoritative
    provider mechanism says otherwise; model listing does not imply entitlement.
@@ -31,8 +39,9 @@ ADR and the corresponding authority extension are explicitly accepted and negoti
    provider/build mismatch, changed generation, missing feature negotiation and unknown
    capability. No automatic substitution is allowed.
 5. Emit four separate facts with source, time, scope and generation: **offered** by current
-   catalogue; **configured** by account/project/provider settings; **requested** by the
-   user for the turn; **reported in use** by the provider for that turn. Absence is unknown.
+   catalogue; **configured** by account/project/provider settings **or by the runtime-start effort of
+   item 2a**; **requested** by the user for the turn (a model, and an effort only where per-turn);
+   **reported in use** by the provider for that turn. Absence is unknown.
    Never infer that effort was honored without provider evidence.
 6. A provider reroute is a new observation bound to the same originating turn. It does not
    rewrite the request or catalogue. Any retry/cancel requires a distinct explicit action
@@ -71,23 +80,30 @@ before any new authority capability is advertised or used. Until then, Managed m
 effort selection remain disabled. The extension and ADR may be revised only through a new
 versioned contract; no caller can force compatibility by sending extra fields.
 
-## Implementation evidence (2026-10-23) — status stays Proposed
+## Verified provider capabilities (2026-10-23) and the one contract that follows
 
-`m3::model` implements this contract's engineering semantics with the gate **closed**
-(`m3::gate::ADR0054_ACCEPTED = false`): a request is refused with `gate_closed` before anything is
-validated, so no field reaches the P2 schema and no live selection exists. With the gate forced open in
-tests: strict request shape, canonical model and effort enums, catalogue freshness (15 min), revalidation at
-dispatch, generation fence, no substitution, four facts kept apart, reroute recorded as a new observation on
-the same turn. The capability is versioned on its own (`m3.model_selection`, version 1), separate from
-the authority's protocol number.
+Measured on the pinned Claude build (SDK `0.2.173`, Claude Code `2.1.309`): the **model can change per
+turn** (`set_model`); the **effort is read once, when the CLI starts** (`--effort`), and cannot change
+afterwards. The contract above is therefore the same one for every provider, and it differs only in what
+each build can do, which `m3::model::Caps` states:
 
-What the pinned Claude build allows (measured): the model can change **per turn** (`set_model`); effort is read
-**once, when the runtime starts** (`--effort`). The adapter therefore publishes `model_per_turn` and
-`effort_per_runtime`, and refuses a per-turn effort instead of pretending (`Caps::CLAUDE`). Codex's row claims
-no support today. The window shows both selects disabled with the reason.
+| Provider | Model per turn | Effort per turn                            | Effort at runtime start |
+| -------- | -------------- | ------------------------------------------ | ----------------------- |
+| Claude   | yes            | **no**                                     | yes                     |
+| Codex    | yes            | yes (in the contract; no live claim today) | no                      |
 
-**Decision packet.** _Choices:_ (1) accept as written; (2) accept with Claude's effort as a runtime-start
-setting only (what the build can do; **recommended**, it is already how `Caps` is expressed); (3) reject.
-_Risks:_ an authority extension is a new protocol version and a negotiation; the catalogue is an
-observation, not entitlement. _Unlocks:_ the live selection tests and the GUI controls. _Effects:_ none until
-a protocol-version release; Codex P2 untouched.
+The implementation matches this text: `m3::model::validate` refuses an effort for a provider without
+per-turn effort; `validate_runtime_effort` checks the runtime-start effort against the build's levels; and
+the worker applies both the gate and that check when it is made (`ClaudeWorker::new`), which the review
+found had not been connected before. A request or a runtime that cannot be honored is refused and never
+replaced by another model or level. All of it is disabled while `m3::gate::ADR0054_ACCEPTED` is false, and
+a protocol-2 authority neither advertises nor accepts any of it.
+
+## Decision packet
+
+_Choices:_ (1) accept this contract as amended; (2) accept only the per-turn model and leave effort
+unsupported for Claude; (3) reject. **Recommended: (1)** — it describes what the pinned build can do and
+what the code does, and the effort default it admits is bound to a runtime generation. _Risks:_ a new
+protocol version and negotiation; the catalogue is an observation, not entitlement. _Unlocks:_ live
+selection tests and the GUI controls (disabled today, with the reason shown). _Effects:_ none until a
+protocol-version release; Codex P2 untouched.
