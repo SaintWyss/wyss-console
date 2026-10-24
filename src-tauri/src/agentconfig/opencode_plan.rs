@@ -900,7 +900,7 @@ pub fn draft_park_mcp(
         h1: hash(&new),
     };
     let shown = label(&format!("MCP server · {name}"));
-    let (diff, hidden) = redact_lines(&unit, DiffKind::Removed, bounds);
+    let (diff, _) = redact_lines(&unit, DiffKind::Removed, bounds);
     Ok(Drafted {
         operation: Operation::ParkMcp,
         item: item_id_for(SourceKey::OpencodeUserConfig, &[name]),
@@ -917,7 +917,7 @@ pub fn draft_park_mcp(
             protection,
         },
         diff,
-        holds_hidden_values: hidden || true,
+        holds_hidden_values: true,
         prior: None,
         managed: None,
     })
@@ -993,7 +993,7 @@ pub fn drafted_restore_mcp(
             restored
         }
     };
-    let (diff, hidden) = redact_lines(&unit, DiffKind::Added, bounds);
+    let (diff, _) = redact_lines(&unit, DiffKind::Added, bounds);
     Ok(Drafted {
         operation: Operation::RestoreHook,
         item: record.to_owned(),
@@ -1008,7 +1008,7 @@ pub fn drafted_restore_mcp(
             already_present: false,
         },
         diff,
-        holds_hidden_values: hidden || true,
+        holds_hidden_values: true,
         prior: None,
         managed: None,
     })

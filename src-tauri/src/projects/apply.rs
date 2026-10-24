@@ -1597,7 +1597,7 @@ impl Engine<'_> {
                     .terminals
                     .iter()
                     .find(|t| t.terminal_id == terminal_id.as_str() && t.running);
-                if !row.is_some_and(|t| t.native_session.as_deref() == Some(session_id.as_str())) {
+                if row.is_none_or(|t| t.native_session.as_deref() != Some(session_id.as_str())) {
                     return Err(Failure::new(ErrorCode::OwnerRefused).with_field("target"));
                 }
             }
