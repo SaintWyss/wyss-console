@@ -4,7 +4,8 @@ What the endpoints say is a closed set of words: no byte of a request ever reach
 (not a method, a version, a header or a tool name), so nothing a client controls can inject a
 header or forge a line of protocol. What they accept is closed too: one length per request, no
 chunking, no folded or control-bearing headers. What they spend is bounded: connections,
-bytes in flight, time to read, requests, response sizes. Standard library only.
+bytes being read in flight (a bound on what is held at once, not on the process's memory), idle
+time and total time to read a request, requests, response sizes. Standard library only.
 """
 
 import re
@@ -221,7 +222,7 @@ class GuardedHandler(BaseHTTPRequestHandler):
         return n
 
     def body(self, n, gauge):
-        """The `n` bytes of the body, within the bytes-in-flight budget and the read deadline; or
+        """The `n` bytes of the body, within the bytes-in-flight budget and the request's total deadline; or
         `None` after refusing."""
         if not gauge.reserve(n):
             self.refuse(503, "busy")
