@@ -24,6 +24,22 @@ it('lays the package out as the desktop looks for its authority', () => {
   );
 });
 
+it('ships the terminal parser helper beside the authority, listed and checked like it', () => {
+  // The host looks for it next to its own executable (`libexec/wyss-console/wyss-screen`); the
+  // manifest hashes it, the installer verifies the hash, and the fixture check reads it too.
+  const rust = read('src-tauri/src/host/core.rs');
+  expect(rust).toContain('../libexec/wyss-console/wyss-screen');
+  const packager = read('scripts/package.mjs');
+  expect(packager).toContain(
+    "[screenHelper, 'libexec/wyss-console/wyss-screen']",
+  );
+  expect(read('scripts/package-fixtures.mjs')).toContain(
+    "'libexec', 'wyss-console', 'wyss-screen'",
+  );
+  // It is a binary of its own, not a mode of the desktop: no window toolkit is loaded for it.
+  expect(read('src-tauri/src/bin/wyss-screen.rs')).not.toMatch(/tauri|gtk/);
+});
+
 it('bundles no installer, no updater and no signing claim', () => {
   const bundle = tauriConfig.bundle as Record<string, unknown>;
   expect(bundle.active).toBe(false);

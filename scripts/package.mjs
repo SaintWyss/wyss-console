@@ -2,6 +2,7 @@
 //
 //   <out>/bin/wyss-console
 //   <out>/libexec/wyss-console/wyss-control
+//   <out>/libexec/wyss-console/wyss-screen
 //   <out>/share/wyss-console/package.json
 //
 // The desktop installs and starts only the authority whose SHA-256 it was compiled
@@ -65,6 +66,9 @@ if (sha256(authority) !== digest) {
   console.error('package: the authority changed while the desktop was built');
   process.exit(1);
 }
+// The terminal parser helper (M4): a small process of its own that keeps a terminal's screen. The
+// host starts it from beside itself; it is part of what the manifest lists and the installer checks.
+const screenHelper = join(release, 'wyss-screen');
 const desktop = join(release, 'wyss-console');
 if (!readFileSync(desktop).includes(Buffer.from(digest, 'ascii'))) {
   console.error('package: the desktop does not carry the authority digest');
@@ -83,6 +87,7 @@ const staging = mkdtempSync(join(parent, '.staging-'));
 const files = [
   [desktop, 'bin/wyss-console'],
   [authority, 'libexec/wyss-console/wyss-control'],
+  [screenHelper, 'libexec/wyss-console/wyss-screen'],
 ];
 for (const [, target] of files) {
   mkdirSync(dirname(join(staging, target)), { recursive: true });

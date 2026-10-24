@@ -86,6 +86,7 @@ export function verifyPackageFixtures(directory) {
   const binaries = [
     join(directory, 'bin', 'wyss-console'),
     join(directory, 'libexec', 'wyss-console', 'wyss-control'),
+    join(directory, 'libexec', 'wyss-console', 'wyss-screen'),
   ];
   for (const binary of binaries) {
     const hits = fixtureHitsInFile(binary);
