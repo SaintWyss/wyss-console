@@ -231,6 +231,8 @@ pub struct History {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
+    /// Which width table decides how many columns a character takes.
+    pub width: width::Table,
     pub scrollback_lines: usize,
     /// Cells all kept scrollback may hold together.
     pub scrollback_cells: usize,
@@ -239,6 +241,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
+            width: width::Table::default(),
             scrollback_lines: 2_000,
             scrollback_cells: 256 * 1024,
         }
@@ -563,7 +566,7 @@ impl Terminal {
         } else {
             ch
         };
-        let w = width::of(ch);
+        let w = width::of(self.limits.width, ch);
         if w == 0 {
             self.combine(ch);
             return;
@@ -660,13 +663,21 @@ impl Terminal {
         }
         r.whole();
     }
+    /// The column erasing and editing work from: a cursor that is waiting to wrap is logically
+    /// past the last column (as in xterm.js and tmux), so erasing to the end of the line leaves
+    /// the character just written alone.
+    fn edit_col(&self) -> usize {
+        let c = self.buf().cursor;
+        if c.pending_wrap { self.cols } else { c.col }
+    }
     fn erase_display(&mut self, how: u32) {
         let cur = self.buf().cursor;
+        let at = self.edit_col();
         let (rows, cols) = (self.rows, self.cols);
         let pen = self.pen;
         match how {
             0 => {
-                self.erase_cells(cur.row, cur.col, cols);
+                self.erase_cells(cur.row, at, cols);
                 for r in cur.row + 1..rows {
                     self.buf_mut().rows[r] = Row::blank(cols, pen);
                 }
@@ -675,7 +686,7 @@ impl Terminal {
                 for r in 0..cur.row {
                     self.buf_mut().rows[r] = Row::blank(cols, pen);
                 }
-                self.erase_cells(cur.row, 0, cur.col + 1);
+                self.erase_cells(cur.row, 0, at + 1);
             }
             2 => {
                 for r in 0..rows {
@@ -688,21 +699,24 @@ impl Terminal {
             }
             _ => {}
         }
-        self.buf_mut().cursor.pending_wrap = false;
     }
     fn erase_line(&mut self, how: u32) {
         let cur = self.buf().cursor;
         let cols = self.cols;
+        let at = self.edit_col();
         match how {
-            0 => self.erase_cells(cur.row, cur.col, cols),
-            1 => self.erase_cells(cur.row, 0, cur.col + 1),
+            0 => self.erase_cells(cur.row, at, cols),
+            1 => self.erase_cells(cur.row, 0, at + 1),
             2 => self.erase_cells(cur.row, 0, cols),
             _ => {}
         }
-        self.buf_mut().cursor.pending_wrap = false;
     }
     fn insert_cells(&mut self, n: usize) {
         let (cur, cols, pen) = (self.buf().cursor, self.cols, self.pen);
+        if cur.pending_wrap {
+            self.buf_mut().cursor.pending_wrap = false;
+            return;
+        }
         let n = n.min(cols - cur.col);
         let r = &mut self.buf_mut().rows[cur.row];
         r.cells.truncate(cols - n);
@@ -714,6 +728,10 @@ impl Terminal {
     }
     fn delete_cells(&mut self, n: usize) {
         let (cur, cols, pen) = (self.buf().cursor, self.cols, self.pen);
+        if cur.pending_wrap {
+            self.buf_mut().cursor.pending_wrap = false;
+            return;
+        }
         let n = n.min(cols - cur.col);
         let r = &mut self.buf_mut().rows[cur.row];
         r.cells.drain(cur.col..cur.col + n);
@@ -1245,8 +1263,8 @@ impl Terminal {
             (0, 0, b'T') if self.nparams <= 1 => self.scroll_down(n),
             (0, 0, b'X') => {
                 let cols = self.cols;
-                self.erase_cells(cur.row, cur.col, (cur.col + n).min(cols));
-                self.buf_mut().cursor.pending_wrap = false;
+                let at = self.edit_col();
+                self.erase_cells(cur.row, at, (at + n).min(cols));
             }
             (0, 0, b'Z') => self.tab_back(n),
             (0, 0, b'b') => {
@@ -1349,9 +1367,18 @@ impl Terminal {
                         self.leave_alternate(true, false);
                     }
                 }
-                1000 => self.set(mode::MOUSE_1000, on),
-                1002 => self.set(mode::MOUSE_1002, on),
-                1003 => self.set(mode::MOUSE_1003, on),
+                // One tracking mode at a time: the last one set wins; a reset ends only itself.
+                1000 | 1002 | 1003 => {
+                    let flag = match n {
+                        1000 => mode::MOUSE_1000,
+                        1002 => mode::MOUSE_1002,
+                        _ => mode::MOUSE_1003,
+                    };
+                    if on {
+                        self.modes &= !(mode::MOUSE_1000 | mode::MOUSE_1002 | mode::MOUSE_1003);
+                    }
+                    self.set(flag, on);
+                }
                 1004 => self.set(mode::FOCUS_1004, on),
                 1005 => self.set(mode::MOUSE_UTF8, on),
                 1006 => self.set(mode::MOUSE_SGR, on),

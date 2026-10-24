@@ -197,6 +197,7 @@ fn scrollback_is_bounded_by_lines_and_cells() {
         Limits {
             scrollback_lines: 5,
             scrollback_cells: 1_000,
+            ..Limits::default()
         },
     );
     for n in 0..100 {
@@ -537,36 +538,4 @@ fn a_repaint_contains_nothing_a_terminal_would_act_on() {
         assert!(!text.contains(forbidden), "{forbidden:?} in the repaint");
     }
     assert!(text.contains("a title"));
-}
-
-#[test]
-#[ignore = "debug helper"]
-fn debug_seed() {
-    let seed: u64 = std::env::var("SEED").unwrap().parse().unwrap();
-    let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
-    let rows = 2 + rng.below(20);
-    let cols = 3 + rng.below(60);
-    let mut t = term(rows, cols);
-    let count = 40 + rng.below(160);
-    let bytes = stream(&mut rng, count);
-    t.feed(&bytes);
-    eprintln!(
-        "orig  {:?} cursor {:?} pen {:?}",
-        t.text(),
-        t.cursor(),
-        t.pen()
-    );
-    let rp = t.repaint(10_000);
-    let mut again = term(rows, cols);
-    again.feed(&rp.bytes);
-    eprintln!(
-        "again {:?} cursor {:?} pen {:?}",
-        again.text(),
-        again.cursor(),
-        again.pen()
-    );
-    eprintln!(
-        "repaint tail {:?}",
-        String::from_utf8_lossy(&rp.bytes[rp.bytes.len().saturating_sub(300)..])
-    );
 }

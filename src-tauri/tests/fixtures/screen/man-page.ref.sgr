@@ -1,0 +1,24 @@
+     [1m-b,[0m [1m--escape[0m   
+            print C-style escapes for nongraphic characters                     
+
+     [1m--block-size=SIZE[0m                  
+            with   [1m-l[0m,   scale   sizes   by  SIZE  when  printing  them;  e.g., 
+            '--block-size=M'; see SIZE format below                             
+
+     [1m-B,[0m [1m--ignore-backups[0m               
+            do not list implied entries ending with ~                           
+
+     [1m-c[0m     with [1m-lt[0m: sort by, and show, ctime (time of  last  change  of  file 
+            status  information);  with [1m-l[0m: show ctime and sort by name; other‐ 
+            wise: sort by ctime, newest first                                   
+
+     [1m-C[0m     list entries by columns     
+
+     [1m--color[=WHEN][0m 
+            color the output WHEN; more info below                              
+
+     [1m-d,[0m [1m--directory
+[0m            list directories themselves, not their contents                     
+
+     [1m-D,[0m [1m--dired[0m    
+[7m Manual page ls(1) line 24 (press h for help or q to quit)[0m                      

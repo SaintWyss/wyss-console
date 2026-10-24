@@ -1,0 +1,52 @@
+[?1049h[22;0;0t[>4;2m[?1h=[?2004h[?1004h[1;24r[?12h[?12l[22;2t[22;1t[27m[23m[29m[m[H[2J[?25l[24;1H"/tmp/wyss-corpus-hsqhpjgq/sample.py" 22L, 465B[?1006;1000h[?1002h[2;1H▽[6n[2;1H  [3;1HPzz\[0%m[6n[3;1H           [1;1H[>c]10;?]11;?[1;1H[34m#!/usr/bin/env python3[m
+[31m"""A small module, for the editor to show."""[m[2;46H[K[3;1H[35mimport[m json[3;12H[K[6;1H[38;5;130mclass[m [32mGreeter[m:
+    [38;5;130mdef[m [36m__init__[m([36mself[m, name: [36mstr[m = [31m"mundo"[m) -> [36mNone[m:[8;9H[36mself[m.name = name[10;5H[38;5;130mdef[m [36mgreet[m([36mself[m) -> [36mstr[m:[11;9H[34m# naïve greeting with accents: ñandú[11;45H, café[11;51H, 世界[m[12;9H[38;5;130mreturn[m [31mf"hola, [m[35m{[m[36mself[m.name[35m}[m[31m!"[m
+
+
+[38;5;130mdef[m [36mmain[m():
+    [38;5;130mfor[m i [38;5;130min[m [36mrange[m([31m3[m):[17;9H[36mprint[m(Greeter([36mstr[m(i)).greet())
+    [36mprint[m(json.dumps({[31m"ok"[m: [36mTrue[m, [31m"n"[m: [31m3[m}))
+
+
+[38;5;130mif[m __name__ == [31m"__main__"[m:
+    main()
+[94m~                                                                               [m[24;63H1,1[10CTodo[?25h[1;1H[?4m[?12$p[?25l[24;53Hi[1;1H[24;53H [1;1H[24;1H[1m-- INSERTAR --[m[24;15H[K[24;63H1,1[10CTodo[1;1H[?25h[?25l[1C[34m typed in vim: ñandú[1;22H 世界#!/usr/bin/env python3[?25h[?25l[m[24;65H31-27[1;27H[?25h[24;1H[K[1;25H[?25l[24;53H^[[1;25H[?25h[?25l[24;53H  [1;27H[24;63H1,28-25      Todo[1;25H[?25h[?25l[24;53H:[1;25H[24;53H[K[24;1H:[?25hvsplit[?25l[1;25H[16C[7m|[m
+[34m python3[m                                [7m|[m
+[31m"""A small module, for the editor to sho[m[7m|[m
+[31mw."""[m[35C[7m|[m
+[35mimport[m json[29C[7m|[m
+              [26C[7m|[m
+                                        [7m|[m
+[38;5;130mclass[m [32mGreeter[m:          [16C[7m|[m
+    [38;5;130mdef[m [36m__init__[m([36mself[m, name: [36mstr[m = [31m"mund[m[7m|[m
+[31mo"[m) -> [36mNon[m[1C:               [13C[7m|[m[11;9H[36mself[m.name = name                [7m|[m[12;9H                                [7m|[m
+    [38;5;130mdef[m [36mgreet[m([36mself[m) -> [36mstr[m:[13C[7m|[m[14;9H[34m# naïve greeting with accents: ñ[m[7m|[m
+[34mandú[15;5H, café[15;11H, 世界[m[24C[7m|[m
+        [38;5;130mreturn[m [31mf"hola, [m[35m{[m[36mself[m.name[35m}[m[31m!"[m    [7m|[m[17;9H                                [7m|[m
+                                        [7m|[m
+[38;5;130mdef[m [36mmain[m():[29C[7m|[m
+    [38;5;130mfor[m i [38;5;130min[m [36mrange[m([31m3[m):[18C[7m|[m
+        [36mprint[m(Greeter([36mstr[m(i)).greet())  [7m|[m
+    [36mprint[m(json.dumps({[31m"ok"[m: [36mTrue[m, [31m"n"[m: [31m3[m[7m|[m[94m@                                       [m
+[1m[7m<qhpjgq/sample.py [+] 1,28-25   Comienzo [m[1;42H[34m# typed in vim: ñandú[1;63H 世界#!/usr/bin/en[2;42Hv python3[m[3;42H[31m"""A small module, for the editor to sh[4;42How."""[m[5;42H[35mimport[m json[7;42H[K[8;42H[38;5;130mclass[m [32mGreeter[m:[9;46H[38;5;130mdef[m [36m__init__[m([36mself[m, name: [36mstr[m = [31m"mun[10;42Hdo"[m) -> [36mNone[m:[11;42H        [36mself[m.name = name[13;46H[38;5;130mdef[m [36mgreet[m([36mself[m) -> [36mstr[m:[14;50H[34m# naïve greeting with accents: [15;42Hñandú[15;47H, café[15;53H, 世界[m[16;50H[38;5;130mreturn[m [31mf"hola, [m[35m{[m[36mself[m.name[35m}[m[31m!"[m[18;42H[K[19;42H[38;5;130mdef[m [36mmain[m():[20;46H[38;5;130mfor[m i [38;5;130min[m [36mrange[m([31m3[m):[21;50H[36mprint[m(Greeter([36mstr[m(i)).greet())[22;46H[36mprint[m(json.dumps({[31m"ok"[m: [36mTrue[m, [31m"n"[m:[22;42H[94m@                                      [m[23;42H[7m<hpjgq/sample.py [+] 1,28-25   Comienzo[?25h[1;25H[?25l[m[24;70H:[1;25H[24;1H[K[24;1H:[?25hset number[?25l[1;29H[38;5;130m  1 [m[34m# typed in vim: ñandú[1;26H 世界#!/usr/bin[m
+[38;5;130m    [m[34m/env python3[m
+[38;5;130m  2 [m[31m"""A small module, for the editor t[m
+[38;5;130m    [m[31m show."""[m
+[38;5;130m  3 [m[35mimport[m json
+[38;5;130m  4 
+  5 
+  6 class[m [32mGreeter[m:
+[38;5;130m  7 [m    [38;5;130mdef[m [36m__init__[m([36mself[m, name: [36mstr[m = [31m"[m
+[38;5;130m    [m[31mmundo"[m) -> [36mNone[m:
+[38;5;130m  8 [m        [36mself[m.name = name
+[38;5;130m  9 
+ 10 [m    [38;5;130mdef[m [36mgreet[m([36mself[m) -> [36mstr[m:
+[38;5;130m 11 [m        [34m# naïve greeting with accent[m
+[38;5;130m    [m[34ms: ñandú[15;13H, café[15;19H, 世界[m
+[38;5;130m 12 [m        [1C[38;5;130meturn[m [31mf"hola, [m[35m{[m[36mself[m.name[35m}[m[31m!"[m
+[38;5;130m 13 
+ 14 
+ 15 def[m [36mmain[m():
+[38;5;130m 16 [m    [38;5;130mfor[m i [38;5;130min[m [36mrange[m([31m3[m):
+[38;5;130m 17 [m        [36mprint[m(Greeter([36mstr[m(i)).greet(
+[38;5;130m    [m))                                  [?25h[1;29H[?25l[24;1H[K[24;1H/greet[?25h[?25l[23;24H[1m[7m0,9    [13;13H[?25h[?25h
