@@ -463,7 +463,7 @@ impl Terminal {
                         break;
                     }
                     let row = self.primary.rows.remove(0);
-                    self.push_history(row);
+                    self.push_history(&row);
                     self.primary.cursor.row -= 1;
                 }
             }
@@ -493,7 +493,7 @@ impl Terminal {
 
     // ---------------------------------------------------------------- history
 
-    fn push_history(&mut self, row: Row) {
+    fn push_history(&mut self, row: &Row) {
         let row = row.trimmed();
         self.scrollback_cells += row.cells.len() + 1;
         self.scrollback.push_back(row);
@@ -518,15 +518,15 @@ impl Terminal {
         let keep = !self.alt_active && top == 0 && bottom == self.rows - 1;
         let (cols, pen) = (self.cols, self.pen);
         for _ in 0..n {
-            let row = {
-                let b = self.buf_mut();
-                let row = b.rows.remove(top);
-                b.rows.insert(bottom, Row::blank(cols, pen));
-                row
-            };
+            let mut row = self.buf_mut().rows.remove(top);
             if keep {
-                self.push_history(row);
+                self.push_history(&row);
             }
+            // The row that left is the blank row that enters: its allocation is reused.
+            row.cells.clear();
+            row.cells.resize(cols, Cell::blank(pen));
+            row.wrapped = false;
+            self.buf_mut().rows.insert(bottom, row);
         }
     }
     fn scroll_down(&mut self, n: usize) {
@@ -535,8 +535,11 @@ impl Terminal {
         let (cols, pen) = (self.cols, self.pen);
         let b = self.buf_mut();
         for _ in 0..n {
-            b.rows.remove(bottom);
-            b.rows.insert(top, Row::blank(cols, pen));
+            let mut row = b.rows.remove(bottom);
+            row.cells.clear();
+            row.cells.resize(cols, Cell::blank(pen));
+            row.wrapped = false;
+            b.rows.insert(top, row);
         }
     }
     fn linefeed(&mut self) {
@@ -690,7 +693,9 @@ impl Terminal {
             }
             2 => {
                 for r in 0..rows {
-                    self.buf_mut().rows[r] = Row::blank(cols, pen);
+                    let row = &mut self.buf_mut().rows[r];
+                    row.cells.fill(Cell::blank(pen));
+                    row.wrapped = false;
                 }
             }
             3 => {

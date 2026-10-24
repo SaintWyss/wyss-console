@@ -4,7 +4,10 @@
 //! that redraws it (what a window that attaches later receives), `ipc` and `helper` are the
 //! typed, bounded protocol and the loop of the separate process that runs the parser, and
 //! `sandbox` is what that process does to itself before it reads a byte.
+pub mod helper;
+pub mod ipc;
 pub mod repaint;
+pub mod sandbox;
 pub mod terminal;
 pub mod width;
 
