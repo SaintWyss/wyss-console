@@ -596,6 +596,8 @@ mod tests {
             "allow-host-info",
             "allow-terminal-redraw",
             "allow-terminal-attach",
+            "allow-host-persistence",
+            "allow-host-lingering",
             // The layout of tabs and panes (T2).
             "allow-layout-read",
             "allow-layout-write",

@@ -40,6 +40,7 @@
   } from './lib/features/sessions/present';
   import SessionsView from './lib/features/sessions/SessionsView.svelte';
   import TerminalView from './lib/features/terminal/TerminalView.svelte';
+  import LifecycleCard from './lib/features/terminal/LifecycleCard.svelte';
   import type { WorkspaceState } from './lib/features/terminal/session-manager';
   import { retryAuthority } from './lib/desktop/lifecycle-client';
   import AuthorityNotice from './lib/shell/AuthorityNotice.svelte';
@@ -468,6 +469,7 @@
       onretry={retry}
     >
       <ProjectsGate {projects} controller={projectsController} />
+      <LifecycleCard />
     </SettingsView>
   </main>
 </div>

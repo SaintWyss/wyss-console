@@ -865,3 +865,120 @@ mod screen {
         assert!(gone, "the helper of a closed terminal is gone");
     }
 }
+
+mod lifecycle {
+    use super::*;
+    use crate::host::persistence::{Runner, Sources};
+    use std::sync::Mutex;
+
+    struct Fake {
+        ran: Mutex<Vec<String>>,
+        marker: PathBuf,
+    }
+    impl Runner for Fake {
+        fn run(&self, program: &Path, args: &[&str]) -> std::io::Result<i32> {
+            self.ran
+                .lock()
+                .unwrap()
+                .push(format!("{} {}", program.display(), args.join(" ")));
+            if args[0] == "enable-linger" {
+                fs::write(&self.marker, "").unwrap();
+            } else {
+                let _ = fs::remove_file(&self.marker);
+            }
+            Ok(0)
+        }
+    }
+
+    fn world() -> (Sources, Arc<Fake>, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("wyss-life-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir_all(dir.join("linger")).unwrap();
+        fs::write(
+            dir.join("cgroup"),
+            "0::/user.slice/user-1000.slice/user@1000.service/app.slice/x.scope\n",
+        )
+        .unwrap();
+        let sources = Sources {
+            cgroup: dir.join("cgroup"),
+            linger_dir: dir.join("linger"),
+            logind_confs: vec![dir.join("logind.conf")],
+            uid: 1000,
+            user: "tester".into(),
+        };
+        let fake = Arc::new(Fake {
+            ran: Mutex::new(vec![]),
+            marker: dir.join("linger/tester"),
+        });
+        (sources, fake, dir)
+    }
+
+    #[test]
+    fn the_host_says_what_survives_what_and_never_turns_lingering_on_by_itself() {
+        let host = Host::start(Duration::from_secs(600));
+        let (sources, fake, dir) = world();
+        host.core.use_persistence(sources, fake.clone());
+        let client = host.client();
+        let before = client.call("host_persistence", Value::Null).unwrap();
+        assert_eq!(before["lingering"], false);
+        assert_eq!(before["placement"], "user_manager");
+        let rows = before["events"].as_array().unwrap();
+        let row = |id: &str| rows.iter().find(|r| r["id"] == id).unwrap().clone();
+        assert_eq!(row("window_close")["outcome"], "survives");
+        assert_eq!(row("reboot_or_power_off")["outcome"], "ends");
+        assert_eq!(row("logout_without_lingering")["outcome"], "ends");
+        assert_eq!(row("logout_without_lingering")["current"], true);
+        // Reading, listing, creating a terminal: none of it runs the command.
+        client.call("term_list", Value::Null).unwrap();
+        assert!(fake.ran.lock().unwrap().is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn lingering_is_changed_only_by_an_explicit_request_with_its_word_and_can_be_undone() {
+        let host = Host::start(Duration::from_secs(600));
+        let (sources, fake, dir) = world();
+        host.core.use_persistence(sources, fake.clone());
+        let client = host.client();
+        let refused = client
+            .call(
+                "host_lingering",
+                json!({"enable": true, "confirm": "yes please"}),
+            )
+            .unwrap_err();
+        assert_eq!(refused.code, "not_confirmed");
+        assert!(fake.ran.lock().unwrap().is_empty());
+        let on = client
+            .call(
+                "host_lingering",
+                json!({"enable": true, "confirm": "enable-lingering"}),
+            )
+            .unwrap();
+        assert_eq!(on["lingering"], true);
+        let now = on["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == "logout_with_lingering")
+            .unwrap()
+            .clone();
+        assert_eq!(
+            (now["outcome"].as_str(), now["current"].as_bool()),
+            (Some("survives"), Some(true))
+        );
+        let off = client
+            .call(
+                "host_lingering",
+                json!({"enable": false, "confirm": "disable-lingering"}),
+            )
+            .unwrap();
+        assert_eq!(off["lingering"], false);
+        assert_eq!(
+            fake.ran.lock().unwrap().as_slice(),
+            [
+                "/usr/bin/loginctl enable-linger",
+                "/usr/bin/loginctl disable-linger"
+            ]
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+}

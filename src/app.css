@@ -1988,6 +1988,31 @@ html[data-glass='transparent'] .shell {
   border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.025);
 }
+.lifecycle-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.lifecycle-table th,
+.lifecycle-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line, rgba(127, 127, 127, 0.25));
+  vertical-align: top;
+}
+.lifecycle-table tr[data-current='true'] td:first-child {
+  font-weight: 600;
+}
+.lifecycle-table td[data-outcome='ends'] {
+  color: var(--warn);
+}
+.lifecycle-caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 .settings-section h3 {
   margin: 0;
   font-size: 13px;

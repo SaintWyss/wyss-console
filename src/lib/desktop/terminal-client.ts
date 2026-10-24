@@ -2,6 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import type { TerminalId } from '../contracts/identities';
 import {
   parseAttach,
+  parseHostLifecycle,
+  type HostLifecycle,
   parseHostTerminals,
   parseParserBrief,
   type Attach,
@@ -58,6 +60,27 @@ export async function redrawTerminal(terminal_id: TerminalId): Promise<void> {
 export async function attachTerminal(terminal_id: TerminalId): Promise<Attach> {
   return parseAttach(
     await invoke<unknown>('terminal_attach', { request: { terminal_id } }),
+  );
+}
+/** What survives what for the terminals the host holds, from facts read on this machine. */
+export async function hostLifecycle(): Promise<HostLifecycle> {
+  return parseHostLifecycle(await invoke<unknown>('host_persistence'));
+}
+export const ENABLE_LINGERING = 'enable-lingering';
+export const DISABLE_LINGERING = 'disable-lingering';
+/**
+ * Turns systemd lingering on or off for this account. Only ever called from the button that asks
+ * for it, with the confirmation word of that direction: the desktop and the host refuse anything
+ * else.
+ */
+export async function setLingering(enable: boolean): Promise<HostLifecycle> {
+  return parseHostLifecycle(
+    await invoke<unknown>('host_lingering', {
+      request: {
+        enable,
+        confirm: enable ? ENABLE_LINGERING : DISABLE_LINGERING,
+      },
+    }),
   );
 }
 /** The saved layout of tabs and panes, as the desktop kept it; `null` when there is none. */

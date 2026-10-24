@@ -153,6 +153,8 @@ fn main() {
             "host_info",
             "terminal_redraw",
             "terminal_attach",
+            "host_persistence",
+            "host_lingering",
             "layout_read",
             "layout_write",
             "credentials_list",

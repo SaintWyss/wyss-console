@@ -256,3 +256,69 @@ export function parseHostTerminals(value: unknown): HostTerminal[] {
   }
   return out;
 }
+
+export type LifecycleOutcome = 'survives' | 'ends' | 'uncertain';
+export interface LifecycleEvent {
+  id: string;
+  outcome: LifecycleOutcome;
+  /** Of the two logout rows, the one that describes the setting this machine has now. */
+  current: boolean;
+  basis: string;
+  known_by: string;
+}
+/** What survives what for the terminals a host holds, and the one setting that changes logout. */
+export interface HostLifecycle {
+  /** `null`: this system keeps no record the Console can read. */
+  lingering: boolean | null;
+  kill_user_processes: boolean;
+  placement: 'user_manager' | 'session_scope' | 'other' | 'unknown';
+  events: LifecycleEvent[];
+}
+
+const PLACEMENT: readonly string[] = [
+  'user_manager',
+  'session_scope',
+  'other',
+  'unknown',
+];
+const OUTCOME: readonly string[] = ['survives', 'ends', 'uncertain'];
+
+export function parseHostLifecycle(value: unknown): HostLifecycle {
+  if (typeof value !== 'object' || value === null)
+    throw new Error('invalid_lifecycle');
+  const v = value as Record<string, unknown>;
+  if (
+    !(v.lingering === null || typeof v.lingering === 'boolean') ||
+    typeof v.kill_user_processes !== 'boolean' ||
+    typeof v.placement !== 'string' ||
+    !PLACEMENT.includes(v.placement) ||
+    !Array.isArray(v.events) ||
+    v.events.length > 32
+  )
+    throw new Error('invalid_lifecycle');
+  const events = v.events.map((e): LifecycleEvent => {
+    const r = e as Record<string, unknown>;
+    if (
+      typeof r?.id !== 'string' ||
+      typeof r.outcome !== 'string' ||
+      !OUTCOME.includes(r.outcome) ||
+      typeof r.current !== 'boolean' ||
+      typeof r.basis !== 'string' ||
+      typeof r.known_by !== 'string'
+    )
+      throw new Error('invalid_lifecycle');
+    return {
+      id: r.id,
+      outcome: r.outcome as LifecycleOutcome,
+      current: r.current,
+      basis: r.basis,
+      known_by: r.known_by,
+    };
+  });
+  return {
+    lingering: v.lingering as boolean | null,
+    kill_user_processes: v.kill_user_processes,
+    placement: v.placement as HostLifecycle['placement'],
+    events,
+  };
+}

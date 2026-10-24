@@ -204,7 +204,10 @@ pub async fn terminal_attach(
     let link = link.inner().clone();
     let terminal_id = request.terminal_id.clone();
     let answer = blocking(move || {
-        match link.call("term_screen", json!({"terminal_id": terminal_id, "scrollback_lines": 500})) {
+        match link.call(
+            "term_screen",
+            json!({"terminal_id": terminal_id, "scrollback_lines": 500}),
+        ) {
             Err(error) if error.code == "unknown_op" => Ok(json!({
                 "available": false,
                 "reason": "host_without_screen",
@@ -234,6 +237,40 @@ pub async fn terminal_attach(
             "parser": answer["parser"],
         }))
     }
+}
+
+/// What survives what, from facts read on this machine, and whether lingering is on.
+#[tauri::command]
+pub async fn host_persistence(link: State<'_, HostLink>) -> Result<Value, WireError> {
+    let link = link.inner().clone();
+    blocking(move || link.call("host_persistence", Value::Null)).await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LingeringRequest {
+    enable: bool,
+    confirm: String,
+}
+
+/// Turns lingering on or off: the owner's explicit action, with its confirmation word. Never
+/// called by anything but the button that asks for it.
+#[tauri::command]
+pub async fn host_lingering(
+    link: State<'_, HostLink>,
+    request: LingeringRequest,
+) -> Result<Value, WireError> {
+    if request.confirm.len() > 32 {
+        return Err(invalid());
+    }
+    let link = link.inner().clone();
+    blocking(move || {
+        link.call(
+            "host_lingering",
+            json!({"enable": request.enable, "confirm": request.confirm}),
+        )
+    })
+    .await
 }
 
 /// How long a read that finds nothing new waits for something before it answers empty. The page
@@ -370,6 +407,8 @@ const COMMANDS: &[&str] = &[
     "terminal_status",
     "terminal_redraw",
     "terminal_attach",
+    "host_persistence",
+    "host_lingering",
     "host_terminals",
     "host_info",
     "layout_read",
@@ -387,6 +426,8 @@ pub fn extension() -> wyss_console::Extension {
             terminal_status,
             terminal_redraw,
             terminal_attach,
+            host_persistence,
+            host_lingering,
             terminal_read_output,
             host_terminals,
             host_info,

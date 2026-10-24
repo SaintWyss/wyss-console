@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Local application information, one read of the authority projection, one read and six intents for managed sessions, one native folder dialog, three reads and two intents for managed turns, two reads and two decisions for their approvals, one read, one update and one reset of the desktop's own preferences, two reads of the agents' configuration inventory and eight operations to change it with a way back, seventeen operations for native agent sessions and session profiles (none takes a command, an argument list, an environment or a path), four operations for the host that holds the terminals past the window (list what it holds, say whether it is a host process, redraw a program's screen, attach to the screen a terminal kept while the window was away), a read and a bounded write of the saved layout of tabs and panes, six operations for API credentials (a key is typed in a native window and never returned), a handoff brief to review and to save, and narrow human-terminal operations for the main window, and one read of whether the protocol-2 interface exists (it answers inactive unless the desktop was started with --f8-authority).",
+  "description": "Local application information, one read of the authority projection, one read and six intents for managed sessions, one native folder dialog, three reads and two intents for managed turns, two reads and two decisions for their approvals, one read, one update and one reset of the desktop's own preferences, two reads of the agents' configuration inventory and eight operations to change it with a way back, seventeen operations for native agent sessions and session profiles (none takes a command, an argument list, an environment or a path), six operations for the host that holds the terminals past the window (list what it holds, say whether it is a host process, redraw a program's screen, attach to the screen a terminal kept while the window was away, read what survives what and whether lingering is on, and turn lingering on or off on the owner's explicit confirmation), a read and a bounded write of the saved layout of tabs and panes, six operations for API credentials (a key is typed in a native window and never returned), a handoff brief to review and to save, and narrow human-terminal operations for the main window, and one read of whether the protocol-2 interface exists (it answers inactive unless the desktop was started with --f8-authority).",
   "windows": ["main"],
   "permissions": [
     "allow-get-app-info",
@@ -79,6 +79,8 @@
     "allow-host-info",
     "allow-terminal-redraw",
     "allow-terminal-attach",
+    "allow-host-persistence",
+    "allow-host-lingering",
     "allow-layout-read",
     "allow-layout-write",
     "allow-credentials-list",

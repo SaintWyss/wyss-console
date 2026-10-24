@@ -166,6 +166,11 @@ pub struct HostCore {
     shell: Mutex<Option<std::path::PathBuf>>,
     /// Starts the parser helper of a terminal; `None` when no helper executable was found.
     screen: Mutex<Option<Arc<dyn Spawner>>>,
+    /// Where lifecycle facts are read from and how `loginctl` is run (tests replace both).
+    persistence: Mutex<(
+        Option<super::persistence::Sources>,
+        Arc<dyn super::persistence::Runner>,
+    )>,
 }
 
 fn terminal_error(error: &TerminalError) -> HostError {
@@ -237,6 +242,12 @@ struct ScreenRequest {
     terminal_id: String,
     #[serde(default)]
     scrollback_lines: Option<u32>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LingerRequest {
+    enable: bool,
+    confirm: String,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -312,6 +323,10 @@ impl HostCore {
             table: Mutex::new(HashMap::new()),
             idle_since: Mutex::new(Some(Instant::now())),
             shell: Mutex::new(None),
+            persistence: Mutex::new((
+                super::persistence::Sources::system(),
+                Arc::new(super::persistence::SystemRunner),
+            )),
             screen: Mutex::new(screen_helper_path().map(|path| {
                 Arc::new(ProcessSpawner {
                     path,
@@ -319,6 +334,15 @@ impl HostCore {
                 }) as Arc<dyn Spawner>
             })),
         })
+    }
+
+    #[cfg(test)]
+    pub fn use_persistence(
+        &self,
+        sources: super::persistence::Sources,
+        runner: Arc<dyn super::persistence::Runner>,
+    ) {
+        *lock(&self.persistence) = (Some(sources), runner);
     }
 
     /// Replaces the way parser helpers are started (tests only).
@@ -555,6 +579,26 @@ impl HostCore {
             "term_screen" => {
                 let request: ScreenRequest = params(value)?;
                 self.screen(&request)
+            }
+            "host_persistence" => {
+                let (sources, _) = lock(&self.persistence).clone();
+                let sources = sources.ok_or_else(|| HostError::new("unavailable"))?;
+                Ok(super::persistence::to_json(
+                    &super::persistence::read_facts(&sources),
+                ))
+            }
+            "host_lingering" => {
+                let request: LingerRequest = params(value)?;
+                let (sources, runner) = lock(&self.persistence).clone();
+                let sources = sources.ok_or_else(|| HostError::new("unavailable"))?;
+                super::persistence::set_lingering(
+                    runner.as_ref(),
+                    &sources,
+                    request.enable,
+                    &request.confirm,
+                )
+                .map(|facts| super::persistence::to_json(&facts))
+                .map_err(|e| HostError::new(e.code()))
             }
             "term_parser" => {
                 let request: Target = params(value)?;

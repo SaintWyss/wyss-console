@@ -73,7 +73,11 @@ const renderer = (): TerminalRenderer => ({
   setActive: vi.fn(),
   focus: vi.fn(),
   dispose: vi.fn(),
-  ...(withRestore ? { restore } : {}),
+  ...(withRestore
+    ? {
+        restore: restore as unknown as NonNullable<TerminalRenderer['restore']>,
+      }
+    : {}),
 });
 
 beforeEach(() => {
