@@ -98,7 +98,10 @@ fn a_replaced_host_is_a_different_host_and_the_old_expectation_fails_without_a_c
     let old = owner.host(None).unwrap().epoch;
     let dir = TestDir(first._dir.0.clone());
     first.stop();
-    std::mem::forget(first._dir.0.clone());
+    // This fixture uses threads in one process. Keep the retired socket inode allocated
+    // so the next thread cannot accidentally reuse the same (dev, inode, pid, start_ticks)
+    // epoch tuple; a real replacement host has a distinct process identity.
+    std::fs::rename(&first.socket, first._dir.0.join("retired-host.sock")).unwrap();
     assert_eq!(owner.host(Some(&old)).unwrap_err(), OwnerError::HostOffline);
     // Another host takes the same path.
     let _second = Host::start_in(dir);
