@@ -1,6 +1,10 @@
 //! The authority's lifecycle with the real things: the real `wyss-control`, started by a
 //! real `systemd --user`, found by the real `AuthorityService`.
 //!
+//! The tests that start a private manager are ignored in hosted CI: an independent
+//! private systemd --user manager is not available there. They require dedicated
+//! workstation/VM qualification before production deployment, not silent PASS.
+//!
 //! The service manager is a private one. Each test starts its own `systemd --user` on a
 //! temporary runtime directory and an empty temporary home, so the unit under test is the
 //! one the product writes, unchanged, and nothing of the user's own session, units or
@@ -472,6 +476,7 @@ fn activated(
 }
 
 #[test]
+#[ignore = "legacy explicit-bootstrap integration; needs isolated systemd --user qualification before production deployment"]
 fn a_clean_account_gets_an_authority_that_outlives_the_desktop_and_survives_a_crash() {
     let _serial = serial();
     let account = Account::new("approval_command");
@@ -731,6 +736,7 @@ fn a_clean_account_gets_an_authority_that_outlives_the_desktop_and_survives_a_cr
 }
 
 #[test]
+#[ignore = "legacy explicit-bootstrap integration; needs isolated systemd --user qualification before production deployment"]
 fn desktops_that_start_at_once_get_one_authority() {
     let _serial = serial();
     let account = Account::new("happy");
@@ -793,6 +799,7 @@ fn desktops_that_start_at_once_get_one_authority() {
 }
 
 #[test]
+#[ignore = "legacy explicit-bootstrap integration; needs isolated systemd --user qualification before production deployment"]
 fn an_authority_that_keeps_failing_is_restarted_a_bounded_number_of_times_and_no_more() {
     let _serial = serial();
     let account = Account::new("happy");
@@ -920,6 +927,7 @@ impl Drop for Foreign {
 }
 
 #[test]
+#[ignore = "legacy explicit-bootstrap integration; needs isolated systemd --user qualification before production deployment"]
 fn an_authority_somebody_else_started_is_used_and_never_replaced_or_stopped() {
     let _serial = serial();
     let account = Account::new("happy");
@@ -1025,6 +1033,7 @@ fn impostor(account: &Account) -> (thread::JoinHandle<()>, Arc<Mutex<usize>>) {
 }
 
 #[test]
+#[ignore = "legacy explicit-bootstrap integration; needs isolated systemd --user qualification before production deployment"]
 fn an_incompatible_authority_is_said_and_nothing_is_done_about_it() {
     let _serial = serial();
     let account = Account::new("happy");
@@ -1061,6 +1070,7 @@ fn an_incompatible_authority_is_said_and_nothing_is_done_about_it() {
 }
 
 #[test]
+#[ignore = "legacy explicit-bootstrap integration; needs isolated systemd --user qualification before production deployment"]
 fn a_newer_authority_is_installed_on_a_cold_start_never_under_work_and_the_store_survives() {
     let _serial = serial();
     // This provider keeps a turn running until it is cancelled.
@@ -1178,6 +1188,7 @@ fn a_newer_authority_is_installed_on_a_cold_start_never_under_work_and_the_store
 }
 
 #[test]
+#[ignore = "legacy explicit-bootstrap integration; needs isolated systemd --user qualification before production deployment"]
 fn a_dead_socket_and_a_half_done_install_are_recovered_on_the_next_launch() {
     let _serial = serial();
     let account = Account::new("happy");

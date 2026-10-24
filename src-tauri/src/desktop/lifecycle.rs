@@ -37,8 +37,8 @@ pub struct LifecycleRequest {
 #[serde(deny_unknown_fields)]
 pub struct RetryRequest {}
 
-/// The desktop's bootstrap for this process: the authority packaged with this build, the
-/// user's XDG directories and the user's service manager.
+/// The desktop observes the existing authority without installing, starting or retrying it.
+/// The authority digest and XDG paths are diagnostic inputs, never activation rights.
 #[cfg(target_os = "linux")]
 pub fn start(
     authority: &super::authority::AuthorityService,
@@ -52,7 +52,7 @@ pub fn start(
         |_| PathBuf::from("/nonexistent"),
         |l| l.runtime().to_owned(),
     );
-    AuthorityBootstrap::start(
+    AuthorityBootstrap::observe_only(
         Arc::new(authority.clone()),
         Provision::of_build(authority_digest),
         layout,

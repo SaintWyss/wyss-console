@@ -113,6 +113,7 @@ struct Inner {
     layout: LifecycleResult<Layout>,
     manager: Arc<dyn ServiceManager>,
     limits: Limits,
+    mutations_allowed: bool,
 }
 
 /// Ends an attempt even if it panics, so that Retry is never left unusable.
@@ -168,7 +169,7 @@ impl Inner {
         let mut draft = view.clone();
         change(&mut draft);
         draft.failure = draft.failure.filter(|_| draft.phase == Phase::Failed);
-        draft.retry = draft.phase == Phase::Failed;
+        draft.retry = self.mutations_allowed && draft.phase == Phase::Failed;
         if !matches!(draft.phase, Phase::Ready | Phase::Incompatible) {
             draft.origin = None;
         }
@@ -423,6 +424,15 @@ impl Inner {
                         self.settle(state);
                     }
                 }
+                LinkState::Absent if !self.mutations_allowed => {
+                    // The desktop only observes existing authorities; absence cannot
+                    // install, start, retry or replace anything on the user's machine.
+                    self.fail(if connected_once {
+                        Failure::Stopped
+                    } else {
+                        Failure::SocketUnavailable
+                    });
+                }
                 LinkState::Absent if armed && self.begin() => {
                     armed = false;
                     // By itself it starts an authority once, and only one it never saw:
@@ -481,6 +491,26 @@ impl AuthorityBootstrap {
         manager: Arc<dyn ServiceManager>,
         limits: Limits,
     ) -> Self {
+        Self::start_with_mode(link, provision, layout, manager, limits, true)
+    }
+    /// Observation-only lifecycle for the installed GUI. Even a Retry request is inert.
+    /// Service activation and migration remain separate operator-authorized actions.
+    pub fn observe_only(
+        link: Arc<dyn AuthorityLink>,
+        provision: Provision,
+        layout: LifecycleResult<Layout>,
+        manager: Arc<dyn ServiceManager>,
+    ) -> Self {
+        Self::start_with_mode(link, provision, layout, manager, Limits::default(), false)
+    }
+    fn start_with_mode(
+        link: Arc<dyn AuthorityLink>,
+        provision: Provision,
+        layout: LifecycleResult<Layout>,
+        manager: Arc<dyn ServiceManager>,
+        limits: Limits,
+        mutations_allowed: bool,
+    ) -> Self {
         let build = match &provision {
             Provision::Packaged(_) => BuildKind::Packaged,
             Provision::Development => BuildKind::Development,
@@ -496,6 +526,7 @@ impl AuthorityBootstrap {
             layout,
             manager,
             limits,
+            mutations_allowed,
         });
         let follower = {
             let inner = inner.clone();
@@ -538,6 +569,9 @@ impl AuthorityBootstrap {
     pub fn retry(&self) -> LifecycleView {
         // The attempt is taken first: whether there is something to retry is then read
         // by one caller at a time.
+        if !self.inner.mutations_allowed {
+            return self.view();
+        }
         if !self.inner.stopping() && self.inner.begin() {
             if self.inner.lock().phase == Phase::Failed {
                 // Shown at once, so that a second press finds nothing to retry.
