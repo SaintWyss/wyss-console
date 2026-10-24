@@ -195,6 +195,10 @@ struct Live {
     meter: Meter,
     spawned_at: Instant,
     turn: Option<(String, String)>,
+    /// When `turn/interrupt` was written to this launch's provider for the turn above. The write
+    /// is not an answer: the provider owes the turn's end, and a runtime that does not give it
+    /// within `interrupt_answer_ms` is faulted alone (it never holds a slot or a session for ever).
+    interrupt_sent: Option<Instant>,
     /// Provider request id to pending approval, scoped to this very launch.
     approvals: BTreeMap<String, Pending>,
     attachment: Option<Attachment>,
@@ -229,6 +233,8 @@ pub struct Engine {
     /// Exits whose audit record could not be written yet (storage failure): retried, never lost.
     unrecorded: Vec<(RuntimeRef, String, Option<String>)>,
     hook: Option<StageHook>,
+    /// A shorter answer deadline than the contract's, for tests of the stall path only.
+    interrupt_answer_override: Option<u64>,
 }
 
 impl Engine {
@@ -252,6 +258,7 @@ impl Engine {
             shutting_down: false,
             unrecorded: Vec::new(),
             hook: None,
+            interrupt_answer_override: None,
         })
     }
     pub fn with_stage_hook(
@@ -438,6 +445,7 @@ impl Engine {
             && live.turn.as_ref().is_some_and(|t| t.1 == lease_id)
         {
             live.turn = None;
+            live.interrupt_sent = None;
             live.approvals.clear();
             if let Ok(m) = Meter::new(now) {
                 live.meter = m;
@@ -633,6 +641,7 @@ impl Engine {
                 meter: Meter::new(self.ms(Instant::now()))?,
                 spawned_at: Instant::now(),
                 turn: None,
+                interrupt_sent: None,
                 approvals: BTreeMap::new(),
                 attachment: None,
                 exit: None,
@@ -805,6 +814,7 @@ impl Engine {
         }
         live.attachment = Some(next);
         live.turn = None;
+        live.interrupt_sent = None;
         live.approvals.clear();
         live.meter = Meter::new(now)?;
         Ok(())
@@ -869,9 +879,29 @@ impl Engine {
             return Err(E::StaleRevision);
         }
         live.turn = None;
+        live.interrupt_sent = None;
         live.approvals.clear();
         live.meter = Meter::new(now)?;
         Ok(())
+    }
+
+    /// Tests of the stall path only: a deadline shorter than the contract's.
+    #[cfg(test)]
+    pub(crate) fn with_interrupt_answer_ms(mut self, ms: u64) -> Self {
+        self.interrupt_answer_override = Some(ms);
+        self
+    }
+
+    /// The authority wrote `turn/interrupt` to this launch's provider. The clock for the provider's
+    /// answer starts here, for this runtime only; a repeated cancel does not restart it.
+    pub fn interrupt_dispatched(&mut self, reference: &RuntimeRef, now: Instant) {
+        if let Some(live) = self
+            .live
+            .get_mut(reference.managed_session_id.as_str())
+            .filter(|l| l.reference == *reference && l.turn.is_some())
+        {
+            live.interrupt_sent.get_or_insert(now);
+        }
     }
 
     /// Revalidates, at this very moment, the launch, turn, lease and attachment of a ticket.
@@ -1092,10 +1122,17 @@ impl Engine {
     /// the record cannot be written it is retried later and the unknown stays visible.
     pub fn poll(&mut self, now: Instant) {
         let now_ms = self.ms(now);
-        let init_timeout = super::budget::contract()
-            .ok()
+        let contract = super::budget::contract().ok();
+        let init_timeout = contract
+            .as_ref()
             .and_then(|c| c.get("provider_init_timeout_ms").copied())
             .unwrap_or(10_000);
+        let interrupt_answer = self.interrupt_answer_override.unwrap_or_else(|| {
+            contract
+                .as_ref()
+                .and_then(|c| c.get("interrupt_answer_ms").copied())
+                .unwrap_or(10_000)
+        });
         // Detect what no one reported: an unexpected child exit, a missed handshake deadline,
         // a turn over its wall clock and a faulted or stalled scheduler lane. Each stops only
         // the runtime concerned.
@@ -1127,6 +1164,17 @@ impl Engine {
                 verdicts.push((session.clone(), "budget_exceeded", Some(v.key.to_owned())));
             } else if self.scheduler.is_faulted(session) {
                 verdicts.push((session.clone(), "transport_failed", None));
+            } else if live.turn.is_some()
+                && live.interrupt_sent.is_some_and(|at| {
+                    u64::try_from(now.saturating_duration_since(at).as_millis()).unwrap_or(u64::MAX)
+                        > interrupt_answer
+                })
+            {
+                verdicts.push((
+                    session.clone(),
+                    "budget_exceeded",
+                    Some("interrupt_answer_ms".to_owned()),
+                ));
             }
         }
         self.pump(now_ms, &mut verdicts);

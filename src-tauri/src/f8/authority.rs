@@ -713,6 +713,9 @@ impl Authority {
                     self.engine.transport_failed(&ticket.reference);
                     return Err(E::ExternalEffectUnknown);
                 }
+                // The write is accepted, not answered: the provider now owes the turn's end.
+                self.engine
+                    .interrupt_dispatched(&ticket.reference, Instant::now());
             }
         }
         Ok(json!({"kind":"turn","value":record}))

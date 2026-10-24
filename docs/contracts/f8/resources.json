@@ -32,6 +32,7 @@
   "term_grace_ms": 2000,
   "hello_timeout_ms": 3000,
   "provider_init_timeout_ms": 10000,
+  "interrupt_answer_ms": 10000,
   "owned_root_rss_soft_kib": 524288,
   "aggregate_owned_roots_rss_soft_kib": 786432
 }
