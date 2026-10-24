@@ -4,7 +4,8 @@
 //! protocol conversations the parity tests use, so it holds real work in every table the migration
 //! touches: sessions, a runtime and its launch, a binding, completed and declined turns, accepted
 //! and declined approvals with their delivery records, a lease, receipts and the event log. It is
-//! an in-memory database made for each test. No installed store, path or authority is read, copied
+//! a synthetic database made for each test. The release tests also persist disposable images and
+//! crash a private child during their rebuild. No installed store or authority is read, copied
 //! or modified, and `v9_candidate` is compiled into test builds only.
 use super::*;
 use crate::{
@@ -12,7 +13,9 @@ use crate::{
     f8::{
         migration::{boundary_digest, clone_database, rows},
         v8::validate_v8,
-        v9_candidate::{Stage, expected_v9, migrate, quiescent, v8_view, validate_v9},
+        v9_candidate::{
+            Stage, expected_v9, migrate, quiescent, rebuild_statements, v8_view, validate_v9,
+        },
     },
 };
 use rusqlite::{Connection, types::Value as Sql};
@@ -133,6 +136,98 @@ fn synthetic_v8(quiet: bool) -> Connection {
 fn count(c: &Connection, table: &str) -> i64 {
     c.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
         .unwrap()
+}
+
+#[test]
+fn disposable_disk_images_preserve_v8_and_restore_after_v9_is_rejected_by_the_old_validator() {
+    use rusqlite::OpenFlags;
+    let root = std::env::temp_dir().join(format!("wyss-release-v9-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let source = root.join("source-v8.sqlite");
+    let candidate = root.join("candidate-v9.sqlite");
+    let restored = root.join("restored-v8.sqlite");
+    let v8 = synthetic_v8(true);
+    let before = rows(&v8).unwrap();
+    v8.execute("VACUUM INTO ?1", [source.to_str().unwrap()])
+        .unwrap();
+    let source_bytes = std::fs::read(&source).unwrap();
+    let input = Connection::open_with_flags(&source, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let v9 = migrate(&input, |_| Ok(())).unwrap();
+    v9.execute("VACUUM INTO ?1", [candidate.to_str().unwrap()])
+        .unwrap();
+    drop(v9);
+    let reopened =
+        Connection::open_with_flags(&candidate, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    validate_v9(&reopened).unwrap();
+    assert_eq!(validate_v8(&reopened), Err(E::StorageIncompatible));
+    assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+    // Rollback is the untouched V8 snapshot, not an older executable over a V9 file.
+    std::fs::copy(&source, &restored).unwrap();
+    let rollback =
+        Connection::open_with_flags(&restored, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    validate_v8(&rollback).unwrap();
+    assert_eq!(rows(&rollback).unwrap(), before);
+    drop((input, reopened, rollback));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Child entry point for the crash test, never run without an explicit test filter and
+/// private fixture marker. Exiting bypasses SQLite/Rust destructors and leaves a hot journal.
+#[test]
+#[ignore = "internal disposable crash child"]
+fn disposable_v9_crash_child() {
+    let root = std::path::PathBuf::from(std::env::var_os("WYSS_RELEASE_CRASH_FIXTURE").unwrap());
+    assert_eq!(
+        std::fs::read(root.join("fixture-marker")).unwrap(),
+        b"disposable-v9-only"
+    );
+    let c = Connection::open(root.join("interrupted.sqlite")).unwrap();
+    let statements: Vec<String> =
+        serde_json::from_slice(&std::fs::read(root.join("statements.json")).unwrap()).unwrap();
+    c.execute_batch("PRAGMA foreign_keys=OFF; PRAGMA legacy_alter_table=ON; BEGIN IMMEDIATE")
+        .unwrap();
+    for sql in statements {
+        c.execute_batch(&sql).unwrap();
+    }
+    std::process::exit(73);
+}
+
+#[test]
+fn a_real_process_crash_during_the_disposable_table_rebuild_recovers_the_original_v8() {
+    let root = std::env::temp_dir().join(format!("wyss-release-v9-crash-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("fixture-marker"), b"disposable-v9-only").unwrap();
+    let v8 = synthetic_v8(true);
+    let before = rows(&v8).unwrap();
+    v8.execute(
+        "VACUUM INTO ?1",
+        [root.join("interrupted.sqlite").to_str().unwrap()],
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("statements.json"),
+        serde_json::to_vec(&rebuild_statements(&v8).unwrap()).unwrap(),
+    )
+    .unwrap();
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            &format!(
+                "{}::disposable_v9_crash_child",
+                module_path!().split_once("::").unwrap().1
+            ),
+            "--ignored",
+        ])
+        .env("WYSS_RELEASE_CRASH_FIXTURE", &root)
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(73));
+    let recovered = Connection::open(root.join("interrupted.sqlite")).unwrap();
+    validate_v8(&recovered).unwrap();
+    assert_eq!(rows(&recovered).unwrap(), before);
+    drop(recovered);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -298,6 +393,28 @@ fn a_v9_image_holds_a_claude_runtime_that_a_v8_image_refuses_and_still_refuses_a
 }
 
 #[test]
+fn release_blocker_the_rehearsal_claude_kind_is_not_the_wire_kind() {
+    use crate::contracts::agent_adapter::AgentRuntimeKind;
+    assert_eq!(
+        serde_json::to_value(AgentRuntimeKind::ClaudeCode).unwrap(),
+        json!("claude_code")
+    );
+    assert!(serde_json::from_value::<AgentRuntimeKind>(json!("claude")).is_err());
+    // ADR0055's rehearsal widens to runtime_kind=adapter_id, but the existing descriptive
+    // wire kind is claude_code. Do not call that a complete multi-provider migration.
+    let v9 = migrate(&synthetic_v8(true), |_| Ok(())).unwrap();
+    let statement = "INSERT INTO managed_sessions SELECT 'ffffffff-0000-4000-8000-000000000002','claude','claude_code',control_state,revision,created_at,updated_at,'99999999999999999992' FROM managed_sessions LIMIT 1";
+    v9.execute(statement, []).unwrap();
+    let rejected = v9.execute("INSERT INTO managed_runtimes VALUES('ffffffff-0000-4000-8000-000000000002','claude','claude_code','stopped',1,0,'t','t')", []);
+    assert!(
+        rejected
+            .unwrap_err()
+            .to_string()
+            .contains("CHECK constraint failed")
+    );
+}
+
+#[test]
 fn an_interruption_at_every_stage_returns_nothing_and_leaves_the_source_exactly_as_it_was() {
     let v8 = synthetic_v8(true);
     let before = rows(&v8).unwrap();
@@ -413,7 +530,7 @@ fn the_row_count_triggers_survive_and_the_runtime_capacity_of_one_is_still_the_r
 }
 
 #[test]
-fn the_rehearsal_reads_no_path_and_is_not_compiled_into_a_package() {
+fn the_migration_algorithm_reads_no_path_and_is_not_compiled_into_a_package() {
     // The words are assembled so that this test does not find itself.
     let forbidden = [
         ["std", "::fs"].concat(),
@@ -423,13 +540,9 @@ fn the_rehearsal_reads_no_path_and_is_not_compiled_into_a_package() {
         ["home", "_dir"].concat(),
         ["env", "::var"].concat(),
     ];
-    for (name, source) in [
-        ("v9_candidate.rs", include_str!("../v9_candidate.rs")),
-        (
-            "v9_rehearsal_tests.rs",
-            include_str!("v9_rehearsal_tests.rs"),
-        ),
-    ] {
+    // The algorithm remains pure. The test harness now deliberately persists synthetic images
+    // under unique temp directories, and is not part of the packaged migration algorithm.
+    for (name, source) in [("v9_candidate.rs", include_str!("../v9_candidate.rs"))] {
         for (n, line) in source.lines().enumerate() {
             if line.trim_start().starts_with("//") {
                 continue;

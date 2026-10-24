@@ -101,7 +101,7 @@ pub enum Stage {
 
 /// The statements that rebuild the affected tables, read off the V8 image itself so that nothing
 /// the V8 definition has (a trigger, an index, a column) can be forgotten.
-fn rebuild_statements(c: &Connection) -> ControlResult<Vec<String>> {
+pub(crate) fn rebuild_statements(c: &Connection) -> ControlResult<Vec<String>> {
     let mut out = Vec::new();
     for table in WIDENED.iter().copied().chain([METADATA]) {
         let old: String = c
