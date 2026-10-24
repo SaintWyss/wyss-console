@@ -630,7 +630,8 @@ fn production_v9_persists_real_claude_identity_turns_approvals_and_recovers_mixe
         (
             "managed_session_bindings",
             format!(
-                "UPDATE managed_session_bindings SET adapter_id='codex',runtime_kind='codex' WHERE managed_session_id='{s}'"
+                "UPDATE managed_session_bindings SET adapter_id='codex',runtime_kind='codex',runtime_session_id='{}' WHERE managed_session_id='{s}'",
+                uuid()
             ),
         ),
         (
