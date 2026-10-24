@@ -220,17 +220,33 @@ fn identifiers_are_bounded_charset_checked_and_refused_never_truncated() {
     assert_eq!(with(SESSION, RUNTIME, ""), invalid);
     assert_eq!(with(SESSION, RUNTIME, "2.1.309-rc1"), invalid);
     assert_eq!(with(SESSION, RUNTIME, &"1.".repeat(40)), invalid);
-    assert_eq!(with(&"s".repeat(64), RUNTIME, "2.1.309"), None);
-    let long = usage(&"t".repeat(129), tokens(None, None), Completeness::Complete);
-    assert_eq!(Record::turn_usage(&o, &long, NOW).err(), invalid);
-    assert!(
-        Record::turn_usage(
-            &o,
-            &usage(&"t".repeat(128), tokens(None, None), Completeness::Complete),
-            NOW
-        )
-        .is_ok()
-    );
+    // Words are not identifiers: the charset used to admit a passphrase, the grammar does not.
+    for words in [
+        "correct-horse-battery-staple",
+        "my-password-is-hunter2",
+        &"s".repeat(64),
+        "Session-1",
+        "t",
+        "t-",
+        "-1",
+        "t1x",
+        "tttttttttt1",
+        "t1234567890123",
+        "0d0d0d0d-1111-4222-8333-44444444444G",
+        "0D0D0D0D-1111-4222-8333-444444444444",
+    ] {
+        assert_eq!(with(words, RUNTIME, "2.1.309"), invalid, "{words}");
+        let long = usage(words, tokens(None, None), Completeness::Complete);
+        assert_eq!(Record::turn_usage(&o, &long, NOW).err(), invalid, "{words}");
+    }
+    for fine in [
+        "t1",
+        "turn-12",
+        "rt0",
+        "0d0d0d0d-1111-4222-8333-444444444444",
+    ] {
+        assert_eq!(with(fine, RUNTIME, "2.1.309"), None, "{fine}");
+    }
     let mut huge = origin(1);
     huge.generation = u64::MAX;
     assert_eq!(Record::turn_usage(&huge, &t, NOW).err(), invalid);
@@ -263,10 +279,8 @@ fn secret_looking_identifiers_are_refused_even_though_the_charset_allows_them() 
     for fine in [
         "turn-1",
         "0d0d0d0d-1111-4222-8333-444444444444",
-        "msg_01XYZabc",
-        "claude-act-1",
-        "limit:five_hour:1900000000",
-        "t.1:2_3",
+        "t1",
+        "t42",
     ] {
         assert!(
             Record::turn_usage(&origin(1), &t(fine), NOW).is_ok(),
@@ -277,20 +291,15 @@ fn secret_looking_identifiers_are_refused_even_though_the_charset_allows_them() 
     let key = ["sk", "-ant-api03-", "zzzzzzzzzzzzzzzz"].concat();
     o.session_id = &key;
     assert_eq!(
-        Record::turn_usage(&o, &t("t"), NOW).err(),
+        Record::turn_usage(&o, &t("t1"), NOW).err(),
         Some(HistoryError::SecretLooking)
     );
 }
 
 #[test]
-fn the_canonical_size_bound_binds_before_the_identifier_bounds_do() {
-    // The contract allows 64+64+128+128 bytes of identifiers and also caps the canonical row at
-    // 1,024 bytes. All maxima at once exceed it: the row is refused, never truncated.
-    let (s, r, b) = ("s".repeat(64), "r".repeat(64), "9.".repeat(31) + "9");
-    let mut o = origin(i64::MAX as u64);
-    o.session_id = &s;
-    o.runtime_id = &r;
-    o.provider_build = &b;
+fn the_largest_record_the_grammar_allows_fits_the_row_bound_with_room_to_spare() {
+    // Identifiers are UUIDs or short tags now, so the 1,024-byte canonical cap is a second wall
+    // that the longest legal record does not reach (the old charset let the maxima exceed it).
     let max = Tokens {
         input: Some(i64::MAX as u64),
         output: Some(i64::MAX as u64),
@@ -298,20 +307,70 @@ fn the_canonical_size_bound_binds_before_the_identifier_bounds_do() {
         cache_read: Some(i64::MAX as u64),
         reasoning: Some(i64::MAX as u64),
     };
-    let t = usage(&"t".repeat(128), max, Completeness::Complete);
-    assert_eq!(
-        Record::turn_usage(&o, &t, i64::MAX).err(),
-        Some(HistoryError::RecordTooLarge)
-    );
-    // A record built from what the authority actually produces fits with room to spare.
-    let real = Record::turn_usage(
-        &origin(i64::MAX as u64),
-        &usage(&"t".repeat(36), max, Completeness::Complete),
-        i64::MAX,
-    )
-    .unwrap();
+    let build = "9.".repeat(31) + "9";
+    let mut o = origin(i64::MAX as u64);
+    o.provider_build = &build;
+    let real =
+        Record::turn_usage(&o, &usage(SESSION, max, Completeness::Complete), i64::MAX).unwrap();
     let n = real.canonical().unwrap().len();
     assert!(n < MAX_RECORD_BYTES && n > 400, "{n}");
+    // And what used to be the maxima is refused, not truncated.
+    let (s, r) = ("s".repeat(64), "r".repeat(64));
+    o.session_id = &s;
+    o.runtime_id = &r;
+    assert_eq!(
+        Record::turn_usage(
+            &o,
+            &usage(&"t".repeat(128), max, Completeness::Complete),
+            i64::MAX
+        )
+        .err(),
+        Some(HistoryError::InvalidRecord)
+    );
+}
+
+#[test]
+fn a_limit_record_has_exactly_the_closed_origin_and_no_token_counters() {
+    let obs = LimitObservation {
+        window: LimitWindow::FiveHour,
+        status: LimitStatus::Allowed,
+        resets_at: Some(9),
+        utilization: Some(0.5),
+        observed_at: 7,
+    };
+    let good = Record::limit(&origin(1), "t1", &obs, NOW).unwrap();
+    assert_eq!(good.origin_event_id, "limit:five_hour:7");
+    for origin_id in [
+        "limit:",
+        "limit:five_hour",
+        "limit:five_hour:",
+        "limit:five_hour:7:8",
+        "limit:five_hour:x",
+        "limit:fivehour:7",
+        "limit:correct-horse-battery-staple:7",
+        "limit:five_hour:12345678901234",
+        "Limit:five_hour:7",
+        "t1",
+    ] {
+        let mut r = good.clone();
+        r.origin_event_id = origin_id.into();
+        assert_eq!(
+            r.validate(),
+            Err(HistoryError::InvalidRecord),
+            "{origin_id}"
+        );
+    }
+    for set in [
+        |r: &mut Record| r.input_tokens = Some(1),
+        |r: &mut Record| r.output_tokens = Some(0),
+        |r: &mut Record| r.cache_creation_tokens = Some(1),
+        |r: &mut Record| r.cache_read_tokens = Some(1),
+        |r: &mut Record| r.reasoning_tokens = Some(1),
+    ] {
+        let mut r = good.clone();
+        set(&mut r);
+        assert_eq!(r.validate(), Err(HistoryError::InvalidRecord));
+    }
 }
 
 #[test]
@@ -411,7 +470,7 @@ fn old_records_are_pruned_by_age_and_the_pruning_is_counted() {
     let mut h = open(&p, small());
     let day = 86_400;
     // Each row is stored when it happens (`now` = its own time).
-    for (name, age) in [("a", 40), ("b", 35), ("c", 29)] {
+    for (name, age) in [("a1", 40), ("b1", 35), ("c1", 29)] {
         let at = NOW - age * day;
         h.insert(&rec(name, 1, at), at).unwrap();
     }
@@ -420,7 +479,7 @@ fn old_records_are_pruned_by_age_and_the_pruning_is_counted() {
         3,
         "nothing was old enough yet at those moments"
     );
-    h.insert(&rec("d", 1, NOW), NOW).unwrap();
+    h.insert(&rec("d1", 1, NOW), NOW).unwrap();
     let s = h.status().unwrap();
     assert_eq!(
         s.records, 2,
@@ -430,12 +489,12 @@ fn old_records_are_pruned_by_age_and_the_pruning_is_counted() {
     assert_eq!(s.oldest_event_at, Some(NOW - 29 * day));
     // The boundary is exact: a row exactly at the retention age stays, one second older goes.
     let mut h = open(&parent(), small());
-    h.insert(&rec("edge", 1, NOW - 30 * day), NOW - 30 * day)
+    h.insert(&rec("edge1", 1, NOW - 30 * day), NOW - 30 * day)
         .unwrap();
     h.insert(&rec("n1", 1, NOW), NOW).unwrap();
     assert_eq!(h.status().unwrap().records, 2);
     let mut h = open(&parent(), small());
-    h.insert(&rec("edge", 1, NOW - 30 * day - 1), NOW - 30 * day - 1)
+    h.insert(&rec("edge1", 1, NOW - 30 * day - 1), NOW - 30 * day - 1)
         .unwrap();
     h.insert(&rec("n1", 1, NOW), NOW).unwrap();
     assert_eq!(h.status().unwrap().records, 1);
@@ -498,7 +557,7 @@ fn a_write_that_cannot_fit_the_database_quota_is_rolled_back_and_reported() {
     assert!(h.status().unwrap().db_bytes <= 16 * 4096);
     // Pruning does not rescue a full store silently: the owner sees `Quota`.
     assert_eq!(
-        h.insert(&rec("another", 1, NOW + 9_999), NOW + 9_999),
+        h.insert(&rec("other1", 1, NOW + 9_999), NOW + 9_999),
         Err(HistoryError::Quota)
     );
 }
@@ -531,9 +590,9 @@ fn crash_child_begins_an_insert_and_dies() {
         return;
     };
     let mut h = History::open_with_gate(Path::new(&dir)).unwrap();
-    let r = rec("in-flight", 1, NOW + 1);
+    let r = rec("flight1", 1, NOW + 1);
     let tx = h.conn.transaction().unwrap();
-    tx.execute("INSERT INTO records (dedupe,schema_version,provider,provider_build,session_id,runtime_id,generation,turn_id,origin_event_id,kind,provenance,completeness,freshness,event_at,received_at) VALUES (?1,1,'claude','2.1.309','s','r',1,'in-flight','in-flight','turn_usage','provider_usage_event','complete','fresh',1,1)", [r.dedupe_key()]).unwrap();
+    tx.execute("INSERT INTO records (dedupe,schema_version,provider,provider_build,session_id,runtime_id,generation,turn_id,origin_event_id,kind,provenance,completeness,freshness,event_at,received_at) VALUES (?1,1,'claude','2.1.309','s','r',1,'flight1','flight1','turn_usage','provider_usage_event','complete','fresh',1,1)", [r.dedupe_key()]).unwrap();
     std::process::abort();
 }
 
@@ -542,7 +601,7 @@ fn a_process_that_dies_inside_a_transaction_leaves_no_row_and_no_dedupe_marker()
     let p = parent();
     {
         let mut h = open(&p, small());
-        h.insert(&rec("committed", 1, NOW), NOW).unwrap();
+        h.insert(&rec("done1", 1, NOW), NOW).unwrap();
     }
     // A real crash: a separate process of this very test binary, killed before commit.
     let status = std::process::Command::new(std::env::current_exe().unwrap())
@@ -560,7 +619,7 @@ fn a_process_that_dies_inside_a_transaction_leaves_no_row_and_no_dedupe_marker()
     assert!(!status.success(), "the child died by abort");
     let mut h = History::open_with_gate(&p).unwrap();
     assert_eq!(h.status().unwrap().records, 1, "only the committed row");
-    let r = rec("in-flight", 1, NOW + 1);
+    let r = rec("flight1", 1, NOW + 1);
     assert_eq!(
         h.insert(&r, NOW + 1),
         Ok(Inserted::New),
@@ -807,7 +866,7 @@ fn reset_leaves_a_directory_with_foreign_files_alone() {
 #[test]
 fn turn_usage_maps_completeness_honestly() {
     let t = |how| {
-        Record::turn_usage(&origin(1), &usage("t", tokens(Some(1), Some(1)), how), NOW)
+        Record::turn_usage(&origin(1), &usage("t1", tokens(Some(1), Some(1)), how), NOW)
             .unwrap()
             .completeness
     };
@@ -823,7 +882,7 @@ fn limit_records_keep_utilization_as_integer_permille_and_drop_nonsense() {
     let l = |u| {
         Record::limit(
             &origin(1),
-            "t",
+            "t1",
             &LimitObservation {
                 window: LimitWindow::SevenDay,
                 status: LimitStatus::AllowedWarning,
@@ -855,13 +914,13 @@ fn limit_records_keep_utilization_as_integer_permille_and_drop_nonsense() {
 
 #[test]
 fn a_turn_record_cannot_carry_limit_fields_and_a_limit_record_must() {
-    let mut r = rec("t", 1, NOW);
+    let mut r = rec("t1", 1, NOW);
     r.limit_window = Some(LimitWindowName::FiveHour);
     assert_eq!(r.validate(), Err(HistoryError::InvalidRecord));
-    let mut r = rec("t", 1, NOW);
+    let mut r = rec("t1", 1, NOW);
     r.kind = Kind::Limit;
     assert_eq!(r.validate(), Err(HistoryError::InvalidRecord));
-    let mut r = rec("t", 1, NOW);
+    let mut r = rec("t1", 1, NOW);
     r.input_tokens = Some(-1);
     assert_eq!(r.validate(), Err(HistoryError::InvalidRecord));
 }
@@ -893,7 +952,7 @@ fn every_field_is_judged_at_the_insertion_boundary_whatever_was_changed_after_co
     let p = parent();
     let mut h = open(&p, Limits::default());
     let key_like = ["sk", "-ant-api03-", "abcdefghijklmnopqrstuvwxyz0123"].concat();
-    let usage_case = || rec("t-ok", 1, NOW);
+    let usage_case = || rec("t1", 1, NOW);
     let limit_case = || {
         let l = crate::m3::usage::LimitObservation {
             window: LimitWindow::FiveHour,
@@ -902,7 +961,7 @@ fn every_field_is_judged_at_the_insertion_boundary_whatever_was_changed_after_co
             utilization: Some(0.5),
             observed_at: 1_800_000_000,
         };
-        Record::limit(&origin(1), "t-ok", &l, NOW).unwrap()
+        Record::limit(&origin(1), "t1", &l, NOW).unwrap()
     };
     let mutations: Vec<(&str, Record, HistoryError)> = vec![
         (
@@ -1136,5 +1195,92 @@ fn the_doors_that_skip_the_policy_gate_exist_only_in_test_and_fixture_builds() {
             attr.contains("cfg(test)") || attr.contains("cfg(any(test, feature = \"m3-fixture\"))"),
             "{door} is not test/fixture only: {attr}"
         );
+    }
+}
+
+// ---- the asynchronous recorder (review F6) -------------------------------------------------
+mod async_recorder {
+    use super::*;
+    use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
+
+    fn recorder() -> (Recorder, PathBuf) {
+        let p = parent();
+        (Recorder::with(open(&p, small())), p)
+    }
+
+    #[test]
+    fn a_writer_that_panics_is_reported_as_failed_not_as_recording_and_nothing_hangs() {
+        let (rec, _p) = recorder();
+        let boom = Arc::new(AtomicBool::new(true));
+        let again = boom.clone();
+        let sink = AsyncRecorder::spawn_with(
+            rec,
+            4,
+            Some(Box::new(move || {
+                if again.swap(false, Ordering::SeqCst) {
+                    panic!("the disk fell over");
+                }
+            })),
+        );
+        sink.offer(rec_for("t1"), NOW);
+        sink.flush();
+        assert_eq!(sink.state(), SinkState::Partial("writer_failed"));
+        // The writer is gone: later records are counted as refused, never queued, never waited for.
+        for n in 2..10 {
+            sink.offer(rec_for(&format!("t{n}")), NOW);
+        }
+        assert_eq!(sink.state(), SinkState::Partial("writer_failed"));
+        let (accepted, dropped) = sink.counts();
+        assert_eq!(accepted, 0);
+        assert!(dropped >= 7, "dropped {dropped}");
+        assert!(
+            sink.finish().is_none(),
+            "a failed writer hands nothing back"
+        );
+    }
+
+    #[test]
+    fn nothing_is_accepted_once_the_history_is_closed() {
+        let (rec, p) = recorder();
+        let sink = AsyncRecorder::spawn(rec);
+        sink.offer(rec_for("t1"), NOW);
+        let back = sink.finish().expect("the recorder comes back");
+        assert_eq!(back.counts(), (1, 0));
+        sink.offer(rec_for("t2"), NOW);
+        sink.offer(rec_for("t3"), NOW);
+        assert_eq!(sink.state(), SinkState::Partial("writer_gone"));
+        assert_eq!(sink.counts(), (1, 2));
+        // The store holds exactly what was accepted before the close.
+        let n = History::open_with(&p, Limits::default())
+            .unwrap()
+            .status()
+            .unwrap()
+            .records;
+        assert_eq!(n, 1);
+        assert!(sink.finish().is_none(), "finishing twice is harmless");
+    }
+
+    #[test]
+    fn the_counters_start_from_what_the_recorder_already_did() {
+        let (mut rec, _p) = recorder();
+        rec.record(&rec_for("t1"), NOW);
+        rec.record(&rec_for("t1"), NOW + 1); // a duplicate: accepted by the store as ignored
+        let before = rec.counts();
+        assert_ne!(before, (0, 0));
+        let sink = AsyncRecorder::spawn(rec);
+        assert_eq!(sink.counts(), before);
+        let _ = sink.finish();
+    }
+
+    #[test]
+    fn a_dropped_recorder_ends_its_writer() {
+        let (rec, _p) = recorder();
+        let sink = AsyncRecorder::spawn(rec);
+        sink.offer(rec_for("t1"), NOW);
+        drop(sink); // joins the writer; a hang here fails the test by timeout
+    }
+
+    fn rec_for(turn: &str) -> Record {
+        rec(turn, 1, NOW)
     }
 }

@@ -128,12 +128,39 @@ text_of!(Complete { Complete => "complete", Partial => "partial", Unknown => "un
 text_of!(LimitWindowName { FiveHour => "five_hour", SevenDay => "seven_day", SevenDayOpus => "seven_day_opus", SevenDaySonnet => "seven_day_sonnet", Overage => "overage" });
 text_of!(LimitStatusName { Allowed => "allowed", AllowedWarning => "allowed_warning", Rejected => "rejected" });
 
-/// Identifier charset of the contract: `[A-Za-z0-9._:-]+`.
-fn ident_ok(s: &str, max: usize) -> bool {
-    !s.is_empty()
-        && s.len() <= max
-        && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'-'))
+/// What an identifier in a record may be: a UUID, or a short lowercase tag and a number (`t-4`,
+/// `rt12`). The wider charset of the contract admitted words (a passphrase fits `[A-Za-z0-9._:-]+`),
+/// and a record is kept; ids the authority makes are always one of these two shapes.
+fn opaque_id(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let hex = |b: &u8| b.is_ascii_digit() || (b'a'..=b'f').contains(b);
+    let uuid = bytes.len() == 36
+        && bytes.iter().enumerate().all(|(i, b)| match i {
+            8 | 13 | 18 | 23 => *b == b'-',
+            _ => hex(b),
+        });
+    let letters = bytes.iter().take_while(|b| b.is_ascii_lowercase()).count();
+    let rest = &bytes[letters..];
+    let rest = rest.strip_prefix(b"-").unwrap_or(rest);
+    let tagged = (1..=8).contains(&letters)
+        && (1..=12).contains(&rest.len())
+        && rest.iter().all(u8::is_ascii_digit);
+    uuid || tagged
+}
+
+/// `limit:<window>:<seconds>`, exactly: the window is one of the closed names.
+fn limit_origin(s: &str) -> bool {
+    let mut parts = s.split(':');
+    let (head, window, at) = (parts.next(), parts.next(), parts.next());
+    head == Some("limit")
+        && window.is_some_and(|w| {
+            matches!(
+                w,
+                "five_hour" | "seven_day" | "seven_day_opus" | "seven_day_sonnet" | "overage"
+            )
+        })
+        && at.is_some_and(|a| (1..=13).contains(&a.len()) && a.bytes().all(|b| b.is_ascii_digit()))
+        && parts.next().is_none()
 }
 
 /// Refuses an identifier that could be carrying a credential. The charset allows it, so the
@@ -239,20 +266,21 @@ impl Record {
             && o.provider_build
                 .split('.')
                 .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
-        if !build_ok
-            || !ident_ok(o.session_id, 64)
-            || !ident_ok(o.runtime_id, 64)
-            || !ident_ok(turn_id, 128)
-            || !ident_ok(origin_event_id, 128)
-        {
-            return Err(HistoryError::InvalidRecord);
-        }
         if [o.session_id, o.runtime_id, turn_id, origin_event_id]
             .iter()
             .any(|s| looks_secret(s))
         {
             return Err(HistoryError::SecretLooking);
         }
+        if !build_ok
+            || !opaque_id(o.session_id)
+            || !opaque_id(o.runtime_id)
+            || !opaque_id(turn_id)
+            || !(opaque_id(origin_event_id) || limit_origin(origin_event_id))
+        {
+            return Err(HistoryError::InvalidRecord);
+        }
+
         Ok(Self {
             schema_version: SCHEMA_VERSION,
             provider: provider_name(o.provider),
@@ -311,22 +339,22 @@ impl Record {
         l: &LimitObservation,
         now: i64,
     ) -> Result<Self, HistoryError> {
-        let window = format!("{:?}", l.window);
-        let mut r = Self::base(
-            o,
-            turn_id,
-            &format!("limit:{}:{}", window.to_ascii_lowercase(), l.observed_at),
-            Kind::Limit,
-            Provenance::ProviderLimitEvent,
-            now,
-        )?;
-        r.limit_window = Some(match l.window {
+        let window = match l.window {
             super::usage::LimitWindow::FiveHour => LimitWindowName::FiveHour,
             super::usage::LimitWindow::SevenDay => LimitWindowName::SevenDay,
             super::usage::LimitWindow::SevenDayOpus => LimitWindowName::SevenDayOpus,
             super::usage::LimitWindow::SevenDaySonnet => LimitWindowName::SevenDaySonnet,
             super::usage::LimitWindow::Overage => LimitWindowName::Overage,
-        });
+        };
+        let mut r = Self::base(
+            o,
+            turn_id,
+            &format!("limit:{}:{}", window.text(), l.observed_at),
+            Kind::Limit,
+            Provenance::ProviderLimitEvent,
+            now,
+        )?;
+        r.limit_window = Some(window);
         r.limit_status = Some(match l.status {
             super::usage::LimitStatus::Allowed => LimitStatusName::Allowed,
             super::usage::LimitStatus::AllowedWarning => LimitStatusName::AllowedWarning,
@@ -375,6 +403,17 @@ impl Record {
         }
         // Every field is judged here, whoever built the record and whatever was changed in it since:
         // the store trusts nothing a caller could have set.
+        if [
+            &self.session_id,
+            &self.runtime_id,
+            &self.turn_id,
+            &self.origin_event_id,
+        ]
+        .iter()
+        .any(|s| looks_secret(s))
+        {
+            return Err(HistoryError::SecretLooking);
+        }
         let build_ok = !self.provider_build.is_empty()
             && self.provider_build.len() <= 64
             && self
@@ -383,10 +422,10 @@ impl Record {
                 .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
         if !matches!(self.provider, "claude" | "codex")
             || !build_ok
-            || !ident_ok(&self.session_id, 64)
-            || !ident_ok(&self.runtime_id, 64)
-            || !ident_ok(&self.turn_id, 128)
-            || !ident_ok(&self.origin_event_id, 128)
+            || !opaque_id(&self.session_id)
+            || !opaque_id(&self.runtime_id)
+            || !opaque_id(&self.turn_id)
+            || !(opaque_id(&self.origin_event_id) || limit_origin(&self.origin_event_id))
         {
             return Err(HistoryError::InvalidRecord);
         }
@@ -398,22 +437,20 @@ impl Record {
             }
             Kind::Limit => {
                 self.provenance == Provenance::ProviderLimitEvent
-                    && self.origin_event_id.starts_with("limit:")
+                    && limit_origin(&self.origin_event_id)
+                    && [
+                        self.input_tokens,
+                        self.output_tokens,
+                        self.cache_creation_tokens,
+                        self.cache_read_tokens,
+                        self.reasoning_tokens,
+                    ]
+                    .iter()
+                    .all(Option::is_none)
             }
         };
         if !consistent {
             return Err(HistoryError::InvalidRecord);
-        }
-        if [
-            &self.session_id,
-            &self.runtime_id,
-            &self.turn_id,
-            &self.origin_event_id,
-        ]
-        .iter()
-        .any(|s| looks_secret(s))
-        {
-            return Err(HistoryError::SecretLooking);
         }
         if self.canonical()?.len() > MAX_RECORD_BYTES {
             return Err(HistoryError::RecordTooLarge);
@@ -984,13 +1021,20 @@ impl Recorder {
 pub struct AsyncRecorder {
     tx: std::sync::mpsc::SyncSender<Job>,
     shared: std::sync::Arc<std::sync::Mutex<Shared>>,
+    /// Records refused because the queue was full.
     overflowed: std::sync::atomic::AtomicU64,
-    writer: std::sync::Mutex<Option<std::thread::JoinHandle<Recorder>>>,
+    /// Records refused because the writer is gone (it panicked, or it was finished).
+    writer_gone: std::sync::atomic::AtomicU64,
+    /// Set before the writer is told to stop: nothing is accepted after the history is closed.
+    closed: std::sync::atomic::AtomicBool,
+    writer: std::sync::Mutex<Option<std::thread::JoinHandle<Option<Recorder>>>>,
 }
 struct Shared {
     state: SinkState,
     accepted: u64,
     dropped: u64,
+    /// The writer panicked: what the store holds can no longer be vouched for.
+    broken: bool,
 }
 enum Job {
     Record(Box<Record>, i64),
@@ -1000,22 +1044,27 @@ enum Job {
 }
 /// Records the queue holds before it starts dropping.
 pub const QUEUE_CAPACITY: usize = 256;
+/// Run by the writer before each record (a test makes the disk "slow" with it).
+pub(crate) type BeforeEach = Box<dyn Fn() + Send>;
 
 impl AsyncRecorder {
     pub fn spawn(recorder: Recorder) -> Self {
         Self::spawn_with(recorder, QUEUE_CAPACITY, None)
     }
-    /// `hold`: a receiver the writer waits on before each record (a test makes the disk "slow").
     pub(crate) fn spawn_with(
         recorder: Recorder,
         capacity: usize,
-        hold: Option<std::sync::mpsc::Receiver<()>>,
+        before_each: Option<BeforeEach>,
     ) -> Self {
         let (tx, rx) = std::sync::mpsc::sync_channel::<Job>(capacity);
+        // What the recorder already knows (it may have been used before it was handed over) is where
+        // the figures start, so they are never reported as zero for a recorder that has history.
+        let (accepted, dropped) = recorder.counts();
         let shared = std::sync::Arc::new(std::sync::Mutex::new(Shared {
             state: recorder.state(),
-            accepted: 0,
-            dropped: 0,
+            accepted,
+            dropped,
+            broken: false,
         }));
         let seen = shared.clone();
         let writer = std::thread::Builder::new()
@@ -1025,15 +1074,28 @@ impl AsyncRecorder {
                 while let Ok(job) = rx.recv() {
                     match job {
                         Job::Record(rec, now) => {
-                            if let Some(hold) = &hold {
-                                let _ = hold.recv();
-                            }
-                            recorder.record(&rec, now);
+                            let wrote =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    if let Some(hook) = &before_each {
+                                        hook();
+                                    }
+                                    recorder.record(&rec, now);
+                                }));
                             if let Ok(mut s) = seen.lock() {
-                                let (accepted, dropped) = recorder.counts();
-                                s.state = recorder.state();
-                                s.accepted = accepted;
-                                s.dropped = dropped;
+                                if wrote.is_err() {
+                                    s.broken = true;
+                                    s.state = SinkState::Partial("writer_failed");
+                                } else {
+                                    let (accepted, dropped) = recorder.counts();
+                                    s.state = recorder.state();
+                                    s.accepted = accepted;
+                                    s.dropped = dropped;
+                                }
+                            }
+                            if wrote.is_err() {
+                                // The store is not used again, and the queue is released at once so
+                                // an `offer` is counted as refused instead of waiting for it.
+                                return None;
                             }
                         }
                         Job::Flush(ack) => {
@@ -1042,52 +1104,73 @@ impl AsyncRecorder {
                         Job::Stop => break,
                     }
                 }
-                recorder
+                Some(recorder)
             })
             .expect("a thread can be started");
         Self {
             tx,
             shared,
             overflowed: 0.into(),
+            writer_gone: 0.into(),
+            closed: false.into(),
             writer: std::sync::Mutex::new(Some(writer)),
         }
     }
 
-    /// Never blocks. A full queue (or a writer that is gone) drops the record and is counted.
+    /// Never blocks. A full queue, a closed history or a writer that is gone drops the record and
+    /// is counted, each under its own name.
     pub fn offer(&self, rec: Record, now: i64) {
+        use std::sync::atomic::Ordering::{Acquire, Relaxed};
         use std::sync::mpsc::TrySendError;
+        if self.closed.load(Acquire) {
+            self.writer_gone.fetch_add(1, Relaxed);
+            return;
+        }
         match self.tx.try_send(Job::Record(Box::new(rec), now)) {
             Ok(()) => (),
-            Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
-                self.overflowed
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Err(TrySendError::Full(_)) => {
+                self.overflowed.fetch_add(1, Relaxed);
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                self.writer_gone.fetch_add(1, Relaxed);
             }
         }
     }
 
-    /// What the sink is doing, truthfully: a storage failure or an overflowing queue is `Partial`.
+    /// What the sink is doing, truthfully: a storage failure, a dead writer or an overflowing queue
+    /// is `Partial`, and a broken writer is never reported as recording.
     pub fn state(&self) -> SinkState {
-        let s = self
+        use std::sync::atomic::Ordering::Relaxed;
+        let (s, broken) = self
             .shared
             .lock()
-            .map_or(SinkState::Partial("poisoned"), |s| s.state);
+            .map_or((SinkState::Partial("poisoned"), true), |s| {
+                (s.state, s.broken)
+            });
+        if broken {
+            return SinkState::Partial("writer_failed");
+        }
         match (
             s,
-            self.overflowed.load(std::sync::atomic::Ordering::Relaxed),
+            self.overflowed.load(Relaxed),
+            self.writer_gone.load(Relaxed),
         ) {
-            (SinkState::Recording, n) if n > 0 => SinkState::Partial("queue_full"),
-            (state, _) => state,
+            (SinkState::Recording, _, g) if g > 0 => SinkState::Partial("writer_gone"),
+            (SinkState::Recording, n, _) if n > 0 => SinkState::Partial("queue_full"),
+            (state, _, _) => state,
         }
     }
-    /// (records the store accepted, records dropped for any reason, including a full queue).
+    /// (records the store accepted, records dropped for any reason, including a full queue or a
+    /// writer that is gone).
     pub fn counts(&self) -> (u64, u64) {
+        use std::sync::atomic::Ordering::Relaxed;
         let (accepted, dropped) = self
             .shared
             .lock()
             .map_or((0, 0), |s| (s.accepted, s.dropped));
         (
             accepted,
-            dropped + self.overflowed.load(std::sync::atomic::Ordering::Relaxed),
+            dropped + self.overflowed.load(Relaxed) + self.writer_gone.load(Relaxed),
         )
     }
 
@@ -1099,11 +1182,23 @@ impl AsyncRecorder {
         }
     }
 
-    /// Ends the writer and hands back the recorder (and its store). Waits for the queue to drain.
+    /// Closes the history to new records, ends the writer and hands back the recorder (and its
+    /// store). Waits for what was already queued. `None` when the writer failed or was already
+    /// finished.
     pub fn finish(&self) -> Option<Recorder> {
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Release);
         let _ = self.tx.send(Job::Stop);
         let handle = self.writer.lock().ok()?.take()?;
-        handle.join().ok()
+        handle.join().ok()?
+    }
+}
+
+impl Drop for AsyncRecorder {
+    fn drop(&mut self) {
+        // A recorder dropped without `finish` still ends its writer and lets the queue drain,
+        // instead of leaving a thread waiting on a channel that nobody can write to.
+        let _ = self.finish();
     }
 }
 

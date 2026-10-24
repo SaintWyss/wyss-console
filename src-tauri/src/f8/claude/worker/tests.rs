@@ -1912,7 +1912,11 @@ mod history_wiring {
         let sink: HistorySink = Arc::new(AsyncRecorder::spawn_with(
             Recorder::with(store),
             capacity,
-            hold,
+            hold.map(|held| -> crate::m3::history::BeforeEach {
+                Box::new(move || {
+                    let _ = held.recv();
+                })
+            }),
         ));
         let mut r = rig(Profile::Inference);
         r.w = std::mem::replace(

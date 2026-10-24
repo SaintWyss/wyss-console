@@ -27,6 +27,7 @@ import ssl
 import stat
 import sys
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
@@ -118,7 +119,8 @@ class Broker:
                 if self.close_connection:
                     self.send_header("connection", "close")
                 self.end_headers()
-                self.wfile.write(raw)
+                if self.command != "HEAD":
+                    self.wfile.write(raw)
 
             def _authorized(self):
                 given = self.headers.get_all("x-wyss-broker") or []
@@ -164,7 +166,11 @@ class Broker:
                         self.send_header("transfer-encoding", "chunked")
                         self.end_headers()
                         sent = 0
+                        until = self.exchange_started()
                         while True:
+                            if time.monotonic() > until:
+                                self.close_connection = True
+                                return
                             chunk = resp.read1(8192) if hasattr(resp, "read1") else resp.read(8192)
                             if not chunk:
                                 break
