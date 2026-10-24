@@ -95,7 +95,7 @@ fn parser_throughput_and_repaint_latency() {
         let mut size = 0;
         for _ in 0..30 {
             let started = Instant::now();
-            let r = t.repaint(lines);
+            let r = t.repaint(lines).unwrap();
             micros.push(started.elapsed().as_secs_f64() * 1000.0);
             size = r.bytes.len();
         }

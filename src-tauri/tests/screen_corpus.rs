@@ -229,7 +229,7 @@ fn a_repaint_of_every_corpus_screen_redraws_it_exactly() {
         let (t, meta, _) = load(&name);
         let rows = meta["rows"].as_u64().unwrap() as usize;
         let cols = meta["cols"].as_u64().unwrap() as usize;
-        let repaint = t.repaint(10_000);
+        let repaint = t.repaint(10_000).unwrap();
         let mut again = Terminal::new(rows, cols, limits());
         again.feed(&repaint.bytes);
         assert_eq!(again.text(), t.text(), "{name}");
@@ -345,7 +345,7 @@ fn mutation_run(iterations: u64) -> u64 {
         }
         check_bounds(&t, name, seed);
         // The repaint of whatever came out is itself valid and redraws the same screen.
-        let r = t.repaint(500);
+        let r = t.repaint(500).unwrap();
         assert!(r.bytes.len() <= wyss_console::screen::repaint::MAX_REPAINT);
         let mut again = Terminal::new(*rows, *cols, limits());
         again.feed(&r.bytes);

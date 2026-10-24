@@ -124,6 +124,8 @@ pub enum Response {
     Pong {
         nonce: u64,
     },
+    /// The screen cannot be redrawn within the repaint bound; nothing was cut and the helper goes on.
+    TooLarge,
     /// The helper will not continue: a closed word for why. Followed by its exit.
     Refused {
         code: Refusal,
@@ -365,6 +367,7 @@ impl Response {
                 o.u8(0x85);
                 o.u8(*code as u8);
             }
+            Response::TooLarge => o.u8(0x86),
         }
         o.0
     }
@@ -434,6 +437,7 @@ impl Response {
             0x85 => Response::Refused {
                 code: Refusal::from(i.u8()?).ok_or(IpcError::Invalid("refusal"))?,
             },
+            0x86 => Response::TooLarge,
             other => return Err(IpcError::UnknownKind(other)),
         };
         i.done()?;
@@ -553,6 +557,7 @@ mod tests {
             },
             Response::Snapshot(Box::new(snap)),
             Response::Pong { nonce: 9 },
+            Response::TooLarge,
             Response::Refused {
                 code: Refusal::Version,
             },

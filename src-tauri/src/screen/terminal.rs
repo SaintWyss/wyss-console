@@ -250,6 +250,12 @@ impl Default for Limits {
     }
 }
 
+enum C2 {
+    Terminated,
+    Swallowed,
+    Normal,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum State {
     Ground,
@@ -299,6 +305,7 @@ pub struct Terminal {
     osc: Vec<u8>,
     osc_over: bool,
     skipped: usize,
+    pending_c2: bool,
     utf8: [u8; 4],
     utf8_len: u8,
     utf8_need: u8,
@@ -343,6 +350,7 @@ impl Terminal {
             osc: Vec::new(),
             osc_over: false,
             skipped: 0,
+            pending_c2: false,
             utf8: [0; 4],
             utf8_len: 0,
             utf8_need: 0,
@@ -566,6 +574,10 @@ impl Terminal {
     // ---------------------------------------------------------------- printing
 
     fn print(&mut self, ch: char) {
+        // Nothing a terminal would act on is ever stored as text, whatever put it here.
+        if ch.is_control() {
+            return;
+        }
         let ch = if self.charset[usize::from(self.shifted)] == Charset::LineDrawing {
             line_drawing(ch)
         } else {
@@ -1002,6 +1014,20 @@ impl Terminal {
             self.utf8_need = 0;
             return;
         }
+        if matches!(self.state, State::Osc | State::Skip) {
+            match self.string_c2(b) {
+                C2::Terminated => {
+                    if self.state == State::Osc {
+                        self.osc_end();
+                    } else {
+                        self.state = State::Ground;
+                    }
+                    return;
+                }
+                C2::Swallowed => return,
+                C2::Normal => {}
+            }
+        }
         match self.state {
             State::Ground => self.ground(b),
             State::Escape => self.escape(b),
@@ -1068,6 +1094,32 @@ impl Terminal {
         }
     }
 
+    /// Inside a string, U+009C (the eight-bit string terminator, sent as C2 9C) ends it. A lone C2
+    /// is held back for one byte: if the next is not 9C it goes into the string after all.
+    fn string_c2(&mut self, b: u8) -> C2 {
+        if self.pending_c2 {
+            self.pending_c2 = false;
+            if b == 0x9C {
+                return C2::Terminated;
+            }
+            if self.state == State::Osc {
+                if self.osc.len() < MAX_OSC {
+                    self.osc.push(0xC2);
+                } else {
+                    self.osc_over = true;
+                }
+            } else {
+                self.skipped += 1;
+            }
+            return C2::Normal;
+        }
+        if b == 0xC2 {
+            self.pending_c2 = true;
+            return C2::Swallowed;
+        }
+        C2::Normal
+    }
+
     fn begin_escape(&mut self) {
         self.state = State::Escape;
         self.intermediate = 0;
@@ -1089,7 +1141,7 @@ impl Terminal {
                             '\u{FFFD}'
                         });
                     self.utf8_need = 0;
-                    self.print(ch);
+                    self.character(ch);
                 }
                 return;
             }
@@ -1110,6 +1162,35 @@ impl Terminal {
             }
         }
     }
+    /// A decoded character: the eight-bit controls (U+0080..U+009F) are controls, exactly as the
+    /// window's terminal reads them, and are never stored as text.
+    fn character(&mut self, ch: char) {
+        match ch as u32 {
+            c @ 0x80..=0x9F => self.c1(c as u8),
+            _ => self.print(ch),
+        }
+    }
+
+    fn c1(&mut self, code: u8) {
+        match code {
+            0x84 => self.linefeed(),
+            0x85 => {
+                self.linefeed();
+                self.buf_mut().cursor.col = 0;
+            }
+            0x88 => {
+                let c = self.buf().cursor.col;
+                self.tabs[c] = true;
+            }
+            0x8D => self.reverse_index(),
+            0x9B => self.escape(b'['),
+            0x9D => self.escape(b']'),
+            0x90 | 0x98 | 0x9E | 0x9F => self.escape(b'P'),
+            // ST outside a string, and the rest of the set, do nothing.
+            _ => {}
+        }
+    }
+
     fn utf8_start(&mut self, b: u8, need: u8) {
         self.utf8[0] = b;
         self.utf8_len = 1;

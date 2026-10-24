@@ -151,7 +151,8 @@ export class TerminalController {
         if (!this.detached) await this.closeOnce();
         return;
       }
-      if (this.attachFirst && this.adopted) await this.attachScreen();
+      if (this.attachFirst && this.adopted && !(await this.attachScreen()))
+        return;
       if (this.stopped) return;
       this.state = 'running';
       this.renderer.setInput(true);
@@ -169,27 +170,58 @@ export class TerminalController {
    * missed; when no screen was kept the host's output is read from its start, as before. Nothing
    * is sent to the program.
    */
-  private async attachScreen() {
-    if (!this.id || !this.renderer.restore) return;
+  private async attachScreen(): Promise<boolean> {
+    if (!this.id || !this.renderer.restore) return true;
+    const id = this.id;
+    let result: Attach | undefined;
+    let drawn = false;
     try {
-      const result = await desktop.attachTerminal(this.id);
+      result = await desktop.attachTerminal(id);
       if (result.mode === 'screen') {
-        const drawn = await this.renderer.restore(result.repaint, result.size);
-        if (!drawn) return;
-        // The program is at the size the repaint was made for until a resize says otherwise.
-        this.sentSize = result.size;
-        this.parser = {
-          health: result.parser.health,
-          fidelity: result.parser.fidelity,
-          restarts: result.parser.restarts,
-        };
+        drawn = await this.renderer.restore(result.repaint, result.size);
       }
-      this.attached = result;
     } catch {
-      // A host that cannot say what its screen is: the output it kept is replayed instead.
-      this.attached = { mode: 'replay', reason: 'attach_failed', parser: null };
+      // A host that cannot say what its screen is, or one the window cannot draw: below.
+    }
+    // The host moves its read position only on this, so a screen that was not drawn loses nothing.
+    if (result?.mode === 'screen') {
+      try {
+        await desktop.commitAttach(id, result.token, drawn);
+      } catch (error) {
+        if (drawn) {
+          // The window shows a screen the host does not know about: reading on would draw output
+          // twice. Said, not guessed.
+          this.fail(error);
+          return false;
+        }
+      }
+    } else if (!result) {
+      try {
+        await desktop.commitAttach(id, null, false);
+      } catch {
+        // Nothing was staged that the window could have used.
+      }
+    }
+    if (result?.mode === 'screen' && drawn) {
+      // The program is at the size the repaint was made for until a resize says otherwise.
+      this.sentSize = result.size;
+      this.parser = {
+        health: result.parser.health,
+        fidelity: result.parser.fidelity,
+        restarts: result.parser.restarts,
+      };
+      this.attached = result;
+    } else if (result?.mode === 'replay') {
+      this.attached = result;
+    } else {
+      this.attached = {
+        mode: 'replay',
+        reason: result ? 'restore_failed' : 'attach_failed',
+        parser: null,
+      };
     }
     this.publish();
+    return true;
   }
   private requestFit() {
     if (this.stopped || !this.active || this.resizeTimer) return;

@@ -1,16 +1,23 @@
 {
-  "run": 1,
+ "run": 1,
+ "shape": "none",
+ "binary": "./src-tauri/target/debug/wyss-console",
+ "loadavg": [
+  "5.65",
+  "3.78",
+  "2.93"
+ ],
+ "mem_available_mib": 9169,
+ "screen": [
+  1500,
+  1400
+ ],
+ "display": ":79",
+ "events": {},
+ "world": {
   "shape": "none",
-  "binary": "./src-tauri/target/debug/wyss-console",
-  "loadavg": ["0.76", "2.16", "2.81"],
-  "mem_available_mib": 9057,
-  "screen": [1500, 1400],
-  "display": ":79",
-  "events": {},
-  "world": {
-    "shape": "none",
-    "projects": 0,
-    "terminals": 0
-  },
-  "leftovers": []
+  "projects": 0,
+  "terminals": 0
+ },
+ "leftovers": []
 }

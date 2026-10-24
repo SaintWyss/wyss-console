@@ -79,6 +79,7 @@
     "allow-host-info",
     "allow-terminal-redraw",
     "allow-terminal-attach",
+    "allow-terminal-attach-commit",
     "allow-host-persistence",
     "allow-host-lingering",
     "allow-layout-read",

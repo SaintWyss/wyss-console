@@ -62,6 +62,21 @@ export async function attachTerminal(terminal_id: TerminalId): Promise<Attach> {
     await invoke<unknown>('terminal_attach', { request: { terminal_id } }),
   );
 }
+/**
+ * The second half of an attach: says whether the screen was drawn. The host moves its read position
+ * to where the screen ends only on `restored: true` with the token it handed out; otherwise what it
+ * kept of the output is read from the start. Without a token (the answer could not be read) only
+ * `restored: false` is possible.
+ */
+export async function commitAttach(
+  terminal_id: TerminalId,
+  token: string | null,
+  restored: boolean,
+): Promise<void> {
+  await invoke<unknown>('terminal_attach_commit', {
+    request: { terminal_id, token, restored },
+  });
+}
 /** What survives what for the terminals the host holds, from facts read on this machine. */
 export async function hostLifecycle(): Promise<HostLifecycle> {
   return parseHostLifecycle(await invoke<unknown>('host_persistence'));

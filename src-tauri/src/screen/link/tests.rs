@@ -45,10 +45,11 @@ impl ByteSource for Bytes {
         let g = lock(&self.inner);
         g.0 + g.1.len() as u64
     }
-    fn read(&self, from: u64, max: usize) -> Vec<u8> {
+    fn read(&self, from: u64, max: usize) -> (u64, Vec<u8>) {
         let g = lock(&self.inner);
+        let from = from.max(g.0);
         let at = (from - g.0) as usize;
-        g.1[at..].iter().take(max).copied().collect()
+        (from, g.1[at..].iter().take(max).copied().collect())
     }
 }
 
@@ -63,6 +64,8 @@ enum Behavior {
     Garbles,
     /// Applies fewer isolation layers than were required.
     Weak,
+    /// Answers the hello, then writes frames nobody asked for, without stopping.
+    Floods,
 }
 
 struct CountingReader {
@@ -150,6 +153,19 @@ impl Spawner for Scripted {
                     helper::serve(&mut reader, &mut writer, applied);
                     // A process that ends closes its pipes, whoever else holds a copy.
                     let _ = writer.shutdown(std::net::Shutdown::Both);
+                }
+                Behavior::Floods => {
+                    let mut reader = std::io::BufReader::new(helper_side);
+                    let _ = ipc::read_frame(&mut reader, MAX_REQUEST);
+                    let ready = Response::Ready {
+                        version: ipc::PROTOCOL,
+                        pid: 1,
+                        applied: layer::ALL,
+                        landlock_abi: 6,
+                    };
+                    let _ = ipc::write_frame(&mut writer, &ready.encode(), MAX_RESPONSE);
+                    let pong = Response::Pong { nonce: 7 }.encode();
+                    while ipc::write_frame(&mut writer, &pong, MAX_RESPONSE).is_ok() {}
                 }
                 Behavior::Hangs => {
                     let mut reader = helper_side;
@@ -357,7 +373,7 @@ fn a_resize_reaches_the_screen_and_dropping_the_link_ends_the_helper() {
     let spawner = Scripted::new(vec![]);
     let link = ScreenLink::start(spawner.clone(), source.clone(), (6, 20), quick());
     source.push(SCREEN);
-    link.resize(8, 30);
+    link.resize(8, 30, source.end());
     let snap = link.snapshot(10, Duration::from_secs(5)).unwrap();
     assert_eq!((snap.body.rows, snap.body.cols), (8, 30));
     drop(link);
@@ -490,4 +506,130 @@ fn a_snapshot_is_not_refused_as_busy_while_the_terminal_floods_the_link_with_wak
     }
     stop.store(true, Ordering::SeqCst);
     flood.join().unwrap();
+}
+
+#[test]
+fn a_helper_that_floods_unasked_frames_cannot_hold_the_link_or_its_end() {
+    let source = Bytes::new();
+    let spawner = Scripted::new(vec![
+        Ok(Behavior::Floods),
+        Ok(Behavior::Floods),
+        Ok(Behavior::Floods),
+    ]);
+    let link = ScreenLink::start(spawner.clone(), source.clone(), (6, 20), quick());
+    source.push(SCREEN);
+    let started = Instant::now();
+    // Each helper is turned away at its first unasked frame; none of this may wait for ever.
+    let _ = link.snapshot(10, Duration::from_secs(10));
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        drop(link);
+        let _ = done_tx.send(());
+    });
+    assert!(
+        done_rx.recv_timeout(Duration::from_secs(10)).is_ok(),
+        "ending the link hung on a helper that floods"
+    );
+    assert!(started.elapsed() < Duration::from_secs(20));
+    assert!(spawner.killed.load(Ordering::SeqCst));
+}
+
+/// A ring that moves on between the moment the link asks for the end and the moment it reads.
+struct Racy {
+    inner: Arc<Bytes>,
+    evict_to: u64,
+    tripped: AtomicBool,
+}
+impl ByteSource for Racy {
+    fn start(&self) -> u64 {
+        self.inner.start()
+    }
+    fn end(&self) -> u64 {
+        self.inner.end()
+    }
+    fn read(&self, from: u64, max: usize) -> (u64, Vec<u8>) {
+        if !self.tripped.swap(true, Ordering::SeqCst) {
+            self.inner.evict_to(self.evict_to);
+        }
+        self.inner.read(from, max)
+    }
+}
+
+#[test]
+fn a_ring_that_moves_between_asking_and_reading_is_fed_at_the_offset_it_answered_with() {
+    let inner = Bytes::new();
+    inner.push(b"AAAAAAAAAA\r\nsecond line\r\nthird");
+    let source = Arc::new(Racy {
+        inner: inner.clone(),
+        evict_to: 12,
+        tripped: AtomicBool::new(false),
+    });
+    let link = ScreenLink::start(Scripted::new(vec![]), source, (6, 40), quick());
+    let snap = link.snapshot(10, Duration::from_secs(10)).unwrap();
+    // The first twelve bytes were gone by the time they were read: the screen starts there and
+    // says that twelve are missing; no restart, and the rest is where it belongs.
+    assert_eq!(snap.status.fidelity, Fidelity::Tail { missing: 12 });
+    assert_eq!(snap.status.restarts, 0);
+    assert_eq!(snap.status.last_failure, None);
+    let text = text_of(&snap.body.repaint, 6, 40);
+    assert!(text.iter().any(|l| l == "second line"), "{text:?}");
+    assert!(text.iter().any(|l| l.ends_with("third")), "{text:?}");
+}
+
+#[test]
+fn a_resize_takes_effect_between_the_bytes_written_before_it_and_after_it() {
+    // 25 characters at 20 columns, then the PTY becomes 40 wide, then 25 more: where the
+    // second run lands depends on exactly where the resize fell in the stream.
+    let before = [b'a'; 25];
+    let after = [b'b'; 25];
+    let mut expected = Terminal::new(6, 20, Limits::default());
+    expected.feed(&before);
+    expected.resize(6, 40);
+    expected.feed(&after);
+
+    let source = Bytes::new();
+    let link = ScreenLink::start(Scripted::new(vec![]), source.clone(), (6, 20), quick());
+    source.push(&before);
+    link.resize(6, 40, source.end());
+    source.push(&after);
+    let snap = link.snapshot(10, Duration::from_secs(10)).unwrap();
+    assert_eq!((snap.body.rows, snap.body.cols), (6, 40));
+    assert_eq!(text_of(&snap.body.repaint, 6, 40), expected.text());
+}
+
+#[test]
+fn a_resize_log_answers_for_every_offset_and_stays_bounded() {
+    let mut log = SizeLog::new((24, 80));
+    assert_eq!(log.size_at(0), (24, 80));
+    log.record(10, 30, 100);
+    log.record(10, 30, 100);
+    log.record(20, 40, 120);
+    assert_eq!(log.size_at(9), (24, 80));
+    assert_eq!(log.size_at(10), (30, 100));
+    assert_eq!(log.size_at(25), (40, 120));
+    assert_eq!(log.next_change_after(10), Some(20));
+    assert_eq!(log.next_change_after(20), None);
+    assert_eq!(log.latest(), (40, 120));
+    for i in 0..5000u64 {
+        log.record(100 + i, 10 + (i % 2) as u16, 20);
+    }
+    assert!(log.changes.len() <= 1024);
+}
+
+#[test]
+fn a_long_backlog_is_fed_in_quanta_and_still_ends_up_complete() {
+    let source = Bytes::new();
+    let link = ScreenLink::start(Scripted::new(vec![]), source.clone(), (6, 20), quick());
+    let chunk = vec![b'x'; 200 * 1024];
+    let mut total = 0u64;
+    for _ in 0..20 {
+        source.push(&chunk);
+        total += chunk.len() as u64;
+        link.wake();
+    }
+    source.push(b"\r\nthe end");
+    let snap = link.snapshot(10, Duration::from_secs(20)).unwrap();
+    let text = text_of(&snap.body.repaint, 6, 20);
+    assert!(text.iter().any(|l| l == "the end"), "{text:?}");
+    assert!(snap.status.fed >= total);
 }

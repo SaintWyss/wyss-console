@@ -69,42 +69,37 @@ impl ByteSource for RingSource {
     fn end(&self) -> u64 {
         self.0.upgrade().map_or(0, |e| lock(&e.inner).ring.end())
     }
-    fn read(&self, from: u64, max: usize) -> Vec<u8> {
-        self.0
-            .upgrade()
-            .map(|e| lock(&e.inner).ring.read(from, max).data)
-            .unwrap_or_default()
+    fn read(&self, from: u64, max: usize) -> (u64, Vec<u8>) {
+        // One look at the ring: the offset of what came back is read from the same read.
+        self.0.upgrade().map_or((from, Vec::new()), |e| {
+            let r = lock(&e.inner).ring.read(from, max);
+            (r.next - r.data.len() as u64, r.data)
+        })
     }
 }
 
 /// The helper executable next to this one (the package's `libexec`, or a development build's
-/// target directory): a regular file, executable, not writable by others, and ours or root's. Anything else is not used.
-fn screen_helper_path() -> Option<std::path::PathBuf> {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+/// target directory), verified and held open (`screen::locate`): anything that does not pass is not
+/// used, and what passed is what runs.
+fn screen_helper() -> Option<Arc<wyss_console::screen::locate::Verified>> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    let (uid, gid) = (
-        nix::unistd::getuid().as_raw(),
-        nix::unistd::getgid().as_raw(),
-    );
-    [
+    #[cfg(test)]
+    {
+        // A test build's artifact is whatever the build's umask made it; the rules stay as strict as
+        // in production, so the artifact is normalised first.
+        use std::os::unix::fs::PermissionsExt;
+        for name in ["wyss-screen", "../wyss-screen"] {
+            let _ =
+                std::fs::set_permissions(dir.join(name), std::fs::Permissions::from_mode(0o755));
+        }
+    }
+    wyss_console::screen::locate::find(&[
         dir.join("../libexec/wyss-console/wyss-screen"),
         dir.join("wyss-screen"),
         dir.join("../wyss-screen"),
-    ]
-    .into_iter()
-    .find_map(|candidate| {
-        let real = std::fs::canonicalize(&candidate).ok()?;
-        let meta = std::fs::metadata(&real).ok()?;
-        let ok = meta.is_file()
-            && meta.permissions().mode() & 0o111 != 0
-            // Not writable by others; by the group only when that group is the user's own (a
-            // private-group account whose umask is 002).
-            && meta.permissions().mode() & 0o002 == 0
-            && (meta.permissions().mode() & 0o020 == 0 || meta.gid() == gid)
-            && (meta.uid() == uid || meta.uid() == 0);
-        ok.then_some(real)
-    })
+    ])
+    .map(Arc::new)
 }
 
 fn health_word(h: Health) -> &'static str {
@@ -330,9 +325,9 @@ impl HostCore {
                 super::persistence::Sources::system(),
                 Arc::new(super::persistence::SystemRunner),
             )),
-            screen: Mutex::new(screen_helper_path().map(|path| {
+            screen: Mutex::new(screen_helper().map(|exe| {
                 Arc::new(ProcessSpawner {
-                    path,
+                    exe,
                     require: wyss_console::screen::ipc::layer::ALL,
                 }) as Arc<dyn Spawner>
             })),
@@ -528,7 +523,9 @@ impl HostCore {
                 if let Ok(entry) = self.entry(&request.terminal_id)
                     && let Some(link) = lock(&entry.screen).clone()
                 {
-                    link.resize(info.size.rows, info.size.cols);
+                    // Tied to the stream: what the ring holds now was written before this size.
+                    let at = lock(&entry.inner).ring.end();
+                    link.resize(info.size.rows, info.size.cols, at);
                 }
                 to_value(info)
             }

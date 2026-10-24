@@ -28,8 +28,9 @@ pub trait ByteSource: Send + Sync + 'static {
     fn start(&self) -> u64;
     /// Offset after the newest byte.
     fn end(&self) -> u64;
-    /// Up to `max` bytes from `from` (which is not before `start`).
-    fn read(&self, from: u64, max: usize) -> Vec<u8>;
+    /// Up to `max` bytes from `from`, in one atomic look at the ring: the offset of the first byte
+    /// actually returned (later than `from` when the ring moved on in the meantime) and the bytes.
+    fn read(&self, from: u64, max: usize) -> (u64, Vec<u8>);
 }
 
 pub trait ChildHandle: Send {
@@ -52,7 +53,8 @@ pub trait Spawner: Send + Sync + 'static {
 /// Starts the real helper executable: no environment, `/` as its directory, nothing inherited but
 /// the two pipes, and the kernel ends it if this process dies.
 pub struct ProcessSpawner {
-    pub path: std::path::PathBuf,
+    /// The helper, verified and held open: the process is started from this very file.
+    pub exe: Arc<super::locate::Verified>,
     pub require: u8,
 }
 
@@ -72,8 +74,9 @@ impl ChildHandle for ProcessChild {
 impl Spawner for ProcessSpawner {
     fn spawn(&self) -> std::io::Result<Spawned> {
         use std::os::unix::process::CommandExt;
-        let mut command = std::process::Command::new(&self.path);
+        let mut command = std::process::Command::new(self.exe.exec_path());
         command
+            .arg0("wyss-screen")
             .arg("--require")
             .arg(self.require.to_string())
             .env_clear()
@@ -197,12 +200,54 @@ enum Command {
     Stop,
 }
 
+/// The PTY's size over the terminal's output: each change is tied to the offset in the stream where
+/// it happened, so a screen is resized *between* the bytes written before the change and those
+/// after it, never at some later moment. A value, not a command: it cannot be lost to a full queue.
+struct SizeLog {
+    base: (u16, u16),
+    changes: VecDeque<(u64, u16, u16)>,
+}
+impl SizeLog {
+    fn new(size: (u16, u16)) -> Self {
+        Self {
+            base: size,
+            changes: VecDeque::new(),
+        }
+    }
+    fn latest(&self) -> (u16, u16) {
+        self.changes.back().map_or(self.base, |c| (c.1, c.2))
+    }
+    fn record(&mut self, at: u64, rows: u16, cols: u16) {
+        if self.latest() == (rows, cols) {
+            return;
+        }
+        self.changes.push_back((at, rows, cols));
+        while self.changes.len() > 1024 {
+            if let Some((_, r, c)) = self.changes.pop_front() {
+                self.base = (r, c);
+            }
+        }
+    }
+    /// The size in effect for the byte at `offset`.
+    fn size_at(&self, offset: u64) -> (u16, u16) {
+        let mut size = self.base;
+        for &(at, rows, cols) in &self.changes {
+            if at > offset {
+                break;
+            }
+            size = (rows, cols);
+        }
+        size
+    }
+    fn next_change_after(&self, offset: u64) -> Option<u64> {
+        self.changes.iter().map(|c| c.0).find(|&at| at > offset)
+    }
+}
+
 pub struct ScreenLink {
     commands: SyncSender<Command>,
     shared: Arc<Mutex<Status>>,
-    /// The PTY's size as the host last set it. A command could be lost to a full queue; a value
-    /// cannot: the worker compares it with what its helper has at every step.
-    size: Arc<Mutex<(u16, u16)>>,
+    size: Arc<Mutex<SizeLog>>,
     /// A wake is already waiting in the queue (or about to be): further ones add nothing, and must
     /// not fill the queue a snapshot request needs.
     woken: Arc<std::sync::atomic::AtomicBool>,
@@ -231,13 +276,13 @@ impl ScreenLink {
             skipped: 0,
         }));
         let (tx, rx) = mpsc::sync_channel(64);
-        let want = Arc::new(Mutex::new(size));
+        let want = Arc::new(Mutex::new(SizeLog::new(size)));
         let woken = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker = Worker {
             spawner,
             source,
             config,
-            want: want.clone(),
+            sizes: want.clone(),
             woken: woken.clone(),
             have: size,
             shared: shared.clone(),
@@ -247,6 +292,7 @@ impl ScreenLink {
             commands_tx: tx.clone(),
             session: None,
             next: 0,
+            begun: false,
             starts: VecDeque::new(),
         };
         let thread = thread::Builder::new()
@@ -273,8 +319,9 @@ impl ScreenLink {
         }
     }
 
-    pub fn resize(&self, rows: u16, cols: u16) {
-        *lock(&self.size) = (rows, cols);
+    /// The PTY now has this size; the output the host held up to `at` was written before the change.
+    pub fn resize(&self, rows: u16, cols: u16, at: u64) {
+        lock(&self.size).record(at, rows, cols);
         self.wake();
     }
 
@@ -322,11 +369,22 @@ struct Session {
 }
 
 impl Session {
-    fn end(mut self) {
-        self.handle.kill();
-        self.handle.reap();
-        drop(self.out);
-        for t in self.threads.drain(..) {
+    /// Ends the helper through the handle held for it, and joins the threads that talk to it. The
+    /// receiver goes first: a reader that is blocked handing over a frame nobody asked for (a
+    /// helper that floods) is released by it, so this cannot wait for ever.
+    fn end(self) {
+        let Session {
+            out,
+            responses,
+            mut handle,
+            threads,
+            ..
+        } = self;
+        drop(responses);
+        handle.kill();
+        handle.reap();
+        drop(out);
+        for t in threads {
             let _ = t.join();
         }
     }
@@ -336,8 +394,8 @@ struct Worker {
     spawner: Arc<dyn Spawner>,
     source: Arc<dyn ByteSource>,
     config: LinkConfig,
-    /// The size wanted, and the size the helper in service has.
-    want: Arc<Mutex<(u16, u16)>>,
+    /// The PTY's sizes over the stream, and the size the helper in service has.
+    sizes: Arc<Mutex<SizeLog>>,
     woken: Arc<std::sync::atomic::AtomicBool>,
     have: (u16, u16),
     shared: Arc<Mutex<Status>>,
@@ -350,6 +408,9 @@ struct Worker {
     gave_up_at: Option<Instant>,
     /// Offset of the next byte to give the helper.
     next: u64,
+    /// Whether the helper in service has been given any of the stream yet: its first `Feed` fixes
+    /// where its screen starts, and a `Skip` before that has nothing to skip.
+    begun: bool,
     starts: VecDeque<Instant>,
 }
 
@@ -369,15 +430,13 @@ impl Worker {
             self.woken.store(false, std::sync::atomic::Ordering::SeqCst);
             match command {
                 Ok(Command::Stop) | Err(_) => break,
-                Ok(Command::Wake) => {
-                    let _ = self.pump();
-                }
+                Ok(Command::Wake) => self.catch_up(),
                 Ok(Command::Gone(id)) => {
                     if self.session.as_ref().is_some_and(|s| s.id == id) {
                         let _ = self.lose("exited");
                         // Replaced at once (within the restart budget): the screen is rebuilt from
                         // the ring while it is all still there, not when someone asks for it.
-                        let _ = self.pump();
+                        self.catch_up();
                     }
                 }
                 Ok(Command::Snapshot { scrollback, reply }) => {
@@ -394,6 +453,17 @@ impl Worker {
             s.health = Health::Unavailable("stopped");
             s.helper_pid = None;
         });
+    }
+
+    /// Feeds what is waiting, a quantum at a time: after each, anything queued (a snapshot, a stop)
+    /// is served before the next, so continuous output cannot hold up the rest.
+    fn catch_up(&mut self) {
+        if matches!(self.pump(PUMP_QUANTUM), Ok(true)) {
+            use std::sync::atomic::Ordering::SeqCst;
+            if !self.woken.swap(true, SeqCst) && self.commands_tx.try_send(Command::Wake).is_err() {
+                // Other work is queued; it pumps too.
+            }
+        }
     }
 
     fn unavailable(&self) -> Option<&'static str> {
@@ -502,7 +572,9 @@ impl Worker {
             threads: vec![writer, reader],
         });
         self.set(|s| s.helper_pid = pid);
-        self.have = *lock(&self.want);
+        // The screen starts where the ring starts, at the size the PTY had there.
+        let start = self.source.start();
+        self.have = lock(&self.sizes).size_at(start);
         let hello = Request::Hello {
             version: PROTOCOL,
             rows: self.have.0,
@@ -524,9 +596,9 @@ impl Worker {
             }
             _ => return Err(self.lose("bad_hello")),
         }
-        // The screen starts where the ring starts: from the first byte when nothing was ever lost.
-        let start = self.source.start();
+        // From the first byte when nothing was ever lost.
         self.next = start;
+        self.begun = false;
         self.set(|s| {
             s.fidelity = if start == 0 {
                 Fidelity::Exact
@@ -575,46 +647,56 @@ impl Worker {
         }
     }
 
-    /// Feeds every byte the ring has that the helper has not seen.
-    fn pump(&mut self) -> Result<(), Fail> {
+    /// Feeds what the ring holds that the helper has not seen, up to a quantum of bytes. `true`:
+    /// there is more.
+    fn pump(&mut self, quantum: usize) -> Result<bool, Fail> {
+        let target = self.source.end();
+        self.pump_to(target, quantum)
+    }
+
+    /// Feeds the stream up to `target` (never chasing what arrives after it), or `quantum` bytes.
+    fn pump_to(&mut self, target: u64, quantum: usize) -> Result<bool, Fail> {
+        let mut fed = 0usize;
         loop {
             self.ensure()?;
-            let end = self.source.end();
-            if self.next >= end {
-                return self.apply_size();
+            if self.next >= target {
+                return Ok(false);
             }
-            let start = self.source.start();
-            if self.next < start {
-                // The ring moved on past bytes this helper never got (a flood faster than it
-                // parses). Replaying from the ring would only fall behind again: the helper is
-                // told to go on from the oldest byte there is, and the loss is stated.
-                match self.exchange(&Request::Skip { to: start })? {
-                    Response::Fed { end, .. } if end == start => {
-                        let lost = start - self.next;
-                        self.next = start;
-                        self.set(|s| {
-                            s.fed = start;
-                            s.skipped += lost;
-                            if let Fidelity::Exact = s.fidelity {
-                                s.fidelity = Fidelity::Gap { skipped: s.skipped };
-                            } else if let Fidelity::Gap { .. } = s.fidelity {
-                                s.fidelity = Fidelity::Gap { skipped: s.skipped };
-                            }
-                        });
-                        continue;
-                    }
-                    _ => return Err(self.lose("bad_ack")),
-                }
+            if fed >= quantum {
+                return Ok(true);
             }
-            let bytes = self.source.read(self.next, MAX_FEED);
+            // The size in effect for the next byte, and no frame that crosses a change of it.
+            self.apply_size_at(self.next)?;
+            let until_change = lock(&self.sizes)
+                .next_change_after(self.next)
+                .map_or(u64::MAX, |at| at - self.next);
+            let max = MAX_FEED
+                .min(usize::try_from(until_change).unwrap_or(usize::MAX))
+                .min(usize::try_from(target - self.next).unwrap_or(usize::MAX));
+            let (at, bytes) = self.source.read(self.next, max);
             if bytes.is_empty() {
-                return self.apply_size();
+                // Nothing there: either the ring is empty up to here, or it moved on past us.
+                let start = self.source.start();
+                if start > self.next {
+                    self.skip_to(start)?;
+                    continue;
+                }
+                return Ok(false);
+            }
+            if at > self.next {
+                // The ring moved on between asking and reading: the bytes in between are gone, and
+                // what came back is not what was asked for, so it goes in at its own offset.
+                self.skip_to(at)?;
+            } else if at < self.next {
+                return Err(self.lose("bad_source"));
             }
             let len = bytes.len() as u64;
             let offset = self.next;
             match self.exchange(&Request::Feed { offset, bytes })? {
                 Response::Fed { end, .. } if end == offset + len => {
                     self.next = end;
+                    self.begun = true;
+                    fed += usize::try_from(len).unwrap_or(usize::MAX);
                     self.set(|s| s.fed = end);
                 }
                 _ => return Err(self.lose("bad_ack")),
@@ -622,9 +704,40 @@ impl Worker {
         }
     }
 
-    /// The helper's size follows the PTY's, after the bytes that came before the change.
-    fn apply_size(&mut self) -> Result<(), Fail> {
-        let (rows, cols) = *lock(&self.want);
+    /// The ring moved on past bytes this helper never got (a flood faster than it parses).
+    /// Replaying from the ring would only fall behind again: the helper is told to go on from `to`,
+    /// and the loss is stated.
+    fn skip_to(&mut self, to: u64) -> Result<(), Fail> {
+        if !self.begun {
+            // Nothing of the stream reached this helper yet: its screen simply starts later, as if
+            // it had been started there, and what came before is stated as missing.
+            self.next = to;
+            self.set(|s| {
+                s.fed = to;
+                s.fidelity = Fidelity::Tail { missing: to };
+            });
+            return Ok(());
+        }
+        match self.exchange(&Request::Skip { to })? {
+            Response::Fed { end, .. } if end == to => {
+                let lost = to - self.next;
+                self.next = to;
+                self.set(|s| {
+                    s.fed = to;
+                    s.skipped += lost;
+                    if matches!(s.fidelity, Fidelity::Exact | Fidelity::Gap { .. }) {
+                        s.fidelity = Fidelity::Gap { skipped: s.skipped };
+                    }
+                });
+                Ok(())
+            }
+            _ => Err(self.lose("bad_ack")),
+        }
+    }
+
+    /// The helper has the size the PTY had for the byte at `offset`.
+    fn apply_size_at(&mut self, offset: u64) -> Result<(), Fail> {
+        let (rows, cols) = lock(&self.sizes).size_at(offset);
         if (rows, cols) == self.have {
             return Ok(());
         }
@@ -637,16 +750,22 @@ impl Worker {
         // A snapshot may need a helper replaced first; one retry only.
         for attempt in 0..2 {
             let result = (|| {
-                self.pump()?;
+                // Everything the ring holds now, and not what arrives while this is made.
+                let target = self.source.end();
+                self.pump_to(target, usize::MAX)?;
+                self.apply_size_at(self.next)?;
                 match self.exchange(&Request::Snapshot {
                     scrollback_lines: scrollback,
                 })? {
-                    Response::Snapshot(body) => Ok(*body),
+                    Response::Snapshot(body) => Ok(Some(*body)),
+                    Response::TooLarge => Ok(None),
                     _ => Err(self.lose("bad_ack")),
                 }
             })();
             match result {
-                Ok(body) => {
+                // The screen cannot be drawn in the bound: not a fault of the helper.
+                Ok(None) => return Err(LinkError::Unavailable("too_large")),
+                Ok(Some(body)) => {
                     return Ok(Snap {
                         body,
                         status: lock(&self.shared).clone(),
@@ -663,6 +782,9 @@ impl Worker {
         Err(LinkError::Unavailable("failed"))
     }
 }
+
+/// Bytes fed in one go before queued commands are looked at.
+const PUMP_QUANTUM: usize = 1024 * 1024;
 
 #[cfg(test)]
 mod tests;

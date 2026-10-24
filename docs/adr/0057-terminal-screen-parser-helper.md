@@ -24,15 +24,15 @@ keeps the screen, and answers snapshots. A snapshot is **a byte stream that redr
 "repaint") plus the offset in the terminal's output where it ends; a window that attaches draws it and then
 reads on from that offset.
 
-| Property            | What it is                                                                                                                                                                                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Failure domain      | The helper is a separate process. It owns no PTY, no credential and no authority and answers nothing but the typed frames below. Its death costs the screen state, never the terminal or its siblings.                                                             |
-| Source of truth     | The host's ring. After any failure a new helper is fed the ring from its start and the link says whether that is **exact** (the ring starts at byte 0) or a **tail** (`missing` bytes before it are not in the screen). It never claims more.                      |
-| Size                | One authority: the PTY's. The helper's size follows what the host last set it to, by value (a command that could be lost is not used), applied after the bytes that preceded the change.                                                                           |
-| Output is data      | The screen engine acts on nothing it parses. A clipboard write (OSC 52), a hyperlink (OSC 8), a window operation (CSI t, DECCOLM), a query that wants an answer, and device/application strings are **counted by closed name and dropped**. Repaints contain none. |
-| Replay              | Bytes are replayed into the parser only. Nothing is written to the PTY by reattaching, restarting a helper, or a snapshot; no command or prompt is repeated. A test counts the executions.                                                                         |
-| Where it is drawn   | The window's own terminal (xterm.js) draws the repaint and parses the live stream itself. The width table of the engine is therefore xterm.js's (`UnicodeV6`), ported with its source; a second table (modern/tmux-like) exists for the reference corpus.          |
-| Failure of the link | A host without a helper (not found, too weak a sandbox, restart budget used) answers `term_screen` with `available: false` and a closed reason; the window replays the ring as before and **says so** ("Output replayed · no screen state was kept").              |
+| Property            | What it is                                                                                                                                                                                                                                                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Failure domain      | The helper is a separate process. It owns no PTY, no credential and no authority and answers nothing but the typed frames below. Its death costs the screen state, never the terminal or its siblings.                                                                                                                    |
+| Source of truth     | The host's ring, read atomically (the offset of what is returned comes from the same look). After any failure a new helper is fed the ring from its start and the link says whether that is **exact** (the ring starts at byte 0), a **gap** or a **tail** (`missing` bytes are not in the screen). It never claims more. |
+| Size                | One authority: the PTY's. Each size change is recorded with the offset of the output where it happened; the helper is resized exactly between the bytes written before and after it, and no `Feed` frame crosses a change (a value in a log, not a command that could be lost).                                           |
+| Output is data      | The screen engine acts on nothing it parses. A clipboard write (OSC 52), a hyperlink (OSC 8), a window operation (CSI t, DECCOLM), a query that wants an answer, and device/application strings are **counted by closed name and dropped**. Repaints contain none.                                                        |
+| Replay              | Bytes are replayed into the parser only. Nothing is written to the PTY by reattaching, restarting a helper, or a snapshot; no command or prompt is repeated. A test counts the executions.                                                                                                                                |
+| Where it is drawn   | The window's own terminal (xterm.js) draws the repaint and parses the live stream itself. The width table of the engine is therefore xterm.js's (`UnicodeV6`), ported with its source; a second table (modern/tmux-like) exists for the reference corpus.                                                                 |
+| Failure of the link | A host without a helper (not found, too weak a sandbox, restart budget used) answers `term_screen` with `available: false` and a closed reason; the window replays the ring as before and **says so** ("Output replayed · no screen state was kept").                                                                     |
 
 ### The protocol (`screen::ipc`, version 1)
 
@@ -40,14 +40,14 @@ Binary frames on the helper's standard input and output: 4-byte big-endian lengt
 an unknown kind, a short or long payload, a frame over its bound, a field out of range is an error and ends the
 conversation with a closed word (`Refused{code}`) and exit code 3; nothing is skipped or guessed.
 
-| Direction   | Frame                                                                             | Bound                                                |
-| ----------- | --------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| host→helper | `Hello` (version, rows, cols, history lines, width table, required layers)        | first frame only; rows/cols 1..512; history ≤ 20,000 |
-| host→helper | `Feed` (offset, bytes)                                                            | ≤ 64 KiB; offsets must be contiguous                 |
-| host→helper | `Resize`, `Snapshot` (history lines), `Ping`, `Shutdown`                          |                                                      |
-| helper→host | `Ready` (pid, layers applied, Landlock ABI), `Fed`, `Snapshot`, `Pong`, `Refused` | a frame ≤ 5 MiB; a repaint ≤ 4 MiB                   |
+| Direction   | Frame                                                                                                                     | Bound                                                             |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| host→helper | `Hello` (version, rows, cols, history lines, width table, required layers)                                                | first frame only; rows/cols 1..512; history ≤ 20,000              |
+| host→helper | `Feed` (offset, bytes)                                                                                                    | ≤ 64 KiB; offsets contiguous; `offset + length` must not overflow |
+| host→helper | `Resize`, `Snapshot` (history lines), `Skip` (go on from a later offset; only after the stream began), `Ping`, `Shutdown` |                                                                   |
+| helper→host | `Ready` (pid, layers applied, Landlock ABI), `Fed`, `Snapshot`, `TooLarge`, `Pong`, `Refused`                             | a frame ≤ 5 MiB; a repaint ≤ 4 MiB                                |
 
-Requests ≤ 256 KiB. The helper is lock-step: one answer per request.
+Requests ≤ 256 KiB. The helper is lock-step: one answer per request (`TooLarge` answers a `Snapshot` whose repaint would exceed its bound). The link reads from the helper through a bounded queue and an end of the link releases its reader even when a helper keeps writing frames nobody asked for; at most one MiB of stream is fed before queued work (a snapshot, a stop) is served.
 
 ### Isolation of the helper (`screen::sandbox`)
 
@@ -63,6 +63,20 @@ refuses to run without them (exit code 4, `SandboxUnavailable`). There is no deg
 
 The helper is started with no environment, `/` as its directory, three descriptors, a new session, and
 `PR_SET_PDEATHSIG` so that it dies with the host. It is a binary of its own (no window toolkit is linked).
+
+**Which file runs is verified, and that file is the one executed** (`screen::locate`). The host opens the helper
+once, reads every property from the open descriptor and starts the process from `/proc/self/fd/N`, so a path that
+is swapped after the check changes nothing. Required: a regular file with an execute bit, not set-id, owned by the
+user or root, with no group or other write bit (whatever the group); every directory above its real path owned by the
+user or root and not writable by others; group-writable directories only when the group is the user's own private
+group (their primary group, no other member, no other account with it as primary group); a world-writable sticky
+directory only where the entry below it is the user's or root's. Anything else: no helper, the window replays.
+Not covered: the same user replacing the file, who already owns the host's memory and every PTY master.
+
+**Output is data in every encoding.** The C1 control characters (U+0080–U+009F, which a UTF-8 terminal may treat as
+single-character CSI, OSC or ST) are interpreted as the controls they are, counted and dropped when they start a
+string, and never stored as cells or written to a repaint; a repaint that cannot be drawn within its 4 MiB bound is
+answered `TooLarge` (the screen is not cut, the helper goes on) and the window replays.
 
 **Not claimed:** a kernel exploit from inside a seccomp+Landlock domain, a same-user attacker reading the host's
 memory (that attacker already owns the PTYs), protection of pathname unix sockets on Landlock ABI < 9 (the

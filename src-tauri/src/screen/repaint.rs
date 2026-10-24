@@ -77,70 +77,86 @@ fn paint_row(out: &mut Vec<u8>, row: &Row, current: &mut Style) {
     }
 }
 
-fn cell_estimate(rows: usize, cols: usize) -> usize {
-    rows * (cols * 24 + 16)
+/// The screen alone does not fit in a repaint (a 512×512 screen of cells that each change colour).
+/// Nothing is cut: no repaint is made, and the window replays the output instead.
+#[derive(Debug, PartialEq, Eq)]
+pub struct TooLarge;
+
+fn check(out: &[u8]) -> Result<(), TooLarge> {
+    if out.len() > MAX_REPAINT {
+        Err(TooLarge)
+    } else {
+        Ok(())
+    }
 }
 
 impl Terminal {
-    /// The bytes that redraw this screen, with up to `scrollback` lines of history before it.
-    pub fn repaint(&self, scrollback: usize) -> Repaint {
-        let mut out: Vec<u8> = Vec::with_capacity(8192);
-        let (rows, cols) = (self.rows(), self.cols());
+    /// The bytes that redraw this screen, with up to `scrollback` lines of history before it. The
+    /// size is checked as it is made, never after: the screen that cannot fit is refused, and the
+    /// history shrinks first to leave it room.
+    pub fn repaint(&self, scrollback: usize) -> Result<Repaint, TooLarge> {
+        let (rows, _) = (self.rows(), self.cols());
         // A clean slate: normal screen, no region, no leftover modes, nothing on screen or in the
         // renderer's history.
-        out.extend_from_slice(b"\x1b[?1049l\x1b[?47l\x1b[0m\x1b(B\x0f\x1b[r\x1b[4l\x1b[20l");
-        out.extend_from_slice(
+        let mut header: Vec<u8> = Vec::with_capacity(512);
+        header.extend_from_slice(b"\x1b[?1049l\x1b[?47l\x1b[0m\x1b(B\x0f\x1b[r\x1b[4l\x1b[20l");
+        header.extend_from_slice(
             b"\x1b[?1l\x1b[?5l\x1b[?6l\x1b[?7h\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b>\x1b[0 q",
         );
-        out.extend_from_slice(b"\x1b[H\x1b[2J\x1b[3J");
+        header.extend_from_slice(b"\x1b[H\x1b[2J\x1b[3J");
 
-        // History first: each line scrolls into the renderer's own scrollback.
+        // The visible screen first, because it is the part that must fit.
+        let mut screen: Vec<u8> = Vec::with_capacity(8192);
+        screen.extend_from_slice(b"\x1b[0m\x1b[H\x1b[2J");
+        // The normal screen is always drawn: it survives behind an alternate one.
+        self.paint_buffer(&mut screen, false)?;
+        if self.alt_active() {
+            screen.extend_from_slice(b"\x1b[?47h\x1b[0m\x1b[H\x1b[2J");
+            self.paint_buffer(&mut screen, true)?;
+        }
+        self.paint_modes(&mut screen);
+        check(&screen)?;
+
+        // History next, newest first, for as long as there is room; each line scrolls into the
+        // renderer's own scrollback.
         let available = self.scrollback_len();
-        let mut take = scrollback.min(available);
-        let mut used = out.len() + cell_estimate(rows, cols) * 2;
         let history: Vec<&Row> = self.scrollback().collect();
-        let mut chosen = 0usize;
-        for line in history.iter().rev().take(take) {
-            let cost = line.cells.len() * 24 + 8;
-            if used + cost > MAX_REPAINT {
+        let mut room = MAX_REPAINT.saturating_sub(header.len() + screen.len() + rows);
+        let mut lines: Vec<Vec<u8>> = Vec::new();
+        for line in history.iter().rev().take(scrollback.min(available)) {
+            let mut one = Vec::new();
+            let mut current = Style::default();
+            paint_row(&mut one, line, &mut current);
+            if current != Style::default() {
+                one.extend_from_slice(b"\x1b[0m");
+            }
+            one.extend_from_slice(b"\r\n");
+            if one.len() > room {
                 break;
             }
-            used += cost;
-            chosen += 1;
+            room -= one.len();
+            lines.push(one);
         }
-        take = chosen;
-        let mut current = Style::default();
-        for line in &history[available - take..] {
-            paint_row(&mut out, line, &mut current);
-            if current != Style::default() {
-                out.extend_from_slice(b"\x1b[0m");
-                current = Style::default();
-            }
-            out.extend_from_slice(b"\r\n");
+        let take = lines.len();
+        let mut out = header;
+        for one in lines.iter().rev() {
+            out.extend_from_slice(one);
         }
         // The last lines written are still on screen: enough line feeds push them out too, so that
         // exactly the history lines are in the scrollback and only blank rows are left to clear.
         if take > 0 {
             out.extend(std::iter::repeat_n(b'\n', rows - 1));
         }
-        // The visible area is cleared again (history lines ran through it) and drawn by position.
-        out.extend_from_slice(b"\x1b[0m\x1b[H\x1b[2J");
-
-        // The normal screen is always drawn: it survives behind an alternate one.
-        self.paint_buffer(&mut out, false);
-        if self.alt_active() {
-            out.extend_from_slice(b"\x1b[?47h\x1b[0m\x1b[H\x1b[2J");
-            self.paint_buffer(&mut out, true);
-        }
-        self.paint_modes(&mut out);
-        Repaint {
+        out.extend_from_slice(&screen);
+        check(&out)?;
+        Ok(Repaint {
             bytes: out,
             scrollback_lines: take,
             scrollback_omitted: available - take,
-        }
+        })
     }
 
-    fn paint_buffer(&self, out: &mut Vec<u8>, alternate: bool) {
+    fn paint_buffer(&self, out: &mut Vec<u8>, alternate: bool) -> Result<(), TooLarge> {
         let buf = self.buffer(alternate);
         let mut current = Style::default();
         for (r, row) in buf.rows.iter().enumerate() {
@@ -149,6 +165,7 @@ impl Terminal {
             }
             out.extend_from_slice(format!("\x1b[{};1H", r + 1).as_bytes());
             paint_row(out, row, &mut current);
+            check(out)?;
         }
         if current != Style::default() {
             out.extend_from_slice(b"\x1b[0m");
@@ -173,6 +190,7 @@ impl Terminal {
         if self.pen != Style::default() {
             sgr(out, self.pen);
         }
+        check(out)
     }
 
     /// Moves the cursor to `cursor` (honouring the origin mode the position was stored under),

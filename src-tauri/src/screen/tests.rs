@@ -484,7 +484,7 @@ fn random_streams_keep_every_invariant_and_survive_a_repaint_round_trip() {
             at += n;
             invariants(&t);
         }
-        let repaint = t.repaint(10_000);
+        let repaint = t.repaint(10_000).unwrap();
         let mut again = term(rows, cols);
         again.feed(&repaint.bytes);
         invariants(&again);
@@ -515,7 +515,7 @@ fn pure_garbage_never_breaks_a_bound() {
             t.feed(&bytes);
             invariants(&t);
         }
-        let r = t.repaint(100);
+        let r = t.repaint(100).unwrap();
         assert!(r.bytes.len() <= super::repaint::MAX_REPAINT);
     }
 }
@@ -524,7 +524,7 @@ fn pure_garbage_never_breaks_a_bound() {
 fn a_repaint_contains_nothing_a_terminal_would_act_on() {
     let mut t = term(4, 20);
     t.feed(b"\x1b]52;c;QUJD\x07\x1b]8;;http://x.invalid\x07hi\x1b]2;a title\x07\x1b[8;1;1t\x1b[c");
-    let bytes = t.repaint(10).bytes;
+    let bytes = t.repaint(10).unwrap().bytes;
     let text = String::from_utf8_lossy(&bytes);
     for forbidden in [
         "\x1b]52",
@@ -538,4 +538,30 @@ fn a_repaint_contains_nothing_a_terminal_would_act_on() {
         assert!(!text.contains(forbidden), "{forbidden:?} in the repaint");
     }
     assert!(text.contains("a title"));
+}
+
+#[test]
+fn c1_controls_do_nothing_a_clipboard_write_included_and_never_reach_a_repaint() {
+    // U+009D is OSC and U+009C is ST in the C1 set: a terminal that honours them would write the
+    // clipboard from this. The engine counts it and the repaint carries none of it.
+    let mut t = term(4, 30);
+    t.feed("A\u{9d}52;c;SGVsbG8=\u{9c}B".as_bytes());
+    assert_eq!(t.text()[0], "AB");
+    assert_eq!(t.refusals().clipboard, 1);
+    let bytes = t.repaint(10).unwrap().bytes;
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(!text.contains('\u{9d}') && !text.contains('\u{9c}'));
+    assert!(!text.contains("SGVsbG8="));
+    // Every C1 character, alone, leaves no cell and no byte behind in a repaint.
+    let mut t = term(4, 30);
+    for c in 0x80u32..0xa0 {
+        let ch = char::from_u32(c).unwrap();
+        t.feed(format!("x{ch}y").as_bytes());
+    }
+    let bytes = t.repaint(10).unwrap().bytes;
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(
+        text.chars().all(|c| !('\u{80}'..='\u{9f}').contains(&c)),
+        "a C1 character reached the repaint"
+    );
 }

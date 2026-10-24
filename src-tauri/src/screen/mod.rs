@@ -8,6 +8,7 @@ pub mod b64;
 pub mod helper;
 pub mod ipc;
 pub mod link;
+pub mod locate;
 pub mod repaint;
 pub mod sandbox;
 pub mod terminal;

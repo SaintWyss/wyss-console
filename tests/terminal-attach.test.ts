@@ -39,8 +39,10 @@ const parser = (extra: Record<string, unknown> = {}) => ({
   sandbox: { layers: 15, landlock_abi: 6 },
   ...extra,
 });
+const TOKEN = '0d9c2f6e-6b0a-4f58-9c0e-2f2f5f6f7a8b';
 const screenAnswer = (extra: Record<string, unknown> = {}) => ({
   mode: 'screen',
+  token: TOKEN,
   available: true,
   at: 1234,
   repaint: b64('\u001b[2Jhello'),
@@ -62,6 +64,7 @@ const screenAnswer = (extra: Record<string, unknown> = {}) => ({
 let state: WorkspaceState;
 let calls: { command: string; request: Record<string, unknown> }[];
 let attach: () => unknown;
+let commit: () => unknown;
 let manager: TerminalSessionManager;
 let restore: ReturnType<typeof vi.fn>;
 let withRestore = true;
@@ -94,6 +97,7 @@ beforeEach(() => {
   withRestore = true;
   restore = vi.fn(async () => true);
   attach = () => screenAnswer();
+  commit = () => ({ committed: true });
   state = { sessions: [], tabs: [], creating: false };
   mockIPC((command, args) => {
     const request =
@@ -102,6 +106,7 @@ beforeEach(() => {
     if (command === 'host_terminals')
       return [{ terminal: info, title: 'T', created_at: 1, native: null }];
     if (command === 'terminal_attach') return attach();
+    if (command === 'terminal_attach_commit') return commit();
     if (command === 'terminal_read_output') return new Promise(() => undefined);
     if (command === 'terminal_redraw') return null;
     return info;
@@ -146,11 +151,64 @@ it('draws the screen the host kept, at the size the program is at, before it rea
   expect(count('terminal_read_output')).toHaveLength(1);
   expect(count('terminal_redraw')).toHaveLength(0);
   expect(state.sessions[0]!.view.attach?.mode).toBe('screen');
-  // Order: attach, then reading.
+  // Order: attach, draw, commit, then reading; the commit carries the token and says it was drawn.
   const order = calls.map((c) => c.command);
   expect(order.indexOf('terminal_attach')).toBeLessThan(
+    order.indexOf('terminal_attach_commit'),
+  );
+  expect(order.indexOf('terminal_attach_commit')).toBeLessThan(
     order.indexOf('terminal_read_output'),
   );
+  expect(count('terminal_attach_commit')[0]!.request).toMatchObject({
+    token: TOKEN,
+    restored: true,
+  });
+});
+
+it('tells the host the screen was NOT drawn when it could not be, so no output is skipped, and replays', async () => {
+  restore = vi.fn(async () => false);
+  await open();
+  expect(count('terminal_attach_commit')).toHaveLength(1);
+  expect(count('terminal_attach_commit')[0]!.request).toMatchObject({
+    token: TOKEN,
+    restored: false,
+  });
+  expect(state.sessions[0]!.view.attach).toMatchObject({
+    mode: 'replay',
+    reason: 'restore_failed',
+  });
+  expect(count('terminal_redraw')).toHaveLength(1);
+});
+
+it('does the same when drawing throws', async () => {
+  restore = vi.fn(async () => {
+    throw new Error('renderer gone');
+  });
+  await open();
+  expect(count('terminal_attach_commit')[0]!.request).toMatchObject({
+    restored: false,
+  });
+  expect(state.sessions[0]!.view.state).toBe('running');
+  expect(state.sessions[0]!.view.attach?.mode).toBe('replay');
+});
+
+it('does not read on, and says so, when the host cannot be told that the screen is drawn', async () => {
+  commit = () => {
+    throw { code: 'invalid_attach_token' };
+  };
+  await open();
+  expect(count('terminal_read_output')).toHaveLength(0);
+  expect(state.sessions[0]!.view.state).toBe('failed');
+});
+
+it('releases whatever the host staged when its answer could not be read', async () => {
+  attach = () => ({ mode: 'screen', repaint: 5 });
+  await open();
+  expect(count('terminal_attach_commit')).toHaveLength(1);
+  expect(count('terminal_attach_commit')[0]!.request).toMatchObject({
+    token: null,
+    restored: false,
+  });
 });
 
 it('falls back to what it always did when the host kept no screen: replay and ask the program to draw again', async () => {

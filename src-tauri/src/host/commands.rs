@@ -43,6 +43,39 @@ pub struct Cursors {
 struct Cursor {
     committed: u64,
     pending: Option<(String, u64)>,
+    /// A screen handed to the window that it has not yet said it drew: (token, where it ends).
+    staged: Option<(String, u64)>,
+}
+
+impl Cursor {
+    /// A screen ending at `at` is being handed to the window; reading does not move yet.
+    fn stage(&mut self, at: u64) -> String {
+        let token = uuid::Uuid::new_v4().to_string();
+        self.pending = None;
+        self.staged = Some((token.clone(), at));
+        token
+    }
+    /// No screen was handed out: what the host kept is read from its start.
+    fn replay(&mut self) {
+        self.pending = None;
+        self.staged = None;
+        self.committed = 0;
+    }
+    /// The window says whether it drew the staged screen. `false`: the token was not the one
+    /// handed out last (nothing changes, the staged screen stays).
+    fn commit(&mut self, token: &str, restored: bool) -> bool {
+        match self.staged.take() {
+            Some((staged, at)) if staged == token => {
+                self.pending = None;
+                self.committed = if restored { at } else { 0 };
+                true
+            }
+            other => {
+                self.staged = other;
+                false
+            }
+        }
+    }
 }
 
 async fn blocking<T: Send + 'static>(
@@ -222,20 +255,93 @@ pub async fn terminal_attach(
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
     let cursor = map.entry(key).or_default();
-    cursor.pending = None;
-    if answer["available"] == true {
-        // Reading continues exactly where the screen the window draws now ends.
-        cursor.committed = answer["at"].as_u64().unwrap_or(0);
+    if answer["available"] == true && screen_answer_is_sound(&answer) {
+        // The read position does not move yet: it moves when the window says it drew this screen
+        // (`terminal_attach_commit`), so a screen that could not be drawn loses nothing.
+        let token = cursor.stage(answer["at"].as_u64().unwrap_or(0));
         let mut out = answer;
         out["mode"] = json!("screen");
+        out["token"] = json!(token);
         Ok(out)
     } else {
-        cursor.committed = 0;
+        cursor.replay();
+        let reason = if answer["available"] == true {
+            json!("invalid_screen")
+        } else {
+            answer["reason"].clone()
+        };
         Ok(json!({
             "mode": "replay",
-            "reason": answer["reason"],
+            "reason": reason,
             "parser": answer["parser"],
         }))
+    }
+}
+
+/// What the window is told to draw has to be something it can draw: a size inside the bounds, a
+/// repaint inside its bound, an offset. Anything else is replayed instead, before any state moves.
+fn screen_answer_is_sound(answer: &Value) -> bool {
+    let size_ok = |key: &str| {
+        answer["size"][key]
+            .as_u64()
+            .is_some_and(|n| (1..=MAX_SCREEN_SIDE).contains(&n))
+    };
+    answer["repaint"]
+        .as_str()
+        .is_some_and(|r| r.len() <= MAX_REPAINT_BASE64)
+        && answer["at"].is_u64()
+        && size_ok("rows")
+        && size_ok("cols")
+}
+
+/// The most a screen can be on a side, and the most base64 of a repaint a window is given.
+const MAX_SCREEN_SIDE: u64 = 512;
+const MAX_REPAINT_BASE64: usize = 900 * 1024;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommitRequest {
+    terminal_id: String,
+    /// The token the attach answer carried; none when the answer could not be read at all, which
+    /// can only mean `restored: false`.
+    token: Option<String>,
+    /// The window drew the screen it was given. When it could not, reading starts from the
+    /// beginning of what the host kept, as before.
+    restored: bool,
+}
+
+/// The second half of an attach: the window says whether it drew the screen it was given, and only
+/// then does the read position move. A token that is not the one handed out last is refused.
+#[tauri::command]
+pub async fn terminal_attach_commit(
+    cursors: State<'_, Cursors>,
+    request: CommitRequest,
+) -> Result<Value, WireError> {
+    if !id_ok(&request.terminal_id) || request.token.as_deref().is_some_and(|t| t.len() > 64) {
+        return Err(invalid());
+    }
+    if request.token.is_none() && request.restored {
+        return Err(invalid());
+    }
+    let key = request.terminal_id.to_ascii_lowercase();
+    let mut map = cursors
+        .by_terminal
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let cursor = map.entry(key).or_default();
+    let Some(token) = request.token.as_deref() else {
+        // An answer that could not be read: whatever was staged is dropped and the output the host
+        // kept is read from its start.
+        cursor.replay();
+        return Ok(json!({"committed": false}));
+    };
+    if cursor.commit(token, request.restored) {
+        Ok(json!({"committed": request.restored}))
+    } else {
+        Err(WireError {
+            code: "invalid_attach_token".to_owned(),
+            bytes_written: 0,
+        })
     }
 }
 
@@ -417,6 +523,7 @@ const COMMANDS: &[&str] = &[
     "terminal_status",
     "terminal_redraw",
     "terminal_attach",
+    "terminal_attach_commit",
     "host_persistence",
     "host_lingering",
     "host_terminals",
@@ -436,6 +543,7 @@ pub fn extension() -> wyss_console::Extension {
             terminal_status,
             terminal_redraw,
             terminal_attach,
+            terminal_attach_commit,
             host_persistence,
             host_lingering,
             terminal_read_output,
@@ -450,5 +558,67 @@ pub fn extension() -> wyss_console::Extension {
             // A window-local host ends with the window; a host process is left running.
             app.state::<HostLink>().close_local();
         })),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_read_position_moves_only_when_the_window_says_it_drew_the_screen() {
+        let mut cursor = Cursor {
+            committed: 7,
+            ..Cursor::default()
+        };
+        let token = cursor.stage(900);
+        assert_eq!(cursor.committed, 7, "staging moves nothing");
+        assert!(cursor.commit(&token, true));
+        assert_eq!(cursor.committed, 900);
+        // Used once: the same token again is refused and moves nothing.
+        assert!(!cursor.commit(&token, true));
+        assert_eq!(cursor.committed, 900);
+    }
+
+    #[test]
+    fn a_screen_that_could_not_be_drawn_sends_the_reader_back_to_the_start() {
+        let mut cursor = Cursor {
+            committed: 500,
+            ..Cursor::default()
+        };
+        let token = cursor.stage(900);
+        assert!(cursor.commit(&token, false));
+        assert_eq!(
+            cursor.committed, 0,
+            "the output the host kept is read from its start"
+        );
+    }
+
+    #[test]
+    fn a_token_that_is_not_the_last_one_is_refused_and_the_staged_screen_stays() {
+        let mut cursor = Cursor::default();
+        let first = cursor.stage(10);
+        let second = cursor.stage(20);
+        assert!(!cursor.commit(&first, true));
+        assert!(!cursor.commit("not a token", true));
+        assert_eq!(cursor.committed, 0);
+        assert!(cursor.commit(&second, true));
+        assert_eq!(cursor.committed, 20);
+    }
+
+    #[test]
+    fn an_unusable_screen_is_not_handed_out() {
+        let good = json!({"repaint": "AAAA", "at": 5, "size": {"rows": 24, "cols": 80}});
+        assert!(screen_answer_is_sound(&good));
+        for bad in [
+            json!({"repaint": "AAAA", "at": 5, "size": {"rows": 0, "cols": 80}}),
+            json!({"repaint": "AAAA", "at": 5, "size": {"rows": 24, "cols": 513}}),
+            json!({"repaint": "AAAA", "at": -1, "size": {"rows": 24, "cols": 80}}),
+            json!({"repaint": "AAAA", "size": {"rows": 24, "cols": 80}}),
+            json!({"repaint": 7, "at": 5, "size": {"rows": 24, "cols": 80}}),
+            json!({"repaint": "A".repeat(MAX_REPAINT_BASE64 + 1), "at": 5, "size": {"rows": 24, "cols": 80}}),
+        ] {
+            assert!(!screen_answer_is_sound(&bad), "{bad}");
+        }
     }
 }

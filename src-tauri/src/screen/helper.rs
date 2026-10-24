@@ -128,8 +128,12 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write, applied: Applied) -
                 if next.is_some_and(|n| n != offset) {
                     return refuse(output, Refusal::OutOfOrder);
                 }
+                // An offset the stream could never reach is a bad frame, not a wrap-around.
+                let Some(end) = offset.checked_add(bytes.len() as u64) else {
+                    return refuse(output, Refusal::BadFrame);
+                };
                 screen.feed(&bytes);
-                next = Some(offset + bytes.len() as u64);
+                next = Some(end);
                 Response::Fed {
                     end: next.unwrap_or(offset),
                     generation: screen.generation(),
@@ -147,7 +151,15 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write, applied: Applied) -
                 }
             }
             Request::Snapshot { scrollback_lines } => {
-                let repaint = screen.repaint(scrollback_lines.min(MAX_SCROLLBACK) as usize);
+                let Ok(repaint) = screen.repaint(scrollback_lines.min(MAX_SCROLLBACK) as usize)
+                else {
+                    // A screen that cannot be drawn in the bound is refused, not cut, and the
+                    // helper (and its screen) go on.
+                    if send(output, &Response::TooLarge).is_err() {
+                        return Exit::Protocol;
+                    }
+                    continue;
+                };
                 let cursor = screen.cursor();
                 let r = screen.refusals();
                 Response::Snapshot(Box::new(SnapshotBody {

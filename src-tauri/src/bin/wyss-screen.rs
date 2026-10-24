@@ -26,6 +26,13 @@ fn main() {
         eprintln!("wyss-screen: usage: wyss-screen [--require <layers>]");
         std::process::exit(2);
     };
+    // The host starts this program from a verified descriptor, so the kernel names the process
+    // after the descriptor ("4"); it names itself, for process listings and for whoever has to
+    // find the right process to end.
+    // SAFETY: PR_SET_NAME reads a NUL-terminated string of at most 16 bytes.
+    unsafe {
+        nix::libc::prctl(nix::libc::PR_SET_NAME, c"wyss-screen".as_ptr(), 0, 0, 0);
+    }
     // Every layer is attempted; the required ones decide whether this process may go on.
     let applied = match sandbox::apply(layer::ALL, require) {
         Ok(a) => a,

@@ -101,7 +101,8 @@ def check(step, ctx):
             return False, "no helper pid reported"
         try:
             # The helper is not dumpable (its /proc/<pid>/exe is not readable by anyone but root),
-            # so the proof is its command name and its parent: the run's own host.
+            # so the proof is its command name (it names itself: the host runs it from a verified
+            # descriptor) and its parent: the run's own host.
             with open(f"/proc/{pid}/comm") as f:
                 exe = f.read().strip()
             with open(f"/proc/{pid}/stat") as f:

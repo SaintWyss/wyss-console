@@ -118,6 +118,8 @@ export interface RefusedOutput {
 export type Attach =
   | {
       mode: 'screen';
+      /** Handed back to say whether the screen was drawn; reading starts only then. */
+      token: string;
       /** The bytes that redraw the screen, to write into an empty terminal of `size`. */
       repaint: Uint8Array;
       size: TerminalSize;
@@ -162,7 +164,12 @@ export function parseAttach(value: unknown): Attach {
       parser: parseParserStatus(v.parser),
     };
   }
-  if (v.mode !== 'screen' || typeof v.repaint !== 'string')
+  if (
+    v.mode !== 'screen' ||
+    typeof v.repaint !== 'string' ||
+    typeof v.token !== 'string' ||
+    !/^[0-9a-f-]{36}$/.test(v.token)
+  )
     throw new Error('invalid_attach');
   const repaint = decodeBase64(v.repaint);
   const size = v.size as Record<string, unknown> | undefined;
@@ -183,6 +190,7 @@ export function parseAttach(value: unknown): Attach {
     throw new Error('invalid_attach');
   return {
     mode: 'screen',
+    token: v.token,
     repaint,
     size: { rows: size.rows as number, cols: size.cols as number },
     parser,

@@ -449,6 +449,12 @@ def main():
     args = ap.parse_args()
 
     binary = os.path.realpath(args.binary)
+    # The host runs the parser helper only if it is not writable by group or others (as the package
+    # installs it); a build made under a group-writable umask is normalised here, for the build's own files.
+    for _name in ("wyss-console", "wyss-screen"):
+        _path = os.path.join(os.path.dirname(binary), _name)
+        if os.path.isfile(_path):
+            os.chmod(_path, 0o755)
     os.makedirs(args.out, exist_ok=True)
     root = tempfile.mkdtemp(prefix="m1p-", dir="/tmp/claude-1000")
     os.chmod(root, 0o700)

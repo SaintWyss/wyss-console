@@ -18,12 +18,18 @@ without the name answers `unknown_op` and the window replays the ring as before.
 | `host_persistence`    | none                                   | what survives what, from facts read on this machine (§4)                                                                                                                                                                                       | `host::tests::lifecycle::…`, `host::persistence::tests`              |
 | `host_lingering`      | `{enable, confirm}`                    | the same facts after the change, read back; `confirm` must be exactly `enable-lingering` / `disable-lingering`                                                                                                                                 | `host::tests::lifecycle::lingering_is_changed_only_by…`              |
 
-Desktop commands: `terminal_attach` (calls `term_screen`, moves the read cursor to `at`, answers `mode: screen` or
-`mode: replay`), `host_persistence`, `host_lingering`; each has its Tauri permission.
+Desktop commands (each has its Tauri permission): `terminal_attach` calls `term_screen`, validates the answer
+(sizes 1..512, repaint within its bound, an offset) and **stages** it with a one-use `token`, answering `mode: screen`
+or `mode: replay`; it moves nothing. `terminal_attach_commit {terminal_id, token, restored}` is the second half: the
+read position moves to where the screen ends only when the window says it **drew** it (`restored: true` with the
+token handed out last); `restored: false`, or no token because the answer could not be read, sends the reader back to
+the start of what the host kept, so a screen that failed to draw loses no output. A window that cannot tell the host
+it drew the screen does not read on and shows the terminal as failed. `host_persistence`, `host_lingering`.
 
 ## 2. Invariants
 
-1. **One size.** The PTY's. `term_resize` sets it; the parser follows by value after the bytes that came before.
+1. **One size.** The PTY's. `term_resize` sets it and records the output offset where it happened; the parser is resized
+   exactly there, between the bytes written before and after (`a_resize_takes_effect_between_the_bytes…`).
    A hidden pane never fits or resizes (`tests/terminal-sessions.test.ts`, existing).
 2. **Exact or labelled.** A screen is `exact` only if the parser consumed every byte since the terminal began;
    after a restart from a ring that no longer starts at byte 0 it is `tail{missing}` and the window says so.
@@ -35,7 +41,7 @@ Desktop commands: `terminal_attach` (calls `term_screen`, moves the read cursor 
 5. **Output is data.** Clipboard, hyperlink, window-operation, query and string sequences are counted and dropped; a
    repaint contains none of them and the window's renderer has no handler that could act (`a_repaint_contains_nothing…`,
    `has_no_way_for_output_to_write_the_clipboard…`).
-6. **Bounded.** Screen ≤ 512×512, history ≤ 20,000 lines and ≤ 256 Ki cells, title ≤ 128 characters, OSC ≤ 1 KiB,
+6. **Bounded and local.** Screen ≤ 512×512, history ≤ 20,000 lines and ≤ 256 Ki cells, title ≤ 128 characters, OSC ≤ 1 KiB,
    strings ≤ 4 KiB, repaint ≤ 4 MiB (host answer ≤ 600 KiB), frame ≤ 256 KiB in / 5 MiB out, helper address space
    ≤ 384 MiB, descriptors ≤ 8, restarts ≤ 3 per 60 s.
 7. **No polling.** An idle terminal's link thread has no wake-ups (`a_host_with_an_idle_terminal_waits…`).
@@ -58,8 +64,12 @@ Logout depends on the facts above and may be reported as not certain. Each row s
 
 ## 5. Layout files
 
-`layout_write` never replaces a file written by a newer version (`layout_newer`), and keeps an unreadable one beside
-the live one (`layout.json.unreadable-<seconds>`, three at most) before writing a usable layout
+`layout_write` takes an exclusive lock (a file beside the layout), looks at the layout without following a link and
+without trusting its size, and never replaces a file written by a newer version (`layout_newer`). An unreadable one,
+or one longer than 1 MiB, is kept beside the live one (`layout.json.unreadable-<seconds>[-n]`, never over an earlier
+one, three at most) before a usable layout is written; a link, a special file or someone else's file in its place is
+refused and left alone. The file is judged again just before it is replaced and the write is abandoned if it is not
+the one judged. A writer that does not use the lock can still change it in the one `rename`; that is the limit
 (`host::layout::tests`). Reading an unreadable or newer layout gives an empty, usable view.
 
 ## 6. Out of scope here (owner or later milestones)

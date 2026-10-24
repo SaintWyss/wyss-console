@@ -563,3 +563,85 @@ fn hostile_output_is_counted_and_a_large_flood_stays_within_its_memory_bound() {
     h.send(&Request::Shutdown);
     h.finish();
 }
+
+#[test]
+fn an_offset_that_would_wrap_is_a_bad_frame_and_a_screen_too_big_to_draw_is_refused_not_cut() {
+    let hello = Request::Hello {
+        version: PROTOCOL,
+        rows: 4,
+        cols: 20,
+        scrollback_lines: 1,
+        width_table: 0,
+        require: 0,
+    };
+    // offset + length past u64: no wrap-around, a closed word.
+    let mut h = spawn(&["--require", "0"]);
+    h.send(&hello);
+    h.recv().unwrap();
+    h.send(&Request::Feed {
+        offset: u64::MAX - 2,
+        bytes: b"abcdef".to_vec(),
+    });
+    assert_eq!(
+        h.recv().unwrap(),
+        Response::Refused {
+            code: Refusal::BadFrame
+        }
+    );
+    assert_eq!(h.finish().code(), Some(3));
+
+    // 512 x 512 cells, each with its own colour: a repaint that does not fit in its bound.
+    let mut h = spawn(&["--require", "0"]);
+    h.send(&Request::Hello {
+        version: PROTOCOL,
+        rows: 512,
+        cols: 512,
+        scrollback_lines: 1,
+        width_table: 0,
+        require: 0,
+    });
+    h.recv().unwrap();
+    let mut screen = Vec::new();
+    screen.extend_from_slice(b"\x1b[H");
+    for row in 0..512u32 {
+        for col in 0..512u32 {
+            let n = row * 512 + col;
+            screen.extend_from_slice(
+                format!(
+                    "\x1b[38;2;{};{};{}m\x1b[48;2;{};{};{}mx",
+                    n % 251,
+                    (n / 7) % 251,
+                    (n / 13) % 251,
+                    (n / 3) % 253,
+                    (n / 11) % 253,
+                    (n / 17) % 253
+                )
+                .as_bytes(),
+            );
+        }
+    }
+    let mut offset = 0u64;
+    for chunk in screen.chunks(60 * 1024) {
+        h.send(&Request::Feed {
+            offset,
+            bytes: chunk.to_vec(),
+        });
+        offset += chunk.len() as u64;
+        assert!(matches!(h.recv().unwrap(), Response::Fed { .. }));
+    }
+    h.send(&Request::Snapshot {
+        scrollback_lines: 10,
+    });
+    assert_eq!(h.recv().unwrap(), Response::TooLarge);
+    // The helper is alive and its screen is intact: it answers, and a smaller one is drawn.
+    h.send(&Request::Ping { nonce: 5 });
+    assert_eq!(h.recv().unwrap(), Response::Pong { nonce: 5 });
+    h.send(&Request::Resize { rows: 4, cols: 20 });
+    h.recv().unwrap();
+    h.send(&Request::Snapshot {
+        scrollback_lines: 0,
+    });
+    assert!(matches!(h.recv().unwrap(), Response::Snapshot(_)));
+    h.send(&Request::Shutdown);
+    h.finish();
+}
