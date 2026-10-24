@@ -25,10 +25,12 @@ import { arch } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyPackageFixtures } from './package-fixtures.mjs';
+import { snapshotSource, assertSourceUnchanged } from './build-source.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const release = join(root, 'src-tauri', 'target', 'release');
 const tool = join(root, 'scripts', 'tool.mjs');
+const source = snapshotSource(root);
 
 /** @param {string} path */
 const sha256 = (path) =>
@@ -40,7 +42,11 @@ function build(extra) {
   const result = spawnSync(
     process.execPath,
     [tool, 'tauri', 'build', '--no-bundle', '--', '--locked'],
-    { cwd: root, env: { ...process.env, ...extra }, stdio: 'inherit' },
+    {
+      cwd: root,
+      env: { ...process.env, ...extra, WYSS_BUILD_REVISION: source.revision },
+      stdio: 'inherit',
+    },
   );
   if (result.status !== 0) {
     console.error('package: the build failed');
@@ -61,6 +67,7 @@ const authority = join(release, 'wyss-control');
 const digest = sha256(authority);
 // 2. The desktop again, compiled with the digest of that authority.
 build({ WYSS_AUTHORITY_SHA256: digest });
+assertSourceUnchanged(root, source);
 // The second build must not have produced another authority than the one it pinned.
 if (sha256(authority) !== digest) {
   console.error('package: the authority changed while the desktop was built');
@@ -114,6 +121,7 @@ writeFileSync(
       schema_version: 1,
       name: 'wyss-console',
       version,
+      source_revision: source.revision,
       platform: `linux-${arch()}`,
       authority_sha256: digest,
       files: Object.fromEntries(
