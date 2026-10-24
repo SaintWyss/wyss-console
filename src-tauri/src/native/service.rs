@@ -3,6 +3,7 @@
 //! holds no thread: state is refreshed from the terminal when the overview asks, and process
 //! resources are sampled only then (nothing runs while the view is hidden).
 use super::{
+    capabilities,
     catalogue::{self, AGENTS, AgentId},
     profile::{self, LaunchPlan, Word},
     profiles::ProfileStore,
@@ -12,6 +13,7 @@ use super::{
     store,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     ffi::OsString,
@@ -127,6 +129,9 @@ pub struct PreviewView {
     pub not_applicable: Vec<String>,
     pub can_start: bool,
     pub through_shell: bool,
+    /// Opaque binding to this exact resolved profile plan. Start rejects it after any edit,
+    /// restore or inherited change, and uses the plan whose fingerprint matched.
+    pub plan_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -142,6 +147,13 @@ pub struct StartRequest {
     /// `# `, no NUL: it travels as one word of the command line, never as text a shell reads.
     #[serde(default)]
     pub brief: Option<String>,
+    /// The token returned by the exact profile preview shown before this start.
+    #[serde(default)]
+    pub plan_token: Option<String>,
+    /// Exact CLI version observed when that preview was shown; Native binds it again inside
+    /// the user's shell before executing the shell-resolved binary.
+    #[serde(default)]
+    pub expected_cli_version: Option<String>,
 }
 
 /// A session as the window sees it: the registry's record plus what is observed now.
@@ -402,9 +414,9 @@ impl NativeService {
         &self,
         agent: AgentId,
         profile_id: Option<&str>,
-    ) -> Result<(LaunchPlan, Option<ProfileRef>), NativeError> {
+    ) -> Result<(LaunchPlan, Option<ProfileRef>, Option<String>), NativeError> {
         let Some(id) = profile_id else {
-            return Ok((LaunchPlan::default(), None));
+            return Ok((LaunchPlan::default(), None, None));
         };
         let (resolved, version) = self
             .inner
@@ -413,14 +425,15 @@ impl NativeService {
             .map_err(|_| NativeError::new("profile_unknown"))?;
         let applies = resolved.body.applies_to.contains(&agent);
         let plan = profile::plan(&resolved, agent, applies);
-        Ok((
-            plan,
-            Some(ProfileRef {
-                id: id.to_owned(),
-                name: resolved.body.name,
-                version,
-            }),
-        ))
+        let profile_ref = ProfileRef {
+            id: id.to_owned(),
+            name: resolved.body.name.clone(),
+            version,
+        };
+        let material = serde_json::to_vec(&(agent, id, &profile_ref, &resolved, &plan))
+            .map_err(|_| NativeError::new("internal"))?;
+        let token = format!("{:x}", Sha256::digest(material));
+        Ok((plan, Some(profile_ref), Some(token)))
     }
 
     pub fn preview(
@@ -428,13 +441,14 @@ impl NativeService {
         agent: AgentId,
         profile_id: Option<&str>,
     ) -> Result<PreviewView, NativeError> {
-        let (plan, _) = self.plan_for(agent, profile_id)?;
+        let (plan, _, plan_token) = self.plan_for(agent, profile_id)?;
         Ok(PreviewView {
             can_start: plan.not_applicable.is_empty(),
             applied: plan.applied,
             with_cost: plan.with_cost,
             not_applicable: plan.not_applicable,
             through_shell: self.shell().is_some_and(|s| s.through_shell),
+            plan_token,
         })
     }
 
@@ -471,7 +485,17 @@ impl NativeService {
             .find(|a| a.agent_id == request.agent_id)
             .filter(|a| a.installed)
             .ok_or_else(|| NativeError::new("agent_not_installed"))?;
-        let (plan, profile_ref) = self.plan_for(request.agent_id, request.profile_id.as_deref())?;
+        let (plan, profile_ref, plan_token) =
+            self.plan_for(request.agent_id, request.profile_id.as_deref())?;
+        if request.profile_id.is_some() {
+            match (request.plan_token.as_deref(), plan_token.as_deref()) {
+                (Some(expected), Some(actual)) if expected == actual => {}
+                (None, _) => return Err(NativeError::new("profile_preview_required")),
+                _ => return Err(NativeError::new("profile_preview_stale")),
+            }
+        } else if request.plan_token.is_some() {
+            return Err(NativeError::new("profile_preview_stale"));
+        }
         if !plan.not_applicable.is_empty() {
             return Err(NativeError {
                 code: "profile_not_applicable",
@@ -481,8 +505,31 @@ impl NativeService {
         let shell = self
             .user_shell()
             .map_err(|_| NativeError::new("spawn_failed"))?;
+        let has_overrides = !plan.applied.is_empty() || !plan.with_cost.is_empty();
+        if has_overrides {
+            let Some(version) = request.expected_cli_version.as_deref() else {
+                return Err(NativeError::new("provider_version_unverified"));
+            };
+            if !capabilities::permits_profile_overrides(request.agent_id, Some(version)) {
+                return Err(NativeError::new("provider_version_unverified"));
+            }
+            if recipe::family(&shell).is_none() {
+                let installed_version = agent
+                    .path
+                    .as_deref()
+                    .and_then(|path| catalogue::probe_version(Path::new(path)));
+                if installed_version.as_deref() != Some(version) {
+                    return Err(NativeError::new("provider_version_unverified"));
+                }
+            }
+        }
         let id = uuid::Uuid::new_v4().simple().to_string();
         let dir = self.inner.base.join("sessions").join(&id);
+        let version_guard = has_overrides && recipe::family(&shell).is_some();
+        let guard_marker = dir.join("provider-version-verified");
+        if version_guard && store::private_dir(&dir).is_err() {
+            return Err(NativeError::new("store_unavailable"));
+        }
         let mut words = vec![agent.executable.to_owned()];
         for word in &plan.words {
             match word {
@@ -509,7 +556,16 @@ impl NativeService {
             }
         }
         let direct = agent.path.clone().map(PathBuf::from).unwrap_or_default();
-        let made = recipe::recipe(&shell, &words, &direct);
+        let made = recipe::recipe_with_version_guard(
+            &shell,
+            &words,
+            &direct,
+            if has_overrides {
+                request.expected_cli_version.as_deref()
+            } else {
+                None
+            },
+        );
         let now = store::now();
         let mut session = Session {
             id: id.clone(),
@@ -528,6 +584,14 @@ impl NativeService {
             restart_of: restart.map(|(of, _)| of.to_owned()),
             restarts: restart.map_or(0, |(_, n)| n),
         };
+        let mut env = vec![("WYSS_NATIVE_SESSION_ID".to_owned(), id.clone())];
+        if version_guard {
+            env.push((
+                "WYSS_NATIVE_VERSION_GUARD".to_owned(),
+                guard_marker.to_string_lossy().into_owned(),
+            ));
+        }
+        env.extend(self.inner.extra_env.iter().cloned());
         let launched = terminal.create_launch(
             CreateTerminal {
                 size: request.size,
@@ -536,9 +600,7 @@ impl NativeService {
             Launch {
                 program: made.program,
                 args: made.args,
-                env: std::iter::once(("WYSS_NATIVE_SESSION_ID".to_owned(), id.clone()))
-                    .chain(self.inner.extra_env.iter().cloned())
-                    .collect(),
+                env,
                 remove_env: self.inner.scrub.clone(),
             },
         );
@@ -558,6 +620,15 @@ impl NativeService {
                 return Err(NativeError::new(code));
             }
         };
+        if version_guard && !await_version_guard(terminal, &info.terminal_id, &guard_marker) {
+            let _ = terminal.close(&info.terminal_id);
+            session.state = State::FailedStart;
+            session.ended_at = Some(store::now());
+            session.error = Some("provider_version_unverified".to_owned());
+            self.record(session);
+            let _ = fs::remove_dir_all(&dir);
+            return Err(NativeError::new("provider_version_unverified"));
+        }
         session.state = State::Running;
         lock(&self.inner.live).insert(
             id.clone(),
@@ -639,13 +710,15 @@ impl NativeService {
         Ok(())
     }
 
-    /// A new session with the same agent, project and profile. The old one is stopped first
-    /// when it still runs; it stays in the registry as it ended.
+    /// A new session with the same agent, project and profile. The old one is stopped only
+    /// after the replacement has started, so stale previews or spawn failures leave it usable.
     pub fn restart(
         &self,
         terminal: &TerminalService,
         id: &str,
         size: TerminalSize,
+        plan_token: Option<String>,
+        expected_cli_version: Option<String>,
     ) -> Result<StartReply, NativeError> {
         if !id_ok(id) {
             return Err(NativeError::new("session_unknown"));
@@ -654,10 +727,8 @@ impl NativeService {
             .session(id)
             .cloned()
             .ok_or_else(|| NativeError::new("session_unknown"))?;
-        if old.state == State::Running {
-            self.stop(terminal, id)?;
-        }
-        self.start_with(
+        let was_running = old.state == State::Running;
+        let reply = self.start_with(
             terminal,
             StartRequest {
                 agent_id: old.agent_id,
@@ -665,9 +736,17 @@ impl NativeService {
                 profile_id: old.profile.map(|p| p.id),
                 size,
                 brief: None,
+                plan_token,
+                expected_cli_version,
             },
             Some((id, old.restarts + 1)),
-        )
+        )?;
+        if was_running {
+            // If the old terminal could not be closed, keep both records visible. The new
+            // session is already live, so returning an error here would hide a successful start.
+            let _ = self.stop(terminal, id);
+        }
+        Ok(reply)
     }
 
     /// Removes the record of a session that is not running.
@@ -831,6 +910,33 @@ impl NativeService {
             });
             entry.last = Some((now, at));
         }
+    }
+}
+
+/// Do not admit a shell-started profile as a session until the post-startup PATH check has
+/// completed. This makes a restart keep its old session when the shell rejects a new build.
+fn await_version_guard(
+    terminal: &TerminalService,
+    terminal_id: &TerminalId,
+    marker: &Path,
+) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(6);
+    loop {
+        let verified = fs::symlink_metadata(marker).is_ok_and(|meta| meta.file_type().is_file())
+            && fs::read(marker).is_ok_and(|bytes| bytes == b"ok\n");
+        if verified {
+            return true;
+        }
+        let Ok(info) = terminal.status(terminal_id) else {
+            return false;
+        };
+        if !matches!(info.state, TerminalState::Starting | TerminalState::Running) {
+            return false;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 

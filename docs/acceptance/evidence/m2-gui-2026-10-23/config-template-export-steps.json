@@ -1,0 +1,22 @@
+[
+  ["click", 75, 377],
+  ["wait", 4],
+  ["click", 800, 457],
+  ["wait", 2],
+  ["click", 425, 660],
+  ["wait", 2],
+  ["click", 745, 665],
+  ["type", "M2FixturePassphrase4926"],
+  ["click", 745, 700],
+  ["wait", 1],
+  ["type", "M2FixturePassphrase4926"],
+  ["click", 797, 736],
+  ["wait", 12],
+  ["click", 200, 326],
+  ["wait", 2],
+  ["shot", "27-export-home-directory"],
+  ["click", 1300, 1128],
+  ["wait", 6],
+  ["fixture-template-snapshot", "exported"],
+  ["shot", "27-template-exported"]
+]

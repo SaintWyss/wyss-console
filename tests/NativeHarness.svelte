@@ -20,6 +20,8 @@
     started?: (reply: StartReply) => void;
     onconsole?: () => void;
   } = $props();
+  // svelte-ignore state_referenced_locally
+  let active = $state(which);
   // Built once for one client, as the application does.
   // svelte-ignore state_referenced_locally
   const controller = new NativeController(
@@ -37,8 +39,19 @@
   });
 </script>
 
-{#if which === 'workspace'}
-  <WorkspaceView {native} {controller} {visible} {onconsole} />
-{:else}
-  <ProfilesView {native} {controller} {visible} />
-{/if}
+<nav aria-label="Native test navigation">
+  <button type="button" onclick={() => (active = 'workspace')}>Workspace</button
+  >
+  <button type="button" onclick={() => (active = 'profiles')}>Profiles</button>
+</nav>
+<WorkspaceView
+  {native}
+  {controller}
+  visible={visible && active === 'workspace'}
+  {onconsole}
+/>
+<ProfilesView
+  {native}
+  {controller}
+  visible={visible && active === 'profiles'}
+/>

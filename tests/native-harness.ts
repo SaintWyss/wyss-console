@@ -158,6 +158,9 @@ export function fakeClient(over: Partial<NativeClient> = {}) {
       not_applicable: [],
       can_start: true,
       through_shell: true,
+      warnings: [],
+      plan_token: 'preview-token',
+      provider_version: '2.1.309 (Claude Code)',
     })),
     start: vi.fn(async () => reply()),
     prepareHandoff: vi.fn(async () => ({

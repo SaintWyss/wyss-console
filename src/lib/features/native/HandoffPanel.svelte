@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { AgentId, NativeSession } from '../../contracts/native';
+  import type { AgentId, NativeSession, Preview } from '../../contracts/native';
   import type { NativeController, NativeState } from './controller';
   import { AGENT_LABEL, profilesFor } from './present';
 
@@ -22,6 +22,8 @@
   let text = $state('');
   let loading = $state(true);
   let screen = $state(false);
+  let preview = $state<Preview | null>(null);
+  let previewFailed = $state(false);
   // svelte-ignore state_referenced_locally
   let target = $state<AgentId>(
     session.agent_id === 'claude_code' ? 'codex' : 'claude_code',
@@ -37,10 +39,28 @@
       !native.starting &&
       !tooLong &&
       text.startsWith('# ') &&
+      (profile === null || preview?.can_start === true) &&
       agents.some((a) => a.agent_id === target),
   );
   $effect(() => {
     if (profile && !profiles.some((p) => p.id === profile)) profile = null;
+  });
+  let previewSeq = 0;
+  $effect(() => {
+    const selectedAgent = target;
+    const selectedProfile = profile;
+    const sequence = ++previewSeq;
+    preview = null;
+    previewFailed = false;
+    if (!selectedProfile) return;
+    void controller.preview(selectedAgent, selectedProfile).then(
+      (next) => {
+        if (sequence === previewSeq) preview = next;
+      },
+      () => {
+        if (sequence === previewSeq) previewFailed = true;
+      },
+    );
   });
   onMount(async () => {
     const brief = await controller.handoff(session.id);
@@ -51,7 +71,15 @@
     loading = false;
   });
   async function start() {
-    if (await controller.startAgent(target, session.project, profile, text))
+    if (
+      await controller.startAgent(
+        target,
+        session.project,
+        profile,
+        text,
+        preview,
+      )
+    )
       onstarted();
   }
 </script>
@@ -102,6 +130,24 @@
         </select>
       </div>
     </div>
+    {#if profile && previewFailed}
+      <p class="native-warning" role="status">
+        Could not verify this profile preview. Refresh Native before starting.
+      </p>
+    {:else if preview}
+      <ul class="native-preview" aria-label="What the profile does">
+        {#each preview.applied as line (line)}<li>{line}</li>{/each}
+        {#each preview.with_cost as line (line)}<li class="cost">
+            {line}
+          </li>{/each}
+        {#each preview.not_applicable as line (line)}<li class="refused">
+            {line}
+          </li>{/each}
+        {#each preview.warnings as line (line)}<li class="evidence">
+            {line}
+          </li>{/each}
+      </ul>
+    {/if}
     <div class="native-plan-actions">
       <button
         type="button"

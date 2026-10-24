@@ -380,7 +380,9 @@ only provider-exposed summaries may be shown transiently.
 
 Native launch uses verified provider flags/overrides; running-session changes use only
 a proven supported provider interface. Otherwise guide the user to its own control,
-without typing slash commands automatically. Managed model/effort is a planned typed
+without typing slash commands automatically. Native profile model/effort requests and
+their configured/requested/provider-reported/observed fact labels close in M2. Managed
+model/effort is a planned typed
 authority extension: validate the current generation's catalogue and effort, bind the
 selection to admission, reject unsupported values and report reroutes only when observed.
 Never switch provider/model automatically outside an explicitly reviewed substitution rule.

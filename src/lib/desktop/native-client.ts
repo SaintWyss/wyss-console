@@ -62,10 +62,19 @@ export async function startNative(
   profile_id: string | null,
   size: TerminalSize,
   brief: string | null = null,
+  preview: Pick<Preview, 'plan_token' | 'provider_version'> | null = null,
 ): Promise<StartReply> {
   const reply = checked(
     await call('native_start', {
-      request: { agent_id, project, profile_id, size, brief },
+      request: {
+        agent_id,
+        project,
+        profile_id,
+        size,
+        brief,
+        plan_token: preview?.plan_token ?? null,
+        expected_cli_version: preview?.provider_version ?? null,
+      },
     }),
     parseStartReply,
   );

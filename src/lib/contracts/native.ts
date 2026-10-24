@@ -27,6 +27,38 @@ export type Permission = (typeof PERMISSIONS)[number];
 export const HOOKS_MODES = ['inherit', 'off'] as const;
 export type HooksMode = (typeof HOOKS_MODES)[number];
 
+export const PROFILE_CAPABILITY_STATUSES = [
+  'syntax_verified',
+  'unverified',
+] as const;
+export type ProfileCapabilityStatus =
+  (typeof PROFILE_CAPABILITY_STATUSES)[number];
+export interface ProfileCapability {
+  status: ProfileCapabilityStatus;
+  qualified_version: string | null;
+  checked_on: string | null;
+  operations: string[];
+  interface: string | null;
+  format: string | null;
+  scope: string | null;
+  reload_semantics: string | null;
+  source: string | null;
+  limitation: string;
+}
+
+const UNVERIFIED_PROFILE_CAPABILITY: ProfileCapability = {
+  status: 'unverified',
+  qualified_version: null,
+  checked_on: null,
+  operations: [],
+  interface: null,
+  format: null,
+  scope: null,
+  reload_semantics: null,
+  source: null,
+  limitation: 'No version-bound profile-override evidence was reported.',
+};
+
 export interface AgentEntry {
   agent_id: AgentId;
   name: string;
@@ -34,6 +66,8 @@ export interface AgentEntry {
   installed: boolean;
   path: string | null;
   version: string | null;
+  /** Exact-build syntax evidence; it never proves provider resolution or effective use. */
+  profile_capability: ProfileCapability;
 }
 export interface ShellInfo {
   path: string;
@@ -58,6 +92,11 @@ export interface Preview {
   not_applicable: string[];
   can_start: boolean;
   through_shell: boolean;
+  warnings: string[];
+  /** Opaque token for the exact profile plan reviewed in this preview. */
+  plan_token: string | null;
+  /** Exact `--version` result for the discovered CLI path at preview time. */
+  provider_version: string | null;
 }
 export interface Usage {
   cpu_percent: number | null;
@@ -171,6 +210,50 @@ function orNull<T>(value: unknown, read: (v: unknown) => T): T | null {
 const strings = (value: unknown, field: string): string[] =>
   arr(value, field).map((v) => str(v, field));
 
+function profileCapability(value: unknown): ProfileCapability {
+  const o = obj(value, 'profile_capability');
+  const capability: ProfileCapability = {
+    status: one(
+      o.status,
+      PROFILE_CAPABILITY_STATUSES,
+      'profile_capability.status',
+    ),
+    qualified_version: orNull(o.qualified_version, (v) =>
+      str(v, 'profile_capability.qualified_version'),
+    ),
+    checked_on: orNull(o.checked_on, (v) =>
+      str(v, 'profile_capability.checked_on'),
+    ),
+    operations:
+      o.operations === undefined
+        ? []
+        : strings(o.operations, 'profile_capability.operations'),
+    interface: orNull(o.interface, (v) =>
+      str(v, 'profile_capability.interface'),
+    ),
+    format: orNull(o.format, (v) => str(v, 'profile_capability.format')),
+    scope: orNull(o.scope, (v) => str(v, 'profile_capability.scope')),
+    reload_semantics: orNull(o.reload_semantics, (v) =>
+      str(v, 'profile_capability.reload_semantics'),
+    ),
+    source: orNull(o.source, (v) => str(v, 'profile_capability.source')),
+    limitation: str(o.limitation, 'profile_capability.limitation'),
+  };
+  if (
+    capability.status === 'syntax_verified' &&
+    (!capability.qualified_version ||
+      !capability.checked_on ||
+      capability.operations.length === 0 ||
+      !capability.interface ||
+      !capability.format ||
+      !capability.scope ||
+      !capability.reload_semantics ||
+      !capability.source)
+  )
+    throw bad('profile_capability.evidence');
+  return capability;
+}
+
 function agent(value: unknown): AgentEntry {
   const o = obj(value, 'agent');
   return {
@@ -180,6 +263,10 @@ function agent(value: unknown): AgentEntry {
     installed: bool(o.installed, 'installed'),
     path: orNull(o.path, (v) => str(v, 'path')),
     version: orNull(o.version, (v) => str(v, 'version')),
+    profile_capability:
+      o.profile_capability === undefined
+        ? { ...UNVERIFIED_PROFILE_CAPABILITY }
+        : profileCapability(o.profile_capability),
   };
 }
 function project(value: unknown): ProjectEntry {
@@ -215,6 +302,15 @@ export function parsePreview(value: unknown): Preview {
     not_applicable: strings(o.not_applicable, 'not_applicable'),
     can_start: bool(o.can_start, 'can_start'),
     through_shell: bool(o.through_shell, 'through_shell'),
+    warnings: o.warnings === undefined ? [] : strings(o.warnings, 'warnings'),
+    plan_token:
+      o.plan_token === undefined
+        ? null
+        : orNull(o.plan_token, (v) => str(v, 'plan_token')),
+    provider_version:
+      o.provider_version === undefined
+        ? null
+        : orNull(o.provider_version, (v) => str(v, 'provider_version')),
   };
 }
 export function parseSession(value: unknown): NativeSession {

@@ -252,3 +252,18 @@ Before/after P1/F8 service start identities, host/F8 socket metadata, Native reg
 layout and installed-binary metadata unchanged. This comparison proves no observed owner
 replacement or metadata rewrite during M0; it does not certify every live session's
 internal state. Scope: documentation files only (the M1 contract, canonical pages and the ADR0052 status), no application implementation.
+
+## M2 engineering delivery — 2026-10-23
+
+Current branch: `feat/m2-native-parity-2026-10-23`, based on verified
+`origin/main` `def69fe35ddfe8b696b65a12d2f2babe296c8247`. The frozen acceptance
+contract is [M2 Native parity and configuration closure](../contracts/m2-native-parity.md);
+the test-by-test result, provider evidence and remaining release conditions are in the
+[M2 engineering acceptance record](../acceptance/m2-engineering-2026-10-23.md).
+
+Engineering status is `ENGINEERING_COMPLETE_RELEASE_BLOCKED`: fixture-backed Native
+profile launch, version check and preview binding are implemented; current provider
+syntax is recorded without claiming provider-resolved/effective model use. Native GUI
+workflow and real-provider consumption acceptance remain NOT_RUN. OD-M2-01 remains a
+separate owner decision under accepted ADR0034. The existing live installation, host,
+authority, sessions, provider configuration and credentials were not changed.

@@ -105,6 +105,30 @@ no help/model-list refresh, sign-in, auth/config reads, inference or paid calls.
 | Claude Managed / any profile                   | No released adapter/compatible build                                                                     | ADR0053 Proposed; unsupported. M3 pins official surface/auth/settings route and mediates every effect before even no-tool acceptance; Native is a separately explicit alternative                                                                                                                                       |
 | OpenCode/Hermes                                | No Native catalogue entry/Managed execution adapter qualified                                            | Retained config/extension work only; not another installed provider qualification or M1 dependency                                                                                                                                                                                                                      |
 
+## M2 Native profile evidence — 2026-10-23
+
+Current PATH observations are Claude Code `2.1.309 (Claude Code)` and Codex
+`codex-cli 0.159.0`. Read-only `--help` output confirms Claude's `--model`, `--effort`,
+`--permission-mode` and `--settings` session interfaces, and Codex's `-m`, `-c
+KEY=VALUE`, `-s` and `-a` interfaces. The exact-build Native profile manifest and its
+limits are in [`native/capabilities.rs`](../../src-tauri/src/native/capabilities.rs)
+and the [M2 acceptance record](../acceptance/m2-engineering-2026-10-23.md).
+
+These probes establish installed version and accepted command-line surface only.
+Claude settings-overlay behavior was exercised on 2.1.303 in the cited F1/F2a and F3
+records; Codex `model_reasoning_effort` was read from the 0.159.0 config surface in F6.
+Neither record proves that a Native turn on the current exact build resolved, was
+entitled to, or effectively used the requested model/effort. No prompt, sign-in,
+credential/config mutation or paid inference was performed for this M2 record.
+
+The updated Native host binds profile previews to the resolved plan and checks the
+shell-resolved CLI build before passing profile values. A legacy host remains able to
+start non-effort profiles with a visible warning, but cannot bind the displayed plan
+revision; effectful M2 acceptance therefore requires the updated host. Unsupported
+Codex per-session hooks/skills exclusions, Codex project skills, Codex hook mutation,
+and project trust writes remain refused. Claude Managed, Managed model/effort
+selection, and authority extensions remain M3 work.
+
 Host hello0.2.0 exposes `profile_effort`; this changes the old-host compatibility
 observation, not the recorded limits of real GUI/provider consumption. The host's protocol1
 is its **terminal transport**, not proof that the selected Managed authority is P1.

@@ -2470,6 +2470,21 @@ html[data-glass='transparent'] .shell {
 .native-preview .refused {
   color: var(--error-text);
 }
+.native-preview .evidence {
+  color: var(--warn);
+}
+.native-capability-details {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.native-capability-details summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.native-capability-details p,
+.native-capability-details ul {
+  margin-block: 0.4rem;
+}
 .native-heading {
   display: flex;
   align-items: center;
