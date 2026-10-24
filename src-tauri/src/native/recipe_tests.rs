@@ -215,9 +215,7 @@ fn a_matching_shell_resolved_cli_is_marked_before_that_same_binary_starts() {
         let path = dir.join("fake-cli");
         fs::write(
             &path,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' '2.1.309 (Claude Code)'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$WYSS_MARKER\"\n"
-            ),
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' '2.1.309 (Claude Code)'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$WYSS_MARKER\"\n",
         )
         .unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();

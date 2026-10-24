@@ -211,7 +211,7 @@ fn annotate_preview(
     if let Some(profile_id) = profile_id
         && !link.has_feature("native_profile_plan_token")
     {
-        if profile_requires_effort(&link, profile_id)? {
+        if profile_requires_effort(link, profile_id)? {
             preview["can_start"] = Value::Bool(false);
             push_string(
                 &mut preview,
