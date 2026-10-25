@@ -1,0 +1,14 @@
+# Authority store of the earlier hung E2E run (copy of ~/wqz-jGaB/state, read-only, integrity ok, user_version 8)
+# execution_leases: state|scopes|revision|issued_at|expires_at|updated_at
+expired|["session_create","session_resume","turn_start","command_execute","file_change"]|2|2026-10-25T03:28:55.416289419Z|2026-10-25T03:33:55.416289419Z|2026-10-25T03:33:55.419963535Z
+# control_events: sequence|event_type (identities omitted)
+00000000000000000001|authority.instance.started
+00000000000000000002|authority.managed_session.prepared
+00000000000000000003|authority.runtime.desired_state_changed
+00000000000000000004|authority.runtime.instance_ready
+00000000000000000005|authority.execution_lease.granted
+00000000000000000006|authority.managed_session.prepared
+00000000000000000007|authority.runtime.desired_state_changed
+00000000000000000008|authority.runtime.instance_exited
+00000000000000000009|authority.instance.started
+00000000000000000010|authority.execution_lease.expired

@@ -1,0 +1,35 @@
+     395.3 ThreadId(20) link.connect.begin Control
+     864.9 ThreadId(17) link.connect.begin Watch
+    6870.5 ThreadId(1) js:ipc.begin #77 f8_lease_grant
+    6871.2 ThreadId(11) cmd.grant.enter intent=a9e4a882 acts=true
+    6871.3 ThreadId(18) cmd.grant.worker intent=a9e4a882
+    6873.8 ThreadId(1) js:grant.click acts=5
+    6874.4 ThreadId(1) js:step 8 grant-clicked
+    6919.5 ThreadId(18) confirm.ask.begin 
+    6919.6 ThreadId(1) confirm.main.enter 
+    6928.0 ThreadId(1) confirm.dialog.shown 
+    7228.1 ThreadId(1) confirm.dialog.allow t=300 allow_sensitive=false value=0 page=347 upper=347
+    7228.2 ThreadId(1) confirm.dialog.probe t=300 dialog_vis=true dialog_active=true dlg_state=Some(WindowState(FOCUSED | TOP_RESIZABLE | RIGHT_RESIZABLE | BOTTOM_RESIZABLE | LEFT_RESIZABLE)) parent_state=Some(WindowState(TOP_RESIZABLE | RIGHT_RESIZABLE | BOTTOM_RESIZABLE | LEFT_RESIZABLE)) parent_active=Some(false) toplevels=[Wyss Console vis=true active=false focus=false] [Let this runtime ask to act? vis=true acti
+    7898.4 ThreadId(1) js:ping ms=25
+    8428.2 ThreadId(1) confirm.dialog.allow t=1500 allow_sensitive=true value=0 page=347 upper=347
+    8428.3 ThreadId(1) confirm.dialog.probe t=1500 dialog_vis=true dialog_active=true dlg_state=Some(WindowState(FOCUSED | TOP_RESIZABLE | RIGHT_RESIZABLE | BOTTOM_RESIZABLE | LEFT_RESIZABLE)) parent_state=Some(WindowState(TOP_RESIZABLE | RIGHT_RESIZABLE | BOTTOM_RESIZABLE | LEFT_RESIZABLE)) parent_active=Some(false) toplevels=[Wyss Console vis=true active=false focus=false] [Let this runtime ask to act? vis=true act
+    8900.9 ThreadId(1) js:ping ms=24
+    9906.6 ThreadId(1) js:ping ms=25
+   10909.8 ThreadId(1) js:ping ms=25
+   10928.1 ThreadId(1) confirm.dialog.allow t=4000 allow_sensitive=true value=0 page=347 upper=347
+   10928.2 ThreadId(1) confirm.dialog.probe t=4000 dialog_vis=true dialog_active=true dlg_state=Some(WindowState(FOCUSED | TOP_RESIZABLE | RIGHT_RESIZABLE | BOTTOM_RESIZABLE | LEFT_RESIZABLE)) parent_state=Some(WindowState(TOP_RESIZABLE | RIGHT_RESIZABLE | BOTTOM_RESIZABLE | LEFT_RESIZABLE)) parent_active=Some(false) toplevels=[Wyss Console vis=true active=false focus=false] [Let this runtime ask to act? vis=true act
+   11914.0 ThreadId(1) js:ping ms=25
+   12920.2 ThreadId(1) js:ping ms=27
+   13922.9 ThreadId(1) js:ping ms=26
+   14926.9 ThreadId(1) js:ping ms=26
+   15928.2 ThreadId(1) confirm.dialog.auto_allow 
+   15928.4 ThreadId(1) confirm.main.leave allowed=true
+   15928.4 ThreadId(18) confirm.ask.answered allowed=true
+   15931.1 ThreadId(1) js:ping ms=26
+   15948.3 ThreadId(8) cmd.grant.exit intent=a9e4a882 ok
+   15950.9 ThreadId(1) js:ipc.headers #77 f8_lease_grant ms=9081 status=200
+   15951.3 ThreadId(1) js:ipc.body #77 f8_lease_grant ms=9081
+   16162.1 ThreadId(1) js:grant.cleared ms=9293 text=Managed runtimes 1 prepared · 0 closed · protocol 2 Connected Refresh New session Session f7134787 Ready Ready · generation 1 · Local Tools Updated 1:44 AM Session f7134787 Ready f7134787-9ebf-472c-94ba-119cb5de5d36 × OverviewConversationModelsHistory Bind a project folder to this session. Provider support Claude Code Managed is not implemented in this authority. T
+   16162.5 ThreadId(1) js:step 9 cleared
+   19393.9 ThreadId(1) js:step 99 finished
+  316124.8 ThreadId(16) link.connect.begin Control
