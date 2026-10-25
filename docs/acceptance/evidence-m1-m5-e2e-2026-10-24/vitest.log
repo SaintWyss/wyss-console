@@ -1,0 +1,16 @@
+npm notice run wyss-console@0.2.0 test
+npm notice run vitest run
+
+ RUN  v5.0.3 /home/saintwyss/wyss-console-qa-0e9a534
+
+
+ Test Files  66 passed (66)
+      Tests  1056 passed (1056)
+   Start at  23:44:52
+   Duration  19.65s (environment 50%, tests 31%, transform 12%, import 5%, setup 1%)
+
+Environment  jsdom was created 66 times · 61.36s total, 50% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
+EXIT 0
