@@ -143,6 +143,8 @@ const FAILURE: Record<F8FailureCode, string> = {
   unavailable: 'The authority did not answer, so the outcome is not known.',
   incompatible: 'This console and the authority speak different versions.',
   invalid: 'The console sent a request it should not have. Nothing changed.',
+  unsupported:
+    'This authority does not offer that. Nothing changed; try another mode.',
   not_found: 'The authority no longer has it.',
   stale:
     'What was shown is no longer what the authority holds. It has been read again.',

@@ -40,6 +40,7 @@ export const F8_FAILURES = [
   'unavailable',
   'incompatible',
   'invalid',
+  'unsupported',
   'not_found',
   'stale',
   'not_allowed',

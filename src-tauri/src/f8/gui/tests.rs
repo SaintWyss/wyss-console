@@ -16,6 +16,14 @@ use crate::{
     sessions::AgentMode,
 };
 
+#[test]
+fn a_mode_the_authority_does_not_serve_is_not_an_invalid_request() {
+    use crate::contracts::control::ControlError as E;
+    assert_eq!(F8Error::of(E::Unsupported).code, F8Failure::Unsupported);
+    assert_eq!(F8Error::of(E::InvalidRequest).code, F8Failure::Invalid);
+    assert!(!F8Error::of(E::Unsupported).retry);
+}
+
 const ALL: [ExecutionScope; 5] = [
     ExecutionScope::SessionCreate,
     ExecutionScope::SessionResume,

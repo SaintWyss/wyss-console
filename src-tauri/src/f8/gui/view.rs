@@ -46,6 +46,9 @@ pub enum F8Failure {
     Incompatible,
     /// The request is not one this desktop sends. Decided here, before anything is asked.
     Invalid,
+    /// The authority understood the request and does not offer it: a mode or provider that
+    /// this authority was not started to serve. Nothing is wrong with the request.
+    Unsupported,
     NotFound,
     /// What the window saw is not what the authority holds: a revision, a generation or a
     /// runtime instance changed. Read again before deciding again.
@@ -114,7 +117,8 @@ impl F8Error {
             | E::FrameTooLarge
             | E::HandshakeRequired
             | E::UnsupportedMethod => F::Incompatible,
-            E::InvalidRequest | E::Unsupported => F::Invalid,
+            E::InvalidRequest => F::Invalid,
+            E::Unsupported => F::Unsupported,
             E::SessionNotFound | E::TurnNotFound | E::ApprovalNotFound | E::LeaseNotFound => {
                 F::NotFound
             }
