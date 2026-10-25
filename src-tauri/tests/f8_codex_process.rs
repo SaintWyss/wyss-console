@@ -515,6 +515,53 @@ fn a_file_change_is_written_only_when_accepted() {
 }
 
 #[test]
+fn a_full_authority_says_capacity_while_a_runtime_runs_and_takes_the_next_once_it_is_stopped() {
+    let mut p = Production::new("approval_command");
+    p.start(true);
+    let gui = p.gui();
+    let first = gui.prepare(id()).unwrap().id;
+    let other = gui.prepare(id()).unwrap().id;
+    let start = |session: &ManagedSessionId| {
+        let row = gui.session(session.clone()).unwrap().session;
+        gui.runtime_start(
+            id(),
+            session.clone(),
+            row.runtime.revision,
+            row.runtime.generation,
+            AgentMode::LocalTools,
+            Some(p.workspace()),
+        )
+    };
+    start(&first).unwrap();
+    let up = ready(&gui, &first);
+    // Stable exhaustion: the runtime stays up, so the answer is capacity, every time, no retry.
+    for _ in 0..3 {
+        let refused = start(&other).unwrap_err();
+        assert_eq!(refused.code, F8Failure::Capacity);
+        assert!(!refused.retry);
+    }
+    assert_eq!(
+        gui.session(other.clone()).unwrap().session.runtime.actual,
+        ActualState::Stopped
+    );
+    gui.runtime_stop(
+        id(),
+        up.session.runtime.fence.clone(),
+        up.session.runtime.revision,
+    )
+    .unwrap();
+    // Transient cleanup: while the stopped runtime still owns its slot the answer is never
+    // capacity (the user can do nothing); it is busy, and the same ask succeeds once it is gone.
+    eventually(|| match start(&other) {
+        Ok(_) => Some(()),
+        Err(e) if e.code == F8Failure::Busy && e.retry => None,
+        Err(e) => panic!("{e:?}"),
+    });
+    ready(&gui, &other);
+    p.stop(Signal::SIGTERM);
+}
+
+#[test]
 fn the_inference_profile_is_refused_and_nothing_is_started() {
     let mut p = Production::new("approval_command");
     p.start(true);
@@ -531,7 +578,9 @@ fn the_inference_profile_is_refused_and_nothing_is_started() {
             None,
         )
         .unwrap_err();
-    assert_eq!(refused.code, F8Failure::Invalid);
+    // The production authority serves Codex local tools only: Inference is a mode it does not
+    // offer (`unsupported`), not a malformed request (`invalid`). Nothing is started either way.
+    assert_eq!(refused.code, F8Failure::Unsupported);
     assert_eq!(p.record("pids"), 0, "no process of the runtime was started");
     p.stop(Signal::SIGTERM);
 }

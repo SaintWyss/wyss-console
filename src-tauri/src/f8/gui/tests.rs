@@ -94,6 +94,36 @@ fn a_second_runtime_at_the_capacity_of_one_is_told_so_and_is_not_offered_a_retry
 }
 
 #[test]
+fn only_a_runtime_that_is_wanted_running_holds_the_capacity_for_good() {
+    use super::service::holds_capacity;
+    use crate::contracts::control::DesiredState as D;
+    let h = Harness::start(true, 1);
+    let session = h.gui.prepare(uuid()).unwrap().id;
+    let base = h.gui.session(session).unwrap().session.runtime;
+    let holds = |desired, actual| {
+        holds_capacity(&RuntimeView {
+            desired,
+            actual,
+            ..base.clone()
+        })
+    };
+    for actual in [
+        ActualState::Starting,
+        ActualState::Initializing,
+        ActualState::Ready,
+    ] {
+        assert!(holds(D::Running, actual), "{actual:?} wanted running");
+        // Cancelled or being stopped: it frees its slot by itself, so the answer is busy.
+        assert!(!holds(D::Stopped, actual), "{actual:?} wanted stopped");
+    }
+    for desired in [D::Running, D::Stopped] {
+        assert!(!holds(desired, ActualState::Stopping));
+        assert!(!holds(desired, ActualState::Stopped));
+        assert!(!holds(desired, ActualState::Failed));
+    }
+}
+
+#[test]
 fn a_refusal_for_capacity_that_no_other_runtime_explains_stays_a_busy_one() {
     use crate::contracts::control::ControlError as E;
     // The mapping alone: only the service, which can see another live runtime, says capacity.
