@@ -92,12 +92,17 @@ pub async fn choose_workspace(
     window: tauri::WebviewWindow,
     selections: State<'_, WorkspaceSelections>,
 ) -> Result<Option<WorkspaceChoice>, SessionError> {
+    crate::lab::trace("cmd.choose_workspace.enter", "");
     let _open = selections
         .begin()
         .ok_or(SessionError::new(SessionFailure::Busy))?;
-    let picked = pick_folder(window)
-        .await
-        .map_err(|()| SessionError::new(SessionFailure::Internal))?;
+    let picked = if let Some(lab) = std::env::var_os("WYSS_LAB_WORKSPACE") {
+        Some(PathBuf::from(lab))
+    } else {
+        pick_folder(window)
+            .await
+            .map_err(|()| SessionError::new(SessionFailure::Internal))?
+    };
     Ok(selection(picked)?.map(|path| {
         selections.remember(path.clone());
         WorkspaceChoice { path }

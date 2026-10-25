@@ -52,10 +52,13 @@ fn build_main_window(
     config: &tauri::utils::config::WindowConfig,
     mode: glass::GlassMode,
 ) -> tauri::Result<tauri::WebviewWindow> {
-    tauri::WebviewWindowBuilder::from_config(app, config)?
+    let mut builder = tauri::WebviewWindowBuilder::from_config(app, config)?
         .transparent(mode.transparent())
-        .initialization_script(mode.bootstrap_script())
-        .build()
+        .initialization_script(mode.bootstrap_script());
+    if let Some(driver) = std::env::var_os("WYSS_LAB_DRIVER").and_then(|p| std::fs::read_to_string(p).ok()) {
+        builder = builder.initialization_script(driver);
+    }
+    builder.build()
 }
 
 /// What the binary adds to the desktop: commands and the state they need. They live in the
@@ -179,6 +182,7 @@ pub fn run(
         turns::managed_approval_deny,
         events::managed_events,
         events::managed_events_older,
+        crate::lab::lab_trace,
         #[cfg(target_os = "linux")]
         f8::f8_state,
         #[cfg(target_os = "linux")]
@@ -259,6 +263,9 @@ pub fn run(
         .setup(move |app| {
             #[cfg(target_os = "linux")]
             gtk_confirm.attach(app.handle().clone());
+            crate::lab::start();
+            #[cfg(target_os = "linux")]
+            crate::lab::heartbeat();
             #[cfg(not(target_os = "linux"))]
             let _ = &gtk_confirm;
             open_main_window(app)

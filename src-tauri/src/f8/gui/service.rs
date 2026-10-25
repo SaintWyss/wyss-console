@@ -277,7 +277,13 @@ impl F8Gui {
         if self.stopping() {
             return Err(F8Error::new(F8Failure::Unavailable));
         }
+        let waited = Instant::now();
+        crate::lab::trace("link.lock.wait", &format!("{role:?}"));
         let mut link = lock(self.link(role));
+        crate::lab::trace(
+            "link.lock.acquired",
+            &format!("{role:?} waited_ms={}", waited.elapsed().as_millis()),
+        );
         // The authority closes a connection that has asked for nothing for a while, and a
         // window is idle most of the time. A connection that rested longer than that is let
         // go and made again, instead of failing the next thing the user does.
@@ -296,6 +302,7 @@ impl F8Gui {
                 });
             }
             link.state = Connection::Connecting;
+            crate::lab::trace("link.connect.begin", &format!("{role:?}"));
             let greeted = connector
                 .connect()
                 .and_then(|stream| F8Client::greet(stream, self.inner.stop.clone()));
@@ -322,7 +329,17 @@ impl F8Gui {
             .client
             .as_mut()
             .ok_or(F8Error::new(F8Failure::Internal))?;
+        let began = Instant::now();
+        crate::lab::trace("link.call.begin", &format!("{role:?}"));
         let outcome = work(client);
+        crate::lab::trace(
+            "link.call.end",
+            &format!(
+                "{role:?} ms={} {}",
+                began.elapsed().as_millis(),
+                if outcome.is_ok() { "ok" } else { "err" }
+            ),
+        );
         link.last_used = Some(Instant::now());
         match outcome {
             Ok(value) => Ok(value),

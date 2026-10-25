@@ -408,6 +408,7 @@ impl Confirmer for Arc<GtkConfirmer> {
         let Some(window) = app.get_webview_window("main") else {
             return false;
         };
+        crate::lab::trace("confirm.ask.begin", "");
         let (answer, answered) = std::sync::mpsc::channel();
         let host = window.clone();
         let prompt = prompt.clone();
@@ -417,14 +418,20 @@ impl Confirmer for Arc<GtkConfirmer> {
         let watch = expired.clone();
         if window
             .run_on_main_thread(move || {
-                let _ = answer.send(show(host.gtk_window().ok(), &prompt, watch));
+                crate::lab::trace("confirm.main.enter", "");
+                let allowed = show(host.gtk_window().ok(), &prompt, watch);
+                crate::lab::trace("confirm.main.leave", &format!("allowed={allowed}"));
+                let _ = answer.send(allowed);
             })
             .is_err()
         {
             return false;
         }
         match answered.recv_timeout(WAIT) {
-            Ok(allowed) => allowed,
+            Ok(allowed) => {
+                crate::lab::trace("confirm.ask.answered", &format!("allowed={allowed}"));
+                allowed
+            }
             Err(_) => {
                 expired.store(true, Ordering::Release);
                 // Wait for the window to go, so that the next prompt starts from none.
@@ -485,6 +492,60 @@ fn show(parent: Option<gtk::ApplicationWindow>, prompt: &Prompt, expired: Arc<At
     dialog.set_default_response(gtk::ResponseType::Cancel);
     dialog.show_all();
     deny.grab_focus();
+    crate::lab::trace("confirm.dialog.shown", "");
+    for ms in [300_u64, 1500, 4000] {
+        let (dialog, parent) = (dialog.clone(), parent.clone());
+        let (allow, scroll) = (allow.clone(), scroll.clone());
+        gtk::glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            if !dialog.is_visible() {
+                crate::lab::trace("confirm.dialog.probe", &format!("t={ms} closed"));
+                return;
+            }
+            let adj = scroll.vadjustment();
+            crate::lab::trace(
+                "confirm.dialog.allow",
+                &format!(
+                    "t={ms} allow_sensitive={} value={:.0} page={:.0} upper={:.0}",
+                    allow.is_sensitive(),
+                    adj.value(),
+                    adj.page_size(),
+                    adj.upper()
+                ),
+            );
+            let tops: Vec<String> = gtk::Window::list_toplevels()
+                .into_iter()
+                .filter_map(|w| w.downcast::<gtk::Window>().ok())
+                .map(|w| {
+                    format!(
+                        "[{} vis={} active={} focus={}]",
+                        w.title().map(|t| t.to_string()).unwrap_or_default(),
+                        w.is_visible(),
+                        w.is_active(),
+                        w.has_toplevel_focus()
+                    )
+                })
+                .collect();
+            crate::lab::trace(
+                "confirm.dialog.probe",
+                &format!(
+                    "t={ms} dialog_vis={} dialog_active={} dlg_state={:?} parent_state={:?} parent_active={:?} toplevels={}",
+                    dialog.is_visible(),
+                    dialog.is_active(),
+                    dialog.window().map(|w| w.state()),
+                    parent.as_ref().and_then(|p| p.window()).map(|w| w.state()),
+                    parent.as_ref().map(|p| p.is_active()),
+                    tops.join(" ")
+                ),
+            );
+        });
+    }
+    if let Some(after) = crate::lab::auto_allow() {
+        let dialog = dialog.clone();
+        gtk::glib::timeout_add_local_once(after, move || {
+            crate::lab::trace("confirm.dialog.auto_allow", "");
+            dialog.response(gtk::ResponseType::Accept);
+        });
+    }
     if prompt.complete {
         let settled = Rc::new(Cell::new(false));
         let adjustment = scroll.vadjustment();
