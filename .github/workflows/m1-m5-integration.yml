@@ -1,0 +1,120 @@
+# Engineering gate only. No credentials, provider calls, service deployment or migrations.
+name: M1-M5 integration checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m1-m5-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-and-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: npm install -g npm@12
+      - run: npm ci
+      - run: npm run check
+      - run: npm run scan:repo
+
+  rust-core-and-v9:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      # All feature combinations retain assertions; omit only bulky debug symbols
+      # so their test executables fit the disposable runner's filesystem.
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tauri Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf bubblewrap meson ninja-build libcap-dev libselinux1-dev
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm install -g npm@12
+      - run: npm ci
+      - run: npm run build
+      - name: Set up Rust
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component clippy --component rustfmt
+          rustup default 1.90.0
+          rustc --version
+      - name: Build pinned bubblewrap 0.13.1 in the ephemeral CI runner
+        run: |
+          curl --fail --location --silent --show-error --retry 3 \
+            https://github.com/containers/bubblewrap/releases/download/v0.13.1/bubblewrap-0.13.1.tar.xz \
+            --output "$RUNNER_TEMP/bubblewrap-0.13.1.tar.xz"
+          echo "0e85c8702248b8dd64144f594147553650cdd0e4c951690345faace79c217c4d  $RUNNER_TEMP/bubblewrap-0.13.1.tar.xz" | sha256sum -c -
+          tar -C "$RUNNER_TEMP" -xf "$RUNNER_TEMP/bubblewrap-0.13.1.tar.xz"
+          meson setup "$RUNNER_TEMP/bwrap-build" "$RUNNER_TEMP/bubblewrap-0.13.1" \
+            --prefix "$RUNNER_TEMP/bwrap" -Dman=disabled
+          meson compile -C "$RUNNER_TEMP/bwrap-build"
+          meson install -C "$RUNNER_TEMP/bwrap-build"
+          # Wyss intentionally launches the fixed, root-owned /usr/bin/bwrap.
+          # Install the verified build to that exact path ONLY on this disposable runner.
+          sudo install -o root -g root -m 0755 "$RUNNER_TEMP/bwrap/bin/bwrap" /usr/bin/bwrap
+          test "$(sha256sum "$RUNNER_TEMP/bwrap/bin/bwrap" | cut -d' ' -f1)" = "$(sha256sum /usr/bin/bwrap | cut -d' ' -f1)"
+      - name: Qualify real unprivileged namespace and overlay support on disposable CI VM
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          test "$(command -v bwrap)" = /usr/bin/bwrap
+          /usr/bin/bwrap --version
+          /usr/bin/bwrap --help | grep -F -- '--overlay-src'
+          /usr/bin/bwrap --unshare-user --unshare-net --ro-bind / / -- /usr/bin/true
+      - name: Formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - name: Clippy (production and fixture code)
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: Focused V9 provider-aware persistence tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib production_v9 -- --test-threads=1
+      - name: Credential handoff process regression
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features f8-fixture --test credential_handoff_process -- --test-threads=1
+      - name: Focused B1 sandbox process regression
+        env:
+          WYSS_B1_REQUIRE_RUN: '1'
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --all-features --test b1_process -- --test-threads=1
+      - name: Full default-feature Rust regression
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+      - name: Verify default product binaries exclude fixture backends
+        run: |
+          node --input-type=module <<'JS'
+          import { fixtureHitsInFile } from './scripts/package-fixtures.mjs';
+          for (const name of ['wyss-console', 'wyss-control', 'wyss-screen', 'wyss-credential-agent']) {
+            const hits = fixtureHitsInFile(`src-tauri/target/debug/${name}`);
+            if (hits.length) throw new Error(`${name}: ${hits.join(', ')}`);
+            console.log(`${name}: no fixture marker`);
+          }
+          JS
+      - name: Full all-feature Rust regression (synthetic fixtures only)
+        env:
+          WYSS_B1_REQUIRE_RUN: '1'
+        run: |
+          df -h .
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --all-features -- --test-threads=1

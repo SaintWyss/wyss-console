@@ -1,0 +1,17 @@
+[
+  {
+    "id": "2362fc7f12a24370bdcf68b9ba9dd4cf",
+    "restart_of": null,
+    "terminal_id": "9d2ac75e-92fb-4e92-a955-9d34c1c3a794",
+    "agent_id": "claude_code",
+    "state": "running",
+    "version": "2.1.309 (Claude Code)",
+    "profile": {
+      "id": "template-review",
+      "name": "Review, read only",
+      "version": 0
+    },
+    "restarts": 0,
+    "error": null
+  }
+]

@@ -1,0 +1,252 @@
+{
+  "scenario": "local-tools-accept",
+  "binary": "src-tauri/target/debug/examples/m3_fixture_gui",
+  "display": ":79",
+  "screen": [1500, 1400],
+  "steps": [
+    {
+      "n": 0,
+      "step": ["click", 80, 467],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 1,
+      "step": ["wait", 2],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 2,
+      "step": ["click", 640, 356],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 3,
+      "step": ["wait", 7],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 4,
+      "step": ["click", 857, 490],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 5,
+      "step": ["type", "Run"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 6,
+      "step": ["key", "space"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 7,
+      "step": ["type", "it"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 8,
+      "step": ["wait", 1],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 9,
+      "step": ["click", 276, 549],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 10,
+      "step": ["wait", 8],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 11,
+      "step": ["shot", "01-held-command"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 12,
+      "step": ["expect_no_file", "made.txt"],
+      "ok": true,
+      "detail": "made.txt"
+    },
+    {
+      "n": 13,
+      "step": ["click", 296, 639],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 14,
+      "step": ["expect_file", "made.txt", "made by the sandbox", 20],
+      "ok": true,
+      "detail": "made.txt"
+    },
+    {
+      "n": 15,
+      "step": ["wait", 4],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 16,
+      "step": ["shot", "02-command-done"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 17,
+      "step": ["expect_tool_result", "made by the sandbox"],
+      "ok": true,
+      "detail": "made by the sandbox"
+    },
+    {
+      "n": 18,
+      "step": ["click", 857, 750],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 19,
+      "step": ["type", "Edit"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 20,
+      "step": ["key", "space"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 21,
+      "step": ["type", "it"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 22,
+      "step": ["wait", 1],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 23,
+      "step": ["click", 276, 805],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 24,
+      "step": ["wait", 8],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 25,
+      "step": ["shot", "03-held-diff"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 26,
+      "step": ["expect_file", "notes.txt", "before\n", 3],
+      "ok": true,
+      "detail": "notes.txt"
+    },
+    {
+      "n": 27,
+      "step": ["click", 296, 993],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 28,
+      "step": ["expect_file", "notes.txt", "after\n", 20],
+      "ok": true,
+      "detail": "notes.txt"
+    },
+    {
+      "n": 29,
+      "step": ["wait", 4],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 30,
+      "step": ["shot", "04-file-done"],
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "loadavg": ["2.96", "2.44", "2.47"],
+  "windows_before": [
+    {
+      "id": "982",
+      "name": "",
+      "geometry": "Window 982 Position: 0,0 (screen: 0) Geometry: 1500x1400"
+    },
+    {
+      "id": "2097153",
+      "name": "m3_fixture_gui",
+      "geometry": "Window 2097153 Position: 10,10 (screen: 0) Geometry: 10x10"
+    },
+    {
+      "id": "2097156",
+      "name": "Wyss Console",
+      "geometry": "Window 2097156 Position: 0,0 (screen: 0) Geometry: 1440x810"
+    },
+    {
+      "id": "2097162",
+      "name": "",
+      "geometry": "Window 2097162 Position: -1,-1 (screen: 0) Geometry: 1x1"
+    },
+    {
+      "id": "2097157",
+      "name": "",
+      "geometry": "Window 2097157 Position: -1,-1 (screen: 0) Geometry: 1x1"
+    }
+  ],
+  "windows_after": [
+    {
+      "id": "982",
+      "name": "",
+      "geometry": "Window 982 Position: 0,0 (screen: 0) Geometry: 1500x1400"
+    },
+    {
+      "id": "2097153",
+      "name": "m3_fixture_gui",
+      "geometry": "Window 2097153 Position: 10,10 (screen: 0) Geometry: 10x10"
+    },
+    {
+      "id": "2097156",
+      "name": "Wyss Console",
+      "geometry": "Window 2097156 Position: 0,0 (screen: 0) Geometry: 1500x1400"
+    },
+    {
+      "id": "2097162",
+      "name": "",
+      "geometry": "Window 2097162 Position: -1,-1 (screen: 0) Geometry: 1x1"
+    },
+    {
+      "id": "2097157",
+      "name": "",
+      "geometry": "Window 2097157 Position: -1,-1 (screen: 0) Geometry: 1x1"
+    }
+  ],
+  "generations": 4,
+  "alive_at_end": true,
+  "leftovers": []
+}

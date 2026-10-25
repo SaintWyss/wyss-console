@@ -134,7 +134,7 @@ impl<S: Spawner> PreparedApplication<S> {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(|_| E::StorageUnavailable)?;
-        if version != 8 {
+        if !matches!(version, 8 | 9) {
             return Err(E::StorageIncompatible);
         }
         // A local prepared connection is not itself proof of exclusive authority. Hold
@@ -147,7 +147,11 @@ impl<S: Spawner> PreparedApplication<S> {
         connection
             .execute_batch("BEGIN EXCLUSIVE; COMMIT;")
             .map_err(|_| E::StorageUnavailable)?;
-        v8::validate_v8(&connection)?;
+        if version == 9 {
+            crate::f8::v9::validate_v9(&connection)?;
+        } else {
+            v8::validate_v8(&connection)?;
+        }
         let (used, generations) =
             Allocator::new(&mut connection, authority.clone())?.registry_history()?;
         let registry = Registry::with_history(authority.clone(), used, generations)?;

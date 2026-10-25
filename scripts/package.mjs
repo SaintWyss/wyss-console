@@ -2,12 +2,11 @@
 //
 //   <out>/bin/wyss-console
 //   <out>/libexec/wyss-console/wyss-control
+//   <out>/libexec/wyss-console/wyss-screen
 //   <out>/share/wyss-console/package.json
 //
-// The desktop installs and starts only the authority whose SHA-256 it was compiled
-// with (`WYSS_AUTHORITY_SHA256`), and finds it beside itself. So the authority is built
-// first, its digest is taken, and the desktop is built again knowing it. A build made
-// any other way (`desktop:build`, `desktop:dev`) carries no authority and manages none.
+// The embedded authority digest identifies the shipped binary. Opening the desktop never
+// installs or starts an authority; service activation is an explicit operator action.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -24,10 +23,12 @@ import { arch } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyPackageFixtures } from './package-fixtures.mjs';
+import { snapshotSource, assertSourceUnchanged } from './build-source.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const release = join(root, 'src-tauri', 'target', 'release');
 const tool = join(root, 'scripts', 'tool.mjs');
+const source = snapshotSource(root);
 
 /** @param {string} path */
 const sha256 = (path) =>
@@ -39,7 +40,11 @@ function build(extra) {
   const result = spawnSync(
     process.execPath,
     [tool, 'tauri', 'build', '--no-bundle', '--', '--locked'],
-    { cwd: root, env: { ...process.env, ...extra }, stdio: 'inherit' },
+    {
+      cwd: root,
+      env: { ...process.env, ...extra, WYSS_BUILD_REVISION: source.revision },
+      stdio: 'inherit',
+    },
   );
   if (result.status !== 0) {
     console.error('package: the build failed');
@@ -60,11 +65,15 @@ const authority = join(release, 'wyss-control');
 const digest = sha256(authority);
 // 2. The desktop again, compiled with the digest of that authority.
 build({ WYSS_AUTHORITY_SHA256: digest });
+assertSourceUnchanged(root, source);
 // The second build must not have produced another authority than the one it pinned.
 if (sha256(authority) !== digest) {
   console.error('package: the authority changed while the desktop was built');
   process.exit(1);
 }
+// The terminal parser helper (M4): a small process of its own that keeps a terminal's screen. The
+// host starts it from beside itself; it is part of what the manifest lists and the installer checks.
+const screenHelper = join(release, 'wyss-screen');
 const desktop = join(release, 'wyss-console');
 if (!readFileSync(desktop).includes(Buffer.from(digest, 'ascii'))) {
   console.error('package: the desktop does not carry the authority digest');
@@ -83,6 +92,11 @@ const staging = mkdtempSync(join(parent, '.staging-'));
 const files = [
   [desktop, 'bin/wyss-console'],
   [authority, 'libexec/wyss-console/wyss-control'],
+  [screenHelper, 'libexec/wyss-console/wyss-screen'],
+  [
+    join(release, 'wyss-credential-agent'),
+    'libexec/wyss-console/wyss-credential-agent',
+  ],
 ];
 for (const [, target] of files) {
   mkdirSync(dirname(join(staging, target)), { recursive: true });
@@ -102,6 +116,7 @@ copyFileSync(
   join(root, 'src-tauri', 'icons', '128x128.png'),
   join(staging, 'share', 'wyss-console', 'icon.png'),
 );
+chmodSync(join(staging, 'share', 'wyss-console', 'icon.png'), 0o644);
 writeFileSync(
   join(staging, 'share', 'wyss-console', 'package.json'),
   `${JSON.stringify(
@@ -109,6 +124,7 @@ writeFileSync(
       schema_version: 1,
       name: 'wyss-console',
       version,
+      source_revision: source.revision,
       platform: `linux-${arch()}`,
       authority_sha256: digest,
       files: Object.fromEntries(

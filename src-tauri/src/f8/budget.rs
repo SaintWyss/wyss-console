@@ -43,7 +43,7 @@ pub fn classify(key: &str) -> Option<Enforcement> {
         | "max_data_events_per_quantum"
         | "control_dispatch_deadline_ms" => Enforced("f8::scheduler"),
         "eof_grace_ms" | "term_grace_ms" => Enforced("f8::ownership"),
-        "provider_init_timeout_ms" => Enforced("f8::engine::poll"),
+        "provider_init_timeout_ms" | "interrupt_answer_ms" => Enforced("f8::engine::poll"),
         "hello_timeout_ms" => NotProven,
         "owned_root_rss_soft_kib" | "aggregate_owned_roots_rss_soft_kib" => SoftObservation,
         "max_clients"

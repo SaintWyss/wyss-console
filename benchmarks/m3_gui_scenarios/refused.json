@@ -1,0 +1,9 @@
+{
+  "boot": 12,
+  "mock": [{ "text": "never reached" }],
+  "steps": [
+    ["click", 80, 467],
+    ["wait", 4],
+    ["shot", "00-providers-refused"]
+  ]
+}

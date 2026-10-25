@@ -617,9 +617,7 @@ pub(super) fn validate_audit(v: &Value) -> ControlResult<()> {
         return Err(ControlError::StorageIncompatible);
     }
     if kind.ends_with("runtime_bound")
-        && (p["adapter_id"] != "codex"
-            || p["runtime_kind"] != "codex"
-            || p["binding_revision"] != 1)
+        && (crate::f8::provider::payload(&v["payload"]).is_err() || p["binding_revision"] != 1)
     {
         return Err(ControlError::StorageIncompatible);
     }

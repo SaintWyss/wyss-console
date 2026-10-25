@@ -1631,3 +1631,21 @@ fn inference_launch_cannot_elevate_profile_during_handshake_or_reattach() {
         Err(E::GateDenied)
     );
 }
+
+#[test]
+fn an_interrupt_unanswered_is_judged_only_after_what_the_provider_already_sent_is_looked_at() {
+    let start = Instant::now();
+    let at = |ms: u64| start + Duration::from_millis(ms);
+    // Inside the time: never.
+    assert!(!interrupt_unanswered(start, at(9_999), 10_000, false));
+    assert!(!interrupt_unanswered(start, at(10_000), 10_000, false));
+    // Past it with nothing waiting: the provider did not answer.
+    assert!(interrupt_unanswered(start, at(10_001), 10_000, false));
+    // Past it with frames waiting (one may be the answer): not yet…
+    assert!(!interrupt_unanswered(start, at(10_001), 10_000, true));
+    assert!(!interrupt_unanswered(start, at(20_000), 10_000, true));
+    // …but a provider that keeps sending cannot hold the deadline off for ever.
+    assert!(interrupt_unanswered(start, at(20_001), 10_000, true));
+    // A clock that went backwards is not a timeout.
+    assert!(!interrupt_unanswered(at(5_000), start, 10_000, false));
+}

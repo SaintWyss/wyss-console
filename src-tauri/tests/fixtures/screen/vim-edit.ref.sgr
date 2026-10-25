@@ -1,0 +1,24 @@
+[38;5;130m  1 [34m# typed in vim: ñandú 世界#!/usr/bin[7m[39m|[0m[34m# typed in vim: ñandú 世界#!/usr/bin/en
+[38;5;130m    [34m/env python3[39m                        [7m|[0m[34mv python3[39m                              
+[38;5;130m  2 [31m"""A small module, for the editor to[7m[39m|[0m[31m"""A small module, for the editor to sh
+[38;5;130m    [31m show."""[39m                           [7m|[0m[31mow."""[39m                                 
+[38;5;130m  3 [35mimport[39m json                         [7m|[0m[35mimport[39m json                            
+[38;5;130m  4 [39m                                    [7m|[0m                                       
+[38;5;130m  5 [39m                                    [7m|[0m                                       
+[38;5;130m  6 class[39m [32mGreeter[39m:                      [7m|[0m[38;5;130mclass[39m [32mGreeter[39m:                         
+[38;5;130m  7 [39m    [38;5;130mdef[39m [36m__init__[39m([36mself[39m, name: [36mstr[39m = [31m"[7m[39m|[0m    [38;5;130mdef[39m [36m__init__[39m([36mself[39m, name: [36mstr[39m = [31m"mun
+[38;5;130m    [31mmundo"[39m) -> [36mNone[39m:                    [7m|[0m[31mdo"[39m) -> [36mNone[39m:                          
+[38;5;130m  8 [39m        [36mself[39m.name = name            [7m|[0m        [36mself[39m.name = name               
+[38;5;130m  9 [39m                                    [7m|[0m                                       
+[38;5;130m 10 [39m    [38;5;130mdef[39m [36mgreet[39m([36mself[39m) -> [36mstr[39m:         [7m|[0m    [38;5;130mdef[39m [36mgreet[39m([36mself[39m) -> [36mstr[39m:            
+[38;5;130m 11 [39m        [34m# naïve greeting with accent[7m[39m|[0m        [34m# naïve greeting with accents: 
+[38;5;130m    [34ms: ñandú, café, 世界[39m                [7m|[0m[34mñandú, café, 世界[39m                      
+[38;5;130m 12 [39m        [38;5;130mreturn[39m [31mf"hola, [35m{[36mself[39m.name[35m}[31m!"[7m[39m|[0m        [38;5;130mreturn[39m [31mf"hola, [35m{[36mself[39m.name[35m}[31m!"[39m   
+[38;5;130m 13 [39m                                    [7m|[0m                                       
+[38;5;130m 14 [39m                                    [7m|[0m                                       
+[38;5;130m 15 def[39m [36mmain[39m():                         [7m|[0m[38;5;130mdef[39m [36mmain[39m():                            
+[38;5;130m 16 [39m    [38;5;130mfor[39m i [38;5;130min[39m [36mrange[39m([31m3[39m):              [7m|[0m    [38;5;130mfor[39m i [38;5;130min[39m [36mrange[39m([31m3[39m):                 
+[38;5;130m 17 [39m        [36mprint[39m(Greeter([36mstr[39m(i)).greet([7m|[0m        [36mprint[39m(Greeter([36mstr[39m(i)).greet()) 
+[38;5;130m    [39m))                                  [7m|[0m[94m@                                      
+[1;7m[39m<qhpjgq/sample.py [+] 10,9      Comienzo [0;7m<hpjgq/sample.py [+] 1,28-25   Comienzo
+[0m/greet              

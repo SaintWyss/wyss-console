@@ -44,6 +44,7 @@ export interface NativeClient {
     project: string,
     profile: string | null,
     brief?: string | null,
+    preview?: Pick<Preview, 'plan_token' | 'provider_version'> | null,
   ): Promise<StartReply>;
   prepareHandoff(id: string): Promise<HandoffBrief>;
   saveHandoff(text: string): Promise<boolean>;
@@ -69,8 +70,8 @@ const desktopClient: NativeClient = {
   sessions: readNativeSessions,
   profiles: readProfiles,
   preview: previewProfile,
-  start: (agent, project, profile, brief = null) =>
-    startNative(agent, project, profile, FIRST_SIZE, brief),
+  start: (agent, project, profile, brief = null, preview = null) =>
+    startNative(agent, project, profile, FIRST_SIZE, brief, preview),
   prepareHandoff,
   saveHandoff,
   restart: (id) => restartNative(id, FIRST_SIZE),
@@ -301,13 +302,20 @@ export class NativeController {
     project: string,
     profile: string | null,
     brief: string | null = null,
+    preview: Preview | null = null,
   ): Promise<boolean> {
     if (this.starting || this.disposed) return false;
     this.starting = true;
     this.failure = null;
     this.emit();
     try {
-      const reply = await this.client.start(agent, project, profile, brief);
+      const reply = await this.client.start(
+        agent,
+        project,
+        profile,
+        brief,
+        preview,
+      );
       this.afterStart(reply);
       return true;
     } catch (error) {

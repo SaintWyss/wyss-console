@@ -9,6 +9,11 @@ export const FIXTURE_MARKERS = [
   'WYSS_RUNTIME_SCENARIO',
   'codex_runtime.py',
   'wyss-b1-synthetic-',
+  'WYSS_M3_FIXTURE_HOST',
+  'WYSS_CREDENTIAL_AGENT_FIXTURE',
+  // The real binary's own fixture arguments (feature m3-fixture): a packaged build has none of them.
+  '--m3-fixture-sdk-root',
+  '--m3-fixture-script',
 ];
 const CHUNK_BYTES = 64 * 1024;
 const MAX_BINARY_BYTES = 512 * 1024 * 1024;
@@ -82,6 +87,8 @@ export function verifyPackageFixtures(directory) {
   const binaries = [
     join(directory, 'bin', 'wyss-console'),
     join(directory, 'libexec', 'wyss-console', 'wyss-control'),
+    join(directory, 'libexec', 'wyss-console', 'wyss-screen'),
+    join(directory, 'libexec', 'wyss-console', 'wyss-credential-agent'),
   ];
   for (const binary of binaries) {
     const hits = fixtureHitsInFile(binary);

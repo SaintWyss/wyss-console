@@ -49,7 +49,7 @@ fn an_authority_restart_recovers_its_durable_image_and_the_window_follows_it() {
     let gone = window.session(s.id.clone()).unwrap_err();
     assert_eq!(gone.code, F8Failure::Unavailable);
     let waiting = window.state();
-    assert!(!waiting.link.retry_in_ms.is_none() || waiting.link.fault.is_some());
+    assert!(waiting.link.retry_in_ms.is_some() || waiting.link.fault.is_some());
     let connections = window.stats().connections;
     let refused = window.sessions(None).unwrap_err();
     assert_eq!(refused.code, F8Failure::Unavailable);

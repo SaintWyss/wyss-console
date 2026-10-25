@@ -1,0 +1,4 @@
+normal line one
+normal line two
+7[?1049h[2J[Halternate screen[5;10Hmiddle[?25l[?1049l8back on normal
+[?1049h[1;1Hback in alt [?25h

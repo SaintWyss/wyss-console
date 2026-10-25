@@ -1,6 +1,11 @@
 import * as desktop from '../../desktop/terminal-client';
 import type { TerminalId } from '../../contracts/identities';
-import type { TerminalInfo, TerminalSize } from '../../contracts/terminal';
+import type {
+  Attach,
+  ParserBrief,
+  TerminalInfo,
+  TerminalSize,
+} from '../../contracts/terminal';
 import type { TerminalRenderer } from './renderer';
 
 export type ViewState =
@@ -10,6 +15,10 @@ export interface TerminalViewState {
   info?: TerminalInfo;
   error?: string;
   truncated?: boolean;
+  /** How the host's parser for this terminal is doing, as of the last read. */
+  parser?: ParserBrief;
+  /** How this window came to show a terminal that was already running; absent for a new one. */
+  attach?: Attach;
 }
 const INPUT_CAPACITY = 64 * 1024;
 const WRITE_LIMIT = 4096;
@@ -56,6 +65,8 @@ export class TerminalController {
   private inputBytes = 0;
   private writing = false;
   private readonly abort = new AbortController();
+  private parser?: ParserBrief;
+  private attached?: Attach;
 
   constructor(
     private readonly host: HTMLElement,
@@ -67,6 +78,8 @@ export class TerminalController {
     private readonly title?: string,
     /** Where a shell this controller makes starts. */
     private readonly cwd?: string,
+    /** The terminal was already running (a host kept it): its screen is drawn before reading on. */
+    private readonly attachFirst = false,
   ) {}
 
   /** Searches this terminal's text; see the renderer. */
@@ -98,7 +111,13 @@ export class TerminalController {
   }
   private publish(extra: Partial<TerminalViewState> = {}) {
     if (!this.disposed)
-      this.update({ state: this.state, info: this.info, ...extra });
+      this.update({
+        state: this.state,
+        info: this.info,
+        parser: this.parser,
+        attach: this.attached,
+        ...extra,
+      });
   }
   private async initialize() {
     if (this.stopped) return;
@@ -132,6 +151,9 @@ export class TerminalController {
         if (!this.detached) await this.closeOnce();
         return;
       }
+      if (this.attachFirst && this.adopted && !(await this.attachScreen()))
+        return;
+      if (this.stopped) return;
       this.state = 'running';
       this.renderer.setInput(true);
       this.publish();
@@ -141,6 +163,65 @@ export class TerminalController {
     } catch (error) {
       if (!this.stopped) this.fail(error);
     }
+  }
+  /**
+   * Draws the screen the host's parser kept for a terminal that ran while this window was away.
+   * The read position moves to where that screen ends, so nothing is drawn twice and nothing is
+   * missed; when no screen was kept the host's output is read from its start, as before. Nothing
+   * is sent to the program.
+   */
+  private async attachScreen(): Promise<boolean> {
+    if (!this.id || !this.renderer.restore) return true;
+    const id = this.id;
+    let result: Attach | undefined;
+    let drawn = false;
+    try {
+      result = await desktop.attachTerminal(id);
+      if (result.mode === 'screen') {
+        drawn = await this.renderer.restore(result.repaint, result.size);
+      }
+    } catch {
+      // A host that cannot say what its screen is, or one the window cannot draw: below.
+    }
+    // The host moves its read position only on this, so a screen that was not drawn loses nothing.
+    if (result?.mode === 'screen') {
+      try {
+        await desktop.commitAttach(id, result.token, drawn);
+      } catch (error) {
+        if (drawn) {
+          // The window shows a screen the host does not know about: reading on would draw output
+          // twice. Said, not guessed.
+          this.fail(error);
+          return false;
+        }
+      }
+    } else if (!result) {
+      try {
+        await desktop.commitAttach(id, null, false);
+      } catch {
+        // Nothing was staged that the window could have used.
+      }
+    }
+    if (result?.mode === 'screen' && drawn) {
+      // The program is at the size the repaint was made for until a resize says otherwise.
+      this.sentSize = result.size;
+      this.parser = {
+        health: result.parser.health,
+        fidelity: result.parser.fidelity,
+        restarts: result.parser.restarts,
+      };
+      this.attached = result;
+    } else if (result?.mode === 'replay') {
+      this.attached = result;
+    } else {
+      this.attached = {
+        mode: 'replay',
+        reason: result ? 'restore_failed' : 'attach_failed',
+        parser: null,
+      };
+    }
+    this.publish();
+    return true;
   }
   private requestFit() {
     if (this.stopped || !this.active || this.resizeTimer) return;
@@ -289,6 +370,12 @@ export class TerminalController {
         const waited = Date.now() - asked >= LONG_POLL_SEEN_MS;
         if (this.stopped) return;
         this.info = batch.status;
+        const parser = batch.parser;
+        const changed =
+          parser?.health !== this.parser?.health ||
+          parser?.fidelity !== this.parser?.fidelity ||
+          parser?.restarts !== this.parser?.restarts;
+        if (changed) this.parser = parser;
         if (batch.eof || batch.status.state !== 'running') {
           this.state = batch.status.state === 'failed' ? 'failed' : 'exited';
           this.renderer.setInput(false);
@@ -297,7 +384,8 @@ export class TerminalController {
         }
         if (batch.data.length && !(await this.processed(batch.data))) return;
         if (this.stopped) return;
-        this.publish({ truncated: batch.truncated });
+        if (changed || batch.data.length)
+          this.publish({ truncated: batch.truncated });
         // EOF may precede child reaping. Drain data and wait for the backend's
         // final lifecycle snapshot before stopping the loop.
         if (

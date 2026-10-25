@@ -1214,6 +1214,59 @@ impl Drop for World {
 }
 
 #[test]
+fn desktop_observer_never_installs_starts_or_retries_even_after_authority_loss() {
+    let account = Account::new();
+    let link = Link::new(LinkState::Absent);
+    let manager = Manager::new(Ok(not_installed()));
+    let observer = AuthorityBootstrap::observe_only(
+        link.clone(),
+        Provision::Packaged(account.package(NEW)),
+        Ok(account.layout()),
+        manager.clone(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while observer.view().phase != Phase::Failed {
+        assert!(Instant::now() < deadline, "observer did not report absence");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let absent = observer.view();
+    assert_eq!(absent.failure, Some(Failure::SocketUnavailable));
+    assert!(!absent.retry);
+    assert_eq!(observer.retry(), absent);
+    assert!(
+        manager.asked().is_empty(),
+        "GUI cannot mutate systemd state"
+    );
+    assert!(
+        account.tree("data").is_empty(),
+        "GUI cannot install authority files"
+    );
+
+    link.set(LinkState::Connected);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while observer.view().phase != Phase::Ready {
+        assert!(
+            Instant::now() < deadline,
+            "observer did not detect connection"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    link.set(LinkState::Absent);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while observer.view().failure != Some(Failure::Stopped) {
+        assert!(
+            Instant::now() < deadline,
+            "observer did not detect authority loss"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!observer.view().retry);
+    assert!(manager.asked().is_empty());
+    link.set(LinkState::Stopped);
+    observer.shutdown();
+}
+
+#[test]
 fn an_authority_that_already_answers_is_used_and_nothing_is_installed_or_started() {
     let world = World::packaged(LinkState::Connected, Ok(not_installed()));
     let view = world.ready();

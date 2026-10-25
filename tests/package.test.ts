@@ -24,6 +24,22 @@ it('lays the package out as the desktop looks for its authority', () => {
   );
 });
 
+it('ships the terminal parser helper beside the authority, listed and checked like it', () => {
+  // The host looks for it next to its own executable (`libexec/wyss-console/wyss-screen`); the
+  // manifest hashes it, the installer verifies the hash, and the fixture check reads it too.
+  const rust = read('src-tauri/src/host/core.rs');
+  expect(rust).toContain('../libexec/wyss-console/wyss-screen');
+  const packager = read('scripts/package.mjs');
+  expect(packager).toContain(
+    "[screenHelper, 'libexec/wyss-console/wyss-screen']",
+  );
+  expect(read('scripts/package-fixtures.mjs')).toContain(
+    "'libexec', 'wyss-console', 'wyss-screen'",
+  );
+  // It is a binary of its own, not a mode of the desktop: no window toolkit is loaded for it.
+  expect(read('src-tauri/src/bin/wyss-screen.rs')).not.toMatch(/tauri|gtk/);
+});
+
 it('bundles no installer, no updater and no signing claim', () => {
   const bundle = tauriConfig.bundle as Record<string, unknown>;
   expect(bundle.active).toBe(false);
@@ -45,7 +61,7 @@ it('bundles no installer, no updater and no signing claim', () => {
   // answer `unsupported_capability` until the owner turns it on in a native confirmation.
   expect(
     (tauriConfig.app.security as { capabilities: string[] }).capabilities,
-  ).toEqual(['main', 'f8', 'projects']);
+  ).toEqual(['main', 'f8', 'projects', 'm3']);
 });
 
 it('opens in a window wide enough for a full-width shell greeting', () => {
@@ -97,4 +113,24 @@ it('does not deny what the product has', () => {
   const readme = read('README.md');
   expect(readme).not.toContain('No agent SDK, authority or agent UI');
   expect(readme).not.toContain('Codex is not usable through the Console UI');
+});
+
+it('never packages the B1 candidate: fixture feature off in every build the packager runs, binaries not listed', () => {
+  // The B1 launcher, shim and probe exist only with the `b1-fixture` feature. The guard is that no
+  // build path enables it (the packager passes no features, the manifest has no default feature set,
+  // the shim and probe are not in the package list); the fixture-marker scan is defence in depth.
+  const packager = read('scripts/package.mjs');
+  expect(packager).not.toMatch(/--features|b1-fixture|wyss-b1/);
+  const manifest = read('src-tauri/Cargo.toml');
+  expect(manifest).not.toMatch(/^default\s*=/m);
+  expect(manifest).toMatch(
+    /name = "wyss-b1-shim"[\s\S]*?required-features = \["b1-fixture"\]/,
+  );
+  expect(manifest).toMatch(
+    /name = "wyss-b1-probe"[\s\S]*?required-features = \["b1-fixture"\]/,
+  );
+  expect(read('src-tauri/src/lib.rs')).toMatch(
+    /cfg\(all\(target_os = "linux", feature = "b1-fixture"\)\)\]\s*pub mod b1;/,
+  );
+  expect(read('scripts/package-fixtures.mjs')).toContain('wyss-b1-synthetic-');
 });

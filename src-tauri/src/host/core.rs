@@ -15,11 +15,18 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
-    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak},
     time::{Duration, Instant},
 };
 use wyss_console::{
     contracts::identities::TerminalId,
+    screen::{
+        b64,
+        link::{
+            ByteSource, Fidelity, Health, LinkConfig, LinkError, ProcessSpawner, ScreenLink,
+            Spawner, Status as ParserStatus,
+        },
+    },
     terminal::{
         TerminalService,
         contracts::{CreateTerminal, ErrorCode, Launch, TerminalError, TerminalInfo, TerminalSize},
@@ -48,6 +55,104 @@ struct Entry {
     created_at: u64,
     inner: Mutex<Inner>,
     changed: Condvar,
+    /// The parser helper that keeps this terminal's screen (M4); none when there is no helper.
+    screen: Mutex<Option<Arc<ScreenLink>>>,
+}
+
+/// The host's ring as the parser link's source of bytes. It holds the entry weakly: the link must
+/// never keep a closed terminal alive.
+struct RingSource(Weak<Entry>);
+impl ByteSource for RingSource {
+    fn start(&self) -> u64 {
+        self.0.upgrade().map_or(0, |e| lock(&e.inner).ring.start())
+    }
+    fn end(&self) -> u64 {
+        self.0.upgrade().map_or(0, |e| lock(&e.inner).ring.end())
+    }
+    fn read(&self, from: u64, max: usize) -> (u64, Vec<u8>) {
+        // One look at the ring: the offset of what came back is read from the same read.
+        self.0.upgrade().map_or((from, Vec::new()), |e| {
+            let r = lock(&e.inner).ring.read(from, max);
+            (r.next - r.data.len() as u64, r.data)
+        })
+    }
+}
+
+/// The helper executable next to this one (the package's `libexec`, or a development build's
+/// target directory), verified and held open (`screen::locate`): anything that does not pass is not
+/// used, and what passed is what runs.
+fn screen_helper() -> Option<Arc<wyss_console::screen::locate::Verified>> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    #[cfg(test)]
+    {
+        // A test build's artifact is whatever the build's umask made it; the rules stay as strict as
+        // in production, so the artifact is normalised first.
+        use std::os::unix::fs::PermissionsExt;
+        for name in ["wyss-screen", "../wyss-screen"] {
+            let _ =
+                std::fs::set_permissions(dir.join(name), std::fs::Permissions::from_mode(0o755));
+        }
+    }
+    wyss_console::screen::locate::find(&[
+        dir.join("../libexec/wyss-console/wyss-screen"),
+        dir.join("wyss-screen"),
+        dir.join("../wyss-screen"),
+    ])
+    .map(Arc::new)
+}
+
+fn health_word(h: Health) -> &'static str {
+    match h {
+        Health::Starting => "starting",
+        Health::Healthy => "healthy",
+        Health::Restarting => "restarting",
+        Health::Unavailable(_) => "unavailable",
+    }
+}
+
+/// The three words a window shows about a terminal's parser on every read.
+fn parser_brief(status: Option<&ParserStatus>) -> Value {
+    let Some(s) = status else {
+        return json!({"health": "unavailable", "fidelity": "unavailable", "restarts": 0});
+    };
+    let fidelity = match s.fidelity {
+        Fidelity::Exact => "exact",
+        Fidelity::Gap { .. } => "gap",
+        Fidelity::Tail { .. } => "tail",
+        Fidelity::Unavailable => "unavailable",
+    };
+    json!({"health": health_word(s.health), "fidelity": fidelity, "restarts": s.restarts})
+}
+
+/// What a window may be told about a terminal's parser: closed words and numbers.
+fn parser_json(status: Option<&ParserStatus>, reason: Option<&str>) -> Value {
+    let Some(s) = status else {
+        return json!({"health": "unavailable", "reason": reason.unwrap_or("helper_missing"),
+                      "fidelity": "unavailable", "restarts": 0, "sandbox": null});
+    };
+    let (fidelity, missing) = match s.fidelity {
+        Fidelity::Exact => ("exact", 0),
+        Fidelity::Gap { .. } => ("gap", 0),
+        Fidelity::Tail { missing } => ("tail", missing),
+        Fidelity::Unavailable => ("unavailable", 0),
+    };
+    let why = match s.health {
+        Health::Unavailable(w) => Some(w),
+        _ => reason.map(|_| "").and(None),
+    };
+    json!({
+        "health": health_word(s.health),
+        "reason": why.or(reason),
+        "fidelity": fidelity,
+        "missing_bytes": missing,
+        "skipped_bytes": s.skipped,
+        "restarts": s.restarts,
+        "last_failure": s.last_failure,
+        "sandbox": s.sandbox.map(|(layers, abi)| json!({"layers": layers, "landlock_abi": abi})),
+        "helper_pid": s.helper_pid,
+        "fed": s.fed,
+    })
 }
 
 pub struct HostCore {
@@ -57,6 +162,13 @@ pub struct HostCore {
     idle_since: Mutex<Option<Instant>>,
     /// A shell standing in for the user's. Never set outside tests.
     shell: Mutex<Option<std::path::PathBuf>>,
+    /// Starts the parser helper of a terminal; `None` when no helper executable was found.
+    screen: Mutex<Option<Arc<dyn Spawner>>>,
+    /// Where lifecycle facts are read from and how `loginctl` is run (tests replace both).
+    persistence: Mutex<(
+        Option<super::persistence::Sources>,
+        Arc<dyn super::persistence::Runner>,
+    )>,
 }
 
 fn terminal_error(error: &TerminalError) -> HostError {
@@ -124,6 +236,19 @@ struct ReadFrom {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct ScreenRequest {
+    terminal_id: String,
+    #[serde(default)]
+    scrollback_lines: Option<u32>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LingerRequest {
+    enable: bool,
+    confirm: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Id {
     id: String,
 }
@@ -137,6 +262,10 @@ struct Sample {
 struct Restart {
     id: String,
     size: TerminalSize,
+    #[serde(default)]
+    plan_token: Option<String>,
+    #[serde(default)]
+    expected_cli_version: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -173,6 +302,13 @@ struct Text {
     text: String,
 }
 
+fn entry_rows(entry: &Entry) -> u16 {
+    lock(&entry.inner).status.size.rows
+}
+fn entry_cols(entry: &Entry) -> u16 {
+    lock(&entry.inner).status.size.cols
+}
+
 fn title_ok(title: &str) -> bool {
     !title.trim().is_empty() && title.chars().count() <= 80 && !title.chars().any(char::is_control)
 }
@@ -185,7 +321,32 @@ impl HostCore {
             table: Mutex::new(HashMap::new()),
             idle_since: Mutex::new(Some(Instant::now())),
             shell: Mutex::new(None),
+            persistence: Mutex::new((
+                super::persistence::Sources::system(),
+                Arc::new(super::persistence::SystemRunner),
+            )),
+            screen: Mutex::new(screen_helper().map(|exe| {
+                Arc::new(ProcessSpawner {
+                    exe,
+                    require: wyss_console::screen::ipc::layer::ALL,
+                }) as Arc<dyn Spawner>
+            })),
         })
+    }
+
+    #[cfg(test)]
+    pub fn use_persistence(
+        &self,
+        sources: super::persistence::Sources,
+        runner: Arc<dyn super::persistence::Runner>,
+    ) {
+        *lock(&self.persistence) = (Some(sources), runner);
+    }
+
+    /// Replaces the way parser helpers are started (tests only).
+    #[cfg(test)]
+    pub fn use_screen_spawner(&self, spawner: Option<Arc<dyn Spawner>>) {
+        *lock(&self.screen) = spawner;
     }
 
     #[cfg(test)]
@@ -230,7 +391,20 @@ impl HostCore {
                 status: info,
             }),
             changed: Condvar::new(),
+            screen: Mutex::new(None),
         });
+        if let Some(spawner) = lock(&self.screen).clone() {
+            let link = ScreenLink::start(
+                spawner,
+                Arc::new(RingSource(Arc::downgrade(&entry))),
+                (entry_rows(&entry), entry_cols(&entry)),
+                LinkConfig {
+                    label: id.as_str().chars().take(7).collect(),
+                    ..LinkConfig::default()
+                },
+            );
+            *lock(&entry.screen) = Some(Arc::new(link));
+        }
         lock(&self.table).insert(id.as_str().to_ascii_lowercase(), entry.clone());
         let terminals = self.terminals.clone();
         let host = Arc::downgrade(self);
@@ -275,6 +449,10 @@ impl HostCore {
                     "title": entry.title,
                     "created_at": entry.created_at,
                     "native": native,
+                    "parser": parser_json(
+                        lock(&entry.screen).as_ref().map(|l| l.status()).as_ref(),
+                        None,
+                    ),
                 }),
             ));
         }
@@ -337,11 +515,19 @@ impl HostCore {
             }
             "term_resize" => {
                 let request: Resize = params(value)?;
-                to_value(
-                    self.terminals
-                        .resize(&terminal_id(&request.terminal_id)?, request.size)
-                        .map_err(|e| terminal_error(&e))?,
-                )
+                let info = self
+                    .terminals
+                    .resize(&terminal_id(&request.terminal_id)?, request.size)
+                    .map_err(|e| terminal_error(&e))?;
+                // The PTY's size is the one size there is; the parser follows what it ended as.
+                if let Ok(entry) = self.entry(&request.terminal_id)
+                    && let Some(link) = lock(&entry.screen).clone()
+                {
+                    // Tied to the stream: what the ring holds now was written before this size.
+                    let at = lock(&entry.inner).ring.end();
+                    link.resize(info.size.rows, info.size.cols, at);
+                }
+                to_value(info)
             }
             "term_redraw" => {
                 // A program that drew its screen before a client attached gets the chance to
@@ -372,7 +558,12 @@ impl HostCore {
                 let id = terminal_id(&request.terminal_id)?;
                 let closed = self.terminals.close(&id);
                 // Whatever the answer, the host keeps nothing for a terminal the client closed.
-                lock(&self.table).remove(&request.terminal_id.to_ascii_lowercase());
+                let removed = lock(&self.table).remove(&request.terminal_id.to_ascii_lowercase());
+                // Its parser helper ends with it (the link joins its threads: no lock is held).
+                if let Some(entry) = removed {
+                    let link = lock(&entry.screen).take();
+                    drop(link);
+                }
                 to_value(closed.map_err(|e| terminal_error(&e))?)
             }
             "term_status" => {
@@ -388,6 +579,39 @@ impl HostCore {
                 self.read(&request)
             }
             "term_list" => self.list(),
+            "term_screen" => {
+                let request: ScreenRequest = params(value)?;
+                self.screen(&request)
+            }
+            "host_persistence" => {
+                let (sources, _) = lock(&self.persistence).clone();
+                let sources = sources.ok_or_else(|| HostError::new("unavailable"))?;
+                Ok(super::persistence::to_json(
+                    &super::persistence::read_facts(&sources),
+                ))
+            }
+            "host_lingering" => {
+                let request: LingerRequest = params(value)?;
+                let (sources, runner) = lock(&self.persistence).clone();
+                let sources = sources.ok_or_else(|| HostError::new("unavailable"))?;
+                super::persistence::set_lingering(
+                    runner.as_ref(),
+                    &sources,
+                    request.enable,
+                    &request.confirm,
+                )
+                .map(|facts| super::persistence::to_json(&facts))
+                .map_err(|e| HostError::new(e.code()))
+            }
+            "term_parser" => {
+                let request: Target = params(value)?;
+                let entry = self.entry(&request.terminal_id)?;
+                let link = lock(&entry.screen).clone();
+                Ok(parser_json(
+                    link.as_ref().map(|l| l.status()).as_ref(),
+                    None,
+                ))
+            }
 
             // ---- native sessions ----
             "native_launcher" => to_value(self.native()?.launcher()),
@@ -416,7 +640,13 @@ impl HostCore {
                 let request: Restart = params(value)?;
                 let reply = self
                     .native()?
-                    .restart(&self.terminals, &request.id, request.size)
+                    .restart(
+                        &self.terminals,
+                        &request.id,
+                        request.size,
+                        request.plan_token,
+                        request.expected_cli_version,
+                    )
                     .map_err(|e| native_error(&e))?;
                 self.track_native(
                     &reply.terminal,
@@ -571,6 +801,57 @@ impl HostCore {
         self.track(info.clone(), format!("{agent} · {folder}"));
     }
 
+    /// The screen a window attaches to: the repaint that redraws it, where in the output it is,
+    /// and what is and is not known about it. Never writes to the terminal.
+    fn screen(&self, request: &ScreenRequest) -> Result<Value, HostError> {
+        let entry = self.entry(&request.terminal_id)?;
+        let Some(link) = lock(&entry.screen).clone() else {
+            return Ok(json!({"available": false, "reason": "helper_missing",
+                             "parser": parser_json(None, Some("helper_missing"))}));
+        };
+        // Bounded: the answer travels in one protocol frame.
+        let lines = request.scrollback_lines.unwrap_or(500).min(1000);
+        match link.snapshot(lines, Duration::from_secs(6)) {
+            Ok(snap) if snap.body.repaint.len() <= 600 * 1024 => {
+                let b = &snap.body;
+                let parser = parser_json(Some(&snap.status), None);
+                Ok(json!({
+                    "available": true,
+                    "at": snap.at,
+                    "size": {"rows": b.rows, "cols": b.cols},
+                    "alt_active": b.alt_active,
+                    "title": b.title,
+                    "repaint": b64::encode(&b.repaint),
+                    "history": {
+                        "included": b.scrollback_included,
+                        "omitted": b.scrollback_omitted,
+                        "evicted": b.history_evicted,
+                    },
+                    "refused": {
+                        "clipboard": b.counters.clipboard,
+                        "hyperlink": b.counters.hyperlink,
+                        "window_op": b.counters.window_op,
+                        "query": b.counters.query,
+                        "oversized": b.counters.oversized,
+                        "string": b.counters.string,
+                        "invalid_utf8": b.counters.invalid_utf8,
+                    },
+                    "parser": parser,
+                }))
+            }
+            Ok(snap) => Ok(json!({"available": false, "reason": "too_large",
+                                  "parser": parser_json(Some(&snap.status), None)})),
+            Err(error) => {
+                let reason = match error {
+                    LinkError::Unavailable(why) => why,
+                    LinkError::Timeout => "timeout",
+                };
+                Ok(json!({"available": false, "reason": reason,
+                          "parser": parser_json(Some(&link.status()), Some(reason))}))
+            }
+        }
+    }
+
     fn read(&self, request: &ReadFrom) -> Result<Value, HostError> {
         let entry = self.entry(&request.terminal_id)?;
         let deadline = Instant::now() + Duration::from_millis(request.wait_ms).min(MAX_WAIT);
@@ -589,14 +870,23 @@ impl HostCore {
         }
         let read = inner.ring.read(request.from, MAX_READ);
         let finished = read.next >= inner.ring.end();
-        Ok(json!({
+        let answer = json!({
             "data": read.data,
             "next": read.next,
             "truncated": read.truncated || inner.truncated,
             "eof": inner.eof && finished,
             "closed": inner.closed && finished,
             "status": inner.status,
-        }))
+        });
+        drop(inner);
+        // The parser's health rides on every read (a status the window already waits for): no
+        // extra call, no extra wake-up per terminal.
+        let mut answer = answer;
+        answer["parser"] = {
+            let link = lock(&entry.screen).clone();
+            parser_brief(link.as_ref().map(|l| l.status()).as_ref())
+        };
+        Ok(answer)
     }
 }
 
@@ -627,6 +917,9 @@ fn pump(terminals: &TerminalService, id: &TerminalId, entry: &Entry) {
                     inner.eof = done;
                 }
                 entry.changed.notify_all();
+                if had && let Some(link) = lock(&entry.screen).clone() {
+                    link.wake();
+                }
                 if done {
                     // Its last bytes are in the ring; the reader holds nothing more.
                     return;

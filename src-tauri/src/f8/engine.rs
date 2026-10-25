@@ -86,6 +86,11 @@ pub trait Worker: Send {
     fn pid_for_diagnostics(&self) -> Option<i32> {
         None
     }
+    /// Provider-side facts for the M3 views (attestation outcome, usage, models observed).
+    /// Only a projection: never an input to any decision. `None` for a worker with nothing to say.
+    fn provider_report(&self) -> Option<crate::m3::report::ProviderReport> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +115,9 @@ pub struct Spawned {
 /// Creates the worker for a launch the allocator already reserved. The engine never spawns
 /// anything for a launch that has no committed reservation.
 pub trait Spawner {
+    fn supports_provider(&self, provider: super::provider::Provider) -> bool {
+        provider == super::provider::Provider::Codex
+    }
     fn supports_profile(&self, _profile: v1::RuntimeSafetyProfile) -> bool {
         true
     }
@@ -190,11 +198,16 @@ struct Live {
     meter: Meter,
     spawned_at: Instant,
     turn: Option<(String, String)>,
+    /// When `turn/interrupt` was written to this launch's provider for the turn above. The write
+    /// is not an answer: the provider owes the turn's end, and a runtime that does not give it
+    /// within `interrupt_answer_ms` is faulted alone (it never holds a slot or a session for ever).
+    interrupt_sent: Option<Instant>,
     /// Provider request id to pending approval, scoped to this very launch.
     approvals: BTreeMap<String, Pending>,
     attachment: Option<Attachment>,
     exit: Option<(String, Option<String>)>,
     requires_containment: bool,
+    expected_profile: &'static str,
     requested_workspace: Option<String>,
     observed_dead: Option<Instant>,
     drained_frames: usize,
@@ -224,6 +237,8 @@ pub struct Engine {
     /// Exits whose audit record could not be written yet (storage failure): retried, never lost.
     unrecorded: Vec<(RuntimeRef, String, Option<String>)>,
     hook: Option<StageHook>,
+    /// A shorter answer deadline than the contract's, for tests of the stall path only.
+    interrupt_answer_override: Option<u64>,
 }
 
 impl Engine {
@@ -247,6 +262,7 @@ impl Engine {
             shutting_down: false,
             unrecorded: Vec::new(),
             hook: None,
+            interrupt_answer_override: None,
         })
     }
     pub fn with_stage_hook(
@@ -433,6 +449,7 @@ impl Engine {
             && live.turn.as_ref().is_some_and(|t| t.1 == lease_id)
         {
             live.turn = None;
+            live.interrupt_sent = None;
             live.approvals.clear();
             if let Ok(m) = Meter::new(now) {
                 live.meter = m;
@@ -531,18 +548,39 @@ impl Engine {
             ),
             _ => return Err(E::InvalidRequest),
         };
-        if let v1::Operation::RuntimeStart(m) = request.operation()
-            && !spawner.supports_profile(
+        let provider = super::provider::session(&self.conn, &session)?;
+        super::provider::admit(&self.conn, provider)?;
+        if !spawner.supports_provider(provider) {
+            return Err(E::GateDenied);
+        }
+        if let v1::Operation::RuntimeStart(m) = request.operation() {
+            let profile =
                 m.safety_profile
-                    .unwrap_or(v1::RuntimeSafetyProfile::CodexInferenceV1),
-            )
+                    .unwrap_or(if provider == super::provider::Provider::Claude {
+                        v1::RuntimeSafetyProfile::ClaudeInferenceV1
+                    } else {
+                        v1::RuntimeSafetyProfile::CodexInferenceV1
+                    });
+            if profile.provider() != provider {
+                return Err(E::InvalidRequest);
+            }
+        }
+        if let v1::Operation::RuntimeStart(m) = request.operation()
+            && !spawner.supports_profile(m.safety_profile.unwrap_or(
+                if provider == super::provider::Provider::Claude {
+                    v1::RuntimeSafetyProfile::ClaudeInferenceV1
+                } else {
+                    v1::RuntimeSafetyProfile::CodexInferenceV1
+                },
+            ))
         {
             return Err(E::Unsupported);
         }
         // Execution paths whose required containment cannot be provided are refused outright:
         // nothing is reserved, spawned or recorded for them.
         if let v1::Operation::RuntimeStart(m) = request.operation()
-            && m.safety_profile == Some(v1::RuntimeSafetyProfile::CodexLocalToolsV1)
+            && m.safety_profile
+                .is_some_and(v1::RuntimeSafetyProfile::local_tools)
             && !spawner.descendant_containment()
         {
             return Err(E::Unsupported);
@@ -588,7 +626,7 @@ impl Engine {
         // `launch` records it now (or queues the record), so no phantom slot remains.
         let tools = matches!(
             request.operation(),
-            v1::Operation::RuntimeStart(m) if m.safety_profile == Some(v1::RuntimeSafetyProfile::CodexLocalToolsV1)
+            v1::Operation::RuntimeStart(m) if m.safety_profile.is_some_and(v1::RuntimeSafetyProfile::local_tools)
         );
         self.launch(&reference, spawner, tools, workspace)?;
         Ok(outcome)
@@ -628,10 +666,12 @@ impl Engine {
                 meter: Meter::new(self.ms(Instant::now()))?,
                 spawned_at: Instant::now(),
                 turn: None,
+                interrupt_sent: None,
                 approvals: BTreeMap::new(),
                 attachment: None,
                 exit: None,
                 requires_containment: tools,
+                expected_profile: super::provider::session(&self.conn, &session)?.profile(tools),
                 requested_workspace,
                 observed_dead: None,
                 drained_frames: 0,
@@ -675,11 +715,7 @@ impl Engine {
             .live
             .get(reference.managed_session_id.as_str())
             .ok_or(E::StaleRevision)?;
-        let profile = if expected.requires_containment {
-            "codex_local_tools_v1"
-        } else {
-            "codex_inference_v1"
-        };
+        let profile = expected.expected_profile;
         if attachment.profile != profile
             || attachment.revision == 0
             || expected
@@ -778,11 +814,7 @@ impl Engine {
     ) -> ControlResult<()> {
         let now = self.ms(Instant::now());
         let live = self.fenced_mut(fence)?;
-        let profile = if live.requires_containment {
-            "codex_local_tools_v1"
-        } else {
-            "codex_inference_v1"
-        };
+        let profile = live.expected_profile;
         if next.profile != profile
             || live
                 .requested_workspace
@@ -800,6 +832,7 @@ impl Engine {
         }
         live.attachment = Some(next);
         live.turn = None;
+        live.interrupt_sent = None;
         live.approvals.clear();
         live.meter = Meter::new(now)?;
         Ok(())
@@ -864,9 +897,29 @@ impl Engine {
             return Err(E::StaleRevision);
         }
         live.turn = None;
+        live.interrupt_sent = None;
         live.approvals.clear();
         live.meter = Meter::new(now)?;
         Ok(())
+    }
+
+    /// Tests of the stall path only: a deadline shorter than the contract's.
+    #[cfg(test)]
+    pub(crate) fn with_interrupt_answer_ms(mut self, ms: u64) -> Self {
+        self.interrupt_answer_override = Some(ms);
+        self
+    }
+
+    /// The authority wrote `turn/interrupt` to this launch's provider. The clock for the provider's
+    /// answer starts here, for this runtime only; a repeated cancel does not restart it.
+    pub fn interrupt_dispatched(&mut self, reference: &RuntimeRef, now: Instant) {
+        if let Some(live) = self
+            .live
+            .get_mut(reference.managed_session_id.as_str())
+            .filter(|l| l.reference == *reference && l.turn.is_some())
+        {
+            live.interrupt_sent.get_or_insert(now);
+        }
     }
 
     /// Revalidates, at this very moment, the launch, turn, lease and attachment of a ticket.
@@ -1087,10 +1140,17 @@ impl Engine {
     /// the record cannot be written it is retried later and the unknown stays visible.
     pub fn poll(&mut self, now: Instant) {
         let now_ms = self.ms(now);
-        let init_timeout = super::budget::contract()
-            .ok()
+        let contract = super::budget::contract().ok();
+        let init_timeout = contract
+            .as_ref()
             .and_then(|c| c.get("provider_init_timeout_ms").copied())
             .unwrap_or(10_000);
+        let interrupt_answer = self.interrupt_answer_override.unwrap_or_else(|| {
+            contract
+                .as_ref()
+                .and_then(|c| c.get("interrupt_answer_ms").copied())
+                .unwrap_or(10_000)
+        });
         // Detect what no one reported: an unexpected child exit, a missed handshake deadline,
         // a turn over its wall clock and a faulted or stalled scheduler lane. Each stops only
         // the runtime concerned.
@@ -1125,6 +1185,27 @@ impl Engine {
             }
         }
         self.pump(now_ms, &mut verdicts);
+        // A provider asked to interrupt gets its time, and the frames it has already sent are
+        // looked at first: they may be the very answer, read from its pipe this poll and still
+        // queued for the authority. This runs after the pump for that reason.
+        for (session, live) in &self.live {
+            if live.phase == Phase::Stopping || verdicts.iter().any(|(s, _, _)| s == session) {
+                continue;
+            }
+            if let (Some(_), Some(sent)) = (live.turn.as_ref(), live.interrupt_sent) {
+                let frames_waiting = self
+                    .scheduler
+                    .queued_bytes(session)
+                    .is_some_and(|(control, data)| control > 0 || data > 0);
+                if interrupt_unanswered(sent, now, interrupt_answer, frames_waiting) {
+                    verdicts.push((
+                        session.clone(),
+                        "budget_exceeded",
+                        Some("interrupt_answer_ms".to_owned()),
+                    ));
+                }
+            }
+        }
         for (session, live) in &self.live {
             if live.observed_dead.is_some()
                 && live.drain_empty
@@ -1273,6 +1354,14 @@ impl Engine {
     pub fn unrecorded_exits(&self) -> usize {
         self.unrecorded.len()
     }
+}
+
+/// Whether a provider that was asked to interrupt has used up its time. Frames it already sent that
+/// are still waiting for the authority are looked at first, because one of them may be the answer,
+/// but only for as long again: a provider that floods cannot hold the deadline off for ever.
+fn interrupt_unanswered(sent: Instant, now: Instant, answer_ms: u64, frames_waiting: bool) -> bool {
+    let waited = u64::try_from(now.saturating_duration_since(sent).as_millis()).unwrap_or(u64::MAX);
+    waited > answer_ms && (!frames_waiting || waited > answer_ms.saturating_mul(2))
 }
 
 #[cfg(test)]

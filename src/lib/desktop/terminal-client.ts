@@ -1,7 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { TerminalId } from '../contracts/identities';
 import {
+  parseAttach,
+  parseHostLifecycle,
+  type HostLifecycle,
   parseHostTerminals,
+  parseParserBrief,
+  type Attach,
   type HostTerminal,
   type TerminalInfo,
   type TerminalOutput,
@@ -45,6 +50,53 @@ export async function redrawTerminal(terminal_id: TerminalId): Promise<void> {
   } catch {
     // The terminal may have ended meanwhile: there is nothing to redraw.
   }
+}
+/**
+ * Attaches to a terminal that kept running without this window: the screen its parser kept, to be
+ * drawn before reading on (the next read starts where the screen ends). Never starts, restarts or
+ * writes to anything. A host without a parser answers `replay`, and an answer that is not exactly
+ * an attach answer is an error the caller treats as `replay`.
+ */
+export async function attachTerminal(terminal_id: TerminalId): Promise<Attach> {
+  return parseAttach(
+    await invoke<unknown>('terminal_attach', { request: { terminal_id } }),
+  );
+}
+/**
+ * The second half of an attach: says whether the screen was drawn. The host moves its read position
+ * to where the screen ends only on `restored: true` with the token it handed out; otherwise what it
+ * kept of the output is read from the start. Without a token (the answer could not be read) only
+ * `restored: false` is possible.
+ */
+export async function commitAttach(
+  terminal_id: TerminalId,
+  token: string | null,
+  restored: boolean,
+): Promise<void> {
+  await invoke<unknown>('terminal_attach_commit', {
+    request: { terminal_id, token, restored },
+  });
+}
+/** What survives what for the terminals the host holds, from facts read on this machine. */
+export async function hostLifecycle(): Promise<HostLifecycle> {
+  return parseHostLifecycle(await invoke<unknown>('host_persistence'));
+}
+export const ENABLE_LINGERING = 'enable-lingering';
+export const DISABLE_LINGERING = 'disable-lingering';
+/**
+ * Turns systemd lingering on or off for this account. Only ever called from the button that asks
+ * for it, with the confirmation word of that direction: the desktop and the host refuse anything
+ * else.
+ */
+export async function setLingering(enable: boolean): Promise<HostLifecycle> {
+  return parseHostLifecycle(
+    await invoke<unknown>('host_lingering', {
+      request: {
+        enable,
+        confirm: enable ? ENABLE_LINGERING : DISABLE_LINGERING,
+      },
+    }),
+  );
 }
 /** The saved layout of tabs and panes, as the desktop kept it; `null` when there is none. */
 export async function readLayout(): Promise<unknown> {
@@ -127,7 +179,12 @@ export function readTerminalOutput(
         throw new Error('invalid_output');
       const batch_id = wire.batch_id === null ? null : parseUuid(wire.batch_id);
       stream.ack = batch_id;
-      return { ...wire, batch_id, data: Uint8Array.from(wire.data) };
+      return {
+        ...wire,
+        batch_id,
+        data: Uint8Array.from(wire.data),
+        parser: parseParserBrief(wire.parser),
+      };
     })
     .finally(() => {
       stream.pending = undefined;

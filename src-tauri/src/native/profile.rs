@@ -100,7 +100,8 @@ fn effort_ok(effort: &str) -> bool {
         && !effort.starts_with('-')
 }
 
-/// What Claude Code documents for `--effort` (its own `--help`, checked against 2.1.304).
+/// The documented Claude Code `--effort` levels; the desktop separately checks exact-build
+/// syntax evidence before passing a profile override to an installed CLI.
 pub const CLAUDE_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
 fn skill_ok(name: &str) -> bool {
@@ -198,7 +199,7 @@ pub fn merge(chain: &[(String, Body)]) -> Resolved {
 
 /// One word of the command line. The settings overlay's path is only known once the session's
 /// own directory exists.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Word {
     Literal(String),
     Overlay,
@@ -206,7 +207,7 @@ pub enum Word {
 
 /// What a profile turns into for one agent (09 §4.2): the words, the file to generate, and
 /// three lists the user reads before starting.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct LaunchPlan {
     /// After the executable name.
     pub words: Vec<Word>,

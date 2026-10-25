@@ -1,0 +1,16 @@
+{
+  "run": 3,
+  "shape": "none",
+  "binary": "./src-tauri/target/debug/wyss-console",
+  "loadavg": ["1.55", "1.97", "2.48"],
+  "mem_available_mib": 8662,
+  "screen": [1500, 1400],
+  "display": ":79",
+  "events": {},
+  "world": {
+    "shape": "none",
+    "projects": 0,
+    "terminals": 0
+  },
+  "leftovers": []
+}

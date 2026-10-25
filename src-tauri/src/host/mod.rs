@@ -5,6 +5,8 @@
 pub mod client;
 pub mod commands;
 pub mod core;
+pub mod layout;
+pub mod persistence;
 pub mod protocol;
 pub mod ring;
 pub mod server;

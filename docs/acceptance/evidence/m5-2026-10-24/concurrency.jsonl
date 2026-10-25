@@ -1,0 +1,12 @@
+{"measure":"all_runtimes_ready_after_start","runtimes":1,"unit":"ms","n":8,"p50":208.08,"p95":213.27,"raw":[213.27, 208.08, 206.75, 207.91, 206.36, 207.98, 209.07, 208.3]}
+{"measure":"sum_of_children_rss","runtimes":1,"unit":"MiB","n":8,"p50":14.44,"p95":14.45,"raw":[14.45, 14.41, 14.45, 14.44, 14.43, 14.41, 14.45, 14.44]}
+{"measure":"one_turn_cancelled_with_others_running","runtimes":1,"unit":"ms","n":8,"p50":12.48,"p95":12.87,"raw":[12.3, 12.56, 12.87, 12.3, 12.57, 12.34, 12.48, 12.26]}
+{"measure":"application_thread_cpu_with_idle_runtimes","runtimes":1,"unit":"percent_of_one_core","n":8,"p50":0.50,"p95":1.00,"raw":[0.0, 0.5, 0.5, 0.0, 1.0, 0.0, 0.5, 0.0]}
+{"measure":"all_runtimes_ready_after_start","runtimes":2,"unit":"ms","n":8,"p50":357.79,"p95":360.70,"raw":[357.79, 356.19, 356.45, 358.48, 360.7, 356.6, 358.83, 353.74]}
+{"measure":"sum_of_children_rss","runtimes":2,"unit":"MiB","n":8,"p50":28.87,"p95":28.89,"raw":[28.85, 28.88, 28.89, 28.87, 28.79, 28.84, 28.85, 28.89]}
+{"measure":"one_turn_cancelled_with_others_running","runtimes":2,"unit":"ms","n":8,"p50":12.53,"p95":12.92,"raw":[12.22, 12.52, 12.27, 12.62, 12.92, 12.53, 12.82, 12.44]}
+{"measure":"application_thread_cpu_with_idle_runtimes","runtimes":2,"unit":"percent_of_one_core","n":8,"p50":0.50,"p95":1.00,"raw":[0.5, 0.0, 1.0, 0.5, 0.5, 0.0, 0.5, 0.5]}
+{"measure":"all_runtimes_ready_after_start","runtimes":4,"unit":"ms","n":8,"p50":687.47,"p95":690.98,"raw":[688.01, 685.31, 687.12, 687.47, 685.34, 687.4, 690.98, 688.28]}
+{"measure":"sum_of_children_rss","runtimes":4,"unit":"MiB","n":8,"p50":57.70,"p95":57.75,"raw":[57.72, 57.7, 57.7, 57.66, 57.68, 57.7, 57.74, 57.75]}
+{"measure":"one_turn_cancelled_with_others_running","runtimes":4,"unit":"ms","n":8,"p50":12.65,"p95":13.12,"raw":[12.36, 12.28, 12.46, 12.81, 12.37, 12.65, 13.12, 12.92]}
+{"measure":"application_thread_cpu_with_idle_runtimes","runtimes":4,"unit":"percent_of_one_core","n":8,"p50":0.50,"p95":1.00,"raw":[0.0, 1.0, 0.5, 0.0, 1.0, 0.5, 1.0, 0.5]}

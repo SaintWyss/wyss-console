@@ -37,7 +37,12 @@ it('splits the interface across the capabilities the installed configuration lis
   // commands answer `inactive` until the desktop is started with `--f8-authority`, which a
   // window cannot do (see the Rust test of the entry points).
   // `projects` is the project workspace's own capability (see projects-capability.test.ts).
-  expect(config.app.security.capabilities).toEqual(['main', 'f8', 'projects']);
+  expect(config.app.security.capabilities).toEqual([
+    'main',
+    'f8',
+    'projects',
+    'm3',
+  ]);
   expect(f8.permissions).not.toContain('allow-f8-state');
   expect(f8.windows).toEqual(['main']);
 });

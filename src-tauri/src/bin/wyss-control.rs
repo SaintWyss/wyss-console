@@ -5,10 +5,18 @@ use wyss_console::contracts::control::ControlError;
 const EXIT_WILL_NOT_START: i32 = 2;
 
 fn main() {
-    let arguments = std::env::args_os().skip(1);
+    let mut arguments = std::env::args_os().skip(1).peekable();
+    if arguments.peek().is_some_and(|a| a == "--prepare-v9-copy") {
+        arguments.next();
+        if wyss_console::f8::v9::prepare_copy_arguments(arguments).is_err() {
+            eprintln!("wyss-control: offline V9 preparation refused");
+            std::process::exit(EXIT_WILL_NOT_START);
+        }
+        return;
+    }
     // No arguments: the installed protocol-1 authority. Arguments: protocol 2, which the
     // caller asked for by name and which never falls back to protocol 1.
-    let started = if arguments.len() == 0 {
+    let started = if arguments.peek().is_none() {
         wyss_console::control::run_from_environment()
     } else {
         wyss_console::control::serve::run_from_arguments(arguments)

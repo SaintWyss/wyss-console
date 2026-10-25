@@ -120,7 +120,23 @@ pub fn inactive_f8() -> F8 {
     }
 }
 
-pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>, f8_gui: F8) {
+#[cfg(target_os = "linux")]
+pub type M3 = crate::m3::gui::M3Service;
+#[cfg(not(target_os = "linux"))]
+pub type M3 = ();
+pub fn inactive_m3() -> M3 {
+    #[cfg(target_os = "linux")]
+    {
+        crate::m3::gui::M3Service::inactive()
+    }
+}
+
+pub fn run(
+    authority_digest: Option<&'static str>,
+    extension: Option<Extension>,
+    f8_gui: F8,
+    m3_gui: M3,
+) {
     let stopping = Arc::new(AtomicBool::new(false));
     let managed_sessions = sessions::SessionService::from_environment();
     let authority = authority::AuthorityService::from_environment();
@@ -211,6 +227,8 @@ pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>,
         f8::f8_audit,
         #[cfg(target_os = "linux")]
         f8::f8_audit_wait,
+        #[cfg(target_os = "linux")]
+        crate::m3::gui::m3_state,
         settings::settings_read,
         settings::settings_update,
         settings::settings_reset,
@@ -248,6 +266,8 @@ pub fn run(authority_digest: Option<&'static str>, extension: Option<Extension>,
         .manage(TerminalService::default())
         // Inactive unless the command line named an authority (`select`): the window cannot.
         .manage(f8_gui)
+        // Read-only: the profiles, the capabilities and why Claude is or is not available.
+        .manage(m3_gui)
         .manage(f8_confirm)
         // Read-only and independent: no terminal operation waits on, or learns of, it.
         .manage(authority)

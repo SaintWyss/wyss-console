@@ -89,6 +89,20 @@ effect route, including provider subagents, hooks, plugins, MCP, background tool
 network. A feature unavailable safely in Managed remains visible with reason and a Native
 alternative requiring a **new explicit launch**, never automatic fallback.
 
+### M3 feasibility update — 2026-10-23
+
+Official current candidates are Python Agent SDK `0.2.173` with bundled Claude Code
+`2.1.309`, and TypeScript SDK `0.3.308` with CLI parity `2.1.308`. These release facts do
+not certify Wyss compatibility. The SDK's `disallowed_tools=["*"]` removes tool definitions,
+which makes text-only Inference plausible; effective managed policy, hooks, connectors,
+memory and authentication remain unproven. Permission rules/hooks can decide before or
+without `canUseTool`, so callback-only Local Tools mediation is insufficient. Both profiles
+remain unavailable pending the exact tests in the
+[M3 feasibility report](../research/claude-managed-feasibility-2026-10-23.md). Model/effort
+selection is separately proposed in [ADR0054](../adr/0054-managed-model-selection-and-effort.md);
+history persistence is separately proposed in the
+[M3 usage-history contract](../contracts/m3-model-usage-history.md).
+
 ## M0 installed-build manifest
 
 Dated observation 2026-10-22, source main `d2ee8d2` (application trees equal `e480d479`).
@@ -104,6 +118,30 @@ no help/model-list refresh, sign-in, auth/config reads, inference or paid calls.
 | Codex Managed / codex_local_tools_v1           | P2/V8 active, service0.2.0; production adapter pins0.159.0, cap1                                         | Recorded real0.159.0 F8 activation + accepted ADR0051; M0 hello confirms2/8, registry/engine/transport fixtures confirm narrow contracts. No new runtime launch, real overload, refresh, reroute or full adversarial provider campaign. Model/effort selection fields remain absent; hooks/MCP/plugins/subagents denied |
 | Claude Managed / any profile                   | No released adapter/compatible build                                                                     | ADR0053 Proposed; unsupported. M3 pins official surface/auth/settings route and mediates every effect before even no-tool acceptance; Native is a separately explicit alternative                                                                                                                                       |
 | OpenCode/Hermes                                | No Native catalogue entry/Managed execution adapter qualified                                            | Retained config/extension work only; not another installed provider qualification or M1 dependency                                                                                                                                                                                                                      |
+
+## M2 Native profile evidence — 2026-10-23
+
+Current PATH observations are Claude Code `2.1.309 (Claude Code)` and Codex
+`codex-cli 0.159.0`. Read-only `--help` output confirms Claude's `--model`, `--effort`,
+`--permission-mode` and `--settings` session interfaces, and Codex's `-m`, `-c
+KEY=VALUE`, `-s` and `-a` interfaces. The exact-build Native profile manifest and its
+limits are in [`native/capabilities.rs`](../../src-tauri/src/native/capabilities.rs)
+and the [M2 acceptance record](../acceptance/m2-engineering-2026-10-23.md).
+
+These probes establish installed version and accepted command-line surface only.
+Claude settings-overlay behavior was exercised on 2.1.303 in the cited F1/F2a and F3
+records; Codex `model_reasoning_effort` was read from the 0.159.0 config surface in F6.
+Neither record proves that a Native turn on the current exact build resolved, was
+entitled to, or effectively used the requested model/effort. No prompt, sign-in,
+credential/config mutation or paid inference was performed for this M2 record.
+
+The updated Native host binds profile previews to the resolved plan and checks the
+shell-resolved CLI build before passing profile values. A legacy host remains able to
+start non-effort profiles with a visible warning, but cannot bind the displayed plan
+revision; effectful M2 acceptance therefore requires the updated host. Unsupported
+Codex per-session hooks/skills exclusions, Codex project skills, Codex hook mutation,
+and project trust writes remain refused. Claude Managed, Managed model/effort
+selection, and authority extensions remain M3 work.
 
 Host hello0.2.0 exposes `profile_effort`; this changes the old-host compatibility
 observation, not the recorded limits of real GUI/provider consumption. The host's protocol1

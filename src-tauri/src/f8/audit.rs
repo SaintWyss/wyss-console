@@ -321,7 +321,7 @@ fn runtime_v2(v: &Value, kind: &str) -> ControlResult<()> {
             }
         }
     }
-    if p["adapter_id"] != "codex" || p["runtime_kind"] != "codex" {
+    if super::provider::payload(&v["payload"]).is_err() {
         return Err(bad());
     }
     Ok(())
@@ -448,6 +448,7 @@ pub struct Unresolved {
 /// Deterministic replay of the whole stream from sequence 1. A refusal leaves nothing to repair.
 #[derive(Default)]
 pub struct AuditReplay {
+    multiprovider: bool,
     stream: Option<String>,
     head: u64,
     events: HashSet<String>,
@@ -480,6 +481,18 @@ pub struct AuditReplay {
 }
 
 impl AuditReplay {
+    pub fn v9() -> Self {
+        Self {
+            multiprovider: true,
+            ..Self::default()
+        }
+    }
+    pub fn with_v9_boundary(v7_head: u64) -> Self {
+        Self {
+            multiprovider: true,
+            ..Self::with_boundary(v7_head)
+        }
+    }
     pub fn with_boundary(v7_head: u64) -> Self {
         Self {
             boundary: Some(v7_head),
@@ -514,6 +527,12 @@ impl AuditReplay {
     }
     fn fold(&mut self, v: &Value) -> ControlResult<()> {
         let vocabulary = validate_event(v)?;
+        if !self.multiprovider
+            && v["payload"].get("adapter_id").is_some()
+            && v["payload"]["adapter_id"] != "codex"
+        {
+            return Err(bad());
+        }
         let source = canonical_source(v)?.to_owned();
         if self.retired.contains(&source) {
             return Err(bad());

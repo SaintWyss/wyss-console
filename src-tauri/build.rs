@@ -152,6 +152,10 @@ fn main() {
             "host_terminals",
             "host_info",
             "terminal_redraw",
+            "terminal_attach",
+            "terminal_attach_commit",
+            "host_persistence",
+            "host_lingering",
             "layout_read",
             "layout_write",
             "credentials_list",
@@ -212,6 +216,15 @@ fn main() {
             "f8_approval_cancel",
             "f8_audit",
             "f8_audit_wait",
+            // The M3 window: one read, and the five actions of the isolated fixture runtime. The
+            // fixture ones are only reachable where a binary registers them (`m3-fixture`); the
+            // package registers none, so there they answer "not found" whatever the grant.
+            "m3_state",
+            "m3_fixture_start",
+            "m3_fixture_stop",
+            "m3_fixture_prompt",
+            "m3_fixture_interrupt",
+            "m3_fixture_decide",
         ]),
     ))
     .expect("failed to build Wyss Console metadata");

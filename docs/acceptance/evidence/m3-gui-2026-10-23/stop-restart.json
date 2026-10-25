@@ -1,0 +1,210 @@
+{
+  "scenario": "stop-restart",
+  "binary": "src-tauri/target/debug/examples/m3_fixture_gui",
+  "display": ":79",
+  "screen": [1500, 1400],
+  "steps": [
+    {
+      "n": 0,
+      "step": ["click", 80, 467],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 1,
+      "step": ["wait", 2],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 2,
+      "step": ["click", 427, 356],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 3,
+      "step": ["wait", 7],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 4,
+      "step": ["click", 857, 490],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 5,
+      "step": ["type", "One"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 6,
+      "step": ["wait", 1],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 7,
+      "step": ["click", 276, 549],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 8,
+      "step": ["expect_generations", 1, 40],
+      "ok": true,
+      "detail": "1 generation requests"
+    },
+    {
+      "n": 9,
+      "step": ["wait", 4],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 10,
+      "step": ["shot", "00-first-life"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 11,
+      "step": ["click", 515, 356],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 12,
+      "step": ["wait", 5],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 13,
+      "step": ["shot", "01-stopped"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 14,
+      "step": ["click", 552, 356],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 15,
+      "step": ["wait", 7],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 16,
+      "step": ["shot", "02-restarted"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 17,
+      "step": ["click", 857, 490],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 18,
+      "step": ["type", "Two"],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 19,
+      "step": ["wait", 1],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 20,
+      "step": ["click", 276, 549],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 21,
+      "step": ["expect_generations", 2, 40],
+      "ok": true,
+      "detail": "2 generation requests"
+    },
+    {
+      "n": 22,
+      "step": ["wait", 4],
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": 23,
+      "step": ["shot", "03-second-life"],
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "loadavg": ["2.93", "2.70", "2.57"],
+  "windows_before": [
+    {
+      "id": "982",
+      "name": "",
+      "geometry": "Window 982 Position: 0,0 (screen: 0) Geometry: 1500x1400"
+    },
+    {
+      "id": "2097153",
+      "name": "m3_fixture_gui",
+      "geometry": "Window 2097153 Position: 10,10 (screen: 0) Geometry: 10x10"
+    },
+    {
+      "id": "2097156",
+      "name": "Wyss Console",
+      "geometry": "Window 2097156 Position: 0,0 (screen: 0) Geometry: 1440x810"
+    },
+    {
+      "id": "2097162",
+      "name": "",
+      "geometry": "Window 2097162 Position: -1,-1 (screen: 0) Geometry: 1x1"
+    },
+    {
+      "id": "2097157",
+      "name": "",
+      "geometry": "Window 2097157 Position: -1,-1 (screen: 0) Geometry: 1x1"
+    }
+  ],
+  "windows_after": [
+    {
+      "id": "982",
+      "name": "",
+      "geometry": "Window 982 Position: 0,0 (screen: 0) Geometry: 1500x1400"
+    },
+    {
+      "id": "2097153",
+      "name": "m3_fixture_gui",
+      "geometry": "Window 2097153 Position: 10,10 (screen: 0) Geometry: 10x10"
+    },
+    {
+      "id": "2097156",
+      "name": "Wyss Console",
+      "geometry": "Window 2097156 Position: 0,0 (screen: 0) Geometry: 1500x1400"
+    },
+    {
+      "id": "2097162",
+      "name": "",
+      "geometry": "Window 2097162 Position: -1,-1 (screen: 0) Geometry: 1x1"
+    },
+    {
+      "id": "2097157",
+      "name": "",
+      "geometry": "Window 2097157 Position: -1,-1 (screen: 0) Geometry: 1x1"
+    }
+  ],
+  "generations": 2,
+  "alive_at_end": true,
+  "leftovers": []
+}

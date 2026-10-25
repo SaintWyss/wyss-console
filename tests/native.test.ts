@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   parseFailure,
   parseLauncher,
+  parsePreview,
   parseSession,
   parseStartReply,
 } from '../src/lib/contracts/native';
@@ -43,6 +44,57 @@ describe('the contract', () => {
     expect(() =>
       parseLauncher({ agents: 'x', shell: null, projects: [] }),
     ).toThrow();
+  });
+  it('treats missing capability metadata as unverified and validates evidence shapes', () => {
+    expect(launcher().agents[0]?.profile_capability.status).toBe('unverified');
+    const parsed = parseLauncher({
+      ...launcher(),
+      agents: [
+        {
+          ...launcher().agents[0],
+          profile_capability: {
+            status: 'syntax_verified',
+            qualified_version: '2.1.309 (Claude Code)',
+            checked_on: '2026-10-23',
+            operations: ['model via --model'],
+            interface: '--model and --effort',
+            format: 'argv flags',
+            scope: 'one process',
+            reload_semantics: 'Not tested',
+            source: 'installed CLI --help',
+            limitation: 'Syntax only; effective value not reported.',
+          },
+        },
+      ],
+    });
+    expect(parsed.agents[0]?.profile_capability.status).toBe('syntax_verified');
+    expect(() =>
+      parseLauncher({
+        ...launcher(),
+        agents: [
+          {
+            ...launcher().agents[0],
+            profile_capability: { status: 'verified' },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+  it('reads capability warnings and tolerates a pre-M2 preview without them', () => {
+    const oldPreview = {
+      applied: [],
+      with_cost: [],
+      not_applicable: [],
+      can_start: true,
+      through_shell: true,
+    };
+    expect(parsePreview(oldPreview).warnings).toEqual([]);
+    expect(parsePreview(oldPreview).plan_token).toBeNull();
+    expect(parsePreview(oldPreview).provider_version).toBeNull();
+    expect(
+      parsePreview({ ...oldPreview, warnings: ['Exact build is unverified.'] })
+        .warnings,
+    ).toEqual(['Exact build is unverified.']);
   });
   it('takes a start reply only when the terminal is the one the session names', () => {
     expect(reply().terminal.terminal_id).toBe(reply().session.terminal_id);
@@ -113,6 +165,17 @@ describe('what the overview says', () => {
     expect([...sharedFolders([a, b, c])]).toEqual(['/p']);
     expect(folderName('/home/u/work/app')).toBe('app');
     expect(formatBytes(300 * 1024 * 1024)).toBe('300 MB');
+  });
+  it('explains when a profile override was refused for an unverified provider build', () => {
+    expect(failureText('provider_version_unverified')).toContain(
+      'exact provider build is not verified',
+    );
+    expect(failureText('provider_version_unverified')).toContain(
+      'was not launched',
+    );
+    expect(failureText('profile_preview_stale')).toContain(
+      'Review the new preview',
+    );
   });
 });
 
@@ -228,6 +291,7 @@ describe('the controller', () => {
     expect(client.start).toHaveBeenCalledWith(
       'claude_code',
       '/home/u',
+      null,
       null,
       null,
     );
@@ -380,7 +444,7 @@ describe('the model of a native session', () => {
   });
   it('says in plain words that an older terminal host cannot keep an effort, and a code it has no words for is never shown raw', () => {
     expect(failureText('host_outdated')).toContain('older than this window');
-    expect(failureText('host_outdated')).toContain('leave the effort empty');
+    expect(failureText('host_outdated')).toContain('preview-bound profiles');
     expect(failureText('profile_effort_invalid')).toContain('letters, digits');
     expect(failureText('some_unknown_code')).not.toContain('some_unknown_code');
   });

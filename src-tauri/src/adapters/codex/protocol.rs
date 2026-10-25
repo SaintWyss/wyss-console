@@ -293,7 +293,7 @@ fn client_params(method: &str, p: &Map<String, Value>) -> Result<()> {
             optional_text(p, "cursor", 2048)?;
             optional_bool(p, "includeHidden")?;
             if let Some(v) = p.get("limit").filter(|v| !v.is_null())
-                && !v.as_u64().is_some_and(|n| n <= u64::from(u32::MAX))
+                && v.as_u64().is_none_or(|n| n > u64::from(u32::MAX))
             {
                 return fail("invalid_limit");
             }
@@ -656,7 +656,7 @@ fn permission_profile(v: &Value) -> Result<()> {
             }
         }
         if let Some(v) = f.get("globScanMaxDepth").filter(|v| !v.is_null())
-            && !v.as_u64().is_some_and(|n| n > 0)
+            && v.as_u64().is_none_or(|n| n == 0)
         {
             return fail("invalid_depth");
         }

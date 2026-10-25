@@ -43,6 +43,8 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from owned import NotOurs, Owned  # noqa: E402
+import m3_steps  # noqa: E402
+import m4_steps  # noqa: E402
 
 SCREEN = (1500, 1400)
 DISPLAY = ":79"
@@ -432,6 +434,14 @@ def main():
     ap.add_argument("--test-binary", default="", help="the built unit-test executable (not needed for shape none)")
     ap.add_argument("--steps", help="JSON list of calibration steps; no measurement is made")
     ap.add_argument("--seed", help="a directory whose layout.json, native/ and configuration/trusted-writers are copied into the run's own state (a rehearsal on a copy of real records)")
+    ap.add_argument("--m3-fixture", action="store_true",
+                    help="also host the Claude Managed fixture runtime in the application (needs --m3-sdk-root and --m3-script; the binary must be built with --features m3-fixture)")
+    ap.add_argument("--m3-sdk-root", default="", help="the hash-locked virtual environment the Managed fixture runs (read-only)")
+    ap.add_argument("--m3-script", default="", help="the mock provider's script (a JSON list of responses)")
+    ap.add_argument("--m3-seed", action="append", default=[], metavar="NAME=TEXT",
+                    help="a file to create in the Managed fixture's workspace (\\n is a newline); repeatable")
+    ap.add_argument("--m2-fixtures", action="store_true",
+                    help="put fixture-only Claude/Codex CLIs and a disposable instruction file in this run's HOME")
     ap.add_argument("--idle-seconds", type=int, default=60)
     ap.add_argument("--switches", type=int, default=40)
     ap.add_argument("--keys", type=int, default=40)
@@ -439,11 +449,55 @@ def main():
     args = ap.parse_args()
 
     binary = os.path.realpath(args.binary)
+    # The host runs the parser helper only if it is not writable by group or others (as the package
+    # installs it); a build made under a group-writable umask is normalised here, for the build's own files.
+    for _name in ("wyss-console", "wyss-screen"):
+        _path = os.path.join(os.path.dirname(binary), _name)
+        if os.path.isfile(_path):
+            os.chmod(_path, 0o755)
     os.makedirs(args.out, exist_ok=True)
     root = tempfile.mkdtemp(prefix="m1p-", dir="/tmp/claude-1000")
     os.chmod(root, 0o700)
     for sub in ("run", "state", "config", "data", "cache", "home", "logs"):
         os.makedirs(os.path.join(root, sub), mode=0o700, exist_ok=True)
+    app_args = []
+    if args.m3_fixture:
+        if not (args.m3_sdk_root and args.m3_script):
+            raise SystemExit("--m3-fixture needs --m3-sdk-root and --m3-script")
+        for sub in ("m3-state", "m3-ws"):
+            os.makedirs(os.path.join(root, sub), mode=0o700, exist_ok=True)
+        shutil.copy(args.m3_script, os.path.join(root, "m3-script.json"))
+        for seed in args.m3_seed:
+            name, _, text = seed.partition("=")
+            if "/" in name or not name:
+                raise SystemExit("--m3-seed names a file in the workspace root")
+            with open(os.path.join(root, "m3-ws", name), "w") as f:
+                f.write(text.replace("\\n", "\n"))
+        app_args = ["--m3-fixture-sdk-root", os.path.realpath(args.m3_sdk_root),
+                    "--m3-fixture-state", os.path.join(root, "m3-state"),
+                    "--m3-fixture-workspace", os.path.join(root, "m3-ws"),
+                    "--m3-fixture-script", os.path.join(root, "m3-script.json")]
+    fixture_bin = None
+    if args.m2_fixtures:
+        fixture_bin = os.path.join(root, "fixture-bin")
+        os.makedirs(fixture_bin, mode=0o700)
+        for name, version in (("claude", "2.1.309 (Claude Code)"),
+                              ("codex", "codex-cli 0.159.0")):
+            script = ("#!/bin/sh\n"
+                      "if [ \"${1-}\" = \"--version\" ]; then\n"
+                      f"  printf '%s\\n' '{version}'\n"
+                      "  exit 0\n"
+                      "fi\n"
+                      f"printf '%s\\n' 'M2_FIXTURE_{name.upper()}_STARTED'\n"
+                      f"while IFS= read -r line; do printf '%s\\n' 'M2_FIXTURE_{name.upper()}_INPUT' \"$line\"; done\n")
+            path = os.path.join(fixture_bin, name)
+            with open(path, "w") as f:
+                f.write(script)
+            os.chmod(path, 0o700)
+        os.makedirs(os.path.join(root, "home", ".claude"), mode=0o700)
+        with open(os.path.join(root, "home", ".claude", "CLAUDE.md"), "w") as f:
+            f.write("# Disposable M2 GUI fixture\n\nInitial instruction text for edit, template, and Undo checks.\n")
+        os.chmod(os.path.join(root, "home", ".claude", "CLAUDE.md"), 0o600)
     logs = os.path.join(root, "logs")
     if args.seed:
         # Copies, into the run's own private state: the originals are only read.
@@ -460,7 +514,7 @@ def main():
                 os.chmod(dirpath, 0o700)
                 for f in files:
                     os.chmod(os.path.join(dirpath, f), 0o600)
-    nest = host = app = frames = pointer = None
+    nest = host = app = frames = pointer = keyring = keyring_log = None
     result = {"run": args.run, "shape": args.shape, "binary": binary,
               "loadavg": open("/proc/loadavg").read().split()[:3],
               "mem_available_mib": int([l for l in open("/proc/meminfo") if l.startswith("MemAvailable")][0].split()[1]) // 1024,
@@ -469,7 +523,8 @@ def main():
         nest = Nest(root, logs)
         x_env = {"PATH": BASE_PATH, "DISPLAY": DISPLAY, "HOME": os.path.join(root, "nest-home")}
         app_env = {
-            "PATH": BASE_PATH, "HOME": os.path.join(root, "home"),
+            "PATH": f"{fixture_bin}:{BASE_PATH}" if fixture_bin else BASE_PATH,
+            "HOME": os.path.join(root, "home"),
             "XDG_RUNTIME_DIR": os.path.join(root, "run"), "XDG_STATE_HOME": os.path.join(root, "state"),
             "XDG_CONFIG_HOME": os.path.join(root, "config"), "XDG_DATA_HOME": os.path.join(root, "data"),
             "XDG_CACHE_HOME": os.path.join(root, "cache"), "DISPLAY": DISPLAY, "GDK_BACKEND": "x11",
@@ -477,6 +532,53 @@ def main():
             "KDE_SESSION_VERSION": "6", "LANG": "C.UTF-8", "SHELL": os.environ.get("SHELL", "/bin/sh"),
             "DBUS_SESSION_BUS_ADDRESS": nest.bus("app-bus"),
         }
+        if fixture_bin:
+            # Keep the disposable M2 GUI accessible to AT-SPI driven test tooling.
+            app_env.pop("NO_AT_BRIDGE", None)
+            # The isolated Secret Service lets the M2 GUI exercise sealed Undo without
+            # reading or using the account's real keyring. Its password exists only in this
+            # temporary HOME and the owned daemon is stopped before the private bus.
+            control = os.path.join(root, "run", "fixture-keyring")
+            os.makedirs(control, mode=0o700)
+            password = os.path.join(root, "home", ".fixture-keyring-passphrase")
+            with open(password, "w") as f:
+                f.write("M2 disposable keyring passphrase\n")
+            os.chmod(password, 0o600)
+            starter = os.path.join(root, "run", "start-fixture-keyring.sh")
+            with open(starter, "w") as f:
+                f.write("#!/bin/sh\n/usr/bin/gnome-keyring-daemon --components=secrets --foreground --unlock --control-directory \"$XDG_RUNTIME_DIR/fixture-keyring\" < \"$HOME/.fixture-keyring-passphrase\"\n")
+            os.chmod(starter, 0o700)
+            keyring_log = open(os.path.join(logs, "keyring.log"), "wb")
+            keyring = Owned(["/bin/sh", starter], "/bin/sh", env=app_env,
+                            log=keyring_log)
+            # A secret-tool request made before this owned daemon registers can D-Bus-activate
+            # a second, locked daemon. Wait on the private bus without activating the service.
+            ready_until = time.monotonic() + 8
+            while True:
+                ready = subprocess.run(
+                    ["/usr/bin/gdbus", "call", "--session", "--dest", "org.freedesktop.DBus",
+                     "--object-path", "/org/freedesktop/DBus", "--method",
+                     "org.freedesktop.DBus.NameHasOwner", "org.freedesktop.secrets"],
+                    capture_output=True, env=app_env, timeout=2, check=False,
+                )
+                if ready.returncode == 0 and ready.stdout.strip() == b"(true,)":
+                    break
+                if time.monotonic() >= ready_until or not keyring.alive():
+                    raise RuntimeError("the disposable Secret Service did not register")
+                time.sleep(0.05)
+            secret_attrs = ["service", "wyss-m2-fixture", "account", "integration-probe"]
+            stored = subprocess.run(
+                ["/usr/bin/secret-tool", "store", "--label", "M2 disposable fixture", *secret_attrs],
+                input=b"fixture marker only\n", capture_output=True, env=app_env,
+                timeout=8, check=False,
+            )
+            looked_up = subprocess.run(
+                ["/usr/bin/secret-tool", "lookup", *secret_attrs],
+                capture_output=True, env=app_env, timeout=8, check=False,
+            )
+            if stored.returncode != 0 or looked_up.returncode != 0 or looked_up.stdout != b"fixture marker only\n":
+                raise RuntimeError("the disposable M2 Secret Service fixture did not round trip")
+            print("M2 fixture Secret Service round trip: PASS", flush=True)
         # The host, apart from any window, as the application would have it.
         with open(os.path.join(logs, "host.log"), "wb") as hostlog:
             host = Owned([binary, "--wyss-host"], binary, env=app_env, log=hostlog)
@@ -494,11 +596,16 @@ def main():
                                "terminals": sum(len(p["terminals"]) for p in world["projects"])}
             pointer = Pointer(x_env)
             if args.steps:
-                app = Session(binary, app_env, logs, "app")
-                time.sleep(7.0)
+                app_ctl = AppCtl(binary, app_env, logs, app_args)
+                app = app_ctl.app
+                time.sleep(7.0 if not app_args else 10.0)
                 place_window(x_env)
                 time.sleep(1.5)
-                run_steps(json.load(open(args.steps)), x_env, pointer, args.out, args.run, world, socket_path, (app.pid,))
+                try:
+                    run_steps(json.load(open(args.steps)), x_env, pointer, args.out, args.run,
+                              world, socket_path, (app.pid,), root, app_ctl, host.pid)
+                finally:
+                    app = app_ctl.app
                 print("host alive:", host.alive(), "code:", host.proc.poll())
                 print(json.dumps(host_list(socket_path))[:1500])
                 return 0
@@ -516,23 +623,46 @@ def main():
         if host:
             host.adopt_tree()
             host.stop()
+        if keyring:
+            keyring.adopt_tree()
+            keyring.stop()
+        if keyring_log:
+            keyring_log.close()
         if nest:
             nest.stop()
         with open(os.path.join(args.out, f"run{args.run}.json"), "w") as f:
             json.dump(result, f, indent=1, default=str)
-        for name in ("app.log", "host.log", "world.log"):
+            f.write("\n")
+        for name in ("app.log", "host.log", "world.log", "keyring.log"):
             src = os.path.join(root, "logs", name)
             if os.path.exists(src):
                 shutil.copy(src, os.path.join(args.out, f"run{args.run}.{name}"))
         result["leftovers"] = leftovers(root)
         with open(os.path.join(args.out, f"run{args.run}.json"), "w") as f:
             json.dump(result, f, indent=1, default=str)
+            f.write("\n")
         mounted = [l.split()[1] for l in open("/proc/mounts") if l.split()[1].startswith(root)]
         if mounted:
             print(f"left {root}: still mounted {mounted}", file=sys.stderr)
         else:
             shutil.rmtree(root, ignore_errors=True)
     return 0
+
+
+def real_paths_state():
+    """Metadata only (never contents) of the installed Console's own directories, which a disposable
+    run must not touch: existence, change time, size and entry count."""
+    out = {}
+    home = os.path.expanduser("~")
+    for rel in (".config/wyss-console", ".local/state/wyss-console", ".local/share/wyss-console", ".local/opt/wyss-console"):
+        p = os.path.join(home, rel)
+        try:
+            st = os.lstat(p)
+            entries = len(os.listdir(p)) if os.path.isdir(p) else None
+            out[rel] = {"mtime_ns": st.st_mtime_ns, "size": st.st_size, "entries": entries}
+        except OSError:
+            out[rel] = None
+    return out
 
 
 def leftovers(root):
@@ -552,8 +682,13 @@ def leftovers(root):
     return found
 
 
-def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None, session_pid=(None,)):
+def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None,
+              session_pid=(None,), fixture_root=None, app_ctl=None, host_pid=None):
     """Calibration: click, type, wait and take pictures, to read the screen by eye."""
+    fixture_baseline = None
+    fixture_snapshots = {}
+    fs_baseline = None
+    m4_ctx = {}
     for step in steps:
         kind = step[0]
         if os.environ.get("M1_TRACE_HOST") and socket_path:
@@ -583,6 +718,113 @@ def run_steps(steps, x_env, pointer, out, run, world=None, socket_path=None, ses
         elif kind == "hostwrite":
             host_write(socket_path, world["projects"][0]["terminals"][0]["terminal"],
                        step[1].encode().decode("unicode_escape").encode())
+        elif kind == "restart-app":
+            # The window ends and a new one opens over the same host and state; the host and its
+            # terminals are not touched. The new window is waited for like the first.
+            app_ctl.restart()
+            session_pid = (app_ctl.app.pid,)
+            time.sleep(7.0 if not app_ctl.args else 10.0)
+            place_window(x_env)
+            time.sleep(1.5)
+        elif kind.startswith("m4-"):
+            ctx = {"socket": socket_path, "host_pid": host_pid, "m4": m4_ctx}
+            ok, detail = m4_steps.check((kind[3:].replace("-", "_"), *step[1:]), ctx)
+            print(f"{kind} {step[1:]}: {'ok' if ok else 'FAILED'} {detail}", flush=True)
+            if not ok:
+                raise AssertionError(f"{kind} {step[1:]} failed: {detail}")
+        elif kind.startswith("m3-"):
+            if fixture_root is None:
+                raise RuntimeError("m3 checks need --m3-fixture")
+            ctx = {"state": os.path.join(fixture_root, "m3-state"), "ws": os.path.join(fixture_root, "m3-ws"),
+                   "root": fixture_root}
+            ok, detail = m3_steps.check((kind[3:].replace("-", "_"), *step[1:]), ctx)
+            print(f"{kind} {step[1:]}: {'ok' if ok else 'FAILED'} {detail}", flush=True)
+            if not ok:
+                raise AssertionError(f"{kind} {step[1:]} failed: {detail}")
+        elif kind == "fs-baseline":
+            fs_baseline = real_paths_state()
+        elif kind == "fs-compare":
+            now = real_paths_state()
+            changed = {k: [fs_baseline.get(k), now[k]] for k in now if fs_baseline is None or fs_baseline.get(k) != now[k]}
+            with open(os.path.join(out, f"fs-{run}-{step[1]}.json"), "w") as f:
+                json.dump({"compared": sorted(now), "changed": changed}, f, indent=2)
+                f.write("\n")
+            if changed:
+                raise AssertionError(f"the installed Console's own directories changed: {sorted(changed)}")
+        elif kind == "fs-tree":
+            tree = []
+            for d, dirs, files in os.walk(fixture_root):
+                for n in sorted(dirs + files):
+                    p = os.path.join(d, n)
+                    if os.path.islink(p) or os.path.isdir(p):
+                        tree.append([os.path.relpath(p, fixture_root), "dir" if os.path.isdir(p) else "link"])
+                    elif os.path.isfile(p):
+                        tree.append([os.path.relpath(p, fixture_root), os.path.getsize(p)])
+            with open(os.path.join(out, f"tree-{run}-{step[1]}.json"), "w") as f:
+                json.dump(tree, f, indent=1)
+                f.write("\n")
+        elif kind == "native-state":
+            rows = host_call(socket_path, "native_sessions", {"sample": False})
+            state = rows.get("ok", [])
+            summary = [{"id": row.get("id"), "restart_of": row.get("restart_of"),
+                        "terminal_id": row.get("terminal_id"),
+                        "agent_id": row.get("agent_id"), "state": row.get("state"),
+                        "version": row.get("version"), "profile": row.get("profile"),
+                        "restarts": row.get("restarts"), "error": row.get("error")}
+                       for row in state]
+            with open(os.path.join(out, f"native-{run}-{step[1]}.json"), "w") as f:
+                json.dump(summary, f, indent=2)
+                f.write("\n")
+            print(f"native state {step[1]}:", json.dumps(summary), flush=True)
+        elif kind == "assert-native-count":
+            rows = host_call(socket_path, "native_sessions", {"sample": False}).get("ok", [])
+            if len(rows) != step[1]:
+                raise AssertionError(f"expected {step[1]} Native sessions; got {len(rows)}")
+            if len(step) > 2 and rows[0].get("restarts") != step[2]:
+                raise AssertionError(f"expected restart count {step[2]}; got {rows[0].get('restarts')}")
+        elif kind == "assert-native-restart":
+            rows = host_call(socket_path, "native_sessions", {"sample": False}).get("ok", [])
+            replaced = [row for row in rows if row.get("restart_of")]
+            old = [row for row in rows if row.get("state") == "stopped"]
+            if (len(rows) != 2 or len(replaced) != 1 or len(old) != 1
+                    or replaced[0].get("state") != "running"
+                    or replaced[0].get("restarts") != 1
+                    or replaced[0].get("restart_of") != old[0].get("id")
+                    or replaced[0].get("terminal_id") == old[0].get("terminal_id")):
+                raise AssertionError(f"restart did not preserve/replace as expected: {rows}")
+        elif kind == "fixture-file-snapshot":
+            import hashlib
+            if fixture_root is None:
+                raise RuntimeError("fixture file checks require --m2-fixtures")
+            path = os.path.join(fixture_root, "home", ".claude", "CLAUDE.md")
+            data = open(path, "rb").read()
+            digest = hashlib.sha256(data).hexdigest()
+            if step[1] == "initial":
+                fixture_baseline = digest
+            elif step[2] == "same" and digest != fixture_baseline:
+                raise AssertionError(f"fixture file {step[1]} should match its initial SHA-256")
+            elif step[2] == "different" and digest == fixture_baseline:
+                raise AssertionError(f"fixture file {step[1]} should differ from its initial SHA-256")
+            elif step[2] == "same-as" and digest != fixture_snapshots.get(step[3]):
+                raise AssertionError(f"fixture file {step[1]} should match snapshot {step[3]}")
+            snapshot = {"label": step[1], "bytes": len(data), "sha256": digest}
+            fixture_snapshots[step[1]] = digest
+            with open(os.path.join(out, f"fixture-{run}-{step[1]}.json"), "w") as f:
+                json.dump(snapshot, f, indent=2)
+                f.write("\n")
+            print(f"fixture file {step[1]}: {json.dumps(snapshot)}", flush=True)
+        elif kind == "fixture-template-snapshot":
+            import hashlib
+            if fixture_root is None:
+                raise RuntimeError("fixture template checks require --m2-fixtures")
+            path = os.path.join(fixture_root, "home", "instructions.wyss-template")
+            data = open(path, "rb").read()
+            snapshot = {"label": step[1], "bytes": len(data),
+                        "sha256": hashlib.sha256(data).hexdigest()}
+            with open(os.path.join(out, f"template-{run}-{step[1]}.json"), "w") as f:
+                json.dump(snapshot, f, indent=2)
+                f.write("\n")
+            print(f"fixture template {step[1]}: {json.dumps(snapshot)}", flush=True)
         elif kind == "scroll":
             pointer.do(f"mousemove {step[1]} {step[2]} click --repeat {step[3]} --delay 20 {step[4]}")
 
@@ -630,13 +872,48 @@ def host_list(socket_path):
     return json.loads(data)
 
 
+def host_call(socket_path, op, params):
+    """One bounded read-only host request used to record Native fixture state."""
+    import socket
+    import struct
+    body = json.dumps({"op": op, "params": params}).encode()
+    with socket.socket(socket.AF_UNIX) as sock:
+        sock.settimeout(10)
+        sock.connect(socket_path)
+        sock.sendall(struct.pack(">I", len(body)) + body)
+        head = sock.recv(4)
+        size = struct.unpack(">I", head)[0]
+        data = b""
+        while len(data) < size:
+            data += sock.recv(size - len(data))
+    return json.loads(data)
+
+
+class AppCtl:
+    """The application window of a scenario, which a step may end and open again over the same host
+    and state (the host and its terminals are not part of it)."""
+
+    def __init__(self, binary, env, logs, args):
+        self.binary, self.env, self.logs, self.args = binary, env, logs, list(args)
+        self.count = 0
+        self.app = self._start()
+
+    def _start(self):
+        self.count += 1
+        return Session(self.binary, self.env, self.logs, "app" if self.count == 1 else f"app{self.count}", self.args)
+
+    def restart(self):
+        self.app.stop()
+        self.app = self._start()
+
+
 class Session:
     """The application on the nested display, started over the run's host and store, on the bus
     made for the run."""
 
-    def __init__(self, binary, app_env, logs, name):
+    def __init__(self, binary, app_env, logs, name, args=()):
         self.log = open(os.path.join(logs, f"{name}.log"), "wb")
-        self.owned = Owned([binary], binary, env=app_env, log=self.log)
+        self.owned = Owned([binary, *args], binary, env=app_env, log=self.log)
         self.pid = self.owned.pid
 
     def stop(self):

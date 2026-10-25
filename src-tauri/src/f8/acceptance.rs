@@ -243,6 +243,8 @@ struct Options {
     root: Option<PathBuf>,
     /// The identity of this authority instance, when it is not the fixture's.
     authority: Option<String>,
+    /// How long a provider has to answer `turn/interrupt`, when a test needs less than the contract.
+    interrupt_answer_ms: Option<u64>,
 }
 
 struct App {
@@ -351,6 +353,9 @@ impl App {
                 .then(|| StagingRoot::open(&staging).unwrap()),
         )
         .unwrap();
+        if let Some(ms) = options.interrupt_answer_ms {
+            engine = engine.with_interrupt_answer_ms(ms);
+        }
         if let Some(stage) = options.stage_fault {
             knobs.stage_fires.store(true, Ordering::Release);
             let fires = knobs.stage_fires.clone();
@@ -2846,3 +2851,6 @@ mod system;
 
 #[path = "acceptance_resources.rs"]
 mod resources;
+
+#[path = "acceptance_concurrency.rs"]
+mod concurrency;

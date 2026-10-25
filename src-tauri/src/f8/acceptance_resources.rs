@@ -9,7 +9,7 @@ fn ticks_per_second() -> f64 {
     unsafe { nix::libc::sysconf(nix::libc::_SC_CLK_TCK) as f64 }
 }
 /// CPU time of one thread of this process, in seconds.
-fn thread_cpu(tid: usize) -> f64 {
+pub(super) fn thread_cpu(tid: usize) -> f64 {
     let stat = std::fs::read_to_string(format!("/proc/self/task/{tid}/stat")).unwrap();
     // The command is in parentheses and may hold spaces: the fields after it are counted.
     let rest = &stat[stat.rfind(')').unwrap() + 2..];
@@ -30,7 +30,7 @@ fn fds() -> usize {
 fn threads() -> u64 {
     status_kib("/proc/self/status", "Threads:")
 }
-fn rss_kib(pid: u32) -> u64 {
+pub(super) fn rss_kib(pid: u32) -> u64 {
     status_kib(&format!("/proc/{pid}/status"), "VmRSS:")
 }
 fn percentile(samples: &mut [Duration], p: f64) -> Duration {

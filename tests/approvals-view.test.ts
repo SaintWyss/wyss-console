@@ -312,8 +312,9 @@ it('shows an approval under the turn that waits on it and in Approvals, and appr
   expect(text(agent().querySelector('.turn-head .pill'))).toBe('Running');
   // The sidebar says something waits, wherever the user is.
   expect(text(document.querySelector('.nav-tag.waiting'))).toBe('1');
-  // No handle, fingerprint or lease is on screen.
-  expect(text(document.body)).not.toMatch(
+  // No handle, fingerprint or lease is on screen of the Agents view. (The whole page is not
+  // the claim: the sidebar names the Providers view, and that word is fine there.)
+  expect(text(agent())).not.toMatch(
     new RegExp(`${C}|fingerprint|lease|provider`, 'i'),
   );
 

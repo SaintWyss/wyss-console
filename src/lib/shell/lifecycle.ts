@@ -145,7 +145,7 @@ export function summarizeLink(
 
 const FAILURE: Record<LifecycleFailure, string> = {
   not_packaged:
-    'No Wyss authority is running. This is a development build: it does not install or start one. Start wyss-control yourself and it is used as soon as it answers.',
+    'No Wyss authority is running. Automatic authority management is disabled: opening the GUI does not install or start an authority. Start wyss-control yourself and it is used as soon as it answers.',
   package_invalid:
     'The authority packaged with this application could not be trusted: it is missing, it is not the one this application was built with, or it is in a folder others can write to. Nothing was installed.',
   installation_unsafe:

@@ -14,6 +14,9 @@
   import CredentialsView from './lib/features/credentials/CredentialsView.svelte';
   import { EventsController } from './lib/features/events/controller';
   import { F8Controller } from './lib/features/f8/controller';
+  import { M3Controller } from './lib/features/m3/controller';
+  import ProvidersView from './lib/features/m3/ProvidersView.svelte';
+  import { desktopM3 } from './lib/desktop/m3-client';
   import { ProjectsController } from './lib/features/projects/controller';
   import ProjectsGate from './lib/features/projects/ProjectsGate.svelte';
   import ProjectsView from './lib/features/projects/ProjectsView.svelte';
@@ -37,6 +40,7 @@
   } from './lib/features/sessions/present';
   import SessionsView from './lib/features/sessions/SessionsView.svelte';
   import TerminalView from './lib/features/terminal/TerminalView.svelte';
+  import LifecycleCard from './lib/features/terminal/LifecycleCard.svelte';
   import type { WorkspaceState } from './lib/features/terminal/session-manager';
   import { retryAuthority } from './lib/desktop/lifecycle-client';
   import AuthorityNotice from './lib/shell/AuthorityNotice.svelte';
@@ -134,6 +138,11 @@
   const defaultFilter = $derived(settings.preferences.events.default_filter);
   // Managed runtimes of protocol 2. Whether the interface exists is the desktop's answer,
   // asked once: the installed desktop answers inactive and shows nothing of it.
+  // Read only while its view is shown; it carries the fixture runtime's few actions where a build hosts one.
+  const m3Controller = new M3Controller(desktopM3, (next) => {
+    m3 = next;
+  });
+  let m3 = $state(m3Controller.state());
   const f8Controller = new F8Controller((next) => {
     f8 = next;
   });
@@ -145,7 +154,7 @@
   });
   let projects = $state(projectsController.state());
   const items = $derived(
-    navItems(f8.gate === 'active', projects.overview?.enabled === true),
+    navItems(f8.gate === 'active', projects.overview?.enabled === true, true),
   );
   let opened = false;
   let navigated = false;
@@ -157,6 +166,9 @@
   });
   $effect(() => {
     f8Controller.setVisible(activeView === 'runtimes');
+  });
+  $effect(() => {
+    m3Controller.setVisible(activeView === 'providers');
   });
   $effect(() => {
     projectsController.setVisible(activeView === 'projects');
@@ -262,6 +274,7 @@
       credentialsController.dispose();
       settingsController.dispose();
       f8Controller.dispose();
+      m3Controller.dispose();
       projectsController.dispose();
     };
   });
@@ -390,6 +403,11 @@
         nativeProfiles={native.profiles}
       />
     {/if}
+    <ProvidersView
+      visible={activeView === 'providers'}
+      view={m3}
+      controller={m3Controller}
+    />
     {#if f8.gate === 'active'}
       <RuntimesView
         visible={activeView === 'runtimes'}
@@ -451,6 +469,7 @@
       onretry={retry}
     >
       <ProjectsGate {projects} controller={projectsController} />
+      <LifecycleCard />
     </SettingsView>
   </main>
 </div>

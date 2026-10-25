@@ -20,6 +20,11 @@ export interface TerminalRenderer {
    */
   onMetricsChange?(listener: () => void): () => void;
   focus(): void;
+  /**
+   * Draws a screen the host's parser kept: the terminal takes the size the program is at, is
+   * cleared, and the repaint is written. Resolves false when the terminal went away meanwhile.
+   */
+  restore?(repaint: Uint8Array, size: TerminalSize): Promise<boolean>;
   /** Finds `query` in the scrollback and the screen and shows the match `step` from the last. */
   search?(
     query: string,
@@ -125,6 +130,22 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
       const rows = Math.max(1, Math.min(512, size.rows));
       if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
       return { rows, cols };
+    },
+    async restore(repaint, size) {
+      if (disposed) return false;
+      if (pending) throw new Error('renderer_busy');
+      term.resize(
+        Math.max(2, Math.min(512, size.cols)),
+        Math.max(1, Math.min(512, size.rows)),
+      );
+      term.reset();
+      return new Promise<boolean>((resolve) => {
+        pending = resolve;
+        term.write(repaint, () => {
+          pending = undefined;
+          resolve(!disposed);
+        });
+      });
     },
     write(data) {
       if (disposed) return Promise.resolve(false);

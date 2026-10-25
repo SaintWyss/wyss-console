@@ -95,6 +95,16 @@
 <div class="rt-overview">
   <p class="rt-next" role="status">{next}</p>
 
+  <section class="rt-card" aria-labelledby="rt-provider-support">
+    <header>
+      <h4 id="rt-provider-support">Provider support</h4>
+    </header>
+    <p class="rt-alert" data-testid="claude-managed-unavailable" role="note">
+      Claude Code Managed is not implemented in this authority. This session
+      remains Codex; Native use requires a separate, explicit launch.
+    </p>
+  </section>
+
   <section class="rt-card" aria-labelledby="rt-runtime">
     <header>
       <h4 id="rt-runtime">Runtime</h4>

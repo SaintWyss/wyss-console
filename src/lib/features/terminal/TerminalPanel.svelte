@@ -4,6 +4,7 @@
     TerminalSession,
     TerminalSessionManager,
   } from './session-manager';
+  import { parserNote } from './parser-status';
   let {
     session,
     tabId,
@@ -28,6 +29,7 @@
     onsearchclose: () => void;
   } = $props();
   let host: HTMLDivElement;
+  const note = $derived(parserNote(session.view));
   let query = $state('');
   let caseSensitive = $state(false);
   let result = $state({ total: 0, current: 0 });
@@ -104,6 +106,11 @@
       {#if session.view.truncated}
         · Output truncated{/if}
     </p>
+    {#if note}
+      <p class="terminal-parser" data-tone={note.tone} title={note.title}>
+        {note.text}
+      </p>
+    {/if}
   </div>
   {#if searching}
     <div class="terminal-search" role="search">

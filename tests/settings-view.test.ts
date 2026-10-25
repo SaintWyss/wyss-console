@@ -140,6 +140,7 @@ it('opens from the sidebar with every section, in order, and the defaults select
       'About',
       'Reset',
       'Projects and workspaces',
+      'Terminals after the window closes',
     ],
   );
   expect(select('setting-landing').value).toBe('console');

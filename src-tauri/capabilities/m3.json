@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "m3",
+  "description": "The Providers window (M3): one read of what each provider profile can do and why it is or is not available. It starts nothing, decides nothing and reads no provider, credential or configuration; the state it answers is a projection built by the application.",
+  "windows": ["main"],
+  "permissions": ["allow-m3-state"]
+}

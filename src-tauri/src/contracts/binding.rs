@@ -49,8 +49,11 @@ impl SessionBinding {
     pub fn validate(&self) -> ControlResult<()> {
         validate_workspace_text(&self.workspace_root)?;
         if self.binding_revision != 1
-            || self.adapter_id.as_str() != "codex"
-            || self.runtime_kind != super::agent_adapter::AgentRuntimeKind::Codex
+            || !matches!(
+                (self.adapter_id.as_str(), self.runtime_kind),
+                ("codex", super::agent_adapter::AgentRuntimeKind::Codex)
+                    | ("claude", super::agent_adapter::AgentRuntimeKind::ClaudeCode)
+            )
             || self.created_at != self.updated_at
         {
             return Err(ControlError::StorageIncompatible);

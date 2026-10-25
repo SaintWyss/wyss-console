@@ -286,7 +286,7 @@ impl Authority {
         };
         Ok(json!({"kind":kind,"value":{"protocol_version":2,
             "authority_instance_id":self.authority(),"service_version":env!("CARGO_PKG_VERSION"),
-            "storage_schema_version":8,"stream_id":stream,
+            "storage_schema_version":super::provider::version(c)?,"stream_id":stream,
             "last_sequence":if head == "0" { Value::Null } else { json!(head) },
             "prepared_count":count("prepared")?,"closed_count":count("closed")?}}))
     }
@@ -296,6 +296,8 @@ impl Authority {
             return Err(E::InvalidRequest);
         };
         let s = session.as_str();
+        let provider = super::provider::session(self.engine.connection(), s)?;
+        let (adapter, runtime_kind) = provider.fields();
         // A status for a session that was never prepared would invent a stopped runtime for it.
         super::operations::session(self.engine.connection(), s)?;
         let row: Option<(String, i64, i64)> = self
@@ -318,9 +320,9 @@ impl Authority {
         let launch = self.engine.launch_facts(s);
         let (profile, workspace, models) = match &launch {
             Some((Some(root), listed)) => {
-                (Some("codex_local_tools_v1"), Some(root.clone()), *listed)
+                (Some(provider.profile(true)), Some(root.clone()), *listed)
             }
-            Some((None, listed)) => (Some("codex_inference_v1"), None, *listed),
+            Some((None, listed)) => (Some(provider.profile(false)), None, *listed),
             None => (None, None, 0),
         };
         let models = if actual == "ready" { models } else { 0 };
@@ -336,7 +338,7 @@ impl Authority {
             diagnostic = Some(kind);
             budget = key;
         }
-        let mut value = json!({"adapter_id":"codex","runtime_kind":"codex","desired_state":desired,
+        let mut value = json!({"adapter_id":adapter,"runtime_kind":runtime_kind,"desired_state":desired,
             "revision":revision.max(0),"actual_state":actual,
             "runtime_instance_id":self.engine.reference(s).map(|r| r.runtime_instance_id),
             "runtime_version":identity.as_ref().map(|i| i.observed_version.clone()),
@@ -713,6 +715,9 @@ impl Authority {
                     self.engine.transport_failed(&ticket.reference);
                     return Err(E::ExternalEffectUnknown);
                 }
+                // The write is accepted, not answered: the provider now owes the turn's end.
+                self.engine
+                    .interrupt_dispatched(&ticket.reference, Instant::now());
             }
         }
         Ok(json!({"kind":"turn","value":record}))

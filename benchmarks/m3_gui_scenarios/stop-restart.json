@@ -1,0 +1,30 @@
+{
+  "boot": 10,
+  "mock": [{ "text": "first life" }, { "text": "second life" }],
+  "steps": [
+    ["click", 80, 467],
+    ["wait", 2],
+    ["click", 427, 356],
+    ["wait", 7],
+    ["click", 857, 490],
+    ["type", "One"],
+    ["wait", 1],
+    ["click", 276, 549],
+    ["expect_generations", 1, 40],
+    ["wait", 4],
+    ["shot", "00-first-life"],
+    ["click", 515, 356],
+    ["wait", 5],
+    ["shot", "01-stopped"],
+    ["click", 552, 356],
+    ["wait", 7],
+    ["shot", "02-restarted"],
+    ["click", 857, 490],
+    ["type", "Two"],
+    ["wait", 1],
+    ["click", 276, 549],
+    ["expect_generations", 2, 40],
+    ["wait", 4],
+    ["shot", "03-second-life"]
+  ]
+}

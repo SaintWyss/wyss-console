@@ -102,6 +102,13 @@ impl HostLink {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn remote_for_test(path: PathBuf) -> Self {
+        Self {
+            mode: Arc::new(Mutex::new(Some(Arc::new(Mode::Remote(Remote::at(path)))))),
+        }
+    }
+
     fn connect(&self) -> Arc<Mode> {
         if let Some(path) = socket_path() {
             let remote = Remote { path };

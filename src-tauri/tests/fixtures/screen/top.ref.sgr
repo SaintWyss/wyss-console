@@ -1,0 +1,24 @@
+top - 03:47:53 up 2 days, 14:00,  1 user,  load average: 2,94, 2,11, 1,70       
+Tareas:[1m 2 [0mtotal,[1m 0 [0mrunning,[1m 2 [0msleep,[1m 0 [0md-sleep,[1m 0 [0mstopped,[1m 0 [0mzombie             
+%Cpu0  :[1m  5,7 [0mus,[1m  0,0 [0msy,[1m 11,4 [0mni,[1m 82,9 [0mid,[1m  0,0 [0mwa,[1m  0,0 [0mhi,[1m  0,0 [0msi,[1m  0,0 [0mst 
+%Cpu1  :[1m  0,0 [0mus,[1m  0,0 [0msy,[1m 32,4 [0mni,[1m 67,6 [0mid,[1m  0,0 [0mwa,[1m  0,0 [0mhi,[1m  0,0 [0msi,[1m  0,0 [0mst 
+%Cpu2  :[1m  0,0 [0mus,[1m  0,0 [0msy,[1m  0,0 [0mni,[1m100,0 [0mid,[1m  0,0 [0mwa,[1m  0,0 [0mhi,[1m  0,0 [0msi,[1m  0,0 [0mst 
+%Cpu3  :[1m  0,0 [0mus,[1m  0,0 [0msy,[1m  0,0 [0mni,[1m100,0 [0mid,[1m  0,0 [0mwa,[1m  0,0 [0mhi,[1m  0,0 [0msi,[1m  0,0 [0mst 
+%Cpu4  :[1m  0,0 [0mus,[1m  0,0 [0msy,[1m  0,0 [0mni,[1m 97,1 [0mid,[1m  0,0 [0mwa,[1m  0,0 [0mhi,[1m  2,9 [0msi,[1m  0,0 [0mst 
+%Cpu5  :[1m  2,7 [0mus,[1m  0,0 [0msy,[1m  8,1 [0mni,[1m 86,5 [0mid,[1m  0,0 [0mwa,[1m  2,7 [0mhi,[1m  0,0 [0msi,[1m  0,0 [0mst 
+%Cpu6  :[1m  0,0 [0mus,[1m  2,8 [0msy,[1m 22,2 [0mni,[1m 72,2 [0mid,[1m  0,0 [0mwa,[1m  2,8 [0mhi,[1m  0,0 [0msi,[1m  0,0 [0mst 
+%Cpu7  :[1m  0,0 [0mus,[1m  0,0 [0msy,[1m 22,2 [0mni,[1m 75,0 [0mid,[1m  0,0 [0mwa,[1m  2,8 [0mhi,[1m  0,0 [0msi,[1m  0,0 [0mst 
+MiB Mem :[1m  15813,0 [0mtotal,[1m   1902,4 [0mlibre,[1m   7747,6 [0musado,[1m   6640,1 [0mbúf/caché    
+MiB Intercambio:[1m  15813,0 [0mtotal,[1m   3733,6 [0mlibre,[1m  12079,3 [0musado.[1m   8065,5 [0mdispon
+
+[7m    PID USUARIO   PR  NI    VIRT    RES    SHR S  %CPU  %MEM     HORA+ ORDEN    
+[0m1981222 saintwy+  20   0    9048   4704   4592 S   0,0   0,0   0:00.00 sleep    
+1981223 saintwy+  20   0    9048   4692   4584 S   0,0   0,0   0:00.00 sleep    
+
+
+
+
+
+
+
+
