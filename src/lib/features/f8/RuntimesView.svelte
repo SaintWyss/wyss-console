@@ -147,7 +147,9 @@
           ? 'Waiting for the runtime to stop…'
           : f8.operation.step === 'binding'
             ? 'The authority is binding the workspace…'
-            : OPERATION[f8.operation.kind]}
+            : f8.operation.step === 'confirming'
+              ? 'Waiting for your answer in the confirmation window. Nothing is allowed until you choose Allow. If you cannot see it, it may be behind another window.'
+              : OPERATION[f8.operation.kind]}
     </p>
   {:else if f8.operation?.failure}
     <div

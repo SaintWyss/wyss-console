@@ -145,6 +145,8 @@ export function rig() {
   };
   let state!: F8ViewState;
   const sleeps: number[] = [];
+  /** The page's own bounds on an answer: none runs by itself, a test fires it. */
+  const timers: { ms: number; cancelled: boolean; fire: () => void }[] = [];
   // The fixture's own time: an approval is open for the five minutes after its request.
   let clock = Date.parse(real.approval.approval.requested_at) + 1000;
   const controller = new F8Controller(
@@ -158,11 +160,19 @@ export function rig() {
       clock += ms;
     },
     () => clock,
+    (ms, fire) => {
+      const timer = { ms, cancelled: false, fire };
+      timers.push(timer);
+      return () => {
+        timer.cancelled = true;
+      };
+    },
   );
   return {
     client,
     controller,
     sleeps,
+    timers,
     get state() {
       return state;
     },

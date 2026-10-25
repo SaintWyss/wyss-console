@@ -153,7 +153,7 @@ export type OperationKind =
   | 'abandon'
   | 'turn'
   | 'cancel';
-export type OperationStep = 'starting' | 'stopping' | 'binding';
+export type OperationStep = 'starting' | 'stopping' | 'binding' | 'confirming';
 
 export interface Operation {
   kind: OperationKind;
@@ -262,6 +262,17 @@ const BIND_PACE_MS = 500;
  */
 export const TURN_WAIT_MS = 10_000;
 const TURN_PACE_MS = 300;
+/**
+ * How long the page waits for the answer to one action. Rust bounds every call well inside
+ * this (the authority answers in 5 to 16 seconds); it is the page's own bound, for an answer
+ * that never comes, so that nothing stays pending for good.
+ */
+export const CALL_LIMIT_MS = 90_000;
+/**
+ * The same for an action the user must first allow in the confirmation window, which waits
+ * five minutes for them before it answers no.
+ */
+export const CONFIRM_LIMIT_MS = 5 * 60_000 + 30_000;
 /** The most one watcher waits for a commit before it asks again. */
 export const WATCH_MS = 20_000;
 /** Files of a change set read without being asked for. The rest are read on request. */
@@ -304,6 +315,8 @@ interface Intent {
   session: ManagedSessionId | null;
   /** The whole action, with the identities it was made with: a retry runs exactly this. */
   run: () => Promise<void>;
+  /** The desktop asks the user in its confirmation window before this goes to the authority. */
+  confirm?: boolean;
 }
 interface DecisionIntent {
   id: string;
@@ -381,6 +394,14 @@ export class F8Controller {
     private readonly sleep: (ms: number) => Promise<void> = (ms) =>
       new Promise((resolve) => setTimeout(resolve, ms)),
     private readonly now: () => number = () => Date.now(),
+    /** Calls `fire` after `ms`; the result cancels it. */
+    private readonly after: (ms: number, fire: () => void) => () => void = (
+      ms,
+      fire,
+    ) => {
+      const timer = setTimeout(fire, ms);
+      return () => clearTimeout(timer);
+    },
   ) {}
 
   state(): F8ViewState {
@@ -695,12 +716,14 @@ export class F8Controller {
       kind: intent.kind,
       session: intent.session,
       status: 'pending',
-      step: null,
+      step: intent.confirm ? 'confirming' : null,
       failure: null,
     };
     this.emit();
     try {
-      await intent.run();
+      await this.bounded(intent.run(), intent.confirm === true, () =>
+        this.arrived(intent),
+      );
       this.operation = null;
       this.intent = null;
     } catch (error) {
@@ -723,6 +746,47 @@ export class F8Controller {
     this.emit();
     // The outcome of the action is whatever the next read says it is.
     await this.refresh();
+  }
+  /**
+   * `work`, or the failure that says its answer did not come: the outcome is not known, the
+   * same identity may be sent again, and what the authority holds is read at once. The work
+   * itself is never run again here. If its answer does come late it is only read: `arrived`.
+   */
+  private async bounded(
+    work: Promise<void>,
+    confirm: boolean,
+    arrived: () => void,
+  ): Promise<void> {
+    let cancel = () => {};
+    const timeout = new Promise<'timeout'>((resolve) => {
+      cancel = this.after(confirm ? CONFIRM_LIMIT_MS : CALL_LIMIT_MS, () =>
+        resolve('timeout'),
+      );
+    });
+    try {
+      const first = await Promise.race([
+        work.then(() => 'done' as const),
+        timeout,
+      ]);
+      if (first === 'done') return;
+      work.then(arrived, () => undefined);
+      throw new F8CallError({
+        code: 'unavailable',
+        retry: true,
+        retry_in_ms: null,
+      });
+    } finally {
+      cancel();
+    }
+  }
+  /** The answer of an action that was called lost came after all: the failure goes, the reading stays. */
+  private arrived(intent: Intent) {
+    if (this.disposed || this.intent !== intent) return;
+    if (this.operation?.status !== 'failed') return;
+    this.operation = null;
+    this.intent = null;
+    this.emit();
+    void this.refresh();
   }
   private step(step: OperationStep) {
     if (this.operation?.status === 'pending') {
@@ -903,6 +967,8 @@ export class F8Controller {
     const revision = row.revision;
     await this.perform({
       kind: 'grant',
+      confirm:
+        scopes.includes('command_execute') || scopes.includes('file_change'),
       session: row.id,
       run: async () => {
         await this.client.grantLease(id, fence, revision, scopes, ttl);
@@ -918,6 +984,7 @@ export class F8Controller {
     const ttl = this.lease.ttl;
     await this.perform({
       kind: 'renew',
+      confirm: true,
       session: row.id,
       run: async () => {
         await this.client.renewLease(id, fence, lease.id, lease.revision, ttl);
@@ -1330,6 +1397,16 @@ export class F8Controller {
     };
     await this.sendDecision();
   }
+  /** A decision called lost was answered after all: the failure goes, what the approval says stays. */
+  private decisionArrived(intent: DecisionIntent) {
+    if (this.disposed || this.decisionIntent !== intent) return;
+    if (this.approval?.decision?.status !== 'failed') return;
+    this.decisionIntent = null;
+    this.approval = { ...this.approval, decision: null };
+    this.emit();
+    void this.loadApproval(intent.approval, true);
+    void this.readDetail();
+  }
   async retryDecision(): Promise<void> {
     if (
       this.approval?.decision?.status !== 'failed' ||
@@ -1353,12 +1430,18 @@ export class F8Controller {
     };
     this.emit();
     try {
-      await this.client.decide(
-        intent.kind,
-        intent.id,
-        intent.fence,
-        intent.approval,
-        intent.revision,
+      await this.bounded(
+        this.client
+          .decide(
+            intent.kind,
+            intent.id,
+            intent.fence,
+            intent.approval,
+            intent.revision,
+          )
+          .then(() => undefined),
+        intent.kind === 'accept',
+        () => this.decisionArrived(intent),
       );
       this.decisionIntent = null;
       if (this.approval) this.approval = { ...this.approval, decision: null };
