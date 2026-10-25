@@ -66,8 +66,11 @@ pub enum F8Failure {
     PermissionDenied,
     /// A lease for the session is already active.
     LeaseActive,
-    /// The authority is doing something that excludes this, or is at capacity.
+    /// The authority is doing something that excludes this, or is momentarily overloaded.
     Busy,
+    /// The authority is at its configured capacity for this (one runtime at a time) and did
+    /// not take it. Asking again changes nothing until something else stops.
+    Capacity,
     /// The agent runtime refused.
     Rejected,
     /// The authority could not tell whether the runtime acted.

@@ -316,6 +316,33 @@ it('offers a lease to grant only when none is active, with a closed set of scope
   expect(sent.fence).toEqual(stopped.session.runtime.fence);
 });
 
+it('says a runtime is refused for capacity in words of its own and offers only Dismiss', async () => {
+  const stopped = copy(fx.session_stopped);
+  const ipc = await select({
+    session: () => stopped,
+    run: (call) => {
+      if (call.command === 'f8_runtime_start')
+        throw { code: 'capacity', retry: false, retry_in_ms: null };
+      return {};
+    },
+  });
+  view()
+    .querySelector<HTMLInputElement>(
+      'input[name="rt-mode"][value="inference"]',
+    )!
+    .click();
+  await flush();
+  button('Start runtime').click();
+  await flush();
+  expect(ipc.count('f8_runtime_start')).toBe(1);
+  const alert = view().querySelector('.sessions-status[role="alert"]')!;
+  expect(text(alert)).toContain('Only one runtime runs at a time');
+  expect(text(alert)).not.toContain('busy');
+  expect(
+    Array.from(alert.querySelectorAll('button')).map((b) => text(b)),
+  ).toEqual(['Dismiss']);
+});
+
 it('says a lease that lets the runtime act waits for the user in the confirmation window, and one that does not does not', async () => {
   const stopped = copy(fx.session_attached);
   stopped.lease = null;

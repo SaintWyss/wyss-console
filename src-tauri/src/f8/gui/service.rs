@@ -34,13 +34,13 @@ use crate::{
     contracts::{
         Sequence, WireUuid,
         control::{
-            ApprovalDecision, ApprovalGet, ApprovalPending, ApprovalRespond, AuditRead, AuditWatch,
-            BindingAbandon, BindingCreate, BindingResume, BindingState, Close, ControlError as E,
-            Empty, ExecutionScope, GateQuery, Get, LeaseActive, LeaseGrant, LeaseRenew,
-            LeaseRevoke, List, MAX_PAGE, ManagedSessionRecord, ModelCursor, Operation, Prepare,
-            ResultValue, RuntimeModels, RuntimeMutation, RuntimeSafetyProfile, RuntimeStatus,
-            RuntimeTarget, TurnCancel, TurnEvents, TurnGet, TurnStart, validate_prompt,
-            validate_workspace_text,
+            ActualState, ApprovalDecision, ApprovalGet, ApprovalPending, ApprovalRespond,
+            AuditRead, AuditWatch, BindingAbandon, BindingCreate, BindingResume, BindingState,
+            Close, ControlError as E, Empty, ExecutionScope, GateQuery, Get, LeaseActive,
+            LeaseGrant, LeaseRenew, LeaseRevoke, List, MAX_PAGE, ManagedSessionRecord, ModelCursor,
+            Operation, Prepare, ResultValue, RuntimeModels, RuntimeMutation, RuntimeSafetyProfile,
+            RuntimeStatus, RuntimeTarget, TurnCancel, TurnEvents, TurnGet, TurnStart,
+            validate_prompt, validate_workspace_text,
         },
         identities::{ExecutionLeaseId, ManagedApprovalId, ManagedSessionId, ManagedTurnId},
     },
@@ -649,7 +649,7 @@ impl F8Gui {
             _ => return Err(F8Error::new(F8Failure::Invalid)),
         };
         let target = RuntimeTarget::codex();
-        self.runtime_mutation(
+        let started = self.runtime_mutation(
             session.clone(),
             Operation::RuntimeStart(RuntimeMutation {
                 intent_id: intent,
@@ -660,11 +660,50 @@ impl F8Gui {
                 workspace_root,
             }),
             Target::Runtime {
-                session,
+                session: session.clone(),
                 generation: Some(expected_generation),
                 instance: None,
             },
-        )
+        );
+        match started {
+            // The authority's limit is one runtime at a time. When it refuses because another
+            // session holds the runtime, say so and offer no retry: it cannot succeed until
+            // that one stops. Any other refusal for capacity stays what it was, a busy one.
+            Err(e)
+                if e.cause == Some(E::CapacityExceeded)
+                    && self.another_runtime_is_live(&session) =>
+            {
+                Err(F8Error {
+                    code: F8Failure::Capacity,
+                    retry: false,
+                    ..e
+                })
+            }
+            other => other,
+        }
+    }
+    /// Whether a session other than `session` has a runtime that is up or coming up or going down.
+    fn another_runtime_is_live(&self, session: &ManagedSessionId) -> bool {
+        let mut before = None;
+        for _ in 0..WALK_PAGES {
+            let Ok(view) = self.sessions(before) else {
+                return false;
+            };
+            if view.sessions.iter().any(|row| {
+                row.id != *session
+                    && !matches!(
+                        row.runtime.actual,
+                        ActualState::Stopped | ActualState::Failed
+                    )
+            }) {
+                return true;
+            }
+            match view.older {
+                Some(older) => before = Some(older),
+                None => return false,
+            }
+        }
+        false
     }
 
     pub fn runtime_stop(

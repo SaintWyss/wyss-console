@@ -52,6 +52,7 @@ export const F8_FAILURES = [
   'permission_denied',
   'lease_active',
   'busy',
+  'capacity',
   'rejected',
   'uncertain',
   'conflict',

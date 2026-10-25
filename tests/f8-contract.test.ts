@@ -217,6 +217,14 @@ describe('what it refuses', () => {
     expect(parseF8Failure(unsupported).code).toBe('unsupported');
     expect(failureText('unsupported')).not.toBe(failureText('invalid'));
     expect(failureText('unsupported')).toContain('does not offer');
+    // Capacity is not a passing busy: it says why and what frees it.
+    expect(failureText('capacity')).not.toBe(failureText('busy'));
+    expect(failureText('capacity')).toContain(
+      'Only one runtime runs at a time',
+    );
+    // An unknown outcome never says the action was canceled.
+    expect(failureText('unavailable')).toContain('Nothing was canceled');
+    expect(failureText('unavailable')).toContain('may still have happened');
   });
 
   it('turns anything that is not a failure into an internal one', () => {

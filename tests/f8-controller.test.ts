@@ -292,6 +292,46 @@ describe('an action is one intent', () => {
     expect(r.timers.every((t) => t.cancelled)).toBe(true);
   });
 
+  it('ends a lost action that is asked again after the authority was replaced or lost the lease: it says so, reads again and asks nothing more', async () => {
+    for (const refusal of ['stale', 'not_found'] as const) {
+      const r = make();
+      await r.open();
+      r.client.grantLease.mockImplementationOnce(() => never());
+      const grant = r.controller.grantLease();
+      await settle();
+      r.timers.find((t) => !t.cancelled)!.fire();
+      await grant;
+      expect(r.state.operation?.failure?.code).toBe('unavailable');
+      const reads = r.client.session.mock.calls.length;
+      r.client.grantLease.mockRejectedValueOnce(failure(refusal));
+      await r.controller.retry();
+      expect(r.state.notice).toBe('stale');
+      expect(r.state.operation).toBeNull();
+      expect(r.client.grantLease).toHaveBeenCalledTimes(2);
+      expect(r.client.session.mock.calls.length).toBeGreaterThan(reads);
+      await r.controller.retry();
+      expect(r.client.grantLease).toHaveBeenCalledTimes(2);
+      r.controller.dispose();
+    }
+  });
+
+  it('tells a second runtime at the capacity of one apart from a busy authority and offers no retry', async () => {
+    const r = make();
+    r.client.session.mockResolvedValue(runtimeAs('stopped'));
+    await r.open();
+    r.controller.chooseMode('inference');
+    r.client.startRuntime.mockRejectedValueOnce(failure('capacity'));
+    await r.controller.startRuntime();
+    expect(r.state.operation?.status).toBe('failed');
+    expect(r.state.operation?.failure).toEqual({
+      code: 'capacity',
+      retry: false,
+      retry_in_ms: null,
+    });
+    await r.controller.retry();
+    expect(r.client.startRuntime).toHaveBeenCalledTimes(1);
+  });
+
   it('sends a lost grant again only when the user asks, with exactly the identity it had', async () => {
     const r = make();
     await r.open();

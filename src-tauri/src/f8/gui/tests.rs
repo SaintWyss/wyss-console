@@ -24,6 +24,87 @@ fn a_mode_the_authority_does_not_serve_is_not_an_invalid_request() {
     assert!(!F8Error::of(E::Unsupported).retry);
 }
 
+#[test]
+fn a_second_runtime_at_the_capacity_of_one_is_told_so_and_is_not_offered_a_retry() {
+    let h = Harness::start(true, 1);
+    let first = h.gui.prepare(uuid()).unwrap().id;
+    let second = h.gui.prepare(uuid()).unwrap().id;
+    let workspace = || Some(h.workspace.to_str().unwrap().to_owned());
+    let rows = h.gui.sessions(None).unwrap();
+    let row = |id: &ManagedSessionId| rows.sessions.iter().find(|r| &r.id == id).unwrap().clone();
+    let (a, b) = (row(&first), row(&second));
+    h.gui
+        .runtime_start(
+            uuid(),
+            first.clone(),
+            a.runtime.revision,
+            a.runtime.generation,
+            AgentMode::LocalTools,
+            workspace(),
+        )
+        .unwrap();
+    let up = ready(&h.gui, &first);
+
+    // The authority's limit holds: the second session is refused, and the refusal says why.
+    let refused = h
+        .gui
+        .runtime_start(
+            uuid(),
+            second.clone(),
+            b.runtime.revision,
+            b.runtime.generation,
+            AgentMode::LocalTools,
+            workspace(),
+        )
+        .unwrap_err();
+    assert_eq!(refused.code, F8Failure::Capacity);
+    assert!(!refused.retry);
+    assert_ne!(refused.code, F8Failure::Busy);
+
+    // Nothing was admitted past the limit, and it is the first runtime that frees it.
+    let second_now = h.gui.session(second.clone()).unwrap();
+    assert_eq!(second_now.session.runtime.actual, ActualState::Stopped);
+    h.gui
+        .runtime_stop(
+            uuid(),
+            up.session.runtime.fence.clone(),
+            up.session.runtime.revision,
+        )
+        .unwrap();
+    eventually(|| {
+        (h.gui.session(first.clone()).ok()?.session.runtime.actual == ActualState::Stopped)
+            .then_some(())
+    });
+    let again = h.gui.session(second.clone()).unwrap();
+    eventually(|| {
+        match h.gui.runtime_start(
+            uuid(),
+            second.clone(),
+            again.session.runtime.revision,
+            again.session.runtime.generation,
+            AgentMode::LocalTools,
+            workspace(),
+        ) {
+            Ok(_) => Some(()),
+            Err(e) if matches!(e.code, F8Failure::Busy | F8Failure::Capacity) => None,
+            Err(e) => panic!("{e:?}"),
+        }
+    });
+    ready(&h.gui, &second);
+}
+
+#[test]
+fn a_refusal_for_capacity_that_no_other_runtime_explains_stays_a_busy_one() {
+    use crate::contracts::control::ControlError as E;
+    // The mapping alone: only the service, which can see another live runtime, says capacity.
+    assert_eq!(F8Error::of(E::CapacityExceeded).code, F8Failure::Busy);
+    assert!(F8Error::of(E::CapacityExceeded).retry);
+    assert_eq!(
+        F8Error::of(E::RuntimeOperationInProgress).code,
+        F8Failure::Busy
+    );
+}
+
 const ALL: [ExecutionScope; 5] = [
     ExecutionScope::SessionCreate,
     ExecutionScope::SessionResume,

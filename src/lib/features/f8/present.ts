@@ -140,7 +140,8 @@ export function gateText(reason: GateReasonName): string {
 
 const FAILURE: Record<F8FailureCode, string> = {
   inactive: 'This console is not connected to managed runtimes.',
-  unavailable: 'The authority did not answer, so the outcome is not known.',
+  unavailable:
+    'The authority did not answer, so the outcome is not known. Nothing was canceled and it may still have happened. The console reads the authority again; check what it holds before sending this again.',
   incompatible: 'This console and the authority speak different versions.',
   invalid: 'The console sent a request it should not have. Nothing changed.',
   unsupported:
@@ -158,6 +159,8 @@ const FAILURE: Record<F8FailureCode, string> = {
     'The authority denied it: no execution lease allows this action.',
   lease_active: 'The session already has an active execution lease.',
   busy: 'The authority is busy with another operation. Try again in a moment.',
+  capacity:
+    'The authority is at its limit for this and did not take it. Nothing changed. Only one runtime runs at a time: stop the one that is running, then start this one.',
   rejected: 'The agent runtime refused.',
   uncertain:
     'The authority could not confirm what the runtime did. Nothing is sent again by itself.',
