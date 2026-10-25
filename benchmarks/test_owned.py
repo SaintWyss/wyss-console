@@ -54,7 +54,9 @@ class OwnedTests(Base):
     def test_a_process_that_ignores_termination_is_ended_through_its_descriptor(self):
         sh = os.path.join(self.dir, "sh")
         shutil.copy("/bin/sh", sh)
-        decoy_sh = subprocess.Popen([sh, "-c", "sleep 300"])
+        # Block in the shell itself: killing a shell waiting on `sleep` orphaned the
+        # decoy's child after this test passed. The decoy must keep the same shell path.
+        decoy_sh = subprocess.Popen([sh, "-c", "read -r unused"], stdin=subprocess.PIPE)
         try:
             started = time.time()
             with Owned([sh, "-c", 'trap "" TERM; while :; do sleep 1; done'], sh) as o:
@@ -66,6 +68,7 @@ class OwnedTests(Base):
         finally:
             decoy_sh.kill()
             decoy_sh.wait()
+            decoy_sh.stdin.close()
 
     def test_a_launch_that_is_not_the_expected_binary_ends_itself_and_nothing_else(self):
         other = shutil.which("true") and os.path.join(self.dir, "other")
