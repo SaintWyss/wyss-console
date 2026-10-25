@@ -1,0 +1,72 @@
+{
+  "deleted": [
+    "docs/phase-1-product-consolidation",
+    "feat/f8-installed-wiring",
+    "feat/m1-store-v1-codec",
+    "feat/m1-workspace",
+    "fix/m1-confirm-labels",
+    "integrate/f8-final"
+  ],
+  "preserved": [
+    {
+      "name": "docs/m0-engineering-baseline",
+      "occupied": true,
+      "merged": true
+    },
+    {
+      "name": "docs/m1-adoption-record",
+      "occupied": true,
+      "merged": true
+    },
+    {
+      "name": "feat/b1-pure-contracts-2026-10-15",
+      "occupied": true,
+      "merged": true
+    },
+    {
+      "name": "feat/f8-production-runtime",
+      "occupied": true,
+      "merged": true
+    },
+    {
+      "name": "feat/m2-native-parity-2026-10-23",
+      "occupied": true,
+      "merged": true
+    },
+    {
+      "name": "feat/m3-managed-parity-2026-10-23",
+      "occupied": true,
+      "merged": true
+    },
+    {
+      "name": "feat/m4-terminal-fidelity",
+      "occupied": true,
+      "merged": true
+    },
+    {
+      "name": "feat/m5-boundaries-concurrency",
+      "occupied": true,
+      "merged": true
+    },
+    {
+      "name": "fix/m1-m5-production-blockers",
+      "occupied": true,
+      "merged": true
+    },
+    {
+      "name": "integration/m2-m3",
+      "occupied": true,
+      "merged": true
+    },
+    {
+      "name": "main",
+      "occupied": true,
+      "merged": true
+    },
+    {
+      "name": "release/m1-m5-production-candidate",
+      "occupied": true,
+      "merged": true
+    }
+  ]
+}

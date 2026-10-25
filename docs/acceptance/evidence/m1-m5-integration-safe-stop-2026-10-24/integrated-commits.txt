@@ -1,0 +1,101 @@
+0e9a5341a9df4e6169436a1d52320ce8548c031c def69fe35ddfe8b696b65a12d2f2babe296c8247 51b3fbeb9c42ed3216b7b1fe27ad77263899a48b Santiago V. Scacciaferro W. Merge PR #27: consolidate complete M1–M5 source history
+51b3fbeb9c42ed3216b7b1fe27ad77263899a48b 9b603f4ae80fa4f95b9306a34b4a2177ae004847 SaintWyss ci: exercise mandatory B1 sandbox checks before the long regression
+9b603f4ae80fa4f95b9306a34b4a2177ae004847 a68e7866e60409ac3f36218df4e55e6ae9382465 SaintWyss test(b1): probe namespaces with the host runtime loader aliases
+a68e7866e60409ac3f36218df4e55e6ae9382465 5eb3f69a45472403c35c6b2b6588047ad5aaa4e4 SaintWyss ci: retain test assertions while fitting all-feature artifacts on runner disk
+5eb3f69a45472403c35c6b2b6588047ad5aaa4e4 51dc23e471bdfc91594c5785684ab8ca6fb91c8e 6fd3b27caa4ce56870a9ff3f9c212d3236990901 817bc95526af6cb875eadb1d7ae87918d8d44cd4 fddbb428fae1d60e53626e07604d12d80848998c SaintWyss merge: preserve original M1 histories already integrated by PRs #19-21
+51dc23e471bdfc91594c5785684ab8ca6fb91c8e 1368f30c76f3e59724fbf94c66677a54295a9983 SaintWyss test: keep ownership decoy in its shell without orphaning sleep
+1368f30c76f3e59724fbf94c66677a54295a9983 23a567f353bf36d948e625c8b8bf5adcff540b1f SaintWyss ci: require actual B1 sandbox execution in fixture qualification
+23a567f353bf36d948e625c8b8bf5adcff540b1f eb45cab2393b669add1a5fd0b908cfea47d3b749 SaintWyss docs: reconcile rollout boundaries with current V9 and observer GUI
+eb45cab2393b669add1a5fd0b908cfea47d3b749 f90d6e529875f74a56806b44168c1b412e19dea3 SaintWyss ci: execute credential fixture and full feature regression before integration
+f90d6e529875f74a56806b44168c1b412e19dea3 92ea2b6516ecd5bfbc371db62eaf32dd58ddb742 Santiago V. Scacciaferro W. style: format GUI-only lifecycle regression assertions
+92ea2b6516ecd5bfbc371db62eaf32dd58ddb742 8e24202c2927059bce59f688d894373d5398eda1 Santiago V. Scacciaferro W. perf(gui): refresh read-only lifecycle only on authority link changes
+8e24202c2927059bce59f688d894373d5398eda1 a3d4e825bde42181dd2d0ae9c60295eaf3ae053a Santiago V. Scacciaferro W. security(gui): forbid implicit authority bootstrap; record legacy systemd test qualification gap
+a3d4e825bde42181dd2d0ae9c60295eaf3ae053a a48a782031274069323115d2e92f2342fc9d4756 Santiago V. Scacciaferro W. test(m1): retain retired socket inode when simulating host replacement in threads
+a48a782031274069323115d2e92f2342fc9d4756 a659042ad4a2843da3eb82075d971263762d775b Santiago V. Scacciaferro W. ci: install pinned bubblewrap at Wyss fixed executable path on disposable runner
+a659042ad4a2843da3eb82075d971263762d775b e01f3d739369b07b741cd2920cd13ef346d2bc99 Santiago V. Scacciaferro W. ci: use verified bubblewrap 0.13.1 with overlay support; run focused release gates first
+e01f3d739369b07b741cd2920cd13ef346d2bc99 29508b79fffee11e1e7ea5c7057468f13767c442 Santiago V. Scacciaferro W. ci: qualify Linux user namespaces and serialize full Rust regression on disposable runner
+29508b79fffee11e1e7ea5c7057468f13767c442 fd3431eccdb2cce88da12c20966b89371a024b18 Santiago V. Scacciaferro W. test(v9): avoid unrelated unique collision during tampered-provider replay check
+fd3431eccdb2cce88da12c20966b89371a024b18 9e9ce8bcdf328c3b889370c386323467ec10af38 Santiago V. Scacciaferro W. test: simplify negative host socket assertion for Clippy
+9e9ce8bcdf328c3b889370c386323467ec10af38 5840f2e6e887717be21ab860776504265c7f578b Santiago V. Scacciaferro W. fix: preserve conservative secret flags and simplify provider checks
+5840f2e6e887717be21ab860776504265c7f578b 585b5c9770d38ec155dd40151addde901a3d5161 Santiago V. Scacciaferro W. test: express bounded counter increment without Clippy warning
+585b5c9770d38ec155dd40151addde901a3d5161 1fc907177bd8979f045bde98df8f8d5e8335a6d1 Santiago V. Scacciaferro W. style: apply rustfmt to Codex thread guards
+1fc907177bd8979f045bde98df8f8d5e8335a6d1 8fa391ce99917c437d70d048a632260a1754fee5 Santiago V. Scacciaferro W. ci: verify PRs and main without duplicate branch-push runs
+8fa391ce99917c437d70d048a632260a1754fee5 2e1eb23ae58382bc70e26b3b21a5b0e926e8b0b1 Santiago V. Scacciaferro W. fix: apply behavior-preserving Clippy simplifications before M1-M5 merge
+2e1eb23ae58382bc70e26b3b21a5b0e926e8b0b1 344e704afab74eee931c44afdc7aa6d4b07c95dd Santiago V. Scacciaferro W. ci: remove completed one-shot report formatter
+344e704afab74eee931c44afdc7aa6d4b07c95dd 61f1d548fb2359d3bb951f812455c9aeab3f5894 Santiago V. Scacciaferro W. ci: use declared Rust 1.90 and build Tauri frontend before Rust checks
+61f1d548fb2359d3bb951f812455c9aeab3f5894 575910ab7a40d13b547482599992f7fc61c3f75a wyss-release-ci docs: format M1-M5 safe-stop acceptance reports
+575910ab7a40d13b547482599992f7fc61c3f75a e586f7c9a3a5fbda9c74c9a0b3549796ce8653a0 Santiago V. Scacciaferro W. ci: temporary tightly-scoped release-report formatter
+e586f7c9a3a5fbda9c74c9a0b3549796ce8653a0 ac047427a965e6c0aafe213a490430a7e9eb85ce Santiago V. Scacciaferro W. ci: add isolated M1–M5 validation gate before main integration
+ac047427a965e6c0aafe213a490430a7e9eb85ce f042e0db96bde1b57d736bd324046aeb95df674b SaintWyss Document safe stop, verification evidence and incomplete independent review
+f042e0db96bde1b57d736bd324046aeb95df674b 8eed1be63885c193babb3dea82cc60e486c76858 SaintWyss Harden handoff memory cleanup and add native-consent fixture coverage
+8eed1be63885c193babb3dea82cc60e486c76858 48396c41d0263687ea72b8392f4cbdbd46038d1a SaintWyss Complete provider-aware V9, protected credential agent and isolated GUI activation
+48396c41d0263687ea72b8392f4cbdbd46038d1a 67b75c5c57668500d8ede5cda6f990c70e994479 SaintWyss fix(package): remove inherited group write permission from shipped icon
+67b75c5c57668500d8ede5cda6f990c70e994479 3b3260edca9153f0c1c57b2c7236fd6a5f58c96a SaintWyss docs(release): record qualification boundaries and controlled rollback plan
+3b3260edca9153f0c1c57b2c7236fd6a5f58c96a 3d2da6520b97fd6a19d1d32dcf238e7a7f7c639d SaintWyss fix(package): freeze clean source revision across authority pinning builds
+3d2da6520b97fd6a19d1d32dcf238e7a7f7c639d 55538cc3ba625a8df2dd55524837356c765faa89 SaintWyss test(release): exercise V9 disk recovery and expose provider kind incompatibility
+55538cc3ba625a8df2dd55524837356c765faa89 2e00b8cb8ddb176d15a4a0f96fdafe7cba4f23a0 SaintWyss feat(credentials): add disabled native one-shot sealed delivery candidate
+2e00b8cb8ddb176d15a4a0f96fdafe7cba4f23a0 01f48fed0aab6d8eedf7a9882758df7aec9edad1 SaintWyss fix(acceptance): pin signalled processes and wait for private keyring readiness
+01f48fed0aab6d8eedf7a9882758df7aec9edad1 42c73aa43b9195f4db20d4f3dbeac260df8b97c3 SaintWyss fix(screen): reject x32 syscalls before native seccomp comparisons
+42c73aa43b9195f4db20d4f3dbeac260df8b97c3 04e862e1dd1e62d0fcee3f1448a081cbaea9617e SaintWyss fix(m5): address the independent review (F01-F10): quarantine, x32 seccomp, pinned directories, interrupt deadline, ABI floor, honest tests
+04e862e1dd1e62d0fcee3f1448a081cbaea9617e bef102c2c5f05e4fe46efcd9c48d20c7489a6c64 SaintWyss feat(m5): constrained B1 candidate (rootless launch plan, pre-exec shim, workspace materializer/exporter, quarantine) and the approval-boundary contract
+bef102c2c5f05e4fe46efcd9c48d20c7489a6c64 0a8fb60744eaccafed0cfe0c98d551b829e4014c SaintWyss feat(m5): runtime concurrency fixtures at 2 and 4; a provider that stops answering a cancel no longer holds the slot
+0a8fb60744eaccafed0cfe0c98d551b829e4014c 7dd8ff7641071f06943829ed4f648cf5b0912ff1 SaintWyss style(m4): format the GUI run record
+7dd8ff7641071f06943829ed4f648cf5b0912ff1 d6790ce69ee6bbaaa8e7f36725f41397cf261770 SaintWyss fix(m4): address the independent review (F01–F09) and record its FAIL verdict
+d6790ce69ee6bbaaa8e7f36725f41397cf261770 aaa2e7b7229d6b19c7583639e833fd40cff41820 SaintWyss test(m4): final GUI run, measurements, fuzz record, contract; wakes are coalesced so a flood cannot starve a snapshot
+aaa2e7b7229d6b19c7583639e833fd40cff41820 7ebc8e64bbd09d3d22f122acdf6fef3798b947e6 SaintWyss feat(m4): a flood faster than the parser is a stated gap, not a restart loop; ASCII run fast path; attach and measurement harnesses
+7ebc8e64bbd09d3d22f122acdf6fef3798b947e6 22ea83ac9c3ba0533a0230b10987128443b50170 SaintWyss feat(m4): newer layouts are never overwritten and unreadable ones are kept aside; ADR 0057 (proposed); mutation fuzz and measurement harnesses
+22ea83ac9c3ba0533a0230b10987128443b50170 1b9b27b405a336affa19b1207ef92fb68f5e4405 SaintWyss build(m4): ship wyss-screen in the package and check it for fixture markers
+1b9b27b405a336affa19b1207ef92fb68f5e4405 b44ab8d55d99b189cce9a2ca9fd2891460b05105 SaintWyss feat(m4): isolated desktop scenario (window closed and reopened over a running host, parser killed and replaced, parser given up), eager replacement of a lost helper, recovery after the restart window
+b44ab8d55d99b189cce9a2ca9fd2891460b05105 10463bf7c4fd30958fdb5ce6bce2d59ebb144ff0 SaintWyss test(m4): host as a real process (crash ends terminals and helper, nothing comes back), resize bursts, repeated attach, exited screens, slow readers; parser link sleeps when idle
+10463bf7c4fd30958fdb5ce6bce2d59ebb144ff0 149f99b43970e4d8b071cea298265a4ab12aa21c SaintWyss feat(m4): what survives what (host_persistence), lingering on explicit confirmation only, settings card
+149f99b43970e4d8b071cea298265a4ab12aa21c 99e653585833d615f46d267d6a90299e5057c1e4 SaintWyss test(m4): attach flow, fallbacks, status words and the renderer's output policy
+99e653585833d615f46d267d6a90299e5057c1e4 da07ebe43cf62a31e3574b75172b56844dcd4e6f SaintWyss feat(m4): attach to the screen a terminal kept (terminal_attach, parser status on every read, restore in the renderer, status note)
+da07ebe43cf62a31e3574b75172b56844dcd4e6f 9e9db898b0422ca25dcd353659cee2161f6bcb15 SaintWyss feat(m4): host owns the parser link per terminal (term_screen, term_parser, size follows the PTY, helper ends with the terminal)
+9e9db898b0422ca25dcd353659cee2161f6bcb15 5b026bbf83743cdf94bc935501fe9389885e5fff SaintWyss feat(m4): screen link supervisor (restart budget, replay from the host ring, stated fidelity) with fault-injection tests
+5b026bbf83743cdf94bc935501fe9389885e5fff ca3e1444df48b7cd195d3faae977b1aa47f49e93 SaintWyss feat(m4): parser helper process (typed IPC, Landlock + seccomp + rlimits, probe) with process tests
+ca3e1444df48b7cd195d3faae977b1aa47f49e93 227cb21a34b8c9236ba62b6158210bd14a7b964f SaintWyss feat(m4): reference-screen corpus recorded with tmux (17 streams) and a differential test; xterm.js width table; pending-wrap editing semantics
+227cb21a34b8c9236ba62b6158210bd14a7b964f 6c944dd2474da1c2e0805d3123b50b140638b310 SaintWyss feat(m4): screen engine (VT state machine, normal/alternate buffers, bounded scrollback) and repaint with a round-trip property test
+6c944dd2474da1c2e0805d3123b50b140638b310 75ee4498e427c56caf3625956fb9126bf7320816 SaintWyss feat(integration): M2+M3 integrated acceptance (13/13 desktop scenarios), invariant test for the new main.rs wiring, records
+75ee4498e427c56caf3625956fb9126bf7320816 fb18bc8c6c378578eaa65212957614582dd781f8 d52705c5331ca8a27e7e0fd93ec18043db2c87f8 SaintWyss merge: M3 PR #23 final corrections (F1-F7) into integration
+d52705c5331ca8a27e7e0fd93ec18043db2c87f8 31bb7cb30caef0674da26f55a94aca37e30d5920 SaintWyss style: format refreshed evidence
+31bb7cb30caef0674da26f55a94aca37e30d5920 5703054b32673b7616d42abac3f60820f77889f8 SaintWyss docs(m3): record both failed independent reviews, F1-F7 handling, corrected claims; refresh desktop evidence
+5703054b32673b7616d42abac3f60820f77889f8 34a52c5a5f6145be2235ea12479529ae5b60f0b3 SaintWyss fix(m3): second-review findings F1-F7 (executor write race, header framing, total deadlines, event bounds, history ids, async recorder)
+34a52c5a5f6145be2235ea12479529ae5b60f0b3 d20d8e6c12d6c1b84dc4115e43cd6ac109377edc SaintWyss fix(m3): withdraw actions still waiting when their turn or runtime ends
+fb18bc8c6c378578eaa65212957614582dd781f8 9f8871af56314e65ccd77e2c13df511319863673 SaintWyss feat(integration): host the M3 fixture in the real binary and drive Native and Managed together
+9f8871af56314e65ccd77e2c13df511319863673 25b76cde3b1ca20301701e737ea6461fd291b761 SaintWyss fix(m3): withdraw actions still waiting when their turn or runtime ends
+25b76cde3b1ca20301701e737ea6461fd291b761 cf62a0c36327ab787c4e3518cea8c9927e9c9e9f SaintWyss fix(integration): clippy findings in M2's native code (needless borrow, useless format!)
+cf62a0c36327ab787c4e3518cea8c9927e9c9e9f a252d17f40205884a746f2ffe8dbae79e15c1ff0 d20d8e6c12d6c1b84dc4115e43cd6ac109377edc SaintWyss merge: M3 managed parity (PR #23, d20d8e6) into integration/m2-m3
+a252d17f40205884a746f2ffe8dbae79e15c1ff0 def69fe35ddfe8b696b65a12d2f2babe296c8247 977cb8f83cb0473d99bc7766c45318cdb0fdc882 SaintWyss merge: M2 native parity (PR #22, 977cb8f) into integration/m2-m3
+d20d8e6c12d6c1b84dc4115e43cd6ac109377edc 6502fb5ce8f66c09ab694edbec58cffa2938ef74 SaintWyss fix(m3): close review findings S2-S8 and record the real results
+6502fb5ce8f66c09ab694edbec58cffa2938ef74 61e49eb1ba93d512d2a6133d98ecf0dcccb4b6df SaintWyss style(m3): drop a useless conversion flagged by clippy
+61e49eb1ba93d512d2a6133d98ecf0dcccb4b6df 530c49ed4e624f3c343f92ab2d5c3f1e6801a6e8 SaintWyss fix(m3): resolve the approved write's parents by descriptor and recheck before the rename (review S1)
+530c49ed4e624f3c343f92ab2d5c3f1e6801a6e8 ebbe8ad4c477a32a4f450f323f1deb6b280a3f70 SaintWyss fix(m3): corrective pass after the security review
+ebbe8ad4c477a32a4f450f323f1deb6b280a3f70 aac873406be51f8a7483241aebff107d2ee22ced SaintWyss docs(m3): acceptance record, E1-E9 results, ADR0053/0054 evidence, ADR0055, status
+aac873406be51f8a7483241aebff107d2ee22ced 123f2705aacb48e448e0b338c98ef1d4e84fac10 SaintWyss test(m3): isolated desktop suite, performance campaign and their evidence
+123f2705aacb48e448e0b338c98ef1d4e84fac10 9e83a8d838e7960f00c3c251f815fcae33648faf SaintWyss feat(m3): Providers window with strict decoder
+9e83a8d838e7960f00c3c251f815fcae33648faf 7eebdefc92fbf7addc3fc5c05be364b7de82f37f SaintWyss feat(m3): Claude Managed worker, authority-owned executor, model/usage/history capabilities
+7eebdefc92fbf7addc3fc5c05be364b7de82f37f 04c673a0295421329acaaf86dfb01de3068279b1 SaintWyss feat(m3): supervised Claude Agent SDK bridge, loopback API tap and offline isolation probes
+04c673a0295421329acaaf86dfb01de3068279b1 def69fe35ddfe8b696b65a12d2f2babe296c8247 SaintWyss docs(m3): freeze managed feasibility and acceptance
+977cb8f83cb0473d99bc7766c45318cdb0fdc882 79ac9eba6592bc1c20c70ded3777f43d2df0a5c6 SaintWyss docs: clarify M2 GUI release acceptance
+79ac9eba6592bc1c20c70ded3777f43d2df0a5c6 b4f886160aa1675e6b3da30a6fb011f4a7e1d784 SaintWyss fix: refresh native previews and test legacy host
+b4f886160aa1675e6b3da30a6fb011f4a7e1d784 def69fe35ddfe8b696b65a12d2f2babe296c8247 SaintWyss feat: complete M2 native parity and configuration closure
+fddbb428fae1d60e53626e07604d12d80848998c e3af6ff1a281572b2b23851710ebb12341fdbfc2 SaintWyss docs(m1): integration and controlled adoption record; the rig can rehearse on a copy of real records
+817bc95526af6cb875eadb1d7ae87918d8d44cd4 4829d6c26700345696689cf60754102b7cb3011b SaintWyss fix(m1): the confirmation that turns Projects on or off names what it does
+6fd3b27caa4ce56870a9ff3f9c212d3236990901 140f469b9720cf2c1c8bf1cc9e9d65e45876bb54 SaintWyss docs(m1): contract section 5 states the final results
+140f469b9720cf2c1c8bf1cc9e9d65e45876bb54 512d04f75012d9307d92016e7a59f5e48e3005f7 SaintWyss docs(m1): keep the measurement evidence small: raw samples in one hashed archive, home path redacted
+512d04f75012d9307d92016e7a59f5e48e3005f7 30756bc2008a4f6e77a554ccbe5518760e486042 SaintWyss docs(m1): independent review outcome and post-review runs on the final build
+30756bc2008a4f6e77a554ccbe5518760e486042 3b86c878c004f7469b732e81778b4f1547df2f74 SaintWyss fix(m1): independent review of the final head (pieces of a paste, one prepare per authority, flush on dispose, moves on a changed workspace, lock-free forgetting)
+3b86c878c004f7469b732e81778b4f1547df2f74 9501c4b2783b21fdced460f815564f5883198148 SaintWyss docs(m1): final closure record, contract as built, GUI measurements of M1-13 with raw data and proposed budgets
+9501c4b2783b21fdced460f815564f5883198148 05c3dbbe902d94443615685f7f2f77477f28b189 SaintWyss feat(m1): busy writes are offered again, bounded writes and windows, older view keeps the terminal, GUI measurement rig
+05c3dbbe902d94443615685f7f2f77477f28b189 b7633fc37ae00e14b3c7b0dd6f2f8201b4c644b4 SaintWyss feat(m1): Managed authority and capability checks, operation-ID semantics, shell directory disclosure, foreign-writer refusal, shared owner inventory, debounced layout saves, virtualized lists
+b7633fc37ae00e14b3c7b0dd6f2f8201b4c644b4 a9d1e90beb697fcfe0e9a6bf1c4f22b133dcd6e0 SaintWyss feat(m1): resolve independent review findings
+a9d1e90beb697fcfe0e9a6bf1c4f22b133dcd6e0 b45a5bb7c1cd494bef9a278c603ede3583c0632c SaintWyss docs(m1): status, roadmap and changelog
+b45a5bb7c1cd494bef9a278c603ede3583c0632c 8c9563523e5bc6d1e3688e3dfecb1f36e397701f SaintWyss docs(m1): as-built contract section and delivery record; projects capability excluded from the main capability test
+8c9563523e5bc6d1e3688e3dfecb1f36e397701f 5761b937f70fb2472165b2006cfb447af945b456 SaintWyss wip(m1): pane takes input for the session it started, ordered input, gate card; graphical captures
+5761b937f70fb2472165b2006cfb447af945b456 8770a6f0d77edd4a0d290f6c2ee520e03cc82e22 SaintWyss wip(m1): share the decoded store between views until the file is replaced; backend measurements
+8770a6f0d77edd4a0d290f6c2ee520e03cc82e22 5cc67876110a32ae5ff24afbf85e96811999a603 SaintWyss wip(m1): real host process end-to-end test; Scratch shell has no empty cwd
+5cc67876110a32ae5ff24afbf85e96811999a603 4c0c54cb3c98a8d3ce217d974c60839775490444 SaintWyss wip(m1): frontend tests (contract, controller, view, capability)
+4c0c54cb3c98a8d3ce217d974c60839775490444 4f32b02b33bf0a790ced3c731a1c430b02776804 SaintWyss wip(m1): project workspace UI, client, controller, gate
+4f32b02b33bf0a790ced3c731a1c430b02776804 f0df01fc69c615482ed275107d22acc389a4e4c5 SaintWyss wip(m1): window commands, capability, Managed port, retry with original intent
+f0df01fc69c615482ed275107d22acc389a4e4c5 9f4396e5f5dc5a8cf637122fe6ef1da222a5a4e3 SaintWyss wip(m1): migration, service facade, input claims, owner against a disposable host
+9f4396e5f5dc5a8cf637122fe6ef1da222a5a4e3 b3d3c0b455ac77c78eab3b007b36abddb019c889 SaintWyss wip(m1): locked CAS store, command engine, checked owner, claims — tests M1-02..06,08,10,11

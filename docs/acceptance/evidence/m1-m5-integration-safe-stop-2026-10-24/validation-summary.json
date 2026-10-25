@@ -1,0 +1,18 @@
+{
+  "default": {
+    "passed": 2153,
+    "failed": 0,
+    "ignored": 57,
+    "suites": 23
+  },
+  "allFeatures": {
+    "passed": 2195,
+    "failed": 0,
+    "ignored": 57,
+    "suites": 28
+  },
+  "sourceHead": "51b3fbeb9c42ed3216b7b1fe27ad77263899a48b",
+  "main": "0e9a5341a9df4e6169436a1d52320ce8548c031c",
+  "ci": 40150262201,
+  "job": 121040293942
+}

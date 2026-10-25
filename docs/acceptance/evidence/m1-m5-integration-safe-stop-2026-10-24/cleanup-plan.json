@@ -1,0 +1,152 @@
+{
+  "main": "0e9a5341a9df4e6169436a1d52320ce8548c031c",
+  "branches": [
+    {
+      "name": "docs/m0-engineering-baseline",
+      "sha": "2b7ec2c3226e2cd60ab8fc766852847711c47642",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "docs/m1-adoption-record",
+      "sha": "fddbb428fae1d60e53626e07604d12d80848998c",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "docs/phase-1-product-consolidation",
+      "sha": "de0b8c8e4ae73f61ea4402de1897c71c5f0b68ae",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "feat/b1-pure-contracts-2026-10-15",
+      "sha": "eadc42b30b50385e161b7cc6ddf94a33a777ff49",
+      "unique": 0,
+      "action": "preserve",
+      "reason": "active dirty worktree"
+    },
+    {
+      "name": "feat/f8-installed-wiring",
+      "sha": "58933ae3432b97c46358170f78cdc14daa549851",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "feat/f8-production-runtime",
+      "sha": "e480d479fdbd8a215612b1d809862a62aa914eb5",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "feat/m1-store-v1-codec",
+      "sha": "0cd697ece1d202f48caf10c3c6d02c43b9d067d3",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "feat/m1-workspace",
+      "sha": "6fd3b27caa4ce56870a9ff3f9c212d3236990901",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "feat/m2-native-parity-2026-10-23",
+      "sha": "977cb8f83cb0473d99bc7766c45318cdb0fdc882",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "feat/m3-managed-parity-2026-10-23",
+      "sha": "d52705c5331ca8a27e7e0fd93ec18043db2c87f8",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "feat/m4-terminal-fidelity",
+      "sha": "0a8fb60744eaccafed0cfe0c98d551b829e4014c",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "feat/m5-boundaries-concurrency",
+      "sha": "42c73aa43b9195f4db20d4f3dbeac260df8b97c3",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "feat/native-e2e-fixture-harness",
+      "sha": "7e7106d71acb6f362b34d81aa4f56e4c59807fb5",
+      "unique": 48,
+      "action": "preserve",
+      "reason": "unique commits"
+    },
+    {
+      "name": "fix/m1-confirm-labels",
+      "sha": "817bc95526af6cb875eadb1d7ae87918d8d44cd4",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "fix/m1-m5-production-blockers",
+      "sha": "ac047427a965e6c0aafe213a490430a7e9eb85ce",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "integrate/f8-final",
+      "sha": "226e41b1c764d03f549e52b9fe024a8cd79167da",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "integration/m2-m3",
+      "sha": "6c944dd2474da1c2e0805d3123b50b140638b310",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "main",
+      "sha": "0e9a5341a9df4e6169436a1d52320ce8548c031c",
+      "unique": 0,
+      "action": "preserve",
+      "reason": "main"
+    },
+    {
+      "name": "prototype/b1-synthetic-contract-2026-10-14",
+      "sha": "10b9c33afa861042a0809abfd9ccfdd6635abf78",
+      "unique": 4,
+      "action": "preserve",
+      "reason": "unique commits"
+    },
+    {
+      "name": "release/m1-m5-production-candidate",
+      "sha": "51b3fbeb9c42ed3216b7b1fe27ad77263899a48b",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    },
+    {
+      "name": "review/f8-issue14-fences-reap",
+      "sha": "686c5ba525b88ebd739412dda7258528833beca3",
+      "unique": 0,
+      "action": "delete",
+      "reason": null
+    }
+  ]
+}
