@@ -46,6 +46,9 @@ pub enum F8Failure {
     Incompatible,
     /// The request is not one this desktop sends. Decided here, before anything is asked.
     Invalid,
+    /// The authority understood the request and does not offer it: a mode or provider that
+    /// this authority was not started to serve. Nothing is wrong with the request.
+    Unsupported,
     NotFound,
     /// What the window saw is not what the authority holds: a revision, a generation or a
     /// runtime instance changed. Read again before deciding again.
@@ -63,8 +66,11 @@ pub enum F8Failure {
     PermissionDenied,
     /// A lease for the session is already active.
     LeaseActive,
-    /// The authority is doing something that excludes this, or is at capacity.
+    /// The authority is doing something that excludes this, or is momentarily overloaded.
     Busy,
+    /// The authority is at its configured capacity for this (one runtime at a time) and did
+    /// not take it. Asking again changes nothing until something else stops.
+    Capacity,
     /// The agent runtime refused.
     Rejected,
     /// The authority could not tell whether the runtime acted.
@@ -114,7 +120,8 @@ impl F8Error {
             | E::FrameTooLarge
             | E::HandshakeRequired
             | E::UnsupportedMethod => F::Incompatible,
-            E::InvalidRequest | E::Unsupported => F::Invalid,
+            E::InvalidRequest => F::Invalid,
+            E::Unsupported => F::Unsupported,
             E::SessionNotFound | E::TurnNotFound | E::ApprovalNotFound | E::LeaseNotFound => {
                 F::NotFound
             }

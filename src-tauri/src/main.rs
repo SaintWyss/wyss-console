@@ -32,7 +32,29 @@ mod remote;
 #[cfg(all(target_os = "linux", feature = "m3-fixture"))]
 mod m3_fixture;
 
+/// What `--help` prints. It is the first thing `main` decides: nothing is read, created or
+/// started for it, and no toolkit is initialised.
+const USAGE: &str = concat!(
+    "Wyss Console ",
+    env!("CARGO_PKG_VERSION"),
+    "\n\nUsage:\n",
+    "  wyss-console                        open the window\n",
+    "  wyss-console --f8-authority <DIR>   open the window against the protocol-2 authority\n",
+    "                                      whose runtime directory is DIR\n",
+    "  wyss-console --gui-only             open the window alone, in a throw-away private\n",
+    "                                      environment; no authority is started\n",
+    "  wyss-console --diagnose             print a diagnosis of this environment and exit\n",
+    "  wyss-console --help, -h             print this text and exit\n",
+);
+
 fn main() {
+    if std::env::args_os()
+        .skip(1)
+        .any(|a| a == "--help" || a == "-h")
+    {
+        print!("{USAGE}");
+        return;
+    }
     #[cfg(target_os = "linux")]
     match activation::select(&std::env::args_os().skip(1).collect::<Vec<_>>()) {
         Ok(true) => return,

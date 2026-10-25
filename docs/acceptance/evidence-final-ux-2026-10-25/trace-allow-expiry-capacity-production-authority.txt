@@ -1,0 +1,19 @@
+    2498.1 ThreadId(1) js:stage ready
+    2500.0 ThreadId(1) js:ipc.begin #2 f8_lease_grant
+    2500.6 ThreadId(7) cmd.grant.enter intent=d01c63e6 acts=true
+    2500.7 ThreadId(20) cmd.grant.worker intent=d01c63e6
+    2555.4 ThreadId(1) confirm.dialog.shown 
+    2622.3 ThreadId(1) js:banner Waiting for your answer in the confirmation window. Nothing is allowed until you choose Allow. If you cannot see it, it may be behind another window.
+    3523.9 ThreadId(1) js:ping ms=22
+    4526.8 ThreadId(1) js:ping ms=21
+    5528.4 ThreadId(1) js:ping ms=19
+    6530.4 ThreadId(1) js:ping ms=16
+    6555.6 ThreadId(1) confirm.dialog.auto_allow 
+    6555.6 ThreadId(1) confirm.main.leave allowed=true
+    6562.5 ThreadId(7) cmd.grant.exit intent=d01c63e6 ok
+    6590.2 ThreadId(1) js:grant.settled ms=4090
+    7394.2 ThreadId(1) js:lease.active true
+   66914.1 ThreadId(1) js:expired.noticed after_s=60
+   68542.0 ThreadId(1) js:capacity.answer The authority is at its limit for this and did not take it. Nothing changed. Only one runtime runs at a time: stop the one that is running, then start this one. Dismiss
+   68542.2 ThreadId(1) js:capacity.controls Dismiss
+   68542.4 ThreadId(1) js:driver.done 

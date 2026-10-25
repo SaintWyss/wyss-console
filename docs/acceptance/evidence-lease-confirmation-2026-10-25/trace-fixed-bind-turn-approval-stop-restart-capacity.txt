@@ -1,0 +1,41 @@
+     535.4 ThreadId(1) js:ipc.begin #1 f8_session_prepare
+    1187.2 ThreadId(1) js:stage session-open
+    1339.2 ThreadId(1) js:ipc.begin #2 f8_runtime_start
+    1940.7 ThreadId(1) js:stage runtime-ready
+    1981.2 ThreadId(1) confirm.dialog.shown 
+    4981.5 ThreadId(1) confirm.dialog.auto_allow 
+    5076.3 ThreadId(1) js:stage lease-granted
+    5581.0 ThreadId(1) js:ipc.begin #4 f8_binding_create
+    5984.1 ThreadId(1) js:stage bound
+    6103.2 ThreadId(1) js:ipc.begin #5 f8_binding_create
+    6892.5 ThreadId(1) js:send.click Run
+    6893.4 ThreadId(1) js:ipc.begin #6 f8_turn_start
+    7048.1 ThreadId(1) js:stage turn-answered
+    8856.8 ThreadId(1) js:ipc.begin #7 f8_turn_start
+    9008.3 ThreadId(1) js:stage approval-shown
+    9009.9 ThreadId(1) js:ipc.begin #8 f8_approval_decline
+   11512.3 ThreadId(1) js:stage declined
+   11513.8 ThreadId(1) js:ipc.begin #9 f8_turn_cancel
+   14016.4 ThreadId(1) js:stage turn-cancelled
+   14320.6 ThreadId(1) js:ipc.begin #10 f8_turn_start
+   14472.2 ThreadId(1) js:stage approval2-shown
+   14472.8 ThreadId(1) js:ipc.begin #11 f8_approval_accept
+   14522.4 ThreadId(1) confirm.dialog.shown 
+   15076.3 ThreadId(1) js:banner-accept Codex wants to run a command Pending Command · turn 1e3a88f6 Command printf fixture Directory /home/saintwyss/wyss-lease-lab/runs/r020838/app/workspace Waits until 2:13 AM — the authority checks the action again before anything runs. Waiting for your Allow in the confirmation window, then asking the authority… Accept D
+   17522.5 ThreadId(1) confirm.dialog.auto_allow 
+   19164.4 ThreadId(1) js:stage accepted
+   20172.6 ThreadId(1) js:ipc.begin #12 f8_runtime_stop
+   21676.3 ThreadId(1) js:stage stop-under-turn-answer
+   22280.4 ThreadId(1) js:ipc.begin #13 f8_turn_cancel
+   26092.9 ThreadId(1) js:ipc.begin #14 f8_runtime_stop
+   26496.6 ThreadId(1) js:stage stopped
+   26498.2 ThreadId(1) js:ipc.begin #15 f8_runtime_start
+   27109.0 ThreadId(1) js:stage restarted-gen2
+   27110.2 ThreadId(1) js:ipc.begin #16 f8_session_prepare
+   28612.5 ThreadId(1) js:cards Session 7fb6538a Stopped No runtime yet Updated 2:09 AM | Session 3d3e641c Ready Ready · generation 2 · Local Tools Updated 2:08 AM
+   29118.2 ThreadId(1) js:ipc.begin #17 f8_runtime_start
+   32620.2 ThreadId(1) js:stage second-start-answer
+   32620.2 ThreadId(1) js:stage second-start-answer
+   32620.7 ThreadId(1) js:dom second-start: Managed runtimes 2 prepared · 0 closed · protocol 2 Connected Refresh New session The authority is busy with another operation. Try again in a moment. Retry Dismiss Session 7fb6538a Stopped No runtime yet Updated 2:09 AMSession 3d3e641c Ready Ready · generation 2 · Local Tools Updated 2:08 AM Session 7fb6538a Stopped 7fb6538a-327e-4d4e-9a5c-fb368108becf × OverviewConversati
+   21676.3 ThreadId(1) js:stage stop-under-turn-answer
+   21676.9 ThreadId(1) js:dom stop-under-turn: Managed runtimes 1 prepared · 0 closed · protocol 2 Connected Refresh New session A turn is running. Nothing is stopped under it. Dismiss Session 3d3e641c Ready Ready · generation 1 · Local Tools Updated 2:08 AM Session 3d3e641c Ready 3d3e641c-5b81-4239

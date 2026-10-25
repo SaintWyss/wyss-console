@@ -16,6 +16,7 @@ import {
   parseTurnReceipt,
   parseWatchInfo,
 } from '../src/lib/contracts/f8';
+import { failureText } from '../src/lib/features/f8/present';
 import { parseF8ApprovalDetail as parseApprovalDetail } from '../src/lib/contracts/f8';
 import fixture from './fixtures/f8-gui-v1.json';
 import type { Raw } from './f8-harness';
@@ -205,6 +206,25 @@ describe('what it refuses', () => {
     const awake = copy(fx.state);
     awake.link.state = 'waiting';
     expect(() => parseF8State(awake)).toThrow();
+  });
+
+  it('tells a mode the authority does not offer from a malformed request', () => {
+    const unsupported = {
+      code: 'unsupported',
+      retry: false,
+      retry_in_ms: null,
+    };
+    expect(parseF8Failure(unsupported).code).toBe('unsupported');
+    expect(failureText('unsupported')).not.toBe(failureText('invalid'));
+    expect(failureText('unsupported')).toContain('does not offer');
+    // Capacity is not a passing busy: it says why and what frees it.
+    expect(failureText('capacity')).not.toBe(failureText('busy'));
+    expect(failureText('capacity')).toContain(
+      'Only one runtime runs at a time',
+    );
+    // An unknown outcome never says the action was canceled.
+    expect(failureText('unavailable')).toContain('Nothing was canceled');
+    expect(failureText('unavailable')).toContain('may still have happened');
   });
 
   it('turns anything that is not a failure into an internal one', () => {

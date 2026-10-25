@@ -14,6 +14,10 @@ import {
   settle,
 } from './f8-harness';
 import { parseTurnReading, type WatchInfo } from '../src/lib/contracts/f8';
+import {
+  CALL_LIMIT_MS,
+  CONFIRM_LIMIT_MS,
+} from '../src/lib/features/f8/controller';
 import { parseF8ApprovalDetail as parseApprovalDetail } from '../src/lib/contracts/f8';
 
 type Rig = ReturnType<typeof rig>;
@@ -210,6 +214,186 @@ describe('an action is one intent', () => {
     await r.controller.retry();
     expect(r.client.grantLease).toHaveBeenCalledTimes(3);
     r.controller.dismissOperation();
+    expect(r.state.operation).toBeNull();
+  });
+
+  it("says, while it waits, that the answer is the user's in the confirmation window", async () => {
+    const r = make();
+    await r.open();
+    let release!: () => void;
+    r.client.grantLease.mockImplementationOnce(
+      () => new Promise((resolve) => (release = () => resolve({}))),
+    );
+    const grant = r.controller.grantLease();
+    await settle();
+    expect(r.state.operation).toMatchObject({
+      kind: 'grant',
+      status: 'pending',
+      step: 'confirming',
+    });
+    release();
+    await grant;
+    expect(r.state.operation).toBeNull();
+
+    // A lease that lets the runtime do nothing on the machine asks nobody.
+    for (const s of ['command_execute', 'file_change'] as const)
+      r.controller.toggleScope(s);
+    r.client.grantLease.mockImplementationOnce(
+      () => new Promise((resolve) => (release = () => resolve({}))),
+    );
+    const quiet = r.controller.grantLease();
+    await settle();
+    expect(r.state.operation).toMatchObject({ kind: 'grant', step: null });
+    release();
+    await quiet;
+  });
+
+  it('asks the user for a renewal too, and says so', async () => {
+    const r = make();
+    r.client.session.mockResolvedValue(real.attached);
+    await r.open();
+    expect(r.state.detail?.lease).not.toBeNull();
+    let release!: () => void;
+    r.client.renewLease.mockImplementationOnce(
+      () => new Promise((resolve) => (release = () => resolve({}))),
+    );
+    const renew = r.controller.renewLease();
+    await settle();
+    expect(r.state.operation).toMatchObject({
+      kind: 'renew',
+      step: 'confirming',
+    });
+    release();
+    await renew;
+  });
+
+  it('does not wait for ever for an answer that never comes: it says the outcome is not known, reads the authority and sends nothing again by itself', async () => {
+    const r = make();
+    await r.open();
+    r.client.grantLease.mockImplementationOnce(() => never());
+    const reads = r.client.session.mock.calls.length;
+    const grant = r.controller.grantLease();
+    await settle();
+    expect(r.state.operation?.status).toBe('pending');
+    // One bound, the longer one: the user may be reading the confirmation window.
+    const [bound] = r.timers.filter((t) => !t.cancelled);
+    expect(bound.ms).toBe(CONFIRM_LIMIT_MS);
+    bound.fire();
+    await grant;
+    expect(r.state.operation?.status).toBe('failed');
+    expect(r.state.operation?.failure).toEqual({
+      code: 'unavailable',
+      retry: true,
+      retry_in_ms: null,
+    });
+    // What the authority holds was read again, and nothing was asked twice.
+    expect(r.client.session.mock.calls.length).toBeGreaterThan(reads);
+    expect(r.client.grantLease).toHaveBeenCalledTimes(1);
+    expect(r.timers.every((t) => t.cancelled)).toBe(true);
+  });
+
+  it('ends a lost action that is asked again after the authority was replaced or lost the lease: it says so, reads again and asks nothing more', async () => {
+    for (const refusal of ['stale', 'not_found'] as const) {
+      const r = make();
+      await r.open();
+      r.client.grantLease.mockImplementationOnce(() => never());
+      const grant = r.controller.grantLease();
+      await settle();
+      r.timers.find((t) => !t.cancelled)!.fire();
+      await grant;
+      expect(r.state.operation?.failure?.code).toBe('unavailable');
+      const reads = r.client.session.mock.calls.length;
+      r.client.grantLease.mockRejectedValueOnce(failure(refusal));
+      await r.controller.retry();
+      expect(r.state.notice).toBe('stale');
+      expect(r.state.operation).toBeNull();
+      expect(r.client.grantLease).toHaveBeenCalledTimes(2);
+      expect(r.client.session.mock.calls.length).toBeGreaterThan(reads);
+      await r.controller.retry();
+      expect(r.client.grantLease).toHaveBeenCalledTimes(2);
+      r.controller.dispose();
+    }
+  });
+
+  it('tells a second runtime at the capacity of one apart from a busy authority and offers no retry', async () => {
+    const r = make();
+    r.client.session.mockResolvedValue(runtimeAs('stopped'));
+    await r.open();
+    r.controller.chooseMode('inference');
+    r.client.startRuntime.mockRejectedValueOnce(failure('capacity'));
+    await r.controller.startRuntime();
+    expect(r.state.operation?.status).toBe('failed');
+    expect(r.state.operation?.failure).toEqual({
+      code: 'capacity',
+      retry: false,
+      retry_in_ms: null,
+    });
+    await r.controller.retry();
+    expect(r.client.startRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends a lost grant again only when the user asks, with exactly the identity it had', async () => {
+    const r = make();
+    await r.open();
+    r.client.grantLease.mockImplementationOnce(() => never());
+    const grant = r.controller.grantLease();
+    await settle();
+    r.timers.find((t) => !t.cancelled)!.fire();
+    await grant;
+    expect(r.client.grantLease).toHaveBeenCalledTimes(1);
+    await r.controller.retry();
+    expect(r.client.grantLease).toHaveBeenCalledTimes(2);
+    const [first, second] = r.client.grantLease.mock.calls;
+    expect(second).toEqual(first);
+    expect(r.state.operation).toBeNull();
+  });
+
+  it('drops the failure when the answer of an action called lost arrives late, and asks nothing', async () => {
+    const r = make();
+    await r.open();
+    let arrive!: () => void;
+    r.client.grantLease.mockImplementationOnce(
+      () => new Promise((resolve) => (arrive = () => resolve({}))),
+    );
+    const grant = r.controller.grantLease();
+    await settle();
+    r.timers.find((t) => !t.cancelled)!.fire();
+    await grant;
+    expect(r.state.operation?.status).toBe('failed');
+    const reads = r.client.session.mock.calls.length;
+    arrive();
+    await settle();
+    expect(r.state.operation).toBeNull();
+    expect(r.client.session.mock.calls.length).toBeGreaterThan(reads);
+    expect(r.client.grantLease).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the failure when a lost action fails late, and a second click while it waits does nothing', async () => {
+    const r = make();
+    await r.open();
+    let fail!: () => void;
+    r.client.grantLease.mockImplementationOnce(
+      () => new Promise((_, reject) => (fail = () => reject(failure('stale')))),
+    );
+    const grant = r.controller.grantLease();
+    await settle();
+    await r.controller.grantLease();
+    expect(r.client.grantLease).toHaveBeenCalledTimes(1);
+    r.timers.find((t) => !t.cancelled)!.fire();
+    await grant;
+    fail();
+    await settle();
+    expect(r.state.operation?.status).toBe('failed');
+    expect(r.state.operation?.failure?.code).toBe('unavailable');
+  });
+
+  it('gives an action that asks nobody the shorter bound, and cancels it when the answer comes', async () => {
+    const r = make();
+    await r.open();
+    await r.controller.revokeLease();
+    const [bound] = r.timers;
+    expect(bound.ms).toBe(CALL_LIMIT_MS);
+    expect(bound.cancelled).toBe(true);
     expect(r.state.operation).toBeNull();
   });
 
@@ -580,6 +764,44 @@ describe('an approval', () => {
     await settle();
     await r.controller.decide('accept');
     expect(r.client.decide).not.toHaveBeenCalled();
+  });
+
+  it('does not wait for ever for the answer to a decision: accept has the long bound, decline the short one, and a late answer clears the failure', async () => {
+    const r = await pending();
+    let arrive!: () => void;
+    r.client.decide.mockImplementationOnce(
+      () => new Promise((resolve) => (arrive = () => resolve({}))),
+    );
+    const accept = r.controller.decide('accept');
+    await settle();
+    expect(r.state.approval?.decision?.status).toBe('pending');
+    const bound = r.timers.find((t) => !t.cancelled)!;
+    expect(bound.ms).toBe(CONFIRM_LIMIT_MS);
+    bound.fire();
+    await accept;
+    expect(r.state.approval?.decision).toMatchObject({
+      status: 'failed',
+      failure: { code: 'unavailable', retry: true },
+    });
+    expect(r.client.decide).toHaveBeenCalledTimes(1);
+    arrive();
+    await settle();
+    expect(r.state.approval?.decision).toBeNull();
+    expect(r.client.decide).toHaveBeenCalledTimes(1);
+
+    r.client.decide.mockImplementationOnce(() => never());
+    const decline = r.controller.decide('decline');
+    await settle();
+    const [short] = r.timers.filter((t) => !t.cancelled);
+    expect(short.ms).toBe(CALL_LIMIT_MS);
+    short.fire();
+    await decline;
+    // Sent again by the user's own choice: the same decision, the same identity.
+    await r.controller.retryDecision();
+    expect(r.client.decide).toHaveBeenCalledTimes(3);
+    expect(r.client.decide.mock.calls[2]).toEqual(
+      r.client.decide.mock.calls[1],
+    );
   });
 
   it('retries a decision that was not answered with the same identity, and not one that was refused', async () => {

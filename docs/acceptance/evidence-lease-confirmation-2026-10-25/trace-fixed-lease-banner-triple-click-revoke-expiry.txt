@@ -1,0 +1,43 @@
+    6837.8 ThreadId(1) js:ipc.begin #75 f8_lease_grant
+    6838.5 ThreadId(8) cmd.grant.enter intent=bf3e7ece acts=true
+    6838.5 ThreadId(1) js:grant.click acts=5
+    6838.6 ThreadId(16) cmd.grant.worker intent=bf3e7ece
+    6838.8 ThreadId(1) js:step 8 grant-clicked
+    6871.0 ThreadId(16) confirm.ask.begin 
+    6871.1 ThreadId(1) confirm.main.enter 
+    6878.2 ThreadId(1) confirm.dialog.shown 
+    7240.6 ThreadId(1) js:banner Waiting for your answer in the confirmation window. Nothing is allowed until you choose Allow. If you cannot see it, it may be behind another window.
+    7849.8 ThreadId(1) js:ping ms=10
+    8852.8 ThreadId(1) js:ping ms=10
+    9858.7 ThreadId(1) js:ping ms=12
+   10861.9 ThreadId(1) js:ping ms=11
+   10878.6 ThreadId(1) confirm.dialog.auto_allow 
+   10878.6 ThreadId(1) confirm.main.leave allowed=true
+   10878.7 ThreadId(16) confirm.ask.answered allowed=true
+   10894.8 ThreadId(10) cmd.grant.exit intent=bf3e7ece ok
+   11279.6 ThreadId(1) js:banner 
+   11279.8 ThreadId(1) js:grant.cleared ms=4444 text=Managed runtimes 1 prepared · 0 closed · protocol 2 Connected Refresh New session Session b249c8a9 Ready Ready · generation 1 · Local Tools Updated 1:56 AM Session b249c8a9 Ready b249c8a9-a7e2-418c-9e74-1da6142a02cd × OverviewConversationModelsHistory Bind a project folder to 
+   12895.8 ThreadId(1) js:step 10 post-grant-dumped
+   13299.7 ThreadId(1) js:revoke.click 
+   13300.0 ThreadId(1) js:step 11 revoke-clicked
+   14108.1 ThreadId(1) js:ipc.begin #105 f8_lease_revoke
+   14108.6 ThreadId(1) js:revoke.confirm.click Revoke lease
+   14108.8 ThreadId(1) js:step 12 revoke-confirmed
+   14511.5 ThreadId(1) js:revoke.cleared ms=404
+   14511.7 ThreadId(1) js:step 13 revoked
+   15723.3 ThreadId(1) js:ipc.begin #117 f8_lease_grant
+   15723.7 ThreadId(8) cmd.grant.enter intent=ef85dfa7 acts=true
+   15723.7 ThreadId(1) js:grant2.click 
+   15723.8 ThreadId(19) cmd.grant.worker intent=ef85dfa7
+   15723.9 ThreadId(1) js:step 14 grant2-clicked
+   15774.8 ThreadId(19) confirm.ask.begin 
+   15774.9 ThreadId(1) confirm.main.enter 
+   15777.4 ThreadId(1) confirm.dialog.shown 
+   19777.6 ThreadId(1) confirm.dialog.auto_allow 
+   19777.7 ThreadId(1) confirm.main.leave allowed=true
+   19777.9 ThreadId(19) confirm.ask.answered allowed=true
+   19810.8 ThreadId(8) cmd.grant.exit intent=ef85dfa7 ok
+   20167.6 ThreadId(1) js:grant2.cleared ms=4444
+   20167.8 ThreadId(1) js:step 15 waiting-expiry
+   80363.6 ThreadId(1) js:expired.noticed after_s=60
+   80363.8 ThreadId(1) js:step 16 expired

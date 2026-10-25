@@ -416,6 +416,56 @@ fn expiry_denies_at_deadline_before_reconciliation_and_audits_once() {
     assert_ne!(fresh.lease_id, l.lease_id);
 }
 #[test]
+fn a_grant_whose_answer_was_lost_is_replayed_as_it_was_and_never_revived_or_repeated() {
+    // The desktop did not see the answer and asks again with the same identity, possibly much
+    // later: after the lease expired, after it was revoked, after the authority restarted.
+    let mut f = Fixture::new();
+    let op = f.grant_op(
+        vec![ExecutionScope::SessionCreate, ExecutionScope::TurnStart],
+        60,
+    );
+    let original = lease(f.store.apply(&op).unwrap());
+    assert_eq!(original.state, LeaseState::Active);
+    let events = audit(&f.store).len();
+
+    // Still active: the same receipt.
+    assert_eq!(lease(f.store.apply(&op).unwrap()), original);
+
+    // Expired, reconciled, and the authority restarted: still the receipt it gave, no new
+    // lease, no event, and the gate still says expired (the replay grants nothing).
+    f.clock.advance(61);
+    f.store.expire_due().unwrap();
+    f.reopen();
+    let after_expiry = audit(&f.store).len();
+    assert_eq!(after_expiry, events + 1);
+    assert_eq!(lease(f.store.apply(&op).unwrap()), original);
+    assert_eq!(audit(&f.store).len(), after_expiry);
+    assert_eq!(f.gate(ExecutionScope::TurnStart), GateReason::LeaseExpired);
+    assert!(matches!(
+        f.store
+            .apply(&Operation::LeaseActive(LeaseActive {
+                session_id: original.session_id.clone()
+            }))
+            .unwrap(),
+        ResultValue::ActiveLease(None)
+    ));
+
+    // A new grant is a new action with its own identity; the old one does not collide.
+    let fresh = f.grant();
+    assert_ne!(fresh.lease_id, original.lease_id);
+    assert_eq!(lease(f.store.apply(&op).unwrap()), original);
+
+    // Revoked: replaying the grant does not undo the revocation.
+    f.store.apply(&revoke(&fresh)).unwrap();
+    let before = audit(&f.store).len();
+    assert_eq!(lease(f.store.apply(&op).unwrap()), original);
+    assert_eq!(audit(&f.store).len(), before);
+    assert_eq!(
+        f.gate(ExecutionScope::TurnStart),
+        GateReason::LeaseNotActive
+    );
+}
+#[test]
 fn grant_reconciles_overdue_active_in_same_transaction() {
     let mut f = Fixture::new();
     let old = f.grant();

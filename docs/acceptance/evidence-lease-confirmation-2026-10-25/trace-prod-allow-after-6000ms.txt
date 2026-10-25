@@ -1,0 +1,30 @@
+     425.8 ThreadId(20) link.connect.begin Control
+     898.3 ThreadId(16) link.connect.begin Watch
+    7316.8 ThreadId(1) js:ipc.begin #76 f8_lease_grant
+    7317.2 ThreadId(13) cmd.grant.enter intent=9b7ecead acts=true
+    7317.3 ThreadId(15) cmd.grant.worker intent=9b7ecead
+    7317.3 ThreadId(1) js:grant.click acts=5
+    7317.5 ThreadId(1) js:step 8 grant-clicked
+    7348.3 ThreadId(15) confirm.ask.begin 
+    7348.4 ThreadId(1) confirm.main.enter 
+    7357.1 ThreadId(1) confirm.dialog.shown 
+    7657.2 ThreadId(1) confirm.dialog.allow t=300 allow_sensitive=false value=0 page=347 upper=347
+    7657.3 ThreadId(1) confirm.dialog.probe t=300 dialog_vis=true dialog_active=true dlg_state=Some(WindowState(FOCUSED | TOP_RESIZABLE | RIGHT_RESIZABLE | BOTTOM_RESIZABLE | LEFT_RESIZABLE)) parent_state=Some(WindowState(TOP_RESIZABLE | RIGHT_RESIZABLE | BOTTOM_RESIZABLE | LEFT_RESIZABLE)) parent_active=Some(false) toplevels=[Wyss Console vis=true active=false focus=false] [Let this runtime ask to act? vis=true acti
+    8857.3 ThreadId(1) confirm.dialog.allow t=1500 allow_sensitive=true value=0 page=347 upper=347
+    8857.4 ThreadId(1) confirm.dialog.probe t=1500 dialog_vis=true dialog_active=true dlg_state=Some(WindowState(FOCUSED | TOP_RESIZABLE | RIGHT_RESIZABLE | BOTTOM_RESIZABLE | LEFT_RESIZABLE)) parent_state=Some(WindowState(TOP_RESIZABLE | RIGHT_RESIZABLE | BOTTOM_RESIZABLE | LEFT_RESIZABLE)) parent_active=Some(false) toplevels=[Wyss Console vis=true active=false focus=false] [Let this runtime ask to act? vis=true act
+   11357.3 ThreadId(1) confirm.dialog.allow t=4000 allow_sensitive=true value=0 page=347 upper=347
+   11357.4 ThreadId(1) confirm.dialog.probe t=4000 dialog_vis=true dialog_active=true dlg_state=Some(WindowState(FOCUSED | TOP_RESIZABLE | RIGHT_RESIZABLE | BOTTOM_RESIZABLE | LEFT_RESIZABLE)) parent_state=Some(WindowState(TOP_RESIZABLE | RIGHT_RESIZABLE | BOTTOM_RESIZABLE | LEFT_RESIZABLE)) parent_active=Some(false) toplevels=[Wyss Console vis=true active=false focus=false] [Let this runtime ask to act? vis=true act
+   13357.3 ThreadId(1) confirm.dialog.auto_allow 
+   13357.4 ThreadId(1) confirm.main.leave allowed=true
+   13357.5 ThreadId(15) confirm.ask.answered allowed=true
+   13357.6 ThreadId(15) link.connect.begin Control
+   13383.8 ThreadId(13) cmd.grant.exit intent=9b7ecead ok
+   13384.9 ThreadId(1) js:ipc.headers #76 f8_lease_grant ms=6068 status=200
+   13385.1 ThreadId(1) js:ipc.body #76 f8_lease_grant ms=6068
+   13780.5 ThreadId(1) js:grant.cleared ms=6465 text=Managed runtimes 1 prepared · 0 closed · protocol 2 Connected Refresh New session Session c2314f80 Ready Ready · generation 1 · Local Tools Updated 1:42 AM Session c2314f80 Ready c2314f80-c2de-4e29-a0b6-1320670a5f43 × OverviewConversationModelsHistory Bind a project folder to this session. Provider support Claude Code Managed is not implemented in this authority. T
+   13780.7 ThreadId(1) js:step 9 cleared
+   17013.0 ThreadId(1) js:step 99 finished
+   98843.3 ThreadId(15) link.connect.begin Control
+   99346.7 ThreadId(21) link.connect.begin Control
+   99848.2 ThreadId(16) link.connect.begin Control
+  100849.1 ThreadId(21) link.connect.begin Control
