@@ -39,6 +39,10 @@ jobs:
     env:
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'
+      # All feature combinations retain assertions; omit only bulky debug symbols
+      # so their test executables fit the disposable runner's filesystem.
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
     steps:
       - uses: actions/checkout@v4
       - name: Install Tauri Linux build dependencies
@@ -107,4 +111,6 @@ jobs:
       - name: Full all-feature Rust regression (synthetic fixtures only)
         env:
           WYSS_B1_REQUIRE_RUN: '1'
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --all-features -- --test-threads=1
+        run: |
+          df -h .
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --all-features -- --test-threads=1
