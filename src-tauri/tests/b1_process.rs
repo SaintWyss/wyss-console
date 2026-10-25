@@ -290,28 +290,25 @@ fn machine_ok(rig: &Rig) -> bool {
         ));
         return false;
     }
-    let bare = Command::new("/usr/bin/bwrap")
-        .env_clear()
-        .args([
-            "--unshare-user",
-            "--unshare-pid",
-            "--unshare-net",
-            "--ro-bind",
-            "/usr",
-            "/usr",
-            "--symlink",
-            "usr/bin",
-            "/bin",
-            "--symlink",
-            "usr/lib",
-            "/lib",
-            "--symlink",
-            "usr/lib",
-            "/lib64",
-            "/usr/bin/true",
-        ])
-        .stdin(Stdio::null())
-        .output();
+    let mut bare = Command::new("/usr/bin/bwrap");
+    bare.env_clear().args([
+        "--unshare-user",
+        "--unshare-pid",
+        "--unshare-net",
+        "--ro-bind",
+        "/usr",
+        "/usr",
+    ]);
+    // Mirror the host's runtime aliases, as the candidate plan does. Ubuntu's
+    // /lib64 points to usr/lib64, not CachyOS's usr/lib; a wrong loader alias
+    // must not be reported as missing namespace support.
+    for name in ["bin", "sbin", "lib", "lib64"] {
+        let path = Path::new("/").join(name);
+        if let Ok(target) = fs::read_link(&path) {
+            bare.arg("--symlink").arg(target).arg(path);
+        }
+    }
+    let bare = bare.arg("/usr/bin/true").stdin(Stdio::null()).output();
     if !bare.as_ref().is_ok_and(|o| o.status.success()) {
         not_run(&format!(
             "this machine cannot make user namespaces with bwrap: {:?}",
