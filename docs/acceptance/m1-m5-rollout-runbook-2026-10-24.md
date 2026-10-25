@@ -1,6 +1,6 @@
 # M1–M5 controlled rollout and rollback — not authorized for execution
 
-**NO-GO.** These are future owner actions, not actions performed by the release session. Use the
+**PRODUCTION NO-GO. Source consolidation through PR #27 is separately authorized.** These are future owner actions, not actions performed by the release session. Use the
 release artifact summary for the immutable candidate revision, archive and SHA-256. Do not merge,
 install, start the GUI against real stores, restart a service or migrate a database on this document's
 authority. No lingering or privilege change belongs to this rollout.
@@ -39,16 +39,16 @@ launcher is not a store rollback.
 Before any launch, repeat the read-only service/socket/version/hash inventory and verify active work
 has finished voluntarily. Do not terminate a host or an unrelated provider session to make a test pass.
 
-The packaged GUI can bootstrap/manage the v1 authority. There is no qualified GUI-only production
-startup switch in this candidate. Therefore package staging is reversible on its own, but launching
-the GUI is a **separate approval with potential authority effects**, not a consequence of Stage 1.
-Review this behavior before authorizing the following command:
+The current GUI observes the authority through `AuthorityBootstrap::observe_only`; absence and
+Retry cannot install or start it. `--gui-only` creates private HOME/XDG directories and a private
+bus. Final graphical acceptance is still NOT_PROVEN. Launching against installed state remains a
+separate owner approval; the following is not an instruction to execute during source integration:
 
 ```bash
 "$prefix/bin/wyss-console" --f8-authority "$XDG_RUNTIME_DIR/wyss-console-f8"
 ```
 
-This command may connect to the existing v2 authority and invoke the existing v1 bootstrap. It does
+This command may connect to the existing v2 authority; it does not invoke a mutating v1 bootstrap. It does
 not authorize an F8 unit rewrite, service restart, capacity increase, V9 migration, real Claude
 credential, B1 admission or lingering. Preserve the running host/PTYs until their sessions end; the
 new helper cannot be retrofitted into a running old host by copying a GUI. If startup requires a
@@ -61,10 +61,11 @@ no service beyond the approved set changed. No paid turn is part of a smoke test
 
 ## Stage 3: authority/store upgrade — independently blocked
 
-Do not execute this stage for this candidate: full V9 writers/replay and credential handoff are absent.
-A subsequent candidate must provide a qualified offline migration command before exact migration
-commands can be approved. This runbook deliberately does not substitute raw SQL or the test-only
-rehearsal for that tool.
+Do not execute this stage under source-integration authorization. V9 writers/replay and the explicit
+`wyss-control --prepare-v9-copy SOURCE BACKUP_V8 CANDIDATE_V9` tool now exist. The tool requires three
+absolute paths, reads the source and creates new private outputs without publishing a live store.
+Synthetic validation does not authorize accessing an installed source or performing a live migration.
+The protected credential handoff remains gated and has no operational production broker wiring.
 
 Required future sequence: quiescent authority; no active lease/turn/pending approval/in-flight
 operation; explicit downtime approval; sole-writer lock; full V8 SQLite backup with all committed
@@ -86,7 +87,8 @@ GUI activation without schema change: after the candidate window closes voluntar
 previous installed GUI through its existing launcher. Do not use `install.sh rollback` while terminals
 are active, because that command stops the host. If the v1 bootstrap replaced an authority, rollback
 must separately restore its approved binary/unit after quiescence; the package-only rollback does
-not promise to undo that effect.
+not promise to undo that effect. That bootstrap warning applies to historical packages only;
+the current GUI is observation-only.
 
 V9: an old binary must never open the V9 image. Preserve the failed/new V9 store and its sidecars for
 recovery, restore the validated pre-migration V8 snapshot as a complete store, verify V8 replay, then

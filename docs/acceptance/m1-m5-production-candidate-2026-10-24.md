@@ -1,5 +1,7 @@
 # M1–M5 production candidate — release qualification
 
+> Historical package qualification for `48396c4`. Later V9, credential-agent and GUI observer changes supersede its implementation status; see PR #27 and the current rollout runbook. The package hashes below do not qualify the current source.
+
 Date: 2026-10-24. Owner: Santiago. **Deployment verdict: NO-GO.**
 
 This is a release branch carrying the complete stacked history, not an acceptance of the proposed
