@@ -1,0 +1,3 @@
+# packaged binaries, no lab hooks (smoke s034937)
+--help: exit 0, stderr empty, no state, no window (see tests/cli_help.rs for the process-level test)
+authority and GUI stayed up 14 s on the real Wayland session; GUI spawned its WebKit processes; authority.log 0 bytes; GUI log: no panic/critical/abort; store integrity ok, user_version 8, journal gone after clean stop
