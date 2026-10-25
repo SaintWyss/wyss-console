@@ -265,20 +265,26 @@ pub async fn f8_sessions(
     service: State<'_, F8Gui>,
     request: SessionsRequest,
 ) -> Result<SessionsView, F8Error> {
-    blocking(READ, service.inner().clone(), move |s| {
+    crate::lab::trace("cmd.sessions.enter", "");
+    let out = blocking(READ, service.inner().clone(), move |s| {
         s.sessions(request.before)
     })
-    .await
+    .await;
+    crate::lab::trace("cmd.sessions.exit", if out.is_ok() { "ok" } else { "err" });
+    out
 }
 #[tauri::command]
 pub async fn f8_session(
     service: State<'_, F8Gui>,
     request: SessionRequest,
 ) -> Result<SessionDetail, F8Error> {
-    blocking(READ, service.inner().clone(), move |s| {
+    crate::lab::trace("cmd.session.enter", "");
+    let out = blocking(READ, service.inner().clone(), move |s| {
         s.session(request.session_id)
     })
-    .await
+    .await;
+    crate::lab::trace("cmd.session.exit", if out.is_ok() { "ok" } else { "err" });
+    out
 }
 #[tauri::command]
 pub async fn f8_session_prepare(
@@ -361,7 +367,11 @@ pub async fn f8_lease_grant(
     request: GrantRequest,
 ) -> Result<LeaseReceipt, F8Error> {
     let confirm = confirm.inner().clone();
-    blocking(INTENT, service.inner().clone(), move |s| {
+    let tag = crate::lab::short(request.intent_id.as_str());
+    crate::lab::trace("cmd.grant.enter", &format!("intent={tag} acts={}", confirm::acts(&request.scopes)));
+    let tag_exit = tag.clone();
+    let out = blocking(INTENT, service.inner().clone(), move |s| {
+        crate::lab::trace("cmd.grant.worker", &format!("intent={tag}"));
         if confirm::acts(&request.scopes) {
             let prompt = confirm::lease_prompt(
                 false,
@@ -384,7 +394,12 @@ pub async fn f8_lease_grant(
             request.ttl_seconds,
         )
     })
-    .await
+    .await;
+    crate::lab::trace(
+        "cmd.grant.exit",
+        &format!("intent={tag_exit} {}", if out.is_ok() { "ok" } else { "err" }),
+    );
+    out
 }
 /// Extending a lease keeps what it allows alive, so it is allowed the same way.
 #[tauri::command]

@@ -192,6 +192,7 @@ fn main() {
             "projects_open_window",
             // Protocol 2 (F8): granted by the `f8` capability, which the installed
             // configuration does not enable; only the state read is in `main`.
+            "lab_trace",
             "f8_state",
             "f8_reconnect",
             "f8_sessions",
