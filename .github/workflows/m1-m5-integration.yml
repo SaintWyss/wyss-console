@@ -91,6 +91,18 @@ jobs:
       - name: Focused V9 provider-aware persistence tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib production_v9 -- --test-threads=1
       - name: Credential handoff process regression
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --test credential_handoff_process -- --test-threads=1
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features f8-fixture --test credential_handoff_process -- --test-threads=1
       - name: Full default-feature Rust regression
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+      - name: Verify default product binaries exclude fixture backends
+        run: |
+          node --input-type=module <<'JS'
+          import { fixtureHitsInFile } from './scripts/package-fixtures.mjs';
+          for (const name of ['wyss-console', 'wyss-control', 'wyss-screen', 'wyss-credential-agent']) {
+            const hits = fixtureHitsInFile(`src-tauri/target/debug/${name}`);
+            if (hits.length) throw new Error(`${name}: ${hits.join(', ')}`);
+            console.log(`${name}: no fixture marker`);
+          }
+          JS
+      - name: Full all-feature Rust regression (synthetic fixtures only)
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --all-features -- --test-threads=1
