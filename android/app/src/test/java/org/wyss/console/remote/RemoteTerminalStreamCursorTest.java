@@ -9,8 +9,8 @@ public final class RemoteTerminalStreamCursorTest {
 
     @Test public void framesRequireCheckpointAndAdvanceOnlyContiguously() {
         RemoteTerminalStreamCursor cursor = new RemoteTerminalStreamCursor();
-        assertEquals(RemoteTerminalStreamCursor.Result.INVALID, cursor.frame(7, 2, 0, 3));
         assertEquals(RemoteTerminalStreamCursor.Result.ATTACHMENT_RESET, cursor.reconnect(7, 2));
+        assertEquals(RemoteTerminalStreamCursor.Result.INVALID, cursor.frame(7, 2, 0, 3));
         assertEquals(RemoteTerminalStreamCursor.Result.CHECKPOINT_ACCEPTED,
                 cursor.checkpoint(7, 2, 11, DIGEST));
         assertEquals(RemoteTerminalStreamCursor.Result.FRAME_ACCEPTED, cursor.frame(7, 2, 11, 3));
