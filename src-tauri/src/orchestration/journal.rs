@@ -366,6 +366,22 @@ impl RunJournal {
         self.get(&run_id)?.ok_or(JournalError::Storage)
     }
 
+    /// Current exclusive claims, including needs-review runs recovered without volatile paths.
+    /// Only opaque workspace identities cross the durable boundary.
+    pub fn claimed_workspaces(&self) -> Result<Vec<(String, String)>, JournalError> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut statement = connection.prepare(
+            "SELECT run_id,workspace_id FROM orchestration_workspace_claims ORDER BY run_id",
+        )?;
+        statement
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(JournalError::from)
+    }
+
     pub fn list(&self, limit: usize) -> Result<Vec<CoordinatorSnapshot>, JournalError> {
         if limit == 0 || limit > MAX_LIST {
             return Err(JournalError::Invalid);
