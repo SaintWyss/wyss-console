@@ -1609,7 +1609,11 @@ impl Coordinator {
             // A prior effect in this run requires owner verification before any more
             // effects can dispatch, even for dependency-free DAG steps. This fence
             // is per run; independent workspace deadlines and work still progress.
-            if run.steps.iter().any(|step| step.state == StepState::Verifying) {
+            if run
+                .steps
+                .iter()
+                .any(|step| step.state == StepState::Verifying)
+            {
                 continue;
             }
             self.update_dependencies(&run.run_id, now)?;
@@ -3435,7 +3439,10 @@ mod tests {
             revision: 2,
         };
         coordinator.tick(102).unwrap();
-        assert_eq!(coordinator.get(&run.run_id).unwrap().steps[0].state, StepState::Verifying);
+        assert_eq!(
+            coordinator.get(&run.run_id).unwrap().steps[0].state,
+            StepState::Verifying
+        );
         // No filesystem changes is not equivalent to reviewed effects.
         for now in [103, 104, 105] {
             coordinator.tick(now).unwrap();
