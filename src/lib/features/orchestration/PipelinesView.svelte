@@ -813,6 +813,32 @@
     }
   }
 
+  async function reviewedWorkspaceRevision(
+    run: CoordinatorSnapshot,
+    root: string,
+  ): Promise<string> {
+    // Use only the revision already displayed when the owner selected the workspace.
+    // Re-sampling at confirmation must never silently promote unseen changes.
+    const observed = observedWorkspace[run.run_id];
+    if (
+      !observed ||
+      runWorkspaceRoots[run.run_id] !== root ||
+      observed.workspace_id !== run.workspace_id
+    )
+      throw new OrchestrationCallError('workspace_conflict');
+    const current = await workspaceSnapshot(root);
+    if (
+      current.workspace_id !== observed.workspace_id ||
+      current.workspace_revision !== observed.workspace_revision
+    ) {
+      const remaining = { ...observedWorkspace };
+      delete remaining[run.run_id];
+      observedWorkspace = remaining;
+      throw new OrchestrationCallError('workspace_conflict');
+    }
+    return observed.workspace_revision;
+  }
+
   async function confirmStep(
     run: CoordinatorSnapshot,
     stepId: string,
@@ -830,11 +856,7 @@
       if (decision === 'confirmed_completed') {
         const chosenRoot = root ?? runWorkspaceRoots[run.run_id];
         if (!chosenRoot) throw new Error('workspace');
-        const workspace = await workspaceSnapshot(chosenRoot);
-        if (workspace.workspace_id !== run.workspace_id)
-          throw new OrchestrationCallError('workspace_conflict');
-        observedWorkspace = { ...observedWorkspace, [run.run_id]: workspace };
-        revision = workspace.workspace_revision;
+        revision = await reviewedWorkspaceRevision(run, chosenRoot);
         root = chosenRoot;
       }
       const next = await reconcileStep(
@@ -863,15 +885,8 @@
     busy = true;
     lastError = '';
     try {
-      const workspace = await workspaceSnapshot(root);
-      if (workspace.workspace_id !== run.workspace_id)
-        throw new OrchestrationCallError('workspace_conflict');
-      observedWorkspace = { ...observedWorkspace, [run.run_id]: workspace };
-      const next = await verifyStep(
-        run.run_id,
-        stepId,
-        workspace.workspace_revision,
-      );
+      const revision = await reviewedWorkspaceRevision(run, root);
+      const next = await verifyStep(run.run_id, stepId, revision);
       runs = runs.map((item) => (item.run_id === next.run_id ? next : item));
     } catch (error) {
       showError(error);
