@@ -1421,15 +1421,8 @@ impl Coordinator {
             }
             return self.poll_active(run, step, now);
         }
-        // A completed turn is not an approved workspace revision. Do not run another step
-        // against a workspace whose prior changes the owner has not reviewed yet.
-        if ordered.iter().any(|run| {
-            run.steps
-                .iter()
-                .any(|step| step.state == StepState::Verifying)
-        }) {
-            return Ok(());
-        }
+        // Verification fences only the run/workspace that owns the completed effect.
+        // A global return here would also starve unrelated workspaces and their deadlines.
         let mut dispatched = false;
         for run in ordered {
             if run.state == RunState::Paused {
@@ -1442,6 +1435,27 @@ impl Coordinator {
                 run.state,
                 RunState::Running | RunState::Pausing | RunState::Cancelling
             ) {
+                continue;
+            }
+            // Completed effects are not cancelled just because review is pending.
+            // Preserve their workspace claim; an expired verification needs owner review.
+            if let Some(verifying) = run
+                .steps
+                .iter()
+                .find(|step| step.state == StepState::Verifying)
+            {
+                if now >= plan_deadline(&self.plans, &run.run_id).unwrap_or(0) {
+                    self.journal
+                        .set_step_state(
+                            &run.run_id,
+                            &verifying.step_id,
+                            StepState::Verifying,
+                            StepState::NeedsReview,
+                            Some(FailureCode::PlanExpired),
+                            now,
+                        )
+                        .map_err(map_journal)?;
+                }
                 continue;
             }
             if now >= plan_deadline(&self.plans, &run.run_id).unwrap_or(0) {
@@ -2969,6 +2983,103 @@ mod tests {
                 .count(),
             1
         );
+        fs::remove_dir_all(root_a).unwrap();
+        fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn verifying_workspace_does_not_starve_another_workspaces_expired_deadline() {
+        let root_a = root();
+        let root_b = root();
+        let (coordinator, _journal, authority) = coordinator(&root_a);
+        *authority.second_root.lock().unwrap() = Some(root_b.clone());
+
+        let mut first = plan(
+            &root_a,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        first.expires_at_unix = 140;
+        first.limits.max_total_seconds = 40;
+        let a = coordinator
+            .submit(first.clone(), review(&first), 100)
+            .unwrap();
+        coordinator.tick(101).unwrap();
+        *authority.observation.lock().unwrap() = TurnObservation {
+            state: TurnState::Completed,
+            reason: None,
+            revision: 2,
+        };
+        coordinator.tick(102).unwrap();
+        assert_eq!(coordinator.get(&a.run_id).unwrap().steps[0].state, StepState::Verifying);
+
+        let mut second_step = step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![]);
+        second_step.managed_session_id = Some(SECOND_SESSION.into());
+        let mut second = plan(
+            &root_b,
+            vec![second_step],
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        );
+        second.expires_at_unix = 120;
+        second.limits.max_total_seconds = 20;
+        let b = coordinator
+            .submit(second.clone(), review(&second), 103)
+            .unwrap();
+        coordinator.tick(120).unwrap();
+        assert_eq!(coordinator.get(&b.run_id).unwrap().state, RunState::Expired);
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
+        assert_eq!(coordinator.get(&a.run_id).unwrap().steps[0].state, StepState::Verifying);
+
+        coordinator.tick(140).unwrap();
+        let expired_review = coordinator.get(&a.run_id).unwrap();
+        assert_eq!(expired_review.state, RunState::NeedsReview);
+        assert_eq!(expired_review.steps[0].state, StepState::NeedsReview);
+        assert_eq!(expired_review.steps[0].failure, Some(FailureCode::PlanExpired));
+        fs::remove_dir_all(root_a).unwrap();
+        fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn verifying_workspace_does_not_block_independent_serial_dispatch() {
+        let root_a = root();
+        let root_b = root();
+        let (coordinator, _journal, authority) = coordinator(&root_a);
+        *authority.second_root.lock().unwrap() = Some(root_b.clone());
+        let first = plan(
+            &root_a,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        let a = coordinator
+            .submit(first.clone(), review(&first), 100)
+            .unwrap();
+        coordinator.tick(101).unwrap();
+        *authority.observation.lock().unwrap() = TurnObservation {
+            state: TurnState::Completed,
+            reason: None,
+            revision: 2,
+        };
+        coordinator.tick(102).unwrap();
+
+        let mut second_step = step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![]);
+        second_step.managed_session_id = Some(SECOND_SESSION.into());
+        let second = plan(
+            &root_b,
+            vec![second_step],
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        );
+        let b = coordinator
+            .submit(second.clone(), review(&second), 103)
+            .unwrap();
+        coordinator.tick(104).unwrap();
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 2);
+        assert_eq!(coordinator.get(&a.run_id).unwrap().steps[0].state, StepState::Verifying);
+        assert!(matches!(
+            coordinator.get(&b.run_id).unwrap().steps[0].state,
+            StepState::Starting | StepState::Running
+        ));
+        coordinator.tick(105).unwrap();
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 2);
         fs::remove_dir_all(root_a).unwrap();
         fs::remove_dir_all(root_b).unwrap();
     }
