@@ -82,9 +82,10 @@ closure under the M8 roadmap DoD.
 - A subsequent Sol High review of the first desktop skip-link commit found its
   translucent background could fall below 4.5:1 over a light glass desktop.
   The link now uses opaque `--bg`; a new test checks text and boundary contrast
-  for all three themes. Re-review of this correction is pending. The skip-link
-  change is desktop-only; the Android source remains unchanged from the
-  separately CI-tested theme build.
+  for all three themes. Re-review at `d295743` found no residual actionable
+  finding and closed the evidence-provenance issue. This remains static review,
+  not formal GitHub approval. The skip-link change is desktop-only; Android
+  source remains unchanged from the separately CI-tested theme build.
 - Direct B1 process suite: **22 passed, 0 failed**. The standard script's
   `b1::` filter selects no `b1_process` cases, so this direct invocation covers
   the process regressions.
@@ -96,8 +97,10 @@ closure under the M8 roadmap DoD.
   `40303043578` passed on M8 head `0f88cf6`, including the native build and JVM
   tests. That M8 delta added desktop skip navigation; the following correction
   changes desktop CSS/tests only. Final-head CI for the correction is tracked
-  separately from this earlier run. CI does not prove physical device rendering
-  or touch target measurement.
+  by M1–M5 integration run `40304125925` and Android run `40304134561` on
+  `d295743`. On that exact head, frontend/contracts and scanner passed; the
+  Rust integration job is still running. Android native build/JUnit passed.
+  CI does not prove physical device rendering or touch target measurement.
 - No benchmark was run and no M01..M33 p50/p95 values are claimed here.
 
 ## Requirement status
