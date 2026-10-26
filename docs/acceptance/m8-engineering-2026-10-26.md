@@ -3,16 +3,15 @@
 ## Baseline and scope of this increment
 
 This branch is `feat/m8-whole-product-reviewed`, based on the separate
-`integration/m7-m9-reviewed` branch at
-`15f0d1a1e19b9d634699861ef2f197ffba1e1e05` (which contains the final
-evidence-only updates from M7 PR #30 head `8abc900` and M9 PR #31 head
-`6686687`).
-Their implementation sources were independently reviewed at M7 source head
-`0a6d5f7` and M9 head `3bbd055`; the evidence updates do not change source code.
-Those static reviews found no actionable findings; neither is a GitHub approval
-or production acceptance. M6 PR #29 remains open and unmerged. This is a
-substantial M8 accessibility and appearance increment; it is not whole-product
-closure under the M8 roadmap DoD.
+`integration/m7-m9-final-reviewed` branch at
+`64f5bc6280a10f7433a77ada86ff17daab5b33e9` (PR #33, open and unmerged). That
+integration includes the final M7 source/evidence head `f1a59513ec064ed288411cad2132175757449f48`
+and final M9 source/evidence head `fa7b1d424bbc3fbdec4b9507087da83988a7f514`.
+The M7, M9 and integrated deltas received separate static reviews with no
+actionable code findings. Those reviews are not GitHub approvals or production
+acceptance. M6 PR #29 remains open and unmerged. This is a substantial M8
+accessibility and appearance increment; it is not whole-product closure under
+the M8 roadmap DoD.
 
 ## Implemented
 
@@ -103,6 +102,28 @@ closure under the M8 roadmap DoD.
   later `d9cbe92` commit updates this evidence only; no product source changed.
   CI does not prove physical device rendering or touch target measurement.
 - No benchmark was run and no M01..M33 p50/p95 values are claimed here.
+
+### Final reviewed-integration head
+
+- The M8 feature branch was updated from PR #33's reviewed integration head
+  `64f5bc6280a10f7433a77ada86ff17daab5b33e9`; the resulting M8 head is
+  `f97c67d2ec533d1c4330fa6fdebfc189f5921571`. Its product delta relative to
+  that integration base is M8-only.
+- On `f97c67d`, `npm run check` passed: formatting, lint, Svelte/TypeScript,
+  69 Vitest files / 1,083 tests, owned-workspace harness (16), Claude bridge
+  (77), and Vite build (230 modules). Existing Python `ResourceWarning`s and
+  the Vite chunk-size advisory were emitted; the build succeeded.
+- `npm run scan:repo` passed 5/5 checks over the tracked repository, and
+  `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` passed on
+  `f97c67d`.
+- Exact-head M1–M5 Rust/integration and Android Gradle/JUnit Actions are
+  pending for `f97c67d`; results will be recorded here after completion. The
+  successful earlier-head runs listed above do not substitute for those
+  final-head runs.
+- A final static Sol High review of `64f5bc6..f97c67d` found no actionable
+  code, security or architecture findings. It identified the stale baseline
+  text corrected above. Static review is not GitHub approval, hardware/provider
+  acceptance or production acceptance.
 
 ## Requirement status
 
