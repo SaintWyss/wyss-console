@@ -7,6 +7,7 @@ export type ViewId =
   | 'runtimes'
   | 'providers'
   | 'projects'
+  | 'remote'
   | 'approvals'
   | 'events'
   | 'configuration'
@@ -54,6 +55,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: 'Pipelines',
     subtitle: 'Structured handoff and finite OL3 coordination',
     icon: 'M5 5h5v5H5zM14 14h5v5h-5zM10 7.5h3a3 3 0 0 1 3 3V14M7.5 10v5a2 2 0 0 0 2 2H14',
+  },
+  {
+    id: 'remote',
+    label: 'Remote PCs',
+    subtitle: 'Hosts and sessions · transport not selected',
+    icon: 'M3 5h18v12H3zM8 21h8M12 17v4M7 9h4M7 12h7M17 9h.01',
   },
   {
     id: 'approvals',

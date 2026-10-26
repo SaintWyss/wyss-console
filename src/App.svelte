@@ -17,6 +17,7 @@
   import { M3Controller } from './lib/features/m3/controller';
   import ProvidersView from './lib/features/m3/ProvidersView.svelte';
   import PipelinesView from './lib/features/orchestration/PipelinesView.svelte';
+  import RemoteView from './lib/features/remote/RemoteView.svelte';
   import { desktopM3 } from './lib/desktop/m3-client';
   import { ProjectsController } from './lib/features/projects/controller';
   import ProjectsGate from './lib/features/projects/ProjectsGate.svelte';
@@ -400,6 +401,7 @@
       f8Active={f8.gate === 'active'}
       onruntimes={() => go('runtimes')}
     />
+    <RemoteView visible={activeView === 'remote'} />
     {#if projects.overview?.enabled}
       <ProjectsView
         visible={activeView === 'projects'}

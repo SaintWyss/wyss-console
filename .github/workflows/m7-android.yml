@@ -1,0 +1,35 @@
+name: M7 Android client checks
+
+on:
+  pull_request:
+    branches: [main, feat/m6-structured-handoff-ol3]
+    paths:
+      - 'android/**'
+      - '.github/workflows/m7-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m7-android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-unit-and-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Install pinned Android platform
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Run offline input protocol tests and assemble the native app
+        run: gradle --no-daemon -p android testDebugUnitTest assembleDebug
