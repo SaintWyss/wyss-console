@@ -80,3 +80,6 @@ pub fn run_with(authority_digest: Option<&'static str>, extension: Extension) {
 
 /// F8 implementation behind an inactive local application selection; installed startup stays v1.
 pub mod f8;
+/// Bounded M6 orchestration client and metadata journal. This is never an execution authority.
+#[cfg(target_os = "linux")]
+pub mod orchestration;
