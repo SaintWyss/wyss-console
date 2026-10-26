@@ -751,6 +751,50 @@ fn opencode_with_comments_and_trailing_commas_is_read_and_shows_no_key() {
 }
 
 #[test]
+fn opencode_inventory_refuses_a_nested_rules_symlink_without_reading_it() {
+    let home = Home::new();
+    home.put(
+        ".config/opencode/opencode.jsonc",
+        r#"{ "model": "local/model" }"#,
+    );
+    let outside = home.put("outside/AGENTS.md", "SEKRET-outside-rules");
+    symlink(&outside, home.0.join(".config/opencode/AGENTS.md")).unwrap();
+
+    let found = home.read();
+    assert!(matches!(
+        outcome(&found, SourceKey::OpencodeUserRules),
+        Outcome::Read { .. }
+    ));
+    let rules = named(&found, ItemKind::RuleFile, "AGENTS.md");
+    assert_eq!(rules.persisted, Persisted::Unreadable);
+    assert!(rules.detail.is_none());
+    assert!(rules.hash.is_none());
+    assert!(!shown(&found).contains("SEKRET-outside-rules"));
+}
+
+#[test]
+fn opencode_inventory_lists_plugin_metadata_without_executing_the_plugin() {
+    let home = Home::new();
+    let marker = home.0.join("plugin-executed");
+    let plugin = home.put(
+        ".config/opencode/plugins/probe.js",
+        &format!("#!/bin/sh\nprintf executed > '{}'\n", marker.display()),
+    );
+    fs::set_permissions(&plugin, fs::Permissions::from_mode(0o700)).unwrap();
+    let config = serde_json::json!({
+        "plugin": [format!("file://{}", plugin.display())]
+    });
+    home.put(
+        ".config/opencode/opencode.jsonc",
+        &serde_json::to_string(&config).unwrap(),
+    );
+
+    let found = home.read();
+    named(&found, ItemKind::Plugin, "probe");
+    assert!(!marker.exists(), "inventory must not execute provider code");
+}
+
+#[test]
 fn a_broken_opencode_file_says_where_and_nothing_of_what_it_held() {
     let home = Home::new();
     home.put(

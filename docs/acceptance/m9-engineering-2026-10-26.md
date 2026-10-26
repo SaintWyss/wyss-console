@@ -22,6 +22,11 @@ for production. This M9 record is not an M6 or M9 production approval.
   trailing commas, secret exclusion, malformed files, selected-project scope,
   and no-write inventory. This M9 branch does not widen the accepted mutation
   surface or infer support from successful parsing.
+- The OpenCode fixture suite now explicitly checks that a nested `AGENTS.md`
+  symlink outside the approved root is represented only as unreadable metadata
+  (no text/hash leaks), and that inventory lists an executable plugin as
+  metadata without running it. These are deterministic fixtures, not evidence
+  about a real installed OpenCode build.
 - **Native provider selection and crash-safe metadata:** switching to a legacy
   Claude/Codex provider durably removes an older M9 project default before
   launch and restores it if launch or shell-version verification fails. M9
@@ -68,6 +73,9 @@ for production. This M9 record is not an M6 or M9 production approval.
   version revalidation. The multi-entry tombstone assertion checks membership,
   not serialized index order; the digests are held in a sorted set and one entry
   is derived from a random temporary home path.
+- Focused `agentconfig::adapter_tests`: **27 passed, 0 failed, 1 ignored**;
+  includes the new OpenCode nested-symlink refusal/redaction and plugin
+  non-execution regressions.
 - `orchestration::hermes_proposal::tests`: **4 passed, 0 failed**; valid and
   hostile JSON, unknown effect fields, size boundaries, dangling/duplicate and
   cyclic dependency cases.
