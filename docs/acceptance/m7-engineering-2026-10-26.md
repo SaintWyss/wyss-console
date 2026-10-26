@@ -96,7 +96,7 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
 | TS-REM-17 terminal escape/screen fidelity                         | NOT_RUN                 | No Android renderer or live terminal stream.                                                                                                                                                  |
 | TS-REM-18 Android cache/privacy and full listed states            | PARTIAL                 | Empty disconnected states, secure window and foreground memory clearing exist; real content cache, notifications, screen lock and five-minute background behavior are not implemented/tested. |
 | TS-HYB-01..14                                                     | BLOCKED / NOT_PROVEN    | OD01 transport selection and actual host/phone are dependencies; no real network or device experiment.                                                                                        |
-| Android Keystore P-256 keys                                       | IMPLEMENTED, NOT_PROVEN | API code creates separate keys and mandates device auth for presence key; CI builds/tests the SDK target, but physical device/TEE/attestation behavior remains untested.                         |
+| Android Keystore P-256 keys                                       | IMPLEMENTED, NOT_PROVEN | API code creates separate keys and mandates device auth for presence key; CI builds/tests the SDK target, but physical device/TEE/attestation behavior remains untested.                      |
 
 ## Verification
 
