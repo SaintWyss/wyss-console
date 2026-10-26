@@ -121,8 +121,12 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
   standalone run substitutes for the Android/JUnit build.
 - The final Android JUnit suite additionally covers a stale unsent request handle
   after reconnect followed by a fresh request; the stale handle cannot release
-  either payload, while the fresh handle is acknowledged. Final-head Android CI
-  and M1–M5 integration checks are pending.
+  either payload, while the fresh handle is acknowledged. Android GitHub Actions
+  run `40289210209` passed on final source head
+  `0a6d5f748dfdd7870f1dcb04c8a38034a94c8a77`, including the Android build and
+  JUnit suite. M1–M5 integration run `40289260949` is still in progress: its
+  frontend/contracts and scanner jobs passed, while the Rust job remains at
+  runner dependency installation. Do not treat that run as a full CI pass.
 - `npm audit`: 0 known vulnerabilities after locking the compatible Vite
   8.3.5 and undici security updates.
 - Android SDK/Gradle are unavailable locally. GitHub Actions run
@@ -133,15 +137,15 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
   frontend/contracts, scanner, full Rust/B1 and Clippy. These runs prove the
   committed sources compile and pass deterministic CI, not behavior on a phone.
   No physical Android device or terminal has been exercised, so device/Keystore
-  behavior remains **NOT_PROVEN**. The following commit updates evidence only;
-  final-head workflows will be dispatched after it is pushed.
-- Independent Sol High static review at `09e4c80` found no actionable issue in
-  the atomic race fix; the test-only delta at `32ddb78` was also rechecked with
-  no findings. Two unresolved PR review comments separately identified clipped
-  horizontal navigation and stale-handle payload release. Source fixes are in
-  `bdf975b` and `09e4c80`; this final stale-versus-fresh regression is pending
-  final-head review. This is not a merge approval, hardware acceptance or
-  production security sign-off.
+  behavior remains **NOT_PROVEN**. The current M1–M5 GitHub run is tracked
+  separately above; the evidence update below changes no Android or Rust source.
+- Independent Sol High static review at final source head `0a6d5f7` found no
+  actionable issue; this is a static review result, not a formal GitHub
+  approval, hardware acceptance or production security sign-off. Two resolved
+  Codex PR threads identified clipped horizontal navigation and stale-handle
+  payload release; source fixes are in `bdf975b` and `09e4c80`, and the final
+  stale-versus-fresh regression passed Android CI on that source head. Resolving
+  those threads is not merge approval or production security sign-off.
 
 No provider, remote network, existing service, credential or production data
 was touched.
