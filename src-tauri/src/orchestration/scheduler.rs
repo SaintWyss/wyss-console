@@ -1036,6 +1036,35 @@ impl Coordinator {
     }
 
     fn expire_paused(&self, run: &CoordinatorSnapshot, now: u64) -> Result<(), CoordinatorError> {
+        if run.steps.iter().any(|step| step.state == StepState::Verifying) {
+            for step in &run.steps {
+                if step.state == StepState::Verifying {
+                    self.journal
+                        .set_step_state(
+                            &run.run_id,
+                            &step.step_id,
+                            StepState::Verifying,
+                            StepState::NeedsReview,
+                            Some(FailureCode::PlanExpired),
+                            now,
+                        )
+                        .map_err(map_journal)?;
+                }
+            }
+            let current = self.get(&run.run_id)?;
+            if current.state == RunState::Paused {
+                self.journal
+                    .set_run_state(
+                        &current.run_id,
+                        current.revision,
+                        RunState::NeedsReview,
+                        Some(FailureCode::PlanExpired),
+                        now,
+                    )
+                    .map_err(map_journal)?;
+            }
+            return Ok(());
+        }
         for step in &run.steps {
             if !step.state.terminal() {
                 self.journal
@@ -1291,11 +1320,32 @@ impl Coordinator {
         {
             return Ok(run);
         }
-        let has_live_plan = self
-            .plans
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .contains_key(run_id);
+        let (has_live_plan, plan_expired) = {
+            let plans = self.plans.lock().unwrap_or_else(PoisonError::into_inner);
+            (
+                plans.contains_key(run_id),
+                plans
+                    .get(run_id)
+                    .is_some_and(|active| now >= active.plan.expires_at_unix),
+            )
+        };
+        if plan_expired {
+            for step in &run.steps {
+                if !step.state.terminal() {
+                    self.journal
+                        .set_step_state(
+                            run_id,
+                            &step.step_id,
+                            step.state,
+                            StepState::Cancelled,
+                            Some(FailureCode::PlanExpired),
+                            now,
+                        )
+                        .map_err(map_journal)?;
+                }
+            }
+        }
+        let run = self.get(run_id)?;
         let required_failed = run.steps.iter().any(|step| {
             step.required && matches!(step.state, StepState::Failed | StepState::Blocked)
         });
@@ -1307,7 +1357,7 @@ impl Coordinator {
             RunState::Failed
         } else if required_cancelled {
             RunState::Cancelled
-        } else if has_live_plan {
+        } else if has_live_plan && !plan_expired {
             // The in-memory immutable plan still exists, so the owner resolved each ambiguous
             // effect and the ordinary dependency scheduler may continue.
             RunState::Running
@@ -1387,6 +1437,72 @@ impl Coordinator {
         }
     }
 
+    /// A terminal/paused review fence expires independently of other running work.
+    /// An executed effect never becomes an unreviewed "cancelled" effect.
+    fn expire_inactive(
+        &self,
+        run: &CoordinatorSnapshot,
+        now: u64,
+    ) -> Result<(), CoordinatorError> {
+        if run.state == RunState::Paused {
+            return self.expire_paused(run, now);
+        }
+        if !matches!(
+            run.state,
+            RunState::Running | RunState::Pausing | RunState::Cancelling
+        ) {
+            return Ok(());
+        }
+        if let Some(verifying) = run
+            .steps
+            .iter()
+            .find(|step| step.state == StepState::Verifying)
+        {
+            self.journal
+                .set_step_state(
+                    &run.run_id,
+                    &verifying.step_id,
+                    StepState::Verifying,
+                    StepState::NeedsReview,
+                    Some(FailureCode::PlanExpired),
+                    now,
+                )
+                .map_err(map_journal)?;
+            return Ok(());
+        }
+        if run.state == RunState::Cancelling {
+            self.cancel_unstarted(&run.run_id, now)?;
+            return Ok(());
+        }
+        for step in &run.steps {
+            if !step.state.terminal() {
+                self.journal
+                    .set_step_state(
+                        &run.run_id,
+                        &step.step_id,
+                        step.state,
+                        StepState::Cancelled,
+                        Some(FailureCode::PlanExpired),
+                        now,
+                    )
+                    .map_err(map_journal)?;
+            }
+        }
+        let current = self.get(&run.run_id)?;
+        if matches!(current.state, RunState::Running | RunState::Pausing) {
+            self.journal
+                .set_run_state(
+                    &current.run_id,
+                    current.revision,
+                    RunState::Expired,
+                    Some(FailureCode::PlanExpired),
+                    now,
+                )
+                .map_err(map_journal)?;
+        }
+        Ok(())
+    }
+
     /// Performs one bounded scheduling observation. Called from the headless daemon loop.
     pub fn tick(&self, now: u64) -> Result<(), CoordinatorError> {
         let runs = self.journal.list(128).map_err(map_journal)?;
@@ -1408,13 +1524,28 @@ impl Coordinator {
                 .unwrap_or_else(PoisonError::into_inner)
                 .contains_key(&run.run_id)
         });
+        // Deadlines are per run, not blocked by the global Managed execution slot.
+        // Service all inactive/verification/paused deadlines before polling the live turn.
+        for run in &ordered {
+            if now >= plan_deadline(&self.plans, &run.run_id).unwrap_or(0)
+                && !run.steps.iter().any(|step| {
+                    matches!(step.state, StepState::Starting | StepState::Running)
+                })
+            {
+                self.expire_inactive(run, now)?;
+            }
+        }
+        let ordered = ordered
+            .iter()
+            .map(|run| self.get(&run.run_id))
+            .collect::<Result<Vec<_>, _>>()?;
         // Exactly one current Managed turn is allowed globally. Poll it before considering a
         // new dispatch; another run can never race it into the authority.
         if let Some((run, step)) = ordered.iter().find_map(|run| {
             run.steps
                 .iter()
                 .find(|s| matches!(s.state, StepState::Starting | StepState::Running))
-                .map(|step| (*run, step))
+                .map(|step| (run, step))
         }) {
             if now >= plan_deadline(&self.plans, &run.run_id).unwrap_or(0) {
                 return self.expire_active(run, step, now);
@@ -1435,61 +1566,6 @@ impl Coordinator {
                 run.state,
                 RunState::Running | RunState::Pausing | RunState::Cancelling
             ) {
-                continue;
-            }
-            // Completed effects are not cancelled just because review is pending.
-            // Preserve their workspace claim; an expired verification needs owner review.
-            if let Some(verifying) = run
-                .steps
-                .iter()
-                .find(|step| step.state == StepState::Verifying)
-            {
-                if now >= plan_deadline(&self.plans, &run.run_id).unwrap_or(0) {
-                    self.journal
-                        .set_step_state(
-                            &run.run_id,
-                            &verifying.step_id,
-                            StepState::Verifying,
-                            StepState::NeedsReview,
-                            Some(FailureCode::PlanExpired),
-                            now,
-                        )
-                        .map_err(map_journal)?;
-                }
-                continue;
-            }
-            if now >= plan_deadline(&self.plans, &run.run_id).unwrap_or(0) {
-                let fresh = self.get(&run.run_id)?;
-                if fresh.state == RunState::Cancelling {
-                    self.cancel_unstarted(&fresh.run_id, now)?;
-                    continue;
-                }
-                for step in &fresh.steps {
-                    if !step.state.terminal() {
-                        self.journal
-                            .set_step_state(
-                                &fresh.run_id,
-                                &step.step_id,
-                                step.state,
-                                StepState::Cancelled,
-                                Some(FailureCode::PlanExpired),
-                                now,
-                            )
-                            .map_err(map_journal)?;
-                    }
-                }
-                let fresh = self.get(&run.run_id)?;
-                if matches!(fresh.state, RunState::Running | RunState::Pausing) {
-                    self.journal
-                        .set_run_state(
-                            &fresh.run_id,
-                            fresh.revision,
-                            RunState::Expired,
-                            Some(FailureCode::PlanExpired),
-                            now,
-                        )
-                        .map_err(map_journal)?;
-                }
                 continue;
             }
             self.update_dependencies(&run.run_id, now)?;
@@ -2151,7 +2227,6 @@ impl Coordinator {
                     | StepState::WaitingResource
                     | StepState::AwaitingPermission
                     | StepState::Queued
-                    | StepState::Verifying
             ) {
                 self.journal
                     .set_step_state(
