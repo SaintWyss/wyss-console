@@ -1220,9 +1220,9 @@ impl Coordinator {
                 .iter()
                 .any(|step| step.state == StepState::NeedsReview)
         {
-            self.journal
-                .set_run_state(run_id, run.revision, RunState::Running, None, now)
-                .map_err(map_journal)
+            // A review resolves uncertainty; it never grants a new dispatch.
+            // The owner must submit a fresh reviewed plan to continue.
+            self.close_reconciled_run(run_id, now)
         } else if run.state == RunState::Pausing
             && !run.steps.iter().any(|step| {
                 matches!(
@@ -1357,29 +1357,29 @@ impl Coordinator {
         }) {
             return Ok(run);
         }
-        let (has_live_plan, plan_expired) = {
-            let plans = self.plans.lock().unwrap_or_else(PoisonError::into_inner);
-            (
-                plans.contains_key(run_id),
-                plans
-                    .get(run_id)
-                    .is_some_and(|active| now >= active.plan.expires_at_unix),
-            )
-        };
-        if plan_expired {
-            for step in &run.steps {
-                if !step.state.terminal() {
-                    self.journal
-                        .set_step_state(
-                            run_id,
-                            &step.step_id,
-                            step.state,
-                            StepState::Cancelled,
-                            Some(FailureCode::PlanExpired),
-                            now,
-                        )
-                        .map_err(map_journal)?;
-                }
+        // Reconciliation is a safety closure, not a new owner authorization. Every
+        // remaining never-dispatched step is explicitly cancelled, regardless of
+        // whether the request to pause or stop survived as a durable run state.
+        for step in &run.steps {
+            if matches!(
+                step.state,
+                StepState::Proposed
+                    | StepState::WaitingDependencies
+                    | StepState::Eligible
+                    | StepState::WaitingResource
+                    | StepState::AwaitingPermission
+                    | StepState::Queued
+            ) {
+                self.journal
+                    .set_step_state(
+                        run_id,
+                        &step.step_id,
+                        step.state,
+                        StepState::Cancelled,
+                        Some(FailureCode::OwnerReviewRequired),
+                        now,
+                    )
+                    .map_err(map_journal)?;
             }
         }
         let run = self.get(run_id)?;
@@ -1394,13 +1394,8 @@ impl Coordinator {
             RunState::Failed
         } else if required_cancelled {
             RunState::Cancelled
-        } else if has_live_plan && !plan_expired {
-            // The in-memory immutable plan still exists, so the owner resolved each ambiguous
-            // effect and the ordinary dependency scheduler may continue.
-            RunState::Running
         } else {
-            // After a process crash the prompts are intentionally gone. Close only the run
-            // whose effects the owner has reconciled; never reconstruct or redispatch it.
+            // Completed reviewed effects never implicitly authorize a new turn.
             RunState::Completed
         };
         let failure = matches!(next, RunState::Failed | RunState::Cancelled)
@@ -2384,6 +2379,7 @@ mod tests {
         fresh_receiver_fault: Mutex<Option<BridgeFault>>,
         source_fault: Mutex<Option<BridgeFault>>,
         start_fault: Mutex<Option<BridgeFault>>,
+        cancel_fault: Mutex<Option<BridgeFault>>,
         observation: Mutex<TurnObservation>,
     }
     impl FakeAuthority {
@@ -2397,6 +2393,7 @@ mod tests {
                 fresh_receiver_fault: Mutex::new(None),
                 source_fault: Mutex::new(None),
                 start_fault: Mutex::new(None),
+                cancel_fault: Mutex::new(None),
                 observation: Mutex::new(TurnObservation {
                     state: TurnState::Running,
                     reason: None,
@@ -2472,6 +2469,9 @@ mod tests {
         }
         fn cancel(&self, _step: &StepSnapshot, _intent_id: &str) -> Result<(), BridgeFault> {
             self.cancels.fetch_add(1, Ordering::SeqCst);
+            if let Some(fault) = *self.cancel_fault.lock().unwrap() {
+                return Err(fault);
+            }
             Ok(())
         }
     }
@@ -3483,6 +3483,89 @@ mod tests {
             assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
             fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    #[test]
+    fn stop_with_ambiguous_cancel_cannot_resume_after_owner_reconciliation() {
+        let root = root();
+        let (coordinator, journal, authority) = coordinator(&root);
+        let draft = plan(
+            &root,
+            vec![
+                step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![]),
+                step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![]),
+            ],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        let run = coordinator
+            .submit(draft.clone(), review(&draft), 100)
+            .unwrap();
+        coordinator.tick(101).unwrap();
+        *authority.cancel_fault.lock().unwrap() = Some(BridgeFault::Unknown);
+        let stopped = coordinator.stop(&run.run_id, 102).unwrap();
+        assert_eq!(stopped.state, RunState::NeedsReview);
+        assert_eq!(stopped.steps[0].state, StepState::NeedsReview);
+        assert_eq!(stopped.steps[1].state, StepState::Eligible);
+        let revised = workspace_revision(&root).unwrap();
+        let resolved = coordinator
+            .reconcile(
+                &run.run_id,
+                &draft.steps[0].step_id,
+                ReconcileDecision::ConfirmedCompleted,
+                Some(&draft.workspace_root),
+                Some(&revised),
+                103,
+            )
+            .unwrap();
+        assert_eq!(resolved.state, RunState::Cancelled);
+        assert_eq!(resolved.steps[0].state, StepState::Succeeded);
+        assert_eq!(resolved.steps[1].state, StepState::Cancelled);
+        assert!(journal.claimed_workspaces().unwrap().is_empty());
+        coordinator.tick(104).unwrap();
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn paused_ambiguous_effect_cannot_implicitly_resume_after_reconciliation() {
+        let root = root();
+        let (coordinator, journal, authority) = coordinator(&root);
+        let draft = plan(
+            &root,
+            vec![
+                step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![]),
+                step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![]),
+            ],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        let run = coordinator
+            .submit(draft.clone(), review(&draft), 100)
+            .unwrap();
+        coordinator.tick(101).unwrap();
+        assert_eq!(coordinator.pause(&run.run_id, 102).unwrap().state, RunState::Pausing);
+        let attempt = coordinator.get(&run.run_id).unwrap().steps[0]
+            .attempt_id
+            .unwrap();
+        journal
+            .mark_attempt_unknown(&run.run_id, &draft.steps[0].step_id, &attempt, 103)
+            .unwrap();
+        let revised = workspace_revision(&root).unwrap();
+        let resolved = coordinator
+            .reconcile(
+                &run.run_id,
+                &draft.steps[0].step_id,
+                ReconcileDecision::ConfirmedCompleted,
+                Some(&draft.workspace_root),
+                Some(&revised),
+                104,
+            )
+            .unwrap();
+        assert_eq!(resolved.state, RunState::Cancelled);
+        assert_eq!(resolved.steps[1].state, StepState::Cancelled);
+        coordinator.tick(105).unwrap();
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
+        assert!(journal.claimed_workspaces().unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
