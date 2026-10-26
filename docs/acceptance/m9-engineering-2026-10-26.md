@@ -31,7 +31,16 @@ for production. This M9 record is not an M6 or M9 production approval.
   primary sidecar has been durably written. Directory scanning is capped at 16
   entries; corrupt or over-cap recovery keeps M9 unavailable and preserves the
   source bytes rather than silently discarding them. Atomic replacement syncs
-  the containing directory after rename.
+  the containing directory after rename. If migration cannot complete, all M9
+  sessions/defaults still held in memory are copied into bounded recovery before
+  the shared registry is projected; inability to preserve them refuses startup.
+  Legacy-provider override records are domain-separated project digests, bounded
+  for the complete recovery envelope, and are written only when a recovered M9
+  default actually exists.
+- **Concurrent settings reads:** a reader that loses an atomic-replacement race
+  yields and retries up to 16 times before returning the existing bounded
+  `Unsafe` result. This keeps replacement handling bounded while giving a
+  legitimate writer time to finish.
 - **Hermes Native:** adds a distinct Native catalogue entry and keeps the real
   interactive command available as a full-account Native process. Automatic
   version probing is disabled because upstream `hermes --version` performs an
@@ -48,30 +57,36 @@ for production. This M9 record is not an M6 or M9 production approval.
 
 ## Verification
 
-- Focused `native::service_tests`: **25 passed, 0 failed, 1 ignored**; includes
-  stale M9 default clearing, corrupt-sidecar legacy availability, recovery
-  migration/preservation, and OpenCode direct-handoff version revalidation.
+- Focused `native::service_tests`: **27 passed, 0 failed, 1 ignored**; includes
+  the P1 recovery-capacity regression across two restarts, corrupt-sidecar
+  legacy availability without irrelevant tombstone growth, hashed override
+  metadata, stale M9 default clearing, and OpenCode direct-handoff version
+  revalidation.
 - `orchestration::hermes_proposal::tests`: **4 passed, 0 failed**; valid and
   hostile JSON, unknown effect fields, size boundaries, dangling/duplicate and
   cyclic dependency cases.
+- `settings::tests::a_reader_of_the_file_only_ever_sees_a_whole_set`: **PASS**
+  after a full-suite scheduling failure exposed that five immediate retries
+  could exhaust under concurrent atomic replacements. The bounded retry/yield
+  correction passed both a focused rerun and the subsequent full Rust suite.
 - `npm run check`: **PASS**; 67 Vitest files / 1,074 tests, Prettier, ESLint,
   Svelte/TypeScript, owned harness (16), Claude bridge (77), and Vite production
   build. Vite reports the repository's >500 kB chunk advisory.
-- `npm run check:rust`: **PASS**; locked cargo check, library tests (1,478
-  passed / 29 ignored), main binary tests (547 passed / 16 ignored), credential
+- `npm run check:rust`: **PASS** on the corrected source; formatting, locked
+  cargo check, library tests (1,478 passed / 29 ignored), main binary tests
+  (549 passed / 16 ignored), credential
   binary tests (5 passed / 1 ignored), `authority_boundary` (1), `cli_help` (1),
   F8 contracts (10), F8 serve process (8), B1 unit tests (136), and Clippy with
   warnings denied.
-- Separately ran the bounded B1 process suite without the repository script's
-  `b1::` name filter: **22 passed, 0 failed**. The filtered script run selected
-  zero `b1_process` tests; this separate run supplies the process-test evidence.
+- Separately ran the bounded B1 process suite: **22 passed, 0 failed**. The
+  repository script's `b1::` filter selects zero `b1_process` tests, so this
+  unfiltered invocation supplies the process-test evidence.
 - `npm audit`: **0 known vulnerabilities** after the Vite 8.3.5 and undici
   security updates.
 - `npm run scan:repo`: **PASS**, 5 checks / 0 failures; all 1,606 tracked files
-  were scanned from Git and the working tree after source changes and before
-  this evidence-only update.
-- GitHub Actions on the corrected M9 commit remain pending; they will be
-  dispatched after the correction/evidence commit is pushed.
+  were scanned from Git and the working tree after the final source changes.
+- GitHub Actions and independent Sol High review for the corrected M9 head are
+  pending the correction/evidence commits being pushed.
 - No real OpenCode process or provider account was run. No Hermes process was
   run. These are fixtures and source-bound argument/capability tests only.
 
