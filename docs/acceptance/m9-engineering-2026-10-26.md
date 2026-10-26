@@ -36,7 +36,10 @@ for production. This M9 record is not an M6 or M9 production approval.
   the shared registry is projected; inability to preserve them refuses startup.
   Legacy-provider override records are domain-separated project digests, bounded
   for the complete recovery envelope, and are written only when a recovered M9
-  default actually exists.
+  default actually exists. The legacy v1 path-bearing tombstone file is validated
+  and merged into the v2 digest set before v1 is removed; malformed, oversized,
+  unreadable, or unpersistable v1 state blocks M9 admission and preserves the
+  original bytes. Dangling symlinks are treated as present and fail closed.
 - **Concurrent settings reads:** a reader that loses an atomic-replacement race
   yields and retries up to 16 times before returning the existing bounded
   `Unsafe` result. This keeps replacement handling bounded while giving a
@@ -57,11 +60,14 @@ for production. This M9 record is not an M6 or M9 production approval.
 
 ## Verification
 
-- Focused `native::service_tests`: **27 passed, 0 failed, 1 ignored**; includes
+- Focused `native::service_tests`: **28 passed, 0 failed, 1 ignored**; includes
   the P1 recovery-capacity regression across two restarts, corrupt-sidecar
-  legacy availability without irrelevant tombstone growth, hashed override
-  metadata, stale M9 default clearing, and OpenCode direct-handoff version
-  revalidation.
+  legacy availability without irrelevant tombstone growth, v1-to-v2 tombstone
+  migration before sidecar recovery, malformed-v1 fail-closed preservation,
+  hashed override metadata, stale M9 default clearing, and OpenCode direct-handoff
+  version revalidation. The multi-entry tombstone assertion checks membership,
+  not serialized index order; the digests are held in a sorted set and one entry
+  is derived from a random temporary home path.
 - `orchestration::hermes_proposal::tests`: **4 passed, 0 failed**; valid and
   hostile JSON, unknown effect fields, size boundaries, dangling/duplicate and
   cyclic dependency cases.
@@ -72,21 +78,28 @@ for production. This M9 record is not an M6 or M9 production approval.
 - `npm run check`: **PASS**; 67 Vitest files / 1,074 tests, Prettier, ESLint,
   Svelte/TypeScript, owned harness (16), Claude bridge (77), and Vite production
   build. Vite reports the repository's >500 kB chunk advisory.
-- `npm run check:rust`: **PASS** on the corrected source; formatting, locked
-  cargo check, library tests (1,478 passed / 29 ignored), main binary tests
-  (549 passed / 16 ignored), credential
-  binary tests (5 passed / 1 ignored), `authority_boundary` (1), `cli_help` (1),
-  F8 contracts (10), F8 serve process (8), B1 unit tests (136), and Clippy with
-  warnings denied.
+- `npm run check:rust`: **PASS** on corrected source head
+  `7f48ceb2680d7be2e8f1ab7f3d53129758be9291`, including formatting, locked
+  cargo check, 1,478 library tests
+  passed / 29 ignored, 550 main-binary tests passed / 16 ignored, credential
+  binary 5 passed / 1 ignored, authority boundary (1), CLI help (1), F8 contracts
+  (10), F8 serve process (8), B1 unit tests (136), and Clippy with warnings
+  denied.
 - Separately ran the bounded B1 process suite: **22 passed, 0 failed**. The
   repository script's `b1::` filter selects zero `b1_process` tests, so this
   unfiltered invocation supplies the process-test evidence.
 - `npm audit`: **0 known vulnerabilities** after the Vite 8.3.5 and undici
   security updates.
-- `npm run scan:repo`: **PASS**, 5 checks / 0 failures; all 1,606 tracked files
-  were scanned from Git and the working tree after the final source changes.
-- GitHub Actions and independent Sol High review for the corrected M9 head are
-  pending the correction/evidence commits being pushed.
+- `npm run scan:repo`: **PASS**, 5 checks / 0 failures across 1,606 tracked
+  files on corrected source head `7f48ceb`.
+- GitHub Actions run `40289260676` covers the earlier source head `2d3603f` and
+  remains in progress: its frontend/contracts and scanner jobs passed; the Rust
+  job remains at runner dependency installation. It is not final-head CI. The
+  order-independent test-only correction does not change adapter behavior.
+- Independent Sol High static review at `2d3603f` found no actionable issue in
+  the implementation. The final `7f48ceb` test-only delta awaits re-review;
+  neither review status is a formal GitHub approval or real-provider
+  acceptance.
 - No real OpenCode process or provider account was run. No Hermes process was
   run. These are fixtures and source-bound argument/capability tests only.
 
@@ -119,5 +132,5 @@ for production. This M9 record is not an M6 or M9 production approval.
 Managed production concurrency remains one; F8 approvals and authority paths are
 unchanged; Hermes planner admission remains blocked; Native sessions are clearly
 labelled as full-account provider processes. No provider files, credentials,
-services or production data were changed. This PR requires independent Sol High
-review and final CI before it is review-ready; it is not production-ready.
+services or production data were changed. Final GitHub Rust CI remains pending;
+real OpenCode/Hermes acceptance is unrun. It is not production-ready.
