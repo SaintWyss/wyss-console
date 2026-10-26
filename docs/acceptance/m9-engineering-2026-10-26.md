@@ -92,12 +92,13 @@ for production. This M9 record is not an M6 or M9 production approval.
   security updates.
 - `npm run scan:repo`: **PASS**, 5 checks / 0 failures across 1,606 tracked
   files on corrected source head `7f48ceb`.
-- GitHub Actions run `40292346348` passed on final PR head
+- GitHub Actions run `40292346348` passed on implementation/evidence revision
   `3bbd055f6919620baf243bb9b7fdd5212a080f96`, including frontend/contracts,
   scanner, formatting, Clippy, focused provider persistence, credential handoff,
   B1 process, default-feature Rust, fixture-binary exclusion and the complete
-  all-feature Rust regression. The earlier `40289260676` run was canceled and
-  is not acceptance evidence.
+  all-feature Rust regression. Later M9 commits update acceptance evidence only;
+  the exact current-head workflow conclusion is linked from PR #31. Earlier
+  canceled runs are not acceptance evidence.
 - Independent Sol High static review and re-review of final implementation head
   `3bbd055` found no actionable issue. The OpenCode exact-version Codex thread
   was resolved after adding direct and shell-resolved executable version checks
