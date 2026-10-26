@@ -22,6 +22,12 @@ for production. This M9 record is not an M6 or M9 production approval.
   trailing commas, secret exclusion, malformed files, selected-project scope,
   and no-write inventory. This M9 branch does not widen the accepted mutation
   surface or infer support from successful parsing.
+- The OpenCode fixture suite now explicitly checks that a nested `AGENTS.md`
+  symlink outside the approved root is represented only as unreadable metadata
+  (no text/hash leaks), and that inventory lists a valid JavaScript plugin and
+  an executable shell canary as metadata without importing/running either.
+  These are deterministic fixtures, not evidence about a real installed
+  OpenCode build.
 - **Native provider selection and crash-safe metadata:** switching to a legacy
   Claude/Codex provider durably removes an older M9 project default before
   launch and restores it if launch or shell-version verification fails. M9
@@ -68,6 +74,9 @@ for production. This M9 record is not an M6 or M9 production approval.
   version revalidation. The multi-entry tombstone assertion checks membership,
   not serialized index order; the digests are held in a sorted set and one entry
   is derived from a random temporary home path.
+- Focused `agentconfig::adapter_tests`: **27 passed, 0 failed, 1 ignored**;
+  includes the new OpenCode nested-symlink refusal/redaction and plugin
+  non-execution regressions.
 - `orchestration::hermes_proposal::tests`: **4 passed, 0 failed**; valid and
   hostile JSON, unknown effect fields, size boundaries, dangling/duplicate and
   cyclic dependency cases.
@@ -92,18 +101,31 @@ for production. This M9 record is not an M6 or M9 production approval.
   security updates.
 - `npm run scan:repo`: **PASS**, 5 checks / 0 failures across 1,606 tracked
   files on corrected source head `7f48ceb`.
+- Final OpenCode boundary delta at `5dfd6c0`: `cargo fmt --check` **PASS**;
+  focused `agentconfig::adapter_tests` **27 passed, 0 failed, 1 ignored**;
+  `npm run scan:repo` **5 passed, 0 failed** across 1,606 tracked files.
+  The inventory fixture uses a valid JavaScript module canary and an executable
+  shell canary, and verifies neither marker file is created.
 - GitHub Actions run `40292346348` passed on implementation/evidence revision
   `3bbd055f6919620baf243bb9b7fdd5212a080f96`, including frontend/contracts,
   scanner, formatting, Clippy, focused provider persistence, credential handoff,
   B1 process, default-feature Rust, fixture-binary exclusion and the complete
-  all-feature Rust regression. Later M9 commits update acceptance evidence only;
-  the exact current-head workflow conclusion is linked from PR #31. Earlier
-  canceled runs are not acceptance evidence.
+  all-feature Rust regression. This is an earlier implementation pass, not
+  evidence for later M9 changes. Earlier canceled runs are not acceptance
+  evidence.
 - Independent Sol High static review and re-review of final implementation head
   `3bbd055` found no actionable issue. The OpenCode exact-version Codex thread
   was resolved after adding direct and shell-resolved executable version checks
   plus regression tests. Static review and thread resolution are not formal
-  GitHub approval or real-provider acceptance.
+  GitHub approval or real-provider acceptance. Sol High's review of the final
+  test delta at `5dfd6c0` found no actionable issue: both valid JavaScript and
+  shell canaries are inventoried without execution. This is static review only.
+- M1–M5 integration workflow `40304623104` passed on source head `5dfd6c0`,
+  including frontend/contracts, scanner, Clippy and the full Rust regression
+  jobs. The later `eb185a9` commit updates acceptance evidence only; it changes
+  no product source. Workflow `40304130076` was canceled on `a1303c1` when the
+  current-head run superseded it. Do not treat `6686687`, `3bbd055` or the
+  canceled run as final-source Actions evidence.
 - No real OpenCode process or provider account was run. No Hermes process was
   run. These are fixtures and source-bound argument/capability tests only.
 
