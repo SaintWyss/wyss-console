@@ -144,10 +144,10 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
   fix. The exact `c6c273c` Android build/JUnit run `40304071949` passed.
   M1–M5 integration run `40304121330` on `c6c273c` reached a frontend
   formatting failure because the acceptance record at that revision failed
-  Prettier; the scanner step was consequently skipped. Its Rust job was still
-  running at the time of this record, so this run is not a full-suite pass. The
-  acceptance record is now formatted and will be rechecked on its published
-  revision. The earlier
+  Prettier; the scanner step was consequently skipped, and its Rust job was
+  canceled before completion. The formatted evidence revision `4e0989e` then
+  passed the exact-head M1–M5 workflow `40305214072`, including frontend,
+  scanner, Clippy and the Rust regression jobs. The earlier
   `40302472721` failure on `1f1f27b` was a test ordering
   expectation (frame sent before attachment); the corrected JUnit case runs
   after attachment and passed on `f85e865`.
