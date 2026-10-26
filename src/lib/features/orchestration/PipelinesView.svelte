@@ -147,12 +147,22 @@
     invalid_request: 'La solicitud no coincide con el contrato M6.',
     invalid_plan: 'El plan no es válido o supera los límites finitos.',
     invalid_handoff: 'El handoff está incompleto, vencido o cambió.',
+    handoff_objective_too_large:
+      'El objetivo supera 2.048 bytes; reduce el texto antes de sellarlo.',
+    handoff_prompt_too_large:
+      'El mensaje generado supera 8 KiB; reduce los extractos o preguntas antes de sellarlo.',
     review_stale:
       'El contenido cambió después de la revisión; vuelve a revisarlo.',
     trust_boundary_blocked:
       'Bloqueado: la frontera de confianza de Native no está demostrada.',
     provider_blocked:
       'El proveedor o el host no está admitido para este handoff.',
+    receiver_not_fresh:
+      'F8 confirmó que el receptor tiene trabajo previo o no está preparado como sesión nueva.',
+    receiver_freshness_unproven:
+      'No se pudo probar desde la evidencia F8 que el receptor esté nuevo y sin historial.',
+    source_freshness_unproven:
+      'No se pudo probar la identidad o generación actual de la sesión Managed de origen.',
     permission_denied: 'La autoridad Managed denegó el inicio.',
     resource_busy: 'El recurso Managed está ocupado; no se inició otro turno.',
     workspace_conflict:

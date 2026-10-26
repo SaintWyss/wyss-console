@@ -445,20 +445,24 @@ impl RunJournal {
         handoff_id: &str,
         revision: u64,
         content_digest: &str,
+        confirmed_at: u64,
     ) -> Result<Option<CoordinatorSnapshot>, JournalError> {
         let connection = self
             .connection
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let existing: Option<(i64, String, String)> = connection.query_row(
-            "SELECT revision,content_digest,run_id FROM orchestration_handoffs WHERE handoff_id=?1",
+        let existing: Option<(i64, String, i64, String)> = connection.query_row(
+            "SELECT revision,content_digest,confirmed_at,run_id FROM orchestration_handoffs WHERE handoff_id=?1",
             [handoff_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         ).optional()?;
-        let Some((stored_revision, stored_digest, run_id)) = existing else {
+        let Some((stored_revision, stored_digest, stored_confirmed_at, run_id)) = existing else {
             return Ok(None);
         };
-        if stored_revision != revision as i64 || stored_digest != content_digest {
+        if stored_revision != revision as i64
+            || stored_digest != content_digest
+            || stored_confirmed_at != confirmed_at as i64
+        {
             return Err(JournalError::Stale);
         }
         get_locked(&connection, &run_id)?
@@ -1642,6 +1646,7 @@ mod tests {
                 &envelope.handoff_id,
                 envelope.revision,
                 &envelope.content_digest,
+                confirmation.confirmed_at_unix,
             )
             .unwrap()
             .unwrap();
@@ -1651,7 +1656,8 @@ mod tests {
                 .handoff_run(
                     &envelope.handoff_id,
                     envelope.revision + 1,
-                    &envelope.content_digest
+                    &envelope.content_digest,
+                    confirmation.confirmed_at_unix,
                 )
                 .unwrap_err(),
             JournalError::Stale

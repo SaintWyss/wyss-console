@@ -95,9 +95,14 @@ pub enum DaemonError {
     InvalidRequest,
     InvalidPlan,
     InvalidHandoff,
+    HandoffObjectiveTooLarge,
+    HandoffPromptTooLarge,
     ReviewStale,
     TrustBoundaryBlocked,
     ProviderBlocked,
+    ReceiverNotFresh,
+    ReceiverFreshnessUnproven,
+    SourceFreshnessUnproven,
     PermissionDenied,
     ResourceBusy,
     WorkspaceConflict,
@@ -216,7 +221,7 @@ fn run_inner() -> Result<(), ()> {
         // fixed local errors do not include prompts, provider responses or filesystem paths.
         let _ = coordinator.tick(now());
         if last_request.elapsed() >= IDLE_EXIT
-            && !coordinator.has_background_work().map_err(|_| ())?
+            && !coordinator.has_background_work(now()).map_err(|_| ())?
         {
             drop(listener);
             let _ = fs::remove_file(&socket_path);
@@ -348,9 +353,14 @@ fn map_error(error: CoordinatorError) -> DaemonError {
         | CoordinatorError::Cycle
         | CoordinatorError::ConcurrencyBlocked => DaemonError::InvalidPlan,
         CoordinatorError::InvalidHandoff => DaemonError::InvalidHandoff,
+        CoordinatorError::HandoffObjectiveTooLarge => DaemonError::HandoffObjectiveTooLarge,
+        CoordinatorError::HandoffPromptTooLarge => DaemonError::HandoffPromptTooLarge,
+        CoordinatorError::SourceFreshnessUnproven => DaemonError::SourceFreshnessUnproven,
         CoordinatorError::ReviewStale => DaemonError::ReviewStale,
         CoordinatorError::TrustBoundaryBlocked => DaemonError::TrustBoundaryBlocked,
         CoordinatorError::ProviderBlocked => DaemonError::ProviderBlocked,
+        CoordinatorError::ReceiverNotFresh => DaemonError::ReceiverNotFresh,
+        CoordinatorError::ReceiverFreshnessUnproven => DaemonError::ReceiverFreshnessUnproven,
         CoordinatorError::SessionUnavailable | CoordinatorError::PermissionDenied => {
             DaemonError::PermissionDenied
         }
@@ -491,4 +501,90 @@ fn write_reply(stream: &mut UnixStream, reply: &DaemonReply) -> Result<(), ()> {
         .map_err(|_| ())?;
     stream.write_all(&bytes).map_err(|_| ())?;
     stream.flush().map_err(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::orchestration::{
+        DependencyV1, EffectClass, PlanLimitsV1, ProviderLane, StepPlanV1, StopPolicy,
+    };
+    use std::{fs, os::unix::fs::PermissionsExt, sync::Arc};
+    use uuid::Uuid;
+
+    #[test]
+    fn paused_plan_survives_idle_exit_predicate_and_resumes_through_ipc() {
+        let root = std::env::temp_dir().join(format!("wyss-orch-daemon-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let started_at = now();
+        let journal = Arc::new(RunJournal::open_in_memory().unwrap());
+        let coordinator = Coordinator::new(
+            journal.clone(),
+            Arc::new(F8Authority::new(root.join("runtime"))),
+            started_at,
+        )
+        .unwrap();
+        let plan = OrchestrationPlanV1 {
+            schema_version: 1,
+            plan_id: Uuid::new_v4().to_string(),
+            revision: 1,
+            host_id: "local".into(),
+            project_id: "daemon-idle-test".into(),
+            workspace_id: workspace_identity(&root).unwrap(),
+            workspace_root: root.to_string_lossy().into_owned(),
+            workspace_revision: workspace_revision(&root).unwrap(),
+            objective: "resume after idle exit threshold".into(),
+            created_at_unix: started_at,
+            expires_at_unix: started_at + 300,
+            limits: PlanLimitsV1 {
+                max_steps: 1,
+                max_parallelism: 1,
+                max_total_seconds: 300,
+                stop_policy: StopPolicy::CancelCurrentManagedTurn,
+            },
+            steps: vec![StepPlanV1 {
+                step_id: Uuid::new_v4().to_string(),
+                dependencies: Vec::<DependencyV1>::new(),
+                required: true,
+                provider: ProviderLane::ManagedCodex,
+                effect: EffectClass::ManagedInference,
+                managed_session_id: Some("11111111-1111-4111-8111-111111111111".into()),
+                model_id: None,
+                prompt: "private prompt stays in memory".into(),
+                max_attempts: 1,
+                max_duration_seconds: 60,
+            }],
+        };
+        let review = PlanReviewV1 {
+            plan_id: plan.plan_id.clone(),
+            revision: plan.revision,
+            digest: plan.digest().unwrap(),
+        };
+        let accepted = coordinator.submit(plan, review, started_at).unwrap();
+        let paused = handle(
+            &coordinator,
+            &journal,
+            DaemonRequest::Pause {
+                run_id: accepted.run_id.clone(),
+            },
+        );
+        assert_eq!(paused.error, None);
+
+        // The idle period is simulated with wall-clock inputs: 61 seconds exceeds IDLE_EXIT,
+        // while the finite approved envelope still has over three minutes remaining.
+        assert!(coordinator.has_background_work(started_at + 61).unwrap());
+        let resumed = handle(
+            &coordinator,
+            &journal,
+            DaemonRequest::Resume {
+                run_id: accepted.run_id.clone(),
+            },
+        );
+        assert_eq!(resumed.error, None);
+        let value = resumed.value.unwrap();
+        assert_eq!(value["state"], "running");
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }

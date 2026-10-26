@@ -9,11 +9,11 @@ use super::{
 };
 use crate::{
     contracts::{
-        WireUuid,
+        Sequence, WireUuid,
         control::{
-            ActualState, BindingState, ControlError as E, ControlState, ExecutionScope, GateReason,
-            Get, LeaseActive, Operation, ResultValue, RuntimeSafetyProfile, RuntimeTarget,
-            TurnCancel, TurnGet, TurnStart,
+            ActualState, AuditRead, BindingState, ControlError as E, ControlState, Empty,
+            ExecutionScope, GateReason, Get, LeaseActive, MAX_PAGE, Operation, ResultValue,
+            RuntimeSafetyProfile, RuntimeTarget, TurnCancel, TurnGet, TurnStart,
         },
         identities::{AgentRuntimeInstanceId, ManagedSessionId, ManagedTurnId},
         turn::{TurnReason, TurnState},
@@ -86,6 +86,21 @@ pub trait ManagedAuthority: Send + Sync + 'static {
     ) -> Result<StartedTurn, BridgeFault> {
         self.start(admission, intent_id, prompt)
     }
+    /// Authority-backed check used only for an explicitly reviewed Managed receiver.
+    /// Implementations that cannot prove a complete creation-to-head history fail closed.
+    fn verify_fresh_receiver(&self, _session_id: &str) -> Result<(), BridgeFault> {
+        Err(BridgeFault::Unknown)
+    }
+    /// Freshness for Managed source provenance. Native source identity is owned by wyss-host
+    /// and is not inferred from this Managed authority.
+    fn verify_managed_source(
+        &self,
+        _session_id: &str,
+        _generation: u64,
+        _workspace_root: &std::path::Path,
+    ) -> Result<(), BridgeFault> {
+        Err(BridgeFault::Unknown)
+    }
 }
 
 /// Concrete bridge. It speaks only the existing F8 protocol and lets its normal authority
@@ -96,8 +111,9 @@ pub struct F8Authority {
 }
 impl F8Authority {
     pub fn new(runtime_root: impl Into<PathBuf>) -> Self {
+        let runtime_root = runtime_root.into();
         Self {
-            connector: SocketConnector::new(runtime_root),
+            connector: SocketConnector::new(runtime_root.clone()),
             cancel: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -109,9 +125,183 @@ impl F8Authority {
             .map_err(|_| BridgeFault::Unavailable)?;
         F8Client::greet(stream, self.cancel.clone()).map_err(|_| BridgeFault::Unavailable)
     }
+
+    /// Proves a prepared Managed Codex session was created on this authority and has no
+    /// durable turn-admission event in its complete bounded creation-to-head history.
+    fn verify_fresh_receiver(&self, session_id: &str) -> Result<(), BridgeFault> {
+        let snapshot = self.inspect_fresh_receiver_snapshot(session_id);
+        require_atomic_fresh_start(snapshot)
+    }
+
+    /// Reads all currently supported F8 evidence for the receiver. A clean snapshot is not
+    /// sufficient to authorize a later turn/start: F8 has no atomic fresh-only precondition
+    /// or consumable preparation receipt, and its session revision does not advance when a
+    /// turn is admitted. The caller must keep this admission blocked until that contract
+    /// exists. This check is still useful to classify known-used receivers as denied.
+    fn inspect_fresh_receiver_snapshot(&self, session_id: &str) -> Result<(), BridgeFault> {
+        const MAX_RECEIVER_HISTORY: u64 = 2_000;
+        let session = ManagedSessionId::parse(session_id).map_err(|_| BridgeFault::Denied)?;
+        let mut client = self.client()?;
+        let initial = status_snapshot(&mut client)?;
+        let record = session_record(&mut client, session.clone())?;
+        if record.control_state != ControlState::Prepared
+            || record.runtime_kind != crate::contracts::agent_adapter::AgentRuntimeKind::Codex
+        {
+            return Err(BridgeFault::Denied);
+        }
+        let created = record.created_sequence.get();
+        let head = initial.last_sequence.map_or(0, Sequence::get);
+        if created == 0 || created > head || head.saturating_sub(created) > MAX_RECEIVER_HISTORY {
+            return Err(BridgeFault::Unknown);
+        }
+        let mut cursor = created - 1;
+        let mut prepared_receipt_seen = false;
+        while cursor < head {
+            let after_sequence = if cursor == 0 {
+                None
+            } else {
+                Some(
+                    cursor
+                        .to_string()
+                        .parse::<Sequence>()
+                        .map_err(|_| BridgeFault::Unknown)?,
+                )
+            };
+            let answer = client
+                .call(
+                    Operation::AuditRead(AuditRead {
+                        stream_id: initial.stream_id.clone(),
+                        after_sequence,
+                        limit: MAX_PAGE,
+                    }),
+                    Target::None,
+                )
+                .map_err(map_read_fault)?;
+            let ResultValue::Audit { events, .. } = answer.value else {
+                return Err(BridgeFault::Unknown);
+            };
+            if events.is_empty() {
+                return Err(BridgeFault::Unknown);
+            }
+            for event in events {
+                let value = serde_json::to_value(event).map_err(|_| BridgeFault::Unknown)?;
+                let sequence = value["sequence"]
+                    .as_str()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .ok_or(BridgeFault::Unknown)?;
+                let next_cursor = next_receiver_sequence(cursor, sequence, head)?;
+                inspect_receiver_event(
+                    &value,
+                    sequence,
+                    created,
+                    &session,
+                    initial.authority_instance_id.as_str(),
+                    initial.stream_id.as_str(),
+                    &mut prepared_receipt_seen,
+                )?;
+                cursor = next_cursor;
+            }
+        }
+        if !prepared_receipt_seen || cursor != head {
+            return Err(BridgeFault::Unknown);
+        }
+        let final_status = status_snapshot(&mut client)?;
+        if final_status.authority_instance_id != initial.authority_instance_id
+            || final_status.stream_id != initial.stream_id
+            || final_status.last_sequence != initial.last_sequence
+        {
+            return Err(BridgeFault::Unknown);
+        }
+        Ok(())
+    }
+
+    fn verify_managed_source(
+        &self,
+        session_id: &str,
+        generation: u64,
+        workspace_root: &std::path::Path,
+    ) -> Result<(), BridgeFault> {
+        let session = ManagedSessionId::parse(session_id).map_err(|_| BridgeFault::Denied)?;
+        let mut client = self.client()?;
+        let record = session_record(&mut client, session.clone())?;
+        if record.control_state != ControlState::Prepared
+            || record.runtime_kind != crate::contracts::agent_adapter::AgentRuntimeKind::Codex
+        {
+            return Err(BridgeFault::Denied);
+        }
+        let binding = match client
+            .call(
+                Operation::BindingStatus(Get {
+                    managed_session_id: session.clone(),
+                }),
+                Target::None,
+            )
+            .map_err(map_read_fault)?
+            .value
+        {
+            ResultValue::BindingStatus(binding) if binding.managed_session_id == session => binding,
+            _ => return Err(BridgeFault::Unknown),
+        };
+        if binding.state != BindingState::BoundAttached
+            || binding
+                .binding
+                .as_ref()
+                .is_none_or(|value| std::path::Path::new(&value.workspace_root) != workspace_root)
+        {
+            return Err(BridgeFault::Denied);
+        }
+        let attached_instance = binding.runtime_instance_id.ok_or(BridgeFault::Denied)?;
+        let runtime = client
+            .call(
+                Operation::RuntimeStatus(RuntimeTarget::codex()),
+                Target::Runtime {
+                    session: session.clone(),
+                    generation: None,
+                    instance: None,
+                },
+            )
+            .map_err(map_read_fault)?;
+        let ResultValue::RuntimeStatus(status) = runtime.value else {
+            return Err(BridgeFault::Unknown);
+        };
+        let Projection::Runtime {
+            session: observed_session,
+            generation: observed_generation,
+            identity: Some(identity),
+            ..
+        } = runtime.projection
+        else {
+            return Err(BridgeFault::Unknown);
+        };
+        if observed_session != session
+            || observed_generation != generation
+            || status.actual_state != ActualState::Ready
+            || status.desired_state != crate::contracts::control::DesiredState::Running
+            || status.runtime_instance_id.as_ref() != Some(&attached_instance)
+            || identity.managed_session_id != session
+            || identity.runtime_instance_id != attached_instance
+            || identity.generation != generation
+        {
+            return Err(BridgeFault::Denied);
+        }
+        Ok(())
+    }
 }
 
 impl ManagedAuthority for F8Authority {
+    fn verify_fresh_receiver(&self, session_id: &str) -> Result<(), BridgeFault> {
+        F8Authority::verify_fresh_receiver(self, session_id)
+    }
+
+    fn verify_managed_source(
+        &self,
+        session_id: &str,
+        generation: u64,
+        workspace_root: &std::path::Path,
+    ) -> Result<(), BridgeFault> {
+        F8Authority::verify_managed_source(self, session_id, generation, workspace_root)
+    }
+
     fn inspect(
         &self,
         session_id: &str,
@@ -374,6 +564,98 @@ fn map_read_fault(error: CallError) -> BridgeFault {
         CallError::Broken(_) => BridgeFault::Unavailable,
     }
 }
+
+fn status_snapshot(
+    client: &mut F8Client,
+) -> Result<crate::contracts::control::AuthorityStatus, BridgeFault> {
+    match client
+        .call(Operation::Status(Empty {}), Target::None)
+        .map_err(map_read_fault)?
+        .value
+    {
+        ResultValue::Status(status)
+            if status.authority_instance_id == *client.authority()
+                && status.protocol_version == 2 =>
+        {
+            Ok(status)
+        }
+        _ => Err(BridgeFault::Unknown),
+    }
+}
+
+fn session_record(
+    client: &mut F8Client,
+    session: ManagedSessionId,
+) -> Result<crate::contracts::control::ManagedSessionRecord, BridgeFault> {
+    match client
+        .call(
+            Operation::Get(Get {
+                managed_session_id: session.clone(),
+            }),
+            Target::None,
+        )
+        .map_err(map_read_fault)?
+        .value
+    {
+        ResultValue::Session(record) if record.managed_session_id == session => Ok(record),
+        _ => Err(BridgeFault::Unknown),
+    }
+}
+
+fn inspect_receiver_event(
+    value: &serde_json::Value,
+    sequence: u64,
+    created: u64,
+    session: &ManagedSessionId,
+    authority_instance_id: &str,
+    stream_id: &str,
+    prepared_receipt_seen: &mut bool,
+) -> Result<(), BridgeFault> {
+    let event_type = value["event_type"].as_str().ok_or(BridgeFault::Unknown)?;
+    let event_session = value["session_id"].as_str();
+    if value["stream_id"].as_str() != Some(stream_id)
+        || value["source"]["component"].as_str() != Some("wyss_control")
+        || value["source"]["instance_id"].as_str() != Some(authority_instance_id)
+    {
+        return Err(BridgeFault::Unknown);
+    }
+    if sequence == created {
+        *prepared_receipt_seen = event_type == "authority.managed_session.prepared"
+            && event_session == Some(session.as_str())
+            && value["correlation_id"].as_str().is_some();
+        if !*prepared_receipt_seen {
+            return Err(BridgeFault::Unknown);
+        }
+    }
+    if sequence > created && event_type.starts_with("authority.managed_turn.") {
+        if event_session.is_none() {
+            return Err(BridgeFault::Unknown);
+        }
+        if event_session == Some(session.as_str()) {
+            return Err(BridgeFault::Denied);
+        }
+    }
+    Ok(())
+}
+
+fn next_receiver_sequence(
+    cursor: u64,
+    sequence: u64,
+    observed_head: u64,
+) -> Result<u64, BridgeFault> {
+    if sequence <= cursor || sequence > observed_head || sequence != cursor.saturating_add(1) {
+        return Err(BridgeFault::Unknown);
+    }
+    Ok(sequence)
+}
+
+/// Converts the current-history result into the stronger proof required for dispatch.
+/// `turn/start` currently cannot atomically consume a fresh-only receipt, so a clean history
+/// remains unproven even though the snapshot check itself succeeded.
+fn require_atomic_fresh_start(snapshot: Result<(), BridgeFault>) -> Result<(), BridgeFault> {
+    snapshot?;
+    Err(BridgeFault::Unknown)
+}
 fn map_effect_fault(error: CallError) -> BridgeFault {
     match error {
         CallError::Refused(E::ActiveTurnExists | E::CapacityExceeded) => BridgeFault::Busy,
@@ -384,6 +666,7 @@ fn map_effect_fault(error: CallError) -> BridgeFault {
 
 struct ActivePlan {
     plan: OrchestrationPlanV1,
+    handoff_receiver: bool,
 }
 
 pub struct Coordinator {
@@ -502,7 +785,13 @@ impl Coordinator {
         self.plans
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(run.run_id.clone(), ActivePlan { plan });
+            .insert(
+                run.run_id.clone(),
+                ActivePlan {
+                    plan,
+                    handoff_receiver: false,
+                },
+            );
         Ok(run)
     }
 
@@ -514,6 +803,14 @@ impl Coordinator {
         confirmation: HandoffConfirmationV1,
         now: u64,
     ) -> Result<CoordinatorSnapshot, CoordinatorError> {
+        // A retry must carry the same reviewed bytes and confirmation before idempotency is
+        // considered. Validate against the original confirmation time so an accepted retry
+        // remains idempotent after envelope expiry without accepting a mutated body.
+        if envelope.digest()? != envelope.content_digest {
+            return Err(CoordinatorError::ReviewStale);
+        }
+        envelope.validate(confirmation.confirmed_at_unix)?;
+        confirmation.validate_for(&envelope, confirmation.confirmed_at_unix)?;
         if confirmation.handoff_id == envelope.handoff_id
             && confirmation.revision == envelope.revision
             && confirmation.reviewed_digest == envelope.content_digest
@@ -523,6 +820,7 @@ impl Coordinator {
                     &envelope.handoff_id,
                     envelope.revision,
                     &envelope.content_digest,
+                    confirmation.confirmed_at_unix,
                 )
                 .map_err(map_journal)?
         {
@@ -540,6 +838,24 @@ impl Coordinator {
         {
             return Err(CoordinatorError::WorkspaceConflict);
         }
+        if envelope.source.plane == super::HandoffPlane::Managed {
+            match self.authority.verify_managed_source(
+                &envelope.source.session_id,
+                envelope.source.session_generation,
+                &source_root,
+            ) {
+                Ok(()) => (),
+                Err(BridgeFault::Denied | BridgeFault::Busy) => {
+                    return Err(CoordinatorError::WorkspaceConflict);
+                }
+                Err(BridgeFault::Unavailable) => {
+                    return Err(CoordinatorError::AuthorityUnavailable);
+                }
+                Err(BridgeFault::Unknown) => {
+                    return Err(CoordinatorError::SourceFreshnessUnproven);
+                }
+            }
+        }
         if envelope.target.provider != ProviderLane::ManagedCodex {
             return Err(match envelope.target.provider {
                 ProviderLane::NativeCodex | ProviderLane::NativeClaude => {
@@ -556,6 +872,18 @@ impl Coordinator {
             .managed_session_id
             .clone()
             .ok_or(CoordinatorError::InvalidHandoff)?;
+        match self.authority.verify_fresh_receiver(&managed_session_id) {
+            Ok(()) => (),
+            Err(BridgeFault::Denied | BridgeFault::Busy) => {
+                return Err(CoordinatorError::ReceiverNotFresh);
+            }
+            Err(BridgeFault::Unavailable) => {
+                return Err(CoordinatorError::AuthorityUnavailable);
+            }
+            Err(BridgeFault::Unknown) => {
+                return Err(CoordinatorError::ReceiverFreshnessUnproven);
+            }
+        }
         let first_message = envelope.first_message()?;
         let expires_at = envelope
             .expires_at_unix
@@ -601,6 +929,14 @@ impl Coordinator {
             digest: plan.digest()?,
         };
         let run = self.submit(plan, review, now)?;
+        if let Some(active) = self
+            .plans
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_mut(&run.run_id)
+        {
+            active.handoff_receiver = true;
+        }
         if self
             .journal
             .record_handoff(&run.run_id, &envelope, &confirmation, now)
@@ -629,12 +965,17 @@ impl Coordinator {
     }
 
     /// Whether the daemon still has scheduled work that must continue without a window call.
-    pub fn has_background_work(&self) -> Result<bool, CoordinatorError> {
-        Ok(self.list()?.iter().any(|run| {
+    pub fn has_background_work(&self, now: u64) -> Result<bool, CoordinatorError> {
+        let runs = self.list()?;
+        let plans = self.plans.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(runs.iter().any(|run| {
             matches!(
                 run.state,
                 RunState::Ready | RunState::Running | RunState::Pausing | RunState::Cancelling
-            )
+            ) || (run.state == RunState::Paused
+                && plans
+                    .get(&run.run_id)
+                    .is_some_and(|active| now < active.plan.expires_at_unix))
         }))
     }
 
@@ -678,17 +1019,50 @@ impl Coordinator {
         if run.state != RunState::Paused {
             return Err(CoordinatorError::InvalidTransition);
         }
-        if !self
+        let expires_at = self
             .plans
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .contains_key(run_id)
-        {
-            return Err(CoordinatorError::InvalidTransition);
+            .get(run_id)
+            .map(|active| active.plan.expires_at_unix)
+            .ok_or(CoordinatorError::InvalidTransition)?;
+        if now >= expires_at {
+            self.expire_paused(&run, now)?;
+            return Err(CoordinatorError::Expired);
         }
         self.journal
             .set_run_state(run_id, run.revision, RunState::Running, None, now)
             .map_err(map_journal)
+    }
+
+    fn expire_paused(&self, run: &CoordinatorSnapshot, now: u64) -> Result<(), CoordinatorError> {
+        for step in &run.steps {
+            if !step.state.terminal() {
+                self.journal
+                    .set_step_state(
+                        &run.run_id,
+                        &step.step_id,
+                        step.state,
+                        StepState::Cancelled,
+                        Some(FailureCode::PlanExpired),
+                        now,
+                    )
+                    .map_err(map_journal)?;
+            }
+        }
+        let current = self.get(&run.run_id)?;
+        if current.state == RunState::Paused {
+            self.journal
+                .set_run_state(
+                    &current.run_id,
+                    current.revision,
+                    RunState::Expired,
+                    Some(FailureCode::PlanExpired),
+                    now,
+                )
+                .map_err(map_journal)?;
+        }
+        Ok(())
     }
 
     pub fn stop(&self, run_id: &str, now: u64) -> Result<CoordinatorSnapshot, CoordinatorError> {
@@ -1058,6 +1432,12 @@ impl Coordinator {
         }
         let mut dispatched = false;
         for run in ordered {
+            if run.state == RunState::Paused {
+                if now >= plan_deadline(&self.plans, &run.run_id).unwrap_or(0) {
+                    self.expire_paused(&self.get(&run.run_id)?, now)?;
+                }
+                continue;
+            }
             if !matches!(
                 run.state,
                 RunState::Running | RunState::Pausing | RunState::Cancelling
@@ -1132,8 +1512,25 @@ impl Coordinator {
             else {
                 continue;
             };
+            let handoff_receiver = self
+                .plans
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&run.run_id)
+                .is_some_and(|active| active.handoff_receiver);
             for step in &plan.steps {
-                let Some(row) = run.steps.iter().find(|row| row.step_id == step.step_id) else {
+                // Do not dispatch from the snapshot taken before an earlier admission result.
+                // In particular, a mandatory denial cancels later eligible rows immediately.
+                self.stop_after_mandatory_failure(&run.run_id, now)?;
+                let current_run = self.get(&run.run_id)?;
+                if current_run.state != RunState::Running {
+                    break;
+                }
+                let Some(row) = current_run
+                    .steps
+                    .iter()
+                    .find(|row| row.step_id == step.step_id)
+                else {
                     continue;
                 };
                 if row.state != StepState::Eligible && row.state != StepState::WaitingResource {
@@ -1146,6 +1543,68 @@ impl Coordinator {
                     )
                 {
                     continue;
+                }
+                if handoff_receiver {
+                    let receiver = step
+                        .managed_session_id
+                        .as_deref()
+                        .ok_or(CoordinatorError::InvalidPlan)?;
+                    match self.authority.verify_fresh_receiver(receiver) {
+                        Ok(()) => (),
+                        Err(BridgeFault::Denied | BridgeFault::Busy) => {
+                            self.journal
+                                .set_step_state(
+                                    &run.run_id,
+                                    &step.step_id,
+                                    row.state,
+                                    StepState::Blocked,
+                                    Some(FailureCode::ManagedSessionUnavailable),
+                                    now,
+                                )
+                                .map_err(map_journal)?;
+                            self.stop_after_mandatory_failure(&run.run_id, now)?;
+                            self.finish_if_done(&run.run_id, now)?;
+                            continue;
+                        }
+                        Err(BridgeFault::Unavailable) => {
+                            if row.state == StepState::Eligible {
+                                self.journal
+                                    .set_step_state(
+                                        &run.run_id,
+                                        &step.step_id,
+                                        row.state,
+                                        StepState::WaitingResource,
+                                        Some(FailureCode::AuthorityUnavailable),
+                                        now,
+                                    )
+                                    .map_err(map_journal)?;
+                            }
+                            continue;
+                        }
+                        Err(BridgeFault::Unknown) => {
+                            self.journal
+                                .set_step_state(
+                                    &run.run_id,
+                                    &step.step_id,
+                                    row.state,
+                                    StepState::NeedsReview,
+                                    Some(FailureCode::AuthorityUnavailable),
+                                    now,
+                                )
+                                .map_err(map_journal)?;
+                            let review_run = self.get(&run.run_id)?;
+                            self.journal
+                                .set_run_state(
+                                    &run.run_id,
+                                    review_run.revision,
+                                    RunState::NeedsReview,
+                                    Some(FailureCode::AuthorityUnavailable),
+                                    now,
+                                )
+                                .map_err(map_journal)?;
+                            break;
+                        }
+                    }
                 }
                 let admission = match self.authority.inspect(
                     step.managed_session_id.as_deref().unwrap_or(""),
@@ -1179,6 +1638,8 @@ impl Coordinator {
                                 now,
                             )
                             .map_err(map_journal)?;
+                        self.stop_after_mandatory_failure(&run.run_id, now)?;
+                        self.finish_if_done(&run.run_id, now)?;
                         continue;
                     }
                     Err(BridgeFault::Unavailable) => {
@@ -1300,6 +1761,8 @@ impl Coordinator {
                                 now,
                             )
                             .map_err(map_journal)?;
+                        self.stop_after_mandatory_failure(&run.run_id, now)?;
+                        self.finish_if_done(&run.run_id, now)?;
                     }
                     Err(BridgeFault::Unknown) => {
                         self.journal
@@ -1758,7 +2221,10 @@ fn map_journal(error: super::JournalError) -> CoordinatorError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestration::{DependencyV1, PlanLimitsV1, PlanReviewV1, StopPolicy};
+    use crate::orchestration::{
+        DependencyV1, HandoffConfirmationV1, HandoffEnvelopeV1, HandoffPlane, HandoffSourceV1,
+        HandoffTargetV1, PlanLimitsV1, PlanReviewV1, StopPolicy,
+    };
     use std::{
         fs,
         os::unix::fs::PermissionsExt,
@@ -1777,6 +2243,9 @@ mod tests {
         second_root: Mutex<Option<PathBuf>>,
         starts: AtomicUsize,
         cancels: AtomicUsize,
+        inspect_fault: Mutex<Option<BridgeFault>>,
+        fresh_receiver_fault: Mutex<Option<BridgeFault>>,
+        source_fault: Mutex<Option<BridgeFault>>,
         start_fault: Mutex<Option<BridgeFault>>,
         observation: Mutex<TurnObservation>,
     }
@@ -1787,6 +2256,9 @@ mod tests {
                 second_root: Mutex::new(None),
                 starts: AtomicUsize::new(0),
                 cancels: AtomicUsize::new(0),
+                inspect_fault: Mutex::new(None),
+                fresh_receiver_fault: Mutex::new(None),
+                source_fault: Mutex::new(None),
                 start_fault: Mutex::new(None),
                 observation: Mutex::new(TurnObservation {
                     state: TurnState::Running,
@@ -1797,12 +2269,34 @@ mod tests {
         }
     }
     impl ManagedAuthority for FakeAuthority {
+        fn verify_fresh_receiver(&self, _session_id: &str) -> Result<(), BridgeFault> {
+            if let Some(fault) = self.fresh_receiver_fault.lock().unwrap().take() {
+                return Err(fault);
+            }
+            Ok(())
+        }
+
+        fn verify_managed_source(
+            &self,
+            _session_id: &str,
+            _generation: u64,
+            _workspace_root: &std::path::Path,
+        ) -> Result<(), BridgeFault> {
+            if let Some(fault) = self.source_fault.lock().unwrap().take() {
+                return Err(fault);
+            }
+            Ok(())
+        }
+
         fn inspect(
             &self,
             session_id: &str,
             _effect: EffectClass,
             _model: Option<&str>,
         ) -> Result<Admission, BridgeFault> {
+            if let Some(fault) = self.inspect_fault.lock().unwrap().take() {
+                return Err(fault);
+            }
             let workspace_root = if session_id == SECOND_SESSION {
                 self.second_root
                     .lock()
@@ -1898,6 +2392,190 @@ mod tests {
         }
     }
 
+    fn handoff(root: &Path) -> (HandoffEnvelopeV1, HandoffConfirmationV1) {
+        let workspace_id = workspace_identity(root).unwrap();
+        let workspace_revision = workspace_revision(root).unwrap();
+        let mut envelope = HandoffEnvelopeV1 {
+            schema_version: 1,
+            handoff_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee".into(),
+            revision: 1,
+            source: HandoffSourceV1 {
+                host_id: "local".into(),
+                session_id: SESSION.into(),
+                session_generation: 1,
+                plane: HandoffPlane::Native,
+                project_id: "test-project".into(),
+                workspace_id: workspace_id.clone(),
+                workspace_revision: workspace_revision.clone(),
+                workspace_root: root.to_string_lossy().into_owned(),
+            },
+            target: HandoffTargetV1 {
+                host_id: "local".into(),
+                project_id: "test-project".into(),
+                workspace_id,
+                workspace_revision,
+                workspace_root: root.to_string_lossy().into_owned(),
+                provider: ProviderLane::ManagedCodex,
+                effect: EffectClass::ManagedInference,
+                managed_session_id: Some(SESSION.into()),
+                native_profile_id: None,
+                profile_revision: None,
+            },
+            objective: "review this small, owner-selected handoff".into(),
+            selected_context_items: vec![],
+            selected_file_references: vec![],
+            open_questions: vec![],
+            created_at_unix: 100,
+            expires_at_unix: 300,
+            content_digest: String::new(),
+        };
+        envelope.seal().unwrap();
+        let confirmation = HandoffConfirmationV1 {
+            handoff_id: envelope.handoff_id.clone(),
+            revision: envelope.revision,
+            reviewed_digest: envelope.content_digest.clone(),
+            confirmed_at_unix: 120,
+        };
+        (envelope, confirmation)
+    }
+
+    #[test]
+    fn fresh_receiver_evidence_requires_creation_receipt_and_rejects_prior_turns() {
+        let session = ManagedSessionId::parse(SESSION).unwrap();
+        let mut prepared_seen = false;
+        let prepared = serde_json::json!({
+            "sequence": "42",
+            "stream_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "event_type": "authority.managed_session.prepared",
+            "session_id": SESSION,
+            "correlation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "source": {
+                "component": "wyss_control",
+                "instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+            }
+        });
+        inspect_receiver_event(
+            &prepared,
+            42,
+            42,
+            &session,
+            "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            &mut prepared_seen,
+        )
+        .unwrap();
+        assert!(prepared_seen);
+
+        let prior_turn = serde_json::json!({
+            "sequence": "43",
+            "stream_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "event_type": "authority.managed_turn.admitted",
+            "session_id": SESSION,
+            "source": {
+                "component": "wyss_control",
+                "instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+            }
+        });
+        assert_eq!(
+            inspect_receiver_event(
+                &prior_turn,
+                43,
+                42,
+                &session,
+                "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                &mut prepared_seen
+            ),
+            Err(BridgeFault::Denied)
+        );
+
+        let mut no_receipt = false;
+        let malformed_creation = serde_json::json!({
+            "sequence": "42",
+            "stream_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "event_type": "authority.managed_session.prepared",
+            "session_id": SESSION,
+            "correlation_id": null,
+            "source": {
+                "component": "wyss_control",
+                "instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+            }
+        });
+        assert_eq!(
+            inspect_receiver_event(
+                &malformed_creation,
+                42,
+                42,
+                &session,
+                "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                &mut no_receipt
+            ),
+            Err(BridgeFault::Unknown)
+        );
+
+        let mut missing_identity = false;
+        let unscoped_turn = serde_json::json!({
+            "sequence": "43",
+            "stream_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "event_type": "authority.managed_turn.completed",
+            "session_id": null,
+            "source": {
+                "component": "wyss_control",
+                "instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+            }
+        });
+        assert_eq!(
+            inspect_receiver_event(
+                &unscoped_turn,
+                43,
+                42,
+                &session,
+                "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                &mut missing_identity
+            ),
+            Err(BridgeFault::Unknown)
+        );
+
+        let mut cross_authority = false;
+        assert_eq!(
+            inspect_receiver_event(
+                &prepared,
+                42,
+                42,
+                &session,
+                "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                &mut cross_authority
+            ),
+            Err(BridgeFault::Unknown)
+        );
+
+        // The current F8 read evidence proves the receiver is unused at the observed head,
+        // but turn/start cannot consume that fact atomically. It is not dispatch authority.
+        assert_eq!(
+            require_atomic_fresh_start(Ok(())),
+            Err(BridgeFault::Unknown)
+        );
+        assert_eq!(
+            require_atomic_fresh_start(Err(BridgeFault::Denied)),
+            Err(BridgeFault::Denied)
+        );
+
+        assert_eq!(next_receiver_sequence(42, 43, 43), Ok(43));
+        assert_eq!(
+            next_receiver_sequence(42, 44, 44),
+            Err(BridgeFault::Unknown),
+            "a skipped event refuses the snapshot"
+        );
+        assert_eq!(
+            next_receiver_sequence(42, 43, 42),
+            Err(BridgeFault::Unknown),
+            "a page beyond the observed head terminates fail-closed instead of rereading"
+        );
+    }
+
     fn coordinator(root: &Path) -> (Coordinator, Arc<RunJournal>, Arc<FakeAuthority>) {
         let journal = Arc::new(RunJournal::open_in_memory().unwrap());
         let authority = Arc::new(FakeAuthority::new(root.to_path_buf()));
@@ -1943,6 +2621,231 @@ mod tests {
         assert_eq!(final_run.steps[0].state, StepState::Failed);
         assert_eq!(final_run.steps[1].state, StepState::Blocked);
         assert_eq!(final_run.state, RunState::Failed);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mandatory_admission_refusal_cancels_independent_steps_before_dispatch() {
+        let root = root();
+        let (coordinator, _journal, authority) = coordinator(&root);
+        *authority.inspect_fault.lock().unwrap() = Some(BridgeFault::Denied);
+        let first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let draft = plan(
+            &root,
+            vec![step(first, vec![]), step(second, vec![])],
+            "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        );
+        let accepted = coordinator
+            .submit(draft.clone(), review(&draft), 100)
+            .unwrap();
+
+        coordinator.tick(101).unwrap();
+
+        let stopped = coordinator.get(&accepted.run_id).unwrap();
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 0);
+        assert_eq!(stopped.steps[0].state, StepState::Blocked);
+        assert_eq!(stopped.steps[1].state, StepState::Cancelled);
+        assert_eq!(stopped.state, RunState::Failed);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn direct_handoff_admission_fails_closed_when_receiver_is_not_fresh() {
+        let root = root();
+        let (coordinator, _journal, authority) = coordinator(&root);
+        *authority.fresh_receiver_fault.lock().unwrap() = Some(BridgeFault::Denied);
+        let (envelope, confirmation) = handoff(&root);
+
+        assert_eq!(
+            coordinator
+                .submit_handoff(envelope, confirmation, 120)
+                .unwrap_err(),
+            CoordinatorError::ReceiverNotFresh
+        );
+        assert!(coordinator.list().unwrap().is_empty());
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn direct_handoff_admission_fails_closed_when_freshness_is_unproven() {
+        let root = root();
+        let (coordinator, _journal, authority) = coordinator(&root);
+        *authority.fresh_receiver_fault.lock().unwrap() = Some(BridgeFault::Unknown);
+        let (envelope, confirmation) = handoff(&root);
+
+        assert_eq!(
+            coordinator
+                .submit_handoff(envelope, confirmation, 120)
+                .unwrap_err(),
+            CoordinatorError::ReceiverFreshnessUnproven
+        );
+        assert!(coordinator.list().unwrap().is_empty());
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn direct_managed_source_admission_fails_closed_without_fresh_identity_evidence() {
+        let root = root();
+        let (coordinator, _journal, authority) = coordinator(&root);
+        *authority.source_fault.lock().unwrap() = Some(BridgeFault::Unknown);
+        let (mut envelope, confirmation) = handoff(&root);
+        envelope.source.plane = super::super::HandoffPlane::Managed;
+        // This changes reviewed bytes; seal again and bind a matching explicit confirmation.
+        envelope.seal().unwrap();
+        let confirmation = HandoffConfirmationV1 {
+            handoff_id: envelope.handoff_id.clone(),
+            revision: envelope.revision,
+            reviewed_digest: envelope.content_digest.clone(),
+            confirmed_at_unix: confirmation.confirmed_at_unix,
+        };
+
+        assert_eq!(
+            coordinator
+                .submit_handoff(envelope, confirmation, 120)
+                .unwrap_err(),
+            CoordinatorError::SourceFreshnessUnproven
+        );
+        assert!(coordinator.list().unwrap().is_empty());
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn handoff_receiver_is_revalidated_before_effectful_dispatch() {
+        let root = root();
+        let (coordinator, _journal, authority) = coordinator(&root);
+        let (envelope, confirmation) = handoff(&root);
+        let run = coordinator
+            .submit_handoff(envelope, confirmation, 120)
+            .unwrap();
+        // A same-UID caller may create work after review. The backend repeats authority
+        // history validation at dispatch and blocks the stale receiver without starting.
+        *authority.fresh_receiver_fault.lock().unwrap() = Some(BridgeFault::Denied);
+
+        coordinator.tick(121).unwrap();
+
+        let after = coordinator.get(&run.run_id).unwrap();
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 0);
+        assert_eq!(after.steps[0].state, StepState::Blocked);
+        assert_eq!(
+            after.steps[0].failure,
+            Some(FailureCode::ManagedSessionUnavailable)
+        );
+        assert_eq!(after.state, RunState::Blocked);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn handoff_replay_rejects_mutated_body_and_changed_confirmation_time() {
+        let root = root();
+        let (coordinator, _journal, authority) = coordinator(&root);
+        let (envelope, confirmation) = handoff(&root);
+        let first = coordinator
+            .submit_handoff(envelope.clone(), confirmation.clone(), 120)
+            .unwrap();
+
+        let mut mutated = envelope.clone();
+        mutated.objective.push_str(" with changed bytes");
+        assert_eq!(
+            coordinator
+                .submit_handoff(mutated, confirmation.clone(), 121)
+                .unwrap_err(),
+            CoordinatorError::ReviewStale
+        );
+        let mut changed_confirmation = confirmation;
+        changed_confirmation.confirmed_at_unix += 1;
+        assert_eq!(
+            coordinator
+                .submit_handoff(envelope, changed_confirmation, 121)
+                .unwrap_err(),
+            CoordinatorError::ReviewStale
+        );
+        assert_eq!(coordinator.list().unwrap().len(), 1);
+        assert_eq!(coordinator.get(&first.run_id).unwrap().run_id, first.run_id);
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn paused_plan_keeps_daemon_alive_past_idle_and_resumes_on_reconnect() {
+        let root = root();
+        let (coordinator, _journal, authority) = coordinator(&root);
+        let draft = plan(
+            &root,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        let accepted = coordinator
+            .submit(draft.clone(), review(&draft), 100)
+            .unwrap();
+        let paused = coordinator.pause(&accepted.run_id, 110).unwrap();
+        assert_eq!(paused.state, RunState::Paused);
+
+        // 61 seconds without a window request exceeds the daemon idle threshold. The same
+        // live coordinator remains reachable because its approved finite plan is still valid.
+        assert!(coordinator.has_background_work(171).unwrap());
+        coordinator.tick(171).unwrap();
+        assert_eq!(
+            coordinator.get(&accepted.run_id).unwrap().state,
+            RunState::Paused
+        );
+
+        coordinator.resume(&accepted.run_id, 172).unwrap();
+        coordinator.tick(173).unwrap();
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            coordinator.get(&accepted.run_id).unwrap().steps[0].state,
+            StepState::Starting | StepState::Running
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn paused_plan_expires_and_restart_recovery_does_not_resume_it() {
+        let root = root();
+        let (coordinator, journal, authority) = coordinator(&root);
+        let draft = plan(
+            &root,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        let accepted = coordinator
+            .submit(draft.clone(), review(&draft), 100)
+            .unwrap();
+        coordinator.pause(&accepted.run_id, 110).unwrap();
+        assert!(!coordinator.has_background_work(400).unwrap());
+        assert_eq!(
+            coordinator.resume(&accepted.run_id, 400).unwrap_err(),
+            CoordinatorError::Expired
+        );
+        let expired = coordinator.get(&accepted.run_id).unwrap();
+        assert_eq!(expired.state, RunState::Expired);
+        assert_eq!(expired.failure, Some(FailureCode::PlanExpired));
+
+        // A separate run that is still within its envelope becomes NeedsReview after a
+        // coordinator restart; in-memory prompts are never reconstructed from SQLite.
+        let second_draft = plan(
+            &root,
+            vec![step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![])],
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        );
+        let second = coordinator
+            .submit(second_draft.clone(), review(&second_draft), 100)
+            .unwrap();
+        coordinator.pause(&second.run_id, 111).unwrap();
+        let restarted = Coordinator::new(journal, authority.clone(), 112).unwrap();
+        assert_eq!(
+            restarted.get(&second.run_id).unwrap().state,
+            RunState::NeedsReview
+        );
+        assert_eq!(
+            restarted.resume(&second.run_id, 113).unwrap_err(),
+            CoordinatorError::InvalidTransition
+        );
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 0);
         fs::remove_dir_all(root).unwrap();
     }
 
