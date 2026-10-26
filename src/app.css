@@ -4,21 +4,40 @@
   --glow-cyan: rgba(56, 189, 248, 0.2);
   --glow-violet: rgba(139, 92, 246, 0.16);
   --frame: rgba(34, 38, 46, 0.7);
-  --glass-line: rgba(148, 178, 230, 0.12);
-  --glass-line-strong: rgba(148, 178, 230, 0.22);
+  --glass-line: #6d7c92;
+  --glass-line-strong: #8494a6;
   --text: #e6ecf5;
-  --muted: #9aa6b8;
-  --faint: #7b879b;
+  --muted: #b7c3d3;
+  --faint: #a2b0c3;
   --accent: #5fd4f5;
   --accent-strong: #8fe6ff;
   --accent-soft: rgba(95, 212, 245, 0.14);
-  --ok: #4ade80;
+  --ok: #61e99a;
   --pending: #7dd3fc;
   --warn: #fbbf24;
-  --error: #f87171;
-  --error-text: #fecaca;
+  --error: #ff7777;
+  --error-text: #ffd6d6;
   --terminal-bg: #0b0f17;
-  --terminal-fg: #e6ecf5;
+  --terminal-fg: #f5f7fb;
+  --surface-subtle: rgba(255, 255, 255, 0.03);
+  --surface: rgba(255, 255, 255, 0.04);
+  --surface-control: rgba(255, 255, 255, 0.05);
+  --surface-raised: rgba(255, 255, 255, 0.06);
+  --surface-strong: rgba(255, 255, 255, 0.08);
+  --surface-hover: rgba(255, 255, 255, 0.12);
+  --surface-overlay: rgba(11, 15, 23, 0.9);
+  --surface-inverse: rgba(0, 0, 0, 0.25);
+  --accent-line: rgba(95, 212, 245, 0.45);
+  --accent-glow: rgba(95, 212, 245, 0.35);
+  --ok-line: rgba(74, 222, 128, 0.3);
+  --ok-glow: rgba(74, 222, 128, 0.6);
+  --ok-soft: rgba(74, 222, 128, 0.1);
+  --warn-soft: rgba(251, 191, 36, 0.1);
+  --warn-line: rgba(251, 191, 36, 0.45);
+  --error-soft: rgba(248, 113, 113, 0.1);
+  --error-line: rgba(248, 113, 113, 0.4);
+  --glass-native-bg: rgba(34, 38, 46, 0.7);
+  --text-on-accent: #070b12;
   --radius-lg: 14px;
   --radius-md: 10px;
   --radius-sm: 8px;
@@ -30,6 +49,90 @@
   line-height: 1.5;
   color: var(--text);
   background: var(--bg);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f6f8fb;
+  --glow-cyan: transparent;
+  --glow-violet: transparent;
+  --frame: #e8edf3;
+  --glass-line: #617088;
+  --glass-line-strong: #526070;
+  --text: #17212f;
+  --muted: #3f4d60;
+  --faint: #596b80;
+  --accent: #005a80;
+  --accent-strong: #00496d;
+  --accent-soft: #e0f2f8;
+  --ok: #176b3a;
+  --pending: #155478;
+  --warn: #704900;
+  --error: #a32622;
+  --error-text: #81201c;
+  --terminal-bg: #ffffff;
+  --terminal-fg: #111827;
+  --surface-subtle: #f1f4f7;
+  --surface: #edf2f6;
+  --surface-control: #e7edf3;
+  --surface-raised: #dfe7ef;
+  --surface-strong: #d9e2eb;
+  --surface-hover: #d0dbe6;
+  --surface-overlay: #e8edf3;
+  --surface-inverse: #e2e8f0;
+  --accent-line: #00678f;
+  --accent-glow: transparent;
+  --ok-line: #176b3a;
+  --ok-glow: transparent;
+  --ok-soft: #e7f7ec;
+  --warn-soft: #fff4cf;
+  --warn-line: #704900;
+  --error-soft: #fff0ed;
+  --error-line: #a32622;
+  --glass-native-bg: rgba(232, 237, 243, 0.94);
+  --text-on-accent: #ffffff;
+}
+
+:root[data-theme='high_contrast'] {
+  color-scheme: dark;
+  --bg: #000000;
+  --glow-cyan: transparent;
+  --glow-violet: transparent;
+  --frame: #000000;
+  --glass-line: #ffffff;
+  --glass-line-strong: #ffffff;
+  --text: #ffffff;
+  --muted: #ffffff;
+  --faint: #ededed;
+  --accent: #00ffff;
+  --accent-strong: #ffff00;
+  --accent-soft: #002a2a;
+  --ok: #73ff73;
+  --pending: #78b5ff;
+  --warn: #ffff00;
+  --error: #ff6868;
+  --error-text: #ffb0b0;
+  --terminal-bg: #000000;
+  --terminal-fg: #ffffff;
+  --surface-subtle: #000000;
+  --surface: #000000;
+  --surface-control: #000000;
+  --surface-raised: #000000;
+  --surface-strong: #000000;
+  --surface-hover: #111111;
+  --surface-overlay: #000000;
+  --surface-inverse: #000000;
+  --accent-line: #00ffff;
+  --accent-glow: transparent;
+  --ok-line: #73ff73;
+  --ok-glow: transparent;
+  --ok-soft: #003300;
+  --warn-soft: #151500;
+  --warn-line: #ffff00;
+  --error-soft: #1b0000;
+  --error-line: #ff6868;
+  --glass-native-bg: #000000;
+  --text-on-accent: #000000;
 }
 * {
   box-sizing: border-box;
@@ -58,7 +161,7 @@ button {
   min-height: 44px;
   padding: 0.25rem 0.75rem;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -112,11 +215,7 @@ button:focus-visible {
   height: 26vmax;
   left: 38%;
   bottom: -8vmax;
-  background: radial-gradient(
-    closest-side,
-    rgba(56, 189, 248, 0.07),
-    transparent
-  );
+  background: radial-gradient(closest-side, var(--glow-cyan), transparent);
 }
 
 .top-bar {
@@ -161,12 +260,12 @@ button:focus-visible {
   color: var(--text);
   border: 1px solid var(--glass-line-strong);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
 }
 .authority-notice[data-tone='error'] {
   color: var(--error-text);
-  border-color: rgba(248, 113, 113, 0.3);
-  background: rgba(248, 113, 113, 0.1);
+  border-color: var(--error-line);
+  background: var(--error-soft);
 }
 .authority-notice-main {
   flex: 1 1 320px;
@@ -190,12 +289,12 @@ button:focus-visible {
   color: var(--text);
   border: 1px solid var(--glass-line-strong);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
   cursor: pointer;
   transition: background-color 150ms ease;
 }
 .authority-notice .action:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--surface-hover);
 }
 .authority-notice .action:focus-visible,
 .authority-notice-details summary:focus-visible {
@@ -280,7 +379,7 @@ button:focus-visible {
   height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
   border: 1px solid var(--glass-line);
   font-size: 12px;
   color: var(--text);
@@ -302,7 +401,7 @@ button:focus-visible {
 }
 .pill[data-tone='ok'] .dot {
   background: var(--ok);
-  box-shadow: 0 0 10px rgba(74, 222, 128, 0.6);
+  box-shadow: 0 0 10px var(--ok-glow);
 }
 .pill[data-tone='pending'] .dot {
   background: var(--pending);
@@ -366,7 +465,7 @@ button:focus-visible {
   stroke-linejoin: round;
 }
 .nav-item:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-control);
   color: var(--text);
 }
 .nav-item[aria-current='page'] {
@@ -385,7 +484,7 @@ button:focus-visible {
   width: 3px;
   border-radius: 0 3px 3px 0;
   background: var(--accent);
-  box-shadow: 0 0 12px rgba(95, 212, 245, 0.7);
+  box-shadow: 0 0 12px var(--accent-glow);
 }
 .nav-item:disabled {
   color: var(--faint);
@@ -404,8 +503,8 @@ button:focus-visible {
   text-align: center;
   font-weight: 600;
   color: var(--warn);
-  border-color: rgba(251, 191, 36, 0.45);
-  background: rgba(251, 191, 36, 0.1);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
 }
 
 /* Console: tabs, actions and terminal surface */
@@ -455,7 +554,7 @@ button:focus-visible {
   border-radius: var(--radius-sm);
 }
 .terminal-tab:has([aria-selected='true']) {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--surface-strong);
   box-shadow: inset 0 0 0 1px var(--glass-line-strong);
 }
 .terminal-tab > button {
@@ -491,13 +590,13 @@ button:focus-visible {
   min-height: 36px;
   padding: 0 14px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(95, 212, 245, 0.35);
+  border: 1px solid var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent-strong);
   font-weight: 600;
 }
 .new-terminal:hover:not(:disabled) {
-  background: rgba(95, 212, 245, 0.22);
+  background: var(--accent-soft);
 }
 .new-terminal:disabled {
   opacity: 0.5;
@@ -521,7 +620,7 @@ button:focus-visible {
 }
 /* Where the keyboard goes, when there is more than one pane to tell apart. */
 .terminal-panel.focused {
-  border-color: rgba(95, 212, 245, 0.35);
+  border-color: var(--accent-line);
 }
 .pane-divider {
   position: absolute;
@@ -539,7 +638,7 @@ button:focus-visible {
   cursor: row-resize;
 }
 .pane-divider:hover {
-  background: rgba(95, 212, 245, 0.25);
+  background: var(--accent-soft);
 }
 .terminal-search {
   display: flex;
@@ -548,7 +647,7 @@ button:focus-visible {
   padding: 4px 6px;
   border: 1px solid var(--glass-line-strong);
   border-radius: var(--radius-md);
-  background: rgba(11, 15, 23, 0.9);
+  background: var(--surface-overlay);
 }
 .terminal-search input {
   flex: 1;
@@ -558,7 +657,7 @@ button:focus-visible {
   font: inherit;
   font-size: 13px;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-control);
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-sm);
 }
@@ -575,11 +674,11 @@ button:focus-visible {
   color: var(--text);
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
   cursor: pointer;
 }
 .terminal-search button[aria-pressed='true'] {
-  border-color: rgba(95, 212, 245, 0.5);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
 }
 .terminal-search-count {
@@ -597,7 +696,7 @@ button:focus-visible {
   font-size: 12.5px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
 }
 .terminal-legend dt {
   font-family: var(--font-mono);
@@ -663,8 +762,8 @@ button:focus-visible {
   padding: 8px 12px;
   font-size: 13px;
   color: var(--error-text);
-  background: rgba(248, 113, 113, 0.1);
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  background: var(--error-soft);
+  border: 1px solid var(--error-line);
   border-radius: var(--radius-md);
 }
 
@@ -725,7 +824,7 @@ button:focus-visible {
 .settings-feature .action:hover:not(:disabled),
 .providers-feature .action:hover:not(:disabled),
 .runtimes-feature .action:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-strong);
 }
 .sessions-feature .action:disabled,
 .agent-feature .action:disabled,
@@ -743,7 +842,7 @@ button:focus-visible {
 .settings-feature .action.primary,
 .providers-feature .action.primary,
 .runtimes-feature .action.primary {
-  border-color: rgba(95, 212, 245, 0.35);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent-strong);
   font-weight: 600;
@@ -755,7 +854,7 @@ button:focus-visible {
 .settings-feature .action.primary:hover:not(:disabled),
 .providers-feature .action.primary:hover:not(:disabled),
 .runtimes-feature .action.primary:hover:not(:disabled) {
-  background: rgba(95, 212, 245, 0.22);
+  background: var(--accent-soft);
 }
 .sessions-feature .action.danger,
 .agent-feature .action.danger,
@@ -764,8 +863,8 @@ button:focus-visible {
 .settings-feature .action.danger,
 .providers-feature .action.danger,
 .runtimes-feature .action.danger {
-  border-color: rgba(248, 113, 113, 0.3);
-  background: rgba(248, 113, 113, 0.1);
+  border-color: var(--error-line);
+  background: var(--error-soft);
   color: var(--error-text);
   font-weight: 600;
 }
@@ -776,7 +875,7 @@ button:focus-visible {
 .settings-feature .action.danger:hover:not(:disabled),
 .providers-feature .action.danger:hover:not(:disabled),
 .runtimes-feature .action.danger:hover:not(:disabled) {
-  background: rgba(248, 113, 113, 0.18);
+  background: var(--error-soft);
 }
 .sessions-status {
   display: flex;
@@ -787,7 +886,7 @@ button:focus-visible {
   color: var(--muted);
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
 }
 .sessions-status .dot {
   flex-shrink: 0;
@@ -797,8 +896,8 @@ button:focus-visible {
 .sessions-status.failed {
   flex-wrap: wrap;
   color: var(--error-text);
-  background: rgba(248, 113, 113, 0.1);
-  border-color: rgba(248, 113, 113, 0.3);
+  background: var(--error-soft);
+  border-color: var(--error-line);
 }
 .sessions-status.failed p {
   flex: 1 1 240px;
@@ -807,8 +906,8 @@ button:focus-visible {
 /* An outcome that is not known is a caution, not an error. */
 .sessions-status.failed.unknown {
   color: var(--text);
-  background: rgba(251, 191, 36, 0.08);
-  border-color: rgba(251, 191, 36, 0.35);
+  background: var(--warn-soft);
+  border-color: var(--warn-line);
 }
 .session-composer {
   display: flex;
@@ -818,7 +917,7 @@ button:focus-visible {
   padding: 10px 12px;
   border: 1px solid var(--glass-line-strong);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
 }
 /* The text takes the row; the actions sit under it. */
 .composer-text {
@@ -866,7 +965,7 @@ button:focus-visible {
   color: var(--muted);
   border: 1px solid var(--glass-line-strong);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
 }
 .uncertain-title {
   font-weight: 600;
@@ -938,13 +1037,13 @@ button:focus-visible {
   padding: 8px 12px;
   text-align: left;
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
   transition:
     background-color 150ms ease,
     border-color 150ms ease;
 }
 .session-row:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
 }
 .session-row[aria-pressed='true'] {
   border-color: var(--glass-line-strong);
@@ -994,7 +1093,7 @@ button:focus-visible {
   overflow-y: auto;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
   scrollbar-width: thin;
   scrollbar-color: var(--glass-line-strong) transparent;
 }
@@ -1052,9 +1151,9 @@ button:focus-visible {
   padding: 10px 12px;
   font-size: 12px;
   color: var(--error-text);
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  border: 1px solid var(--error-line);
   border-radius: var(--radius-md);
-  background: rgba(248, 113, 113, 0.08);
+  background: var(--error-soft);
 }
 /* Not enough room for two columns: the details sit above the list they belong to. */
 @container (max-width: 600px) {
@@ -1113,7 +1212,7 @@ button:focus-visible {
   border-radius: var(--radius-sm);
 }
 .agent-tab:has([aria-selected='true']) {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--surface-strong);
   box-shadow: inset 0 0 0 1px var(--glass-line-strong);
 }
 .agent-tab > button {
@@ -1153,7 +1252,7 @@ button:focus-visible {
   padding: 8px 12px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
 }
 .agent-session h2 {
   margin: 0;
@@ -1255,7 +1354,7 @@ button:focus-visible {
   align-self: flex-end;
   max-width: min(100%, 72ch);
   padding: 8px 12px;
-  border: 1px solid rgba(95, 212, 245, 0.22);
+  border: 1px solid var(--accent-line);
   border-radius: var(--radius-md);
   background: var(--accent-soft);
 }
@@ -1308,9 +1407,9 @@ button:focus-visible {
   padding: 10px 12px;
   font-size: 13px;
   color: var(--text);
-  border: 1px solid rgba(251, 191, 36, 0.35);
+  border: 1px solid var(--warn-line);
   border-radius: var(--radius-md);
-  background: rgba(251, 191, 36, 0.08);
+  background: var(--warn-soft);
 }
 .approval-title {
   font-weight: 600;
@@ -1325,9 +1424,9 @@ button:focus-visible {
   padding: 8px 12px;
   font-size: 13px;
   color: var(--error-text);
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  border: 1px solid var(--error-line);
   border-radius: var(--radius-md);
-  background: rgba(248, 113, 113, 0.1);
+  background: var(--error-soft);
 }
 .turn-alert p {
   flex: 1 1 240px;
@@ -1336,8 +1435,8 @@ button:focus-visible {
 /* An outcome that is not known is a caution, not an error. */
 .turn-alert.unknown {
   color: var(--text);
-  background: rgba(251, 191, 36, 0.08);
-  border-color: rgba(251, 191, 36, 0.35);
+  background: var(--warn-soft);
+  border-color: var(--warn-line);
 }
 .agent-composer {
   display: flex;
@@ -1346,7 +1445,7 @@ button:focus-visible {
   padding: 10px 12px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
 }
 /* The field has no edge of its own: the composer is what shows the focus. */
 .agent-composer:focus-within {
@@ -1446,7 +1545,7 @@ button:focus-visible {
   cursor: pointer;
 }
 .mode-option:has(input:checked) {
-  border-color: rgba(95, 212, 245, 0.35);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
 }
 .mode-option:has(input:focus-visible) {
@@ -1475,8 +1574,8 @@ button:focus-visible {
 /* A change of mode is a caution, not a destruction. */
 .close-confirm.mode-confirm {
   color: var(--text);
-  border-color: rgba(251, 191, 36, 0.35);
-  background: rgba(251, 191, 36, 0.08);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
 }
 .session-hint .link {
   min-height: 0;
@@ -1555,7 +1654,7 @@ button:focus-visible {
   font-size: 12px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
 }
 .approval-kind {
   font-size: 13px;
@@ -1578,7 +1677,7 @@ button:focus-visible {
   padding: 12px 14px;
   font-size: 13px;
   color: var(--text);
-  border: 1px solid rgba(251, 191, 36, 0.35);
+  border: 1px solid var(--warn-line);
   border-radius: var(--radius-md);
   background: var(--terminal-bg);
 }
@@ -1628,7 +1727,7 @@ button:focus-visible {
   color: var(--terminal-fg);
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
   scrollbar-width: thin;
   scrollbar-color: var(--glass-line-strong) transparent;
 }
@@ -1688,10 +1787,10 @@ html[data-glass='transparent'] .ambient {
 /* KWin blurs behind the window in "native", so the frame only tints it.
    "transparent" has no blur, so the tint must be heavier for legibility. */
 html[data-glass='native'] .shell {
-  background: rgba(34, 38, 46, 0.45);
+  background: var(--glass-native-bg);
 }
 html[data-glass='transparent'] .shell {
-  background: rgba(34, 38, 46, 0.88);
+  background: var(--glass-native-bg);
 }
 
 /* Status steps back before the view title does, and no status ever leaves: each width is
@@ -1796,7 +1895,7 @@ html[data-glass='transparent'] .shell {
 .events-feature .action.chip[aria-pressed='true'],
 .configuration-feature .action.chip[aria-pressed='true'] {
   color: var(--text);
-  border-color: rgba(95, 212, 245, 0.35);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
 }
 .events-scope {
@@ -1838,13 +1937,13 @@ html[data-glass='transparent'] .shell {
   text-align: left;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
   transition:
     background-color 150ms ease,
     border-color 150ms ease;
 }
 .event-row:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
 }
 .event-row[aria-pressed='true'] {
   border-color: var(--glass-line-strong);
@@ -1911,9 +2010,9 @@ html[data-glass='transparent'] .shell {
   padding: 10px 12px;
   font-size: 12px;
   color: var(--muted);
-  border: 1px dashed rgba(251, 191, 36, 0.35);
+  border: 1px dashed var(--warn-line);
   border-radius: var(--radius-md);
-  background: rgba(251, 191, 36, 0.06);
+  background: var(--warn-soft);
 }
 .events-list.earlier {
   opacity: 0.75;
@@ -1971,13 +2070,13 @@ html[data-glass='transparent'] .shell {
 }
 .settings-notice[data-tone='warn'] {
   color: var(--text);
-  background: rgba(251, 191, 36, 0.08);
-  border-color: rgba(251, 191, 36, 0.35);
+  background: var(--warn-soft);
+  border-color: var(--warn-line);
 }
 .settings-notice[data-tone='error'] {
   color: var(--error-text);
-  background: rgba(248, 113, 113, 0.1);
-  border-color: rgba(248, 113, 113, 0.3);
+  background: var(--error-soft);
+  border-color: var(--error-line);
 }
 .settings-section {
   display: flex;
@@ -1987,7 +2086,7 @@ html[data-glass='transparent'] .shell {
   padding: 12px 14px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-subtle);
 }
 .lifecycle-table {
   width: 100%;
@@ -1998,7 +2097,7 @@ html[data-glass='transparent'] .shell {
 .lifecycle-table td {
   text-align: left;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--line, rgba(127, 127, 127, 0.25));
+  border-bottom: 1px solid var(--line, var(--glass-line));
   vertical-align: top;
 }
 .lifecycle-table tr[data-current='true'] td:first-child {
@@ -2038,12 +2137,13 @@ html[data-glass='transparent'] .shell {
   font: inherit;
   font-size: 13px;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-control);
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);
 }
 .setting-row select option {
-  color: #0b0f17;
+  color: var(--text);
+  background: var(--bg);
 }
 .setting-row select:focus-visible,
 .setting-row input:focus-visible {
@@ -2166,7 +2266,7 @@ html[data-glass='transparent'] .shell {
   padding: 12px 14px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
 }
 .configuration-detail h3,
 .configuration-detail h4 {
@@ -2245,7 +2345,7 @@ html[data-glass='transparent'] .shell {
   flex-direction: column;
   gap: 8px;
   padding: 12px 14px;
-  border: 1px solid rgba(95, 212, 245, 0.35);
+  border: 1px solid var(--accent-line);
   border-radius: var(--radius-md);
   background: var(--accent-soft);
 }
@@ -2293,7 +2393,7 @@ html[data-glass='transparent'] .shell {
   list-style: none;
   font-size: 12px;
   border-radius: var(--radius-md);
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--surface-inverse);
   overflow-x: auto;
 }
 .configuration-diff li {
@@ -2305,7 +2405,7 @@ html[data-glass='transparent'] .shell {
   color: var(--warn);
 }
 .configuration-diff li[data-kind='added'] {
-  color: var(--ok, #6fcf97);
+  color: var(--ok, var(--ok));
 }
 .configuration-history-row {
   display: grid;
@@ -2314,7 +2414,7 @@ html[data-glass='transparent'] .shell {
   gap: 2px 10px;
   padding: 8px 12px;
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
 }
 .configuration-history-row .event-title {
   grid-column: 1;
@@ -2354,25 +2454,25 @@ html[data-glass='transparent'] .shell {
   white-space: nowrap;
   border: 1px solid var(--glass-line-strong);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
   cursor: pointer;
   transition: background-color 150ms ease;
 }
 .native-feature .action:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--surface-hover);
 }
 .native-feature .action:disabled {
   opacity: 0.5;
   cursor: default;
 }
 .native-feature .action.primary {
-  border-color: rgba(95, 212, 245, 0.35);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent-strong);
   font-weight: 600;
 }
 .native-feature .action.primary:hover:not(:disabled) {
-  background: rgba(95, 212, 245, 0.22);
+  background: var(--accent-soft);
 }
 .native-feature .action:focus-visible,
 .native-feature select:focus-visible,
@@ -2414,7 +2514,7 @@ html[data-glass='transparent'] .shell {
   padding: 10px 12px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
   cursor: pointer;
   transition:
     background-color 150ms ease,
@@ -2425,10 +2525,10 @@ html[data-glass='transparent'] .shell {
   accent-color: var(--accent);
 }
 .native-agent:hover:not(.missing) {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
 }
 .native-agent.selected {
-  border-color: rgba(95, 212, 245, 0.45);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
 }
 .native-agent.missing {
@@ -2467,7 +2567,7 @@ html[data-glass='transparent'] .shell {
   font: inherit;
   font-size: 13px;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-control);
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);
 }
@@ -2479,7 +2579,8 @@ html[data-glass='transparent'] .shell {
   flex: 1;
 }
 .native-feature select option {
-  color: #0b0f17;
+  color: var(--text);
+  background: var(--bg);
 }
 .native-feature select:disabled,
 .native-feature input:disabled,
@@ -2550,10 +2651,10 @@ li.native-row {
   padding: 8px 12px;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
 }
 li.native-row[data-state='running'] {
-  border-color: rgba(74, 222, 128, 0.18);
+  border-color: var(--ok-line);
 }
 li.native-row .event-title {
   grid-area: 1 / 1;
@@ -2613,15 +2714,15 @@ li.native-row .native-note {
   color: var(--text);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
   cursor: pointer;
   font: inherit;
 }
 .native-profile-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
 }
 .native-profile-item[aria-current='true'] {
-  border-color: rgba(95, 212, 245, 0.45);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
 }
 .native-versions {
@@ -2679,7 +2780,7 @@ li.native-row .native-note {
   gap: 2px;
   padding: 8px 12px;
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
 }
 .models-row .event-title {
   display: flex;
@@ -2697,7 +2798,7 @@ li.native-row .native-note {
   padding: 12px 14px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
 }
 .native-card h3,
 .native-card h4 {
@@ -2757,7 +2858,7 @@ li.native-row .native-note {
   overflow: hidden;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-subtle);
 }
 .rt-head {
   display: flex;
@@ -2786,7 +2887,7 @@ li.native-row .native-note {
   padding: 3px;
   overflow-x: auto;
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
   scrollbar-width: none;
 }
 .rt-tabs button {
@@ -2804,7 +2905,7 @@ li.native-row .native-note {
 .rt-tabs button[aria-selected='true'] {
   color: var(--text);
   font-weight: 600;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-strong);
   box-shadow: inset 0 0 0 1px var(--glass-line-strong);
 }
 .rt-panel {
@@ -2838,7 +2939,7 @@ li.native-row .native-note {
   padding: 12px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-subtle);
 }
 .rt-card > header {
   display: flex;
@@ -2854,9 +2955,9 @@ li.native-row .native-note {
   padding: 8px 10px;
   font-size: 12px;
   color: var(--warn);
-  border: 1px solid rgba(251, 191, 36, 0.3);
+  border: 1px solid var(--warn-line);
   border-radius: var(--radius-sm);
-  background: rgba(251, 191, 36, 0.08);
+  background: var(--warn-soft);
 }
 .rt-chips {
   display: flex;
@@ -2875,7 +2976,7 @@ li.native-row .native-note {
 }
 .rt-chips li.default {
   color: var(--accent-strong);
-  border-color: rgba(95, 212, 245, 0.35);
+  border-color: var(--accent-line);
 }
 .rt-gates {
   display: flex;
@@ -2925,7 +3026,7 @@ li.native-row .native-note {
   color: var(--text);
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
   font: inherit;
   font-size: 13px;
 }
@@ -2953,7 +3054,7 @@ li.native-row .native-note {
   min-height: 32px;
 }
 .rt-turns .action[aria-pressed='true'] {
-  border-color: rgba(95, 212, 245, 0.35);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
@@ -2972,7 +3073,7 @@ li.native-row .native-note {
   padding: 10px 12px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-subtle);
 }
 .rt-model-name {
   display: flex;
@@ -3056,11 +3157,11 @@ li.native-row .native-note {
   white-space: nowrap;
   border: 1px solid var(--glass-line-strong);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
   cursor: pointer;
 }
 .projects-feature .action:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--surface-hover);
 }
 .projects-feature .action:disabled {
   opacity: 0.5;
@@ -3069,7 +3170,7 @@ li.native-row .native-note {
 .projects-feature .action.primary {
   background: var(--accent-soft);
   color: var(--accent-strong);
-  border-color: rgba(95, 212, 245, 0.4);
+  border-color: var(--accent-line);
 }
 .projects-feature :focus-visible {
   outline: 2px solid var(--accent);
@@ -3109,7 +3210,7 @@ li.native-row .native-note {
   padding: 0 8px;
   font: inherit;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-control);
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-sm);
 }
@@ -3145,7 +3246,7 @@ li.native-row .native-note {
 }
 .projects-item[aria-current='true'] {
   background: var(--accent-soft);
-  border-color: rgba(95, 212, 245, 0.4);
+  border-color: var(--accent-line);
 }
 .projects-note {
   margin: 0;
@@ -3169,7 +3270,7 @@ li.native-row .native-note {
   padding: 8px 12px;
   border: 1px solid var(--glass-line-strong);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-control);
 }
 .projects-banner[data-kind='error'] {
   border-color: var(--error);
@@ -3219,7 +3320,7 @@ li.native-row .native-note {
   border-radius: var(--radius-lg);
 }
 .projects-pane.focused {
-  border-color: rgba(95, 212, 245, 0.35);
+  border-color: var(--accent-line);
 }
 .projects-session {
   flex: 1;
@@ -3347,9 +3448,9 @@ li.native-row .native-note {
   padding: 8px 10px 8px 26px;
   font-size: 12px;
   color: var(--text);
-  border: 1px solid rgba(251, 191, 36, 0.28);
+  border: 1px solid var(--warn-line);
   border-radius: var(--radius-sm);
-  background: rgba(251, 191, 36, 0.06);
+  background: var(--warn-soft);
 }
 .m3-four {
   display: grid;
@@ -3391,7 +3492,7 @@ li.native-row .native-note {
   font: inherit;
   border: 1px solid var(--glass-line-strong);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
 }
 .m3-select select:disabled,
 .m3-compose textarea:disabled {
@@ -3455,9 +3556,9 @@ li.native-row .native-note {
   padding: 10px 12px;
   font-size: 12px;
   color: var(--text);
-  border: 1px dashed rgba(251, 191, 36, 0.55);
+  border: 1px dashed var(--warn-line);
   border-radius: var(--radius-md);
-  background: rgba(251, 191, 36, 0.08);
+  background: var(--warn-soft);
 }
 .m3-transcript {
   display: flex;
@@ -3503,7 +3604,7 @@ li.native-row .native-note {
   background: var(--terminal-bg);
 }
 .m3-approval[data-state='indeterminate'] {
-  border-color: rgba(248, 113, 113, 0.5);
+  border-color: var(--error-line);
 }
 .m3-compose {
   display: flex;

@@ -1,14 +1,16 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+import { resetAppearance } from '../src/lib/features/terminal/appearance';
 import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 
 let renderer: TerminalRenderer;
 let host: HTMLDivElement;
-let remove: ReturnType<typeof vi.fn>;
 beforeEach(async () => {
-  remove = vi.fn();
+  resetAppearance();
   vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    media: '',
     addEventListener: vi.fn(),
-    removeEventListener: remove,
+    removeEventListener: vi.fn(),
     addListener: vi.fn(),
     removeListener: vi.fn(),
   }));
@@ -34,6 +36,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   renderer?.dispose();
+  resetAppearance();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -54,20 +57,27 @@ it('uses the real ANSI parser rather than displaying escape text', async () => {
     host.querySelectorAll<HTMLSpanElement>('.xterm-rows span'),
   );
   expect(
-    spans.some((span) => span.textContent === 'RED' && span.style.color),
+    spans.some(
+      (span) =>
+        span.textContent === 'RED' && span.classList.contains('xterm-fg-1'),
+    ),
   ).toBe(true);
 });
 it('skips fit while the container cannot be measured', () => {
   expect(renderer.fit()).toBeUndefined();
 });
-it('disposes DOM and media listeners and cancels a pending byte write', async () => {
+it('disposes appearance listeners and cancels a pending byte write', async () => {
   const pending = renderer.write(Uint8Array.of(1));
+  const refit = vi.fn();
+  renderer.onMetricsChange!(refit);
   renderer.dispose();
   expect(await pending).toBe(false);
   expect(host.querySelector('.xterm')).toBeNull();
-  expect(remove).toHaveBeenCalledTimes(1);
+  const { currentAppearance, setAppearance } =
+    await import('../src/lib/features/terminal/appearance');
+  setAppearance({ ...currentAppearance(), fontSize: 18 });
+  expect(refit).not.toHaveBeenCalled();
   renderer.dispose();
-  expect(remove).toHaveBeenCalledTimes(1);
 });
 
 it('keeps hidden byte parsing and protocol responses alive while gating user keys/paste', async () => {
@@ -108,7 +118,7 @@ it('keeps hidden byte parsing and protocol responses alive while gating user key
 });
 
 it('follows the appearance preferences, and says when a character changed size', async () => {
-  const { resetAppearance, setAppearance } =
+  const { setAppearance } =
     await import('../src/lib/features/terminal/appearance');
   const refit = vi.fn();
   const stop = renderer.onMetricsChange!(refit);
@@ -122,6 +132,7 @@ it('follows the appearance preferences, and says when a character changed size',
     scrollback: 9000,
     cursorStyle: 'bar',
     cursorBlink: true,
+    theme: 'dark',
   });
   expect(size()).toBe('20px');
   expect(refit).toHaveBeenCalledTimes(1);
@@ -131,6 +142,7 @@ it('follows the appearance preferences, and says when a character changed size',
     scrollback: 3000,
     cursorStyle: 'underline',
     cursorBlink: false,
+    theme: 'dark',
   });
   expect(refit).toHaveBeenCalledTimes(1);
   // The same appearance again wakes nobody.
@@ -139,6 +151,7 @@ it('follows the appearance preferences, and says when a character changed size',
     scrollback: 3000,
     cursorStyle: 'underline',
     cursorBlink: false,
+    theme: 'dark',
   });
   expect(refit).toHaveBeenCalledTimes(1);
 
@@ -148,6 +161,7 @@ it('follows the appearance preferences, and says when a character changed size',
     scrollback: 3000,
     cursorStyle: 'underline',
     cursorBlink: false,
+    theme: 'dark',
   });
   expect(size()).toBe('12px');
   expect(refit).toHaveBeenCalledTimes(1);
@@ -160,6 +174,7 @@ it('follows the appearance preferences, and says when a character changed size',
       scrollback: 3000,
       cursorStyle: 'underline',
       cursorBlink: false,
+      theme: 'dark',
     }),
   ).not.toThrow();
   resetAppearance();
@@ -174,6 +189,7 @@ it('starts a terminal with the appearance in force', async () => {
     scrollback: 7000,
     cursorStyle: 'block',
     cursorBlink: false,
+    theme: 'dark',
   });
   const { createRenderer } =
     await import('../src/lib/features/terminal/renderer');

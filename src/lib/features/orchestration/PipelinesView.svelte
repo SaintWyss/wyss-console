@@ -1793,7 +1793,7 @@
   .m6-panel {
     min-width: 0;
     border: 1px solid var(--glass-line);
-    background: rgba(9, 14, 23, 0.76);
+    background: var(--surface);
     border-radius: var(--radius-md);
     padding: 14px;
     display: flex;
@@ -1851,20 +1851,20 @@
     font-size: 12px;
   }
   .m6-button:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--surface-strong);
   }
   .m6-button:disabled {
     opacity: 0.5;
   }
   .m6-button.primary {
-    border-color: rgba(95, 212, 245, 0.36);
+    border-color: var(--accent-line);
     background: var(--accent-soft);
     color: var(--accent-strong);
     font-weight: 650;
   }
   .m6-button.danger {
-    border-color: rgba(248, 113, 113, 0.34);
-    background: rgba(248, 113, 113, 0.1);
+    border-color: var(--error-line);
+    background: var(--error-soft);
     color: var(--error-text);
   }
   .m6-button.subtle {
@@ -1877,7 +1877,7 @@
   .m6-run,
   .m6-review {
     border: 1px solid var(--glass-line);
-    background: rgba(255, 255, 255, 0.025);
+    background: var(--surface-subtle);
     border-radius: 9px;
     padding: 11px;
     display: flex;
@@ -1911,9 +1911,9 @@
   }
   .m6-blocked {
     padding: 9px 10px;
-    color: #ffe7ab;
-    background: rgba(251, 191, 36, 0.09);
-    border: 1px solid rgba(251, 191, 36, 0.25);
+    color: var(--warn);
+    background: var(--warn-soft);
+    border: 1px solid var(--warn-line);
     border-radius: 8px;
     font-size: 12px;
   }
@@ -1949,8 +1949,8 @@
     padding: 15px 3px;
   }
   .m6-alert {
-    border: 1px solid rgba(248, 113, 113, 0.28);
-    background: rgba(248, 113, 113, 0.08);
+    border: 1px solid var(--error-line);
+    background: var(--error-soft);
     color: var(--error-text);
     border-radius: 8px;
     padding: 9px 11px;
@@ -1980,24 +1980,24 @@
     display: inline-block;
     padding: 2px 7px;
     border-radius: 99px;
-    background: rgba(148, 163, 184, 0.13);
+    background: var(--surface-raised);
     text-transform: uppercase;
     font-size: 10px;
     letter-spacing: 0.04em;
   }
   .m6-status[data-state='completed'] {
     color: var(--ok);
-    background: rgba(74, 222, 128, 0.1);
+    background: var(--ok-soft);
   }
   .m6-status[data-state='needs_review'],
   .m6-status[data-state='blocked'] {
-    color: #ffe7ab;
-    background: rgba(251, 191, 36, 0.1);
+    color: var(--warn);
+    background: var(--warn-soft);
   }
   .m6-status[data-state='failed'],
   .m6-status[data-state='expired'] {
     color: var(--error-text);
-    background: rgba(248, 113, 113, 0.1);
+    background: var(--error-soft);
   }
   .m6-step-list {
     list-style: none;
@@ -2030,11 +2030,11 @@
     gap: 6px;
     padding: 8px;
     border-radius: 8px;
-    background: rgba(251, 191, 36, 0.06);
+    background: var(--warn-soft);
   }
   .m6-recovery p {
     width: 100%;
-    color: #ffe7ab;
+    color: var(--warn);
   }
   .m6-recovery small {
     width: 100%;

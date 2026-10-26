@@ -35,7 +35,7 @@ it('starts on the defaults, reads once, and shows what it read', async () => {
   const desktop = new FakeDesktopSettings(
     withPreferences((p) => ({
       ...p,
-      interface: { landing_page: 'events' },
+      interface: { ...p.interface, landing_page: 'events' },
     })),
   );
   const controller = make(desktop);
@@ -133,7 +133,10 @@ it('composes changes to different preferences instead of losing one', async () =
   controller.start();
   await settle();
   controller.change(font(14));
-  controller.change((p) => ({ ...p, interface: { landing_page: 'sessions' } }));
+  controller.change((p) => ({
+    ...p,
+    interface: { ...p.interface, landing_page: 'sessions' },
+  }));
   desktop.release();
   await settle();
   desktop.release();

@@ -2,7 +2,11 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import type { TerminalSize } from '../../contracts/terminal';
-import { currentAppearance, followAppearance } from './appearance';
+import {
+  currentAppearance,
+  followAppearance,
+  terminalPalette,
+} from './appearance';
 import { leaderAction } from './keymap';
 
 export interface TerminalRenderer {
@@ -44,15 +48,8 @@ export interface SearchResult {
 export const MAX_MATCHES = 5000;
 
 export function createRenderer(host: HTMLElement): TerminalRenderer {
-  const palette = () => {
-    const css = getComputedStyle(document.documentElement);
-    return {
-      background: css.getPropertyValue('--terminal-bg').trim(),
-      foreground: css.getPropertyValue('--terminal-fg').trim(),
-      cursor: css.getPropertyValue('--terminal-fg').trim(),
-    };
-  };
   const look = currentAppearance();
+  const palette = () => terminalPalette(currentAppearance().theme);
   const term = new Terminal({
     cols: 80,
     rows: 24,
@@ -93,11 +90,6 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
   let pending: ((processed: boolean) => void) | undefined;
   let searchAt = -1;
   let searchQuery = '';
-  const colors = matchMedia('(prefers-color-scheme: dark)');
-  const updateTheme = () => {
-    term.options.theme = palette();
-  };
-  colors.addEventListener('change', updateTheme);
   const metrics = new Set<() => void>();
   // Presentation preferences, applied to this terminal whenever they change.
   const unfollow = followAppearance((next) => {
@@ -107,13 +99,13 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
     term.options.scrollback = next.scrollback;
     term.options.cursorStyle = next.cursorStyle;
     term.options.cursorBlink = next.cursorBlink;
+    term.options.theme = terminalPalette(next.theme);
     if (resized) for (const listener of [...metrics]) listener();
   });
   try {
     term.loadAddon(fit);
     term.open(host);
   } catch (error) {
-    colors.removeEventListener('change', updateTheme);
     unfollow();
     for (const event of guardedEvents)
       host.removeEventListener(event, guardInput, true);
@@ -236,7 +228,6 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
       metrics.clear();
       pending?.(false);
       pending = undefined;
-      colors.removeEventListener('change', updateTheme);
       for (const event of guardedEvents)
         host.removeEventListener(event, guardInput, true);
       // Terminal owns and disposes its loaded fit addon.

@@ -245,8 +245,51 @@ enum Parsed {
 
 /// The version is read first and by itself: what a newer version added is not for this one
 /// to judge, and what is not a preference set at all is not for it to keep.
+fn exact_keys(value: &serde_json::Value, expected: &[&str]) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.len() == expected.len() && expected.iter().all(|key| object.contains_key(*key))
+}
+
+/// M1-M7 preferences used schema 1, whose exact shape had no theme field. Add only the
+/// documented dark default and return the current in-memory shape. Reading remains
+/// non-mutating; the next explicit preference update writes schema 2 atomically.
+fn migrate_v1(value: &mut serde_json::Value) -> bool {
+    if !exact_keys(
+        value,
+        &["schema_version", "interface", "terminal", "events"],
+    ) || !exact_keys(&value["interface"], &["landing_page"])
+        || !exact_keys(
+            &value["terminal"],
+            &["font_size", "scrollback", "cursor_style", "cursor_blink"],
+        )
+        || !exact_keys(&value["events"], &["time_format", "default_filter"])
+    {
+        return false;
+    }
+    let Some(root) = value.as_object_mut() else {
+        return false;
+    };
+    let Some(interface) = root
+        .get_mut("interface")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return false;
+    };
+    interface.insert(
+        "theme".to_owned(),
+        serde_json::Value::String("dark".to_owned()),
+    );
+    root.insert(
+        "schema_version".to_owned(),
+        serde_json::Value::from(SCHEMA_VERSION),
+    );
+    true
+}
+
 fn parse(bytes: &[u8]) -> Parsed {
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
         return Parsed::Rejected;
     };
     let Some(version) = value.get("schema_version").and_then(|v| v.as_u64()) else {
@@ -254,6 +297,9 @@ fn parse(bytes: &[u8]) -> Parsed {
     };
     if version > u64::from(SCHEMA_VERSION) {
         return Parsed::Newer;
+    }
+    if version == 1 && !migrate_v1(&mut value) {
+        return Parsed::Rejected;
     }
     match serde_json::from_value::<Preferences>(value) {
         Ok(preferences) if preferences.validate().is_ok() => Parsed::Stored(preferences),
