@@ -1155,8 +1155,7 @@ impl RunJournal {
                     None,
                     None,
                     "run_state_changed",
-                    (failed || cancelled)
-                        .then_some("owner_review_required"),
+                    (failed || cancelled).then_some("owner_review_required"),
                     now,
                 )?;
                 changed = true;
@@ -1563,7 +1562,13 @@ mod tests {
         let draft = plan();
         let accepted = journal.create_run(&draft, &review(&draft), 120).unwrap();
         journal
-            .set_run_state(&accepted.run_id, accepted.revision, RunState::NeedsReview, None, 121)
+            .set_run_state(
+                &accepted.run_id,
+                accepted.revision,
+                RunState::NeedsReview,
+                None,
+                121,
+            )
             .unwrap();
         journal
             .set_step_state(
@@ -1605,7 +1610,13 @@ mod tests {
         draft.steps.truncate(1);
         let accepted = journal.create_run(&draft, &review(&draft), 120).unwrap();
         journal
-            .set_run_state(&accepted.run_id, accepted.revision, RunState::NeedsReview, None, 121)
+            .set_run_state(
+                &accepted.run_id,
+                accepted.revision,
+                RunState::NeedsReview,
+                None,
+                121,
+            )
             .unwrap();
         journal
             .set_step_state(
@@ -1628,7 +1639,12 @@ mod tests {
             )
             .unwrap();
         journal
-            .verify_step(&accepted.run_id, &draft.steps[0].step_id, &draft.workspace_revision, 124)
+            .verify_step(
+                &accepted.run_id,
+                &draft.steps[0].step_id,
+                &draft.workspace_revision,
+                124,
+            )
             .unwrap();
         // Crash after the durable verified workspace revision but before run closure.
         let recovered = journal.recover_after_restart(125).unwrap();
