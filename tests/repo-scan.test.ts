@@ -10,13 +10,18 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   credentialFiles,
   environmentArtifacts,
   scanCheckout,
   secretKindsIn,
 } from '../scripts/repo-scan-lib.mjs';
+
+// Full-checkout scans and fixture Git subprocesses can exceed Vitest's default
+// five seconds while Rust builds are running in parallel. Keep the scanner's
+// assertions unchanged with a bounded test-file timeout that covers that load.
+vi.setConfig({ testTimeout: 30_000 });
 
 const root = join(__dirname, '..');
 let scratch: string;
