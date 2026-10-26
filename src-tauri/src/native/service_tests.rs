@@ -543,6 +543,60 @@ fn a_legacy_provider_replaces_the_previous_m9_project_default() {
 }
 
 #[test]
+fn legacy_launch_without_m9_default_ignores_sidecar_write_failure() {
+    let world = World::new();
+    let sidecar = world.base.join("registry/m9-native-sessions-v1.json");
+    let original = fs::read(&sidecar).unwrap();
+    // The service has already loaded valid M9 metadata. A concurrent filesystem failure
+    // must not create a new dependency for a legacy launch with nothing to clear.
+    fs::remove_file(&sidecar).unwrap();
+    fs::create_dir(&sidecar).unwrap();
+
+    let legacy = world.start(AgentId::ClaudeCode, None).unwrap();
+    let output = world.output_until(&legacy.terminal.terminal_id, "FAKE-CLAUDE");
+    assert!(output.contains("FAKE-CLAUDE"), "{output:?}");
+    world
+        .service
+        .stop(&world.terminal, &legacy.session.session.id)
+        .unwrap();
+    fs::remove_dir(&sidecar).unwrap();
+    fs::write(&sidecar, original).unwrap();
+}
+
+#[test]
+fn legacy_launch_with_existing_m9_default_refuses_unpersistable_clear() {
+    let world = World::new();
+    let opencode = world.start(AgentId::Opencode, None).unwrap();
+    let project = world.home.to_string_lossy().into_owned();
+    let sidecar = world.base.join("registry/m9-native-sessions-v1.json");
+    let original = fs::read(&sidecar).unwrap();
+    fs::remove_file(&sidecar).unwrap();
+    fs::create_dir(&sidecar).unwrap();
+
+    let rejected = world.start(AgentId::ClaudeCode, None);
+    assert_eq!(rejected.unwrap_err().code, "store_unavailable");
+    assert_eq!(
+        world
+            .service
+            .launcher_extended()
+            .projects
+            .iter()
+            .find(|entry| entry.path == project)
+            .unwrap()
+            .default_agent,
+        Some(AgentId::Opencode),
+        "failed persistence must not silently discard an M9 selection"
+    );
+
+    fs::remove_dir(&sidecar).unwrap();
+    fs::write(&sidecar, original).unwrap();
+    world
+        .service
+        .stop(&world.terminal, &opencode.session.session.id)
+        .unwrap();
+}
+
+#[test]
 fn a_corrupt_m9_sidecar_blocks_only_m9_and_keeps_legacy_state_writable() {
     let world = World::new();
     let sidecar_path = world.base.join("registry/m9-native-sessions-v1.json");
