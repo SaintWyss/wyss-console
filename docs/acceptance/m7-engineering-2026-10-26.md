@@ -124,11 +124,12 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
   while the fresh handle is acknowledged. It also races reconnect with first
   payload acquisition and requires the result to be either a closed unsent
   request or an explicitly ambiguous acquired payload. Android Actions run
-  `40292345934` passed on final PR head `eb88e266182d9f320c88d271adfa9d359066f60f`,
-  including the Android build and JUnit suite. M1–M5 integration run
-  `40292345677` also passed on that exact PR head, including frontend/contracts,
-  scanner, Rust/B1, and Clippy. Both final-head runs are successful; earlier
-  canceled runs are not used as acceptance evidence.
+  `40292345934` and M1–M5 integration run `40292345677` passed on implementation
+  revision `eb88e26`, including the Android build/JUnit suite and
+  frontend/contracts, scanner, Rust/B1 and Clippy respectively. Later commits
+  on the M7 PR update acceptance evidence only; the exact current-head workflow
+  conclusions are linked from PR #30. Historical runs are not treated as
+  current-head evidence.
 - `npm audit`: 0 known vulnerabilities after locking the compatible Vite
   8.3.5 and undici security updates.
 - Android SDK/Gradle are unavailable locally. The final-head Android and M1–M5
