@@ -1344,11 +1344,17 @@ impl Coordinator {
         now: u64,
     ) -> Result<CoordinatorSnapshot, CoordinatorError> {
         let run = self.get(run_id)?;
-        if run
-            .steps
-            .iter()
-            .any(|step| step.state == StepState::NeedsReview)
-        {
+        // Never close a run while any completed-but-unverified effect remains.
+        // Legacy in-memory runs may contain more than one Verifying step.
+        if run.steps.iter().any(|step| {
+            matches!(
+                step.state,
+                StepState::NeedsReview
+                    | StepState::Verifying
+                    | StepState::Starting
+                    | StepState::Running
+            )
+        }) {
             return Ok(run);
         }
         let (has_live_plan, plan_expired) = {
@@ -1480,21 +1486,21 @@ impl Coordinator {
         ) {
             return Ok(());
         }
-        if let Some(verifying) = run
-            .steps
-            .iter()
-            .find(|step| step.state == StepState::Verifying)
-        {
-            self.journal
-                .set_step_state(
-                    &run.run_id,
-                    &verifying.step_id,
-                    StepState::Verifying,
-                    StepState::NeedsReview,
-                    Some(FailureCode::PlanExpired),
-                    now,
-                )
-                .map_err(map_journal)?;
+        if run.steps.iter().any(|step| step.state == StepState::Verifying) {
+            for step in &run.steps {
+                if step.state == StepState::Verifying {
+                    self.journal
+                        .set_step_state(
+                            &run.run_id,
+                            &step.step_id,
+                            StepState::Verifying,
+                            StepState::NeedsReview,
+                            Some(FailureCode::PlanExpired),
+                            now,
+                        )
+                        .map_err(map_journal)?;
+                }
+            }
             return Ok(());
         }
         if run.state == RunState::Cancelling {
@@ -1594,6 +1600,12 @@ impl Coordinator {
                 run.state,
                 RunState::Running | RunState::Pausing | RunState::Cancelling
             ) {
+                continue;
+            }
+            // A prior effect in this run requires owner verification before any more
+            // effects can dispatch, even for dependency-free DAG steps. This fence
+            // is per run; independent workspace deadlines and work still progress.
+            if run.steps.iter().any(|step| step.state == StepState::Verifying) {
                 continue;
             }
             self.update_dependencies(&run.run_id, now)?;
@@ -3394,6 +3406,51 @@ mod tests {
             );
             fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    #[test]
+    fn independent_steps_in_same_run_wait_for_owner_verification() {
+        let root = root();
+        let (coordinator, _journal, authority) = coordinator(&root);
+        let draft = plan(
+            &root,
+            vec![
+                step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![]),
+                step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![]),
+            ],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        let run = coordinator
+            .submit(draft.clone(), review(&draft), 100)
+            .unwrap();
+        coordinator.tick(101).unwrap();
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
+        *authority.observation.lock().unwrap() = TurnObservation {
+            state: TurnState::Completed,
+            reason: None,
+            revision: 2,
+        };
+        coordinator.tick(102).unwrap();
+        assert_eq!(coordinator.get(&run.run_id).unwrap().steps[0].state, StepState::Verifying);
+        // No filesystem changes is not equivalent to reviewed effects.
+        for now in [103, 104, 105] {
+            coordinator.tick(now).unwrap();
+            assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
+            let waiting = coordinator.get(&run.run_id).unwrap();
+            assert_eq!(waiting.steps[0].state, StepState::Verifying);
+            assert_ne!(waiting.steps[1].state, StepState::Verifying);
+        }
+        coordinator
+            .verify_step(
+                &run.run_id,
+                &draft.steps[0].step_id,
+                &workspace_revision(&root).unwrap(),
+                106,
+            )
+            .unwrap();
+        coordinator.tick(107).unwrap();
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 2);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
