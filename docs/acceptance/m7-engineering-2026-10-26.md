@@ -119,11 +119,15 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
 - `npm audit`: 0 known vulnerabilities after locking the compatible Vite
   8.3.5 and undici security updates.
 - Android SDK/Gradle are unavailable locally. GitHub Actions run
-  `40275807145` passed on `32ddb785b453d4c2bd010c6133cd629705ba880f`, including
-  `testDebugUnitTest` and `assembleDebug`. It includes the JUnit race regression.
-  A final-head run is required after this evidence update is committed. No
-  physical Android device or terminal has been exercised, so device/Keystore
-  behavior remains **NOT_PROVEN**.
+  `40276535354` passed on implementation head
+  `467b6c6ff816328a513d536375c915d4500bceeb`, including `testDebugUnitTest`
+  and `assembleDebug`; this is the native-app build and JUnit race regression.
+  The M1-M5 integration run `40276535146` also passed on that head, including
+  frontend/contracts, scanner, full Rust/B1 and Clippy. These runs prove the
+  committed sources compile and pass deterministic CI, not behavior on a phone.
+  No physical Android device or terminal has been exercised, so device/Keystore
+  behavior remains **NOT_PROVEN**. The following commit updates evidence only;
+  final-head workflows will be dispatched after it is pushed.
 - Independent Sol High static review at `09e4c80` found no actionable issue in
   the atomic race fix; the test-only delta at `32ddb78` was also rechecked with
   no findings. This is not a merge approval, hardware acceptance or production
