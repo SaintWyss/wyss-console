@@ -180,7 +180,10 @@ export async function prepareHandoff(id: string): Promise<HandoffBrief> {
         typeof o.text !== 'string' ||
         typeof o.project !== 'string' ||
         typeof o.screen_included !== 'boolean' ||
-        (o.agent_id !== 'claude_code' && o.agent_id !== 'codex')
+        (o.agent_id !== 'claude_code' &&
+          o.agent_id !== 'codex' &&
+          o.agent_id !== 'opencode' &&
+          o.agent_id !== 'hermes')
       )
         throw new Error('handoff');
       return {

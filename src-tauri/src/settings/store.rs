@@ -117,7 +117,7 @@ impl Store {
         for _ in 0..READ_ATTEMPTS {
             match self.read_once() {
                 Attempt::Done(loaded) => return loaded,
-                Attempt::Replaced => {}
+                Attempt::Replaced => std::thread::yield_now(),
             }
         }
         Loaded::Unsafe
@@ -230,7 +230,7 @@ impl Store {
 }
 
 /// How many times a read that lost a race with a write starts over.
-const READ_ATTEMPTS: usize = 5;
+const READ_ATTEMPTS: usize = 16;
 enum Attempt {
     Done(Loaded),
     /// The file was replaced while it was being read.

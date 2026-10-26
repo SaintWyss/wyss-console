@@ -1,7 +1,8 @@
-//! The launcher against real terminals: a fake `claude` and `codex` on a private PATH, started
+//! The launcher against real terminals: fake provider commands on a private PATH, started
 //! through the user's real shell in a real PTY. Nothing here starts the installed agents.
 use super::{
     catalogue::AgentId,
+    extended_registry::ExtendedRegistry,
     profile::{Body, HooksMode, Permission},
     registry::State,
     service::{NativeService, StartRequest},
@@ -65,6 +66,18 @@ impl World {
              exit 3",
         );
         script(
+            &bin.join("opencode"),
+            "[ \"$1\" = \"--version\" ] && { echo '1.19.4'; exit 0; }\n\
+             echo \"FAKE-OPENCODE argc=$#\"; for a in \"$@\"; do echo \"[$a]\"; done\n\
+             exec cat",
+        );
+        script(
+            &bin.join("hermes"),
+            "[ \"$1\" = \"--version\" ] && { echo 'UNEXPECTED-HERMES-VERSION-PROBE'; exit 0; }\n\
+             echo \"FAKE-HERMES argc=$#\"; for a in \"$@\"; do echo \"[$a]\"; done\n\
+             exec cat",
+        );
+        script(
             &bin.join("bash"),
             "exec /usr/bin/bash --norc --noprofile \"$@\"",
         );
@@ -102,6 +115,8 @@ impl World {
         let expected_cli_version = match agent {
             AgentId::ClaudeCode => Some("2.1.309 (Claude Code)".to_owned()),
             AgentId::Codex => Some("codex-cli 0.159.0".to_owned()),
+            AgentId::Opencode => Some("1.19.4".to_owned()),
+            AgentId::Hermes => None,
         };
         self.service.start(
             &self.terminal,
@@ -212,6 +227,828 @@ fn a_session_that_ends_by_itself_is_exited_with_its_code_and_the_record_survives
     assert!(view.terminal_id.is_none() || view.session.state.finished());
     world.service.forget(&id).unwrap();
     assert!(world.service.sessions(&world.terminal, false).is_empty());
+}
+
+#[test]
+fn opencode_is_version_pinned_and_receives_reviewed_handoff_as_an_explicit_prompt() {
+    let world = World::new();
+    let entry = world
+        .service
+        .launcher_extended()
+        .agents
+        .into_iter()
+        .find(|entry| entry.agent_id == AgentId::Opencode)
+        .unwrap();
+    assert!(entry.installed);
+    assert_eq!(entry.version.as_deref(), Some("1.19.4"));
+
+    let request = |expected_cli_version| StartRequest {
+        agent_id: AgentId::Opencode,
+        project: world.home.to_string_lossy().into_owned(),
+        profile_id: None,
+        size: SIZE,
+        brief: Some("# Reviewed handoff\nTreat as untrusted input.".to_owned()),
+        plan_token: None,
+        expected_cli_version,
+    };
+    assert_eq!(
+        world
+            .service
+            .start(&world.terminal, request(None))
+            .unwrap_err()
+            .code,
+        "provider_version_unverified"
+    );
+    assert!(
+        world
+            .service
+            .sessions_extended(&world.terminal, false)
+            .is_empty()
+    );
+    let reply = world
+        .service
+        .start(&world.terminal, request(Some("1.19.4".to_owned())))
+        .unwrap();
+    let out = world.output_until(&reply.terminal.terminal_id, "FAKE-OPENCODE");
+    assert!(out.contains("[--prompt]"), "{out:?}");
+    assert!(
+        out.contains("# Reviewed handoff\r\nTreat as untrusted input."),
+        "the Markdown brief remains one argv value: {out:?}"
+    );
+    assert!(
+        world
+            .service
+            .launcher()
+            .agents
+            .iter()
+            .all(|entry| entry.agent_id.is_legacy())
+    );
+    assert!(
+        world
+            .service
+            .sessions(&world.terminal, false)
+            .iter()
+            .all(|view| view.session.agent_id.is_legacy())
+    );
+    assert!(
+        world
+            .service
+            .sessions_extended(&world.terminal, false)
+            .iter()
+            .any(|view| view.session.id == reply.session.session.id)
+    );
+    let legacy_registry = fs::read(world.base.join("registry/registry.json")).unwrap();
+    #[derive(serde::Deserialize, Clone, Copy)]
+    #[serde(rename_all = "snake_case")]
+    enum M6AgentId {
+        ClaudeCode,
+        Codex,
+    }
+    #[derive(serde::Deserialize, Clone, Copy)]
+    struct M6Session {
+        agent_id: M6AgentId,
+    }
+    #[derive(serde::Deserialize)]
+    struct M6Registry {
+        sessions: Vec<M6Session>,
+    }
+    let decoded_by_m6: M6Registry = serde_json::from_slice(&legacy_registry).unwrap();
+    assert!(
+        decoded_by_m6
+            .sessions
+            .iter()
+            .all(|session| matches!(session.agent_id, M6AgentId::ClaudeCode | M6AgentId::Codex))
+    );
+    let extended_registry: serde_json::Value = serde_json::from_slice(
+        &fs::read(world.base.join("registry/m9-native-sessions-v1.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        extended_registry["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| {
+                session["id"] == reply.session.session.id && session["agent_id"] == "opencode"
+            })
+    );
+    assert!(
+        !extended_registry
+            .to_string()
+            .contains("Treat as untrusted input")
+    );
+    world
+        .service
+        .stop(&world.terminal, &reply.session.session.id)
+        .unwrap();
+    let reopened = World::open(&world.base, &world.home, &world.bin);
+    assert!(
+        reopened
+            .sessions_extended(&TerminalService::default(), false)
+            .iter()
+            .any(|view| view.session.id == reply.session.session.id)
+    );
+
+    let profile_id = world
+        .service
+        .profiles()
+        .create(Body {
+            name: "OpenCode model".to_owned(),
+            applies_to: vec![AgentId::Opencode],
+            model: Some("openai/gpt-test".to_owned()),
+            ..Body::default()
+        })
+        .unwrap();
+    let profiled = world.start(AgentId::Opencode, Some(&profile_id)).unwrap();
+    let out = world.output_until(&profiled.terminal.terminal_id, "FAKE-OPENCODE");
+    assert!(out.contains("[--model]"), "{out:?}");
+    assert!(out.contains("[openai/gpt-test]"), "{out:?}");
+    world
+        .service
+        .stop(&world.terminal, &profiled.session.session.id)
+        .unwrap();
+}
+
+#[test]
+fn direct_opencode_handoff_rechecks_the_resolved_binary_version() {
+    let world = World::new();
+    let direct_service = NativeService::open_with_env(
+        world.base.join("direct-state"),
+        world.home.clone(),
+        Some(format!("{}:/usr/bin:/bin", world.bin.display()).into()),
+        vec![(
+            "PATH".to_owned(),
+            format!("{}:/usr/bin:/bin", world.bin.display()),
+        )],
+        PathBuf::from("/bin/false"),
+    )
+    .unwrap();
+    let direct_terminal = TerminalService::default();
+    script(
+        &world.bin.join("opencode"),
+        "[ \"$1\" = \"--version\" ] && { echo '9.99.0'; exit 0; }; exit 0",
+    );
+    let result = direct_service.start(
+        &direct_terminal,
+        StartRequest {
+            agent_id: AgentId::Opencode,
+            project: world.home.to_string_lossy().into_owned(),
+            profile_id: None,
+            size: SIZE,
+            brief: Some("# Reviewed handoff\nBound to a qualified CLI.".to_owned()),
+            plan_token: None,
+            expected_cli_version: Some("1.19.4".to_owned()),
+        },
+    );
+    assert_eq!(result.unwrap_err().code, "provider_version_unverified");
+    assert!(
+        direct_service
+            .sessions_extended(&direct_terminal, false)
+            .is_empty()
+    );
+}
+
+#[test]
+fn m9_upgrade_migrates_prior_provider_records_before_publishing_the_legacy_registry() {
+    let world = World::new();
+    let reply = world.start(AgentId::Opencode, None).unwrap();
+    let id = reply.session.session.id.clone();
+    world.service.stop(&world.terminal, &id).unwrap();
+
+    // Model the earlier M9 build, which placed the new closed enum in registry.json.
+    let registry_path = world.base.join("registry/registry.json");
+    let mut legacy_registry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&registry_path).unwrap()).unwrap();
+    let sidecar_path = world.base.join("registry/m9-native-sessions-v1.json");
+    let mut sidecar: serde_json::Value =
+        serde_json::from_slice(&fs::read(&sidecar_path).unwrap()).unwrap();
+    let sessions = sidecar["sessions"].as_array_mut().unwrap();
+    let at = sessions
+        .iter()
+        .position(|session| session["id"] == id)
+        .unwrap();
+    let prior_provider_session = sessions.remove(at);
+    legacy_registry["sessions"]
+        .as_array_mut()
+        .unwrap()
+        .push(prior_provider_session);
+    let project = legacy_registry["projects"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|project| project["path"] == world.home.to_string_lossy().as_ref())
+        .unwrap();
+    project["default_agent"] = serde_json::json!("opencode");
+    sidecar["project_defaults"] = serde_json::json!({});
+    fs::write(
+        &registry_path,
+        serde_json::to_vec(&legacy_registry).unwrap(),
+    )
+    .unwrap();
+    fs::write(&sidecar_path, serde_json::to_vec(&sidecar).unwrap()).unwrap();
+
+    let upgraded = World::open(&world.base, &world.home, &world.bin);
+    let upgraded_registry = fs::read(&registry_path).unwrap();
+    #[derive(serde::Deserialize, Clone, Copy)]
+    #[serde(rename_all = "snake_case")]
+    enum M6AgentId {
+        ClaudeCode,
+        Codex,
+    }
+    #[derive(serde::Deserialize)]
+    struct M6Session {
+        agent_id: M6AgentId,
+    }
+    #[derive(serde::Deserialize)]
+    struct M6Project {
+        default_agent: Option<M6AgentId>,
+    }
+    #[derive(serde::Deserialize)]
+    struct M6Registry {
+        sessions: Vec<M6Session>,
+        projects: Vec<M6Project>,
+    }
+    let decoded: M6Registry = serde_json::from_slice(&upgraded_registry).unwrap();
+    assert!(
+        decoded
+            .sessions
+            .iter()
+            .all(|session| matches!(session.agent_id, M6AgentId::ClaudeCode | M6AgentId::Codex))
+    );
+    assert!(decoded.projects.iter().all(|project| matches!(
+        project.default_agent,
+        None | Some(M6AgentId::ClaudeCode | M6AgentId::Codex)
+    )));
+    assert!(
+        upgraded
+            .sessions_extended(&TerminalService::default(), false)
+            .iter()
+            .any(|session| session.session.id == id)
+    );
+    assert!(
+        upgraded
+            .launcher_extended()
+            .projects
+            .iter()
+            .any(|project| project.path == world.home.to_string_lossy()
+                && project.default_agent == Some(AgentId::Opencode))
+    );
+    assert!(
+        upgraded
+            .launcher()
+            .projects
+            .iter()
+            .all(|project| project.default_agent.is_none_or(AgentId::is_legacy))
+    );
+}
+
+#[test]
+fn a_legacy_provider_replaces_the_previous_m9_project_default() {
+    let world = World::new();
+    let opencode = world.start(AgentId::Opencode, None).unwrap();
+    let project = world.home.to_string_lossy().into_owned();
+    assert_eq!(
+        world
+            .service
+            .launcher_extended()
+            .projects
+            .iter()
+            .find(|entry| entry.path == project)
+            .unwrap()
+            .default_agent,
+        Some(AgentId::Opencode)
+    );
+
+    let claude = world.start(AgentId::ClaudeCode, None).unwrap();
+    assert_eq!(
+        world
+            .service
+            .launcher_extended()
+            .projects
+            .iter()
+            .find(|entry| entry.path == project)
+            .unwrap()
+            .default_agent,
+        Some(AgentId::ClaudeCode),
+        "a legacy selection must not be shadowed by an old sidecar default"
+    );
+    world
+        .service
+        .stop(&world.terminal, &opencode.session.session.id)
+        .unwrap();
+    world
+        .service
+        .stop(&world.terminal, &claude.session.session.id)
+        .unwrap();
+}
+
+#[test]
+fn a_corrupt_m9_sidecar_blocks_only_m9_and_keeps_legacy_state_writable() {
+    let world = World::new();
+    let sidecar_path = world.base.join("registry/m9-native-sessions-v1.json");
+    let corrupt = b"{ intentionally corrupt M9 metadata";
+    fs::write(&sidecar_path, corrupt).unwrap();
+
+    let reopened = World {
+        base: world.base.clone(),
+        home: world.home.clone(),
+        bin: world.bin.clone(),
+        terminal: TerminalService::default(),
+        service: World::open(&world.base, &world.home, &world.bin),
+    };
+    let launcher = reopened.service.launcher_extended();
+    assert_eq!(launcher.m9_native_status, "storage_unavailable");
+    assert!(
+        launcher
+            .agents
+            .iter()
+            .all(|entry| entry.agent_id.is_legacy())
+    );
+    assert_eq!(fs::read(&sidecar_path).unwrap(), corrupt);
+
+    let blocked = reopened.service.start(
+        &reopened.terminal,
+        StartRequest {
+            agent_id: AgentId::Opencode,
+            project: reopened.home.to_string_lossy().into_owned(),
+            profile_id: None,
+            size: SIZE,
+            brief: None,
+            plan_token: None,
+            expected_cli_version: Some("1.19.4".to_owned()),
+        },
+    );
+    assert_eq!(blocked.unwrap_err().code, "store_unavailable");
+
+    let legacy = reopened.start(AgentId::ClaudeCode, None).unwrap();
+    let output = reopened.output_until(&legacy.terminal.terminal_id, "FAKE-CLAUDE");
+    assert!(output.contains("FAKE-CLAUDE"), "{output:?}");
+    assert_eq!(fs::read(&sidecar_path).unwrap(), corrupt);
+    let registry: serde_json::Value =
+        serde_json::from_slice(&fs::read(world.base.join("registry/registry.json")).unwrap())
+            .unwrap();
+    assert!(
+        registry["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| {
+                session["agent_id"] == "claude_code" && session["id"] == legacy.session.session.id
+            })
+    );
+    reopened
+        .service
+        .stop(&reopened.terminal, &legacy.session.session.id)
+        .unwrap();
+    assert!(
+        !world
+            .base
+            .join("registry/m9-native-default-overrides-v2.json")
+            .exists(),
+        "a legacy launch with no recovered M9 default does not spend an override slot"
+    );
+}
+
+#[test]
+fn a_malformed_v1_override_blocks_m9_and_preserves_legacy_bytes() {
+    let world = World::new();
+    let legacy_overrides_path = world
+        .base
+        .join("registry/m9-native-default-overrides-v1.json");
+    let malformed = b"{ malformed v1 override";
+    fs::write(&legacy_overrides_path, malformed).unwrap();
+
+    let reopened = World {
+        base: world.base.clone(),
+        home: world.home.clone(),
+        bin: world.bin.clone(),
+        terminal: TerminalService::default(),
+        service: World::open(&world.base, &world.home, &world.bin),
+    };
+    assert_eq!(
+        reopened.service.launcher_extended().m9_native_status,
+        "storage_unavailable"
+    );
+    assert_eq!(fs::read(&legacy_overrides_path).unwrap(), malformed);
+    assert!(
+        !world
+            .base
+            .join("registry/m9-native-default-overrides-v2.json")
+            .exists(),
+        "invalid legacy state is preserved rather than partially migrated"
+    );
+
+    let legacy = reopened.start(AgentId::ClaudeCode, None).unwrap();
+    assert_eq!(fs::read(&legacy_overrides_path).unwrap(), malformed);
+    reopened
+        .service
+        .stop(&reopened.terminal, &legacy.session.session.id)
+        .unwrap();
+}
+
+#[test]
+fn a_capacity_failed_recovery_durably_preserves_interim_m9_records_across_restart() {
+    let world = World::new();
+    let opencode = world.start(AgentId::Opencode, None).unwrap();
+    let session_id = opencode.session.session.id.clone();
+    let registry_dir = world.base.join("registry");
+    let registry_path = registry_dir.join("registry.json");
+    let mut interim: serde_json::Value =
+        serde_json::from_slice(&fs::read(&registry_path).unwrap()).unwrap();
+    let mut sidecar: serde_json::Value =
+        serde_json::from_slice(&fs::read(registry_dir.join("m9-native-sessions-v1.json")).unwrap())
+            .unwrap();
+    let sidecar_sessions = sidecar["sessions"].as_array_mut().unwrap();
+    let at = sidecar_sessions
+        .iter()
+        .position(|session| session["id"] == session_id)
+        .unwrap();
+    interim["sessions"]
+        .as_array_mut()
+        .unwrap()
+        .push(sidecar_sessions.remove(at));
+    let home_path = world.home.to_string_lossy().into_owned();
+    let home_project = interim["projects"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|project| project["path"] == home_path)
+        .unwrap();
+    home_project["default_agent"] = serde_json::json!("opencode");
+    fs::write(&registry_path, serde_json::to_vec(&interim).unwrap()).unwrap();
+    fs::write(
+        registry_dir.join("m9-native-sessions-v1.json"),
+        serde_json::to_vec(&sidecar).unwrap(),
+    )
+    .unwrap();
+
+    // Fill the healthy sidecar to its exact project-default ceiling, then add one durable
+    // recovery default so migration fails before it reaches the shared-registry records.
+    let mut extended = ExtendedRegistry::open(registry_dir.clone()).unwrap();
+    let mut defaults = extended.recovery_snapshot().project_defaults;
+    let mut candidate = 0;
+    while defaults.len() < super::registry::MAX_PROJECTS {
+        let path = format!("/capacity-fill-{candidate}");
+        candidate += 1;
+        if defaults.contains_key(&path) {
+            continue;
+        }
+        extended
+            .set_project_default(&path, AgentId::Opencode)
+            .unwrap();
+        defaults.insert(path, AgentId::Opencode);
+    }
+    assert_eq!(defaults.len(), super::registry::MAX_PROJECTS);
+    ExtendedRegistry::preserve_recovery(
+        &registry_dir,
+        &[],
+        &[("/recovered-capacity-overflow".to_owned(), AgentId::Hermes)],
+    )
+    .unwrap();
+    world
+        .terminal
+        .close(&opencode.terminal.terminal_id)
+        .unwrap();
+
+    let first = World::open(&world.base, &world.home, &world.bin);
+    assert_eq!(
+        first.launcher_extended().m9_native_status,
+        "storage_unavailable"
+    );
+    let first_sessions = first.sessions_extended(&TerminalService::default(), false);
+    assert!(first_sessions.iter().any(|session| {
+        session.session.id == session_id
+            && session.session.agent_id == AgentId::Opencode
+            && session.session.state == State::Lost
+    }));
+    let recovery = ExtendedRegistry::read_recovery(&registry_dir).unwrap();
+    assert!(recovery.snapshots.iter().any(|snapshot| {
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id)
+    }));
+
+    // A second crash/reopen still finds the interim session in durable recovery, even though the
+    // new default remains over capacity and M9 stays explicitly unavailable.
+    let second = World::open(&world.base, &world.home, &world.bin);
+    assert_eq!(
+        second.launcher_extended().m9_native_status,
+        "storage_unavailable"
+    );
+    let second_sessions = second.sessions_extended(&TerminalService::default(), false);
+    assert!(second_sessions.iter().any(|session| {
+        session.session.id == session_id
+            && session.session.agent_id == AgentId::Opencode
+            && session.session.state == State::Lost
+    }));
+    let recovery = ExtendedRegistry::read_recovery(&registry_dir).unwrap();
+    assert!(recovery.snapshots.iter().any(|snapshot| {
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id)
+    }));
+}
+
+#[test]
+fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_registry() {
+    let world = World::new();
+    let opencode = world.start(AgentId::Opencode, None).unwrap();
+    let id = opencode.session.session.id.clone();
+    let project_path = world.home.to_string_lossy().into_owned();
+
+    let registry_path = world.base.join("registry/registry.json");
+    let mut legacy_registry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&registry_path).unwrap()).unwrap();
+    let sidecar_path = world.base.join("registry/m9-native-sessions-v1.json");
+    let mut sidecar: serde_json::Value =
+        serde_json::from_slice(&fs::read(&sidecar_path).unwrap()).unwrap();
+    let sessions = sidecar["sessions"].as_array_mut().unwrap();
+    let at = sessions
+        .iter()
+        .position(|session| session["id"] == id)
+        .unwrap();
+    legacy_registry["sessions"]
+        .as_array_mut()
+        .unwrap()
+        .push(sessions.remove(at));
+    let project = legacy_registry["projects"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|project| project["path"] == world.home.to_string_lossy().as_ref())
+        .unwrap();
+    project["default_agent"] = serde_json::json!("opencode");
+    fs::write(
+        &registry_path,
+        serde_json::to_vec(&legacy_registry).unwrap(),
+    )
+    .unwrap();
+    let corrupt = b"{ sidecar bytes remain untouched";
+    fs::write(&sidecar_path, corrupt).unwrap();
+    let legacy_overrides_path = world
+        .base
+        .join("registry/m9-native-default-overrides-v1.json");
+    let overrides_path = world
+        .base
+        .join("registry/m9-native-default-overrides-v2.json");
+    let other_project_key =
+        ExtendedRegistry::default_override_key("/another-previously-overridden-project");
+    fs::write(
+        &overrides_path,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 2,
+            "project_hashes": [other_project_key],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        &legacy_overrides_path,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 1,
+            "projects": [project_path],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    world
+        .terminal
+        .close(&opencode.terminal.terminal_id)
+        .unwrap();
+
+    let recovered = World::open(&world.base, &world.home, &world.bin);
+    assert_eq!(fs::read(&sidecar_path).unwrap(), corrupt);
+    assert!(
+        !legacy_overrides_path.exists(),
+        "v1 override bytes are retired only after their hashed v2 image is durable"
+    );
+    let overrides_path = world
+        .base
+        .join("registry/m9-native-default-overrides-v2.json");
+    let migrated_overrides: serde_json::Value =
+        serde_json::from_slice(&fs::read(&overrides_path).unwrap()).unwrap();
+    let migrated_keys = migrated_overrides["project_hashes"].as_array().unwrap();
+    assert!(
+        migrated_keys.contains(&serde_json::json!(ExtendedRegistry::default_override_key(
+            &project_path
+        ))),
+        "the legacy user's default replacement survives v1-to-v2 migration"
+    );
+    assert!(migrated_keys.contains(&serde_json::json!(other_project_key)));
+    assert!(!String::from_utf8_lossy(&fs::read(&overrides_path).unwrap()).contains(&project_path));
+    let safe_registry = fs::read(&registry_path).unwrap();
+    #[derive(serde::Deserialize, Clone, Copy)]
+    #[serde(rename_all = "snake_case")]
+    enum M6AgentId {
+        ClaudeCode,
+        Codex,
+    }
+    #[derive(serde::Deserialize, Clone, Copy)]
+    struct M6Session {
+        agent_id: M6AgentId,
+    }
+    #[derive(serde::Deserialize)]
+    struct M6Registry {
+        sessions: Vec<M6Session>,
+    }
+    let m6_view: M6Registry = serde_json::from_slice(&safe_registry).unwrap();
+    assert!(
+        m6_view.sessions.iter().all(|session| {
+            matches!(session.agent_id, M6AgentId::ClaudeCode | M6AgentId::Codex)
+        })
+    );
+    assert_eq!(
+        recovered.launcher_extended().m9_native_status,
+        "storage_unavailable"
+    );
+    let sessions = recovered.sessions_extended(&TerminalService::default(), false);
+    assert!(sessions.iter().any(|session| {
+        session.session.id == id
+            && session.session.agent_id == AgentId::Opencode
+            && session.session.state == State::Lost
+    }));
+    let recovery_dir = world.base.join("registry/m9-native-recovery-v1");
+    let recovery_files: Vec<_> = fs::read_dir(&recovery_dir).unwrap().collect();
+    assert_eq!(recovery_files.len(), 1);
+    let recovery_file = recovery_files[0].as_ref().unwrap().path();
+    let immutable_snapshot = fs::read(&recovery_file).unwrap();
+
+    let degraded = World {
+        base: world.base.clone(),
+        home: world.home.clone(),
+        bin: world.bin.clone(),
+        terminal: TerminalService::default(),
+        service: recovered,
+    };
+    let claude = degraded.start(AgentId::ClaudeCode, None).unwrap();
+    assert_eq!(
+        degraded
+            .service
+            .launcher_extended()
+            .projects
+            .iter()
+            .find(|project| project.path == project_path)
+            .unwrap()
+            .default_agent,
+        Some(AgentId::ClaudeCode),
+        "a later legacy-provider selection suppresses the recovered M9 default"
+    );
+    assert_eq!(
+        fs::read(&recovery_file).unwrap(),
+        immutable_snapshot,
+        "the original bounded recovery snapshot remains byte-for-byte preserved"
+    );
+    let overrides: serde_json::Value =
+        serde_json::from_slice(&fs::read(&overrides_path).unwrap()).unwrap();
+    assert_eq!(
+        overrides["project_hashes"][0],
+        ExtendedRegistry::default_override_key(&project_path),
+        "the bounded override journal stores a digest, not a workspace path"
+    );
+    degraded
+        .service
+        .stop(&degraded.terminal, &claude.session.session.id)
+        .unwrap();
+
+    // Once the primary store is repaired, recovery migrates before the immutable copy is
+    // removed. The durable default override prevents OpenCode from resurfacing, and Forget
+    // must then remain forgotten after a further restart.
+    fs::write(
+        &sidecar_path,
+        br#"{"schema":1,"sessions":[],"project_defaults":{}}"#,
+    )
+    .unwrap();
+    let restored = World::open(&world.base, &world.home, &world.bin);
+    assert_eq!(restored.launcher_extended().m9_native_status, "ready");
+    assert_eq!(
+        restored
+            .launcher_extended()
+            .projects
+            .iter()
+            .find(|project| project.path == project_path)
+            .unwrap()
+            .default_agent,
+        Some(AgentId::ClaudeCode)
+    );
+    assert!(
+        restored
+            .sessions_extended(&TerminalService::default(), false)
+            .iter()
+            .any(|session| session.session.id == id)
+    );
+    assert_eq!(fs::read_dir(&recovery_dir).unwrap().count(), 0);
+    assert!(!overrides_path.exists());
+    restored.forget(&id).unwrap();
+    let after_forget = World::open(&world.base, &world.home, &world.bin);
+    assert!(
+        after_forget
+            .sessions_extended(&TerminalService::default(), false)
+            .iter()
+            .all(|session| session.session.id != id)
+    );
+}
+
+#[test]
+fn an_over_capacity_recovery_merge_blocks_only_m9_and_keeps_legacy_available() {
+    let world = World::new();
+    let registry_dir = world.base.join("registry");
+    let mut extended = ExtendedRegistry::open(registry_dir.clone()).unwrap();
+    for index in 0..super::registry::MAX_PROJECTS {
+        extended
+            .set_project_default(&format!("/fixture-project-{index}"), AgentId::Opencode)
+            .unwrap();
+    }
+    ExtendedRegistry::preserve_recovery(
+        &registry_dir,
+        &[],
+        &[("/recovered-project".to_owned(), AgentId::Hermes)],
+    )
+    .unwrap();
+
+    let reopened = World {
+        base: world.base.clone(),
+        home: world.home.clone(),
+        bin: world.bin.clone(),
+        terminal: TerminalService::default(),
+        service: World::open(&world.base, &world.home, &world.bin),
+    };
+    let launcher = reopened.service.launcher_extended();
+    assert_eq!(launcher.m9_native_status, "storage_unavailable");
+    assert!(
+        launcher
+            .agents
+            .iter()
+            .all(|entry| entry.agent_id.is_legacy())
+    );
+
+    let claude = reopened.start(AgentId::ClaudeCode, None).unwrap();
+    assert!(
+        reopened
+            .output_until(&claude.terminal.terminal_id, "FAKE-CLAUDE")
+            .contains("FAKE-CLAUDE")
+    );
+    reopened
+        .service
+        .stop(&reopened.terminal, &claude.session.session.id)
+        .unwrap();
+}
+
+#[test]
+fn hermes_native_launches_as_configured_without_probe_or_automatic_handoff() {
+    let world = World::new();
+    let entry = world
+        .service
+        .launcher_extended()
+        .agents
+        .into_iter()
+        .find(|entry| entry.agent_id == AgentId::Hermes)
+        .unwrap();
+    assert!(entry.installed);
+    assert_eq!(
+        entry.version, None,
+        "version probe would perform update checks"
+    );
+
+    let reply = world.start(AgentId::Hermes, None).unwrap();
+    let out = world.output_until(&reply.terminal.terminal_id, "FAKE-HERMES");
+    assert!(out.contains("FAKE-HERMES argc=0"), "{out:?}");
+    assert!(!out.contains("UNEXPECTED-HERMES-VERSION-PROBE"), "{out:?}");
+    world
+        .service
+        .stop(&world.terminal, &reply.session.session.id)
+        .unwrap();
+
+    let error = world
+        .service
+        .start(
+            &world.terminal,
+            StartRequest {
+                agent_id: AgentId::Hermes,
+                project: world.home.to_string_lossy().into_owned(),
+                profile_id: None,
+                size: SIZE,
+                brief: Some("# Do not submit automatically".to_owned()),
+                plan_token: None,
+                expected_cli_version: None,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(error.code, "handoff_target_unverified");
+
+    let profile_id = world
+        .service
+        .profiles()
+        .create(Body {
+            name: "Hermes model".to_owned(),
+            applies_to: vec![AgentId::Hermes],
+            model: Some("provider/model".to_owned()),
+            ..Body::default()
+        })
+        .unwrap();
+    let error = world.start(AgentId::Hermes, Some(&profile_id)).unwrap_err();
+    assert_eq!(error.code, "profile_not_applicable");
 }
 
 #[test]

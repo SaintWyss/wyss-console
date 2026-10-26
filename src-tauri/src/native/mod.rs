@@ -3,6 +3,7 @@
 pub mod capabilities;
 pub mod catalogue;
 pub mod commands;
+pub mod extended_registry;
 pub mod profile;
 pub mod profiles;
 #[cfg(test)]

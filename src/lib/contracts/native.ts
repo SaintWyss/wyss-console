@@ -9,7 +9,12 @@
 import type { TerminalInfo } from './terminal';
 import { parseTerminalId } from './identities';
 
-export const AGENT_IDS = ['claude_code', 'codex'] as const;
+export const AGENT_IDS = [
+  'claude_code',
+  'codex',
+  'opencode',
+  'hermes',
+] as const;
 export type AgentId = (typeof AGENT_IDS)[number];
 
 export const SESSION_STATES = [
@@ -85,6 +90,7 @@ export interface Launcher {
   agents: AgentEntry[];
   shell: ShellInfo | null;
   projects: ProjectEntry[];
+  m9_native_status: 'ready' | 'legacy_host' | 'storage_unavailable';
 }
 export interface Preview {
   applied: string[];
@@ -292,6 +298,15 @@ export function parseLauncher(value: unknown): Launcher {
       };
     }),
     projects: arr(o.projects, 'projects').map(project),
+    // M1-M6 hosts predate the additive M9 status field and remain compatible.
+    m9_native_status:
+      o.m9_native_status === undefined
+        ? 'legacy_host'
+        : one(
+            o.m9_native_status,
+            ['ready', 'legacy_host', 'storage_unavailable'],
+            'm9_native_status',
+          ),
   };
 }
 export function parsePreview(value: unknown): Preview {

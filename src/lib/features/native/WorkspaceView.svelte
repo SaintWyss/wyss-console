@@ -200,13 +200,22 @@
   inert={!visible}
 >
   <p class="native-note">
-    Start Claude Code or Codex in a terminal of this window. They run as
-    <strong>native</strong> sessions: your own agents in your own shell, not
-    mediated, contained or approved by the Console.
+    Start Claude Code, Codex, OpenCode or Hermes in a terminal of this window.
+    They run as <strong>Native</strong> sessions: the provider's own tools,
+    configuration and privileges remain active; the Console does not mediate,
+    contain or approve their effects.
     {#if held}They keep running when this window closes: a host process holds
       them, and they end when it stops or you log out.{:else}Here they end when
       the window closes: no host process could be started.{/if}
   </p>
+  {#if chosen?.agent_id === 'hermes'}
+    <p class="sessions-status failed" role="note">
+      Hermes Native is a full-account provider session. Its approval prompts and
+      hooks are not a Wyss security boundary. Hermes planner admission is
+      separately blocked pending tested OS isolation. The installed version is
+      not probed because Hermes version output performs an update check.
+    </p>
+  {/if}
 
   {#if native.failure}
     <p class="sessions-status failed" role="alert">
@@ -233,6 +242,18 @@
     </div>
   {:else}
     <div class="native-main">
+      {#if launcher.m9_native_status === 'storage_unavailable'}
+        <p class="sessions-status failed" role="alert">
+          OpenCode and Hermes are blocked because the private M9 session store
+          could not be read. Its bytes were preserved. Claude Code and Codex
+          remain available.
+        </p>
+      {:else if launcher.m9_native_status === 'legacy_host'}
+        <p class="sessions-status" role="note">
+          This terminal host predates M9. OpenCode and Hermes Native require a
+          matching M9 host; existing Native sessions remain available.
+        </p>
+      {/if}
       {#if handoffSession}
         {#key handoffSession.id}
           <HandoffPanel

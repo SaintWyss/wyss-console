@@ -5,17 +5,18 @@
 use super::{
     capabilities,
     catalogue::{self, AGENTS, AgentId},
+    extended_registry::{ExtendedRegistry, RecoveryRead},
     profile::{self, LaunchPlan, Word},
     profiles::ProfileStore,
     recipe::{self, family},
-    registry::{ProfileRef, Registry, Session, State},
+    registry::{M9Open, ProfileRef, Registry, Session, State},
     resources::{self, Usage},
     store,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, BTreeSet, HashMap},
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
@@ -120,6 +121,9 @@ pub struct LauncherView {
     pub agents: Vec<CatalogueEntry>,
     pub shell: Option<ShellView>,
     pub projects: Vec<ProjectView>,
+    /// Legacy M1-M6 clients do not know this field. M9 windows use it to distinguish an older
+    /// host from a damaged/unavailable M9 sidecar without hiding the legacy providers.
+    pub m9_native_status: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -193,6 +197,9 @@ struct Live {
 struct Inner {
     base: PathBuf,
     registry: Mutex<Registry>,
+    extended_registry: Mutex<Option<ExtendedRegistry>>,
+    recovered_sessions: Vec<Session>,
+    recovered_defaults: Mutex<BTreeMap<String, AgentId>>,
     profiles: ProfileStore,
     home: PathBuf,
     path_var: Option<OsString>,
@@ -236,7 +243,165 @@ impl NativeService {
     /// finished here: sessions that were running are `lost`, their generated files removed.
     pub fn open(base: PathBuf, home: PathBuf, path_var: Option<OsString>) -> Option<Self> {
         store::private_dir(&base).ok()?;
-        let (registry, _lost) = Registry::open(base.join("registry")).ok()?;
+        let registry_dir = base.join("registry");
+        let M9Open {
+            registry,
+            lost: _lost,
+            extended_sessions: migrated_sessions,
+            extended_defaults: migrated_defaults,
+        } = Registry::open_for_m9(registry_dir.clone()).ok()?;
+        let (default_overrides, overrides_complete) =
+            match ExtendedRegistry::read_default_overrides(&registry_dir) {
+                Ok(overrides) => (overrides, true),
+                Err(_) => (BTreeSet::new(), false),
+            };
+        let recovery =
+            ExtendedRegistry::read_recovery(&registry_dir).unwrap_or_else(|_| RecoveryRead {
+                snapshots: Vec::new(),
+                incomplete: true,
+            });
+        let mut recovered_sessions = Vec::new();
+        let mut recovered_defaults = BTreeMap::new();
+        let mut migration_sessions = migrated_sessions.clone();
+        let migration_defaults: BTreeMap<String, AgentId> =
+            migrated_defaults.iter().cloned().collect();
+        let mut extended_registry = ExtendedRegistry::open(registry_dir.clone()).ok();
+        if let Some(extended) = extended_registry.as_mut() {
+            let mut migration_complete = overrides_complete && !recovery.incomplete;
+            if migration_complete {
+                let current_paths = extended
+                    .recovery_snapshot()
+                    .project_defaults
+                    .into_keys()
+                    .collect::<Vec<_>>();
+                for path in current_paths {
+                    if default_overrides.contains(&ExtendedRegistry::default_override_key(&path))
+                        && extended.clear_project_default(&path).is_err()
+                    {
+                        migration_complete = false;
+                        break;
+                    }
+                }
+            }
+            if migration_complete {
+                'migrate: for snapshot in &recovery.snapshots {
+                    for session in snapshot.sessions.iter().cloned() {
+                        if extended.migrate_session(session).is_err() {
+                            migration_complete = false;
+                            break 'migrate;
+                        }
+                    }
+                    for (path, agent) in &snapshot.project_defaults {
+                        if !default_overrides
+                            .contains(&ExtendedRegistry::default_override_key(path))
+                            && extended
+                                .migrate_project_default(path.clone(), *agent)
+                                .is_err()
+                        {
+                            migration_complete = false;
+                            break 'migrate;
+                        }
+                    }
+                }
+            }
+            if migration_complete {
+                for session in migrated_sessions {
+                    if extended.migrate_session(session).is_err() {
+                        migration_complete = false;
+                        break;
+                    }
+                }
+            }
+            if migration_complete {
+                for (path, agent) in migrated_defaults {
+                    if !default_overrides.contains(&ExtendedRegistry::default_override_key(&path))
+                        && extended.migrate_project_default(path, agent).is_err()
+                    {
+                        migration_complete = false;
+                        break;
+                    }
+                }
+            }
+            if !migration_complete
+                && (!migration_sessions.is_empty() || !migration_defaults.is_empty())
+            {
+                let pending_defaults = migration_defaults
+                    .iter()
+                    .map(|(path, agent)| (path.clone(), *agent))
+                    .collect::<Vec<_>>();
+                // The shared registry still owns these interim records until the safe M1-M6
+                // projection is durable. Copy every pending M9 record first; if bounded
+                // recovery cannot accept them, leave the source registry untouched and refuse
+                // startup instead of losing history on the next restart.
+                ExtendedRegistry::preserve_recovery(
+                    &registry_dir,
+                    &migration_sessions,
+                    &pending_defaults,
+                )
+                .ok()?;
+            }
+            // Sidecar writes sync their parent directory before this source registry is
+            // atomically replaced with the M1-M6-safe projection.
+            registry.save().ok()?;
+            if migration_complete
+                && ExtendedRegistry::clear_recovery(&registry_dir).is_ok()
+                && ExtendedRegistry::clear_default_overrides(&registry_dir).is_ok()
+            {
+                // All M9 metadata is now represented by the durable sidecar.
+            } else {
+                // A valid but over-cap or otherwise unmergeable M9 extension must not make
+                // Claude/Codex unavailable. Preserve the current sidecar view plus every
+                // immutable recovery/migration source and explicitly block M9 admission.
+                let current = extended.recovery_snapshot();
+                recovered_sessions.extend(current.sessions);
+                recovered_defaults.extend(current.project_defaults);
+                for snapshot in recovery.snapshots {
+                    recovered_sessions.extend(snapshot.sessions);
+                    for (path, agent) in snapshot.project_defaults {
+                        recovered_defaults.entry(path).or_insert(agent);
+                    }
+                }
+                recovered_sessions.append(&mut migration_sessions);
+                for (path, agent) in migration_defaults {
+                    recovered_defaults.entry(path).or_insert(agent);
+                }
+                extended_registry = None;
+            }
+        } else {
+            // M9 storage is optional to legacy providers. Preserve any M9 values still in
+            // the interim shared registry before sanitizing that registry. A corrupt primary
+            // sidecar itself is never opened, truncated, or replaced here.
+            for snapshot in recovery.snapshots {
+                recovered_sessions.extend(snapshot.sessions);
+                for (path, agent) in snapshot.project_defaults {
+                    recovered_defaults.entry(path).or_insert(agent);
+                }
+            }
+            if !migrated_sessions.is_empty() || !migrated_defaults.is_empty() {
+                let snapshot = ExtendedRegistry::preserve_recovery(
+                    &registry_dir,
+                    &migrated_sessions,
+                    &migrated_defaults,
+                )
+                .ok()?;
+                recovered_sessions.extend(snapshot.sessions);
+                for (path, agent) in snapshot.project_defaults {
+                    recovered_defaults.entry(path).or_insert(agent);
+                }
+            }
+            registry.save().ok()?;
+        }
+        for session in &mut recovered_sessions {
+            if !session.state.finished() {
+                session.state = State::Lost;
+                session.ended_at = None;
+            }
+        }
+        recovered_sessions.sort_by(|left, right| left.id.cmp(&right.id));
+        recovered_sessions.dedup_by(|left, right| left.id == right.id);
+        recovered_defaults.retain(|path, _| {
+            !default_overrides.contains(&ExtendedRegistry::default_override_key(path))
+        });
         let profiles = ProfileStore::open(base.join("profiles")).ok()?;
         let sessions = base.join("sessions");
         // Nothing is running: every generated directory is stale.
@@ -246,6 +411,9 @@ impl NativeService {
             inner: Arc::new(Inner {
                 base,
                 registry: Mutex::new(registry),
+                extended_registry: Mutex::new(extended_registry),
+                recovered_sessions,
+                recovered_defaults: Mutex::new(recovered_defaults),
                 profiles,
                 home,
                 path_var,
@@ -284,7 +452,9 @@ impl NativeService {
             .iter()
             .map(|spec| {
                 let path = catalogue::discover(spec, self.inner.path_var.clone(), &self.inner.home);
-                let version = path.as_deref().and_then(catalogue::probe_version);
+                let version = path
+                    .as_deref()
+                    .and_then(|path| catalogue::probe_provider_version(spec.id, path));
                 CatalogueEntry {
                     agent_id: spec.id,
                     name: spec.name,
@@ -315,8 +485,32 @@ impl NativeService {
     }
 
     pub fn launcher(&self) -> LauncherView {
+        self.launcher_view(false)
+    }
+
+    /// Full M9 view, called only through the additive extended host operation. The legacy
+    /// method remains safe for M1-M6 windows with their closed AgentId contract.
+    pub fn launcher_extended(&self) -> LauncherView {
+        self.launcher_view(true)
+    }
+
+    fn recovered_default(&self, path: &str) -> Option<AgentId> {
+        lock(&self.inner.recovered_defaults).get(path).copied()
+    }
+
+    fn launcher_view(&self, include_extended: bool) -> LauncherView {
         let home = self.inner.home.to_string_lossy().into_owned();
         let registry = lock(&self.inner.registry);
+        let extended = include_extended.then(|| lock(&self.inner.extended_registry));
+        let extension_ready = extended.as_ref().is_some_and(|stored| stored.is_some());
+        let m9_native_status = if !include_extended {
+            "legacy_host"
+        } else if extension_ready {
+            "ready"
+        } else {
+            "storage_unavailable"
+        };
+        let extended_store = extended.as_ref().and_then(|stored| stored.as_ref());
         let mut projects: Vec<ProjectView> = vec![ProjectView {
             path: home.clone(),
             home: true,
@@ -329,7 +523,11 @@ impl NativeService {
                 if let Some(project) = project
                     && let Some(shown) = projects.iter_mut().find(|p| p.path == path)
                 {
-                    shown.default_agent = project.default_agent;
+                    shown.default_agent = extended_store
+                        .and_then(|stored| stored.project_default(path))
+                        .or(project.default_agent)
+                        .or_else(|| self.recovered_default(path))
+                        .filter(|agent| include_extended || agent.is_legacy());
                     shown.default_profile.clone_from(&project.default_profile);
                     shown.last_used = project.last_used;
                 }
@@ -338,7 +536,11 @@ impl NativeService {
             projects.push(ProjectView {
                 path: path.to_owned(),
                 home: false,
-                default_agent: project.and_then(|p| p.default_agent),
+                default_agent: extended_store
+                    .and_then(|stored| stored.project_default(path))
+                    .or_else(|| project.and_then(|p| p.default_agent))
+                    .or_else(|| self.recovered_default(path))
+                    .filter(|agent| include_extended || agent.is_legacy()),
                 default_profile: project.and_then(|p| p.default_profile.clone()),
                 last_used: project.map_or(0, |p| p.last_used),
             });
@@ -353,14 +555,23 @@ impl NativeService {
         if let Some(project) = registry.data.projects.iter().find(|p| p.path == home)
             && let Some(shown) = projects.first_mut()
         {
-            shown.default_agent = project.default_agent;
+            shown.default_agent = extended_store
+                .and_then(|stored| stored.project_default(&home))
+                .or(project.default_agent)
+                .or_else(|| self.recovered_default(&home))
+                .filter(|agent| include_extended || agent.is_legacy());
             shown.default_profile.clone_from(&project.default_profile);
             shown.last_used = project.last_used;
         }
+        let agents = self.agents();
         LauncherView {
-            agents: self.agents(),
+            agents: agents
+                .into_iter()
+                .filter(|entry| entry.agent_id.is_legacy() || (include_extended && extension_ready))
+                .collect(),
             shell: self.shell(),
             projects,
+            m9_native_status,
         }
     }
 
@@ -436,6 +647,20 @@ impl NativeService {
         Ok((plan, Some(profile_ref), Some(token)))
     }
 
+    fn restore_recovered_default_override(
+        &self,
+        project: &str,
+        existed: bool,
+        previous: Option<AgentId>,
+    ) {
+        let registry_dir = self.inner.base.join("registry");
+        if ExtendedRegistry::restore_default_override(&registry_dir, project, existed).is_ok()
+            && let Some(agent) = previous
+        {
+            lock(&self.inner.recovered_defaults).insert(project.to_owned(), agent);
+        }
+    }
+
     pub fn preview(
         &self,
         agent: AgentId,
@@ -478,6 +703,9 @@ impl NativeService {
             return Err(NativeError::new("busy"));
         }
         let _starting = Starting(&self.inner.starting);
+        if !request.agent_id.is_legacy() && lock(&self.inner.extended_registry).is_none() {
+            return Err(NativeError::new("store_unavailable"));
+        }
         let project = self.project_allowed(&request.project)?;
         let agent = self
             .agents()
@@ -506,7 +734,10 @@ impl NativeService {
             .user_shell()
             .map_err(|_| NativeError::new("spawn_failed"))?;
         let has_overrides = !plan.applied.is_empty() || !plan.with_cost.is_empty();
-        if has_overrides {
+        let version_bound_handoff =
+            request.agent_id == AgentId::Opencode && request.brief.is_some();
+        let version_bound = has_overrides || version_bound_handoff;
+        if version_bound {
             let Some(version) = request.expected_cli_version.as_deref() else {
                 return Err(NativeError::new("provider_version_unverified"));
             };
@@ -514,10 +745,9 @@ impl NativeService {
                 return Err(NativeError::new("provider_version_unverified"));
             }
             if recipe::family(&shell).is_none() {
-                let installed_version = agent
-                    .path
-                    .as_deref()
-                    .and_then(|path| catalogue::probe_version(Path::new(path)));
+                let installed_version = agent.path.as_deref().and_then(|path| {
+                    catalogue::probe_provider_version(request.agent_id, Path::new(path))
+                });
                 if installed_version.as_deref() != Some(version) {
                     return Err(NativeError::new("provider_version_unverified"));
                 }
@@ -525,7 +755,7 @@ impl NativeService {
         }
         let id = uuid::Uuid::new_v4().simple().to_string();
         let dir = self.inner.base.join("sessions").join(&id);
-        let version_guard = has_overrides && recipe::family(&shell).is_some();
+        let version_guard = version_bound && recipe::family(&shell).is_some();
         let guard_marker = dir.join("provider-version-verified");
         if version_guard && store::private_dir(&dir).is_err() {
             return Err(NativeError::new("store_unavailable"));
@@ -543,7 +773,14 @@ impl NativeService {
             if brief.len() > MAX_BRIEF || !brief.starts_with("# ") || brief.contains('\0') {
                 return Err(NativeError::new("brief_invalid"));
             }
-            words.push(brief.clone());
+            match request.agent_id {
+                AgentId::Opencode => {
+                    words.push("--prompt".to_owned());
+                    words.push(brief.clone());
+                }
+                AgentId::Hermes => return Err(NativeError::new("handoff_target_unverified")),
+                AgentId::ClaudeCode | AgentId::Codex => words.push(brief.clone()),
+            }
         }
         if let Some(overlay) = &plan.overlay {
             let write = || -> std::io::Result<()> {
@@ -560,7 +797,7 @@ impl NativeService {
             &shell,
             &words,
             &direct,
-            if has_overrides {
+            if version_bound {
                 request.expected_cli_version.as_deref()
             } else {
                 None
@@ -592,6 +829,46 @@ impl NativeService {
             ));
         }
         env.extend(self.inner.extra_env.iter().cloned());
+        // Remove an M9 default durably before a legacy provider can become the selected
+        // project agent. If persistence is unavailable, do not launch a provider and leave a
+        // stale OpenCode/Hermes default shadowing the newly chosen Claude/Codex session.
+        let prior_extended_default = if request.agent_id.is_legacy() {
+            let mut guard = lock(&self.inner.extended_registry);
+            if let Some(extended) = guard.as_mut() {
+                Some(
+                    extended
+                        .clear_project_default(&project.to_string_lossy())
+                        .map_err(|_| NativeError::new("store_unavailable"))?,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let project_key = project.to_string_lossy().into_owned();
+        let prior_recovery_override =
+            if request.agent_id.is_legacy() && lock(&self.inner.extended_registry).is_none() {
+                let previous = lock(&self.inner.recovered_defaults)
+                    .get(&project_key)
+                    .copied();
+                if previous.is_some() {
+                    let existed = ExtendedRegistry::mark_default_overridden(
+                        &self.inner.base.join("registry"),
+                        &project_key,
+                    )
+                    .map_err(|_| NativeError::new("store_unavailable"))?;
+                    lock(&self.inner.recovered_defaults).remove(&project_key);
+                    Some((existed, previous))
+                } else {
+                    // A launch for a project with no recovered M9 default needs no tombstone.
+                    // This keeps legacy launches independent of optional M9 storage and avoids
+                    // filling the bounded override set with irrelevant project paths.
+                    None
+                }
+            } else {
+                None
+            };
         let launched = terminal.create_launch(
             CreateTerminal {
                 size: request.size,
@@ -607,6 +884,14 @@ impl NativeService {
         let info = match launched {
             Ok(info) => info,
             Err(error) => {
+                if let Some((existed, previous)) = prior_recovery_override {
+                    self.restore_recovered_default_override(&project_key, existed, previous);
+                }
+                if let Some(Some(previous)) = prior_extended_default
+                    && let Some(extended) = lock(&self.inner.extended_registry).as_mut()
+                {
+                    let _ = extended.set_project_default(&project.to_string_lossy(), previous);
+                }
                 let _ = fs::remove_dir_all(&dir);
                 session.state = State::FailedStart;
                 session.ended_at = Some(store::now());
@@ -622,6 +907,14 @@ impl NativeService {
         };
         if version_guard && !await_version_guard(terminal, &info.terminal_id, &guard_marker) {
             let _ = terminal.close(&info.terminal_id);
+            if let Some((existed, previous)) = prior_recovery_override {
+                self.restore_recovered_default_override(&project_key, existed, previous);
+            }
+            if let Some(Some(previous)) = prior_extended_default
+                && let Some(extended) = lock(&self.inner.extended_registry).as_mut()
+            {
+                let _ = extended.set_project_default(&project.to_string_lossy(), previous);
+            }
             session.state = State::FailedStart;
             session.ended_at = Some(store::now());
             session.error = Some("provider_version_unverified".to_owned());
@@ -643,7 +936,15 @@ impl NativeService {
             let mut registry = lock(&self.inner.registry);
             let project = registry.project_mut(&session.project);
             project.last_used = now;
-            project.default_agent = Some(session.agent_id);
+            if session.agent_id.is_legacy() {
+                project.default_agent = Some(session.agent_id);
+            }
+            let _ = registry.save();
+        }
+        if !session.agent_id.is_legacy()
+            && let Some(extended) = lock(&self.inner.extended_registry).as_mut()
+        {
+            let _ = extended.set_project_default(&session.project, session.agent_id);
         }
         let view = self.view(
             &session,
@@ -659,9 +960,32 @@ impl NativeService {
     }
 
     fn record(&self, session: Session) {
-        let mut registry = lock(&self.inner.registry);
-        registry.add(session);
-        let _ = registry.save();
+        if session.agent_id.is_legacy() {
+            let mut registry = lock(&self.inner.registry);
+            registry.add(session);
+            let _ = registry.save();
+        } else if let Some(extended) = lock(&self.inner.extended_registry).as_mut() {
+            let _ = extended.add(session);
+        }
+    }
+
+    fn stored_session(&self, id: &str) -> Option<Session> {
+        lock(&self.inner.registry)
+            .session(id)
+            .cloned()
+            .or_else(|| {
+                lock(&self.inner.extended_registry)
+                    .as_ref()
+                    .and_then(|extended| extended.session(id))
+                    .cloned()
+            })
+            .or_else(|| {
+                self.inner
+                    .recovered_sessions
+                    .iter()
+                    .find(|session| session.id == id)
+                    .cloned()
+            })
     }
 
     fn view(
@@ -690,9 +1014,8 @@ impl NativeService {
             live.get(id).map(|l| l.terminal.clone())
         };
         {
-            let registry = lock(&self.inner.registry);
-            let session = registry
-                .session(id)
+            let session = self
+                .stored_session(id)
                 .ok_or_else(|| NativeError::new("session_unknown"))?;
             if session.state != State::Running {
                 return Err(NativeError::new("not_running"));
@@ -723,9 +1046,8 @@ impl NativeService {
         if !id_ok(id) {
             return Err(NativeError::new("session_unknown"));
         }
-        let old = lock(&self.inner.registry)
-            .session(id)
-            .cloned()
+        let old = self
+            .stored_session(id)
             .ok_or_else(|| NativeError::new("session_unknown"))?;
         let was_running = old.state == State::Running;
         let reply = self.start_with(
@@ -752,30 +1074,70 @@ impl NativeService {
     /// Removes the record of a session that is not running.
     pub fn forget(&self, id: &str) -> Result<(), NativeError> {
         let mut registry = lock(&self.inner.registry);
-        let session = registry
-            .session(id)
-            .ok_or_else(|| NativeError::new("session_unknown"))?;
-        if !session.state.finished() {
+        let mut extended = lock(&self.inner.extended_registry);
+        let (finished, in_extended) = if let Some(session) = registry.session(id) {
+            (session.state.finished(), false)
+        } else if let Some(session) = extended.as_ref().and_then(|store| store.session(id)) {
+            (session.state.finished(), true)
+        } else if self
+            .inner
+            .recovered_sessions
+            .iter()
+            .any(|session| session.id == id)
+        {
+            return Err(NativeError::new("store_unavailable"));
+        } else {
+            return Err(NativeError::new("session_unknown"));
+        };
+        if !finished {
             return Err(NativeError::new("still_running"));
         }
-        registry.forget(id);
-        registry
-            .save()
-            .map_err(|_| NativeError::new("store_unavailable"))
+        if in_extended {
+            let Some(extended) = extended.as_mut() else {
+                return Err(NativeError::new("store_unavailable"));
+            };
+            extended.forget(id);
+            extended
+                .save()
+                .map_err(|_| NativeError::new("store_unavailable"))
+        } else {
+            registry.forget(id);
+            registry
+                .save()
+                .map_err(|_| NativeError::new("store_unavailable"))
+        }
     }
 
     fn finish(&self, id: &str, state: State, code: Option<u32>, signal: Option<String>) {
         lock(&self.inner.live).remove(id);
         {
             let mut registry = lock(&self.inner.registry);
-            if let Some(session) = registry.session_mut(id)
-                && !session.state.finished()
-            {
-                session.state = state;
-                session.ended_at = Some(store::now());
-                session.exit_code = code;
-                session.exit_signal = signal;
+            if let Some(session) = registry.session_mut(id) {
+                if !session.state.finished() {
+                    session.state = state;
+                    session.ended_at = Some(store::now());
+                    session.exit_code = code;
+                    session.exit_signal = signal;
+                }
                 let _ = registry.save();
+            } else {
+                let mut extended = lock(&self.inner.extended_registry);
+                if let Some(extended) = extended.as_mut() {
+                    let found = if let Some(session) = extended.session_mut(id) {
+                        if !session.state.finished() {
+                            session.state = state;
+                            session.ended_at = Some(store::now());
+                            session.exit_code = code;
+                            session.exit_signal = signal;
+                        }
+                        true
+                    } else {
+                        false
+                    };
+                    if found {
+                        let _ = extended.save();
+                    }
+                }
             }
         }
         if id_ok(id) {
@@ -789,8 +1151,7 @@ impl NativeService {
             .iter()
             .find(|(_, l)| l.terminal.as_str() == terminal)
             .map(|(id, _)| id.clone())?;
-        let registry = lock(&self.inner.registry);
-        let session = registry.session(&session_id)?;
+        let session = self.stored_session(&session_id)?;
         Some(NativeTag {
             session_id,
             agent_name: session.agent_name.clone(),
@@ -807,13 +1168,13 @@ impl NativeService {
             .terminal
             .as_str()
             .to_owned();
-        let session = lock(&self.inner.registry).session(session_id)?.clone();
+        let session = self.stored_session(session_id)?;
         Some((terminal, session))
     }
 
     /// A finished or running session's record.
     pub fn session_record(&self, session_id: &str) -> Option<Session> {
-        lock(&self.inner.registry).session(session_id).cloned()
+        self.stored_session(session_id)
     }
 
     /// Whether any native session is running or being started.
@@ -823,6 +1184,9 @@ impl NativeService {
             .sessions
             .iter()
             .any(|s| !s.state.finished())
+            || lock(&self.inner.extended_registry)
+                .as_ref()
+                .is_some_and(|store| store.sessions().iter().any(|s| !s.state.finished()))
     }
 
     // ---- what is running now --------------------------------------------------------------
@@ -830,6 +1194,19 @@ impl NativeService {
     /// Every session, each marked with its plane, with what the terminal says now. `sample`
     /// asks for processor and memory too; the window asks only while the overview shows.
     pub fn sessions(&self, terminal: &TerminalService, sample: bool) -> Vec<SessionView> {
+        self.sessions_view(terminal, sample, false)
+    }
+
+    pub fn sessions_extended(&self, terminal: &TerminalService, sample: bool) -> Vec<SessionView> {
+        self.sessions_view(terminal, sample, true)
+    }
+
+    fn sessions_view(
+        &self,
+        terminal: &TerminalService,
+        sample: bool,
+        include_extended: bool,
+    ) -> Vec<SessionView> {
         let running: Vec<(String, TerminalId)> = lock(&self.inner.live)
             .iter()
             .map(|(id, live)| (id.clone(), live.terminal.clone()))
@@ -865,11 +1242,30 @@ impl NativeService {
             self.sample();
         }
         let registry = lock(&self.inner.registry);
+        let extended = lock(&self.inner.extended_registry);
         let live = lock(&self.inner.live);
         registry
             .data
             .sessions
             .iter()
+            .chain(
+                include_extended
+                    .then(|| {
+                        extended
+                            .as_ref()
+                            .into_iter()
+                            .flat_map(|store| store.sessions())
+                    })
+                    .into_iter()
+                    .flatten(),
+            )
+            .chain(
+                include_extended
+                    .then_some(self.inner.recovered_sessions.iter())
+                    .into_iter()
+                    .flatten(),
+            )
+            .filter(|session| include_extended || session.agent_id.is_legacy())
             .map(|session| {
                 let observed = live.get(&session.id);
                 self.view(
