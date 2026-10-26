@@ -398,7 +398,7 @@ it('TS-HAND-02 clears the reviewed handoff when selected context changes', async
 });
 
 for (const state of ['verifying', 'needs_review'] as const) {
-  it(`TS-ORC-review refuses unseen workspace drift during ${state} confirmation`, async () => {
+  it(`TS-ORC rejects unseen ${state} drift`, async () => {
     let changed = false;
     const calls: string[] = [];
     const time = Math.floor(Date.now() / 1000);
@@ -430,7 +430,8 @@ for (const state of ['verifying', 'needs_review'] as const) {
       ],
     };
     mockIPC((command, payload) => {
-      const request = (payload as { request?: IpcRequest } | undefined)?.request;
+      const request = (payload as { request?: IpcRequest } | undefined)
+        ?.request;
       if (command === 'native_sessions') return [];
       if (command === 'choose_workspace') return { path: TARGET_ROOT };
       if (command !== 'orchestration_call') return {};
@@ -468,7 +469,7 @@ for (const state of ['verifying', 'needs_review'] as const) {
   });
 }
 
-it('TS-ORC-review confirms the exact previously observed workspace digest', async () => {
+it('TS-ORC confirms an observed workspace digest', async () => {
   const calls: IpcRequest[] = [];
   const time = Math.floor(Date.now() / 1000);
   const run = {
@@ -503,7 +504,10 @@ it('TS-ORC-review confirms the exact previously observed workspace digest', asyn
     if (command !== 'orchestration_call') return {};
     if (request?.method === 'list') return [run];
     if (request?.method === 'workspace_snapshot')
-      return { workspace_id: TARGET_IDENTITY, workspace_revision: TARGET_REVISION };
+      return {
+        workspace_id: TARGET_IDENTITY,
+        workspace_revision: TARGET_REVISION,
+      };
     if (request?.method === 'verify_step') {
       calls.push(request);
       return run;
