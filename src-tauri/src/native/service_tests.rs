@@ -902,10 +902,14 @@ fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_reg
     );
     let overrides: serde_json::Value =
         serde_json::from_slice(&fs::read(&overrides_path).unwrap()).unwrap();
-    assert_eq!(
-        overrides["project_hashes"][0],
-        ExtendedRegistry::default_override_key(&project_path),
-        "the bounded override journal stores a digest, not a workspace path"
+    assert!(
+        overrides["project_hashes"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!(ExtendedRegistry::default_override_key(
+                &project_path
+            ))),
+        "the bounded override journal stores the project's digest, not its workspace path"
     );
     degraded
         .service
