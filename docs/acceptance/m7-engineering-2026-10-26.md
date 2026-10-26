@@ -96,12 +96,13 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
 | TS-REM-17 terminal escape/screen fidelity                         | NOT_RUN                 | No Android renderer or live terminal stream.                                                                                                                                                  |
 | TS-REM-18 Android cache/privacy and full listed states            | PARTIAL                 | Empty disconnected states, secure window and foreground memory clearing exist; real content cache, notifications, screen lock and five-minute background behavior are not implemented/tested. |
 | TS-HYB-01..14                                                     | BLOCKED / NOT_PROVEN    | OD01 transport selection and actual host/phone are dependencies; no real network or device experiment.                                                                                        |
-| Android Keystore P-256 keys                                       | IMPLEMENTED, NOT_PROVEN | API code creates separate keys and mandates device auth for presence key; no SDK build or physical device/TEE/attestation test.                                                               |
+| Android Keystore P-256 keys                                       | IMPLEMENTED, NOT_PROVEN | API code creates separate keys and mandates device auth for presence key; CI builds/tests the SDK target, but physical device/TEE/attestation behavior remains untested.                         |
 
 ## Verification
 
 - `cargo test --locked --manifest-path src-tauri/Cargo.toml --bin wyss-console remote::`:
-  **44 passed, 0 failed**. Includes real ring-generated P-256 signature checks,
+  **45 passed, 0 failed**. Includes a delayed host-dialog acceptance at the exact
+  120-second expiry boundary, real ring-generated P-256 signature checks,
   malformed/off-curve key refusal, dual-key pairing and revoked/reused-key
   regressions, request/replay policy, and the versioned bounded protocol.
 - `npm run check:rust`: **PASS**. Rust formatting, locked dependency check,
