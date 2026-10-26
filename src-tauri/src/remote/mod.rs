@@ -9,11 +9,12 @@
 //! for F10a has not happened.** It is here so that the rules of `docs/architecture/16` §5.2–5.3 exist
 //! as tested code before any network code does, and so that a later transport has nothing to decide.
 //!
-//! Two things it cannot be honest about without a decision, and says so instead of faking them:
+//! Remaining boundaries it cannot be honest about without separate decisions:
 //!
-//! - **Asymmetric keys.** Device signatures (step-up) and the channel need a public-key algorithm
-//!   that the build does not contain. Every signature check goes through [`StepUpVerifier`]; the
-//!   tests use a stand-in that is plainly not a signature scheme.
+//! - **Transport and host identity.** [`crypto::P256StepUpVerifier`] verifies device presence
+//!   signatures and pairing rejects invalid P-256 public points. It does not provide an encrypted
+//!   channel, host-key persistence/rotation, platform keystore integration or production
+//!   authentication.
 //! - **Short-code pairing.** It needs a password-authenticated key exchange, which also needs a
 //!   crate that is not here. Only the QR path (a 128-bit secret, a MAC over the transcript) exists.
 //!
@@ -25,11 +26,13 @@
 )]
 
 pub mod audit;
+pub mod crypto;
 pub mod device;
 pub mod gateway;
 pub mod grants;
 pub mod pairing;
 pub mod primitives;
+pub mod protocol;
 pub mod request;
 #[cfg(test)]
 mod tests;

@@ -5,6 +5,7 @@
 use super::{
     Refusal,
     audit::{Journal, MemoryJournal, Outcome},
+    crypto::P256_PUBLIC_KEY_BYTES,
     device::{Device, DeviceId, DeviceState, clean_label},
     gateway::{Allowed, Denied, Gateway, HostConfirm},
     grants::{
@@ -14,7 +15,42 @@ use super::{
     primitives::{Random, hex, hmac_sha256, same, sha256, unhex},
     request::{CHALLENGE_SECONDS, Request, StepUp, StepUpVerifier, step_up_message},
 };
+use std::sync::{Mutex, OnceLock};
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+
+type TestKeyPair = (Vec<u8>, Vec<u8>);
+static TEST_PUBLIC_KEYS: OnceLock<Mutex<BTreeMap<Vec<u8>, TestKeyPair>>> = OnceLock::new();
+
+/// Test-only public keys created by ring. The private parts are immediately dropped; step-up
+/// semantics below use the explicit HMAC test double and do not impersonate production signing.
+fn test_public_keys(seed: &[u8]) -> TestKeyPair {
+    let keys = TEST_PUBLIC_KEYS.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut keys = keys.lock().unwrap();
+    keys.entry(seed.to_vec())
+        .or_insert_with(|| {
+            use ring::{
+                rand::SystemRandom,
+                signature::{EcdsaKeyPair, KeyPair},
+            };
+            let rng = SystemRandom::new();
+            let make = || {
+                let pkcs8 = EcdsaKeyPair::generate_pkcs8(
+                    &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+                    &rng,
+                )
+                .unwrap();
+                let pair = EcdsaKeyPair::from_pkcs8(
+                    &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+                    pkcs8.as_ref(),
+                    &rng,
+                )
+                .unwrap();
+                pair.public_key().as_ref().to_vec()
+            };
+            (make(), make())
+        })
+        .clone()
+}
 
 const T0: u64 = 1_800_000_000;
 
@@ -44,8 +80,9 @@ impl Stand {
     }
 }
 impl StepUpVerifier for Stand {
-    fn verify(&self, fingerprint: &str, message: &[u8], signature: &[u8]) -> bool {
-        let secret = self.0.borrow().get(fingerprint).cloned();
+    fn verify(&self, presence_key: &[u8], message: &[u8], signature: &[u8]) -> bool {
+        let fingerprint = super::gateway::fingerprint_of(presence_key);
+        let secret = self.0.borrow().get(&fingerprint).cloned();
         secret.is_some_and(|s| same(&hmac_sha256(&s, message), signature))
     }
 }
@@ -83,13 +120,15 @@ fn gateway() -> (G, Stand) {
 /// What a device does to prove an offer: the same MAC and comparison the host will compute.
 fn attempt(secret_hex: &str, key: &[u8], transcript: &[u8], name: &str) -> Attempt {
     let secret: [u8; 16] = unhex(secret_hex).unwrap().try_into().unwrap();
+    let (connection_key, presence_key) = test_public_keys(key);
     Attempt {
         host_fingerprint_seen: HOST.to_owned(),
-        device_key: key.to_vec(),
+        connection_key: connection_key.clone(),
+        presence_key: presence_key.clone(),
         name: name.to_owned(),
         platform: "Android 15".to_owned(),
         transcript: transcript.to_vec(),
-        mac: Offer::mac_of(&secret, transcript, key),
+        mac: Offer::mac_of(&secret, transcript, &connection_key, &presence_key),
     }
 }
 
@@ -99,7 +138,7 @@ fn enrol(g: &mut G, stand: &Stand, now: u64, key: &[u8]) -> (DeviceId, String) {
     let a = attempt(&shown.secret_hex, key, b"transcript-1", "Santiago's phone");
     g.present_pairing(now + 5, &a).unwrap();
     let id = g.confirm_pairing(now + 10, &Yes).unwrap();
-    let fingerprint = g.device(&id).unwrap().fingerprint.clone();
+    let fingerprint = g.device(&id).unwrap().presence_fingerprint.clone();
     stand
         .0
         .borrow_mut()
@@ -253,9 +292,11 @@ fn a_grant_is_expiring_three_days_out_and_expired_at_its_end() {
 // ---- devices ---------------------------------------------------------------------------------
 
 fn device(now: u64) -> Device {
+    let (connection_key, presence_key) = test_public_keys(b"device helper");
     Device::new(
         DeviceId::from_bytes([1; 16]),
-        "b".repeat(64),
+        connection_key,
+        presence_key,
         "phone".into(),
         "Android".into(),
         grants::give_profile(Profile::Lp2, now, 30).unwrap(),
@@ -372,7 +413,12 @@ fn before_the_first_offer_the_gateway_does_not_listen_and_pairing_enrols_only_on
     let secret: [u8; 16] = unhex(&shown.secret_hex).unwrap().try_into().unwrap();
     assert_eq!(
         comparison,
-        Offer::comparison_of(&secret, b"t", b"device-key-A")
+        Offer::comparison_of(
+            &secret,
+            b"t",
+            &test_public_keys(b"device-key-A").0,
+            &test_public_keys(b"device-key-A").1,
+        )
     );
     let id = g.confirm_pairing(T0 + 2, &Yes).unwrap();
     let d = g.device(&id).unwrap();
@@ -383,7 +429,10 @@ fn before_the_first_offer_the_gateway_does_not_listen_and_pairing_enrols_only_on
         d.grants.iter().map(|h| h.grant).collect::<Vec<_>>(),
         [Grant::SessionsRead, Grant::ManagedRead]
     );
-    assert_eq!(d.fingerprint, hex(&sha256(b"device-key-A")));
+    assert_eq!(
+        d.fingerprint,
+        hex(&sha256(&test_public_keys(b"device-key-A").0))
+    );
     let _ = stand;
 }
 
@@ -492,7 +541,10 @@ fn a_proof_over_another_transcript_or_another_secret_or_a_host_key_that_is_not_o
     // The comparison value depends on the transcript, so a device reached through another
     // channel shows a different value.
     let secret = [9_u8; 16];
-    let digits = |t: &[u8], k: &[u8]| Offer::comparison_of(&secret, t, k);
+    let digits = |t: &[u8], seed: &[u8]| {
+        let (connection, presence) = test_public_keys(seed);
+        Offer::comparison_of(&secret, t, &connection, &presence)
+    };
     assert_ne!(digits(b"one", b"k"), digits(b"two", b"k"));
     assert_ne!(
         digits(b"one", b"k1"),
@@ -524,8 +576,10 @@ fn a_right_proof_with_a_label_that_is_not_text_is_consumed_and_dead() {
 #[test]
 fn oversized_input_is_refused_before_any_work_and_counts_as_an_attempt() {
     for tweak in [
-        |a: &mut Attempt| a.device_key = Vec::new(),
-        |a: &mut Attempt| a.device_key = vec![1; 257],
+        |a: &mut Attempt| a.connection_key = Vec::new(),
+        |a: &mut Attempt| a.presence_key = vec![1; 257],
+        |a: &mut Attempt| a.connection_key = vec![1; P256_PUBLIC_KEY_BYTES],
+        |a: &mut Attempt| a.connection_key = a.presence_key.clone(),
         |a: &mut Attempt| a.transcript = vec![0; 5000],
         |a: &mut Attempt| a.transcript = vec![0; 10 * 1024 * 1024],
     ] {
@@ -559,7 +613,7 @@ fn a_proof_made_for_one_key_cannot_enrol_another() {
     let (mut g, _) = gateway();
     let shown = g.begin_pairing(T0);
     let mut swapped = attempt(&shown.secret_hex, b"honest-key", b"t", "p");
-    swapped.device_key = b"attacker-key".to_vec(); // the MAC covers the honest one
+    swapped.connection_key = test_public_keys(b"attacker-key").0; // the MAC covers the honest key pair
     assert_eq!(g.present_pairing(T0, &swapped), Err(Refusal::PairingFailed));
 }
 
@@ -1297,6 +1351,61 @@ fn a_key_that_is_already_enrolled_is_not_enrolled_again_in_any_state() {
         Err(Refusal::PairingRefused)
     );
     assert_eq!(g.devices.len(), 1);
+}
+
+#[test]
+fn a_presence_key_cannot_be_reused_with_a_new_connection_identity() {
+    let (mut g, stand) = gateway();
+    let (old_id, _) = enrol(&mut g, &stand, T0, b"old-device");
+    let old_presence = g.device(&old_id).unwrap().presence_key.clone();
+    let shown = g.begin_pairing(T0 + 100);
+    let mut replacement = attempt(
+        &shown.secret_hex,
+        b"new-connection",
+        b"new-transcript",
+        "phone",
+    );
+    replacement.presence_key = old_presence.clone();
+    let secret: [u8; 16] = unhex(&shown.secret_hex).unwrap().try_into().unwrap();
+    replacement.mac = Offer::mac_of(
+        &secret,
+        &replacement.transcript,
+        &replacement.connection_key,
+        &replacement.presence_key,
+    );
+    g.present_pairing(T0 + 101, &replacement).unwrap();
+    assert_eq!(
+        g.confirm_pairing(T0 + 102, &Yes),
+        Err(Refusal::PairingRefused)
+    );
+}
+
+#[test]
+fn a_revoked_presence_key_cannot_be_reenrolled_with_a_new_connection_identity() {
+    let (mut g, stand) = gateway();
+    let (old_id, _) = enrol(&mut g, &stand, T0, b"revoked-device");
+    let old_presence = g.device(&old_id).unwrap().presence_key.clone();
+    assert!(g.revoke_at_host(&old_id));
+    let shown = g.begin_pairing(T0 + 100);
+    let mut replacement = attempt(
+        &shown.secret_hex,
+        b"replacement-connection",
+        b"new-transcript",
+        "phone",
+    );
+    replacement.presence_key = old_presence;
+    let secret: [u8; 16] = unhex(&shown.secret_hex).unwrap().try_into().unwrap();
+    replacement.mac = Offer::mac_of(
+        &secret,
+        &replacement.transcript,
+        &replacement.connection_key,
+        &replacement.presence_key,
+    );
+    g.present_pairing(T0 + 101, &replacement).unwrap();
+    assert_eq!(
+        g.confirm_pairing(T0 + 102, &Yes),
+        Err(Refusal::PairingRefused)
+    );
 }
 
 #[test]

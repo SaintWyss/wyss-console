@@ -122,7 +122,8 @@ impl Limiter {
 pub struct Gateway<J: Journal, V: StepUpVerifier, R: Random> {
     host_fingerprint: String,
     pub(super) devices: BTreeMap<DeviceId, Device>,
-    /// Fingerprints of revoked devices: refused for ever, even if a new pairing offers them again.
+    /// Connection and presence fingerprints of revoked devices: refused for ever, even if a new
+    /// pairing offers either key again.
     revoked_keys: Vec<String>,
     offer: Option<Offer>,
     challenges: BTreeMap<String, Challenge>,
@@ -205,12 +206,21 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
         let request = offer.confirm_request().ok_or(Refusal::PairingFailed)?;
         // A key that is already enrolled, in any state, is not enrolled a second time: pairing again
         // would shed a device's suspicion or suspension. The host deals with the device it has.
-        if self.revoked_keys.contains(&request.device_fingerprint)
-            || self
-                .devices
-                .values()
-                .any(|d| d.fingerprint == request.device_fingerprint)
-        {
+        let proposed_fingerprints = [
+            request.device_fingerprint.as_str(),
+            request.presence_fingerprint.as_str(),
+        ];
+        let key_already_used = proposed_fingerprints.iter().any(|fingerprint| {
+            self.revoked_keys
+                .iter()
+                .any(|revoked| revoked == fingerprint)
+        }) || self.devices.values().any(|device| {
+            proposed_fingerprints.iter().any(|fingerprint| {
+                device.fingerprint.as_str() == *fingerprint
+                    || device.presence_fingerprint.as_str() == *fingerprint
+            })
+        });
+        if key_already_used {
             offer.cancel();
             return Err(Refusal::PairingRefused);
         }
@@ -224,7 +234,8 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
             id.clone(),
             Device::new(
                 id.clone(),
-                enrolment.key_fingerprint,
+                enrolment.connection_key,
+                enrolment.presence_key,
                 enrolment.name,
                 enrolment.platform,
                 grants,
@@ -293,10 +304,17 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
         let Some(device) = self.devices.get_mut(id) else {
             return false;
         };
-        let was = device.fingerprint.clone();
+        let fingerprints = [
+            device.fingerprint.clone(),
+            device.presence_fingerprint.clone(),
+        ];
         let changed = device.revoke();
-        if changed && !self.revoked_keys.contains(&was) {
-            self.revoked_keys.push(was);
+        if changed {
+            for fingerprint in fingerprints {
+                if !self.revoked_keys.contains(&fingerprint) {
+                    self.revoked_keys.push(fingerprint);
+                }
+            }
         }
         // Its pending challenges go with it: nothing it was asked can still be answered.
         self.challenges.retain(|_, c| &c.device != id);
@@ -457,7 +475,7 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
             let message = step_up_message(channel_binding, &challenge.nonce(), request);
             if !self
                 .verifier
-                .verify(&device.fingerprint, &message, &step_up.signature)
+                .verify(&device.presence_key, &message, &step_up.signature)
             {
                 device.step_up_failed(now);
                 return refused(self, &device, Refusal::StepUpFailed);

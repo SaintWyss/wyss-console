@@ -39,10 +39,9 @@ pub struct StepUp {
     pub signature: Vec<u8>,
 }
 
-/// Whether a signature is the one the device's presence key makes over `message`. The algorithm is
-/// the ADR's to fix once an asymmetric scheme is available to the build; the core only asks.
+/// Whether a signature is the one the enrolled device presence key makes over `message`.
 pub trait StepUpVerifier {
-    fn verify(&self, key_fingerprint: &str, message: &[u8], signature: &[u8]) -> bool;
+    fn verify(&self, presence_key: &[u8], message: &[u8], signature: &[u8]) -> bool;
 }
 
 #[derive(Debug, Clone)]

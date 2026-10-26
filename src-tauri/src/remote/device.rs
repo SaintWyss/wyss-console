@@ -2,6 +2,7 @@
 //! decided about a key: it is not a name, an address or a network position. State changes are
 //! functions of the record and the clock, so every transition is a test.
 use super::grants::{DAY, GrantState, Held, state_of};
+use super::primitives::{hex, sha256};
 use serde::{Deserialize, Serialize};
 
 pub const SUSPEND_AFTER_UNSEEN: u64 = 30 * DAY;
@@ -56,8 +57,12 @@ pub fn clean_label(text: &str) -> Option<String> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Device {
     pub id: DeviceId,
-    /// SHA-256 of the device's connection key, in hex: what the host pinned.
+    /// SEC1 P-256 connection identity key; its fingerprint is what the host pins.
+    pub connection_key: Vec<u8>,
+    /// SEC1 P-256 user-presence key; used for step-up signatures, separate from connection auth.
+    pub presence_key: Vec<u8>,
     pub fingerprint: String,
+    pub presence_fingerprint: String,
     pub name: String,
     pub platform: String,
     pub state: DeviceState,
@@ -71,15 +76,21 @@ pub struct Device {
 impl Device {
     pub fn new(
         id: DeviceId,
-        fingerprint: String,
+        connection_key: Vec<u8>,
+        presence_key: Vec<u8>,
         name: String,
         platform: String,
         grants: Vec<Held>,
         now: u64,
     ) -> Self {
+        let fingerprint = hex(&sha256(&connection_key));
+        let presence_fingerprint = hex(&sha256(&presence_key));
         Self {
             id,
+            connection_key,
+            presence_key,
             fingerprint,
+            presence_fingerprint,
             name,
             platform,
             state: DeviceState::Active,

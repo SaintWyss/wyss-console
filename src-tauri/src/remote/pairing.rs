@@ -8,6 +8,7 @@
 //! offered.
 use super::{
     Refusal,
+    crypto::{P256_PUBLIC_KEY_BYTES, valid_p256_public_key},
     device::clean_label,
     primitives::{Random, field, hex, hmac_sha256, same, sha256},
 };
@@ -16,7 +17,7 @@ use zeroize::Zeroizing;
 pub const OFFER_SECONDS: u64 = 5 * 60;
 pub const MAX_ATTEMPTS: u32 = 3;
 pub const CONFIRM_SECONDS: u64 = 2 * 60;
-pub const MOST_KEY_BYTES: usize = 256;
+pub const MOST_KEY_BYTES: usize = P256_PUBLIC_KEY_BYTES;
 pub const MOST_TRANSCRIPT_BYTES: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +33,10 @@ enum Phase {
     Offered,
     Proved {
         at: u64,
+        connection_key: Vec<u8>,
+        presence_key: Vec<u8>,
         key_fingerprint: String,
+        presence_fingerprint: String,
         name: String,
         platform: String,
         comparison: String,
@@ -59,11 +63,12 @@ pub struct Offer {
     phase: Phase,
 }
 
-/// What a device sends to prove the offer: the fingerprint it saw for the host's key, its own
-/// connection key (public bytes), the label it proposes, the handshake transcript and the MAC over it.
+/// What a device sends to prove the offer: the fingerprint it saw for the host's key, its distinct
+/// connection and presence public keys, the label it proposes, the handshake transcript and MAC.
 pub struct Attempt {
     pub host_fingerprint_seen: String,
-    pub device_key: Vec<u8>,
+    pub connection_key: Vec<u8>,
+    pub presence_key: Vec<u8>,
     pub name: String,
     pub platform: String,
     pub transcript: Vec<u8>,
@@ -76,6 +81,7 @@ pub struct ConfirmRequest {
     pub name: String,
     pub platform: String,
     pub device_fingerprint: String,
+    pub presence_fingerprint: String,
     pub host_fingerprint: String,
     pub comparison: String,
     pub expires_at: u64,
@@ -86,6 +92,8 @@ pub struct ConfirmRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Enrolment {
     pub key_fingerprint: String,
+    pub connection_key: Vec<u8>,
+    pub presence_key: Vec<u8>,
     pub name: String,
     pub platform: String,
 }
@@ -134,23 +142,33 @@ impl Offer {
         }
     }
 
-    /// The MAC a device makes with the secret over the transcript. The device and the host run the
-    /// same function, over the same bytes.
-    /// The **device key is inside what the MAC covers**, so a proof made for one key cannot enrol
-    /// another.
-    pub fn mac_of(secret: &[u8; 16], transcript: &[u8], device_key: &[u8]) -> [u8; 32] {
+    /// The MAC a device makes with the QR secret. Both public keys are bound so a proof cannot
+    /// substitute either identity after the QR proof was made.
+    pub fn mac_of(
+        secret: &[u8; 16],
+        transcript: &[u8],
+        connection_key: &[u8],
+        presence_key: &[u8],
+    ) -> [u8; 32] {
         let mut message = b"wyss-pair-proof-v2".to_vec();
         field(&mut message, transcript);
-        field(&mut message, device_key);
+        field(&mut message, connection_key);
+        field(&mut message, presence_key);
         hmac_sha256(secret, &message)
     }
 
     /// The six digits both screens show: derived from the same transcript, so that a device that
     /// was reached through someone else's channel shows a different value.
-    pub fn comparison_of(secret: &[u8; 16], transcript: &[u8], device_key: &[u8]) -> String {
+    pub fn comparison_of(
+        secret: &[u8; 16],
+        transcript: &[u8],
+        connection_key: &[u8],
+        presence_key: &[u8],
+    ) -> String {
         let mut message = b"wyss-pair-compare-v2".to_vec();
         field(&mut message, transcript);
-        field(&mut message, device_key);
+        field(&mut message, connection_key);
+        field(&mut message, presence_key);
         let digest = hmac_sha256(secret, &message);
         let value = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) % 1_000_000;
         format!("{value:06}")
@@ -168,9 +186,12 @@ impl Offer {
             _ => return Err(Refusal::PairingFailed),
         }
         // Bounds first, before any work is done over the attacker's bytes; it counts as an attempt.
-        if attempt.device_key.is_empty()
-            || attempt.device_key.len() > MOST_KEY_BYTES
+        if attempt.connection_key.len() != MOST_KEY_BYTES
+            || attempt.presence_key.len() != MOST_KEY_BYTES
             || attempt.transcript.len() > MOST_TRANSCRIPT_BYTES
+            || same(&attempt.connection_key, &attempt.presence_key)
+            || !valid_p256_public_key(&attempt.connection_key)
+            || !valid_p256_public_key(&attempt.presence_key)
         {
             self.attempts += 1;
             if self.attempts >= MAX_ATTEMPTS {
@@ -183,7 +204,12 @@ impl Offer {
             attempt.host_fingerprint_seen.as_bytes(),
             self.host_fingerprint.as_bytes(),
         );
-        let expected = Self::mac_of(&self.secret, &attempt.transcript, &attempt.device_key);
+        let expected = Self::mac_of(
+            &self.secret,
+            &attempt.transcript,
+            &attempt.connection_key,
+            &attempt.presence_key,
+        );
         let proved = same(&expected, &attempt.mac);
         if !host_matches || !proved {
             self.attempts += 1;
@@ -203,11 +229,18 @@ impl Offer {
             self.phase = Phase::Dead(Dead::Failed);
             return Err(Refusal::PairingFailed);
         };
-        let comparison =
-            Self::comparison_of(&self.secret, &attempt.transcript, &attempt.device_key);
+        let comparison = Self::comparison_of(
+            &self.secret,
+            &attempt.transcript,
+            &attempt.connection_key,
+            &attempt.presence_key,
+        );
         self.phase = Phase::Proved {
             at: now,
-            key_fingerprint: hex(&sha256(&attempt.device_key)),
+            connection_key: attempt.connection_key.clone(),
+            presence_key: attempt.presence_key.clone(),
+            key_fingerprint: hex(&sha256(&attempt.connection_key)),
+            presence_fingerprint: hex(&sha256(&attempt.presence_key)),
             name,
             platform,
             comparison: comparison.clone(),
@@ -221,13 +254,16 @@ impl Offer {
             Phase::Proved {
                 at,
                 key_fingerprint,
+                presence_fingerprint,
                 name,
                 platform,
                 comparison,
+                ..
             } => Some(ConfirmRequest {
                 name: name.clone(),
                 platform: platform.clone(),
                 device_fingerprint: key_fingerprint.clone(),
+                presence_fingerprint: presence_fingerprint.clone(),
                 host_fingerprint: self.host_fingerprint.clone(),
                 comparison: comparison.clone(),
                 expires_at: at.saturating_add(CONFIRM_SECONDS),
@@ -241,6 +277,8 @@ impl Offer {
     pub fn confirm(&mut self, now: u64, answer: Option<bool>) -> Result<Enrolment, Refusal> {
         let Phase::Proved {
             at,
+            connection_key,
+            presence_key,
             key_fingerprint,
             name,
             platform,
@@ -256,6 +294,8 @@ impl Offer {
         self.phase = Phase::Confirmed;
         Ok(Enrolment {
             key_fingerprint,
+            connection_key,
+            presence_key,
             name,
             platform,
         })
