@@ -2,6 +2,7 @@ package org.wyss.console.remote;
 
 import org.junit.Test;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
@@ -55,6 +56,20 @@ public final class RemoteInputSequencerTest {
         RemoteInputSequencer.InputRequest request = sequencer.begin(new byte[] {3}, 12, 3);
         assertEquals(RemoteInputSequencer.Delivery.NEW_INPUT_REQUIRED, sequencer.reconnect(13, 4).delivery);
         assertThrows(IllegalStateException.class, request::payloadForFirstSend);
+    }
+
+    @Test public void staleUnsentHandleCannotReleasePayloadAfterReconnectWithFreshInput() {
+        RemoteInputSequencer sequencer = new RemoteInputSequencer();
+        RemoteInputSequencer.InputRequest stale = sequencer.begin(new byte[] {1, 2}, 12, 3);
+
+        assertEquals(RemoteInputSequencer.Delivery.NEW_INPUT_REQUIRED,
+                sequencer.reconnect(12, 4).delivery);
+        RemoteInputSequencer.InputRequest fresh = sequencer.begin(new byte[] {7, 8}, 12, 4);
+
+        assertThrows(IllegalStateException.class, stale::payloadForFirstSend);
+        assertArrayEquals(new byte[] {7, 8}, fresh.payloadForFirstSend());
+        assertEquals(RemoteInputSequencer.Delivery.ACCEPTED,
+                sequencer.acknowledge(fresh.requestId, 2).delivery);
     }
 
     @Test public void aStaleAcknowledgementCannotCompleteCurrentInput() {

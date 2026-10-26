@@ -24,8 +24,9 @@ unavailable. It does not establish production remote access.
 - **Native Android application:** `android/` is a Java/Android application with
   Hosts, Pairing, Projects, Sessions, Terminal, Pipelines, Approvals, Devices
   and Settings screens. It is offline by construction (no `INTERNET`
-  permission), secure-window enabled, uses native accessibility headings and
-  one-column scrolling, and clears rendered in-memory content on background.
+  permission), secure-window enabled, uses native accessibility headings,
+  horizontally scrollable screen navigation and one-column content scrolling,
+  and clears rendered in-memory content on background.
   Android Keystore creates separate non-exportable P-256 connection and
   per-use-authenticated presence keys when explicitly invoked. It labels
   attestation as absent; security level alone is not treated as hardware
@@ -38,8 +39,9 @@ unavailable. It does not establish production remote access.
   sequencer has no persistence or retry method.
   Closing and reading the payload now share one synchronized transition: if the
   first-send read wins, reconnect reports `OUTCOME_UNKNOWN`; if reconnect wins,
-  the retained handle cannot release bytes. The Java regression races both
-  operations 250 times.
+  the retained handle cannot release bytes. A new request after reconnect cannot
+  make the stale handle sendable again; the Java regression exercises that case
+  and races first-send against reconnect 250 times.
 - **H1/H2 comparison:**
   - H1, an owner-configured private overlay, reuses its own reachability and
     Android VPN integration but adds a third-party client/control-plane
@@ -85,18 +87,18 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
 
 ## Acceptance status
 
-| Contract                                                          | Status                  | Evidence or exact blocker                                                                                                                                                                     |
-| ----------------------------------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| TS-REM-01..02 QR and host-confirmation policy                     | PARTIAL, fixture-tested | Dual-key MAC/point validation is added; no live transport, host confirmation boundary or Android enrollment.                                                                                  |
-| TS-REM-03 short code                                              | BLOCKED                 | No approved PAKE implementation or short-code flow.                                                                                                                                           |
-| TS-REM-04..07 grants, revocation and request policy               | PARTIAL, fixture-tested | Existing remote core tests retained; no live attachment/API bridge.                                                                                                                           |
-| TS-REM-08 channel/MITM/channel-binding                            | BLOCKED                 | No selected transport or handshake.                                                                                                                                                           |
-| TS-REM-09 replay and ambiguous action                             | PARTIAL                 | Existing request replay tests plus Android no-replay input tests; no gateway, PTY and process-crash integration.                                                                              |
-| TS-REM-10..16 managed, durable journal, key rotation and recovery | NOT_PROVEN / BLOCKED    | No connected authority gateway, persistent host-key/device registry or rotation protocol. Existing policy fixture tests do not prove live behavior.                                           |
-| TS-REM-17 terminal escape/screen fidelity                         | NOT_RUN                 | No Android renderer or live terminal stream.                                                                                                                                                  |
-| TS-REM-18 Android cache/privacy and full listed states            | PARTIAL                 | Empty disconnected states, secure window and foreground memory clearing exist; real content cache, notifications, screen lock and five-minute background behavior are not implemented/tested. |
-| TS-HYB-01..14                                                     | BLOCKED / NOT_PROVEN    | OD01 transport selection and actual host/phone are dependencies; no real network or device experiment.                                                                                        |
-| Android Keystore P-256 keys                                       | IMPLEMENTED, NOT_PROVEN | API code creates separate keys and mandates device auth for presence key; CI builds/tests the SDK target, but physical device/TEE/attestation behavior remains untested.                      |
+| Contract                                                          | Status                  | Evidence or exact blocker                                                                                                                                                                                            |
+| ----------------------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TS-REM-01..02 QR and host-confirmation policy                     | PARTIAL, fixture-tested | Dual-key MAC/point validation is added; no live transport, host confirmation boundary or Android enrollment.                                                                                                         |
+| TS-REM-03 short code                                              | BLOCKED                 | No approved PAKE implementation or short-code flow.                                                                                                                                                                  |
+| TS-REM-04..07 grants, revocation and request policy               | PARTIAL, fixture-tested | Existing remote core tests retained; no live attachment/API bridge.                                                                                                                                                  |
+| TS-REM-08 channel/MITM/channel-binding                            | BLOCKED                 | No selected transport or handshake.                                                                                                                                                                                  |
+| TS-REM-09 replay and ambiguous action                             | PARTIAL                 | Existing request replay tests plus Android no-replay input tests; no gateway, PTY and process-crash integration.                                                                                                     |
+| TS-REM-10..16 managed, durable journal, key rotation and recovery | NOT_PROVEN / BLOCKED    | No connected authority gateway, persistent host-key/device registry or rotation protocol. Existing policy fixture tests do not prove live behavior.                                                                  |
+| TS-REM-17 terminal escape/screen fidelity                         | NOT_RUN                 | No Android renderer or live terminal stream.                                                                                                                                                                         |
+| TS-REM-18 Android cache/privacy and full listed states            | PARTIAL                 | Empty disconnected states, secure window, horizontal navigation and foreground memory clearing exist; real content cache, notifications, screen lock and five-minute background behavior are not implemented/tested. |
+| TS-HYB-01..14                                                     | BLOCKED / NOT_PROVEN    | OD01 transport selection and actual host/phone are dependencies; no real network or device experiment.                                                                                                               |
+| Android Keystore P-256 keys                                       | IMPLEMENTED, NOT_PROVEN | API code creates separate keys and mandates device auth for presence key; CI builds/tests the SDK target, but physical device/TEE/attestation behavior remains untested.                                             |
 
 ## Verification
 
@@ -117,6 +119,10 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
 - Java `RemoteInputSequencer` standalone smoke compilation/execution: **PASS**.
   A separate 5,000-cycle concurrent reconnect/send smoke also passed. Neither
   standalone run substitutes for the Android/JUnit build.
+- The final Android JUnit suite additionally covers a stale unsent request handle
+  after reconnect followed by a fresh request; the stale handle cannot release
+  either payload, while the fresh handle is acknowledged. Final-head Android CI
+  and M1–M5 integration checks are pending.
 - `npm audit`: 0 known vulnerabilities after locking the compatible Vite
   8.3.5 and undici security updates.
 - Android SDK/Gradle are unavailable locally. GitHub Actions run
@@ -131,8 +137,11 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
   final-head workflows will be dispatched after it is pushed.
 - Independent Sol High static review at `09e4c80` found no actionable issue in
   the atomic race fix; the test-only delta at `32ddb78` was also rechecked with
-  no findings. This is not a merge approval, hardware acceptance or production
-  security sign-off.
+  no findings. Two unresolved PR review comments separately identified clipped
+  horizontal navigation and stale-handle payload release. Source fixes are in
+  `bdf975b` and `09e4c80`; this final stale-versus-fresh regression is pending
+  final-head review. This is not a merge approval, hardware acceptance or
+  production security sign-off.
 
 No provider, remote network, existing service, credential or production data
 was touched.
