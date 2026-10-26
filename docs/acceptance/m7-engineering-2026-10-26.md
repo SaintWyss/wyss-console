@@ -119,33 +119,30 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
 - Java `RemoteInputSequencer` standalone smoke compilation/execution: **PASS**.
   A separate 5,000-cycle concurrent reconnect/send smoke also passed. Neither
   standalone run substitutes for the Android/JUnit build.
-- The final Android JUnit suite additionally covers a stale unsent request handle
-  after reconnect followed by a fresh request; the stale handle cannot release
-  either payload, while the fresh handle is acknowledged. Android GitHub Actions
-  run `40289210209` passed on final source head
-  `0a6d5f748dfdd7870f1dcb04c8a38034a94c8a77`, including the Android build and
-  JUnit suite. M1–M5 integration run `40289260949` is still in progress: its
-  frontend/contracts and scanner jobs passed, while the Rust job remains at
-  runner dependency installation. Do not treat that run as a full CI pass.
+- The Android JUnit suite covers a stale unsent request handle after reconnect
+  followed by a fresh request; the stale handle cannot release either payload,
+  while the fresh handle is acknowledged. It also races reconnect with first
+  payload acquisition and requires the result to be either a closed unsent
+  request or an explicitly ambiguous acquired payload. Android Actions run
+  `40292345934` passed on final PR head `eb88e266182d9f320c88d271adfa9d359066f60f`,
+  including the Android build and JUnit suite. M1–M5 integration run
+  `40292345677` also passed on that exact PR head, including frontend/contracts,
+  scanner, Rust/B1, and Clippy. Both final-head runs are successful; earlier
+  canceled runs are not used as acceptance evidence.
 - `npm audit`: 0 known vulnerabilities after locking the compatible Vite
   8.3.5 and undici security updates.
-- Android SDK/Gradle are unavailable locally. GitHub Actions run
-  `40276535354` passed on implementation head
-  `467b6c6ff816328a513d536375c915d4500bceeb`, including `testDebugUnitTest`
-  and `assembleDebug`; this is the native-app build and JUnit race regression.
-  The M1-M5 integration run `40276535146` also passed on that head, including
-  frontend/contracts, scanner, full Rust/B1 and Clippy. These runs prove the
-  committed sources compile and pass deterministic CI, not behavior on a phone.
-  No physical Android device or terminal has been exercised, so device/Keystore
-  behavior remains **NOT_PROVEN**. The current M1–M5 GitHub run is tracked
-  separately above; the evidence update below changes no Android or Rust source.
+- Android SDK/Gradle are unavailable locally. The final-head Android and M1–M5
+  CI runs above prove the committed sources compile and pass deterministic CI,
+  not behavior on a phone. No physical Android device or terminal has been
+  exercised, so device/Keystore behavior remains **NOT_PROVEN**.
 - Independent Sol High static review at final source head `0a6d5f7` found no
   actionable issue; this is a static review result, not a formal GitHub
   approval, hardware acceptance or production security sign-off. Two resolved
   Codex PR threads identified clipped horizontal navigation and stale-handle
-  payload release; source fixes are in `bdf975b` and `09e4c80`, and the final
-  stale-versus-fresh regression passed Android CI on that source head. Resolving
-  those threads is not merge approval or production security sign-off.
+  payload release; source fixes are in `bdf975b` and `09e4c80`. The current
+  stale-versus-fresh and concurrent reconnect/acquisition regressions passed the
+  final-head Android CI run above. Thread resolution is not merge approval or
+  production security sign-off.
 
 No provider, remote network, existing service, credential or production data
 was touched.
