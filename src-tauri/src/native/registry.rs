@@ -83,14 +83,19 @@ pub struct Registry {
     pub data: Data,
 }
 
+pub struct M9Open {
+    pub registry: Registry,
+    pub lost: Vec<String>,
+    pub extended_sessions: Vec<Session>,
+    pub extended_defaults: Vec<(String, AgentId)>,
+}
+
 impl Registry {
     /// Opens the shared registry without committing it so M9 can first move records written by
     /// an earlier M9 build into its sidecar. The returned shared registry contains only IDs an
     /// M1-M6 binary can deserialize; the caller must durably save the returned M9 records and
     /// defaults before saving this projection.
-    pub fn open_for_m9(
-        dir: PathBuf,
-    ) -> std::io::Result<(Self, Vec<String>, Vec<Session>, Vec<(String, AgentId)>)> {
+    pub fn open_for_m9(dir: PathBuf) -> std::io::Result<M9Open> {
         store::private_dir(&dir)?;
         let path = dir.join("registry.json");
         let mut data: Data = store::read_bounded(&path, MAX_FILE)
@@ -123,12 +128,12 @@ impl Registry {
                 project.default_agent = None;
             }
         }
-        Ok((
-            Self { path, data },
+        Ok(M9Open {
+            registry: Self { path, data },
             lost,
             extended_sessions,
             extended_defaults,
-        ))
+        })
     }
 
     pub fn save(&self) -> std::io::Result<()> {

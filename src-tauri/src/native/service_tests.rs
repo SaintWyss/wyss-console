@@ -502,6 +502,209 @@ fn m9_upgrade_migrates_prior_provider_records_before_publishing_the_legacy_regis
 }
 
 #[test]
+fn a_legacy_provider_replaces_the_previous_m9_project_default() {
+    let world = World::new();
+    let opencode = world.start(AgentId::Opencode, None).unwrap();
+    let project = world.home.to_string_lossy().into_owned();
+    assert_eq!(
+        world
+            .service
+            .launcher_extended()
+            .projects
+            .iter()
+            .find(|entry| entry.path == project)
+            .unwrap()
+            .default_agent,
+        Some(AgentId::Opencode)
+    );
+
+    let claude = world.start(AgentId::ClaudeCode, None).unwrap();
+    assert_eq!(
+        world
+            .service
+            .launcher_extended()
+            .projects
+            .iter()
+            .find(|entry| entry.path == project)
+            .unwrap()
+            .default_agent,
+        Some(AgentId::ClaudeCode),
+        "a legacy selection must not be shadowed by an old sidecar default"
+    );
+    world
+        .service
+        .stop(&world.terminal, &opencode.session.session.id)
+        .unwrap();
+    world
+        .service
+        .stop(&world.terminal, &claude.session.session.id)
+        .unwrap();
+}
+
+#[test]
+fn a_corrupt_m9_sidecar_blocks_only_m9_and_keeps_legacy_state_writable() {
+    let world = World::new();
+    let sidecar_path = world.base.join("registry/m9-native-sessions-v1.json");
+    let corrupt = b"{ intentionally corrupt M9 metadata";
+    fs::write(&sidecar_path, corrupt).unwrap();
+
+    let reopened = World {
+        base: world.base.clone(),
+        home: world.home.clone(),
+        bin: world.bin.clone(),
+        terminal: TerminalService::default(),
+        service: World::open(&world.base, &world.home, &world.bin),
+    };
+    let launcher = reopened.service.launcher_extended();
+    assert_eq!(launcher.m9_native_status, "storage_unavailable");
+    assert!(
+        launcher
+            .agents
+            .iter()
+            .all(|entry| entry.agent_id.is_legacy())
+    );
+    assert_eq!(fs::read(&sidecar_path).unwrap(), corrupt);
+
+    let blocked = reopened.service.start(
+        &reopened.terminal,
+        StartRequest {
+            agent_id: AgentId::Opencode,
+            project: reopened.home.to_string_lossy().into_owned(),
+            profile_id: None,
+            size: SIZE,
+            brief: None,
+            plan_token: None,
+            expected_cli_version: Some("1.19.4".to_owned()),
+        },
+    );
+    assert_eq!(blocked.unwrap_err().code, "store_unavailable");
+
+    let legacy = reopened.start(AgentId::ClaudeCode, None).unwrap();
+    let output = reopened.output_until(&legacy.terminal.terminal_id, "FAKE-CLAUDE");
+    assert!(output.contains("FAKE-CLAUDE"), "{output:?}");
+    assert_eq!(fs::read(&sidecar_path).unwrap(), corrupt);
+    let registry: serde_json::Value =
+        serde_json::from_slice(&fs::read(world.base.join("registry/registry.json")).unwrap())
+            .unwrap();
+    assert!(
+        registry["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| {
+                session["agent_id"] == "claude_code" && session["id"] == legacy.session.session.id
+            })
+    );
+    reopened
+        .service
+        .stop(&reopened.terminal, &legacy.session.session.id)
+        .unwrap();
+}
+
+#[test]
+fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_registry() {
+    let world = World::new();
+    let opencode = world.start(AgentId::Opencode, None).unwrap();
+    let id = opencode.session.session.id.clone();
+
+    let registry_path = world.base.join("registry/registry.json");
+    let mut legacy_registry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&registry_path).unwrap()).unwrap();
+    let sidecar_path = world.base.join("registry/m9-native-sessions-v1.json");
+    let mut sidecar: serde_json::Value =
+        serde_json::from_slice(&fs::read(&sidecar_path).unwrap()).unwrap();
+    let sessions = sidecar["sessions"].as_array_mut().unwrap();
+    let at = sessions
+        .iter()
+        .position(|session| session["id"] == id)
+        .unwrap();
+    legacy_registry["sessions"]
+        .as_array_mut()
+        .unwrap()
+        .push(sessions.remove(at));
+    let project = legacy_registry["projects"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|project| project["path"] == world.home.to_string_lossy().as_ref())
+        .unwrap();
+    project["default_agent"] = serde_json::json!("opencode");
+    fs::write(
+        &registry_path,
+        serde_json::to_vec(&legacy_registry).unwrap(),
+    )
+    .unwrap();
+    let corrupt = b"{ sidecar bytes remain untouched";
+    fs::write(&sidecar_path, corrupt).unwrap();
+    world
+        .terminal
+        .close(&opencode.terminal.terminal_id)
+        .unwrap();
+
+    let recovered = World::open(&world.base, &world.home, &world.bin);
+    assert_eq!(fs::read(&sidecar_path).unwrap(), corrupt);
+    let safe_registry = fs::read(&registry_path).unwrap();
+    #[derive(serde::Deserialize, Clone, Copy)]
+    #[serde(rename_all = "snake_case")]
+    enum M6AgentId {
+        ClaudeCode,
+        Codex,
+    }
+    #[derive(serde::Deserialize, Clone, Copy)]
+    struct M6Session {
+        agent_id: M6AgentId,
+    }
+    #[derive(serde::Deserialize)]
+    struct M6Registry {
+        sessions: Vec<M6Session>,
+    }
+    let m6_view: M6Registry = serde_json::from_slice(&safe_registry).unwrap();
+    assert!(
+        m6_view.sessions.iter().all(|session| {
+            matches!(session.agent_id, M6AgentId::ClaudeCode | M6AgentId::Codex)
+        })
+    );
+    assert_eq!(
+        recovered.launcher_extended().m9_native_status,
+        "storage_unavailable"
+    );
+    let sessions = recovered.sessions_extended(&TerminalService::default(), false);
+    assert!(sessions.iter().any(|session| {
+        session.session.id == id
+            && session.session.agent_id == AgentId::Opencode
+            && session.session.state == State::Lost
+    }));
+    let recovery_dir = world.base.join("registry/m9-native-recovery-v1");
+    let recovery_files: Vec<_> = fs::read_dir(&recovery_dir).unwrap().collect();
+    assert_eq!(recovery_files.len(), 1);
+
+    // Once the primary store is repaired, recovery migrates before the immutable copy is
+    // removed. Forget must then remain forgotten after a further restart.
+    fs::write(
+        &sidecar_path,
+        br#"{"schema":1,"sessions":[],"project_defaults":{}}"#,
+    )
+    .unwrap();
+    let restored = World::open(&world.base, &world.home, &world.bin);
+    assert_eq!(restored.launcher_extended().m9_native_status, "ready");
+    assert!(
+        restored
+            .sessions_extended(&TerminalService::default(), false)
+            .iter()
+            .any(|session| session.session.id == id)
+    );
+    assert_eq!(fs::read_dir(&recovery_dir).unwrap().count(), 0);
+    restored.forget(&id).unwrap();
+    let after_forget = World::open(&world.base, &world.home, &world.bin);
+    assert!(
+        after_forget
+            .sessions_extended(&TerminalService::default(), false)
+            .iter()
+            .all(|session| session.session.id != id)
+    );
+}
+
+#[test]
 fn hermes_native_launches_as_configured_without_probe_or_automatic_handoff() {
     let world = World::new();
     let entry = world

@@ -6,11 +6,18 @@ use super::{
     store,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, io, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 const MAX_FILE: u64 = 2 * 1024 * 1024;
 const MAX_SESSIONS: usize = 200;
+const MAX_RECOVERY_FILES: usize = 16;
+const MAX_RECOVERY_ENTRIES: usize = MAX_RECOVERY_FILES;
 const FILE_NAME: &str = "m9-native-sessions-v1.json";
+const RECOVERY_DIR: &str = "m9-native-recovery-v1";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,6 +33,83 @@ pub struct ExtendedRegistry {
     data: Data,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct RecoverySnapshot {
+    pub sessions: Vec<Session>,
+    pub project_defaults: BTreeMap<String, super::catalogue::AgentId>,
+}
+
+#[derive(Debug, Default)]
+pub struct RecoveryRead {
+    pub snapshots: Vec<RecoverySnapshot>,
+    pub incomplete: bool,
+}
+
+fn data_valid(data: &Data) -> bool {
+    (data.schema == 0 || data.schema == 1)
+        && data.sessions.len() <= MAX_SESSIONS
+        && data
+            .sessions
+            .iter()
+            .all(|session| !session.agent_id.is_legacy())
+        && data.project_defaults.len() <= super::registry::MAX_PROJECTS
+        && data
+            .project_defaults
+            .iter()
+            .all(|(path, agent)| path.len() <= 4096 && !agent.is_legacy())
+}
+
+fn recovery_data(dir: &Path, suffix: &str) -> io::Result<(PathBuf, Data)> {
+    let recovery_dir = dir.join(RECOVERY_DIR);
+    store::private_dir(&recovery_dir)?;
+    let path = recovery_dir.join(format!("{suffix}.json"));
+    let data = if path.exists() {
+        let bytes = store::read_bounded(&path, MAX_FILE)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "m9_recovery_unreadable"))?;
+        serde_json::from_slice::<Data>(&bytes)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "m9_recovery_invalid"))?
+    } else {
+        Data {
+            schema: 1,
+            ..Data::default()
+        }
+    };
+    if !data_valid(&data) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "m9_recovery_schema",
+        ));
+    }
+    Ok((path, data))
+}
+
+/// Enumerates at most the recovery limit plus one directory entry. Unexpected non-JSON files
+/// count toward the bound too, so a damaged directory cannot force an unbounded allocation or
+/// scan. Overflow is incomplete recovery, never evidence that the directory is clean.
+fn recovery_paths(dir: &Path) -> io::Result<(Vec<PathBuf>, bool, usize)> {
+    let mut entries = fs::read_dir(dir)?;
+    let mut paths = Vec::with_capacity(MAX_RECOVERY_FILES);
+    let mut entry_count = 0;
+    for _ in 0..MAX_RECOVERY_ENTRIES {
+        let Some(entry) = entries.next() else {
+            return Ok((paths, false, entry_count));
+        };
+        let path = entry?.path();
+        entry_count += 1;
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+        {
+            paths.push(path);
+        }
+    }
+    // Probe one more entry only to distinguish exactly-at-limit from overflow.
+    if entries.next().transpose()?.is_some() {
+        return Ok((paths, true, entry_count + 1));
+    }
+    Ok((paths, false, entry_count))
+}
+
 impl ExtendedRegistry {
     pub fn open(dir: PathBuf) -> io::Result<Self> {
         store::private_dir(&dir)?;
@@ -39,18 +123,7 @@ impl ExtendedRegistry {
         } else {
             Data::default()
         };
-        if data.schema != 0 && data.schema != 1
-            || data.sessions.len() > MAX_SESSIONS
-            || data
-                .sessions
-                .iter()
-                .any(|session| session.agent_id.is_legacy())
-            || data.project_defaults.len() > super::registry::MAX_PROJECTS
-            || data
-                .project_defaults
-                .iter()
-                .any(|(path, agent)| path.len() > 4096 || agent.is_legacy())
-        {
+        if !data_valid(&data) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "m9_registry_schema",
@@ -97,6 +170,151 @@ impl ExtendedRegistry {
         }
         self.data.project_defaults.insert(path.to_owned(), agent);
         self.save()
+    }
+
+    /// Removes an M9 default when a newer Native provider supersedes it. The old registry
+    /// cannot contain an M9 AgentId, so leaving this value here would keep shadowing Claude or
+    /// Codex after the user starts one of them.
+    pub fn clear_project_default(
+        &mut self,
+        path: &str,
+    ) -> io::Result<Option<super::catalogue::AgentId>> {
+        let previous = self.data.project_defaults.remove(path);
+        if let Err(error) = self.save() {
+            if let Some(agent) = previous {
+                self.data.project_defaults.insert(path.to_owned(), agent);
+            }
+            return Err(error);
+        }
+        Ok(previous)
+    }
+
+    /// Persist M9 records extracted from an earlier shared-registry build before the common
+    /// registry is rewritten as an M1-M6-safe projection. Recovery snapshots are never loaded
+    /// as writable state while the primary sidecar is corrupt; a later healthy start migrates
+    /// them idempotently.
+    pub fn preserve_recovery(
+        dir: &Path,
+        sessions: &[Session],
+        defaults: &[(String, super::catalogue::AgentId)],
+    ) -> io::Result<RecoverySnapshot> {
+        let recovery_dir = dir.join(RECOVERY_DIR);
+        store::private_dir(&recovery_dir)?;
+        let (mut files, overflow, entry_count) = recovery_paths(&recovery_dir)?;
+        files.sort();
+        if overflow || entry_count >= MAX_RECOVERY_ENTRIES {
+            return Err(io::Error::new(
+                io::ErrorKind::StorageFull,
+                "m9_recovery_full",
+            ));
+        }
+        let suffix = format!("recovery-{}", uuid::Uuid::new_v4().simple());
+        let (path, mut data) = recovery_data(dir, &suffix)?;
+        for session in sessions {
+            if session.agent_id.is_legacy() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "m9_recovery_agent",
+                ));
+            }
+            if data
+                .sessions
+                .iter()
+                .all(|existing| existing.id != session.id)
+            {
+                data.sessions.push(session.clone());
+            }
+        }
+        for (project, agent) in defaults {
+            if agent.is_legacy() || project.len() > 4096 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "m9_recovery_default",
+                ));
+            }
+            data.project_defaults
+                .entry(project.clone())
+                .or_insert(*agent);
+        }
+        if !data_valid(&data) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "m9_recovery_schema",
+            ));
+        }
+        let bytes = serde_json::to_vec_pretty(&data).map_err(io::Error::other)?;
+        store::write_atomic(&path, &bytes)?;
+        Ok(RecoverySnapshot {
+            sessions: data.sessions,
+            project_defaults: data.project_defaults,
+        })
+    }
+
+    pub fn read_recovery(dir: &Path) -> io::Result<RecoveryRead> {
+        let recovery_dir = dir.join(RECOVERY_DIR);
+        if !recovery_dir.exists() {
+            return Ok(RecoveryRead::default());
+        }
+        store::private_dir(&recovery_dir)?;
+        let (mut files, overflow, _) = recovery_paths(&recovery_dir)?;
+        files.sort();
+        let mut recovery = RecoveryRead {
+            snapshots: Vec::new(),
+            incomplete: overflow,
+        };
+        for path in files.into_iter().take(MAX_RECOVERY_FILES) {
+            let Some(bytes) = store::read_bounded(&path, MAX_FILE) else {
+                recovery.incomplete = true;
+                continue;
+            };
+            let Ok(data) = serde_json::from_slice::<Data>(&bytes) else {
+                recovery.incomplete = true;
+                continue;
+            };
+            if !data_valid(&data) {
+                recovery.incomplete = true;
+                continue;
+            }
+            recovery.snapshots.push(RecoverySnapshot {
+                sessions: data.sessions,
+                project_defaults: data.project_defaults,
+            });
+        }
+        Ok(recovery)
+    }
+
+    /// Removes valid snapshots only after their contents have been copied into and durably
+    /// saved by the primary registry. Invalid files are left untouched for manual recovery.
+    pub fn clear_recovery(dir: &Path) -> io::Result<()> {
+        let recovery_dir = dir.join(RECOVERY_DIR);
+        if !recovery_dir.exists() {
+            return Ok(());
+        }
+        store::private_dir(&recovery_dir)?;
+        let (files, overflow, _) = recovery_paths(&recovery_dir)?;
+        if overflow {
+            return Err(io::Error::new(
+                io::ErrorKind::StorageFull,
+                "m9_recovery_full",
+            ));
+        }
+        let mut removed = false;
+        for path in files {
+            let Some(bytes) = store::read_bounded(&path, MAX_FILE) else {
+                continue;
+            };
+            let Ok(data) = serde_json::from_slice::<Data>(&bytes) else {
+                continue;
+            };
+            if data_valid(&data) {
+                fs::remove_file(path)?;
+                removed = true;
+            }
+        }
+        if removed {
+            fs::File::open(recovery_dir)?.sync_all()?;
+        }
+        Ok(())
     }
 
     pub fn migrate_session(&mut self, session: Session) -> io::Result<()> {
@@ -192,5 +410,61 @@ impl ExtendedRegistry {
     pub fn save(&self) -> io::Result<()> {
         let bytes = serde_json::to_vec_pretty(&self.data).map_err(io::Error::other)?;
         store::write_atomic(&self.path, &bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_directory_entry_count_is_bounded_and_overflow_fails_closed() {
+        let root = std::env::temp_dir().join(format!(
+            "wyss-m9-recovery-bound-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let directory = root.join(RECOVERY_DIR);
+        store::private_dir(&directory).unwrap();
+        for index in 0..=MAX_RECOVERY_FILES {
+            fs::write(directory.join(format!("unexpected-{index}")), b"x").unwrap();
+        }
+
+        let recovery = ExtendedRegistry::read_recovery(&root).unwrap();
+        assert!(recovery.incomplete);
+        assert!(recovery.snapshots.is_empty());
+        assert_eq!(
+            ExtendedRegistry::preserve_recovery(&root, &[], &[])
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::StorageFull
+        );
+        assert_eq!(
+            ExtendedRegistry::clear_recovery(&root).unwrap_err().kind(),
+            io::ErrorKind::StorageFull
+        );
+        assert_eq!(
+            fs::read_dir(&directory).unwrap().count(),
+            MAX_RECOVERY_FILES + 1
+        );
+        fs::remove_dir_all(&directory).unwrap();
+        store::private_dir(&directory).unwrap();
+        for index in 0..MAX_RECOVERY_FILES {
+            fs::write(directory.join(format!("unexpected-{index}")), b"x").unwrap();
+        }
+        let at_limit = ExtendedRegistry::read_recovery(&root).unwrap();
+        assert!(!at_limit.incomplete);
+        assert!(at_limit.snapshots.is_empty());
+        assert_eq!(
+            ExtendedRegistry::preserve_recovery(&root, &[], &[])
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::StorageFull
+        );
+        ExtendedRegistry::clear_recovery(&root).unwrap();
+        assert_eq!(
+            fs::read_dir(&directory).unwrap().count(),
+            MAX_RECOVERY_FILES
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }

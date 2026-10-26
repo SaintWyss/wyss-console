@@ -926,9 +926,11 @@ mod capability_tests {
     fn a_legacy_host_cannot_admit_m9_providers_or_profiles_by_direct_ipc() {
         let host = LegacyHost::new(false);
         let link = host.link();
-        let mut body = Body::default();
-        body.name = "OpenCode profile".to_owned();
-        body.applies_to = vec![AgentId::Opencode];
+        let body = Body {
+            name: "OpenCode profile".to_owned(),
+            applies_to: vec![AgentId::Opencode],
+            ..Body::default()
+        };
         assert_eq!(
             host_can_keep(&link, &body).unwrap_err().code,
             "host_outdated"
