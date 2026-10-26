@@ -3432,7 +3432,7 @@ mod tests {
             coordinator.tick(101).unwrap();
             let step_id = draft.steps[0].step_id.as_str();
             let attempt = coordinator.get(&run.run_id).unwrap().steps[0]
-                .attempt_id
+                .attempt_id.clone()
                 .unwrap();
             // A real attempted effect became ambiguous; the owner began confirming it.
             journal
@@ -3547,7 +3547,7 @@ mod tests {
             RunState::Pausing
         );
         let attempt = coordinator.get(&run.run_id).unwrap().steps[0]
-            .attempt_id
+            .attempt_id.clone()
             .unwrap();
         journal
             .mark_attempt_unknown(&run.run_id, &draft.steps[0].step_id, &attempt, 103)
