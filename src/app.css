@@ -246,7 +246,7 @@ button:focus-visible {
   color: var(--text);
   border: 2px solid var(--accent);
   border-radius: var(--radius-sm);
-  background: var(--surface-raised);
+  background: var(--bg);
   font-weight: 700;
 }
 .skip-link:focus-visible {

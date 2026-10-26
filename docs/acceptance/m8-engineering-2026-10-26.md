@@ -36,8 +36,9 @@ closure under the M8 roadmap DoD.
   contrast values.
 - The desktop shell now begins keyboard navigation with a visible-on-focus
   skip link to a programmatically focusable main landmark. Its colors use the
-  three theme tokens, with a contrast boundary and focus outline; a shell test
-  asserts the link target, label and landmark semantics. WebKitGTK keyboard and
+  three theme tokens over an opaque background, with tested text/border contrast
+  and a focus outline; shell tests assert the link target, label, contrast and
+  landmark semantics. WebKitGTK keyboard and
   assistive-technology behavior remains NOT_PROVEN.
 - The light-theme `--faint` token is darkened so it remains at least 4.5:1 on
   every opaque light-theme surface. A regression binds the event timestamp,
@@ -49,9 +50,10 @@ closure under the M8 roadmap DoD.
 
 ## Verification
 
-- `npm run check`: **PASS** after the skip-link change. Prettier, ESLint,
-  Svelte/TypeScript; 69 Vitest files and 1,082 tests (including the new shell
-  landmark/skip-link regression); owned-workspace harness (16); Claude bridge
+- `npm run check`: **PASS** after the skip-link and contrast correction.
+  Prettier, ESLint, Svelte/TypeScript; 69 Vitest files and 1,083 tests
+  (including the shell landmark/skip-link and theme contrast regressions);
+  owned-workspace harness (16); Claude bridge
   (77); Vite build
   (230 modules). The bridge tests emitted existing Python `ResourceWarning`s
   for unclosed test-only files. Vite emitted the repository's advisory for a
@@ -77,6 +79,12 @@ closure under the M8 roadmap DoD.
   minimum height used raw pixels. Both are fixed. Re-review of implementation
   head `15590c5` found no actionable residual finding; it was static review,
   not formal GitHub approval, physical measurement or production acceptance.
+- A subsequent Sol High review of the first desktop skip-link commit found its
+  translucent background could fall below 4.5:1 over a light glass desktop.
+  The link now uses opaque `--bg`; a new test checks text and boundary contrast
+  for all three themes. Re-review of this correction is pending. The skip-link
+  change is desktop-only; the Android source remains unchanged from the
+  separately CI-tested theme build.
 - Direct B1 process suite: **22 passed, 0 failed**. The standard script's
   `b1::` filter selects no `b1_process` cases, so this direct invocation covers
   the process regressions.
@@ -85,10 +93,11 @@ closure under the M8 roadmap DoD.
   scanned from Git and the working tree.
 - `npm audit --audit-level=moderate`: **0 known vulnerabilities**.
 - Android Gradle/JUnit is not available as a local verified run. Android run
-  `40295301836` passed on code head `15590c5`, including the native build and
-  JVM tests. Later M8 commits only merge/update M7/M9 acceptance evidence and
-  this record; exact-head CI state is linked from PR #32. CI does not prove
-  physical device rendering or touch target measurement.
+  `40303043578` passed on M8 head `0f88cf6`, including the native build and JVM
+  tests. That M8 delta added desktop skip navigation; the following correction
+  changes desktop CSS/tests only. Final-head CI for the correction is tracked
+  separately from this earlier run. CI does not prove physical device rendering
+  or touch target measurement.
 - No benchmark was run and no M01..M33 p50/p95 values are claimed here.
 
 ## Requirement status

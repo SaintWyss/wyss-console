@@ -72,6 +72,23 @@ it('provides every DN-34 theme with legible text, semantic text, focus and bound
   }
 });
 
+it('keeps the keyboard skip link readable over translucent desktop surfaces', () => {
+  expect(stylesheet).toMatch(
+    /\.skip-link\s*\{[^}]*color:\s*var\(--text\);[^}]*border:\s*2px solid var\(--accent\);[^}]*background:\s*var\(--bg\);/s,
+  );
+  for (const theme of APPEARANCE_THEMES) {
+    const tokens = cssThemes()[theme]!;
+    expect(
+      contrast(tokens.text!, tokens.bg!),
+      `${theme} skip-link text`,
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(
+      contrast(tokens.accent!, tokens.bg!),
+      `${theme} skip-link boundary`,
+    ).toBeGreaterThanOrEqual(3);
+  }
+});
+
 it('keeps light-theme faint text legible on event-row surfaces and states', () => {
   const tokens = cssThemes().light!;
   const surfaceTokens = Object.keys(tokens).filter(
