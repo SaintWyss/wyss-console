@@ -36,6 +36,10 @@ unavailable. It does not establish production remote access.
   and maps partial or impossible acknowledgements distinctly. A lost ACK or
   reconnect consumes the in-flight bytes and requires fresh user input; the
   sequencer has no persistence or retry method.
+  Closing and reading the payload now share one synchronized transition: if the
+  first-send read wins, reconnect reports `OUTCOME_UNKNOWN`; if reconnect wins,
+  the retained handle cannot release bytes. The Java regression races both
+  operations 250 times.
 - **H1/H2 comparison:**
   - H1, an owner-configured private overlay, reuses its own reachability and
     Android VPN integration but adds a third-party client/control-plane
@@ -110,14 +114,20 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
 - `npm run scan:repo`: **PASS**, 5 checks / 0 failures; all 1,620 tracked files
   were scanned from Git and the working tree after the implementation commits.
 - Java `RemoteInputSequencer` standalone smoke compilation/execution: **PASS**.
-  This is not the Android/JUnit build.
+  A separate 5,000-cycle concurrent reconnect/send smoke also passed. Neither
+  standalone run substitutes for the Android/JUnit build.
 - `npm audit`: 0 known vulnerabilities after locking the compatible Vite
   8.3.5 and undici security updates.
-- Android SDK/Gradle are unavailable locally. The checked-in GitHub Actions job
-  runs JUnit input-protocol tests and assembles the APK on a disposable runner;
-  its result is pending until the branch commit is pushed. No physical Android
-  device or terminal has been exercised, so device/Keystore behavior remains
-  **NOT_PROVEN**.
+- Android SDK/Gradle are unavailable locally. GitHub Actions run
+  `40275807145` passed on `32ddb785b453d4c2bd010c6133cd629705ba880f`, including
+  `testDebugUnitTest` and `assembleDebug`. It includes the JUnit race regression.
+  A final-head run is required after this evidence update is committed. No
+  physical Android device or terminal has been exercised, so device/Keystore
+  behavior remains **NOT_PROVEN**.
+- Independent Sol High static review at `09e4c80` found no actionable issue in
+  the atomic race fix; the test-only delta at `32ddb78` was also rechecked with
+  no findings. This is not a merge approval, hardware acceptance or production
+  security sign-off.
 
 No provider, remote network, existing service, credential or production data
 was touched.
