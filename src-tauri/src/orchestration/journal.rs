@@ -376,8 +376,9 @@ impl RunJournal {
         let mut statement = connection.prepare(
             "SELECT run_id,workspace_id FROM orchestration_workspace_claims ORDER BY run_id",
         )?;
-        let rows = statement
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
         let claims = rows.collect::<Result<Vec<_>, _>>()?;
         Ok(claims)
     }
