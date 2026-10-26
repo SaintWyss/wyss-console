@@ -3,14 +3,16 @@
 ## Baseline and scope of this increment
 
 This branch is `feat/m8-whole-product-reviewed`, based on the separate
-`integration/m7-m9-reviewed` branch at `bbcb9812fccaaf9b583b530e15b6f5c44ad6486f`.
-That integration head contains M7 PR #30 source head `0a6d5f7` plus its evidence
-update `eb88e26`, and M9 PR #31 source head `7f48ceb` plus its evidence update
-`3bbd055`. Independent Sol High static reviews found no
-actionable findings on the updated M7/M9 heads; neither is a GitHub approval or
-production acceptance. M6 PR #29 remains open and unmerged. This is a substantial
-M8 accessibility and appearance increment; it is not whole-product closure
-under the M8 roadmap DoD.
+`integration/m7-m9-reviewed` branch at
+`15f0d1a1e19b9d634699861ef2f197ffba1e1e05` (which contains the final
+evidence-only updates from M7 PR #30 head `8abc900` and M9 PR #31 head
+`6686687`).
+Their implementation sources were independently reviewed at M7 source head
+`0a6d5f7` and M9 head `3bbd055`; the evidence updates do not change source code.
+Those static reviews found no actionable findings; neither is a GitHub approval
+or production acceptance. M6 PR #29 remains open and unmerged. This is a
+substantial M8 accessibility and appearance increment; it is not whole-product
+closure under the M8 roadmap DoD.
 
 ## Implemented
 
@@ -65,34 +67,35 @@ under the M8 roadmap DoD.
   test correction.
 - Independent Sol High review of the M8 head `37d4802` found two P2s: light
   theme faint text on raised event rows missed 4.5:1, and Android button
-  minimum height used raw pixels. Both findings are corrected in this
-  increment; independent re-review is pending. The review reported no critical
-  or high findings and did not constitute hardware or production acceptance.
+  minimum height used raw pixels. Both are fixed. Re-review of implementation
+  head `15590c5` found no actionable residual finding; it was static review,
+  not formal GitHub approval, physical measurement or production acceptance.
 - Direct B1 process suite: **22 passed, 0 failed**. The standard script's
   `b1::` filter selects no `b1_process` cases, so this direct invocation covers
   the process regressions.
-- `npm run scan:repo`: **PASS**, 5 checks / 0 failures; all 1,627 tracked files,
+- `npm run scan:repo`: **PASS**, 5 checks / 0 failures; all 1,628 tracked files,
   including the integrated Android/appearance tests and updated evidence, were
   scanned from Git and the working tree.
 - `npm audit --audit-level=moderate`: **0 known vulnerabilities**.
-- Android Gradle/JUnit is not available as a local verified run. The density
-  regression is included in the repository Android GitHub workflow on the final
-  M8 head; CI verifies the native build and JVM test, not physical device
-  rendering or touch target measurement.
+- Android Gradle/JUnit is not available as a local verified run. Android run
+  `40295301836` passed on code head `15590c5`, including the native build and
+  JVM tests. Later M8 commits only merge/update M7/M9 acceptance evidence and
+  this record; exact-head CI state is linked from PR #32. CI does not prove
+  physical device rendering or touch target measurement.
 - No benchmark was run and no M01..M33 p50/p95 values are claimed here.
 
 ## Requirement status
 
-| Requirement                                                                    | Status                                    | Evidence / limitation                                                                                                                                                                                      |
-| ------------------------------------------------------------------------------ | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Three desktop themes and preference migration                                  | IMPLEMENTED, TESTED                       | Closed schema/enum, exact v1-to-v2 migration, unknown-shape refusal and full frontend suite.                                                                                                               |
-| Theme semantic contrast and terminal ANSI palette                              | IMPLEMENTED, TESTED                       | Deterministic CSS and ANSI ratio tests pass; this does not establish assistive-technology usability.                                                                                                       |
-| Native Android theme preference                                                | IMPLEMENTED, NOT YET TESTED ON FINAL HEAD | Native UI/storage and Java unit tests added; final Android workflow and actual-device behavior pending.                                                                                                    |
-| FP-NFR-01 / M01..M33 on two reference PCs and Android                          | NOT_PROVEN                                | No raw, provenance-bound reference-device p50/p95 measurements or approved frozen budgets were collected. Requires the two specified reference PCs, supported Android hardware and controlled repetitions. |
-| FP-NFR-02 keyboard, IME, focus, reduced motion, scale and assistive technology | PARTIAL / NOT_PROVEN                      | Palette/contrast and existing keyboard regressions pass; real WebKitGTK, TalkBack, IME, text scaling, reduced-motion and narrow-device journeys were not exercised.                                        |
-| FP-NFR-03 update, backup, WAL recovery, rollback and power-loss matrix         | NOT_PROVEN                                | No installed migration, backup/restore, mixed-version or rollback rehearsal was performed. Existing fixture regressions do not substitute for those operations.                                            |
-| JF-01..JF-12 full cross-provider and cross-device journeys                     | NOT_RUN / PARTIAL                         | Existing feature tests and this increment's regressions are not a complete end-to-end run across real reference PCs, providers and Android.                                                                |
-| Privacy/no-leak and preservation gates                                         | PARTIAL / TESTED                          | Repository scanner and existing full tests pass; no new credential, provider output or journal field was added by this theme increment. Full final product privacy corpus remains outstanding.             |
+| Requirement                                                                    | Status                                                   | Evidence / limitation                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Three desktop themes and preference migration                                  | IMPLEMENTED, TESTED                                      | Closed schema/enum, exact v1-to-v2 migration, unknown-shape refusal and full frontend suite.                                                                                                               |
+| Theme semantic contrast and terminal ANSI palette                              | IMPLEMENTED, TESTED                                      | Deterministic CSS and ANSI ratio tests pass; this does not establish assistive-technology usability.                                                                                                       |
+| Native Android theme preference                                                | IMPLEMENTED, DETERMINISTIC CI TESTED / DEVICE NOT_PROVEN | Native UI/storage and Java unit tests added; Android CI passed on code head `15590c5`; physical rendering and touch target behavior remain untested.                                                       |
+| FP-NFR-01 / M01..M33 on two reference PCs and Android                          | NOT_PROVEN                                               | No raw, provenance-bound reference-device p50/p95 measurements or approved frozen budgets were collected. Requires the two specified reference PCs, supported Android hardware and controlled repetitions. |
+| FP-NFR-02 keyboard, IME, focus, reduced motion, scale and assistive technology | PARTIAL / NOT_PROVEN                                     | Palette/contrast and existing keyboard regressions pass; real WebKitGTK, TalkBack, IME, text scaling, reduced-motion and narrow-device journeys were not exercised.                                        |
+| FP-NFR-03 update, backup, WAL recovery, rollback and power-loss matrix         | NOT_PROVEN                                               | No installed migration, backup/restore, mixed-version or rollback rehearsal was performed. Existing fixture regressions do not substitute for those operations.                                            |
+| JF-01..JF-12 full cross-provider and cross-device journeys                     | NOT_RUN / PARTIAL                                        | Existing feature tests and this increment's regressions are not a complete end-to-end run across real reference PCs, providers and Android.                                                                |
+| Privacy/no-leak and preservation gates                                         | PARTIAL / TESTED                                         | Repository scanner and existing full tests pass; no new credential, provider output or journal field was added by this theme increment. Full final product privacy corpus remains outstanding.             |
 
 ## Explicit blockers and limits
 
@@ -100,14 +103,13 @@ under the M8 roadmap DoD.
   level and reviewed budgets. Hardware-specific measurements, real accessibility
   journeys and long-duration/recovery rehearsals remain NOT_PROVEN; no target
   was relaxed or inferred from fixtures.
-- Android CI must run against the final pushed head. Actual Android screen reader,
-  IME, lifecycle, scaling and hardware behavior still require supported physical
-  devices.
+- Actual Android screen reader, IME, lifecycle, scaling and hardware behavior
+  still require supported physical devices.
 - M7 transport OD01 and the M7 same-UID authenticity/OD02 gates remain blocked
   as recorded in the M7 acceptance evidence. This appearance change does not
   make remote access available or widen a grant.
-- M9 remains a separate reviewed extension lane. M8 must integrate it only after
-  its independent review. Managed production concurrency remains one; Native
+- M9 remains a separately reviewed extension lane and is included through the
+  reviewed integration base. Managed production concurrency remains one; Native
   automated dispatch and Hermes planner effects remain behind their accepted
   trust-boundary gates.
 
@@ -115,6 +117,7 @@ under the M8 roadmap DoD.
 
 No owner services, installed application, credentials, working sessions or
 production data were installed, restarted, migrated or changed for this work.
-The M8 change is reviewable and fixture-tested, but M8 is not complete, the PR
-must remain unmerged pending independent review and integration CI, and neither
-merge readiness nor production readiness is claimed.
+The M8 change is reviewable and fixture-tested, but M8 is not complete. The PR
+must remain unmerged pending formal independent GitHub review and the M8
+whole-product evidence gates; neither merge readiness nor production readiness
+is claimed.
