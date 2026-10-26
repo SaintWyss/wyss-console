@@ -3542,7 +3542,10 @@ mod tests {
             .submit(draft.clone(), review(&draft), 100)
             .unwrap();
         coordinator.tick(101).unwrap();
-        assert_eq!(coordinator.pause(&run.run_id, 102).unwrap().state, RunState::Pausing);
+        assert_eq!(
+            coordinator.pause(&run.run_id, 102).unwrap().state,
+            RunState::Pausing
+        );
         let attempt = coordinator.get(&run.run_id).unwrap().steps[0]
             .attempt_id
             .unwrap();
