@@ -3457,7 +3457,10 @@ mod tests {
             drop(coordinator);
             let restarted = Coordinator::new(journal.clone(), authority.clone(), 105).unwrap();
             if verified_before_crash {
-                assert_eq!(restarted.get(&run.run_id).unwrap().state, RunState::Completed);
+                assert_eq!(
+                    restarted.get(&run.run_id).unwrap().state,
+                    RunState::Completed
+                );
             } else {
                 let held = restarted.get(&run.run_id).unwrap();
                 assert_eq!(held.state, RunState::NeedsReview);
