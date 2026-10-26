@@ -1065,6 +1065,106 @@ impl RunJournal {
                 recovered.push(view);
             }
         }
+        // A prior owner-confirmed reconciliation can be interrupted between SQLite
+        // transactions. A needs-review run may then contain a Verifying step or a
+        // fully resolved result with no remaining reviewable step. Normalize both
+        // cases under this single transaction; never re-dispatch a lost volatile plan.
+        let review_ids = {
+            let mut statement = tx.prepare(
+                "SELECT run_id FROM orchestration_runs WHERE state='needs_review' ORDER BY created_at,run_id",
+            )?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for run_id in review_ids {
+            let before = get_locked(&tx, &run_id)?.ok_or(JournalError::Storage)?;
+            let mut changed = false;
+            for step in &before.steps {
+                let next = match step.state {
+                    StepState::Verifying | StepState::Starting | StepState::Running => {
+                        Some(StepState::NeedsReview)
+                    }
+                    StepState::Proposed
+                    | StepState::WaitingDependencies
+                    | StepState::Eligible
+                    | StepState::WaitingResource
+                    | StepState::AwaitingPermission
+                    | StepState::Queued => Some(StepState::Cancelled),
+                    _ => None,
+                };
+                if let Some(next) = next {
+                    tx.execute(
+                        "UPDATE orchestration_steps SET state=?3,failure='coordinator_restarted',updated_at=?4 WHERE run_id=?1 AND step_id=?2",
+                        params![run_id, step.step_id, enum_text(&next)?, now as i64],
+                    )?;
+                    changed = true;
+                }
+            }
+            if changed {
+                tx.execute(
+                    "UPDATE orchestration_attempts SET state='unknown',failure='coordinator_restarted',updated_at=?2 WHERE run_id=?1 AND state IN ('dispatching','acknowledged','running')",
+                    params![run_id, now as i64],
+                )?;
+                bump_run(&tx, &run_id, now)?;
+                add_event(
+                    &tx,
+                    &run_id,
+                    None,
+                    None,
+                    "recovered_after_restart",
+                    Some("coordinator_restarted"),
+                    now,
+                )?;
+            }
+            let snapshot = get_locked(&tx, &run_id)?.ok_or(JournalError::Storage)?;
+            if snapshot.steps.iter().all(|step| step.state.terminal()) {
+                let failed = snapshot.steps.iter().any(|step| {
+                    step.required && matches!(step.state, StepState::Failed | StepState::Blocked)
+                });
+                let cancelled = snapshot
+                    .steps
+                    .iter()
+                    .any(|step| step.required && step.state == StepState::Cancelled);
+                let next = if failed {
+                    RunState::Failed
+                } else if cancelled {
+                    RunState::Cancelled
+                } else {
+                    RunState::Completed
+                };
+                tx.execute(
+                    "UPDATE orchestration_runs SET revision=revision+1,state=?2,failure=?3,updated_at=?4 WHERE run_id=?1 AND state='needs_review'",
+                    params![
+                        run_id,
+                        enum_text(&next)?,
+                        if failed || cancelled {
+                            Some(enum_text(&super::FailureCode::OwnerReviewRequired)?)
+                        } else {
+                            None
+                        },
+                        now as i64
+                    ],
+                )?;
+                tx.execute(
+                    "DELETE FROM orchestration_workspace_claims WHERE run_id=?1",
+                    [&run_id],
+                )?;
+                add_event(
+                    &tx,
+                    &run_id,
+                    None,
+                    None,
+                    "run_state_changed",
+                    (failed || cancelled)
+                        .then_some("owner_review_required"),
+                    now,
+                )?;
+                changed = true;
+            }
+            if changed {
+                recovered.push(get_locked(&tx, &run_id)?.ok_or(JournalError::Storage)?);
+            }
+        }
         tx.commit()?;
         Ok(recovered)
     }
@@ -1455,6 +1555,88 @@ mod tests {
         };
         envelope.seal().unwrap();
         envelope
+    }
+
+    #[test]
+    fn interrupted_owner_confirmation_restores_reviewable_step_and_keeps_claim() {
+        let journal = RunJournal::open_in_memory().unwrap();
+        let draft = plan();
+        let accepted = journal.create_run(&draft, &review(&draft), 120).unwrap();
+        journal
+            .set_run_state(&accepted.run_id, accepted.revision, RunState::NeedsReview, None, 121)
+            .unwrap();
+        journal
+            .set_step_state(
+                &accepted.run_id,
+                &draft.steps[0].step_id,
+                StepState::Eligible,
+                StepState::NeedsReview,
+                Some(FailureCode::CoordinatorRestarted),
+                122,
+            )
+            .unwrap();
+        // Crash after first commit in ConfirmedCompleted but before verify_step.
+        journal
+            .set_step_state(
+                &accepted.run_id,
+                &draft.steps[0].step_id,
+                StepState::NeedsReview,
+                StepState::Verifying,
+                Some(FailureCode::OwnerReviewRequired),
+                123,
+            )
+            .unwrap();
+        let recovered = journal.recover_after_restart(124).unwrap();
+        assert_eq!(recovered.len(), 1);
+        let view = journal.get(&accepted.run_id).unwrap().unwrap();
+        assert_eq!(view.state, RunState::NeedsReview);
+        assert_eq!(view.steps[0].state, StepState::NeedsReview);
+        assert_eq!(view.steps[1].state, StepState::Cancelled);
+        assert_eq!(journal.claimed_workspaces().unwrap().len(), 1);
+        // Repeated startup is idempotent: it cannot accidentally free the claim.
+        assert!(journal.recover_after_restart(125).unwrap().is_empty());
+        assert_eq!(journal.claimed_workspaces().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn confirmed_result_committed_before_crash_closes_only_after_safe_recovery() {
+        let journal = RunJournal::open_in_memory().unwrap();
+        let mut draft = plan();
+        draft.steps.truncate(1);
+        let accepted = journal.create_run(&draft, &review(&draft), 120).unwrap();
+        journal
+            .set_run_state(&accepted.run_id, accepted.revision, RunState::NeedsReview, None, 121)
+            .unwrap();
+        journal
+            .set_step_state(
+                &accepted.run_id,
+                &draft.steps[0].step_id,
+                StepState::Eligible,
+                StepState::NeedsReview,
+                Some(FailureCode::CoordinatorRestarted),
+                122,
+            )
+            .unwrap();
+        journal
+            .set_step_state(
+                &accepted.run_id,
+                &draft.steps[0].step_id,
+                StepState::NeedsReview,
+                StepState::Verifying,
+                Some(FailureCode::OwnerReviewRequired),
+                123,
+            )
+            .unwrap();
+        journal
+            .verify_step(&accepted.run_id, &draft.steps[0].step_id, &draft.workspace_revision, 124)
+            .unwrap();
+        // Crash after the durable verified workspace revision but before run closure.
+        let recovered = journal.recover_after_restart(125).unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].state, RunState::Completed);
+        assert_eq!(recovered[0].steps[0].state, StepState::Succeeded);
+        assert!(journal.claimed_workspaces().unwrap().is_empty());
+        assert!(journal.recover_after_restart(126).unwrap().is_empty());
     }
 
     #[test]
