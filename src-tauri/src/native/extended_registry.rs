@@ -22,6 +22,7 @@ const MAX_DEFAULT_OVERRIDE_ENTRIES: usize =
 const FILE_NAME: &str = "m9-native-sessions-v1.json";
 const RECOVERY_DIR: &str = "m9-native-recovery-v1";
 const DEFAULT_OVERRIDES_FILE: &str = "m9-native-default-overrides-v2.json";
+const LEGACY_DEFAULT_OVERRIDES_FILE: &str = "m9-native-default-overrides-v1.json";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,6 +38,13 @@ struct Data {
 struct DefaultOverrides {
     schema: u32,
     project_hashes: BTreeSet<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyDefaultOverrides {
+    schema: u32,
+    projects: BTreeSet<String>,
 }
 
 pub struct ExtendedRegistry {
@@ -65,6 +73,20 @@ fn overrides_valid(data: &DefaultOverrides) -> bool {
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
         })
+}
+
+fn legacy_overrides_valid(data: &LegacyDefaultOverrides) -> bool {
+    (data.schema == 0 || data.schema == 1)
+        && data.projects.len() <= super::registry::MAX_PROJECTS
+        && data.projects.iter().all(|path| path.len() <= 4096)
+}
+
+fn entry_exists(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 fn override_key(project: &str) -> String {
@@ -198,7 +220,8 @@ impl ExtendedRegistry {
     fn default_overrides(dir: &Path) -> io::Result<(PathBuf, DefaultOverrides)> {
         store::private_dir(dir)?;
         let path = dir.join(DEFAULT_OVERRIDES_FILE);
-        let mut data = if path.exists() {
+        let legacy_path = dir.join(LEGACY_DEFAULT_OVERRIDES_FILE);
+        let mut data = if entry_exists(&path)? {
             let bytes = store::read_bounded(&path, MAX_FILE).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -219,6 +242,43 @@ impl ExtendedRegistry {
                 io::ErrorKind::InvalidData,
                 "m9_default_overrides_schema",
             ));
+        }
+        if entry_exists(&legacy_path)? {
+            let bytes = store::read_bounded(&legacy_path, MAX_FILE).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "m9_legacy_default_overrides_unreadable",
+                )
+            })?;
+            let legacy =
+                serde_json::from_slice::<LegacyDefaultOverrides>(&bytes).map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "m9_legacy_default_overrides_invalid",
+                    )
+                })?;
+            if !legacy_overrides_valid(&legacy) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "m9_legacy_default_overrides_schema",
+                ));
+            }
+            for project in legacy.projects {
+                data.project_hashes.insert(override_key(&project));
+            }
+            if data.project_hashes.len() > MAX_DEFAULT_OVERRIDE_ENTRIES {
+                return Err(io::Error::new(
+                    io::ErrorKind::StorageFull,
+                    "m9_default_overrides_full",
+                ));
+            }
+            data.schema = 2;
+            let migrated = serde_json::to_vec_pretty(&data).map_err(io::Error::other)?;
+            // The v2 image is durable before the plaintext v1 paths are unlinked. Any
+            // conversion or unlink failure refuses migration and leaves a recoverable copy.
+            store::write_atomic(&path, &migrated)?;
+            fs::remove_file(&legacy_path)?;
+            fs::File::open(dir)?.sync_all()?;
         }
         data.schema = 2;
         Ok((path, data))
@@ -273,10 +333,6 @@ impl ExtendedRegistry {
     }
 
     pub fn read_default_overrides(dir: &Path) -> io::Result<BTreeSet<String>> {
-        let path = dir.join(DEFAULT_OVERRIDES_FILE);
-        if !path.exists() {
-            return Ok(BTreeSet::new());
-        }
         let (_, data) = Self::default_overrides(dir)?;
         Ok(data.project_hashes)
     }
@@ -284,11 +340,7 @@ impl ExtendedRegistry {
     /// Removes tombstones only after recovered metadata has been migrated and the primary
     /// registry is durable. A damaged override file remains untouched for manual recovery.
     pub fn clear_default_overrides(dir: &Path) -> io::Result<()> {
-        let path = dir.join(DEFAULT_OVERRIDES_FILE);
-        if !path.exists() {
-            return Ok(());
-        }
-        let _ = Self::default_overrides(dir)?;
+        let (path, _) = Self::default_overrides(dir)?;
         match fs::remove_file(path) {
             Ok(()) => fs::File::open(dir)?.sync_all(),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),

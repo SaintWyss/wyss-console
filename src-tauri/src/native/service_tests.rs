@@ -610,6 +610,43 @@ fn a_corrupt_m9_sidecar_blocks_only_m9_and_keeps_legacy_state_writable() {
 }
 
 #[test]
+fn a_malformed_v1_override_blocks_m9_and_preserves_legacy_bytes() {
+    let world = World::new();
+    let legacy_overrides_path = world
+        .base
+        .join("registry/m9-native-default-overrides-v1.json");
+    let malformed = b"{ malformed v1 override";
+    fs::write(&legacy_overrides_path, malformed).unwrap();
+
+    let reopened = World {
+        base: world.base.clone(),
+        home: world.home.clone(),
+        bin: world.bin.clone(),
+        terminal: TerminalService::default(),
+        service: World::open(&world.base, &world.home, &world.bin),
+    };
+    assert_eq!(
+        reopened.service.launcher_extended().m9_native_status,
+        "storage_unavailable"
+    );
+    assert_eq!(fs::read(&legacy_overrides_path).unwrap(), malformed);
+    assert!(
+        !world
+            .base
+            .join("registry/m9-native-default-overrides-v2.json")
+            .exists(),
+        "invalid legacy state is preserved rather than partially migrated"
+    );
+
+    let legacy = reopened.start(AgentId::ClaudeCode, None).unwrap();
+    assert_eq!(fs::read(&legacy_overrides_path).unwrap(), malformed);
+    reopened
+        .service
+        .stop(&reopened.terminal, &legacy.session.session.id)
+        .unwrap();
+}
+
+#[test]
 fn a_capacity_failed_recovery_durably_preserves_interim_m9_records_across_restart() {
     let world = World::new();
     let opencode = world.start(AgentId::Opencode, None).unwrap();
@@ -719,6 +756,7 @@ fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_reg
     let world = World::new();
     let opencode = world.start(AgentId::Opencode, None).unwrap();
     let id = opencode.session.session.id.clone();
+    let project_path = world.home.to_string_lossy().into_owned();
 
     let registry_path = world.base.join("registry/registry.json");
     let mut legacy_registry: serde_json::Value =
@@ -749,6 +787,32 @@ fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_reg
     .unwrap();
     let corrupt = b"{ sidecar bytes remain untouched";
     fs::write(&sidecar_path, corrupt).unwrap();
+    let legacy_overrides_path = world
+        .base
+        .join("registry/m9-native-default-overrides-v1.json");
+    let overrides_path = world
+        .base
+        .join("registry/m9-native-default-overrides-v2.json");
+    let other_project_key =
+        ExtendedRegistry::default_override_key("/another-previously-overridden-project");
+    fs::write(
+        &overrides_path,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 2,
+            "project_hashes": [other_project_key],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        &legacy_overrides_path,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 1,
+            "projects": [project_path],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     world
         .terminal
         .close(&opencode.terminal.terminal_id)
@@ -756,6 +820,24 @@ fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_reg
 
     let recovered = World::open(&world.base, &world.home, &world.bin);
     assert_eq!(fs::read(&sidecar_path).unwrap(), corrupt);
+    assert!(
+        !legacy_overrides_path.exists(),
+        "v1 override bytes are retired only after their hashed v2 image is durable"
+    );
+    let overrides_path = world
+        .base
+        .join("registry/m9-native-default-overrides-v2.json");
+    let migrated_overrides: serde_json::Value =
+        serde_json::from_slice(&fs::read(&overrides_path).unwrap()).unwrap();
+    let migrated_keys = migrated_overrides["project_hashes"].as_array().unwrap();
+    assert!(
+        migrated_keys.contains(&serde_json::json!(ExtendedRegistry::default_override_key(
+            &project_path
+        ))),
+        "the legacy user's default replacement survives v1-to-v2 migration"
+    );
+    assert!(migrated_keys.contains(&serde_json::json!(other_project_key)));
+    assert!(!String::from_utf8_lossy(&fs::read(&overrides_path).unwrap()).contains(&project_path));
     let safe_registry = fs::read(&registry_path).unwrap();
     #[derive(serde::Deserialize, Clone, Copy)]
     #[serde(rename_all = "snake_case")]
@@ -801,7 +883,6 @@ fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_reg
         service: recovered,
     };
     let claude = degraded.start(AgentId::ClaudeCode, None).unwrap();
-    let project_path = world.home.to_string_lossy().into_owned();
     assert_eq!(
         degraded
             .service
@@ -819,9 +900,6 @@ fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_reg
         immutable_snapshot,
         "the original bounded recovery snapshot remains byte-for-byte preserved"
     );
-    let overrides_path = world
-        .base
-        .join("registry/m9-native-default-overrides-v2.json");
     let overrides: serde_json::Value =
         serde_json::from_slice(&fs::read(&overrides_path).unwrap()).unwrap();
     assert_eq!(
