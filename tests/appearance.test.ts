@@ -72,6 +72,34 @@ it('provides every DN-34 theme with legible text, semantic text, focus and bound
   }
 });
 
+it('keeps light-theme faint text legible on event-row surfaces and states', () => {
+  const tokens = cssThemes().light!;
+  const surfaceTokens = Object.keys(tokens).filter(
+    (name) =>
+      name === 'bg' ||
+      name === 'surface' ||
+      name.startsWith('surface-') ||
+      name === 'accent-soft',
+  );
+
+  expect(surfaceTokens).toContain('surface-subtle');
+  expect(surfaceTokens).toContain('surface-raised');
+  expect(stylesheet).toMatch(/\.event-time\s*\{[^}]*color:\s*var\(--faint\);/s);
+  expect(stylesheet).toMatch(
+    /\.event-row:hover\s*\{[^}]*background:\s*var\(--surface-raised\);/s,
+  );
+  expect(stylesheet).toMatch(
+    /\.event-row\[aria-pressed='true'\]\s*\{[^}]*var\(--accent-soft\)/s,
+  );
+
+  for (const surface of surfaceTokens) {
+    expect(
+      contrast(tokens.faint!, tokens[surface]!),
+      `light faint text on ${surface}`,
+    ).toBeGreaterThanOrEqual(4.5);
+  }
+});
+
 it('keeps every terminal ANSI color at 4.5:1 against its selected surface', () => {
   for (const theme of APPEARANCE_THEMES) {
     const palette = terminalPalette(theme);

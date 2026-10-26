@@ -29,6 +29,14 @@ public final class RemoteAppearanceTest {
         }
     }
 
+    @Test public void fortyEightDpButtonMinimumScalesWithHighDisplayDensities() {
+        for (float density : new float[]{1.0f, 1.5f, 2.0f, 3.0f, 4.0f}) {
+            int minimumHeightPx = UiDimensions.dpToPixels(48, density);
+            assertEquals(Math.round(48 * density), minimumHeightPx);
+            assertTrue(minimumHeightPx >= 48 * density - 0.5f);
+        }
+    }
+
     private static void assertAtLeast(double actual, double expected, String label) {
         assertTrue(label + " contrast was " + actual, actual >= expected);
     }

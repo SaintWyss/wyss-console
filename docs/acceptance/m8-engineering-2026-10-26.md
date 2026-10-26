@@ -32,11 +32,18 @@ under the M8 roadmap DoD.
   contrast thresholds, terminal ANSI colors against their terminal surfaces,
   renderer appearance-listener disposal, and Android palette spellings and
   contrast values.
+- The light-theme `--faint` token is darkened so it remains at least 4.5:1 on
+  every opaque light-theme surface. A regression binds the event timestamp,
+  default/hover/selected row states, and those concrete surfaces to the contrast
+  assertions.
+- Android button minimum height now uses `dp(48)` through the shared density
+  conversion. A JVM regression verifies the resulting pixel minimum at
+  densities 1.0, 1.5, 2.0, 3.0 and 4.0.
 
 ## Verification
 
 - `npm run check`: **PASS**. Prettier, ESLint, Svelte/TypeScript; 69 Vitest files
-  and 1,080 tests; owned-workspace harness (16); Claude bridge (77); Vite build
+  and 1,081 tests; owned-workspace harness (16); Claude bridge (77); Vite build
   (230 modules). The bridge tests emitted existing Python `ResourceWarning`s
   for unclosed test-only files. Vite emitted the repository's advisory for a
   minified chunk above 500 kB; build succeeded.
@@ -44,7 +51,7 @@ under the M8 roadmap DoD.
   full Git checkout scan and fixture Git subprocesses exceeded Vitest's default
   five seconds while Rust builds were loaded. Its assertions are unchanged;
   the focused file passed 21 tests.
-- Focused appearance/renderer regressions: **10 passed, 0 failed**.
+- Focused light-theme appearance regressions: **3 passed, 0 failed**.
 - `npm run check:rust`: **PASS** on the reviewed M7/M9 integration; formatting,
   locked cargo check, 1,480 library tests passed / 29 ignored, 559 app-binary
   tests passed / 16 ignored, credential binary 5 passed / 1 ignored, authority
@@ -56,6 +63,11 @@ under the M8 roadmap DoD.
   to assert membership, and the focused migration test plus the complete
   integrated Rust suite then passed. No product behavior was changed for this
   test correction.
+- Independent Sol High review of the M8 head `37d4802` found two P2s: light
+  theme faint text on raised event rows missed 4.5:1, and Android button
+  minimum height used raw pixels. Both findings are corrected in this
+  increment; independent re-review is pending. The review reported no critical
+  or high findings and did not constitute hardware or production acceptance.
 - Direct B1 process suite: **22 passed, 0 failed**. The standard script's
   `b1::` filter selects no `b1_process` cases, so this direct invocation covers
   the process regressions.
@@ -63,10 +75,10 @@ under the M8 roadmap DoD.
   including the integrated Android/appearance tests and updated evidence, were
   scanned from Git and the working tree.
 - `npm audit --audit-level=moderate`: **0 known vulnerabilities**.
-- Android Gradle/JUnit was not available as a local verified run. Run the
-  repository Android GitHub workflow on the final M8 head before treating the
-  Java palette tests/build as TESTED. Emulator output is not real-device
-  evidence.
+- Android Gradle/JUnit is not available as a local verified run. The density
+  regression is included in the repository Android GitHub workflow on the final
+  M8 head; CI verifies the native build and JVM test, not physical device
+  rendering or touch target measurement.
 - No benchmark was run and no M01..M33 p50/p95 values are claimed here.
 
 ## Requirement status

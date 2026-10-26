@@ -221,10 +221,10 @@ public final class MainActivity extends Activity {
         background.setCornerRadius(dp(4));
         background.setStroke(dp(1), palette.border());
         button.setBackground(background);
-        button.setMinHeight(48);
+        button.setMinHeight(dp(48));
     }
 
     private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
+        return UiDimensions.dpToPixels(value, getResources().getDisplayMetrics().density);
     }
 }
