@@ -52,6 +52,7 @@ public final class RemoteTerminalStreamCursorTest {
         RemoteTerminalStreamCursor cursor = attachedAt(30);
         assertEquals(RemoteTerminalStreamCursor.Result.STALE_SESSION, cursor.reconnect(7, 2));
         assertEquals(RemoteTerminalStreamCursor.State.DISCONNECTED, cursor.state());
+        assertEquals(RemoteTerminalStreamCursor.Result.STALE_SESSION, cursor.reconnect(7, 2));
         assertEquals(RemoteTerminalStreamCursor.Result.STALE_SESSION, cursor.frame(7, 2, 30, 1));
         assertEquals(RemoteTerminalStreamCursor.Result.ATTACHMENT_RESET, cursor.reconnect(7, 3));
         assertEquals(RemoteTerminalStreamCursor.State.AWAITING_CHECKPOINT, cursor.state());
@@ -59,6 +60,15 @@ public final class RemoteTerminalStreamCursorTest {
         assertEquals(RemoteTerminalStreamCursor.Result.CHECKPOINT_ACCEPTED,
                 cursor.checkpoint(7, 3, 0, DIGEST));
         assertEquals(RemoteTerminalStreamCursor.Result.FRAME_ACCEPTED, cursor.frame(7, 3, 0, 1));
+    }
+
+    @Test public void explicitDisconnectDoesNotForgetTheAcceptedEpochWatermark() {
+        RemoteTerminalStreamCursor cursor = attachedAt(4);
+        cursor.disconnect();
+        assertEquals(RemoteTerminalStreamCursor.State.DISCONNECTED, cursor.state());
+        assertEquals(RemoteTerminalStreamCursor.Result.STALE_SESSION, cursor.reconnect(7, 2));
+        assertEquals(RemoteTerminalStreamCursor.Result.STALE_SESSION, cursor.reconnect(7, 2));
+        assertEquals(RemoteTerminalStreamCursor.Result.ATTACHMENT_RESET, cursor.reconnect(7, 3));
     }
 
     @Test public void generationChangeRequiresFreshCheckpoint() {
