@@ -666,6 +666,7 @@ fn map_effect_fault(error: CallError) -> BridgeFault {
 
 struct ActivePlan {
     plan: OrchestrationPlanV1,
+    canonical_root: PathBuf,
     handoff_receiver: bool,
 }
 
@@ -727,9 +728,16 @@ impl Coordinator {
                 if active.plan.plan_id == plan.plan_id {
                     continue; // The journal separately validates exact idempotent replay.
                 }
-                let existing = std::fs::canonicalize(&active.plan.workspace_root)
+                let current = std::fs::canonicalize(&active.plan.workspace_root)
                     .map_err(|_| CoordinatorError::WorkspaceConflict)?;
-                if canonical.starts_with(&existing) || existing.starts_with(&canonical) {
+                if current != active.canonical_root {
+                    // A symlink alias moved since its claim was admitted. Do not
+                    // mistake its new target for the original protected workspace.
+                    return Err(CoordinatorError::WorkspaceConflict);
+                }
+                if canonical.starts_with(&active.canonical_root)
+                    || active.canonical_root.starts_with(&canonical)
+                {
                     return Err(CoordinatorError::WorkspaceConflict);
                 }
             } else {
@@ -816,6 +824,7 @@ impl Coordinator {
                 run.run_id.clone(),
                 ActivePlan {
                     plan,
+                    canonical_root: canonical,
                     handoff_receiver: false,
                 },
             );
@@ -1198,14 +1207,23 @@ impl Coordinator {
         reviewed_workspace_revision: &str,
         now: u64,
     ) -> Result<CoordinatorSnapshot, CoordinatorError> {
-        let plan = self
+        let (plan, claimed_root) = self
             .plans
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(run_id)
-            .map(|p| p.plan.clone())
+            .map(|p| (p.plan.clone(), p.canonical_root.clone()))
             .ok_or(CoordinatorError::InvalidTransition)?;
-        let actual = workspace_revision(std::path::Path::new(&plan.workspace_root))
+        let current_root = std::fs::canonicalize(&plan.workspace_root)
+            .map_err(|_| CoordinatorError::WorkspaceConflict)?;
+        if current_root != claimed_root
+            || workspace_identity(&current_root)
+                .map_err(|_| CoordinatorError::WorkspaceConflict)?
+                != plan.workspace_id
+        {
+            return Err(CoordinatorError::WorkspaceConflict);
+        }
+        let actual = workspace_revision(&current_root)
             .map_err(|_| CoordinatorError::WorkspaceConflict)?;
         if actual != reviewed_workspace_revision {
             return Err(CoordinatorError::WorkspaceConflict);
@@ -2359,7 +2377,7 @@ mod tests {
     };
     use std::{
         fs,
-        os::unix::fs::PermissionsExt,
+        os::unix::fs::{symlink, PermissionsExt},
         path::Path,
         sync::atomic::{AtomicUsize, Ordering},
     };
@@ -3365,6 +3383,67 @@ mod tests {
         assert_eq!(authority.starts.load(Ordering::SeqCst), 2);
         fs::remove_dir_all(root_a).unwrap();
         fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn moved_workspace_symlink_cannot_lose_original_parent_claim() {
+        let original = root();
+        let another = root();
+        let child = original.join("child");
+        fs::create_dir(&child).unwrap();
+        let link = std::env::temp_dir().join(format!("wyss-orch-alias-{}", Uuid::new_v4()));
+        symlink(&original, &link).unwrap();
+        let (coordinator, _journal, authority) = coordinator(&original);
+        *authority.second_root.lock().unwrap() = Some(child.clone());
+        let alias_plan = plan(
+            &link,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        let accepted = coordinator
+            .submit(alias_plan.clone(), review(&alias_plan), 100)
+            .unwrap();
+        coordinator.tick(101).unwrap();
+        *authority.observation.lock().unwrap() = TurnObservation {
+            state: TurnState::Completed,
+            reason: None,
+            revision: 2,
+        };
+        coordinator.tick(102).unwrap();
+        assert_eq!(
+            coordinator.get(&accepted.run_id).unwrap().steps[0].state,
+            StepState::Verifying
+        );
+        fs::remove_file(&link).unwrap();
+        symlink(&another, &link).unwrap();
+        let mut nested_step = step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![]);
+        nested_step.managed_session_id = Some(SECOND_SESSION.into());
+        let nested = plan(
+            &child,
+            vec![nested_step],
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        );
+        assert_eq!(
+            coordinator
+                .submit(nested.clone(), review(&nested), 103)
+                .unwrap_err(),
+            CoordinatorError::WorkspaceConflict
+        );
+        assert_eq!(
+            coordinator
+                .verify_step(
+                    &accepted.run_id,
+                    &alias_plan.steps[0].step_id,
+                    &workspace_revision(&another).unwrap(),
+                    104,
+                )
+                .unwrap_err(),
+            CoordinatorError::WorkspaceConflict
+        );
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
+        fs::remove_file(link).unwrap();
+        fs::remove_dir_all(original).unwrap();
+        fs::remove_dir_all(another).unwrap();
     }
 
     #[test]
