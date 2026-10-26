@@ -22,6 +22,16 @@ for production. This M9 record is not an M6 or M9 production approval.
   trailing commas, secret exclusion, malformed files, selected-project scope,
   and no-write inventory. This M9 branch does not widen the accepted mutation
   surface or infer support from successful parsing.
+- **Native provider selection and crash-safe metadata:** switching to a legacy
+  Claude/Codex provider durably removes an older M9 project default before
+  launch and restores it if launch or shell-version verification fails. M9
+  recovery snapshots contain bounded session/default metadata only; they are
+  copied before a safe M1–M6 registry projection is published, migrated
+  idempotently after the sidecar becomes healthy, and removed only after the
+  primary sidecar has been durably written. Directory scanning is capped at 16
+  entries; corrupt or over-cap recovery keeps M9 unavailable and preserves the
+  source bytes rather than silently discarding them. Atomic replacement syncs
+  the containing directory after rename.
 - **Hermes Native:** adds a distinct Native catalogue entry and keeps the real
   interactive command available as a full-account Native process. Automatic
   version probing is disabled because upstream `hermes --version` performs an
@@ -38,7 +48,9 @@ for production. This M9 record is not an M6 or M9 production approval.
 
 ## Verification
 
-- `native::` unit/service regressions: **47 passed, 0 failed, 1 ignored**.
+- Focused `native::service_tests`: **25 passed, 0 failed, 1 ignored**; includes
+  stale M9 default clearing, corrupt-sidecar legacy availability, recovery
+  migration/preservation, and OpenCode direct-handoff version revalidation.
 - `orchestration::hermes_proposal::tests`: **4 passed, 0 failed**; valid and
   hostile JSON, unknown effect fields, size boundaries, dangling/duplicate and
   cyclic dependency cases.
@@ -46,16 +58,20 @@ for production. This M9 record is not an M6 or M9 production approval.
   Svelte/TypeScript, owned harness (16), Claude bridge (77), and Vite production
   build. Vite reports the repository's >500 kB chunk advisory.
 - `npm run check:rust`: **PASS**; locked cargo check, library tests (1,478
-  passed / 29 ignored), main binary tests (538 passed / 16 ignored), credential
-  binary tests (4 passed / 1 ignored), `authority_boundary` (1), `cli_help` (1),
+  passed / 29 ignored), main binary tests (547 passed / 16 ignored), credential
+  binary tests (5 passed / 1 ignored), `authority_boundary` (1), `cli_help` (1),
   F8 contracts (10), F8 serve process (8), B1 unit tests (136), and Clippy with
   warnings denied.
+- Separately ran the bounded B1 process suite without the repository script's
+  `b1::` name filter: **22 passed, 0 failed**. The filtered script run selected
+  zero `b1_process` tests; this separate run supplies the process-test evidence.
 - `npm audit`: **0 known vulnerabilities** after the Vite 8.3.5 and undici
   security updates.
-- `npm run scan:repo`: **PASS**, 5 checks / 0 failures; all 1,605 tracked files
-  were scanned from Git and the working tree after the implementation commits.
-- GitHub Actions on the final M9 commit remain pending; they will be dispatched
-  after this evidence update is pushed.
+- `npm run scan:repo`: **PASS**, 5 checks / 0 failures; all 1,606 tracked files
+  were scanned from Git and the working tree after source changes and before
+  this evidence-only update.
+- GitHub Actions on the corrected M9 commit remain pending; they will be
+  dispatched after the correction/evidence commit is pushed.
 - No real OpenCode process or provider account was run. No Hermes process was
   run. These are fixtures and source-bound argument/capability tests only.
 
