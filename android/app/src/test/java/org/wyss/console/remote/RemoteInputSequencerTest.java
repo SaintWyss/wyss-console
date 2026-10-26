@@ -24,8 +24,8 @@ public final class RemoteInputSequencerTest {
 
         RemoteInputSequencer.Result result = sequencer.acknowledge(request.requestId, 2);
         assertEquals(RemoteInputSequencer.Delivery.PARTIAL, result.delivery);
-        assertEquals(2, result.acceptedBytes);
-        assertEquals(4, result.requestedBytes);
+        assertEquals(Integer.valueOf(2), result.acceptedBytes);
+        assertEquals(Integer.valueOf(4), result.requestedBytes);
         assertEquals(2, sequencer.begin(new byte[] {3, 4}, 7, 4).sequence);
     }
 
