@@ -3201,6 +3201,169 @@ mod tests {
     }
 
     #[test]
+    fn completed_effect_paused_at_expiry_stays_needs_review_with_claim() {
+        let root = root();
+        let (coordinator, _journal, authority) = coordinator(&root);
+        let draft = plan(
+            &root,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        let run = coordinator.submit(draft.clone(), review(&draft), 100).unwrap();
+        coordinator.tick(101).unwrap();
+        *authority.observation.lock().unwrap() = TurnObservation {
+            state: TurnState::Completed,
+            reason: None,
+            revision: 2,
+        };
+        coordinator.tick(102).unwrap();
+        assert_eq!(coordinator.pause(&run.run_id, 103).unwrap().state, RunState::Paused);
+        coordinator.tick(400).unwrap();
+        let held = coordinator.get(&run.run_id).unwrap();
+        assert_eq!(held.state, RunState::NeedsReview);
+        assert_eq!(held.steps[0].state, StepState::NeedsReview);
+        assert_eq!(held.steps[0].failure, Some(FailureCode::PlanExpired));
+
+        let mut other = plan(
+            &root,
+            vec![step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![])],
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        );
+        other.expires_at_unix = 600;
+        other.limits.max_total_seconds = 500;
+        assert_eq!(
+            coordinator.submit(other.clone(), review(&other), 401).unwrap_err(),
+            CoordinatorError::WorkspaceConflict
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stop_does_not_cancel_or_release_a_completed_unverified_effect() {
+        let root = root();
+        let (coordinator, _journal, authority) = coordinator(&root);
+        let draft = plan(
+            &root,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bb8-bbbbbbbbbbbb",
+        );
+        let run = coordinator.submit(draft.clone(), review(&draft), 100).unwrap();
+        coordinator.tick(101).unwrap();
+        *authority.observation.lock().unwrap() = TurnObservation {
+            state: TurnState::Completed,
+            reason: None,
+            revision: 2,
+        };
+        coordinator.tick(102).unwrap();
+        let stopped = coordinator.stop(&run.run_id, 103).unwrap();
+        assert_eq!(stopped.state, RunState::Cancelling);
+        assert_eq!(stopped.steps[0].state, StepState::Verifying);
+        let next = plan(
+            &root,
+            vec![step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![])],
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        );
+        assert_eq!(
+            coordinator.submit(next.clone(), review(&next), 104).unwrap_err(),
+            CoordinatorError::WorkspaceConflict
+        );
+        let reviewed = coordinator
+            .verify_step(&run.run_id, &draft.steps[0].step_id, &workspace_revision(&root).unwrap(), 105)
+            .unwrap();
+        assert_eq!(reviewed.state, RunState::Cancelled);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn active_managed_turn_does_not_starve_another_workspaces_expired_review() {
+        let root_a = root();
+        let root_b = root();
+        let (coordinator, _journal, authority) = coordinator(&root_a);
+        *authority.second_root.lock().unwrap() = Some(root_b.clone());
+        let mut first = plan(
+            &root_a,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        first.expires_at_unix = 120;
+        first.limits.max_total_seconds = 20;
+        let a = coordinator.submit(first.clone(), review(&first), 100).unwrap();
+        coordinator.tick(101).unwrap();
+        *authority.observation.lock().unwrap() = TurnObservation {
+            state: TurnState::Completed,
+            reason: None,
+            revision: 2,
+        };
+        coordinator.tick(102).unwrap();
+
+        let mut second_step = step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![]);
+        second_step.managed_session_id = Some(SECOND_SESSION.into());
+        let second = plan(
+            &root_b,
+            vec![second_step],
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        );
+        let b = coordinator.submit(second.clone(), review(&second), 103).unwrap();
+        coordinator.tick(104).unwrap();
+        *authority.observation.lock().unwrap() = TurnObservation {
+            state: TurnState::Running,
+            reason: None,
+            revision: 2,
+        };
+        coordinator.tick(120).unwrap();
+        assert_eq!(coordinator.get(&a.run_id).unwrap().state, RunState::NeedsReview);
+        assert_eq!(coordinator.get(&a.run_id).unwrap().steps[0].state, StepState::NeedsReview);
+        assert!(matches!(
+            coordinator.get(&b.run_id).unwrap().steps[0].state,
+            StepState::Starting | StepState::Running
+        ));
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 2);
+        fs::remove_dir_all(root_a).unwrap();
+        fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn parent_child_workspace_claims_conflict_in_both_admission_orders() {
+        for parent_first in [true, false] {
+            let root = root();
+            let child = root.join("child");
+            fs::create_dir(&child).unwrap();
+            let (coordinator, _journal, authority) = coordinator(&root);
+            *authority.second_root.lock().unwrap() = Some(child.clone());
+            let parent = plan(
+                &root,
+                vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            );
+            let mut child_step = step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![]);
+            child_step.managed_session_id = Some(SECOND_SESSION.into());
+            let nested = plan(
+                &child,
+                vec![child_step],
+                "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            );
+            let (first, second) = if parent_first { (&parent, &nested) } else { (&nested, &parent) };
+            let accepted = coordinator.submit(first.clone(), review(first), 100).unwrap();
+            coordinator.tick(101).unwrap();
+            *authority.observation.lock().unwrap() = TurnObservation {
+                state: TurnState::Completed,
+                reason: None,
+                revision: 2,
+            };
+            coordinator.tick(102).unwrap();
+            assert_eq!(
+                coordinator.get(&accepted.run_id).unwrap().steps[0].state,
+                StepState::Verifying
+            );
+            assert_eq!(
+                coordinator.submit(second.clone(), review(second), 103).unwrap_err(),
+                CoordinatorError::WorkspaceConflict
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
     fn expired_finite_budget_prevents_dispatch() {
         let root = root();
         let (coordinator, _journal, authority) = coordinator(&root);
