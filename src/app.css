@@ -425,6 +425,7 @@ button:focus-visible {
 .configuration-feature[hidden],
 .settings-feature[hidden],
 .native-feature[hidden],
+.pipelines-feature[hidden],
 .providers-feature[hidden],
 .runtimes-feature[hidden] {
   display: none;

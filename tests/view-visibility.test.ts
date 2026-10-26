@@ -38,6 +38,7 @@ it('finds every view the window mounts and hides', () => {
     'native-feature',
     'native-feature',
     'native-feature',
+    'pipelines-feature',
     'projects-feature',
     'providers-feature',
     'runtimes-feature',
