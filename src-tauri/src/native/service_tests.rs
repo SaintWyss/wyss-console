@@ -2,6 +2,7 @@
 //! through the user's real shell in a real PTY. Nothing here starts the installed agents.
 use super::{
     catalogue::AgentId,
+    extended_registry::ExtendedRegistry,
     profile::{Body, HooksMode, Permission},
     registry::State,
     service::{NativeService, StartRequest},
@@ -677,9 +678,49 @@ fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_reg
     let recovery_dir = world.base.join("registry/m9-native-recovery-v1");
     let recovery_files: Vec<_> = fs::read_dir(&recovery_dir).unwrap().collect();
     assert_eq!(recovery_files.len(), 1);
+    let recovery_file = recovery_files[0].as_ref().unwrap().path();
+    let immutable_snapshot = fs::read(&recovery_file).unwrap();
+
+    let degraded = World {
+        base: world.base.clone(),
+        home: world.home.clone(),
+        bin: world.bin.clone(),
+        terminal: TerminalService::default(),
+        service: recovered,
+    };
+    let claude = degraded.start(AgentId::ClaudeCode, None).unwrap();
+    let project_path = world.home.to_string_lossy().into_owned();
+    assert_eq!(
+        degraded
+            .service
+            .launcher_extended()
+            .projects
+            .iter()
+            .find(|project| project.path == project_path)
+            .unwrap()
+            .default_agent,
+        Some(AgentId::ClaudeCode),
+        "a later legacy-provider selection suppresses the recovered M9 default"
+    );
+    assert_eq!(
+        fs::read(&recovery_file).unwrap(),
+        immutable_snapshot,
+        "the original bounded recovery snapshot remains byte-for-byte preserved"
+    );
+    let overrides_path = world
+        .base
+        .join("registry/m9-native-default-overrides-v1.json");
+    let overrides: serde_json::Value =
+        serde_json::from_slice(&fs::read(&overrides_path).unwrap()).unwrap();
+    assert_eq!(overrides["projects"][0], project_path);
+    degraded
+        .service
+        .stop(&degraded.terminal, &claude.session.session.id)
+        .unwrap();
 
     // Once the primary store is repaired, recovery migrates before the immutable copy is
-    // removed. Forget must then remain forgotten after a further restart.
+    // removed. The durable default override prevents OpenCode from resurfacing, and Forget
+    // must then remain forgotten after a further restart.
     fs::write(
         &sidecar_path,
         br#"{"schema":1,"sessions":[],"project_defaults":{}}"#,
@@ -687,6 +728,16 @@ fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_reg
     .unwrap();
     let restored = World::open(&world.base, &world.home, &world.bin);
     assert_eq!(restored.launcher_extended().m9_native_status, "ready");
+    assert_eq!(
+        restored
+            .launcher_extended()
+            .projects
+            .iter()
+            .find(|project| project.path == project_path)
+            .unwrap()
+            .default_agent,
+        Some(AgentId::ClaudeCode)
+    );
     assert!(
         restored
             .sessions_extended(&TerminalService::default(), false)
@@ -694,6 +745,7 @@ fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_reg
             .any(|session| session.session.id == id)
     );
     assert_eq!(fs::read_dir(&recovery_dir).unwrap().count(), 0);
+    assert!(!overrides_path.exists());
     restored.forget(&id).unwrap();
     let after_forget = World::open(&world.base, &world.home, &world.bin);
     assert!(
@@ -702,6 +754,51 @@ fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_reg
             .iter()
             .all(|session| session.session.id != id)
     );
+}
+
+#[test]
+fn an_over_capacity_recovery_merge_blocks_only_m9_and_keeps_legacy_available() {
+    let world = World::new();
+    let registry_dir = world.base.join("registry");
+    let mut extended = ExtendedRegistry::open(registry_dir.clone()).unwrap();
+    for index in 0..super::registry::MAX_PROJECTS {
+        extended
+            .set_project_default(&format!("/fixture-project-{index}"), AgentId::Opencode)
+            .unwrap();
+    }
+    ExtendedRegistry::preserve_recovery(
+        &registry_dir,
+        &[],
+        &[("/recovered-project".to_owned(), AgentId::Hermes)],
+    )
+    .unwrap();
+
+    let reopened = World {
+        base: world.base.clone(),
+        home: world.home.clone(),
+        bin: world.bin.clone(),
+        terminal: TerminalService::default(),
+        service: World::open(&world.base, &world.home, &world.bin),
+    };
+    let launcher = reopened.service.launcher_extended();
+    assert_eq!(launcher.m9_native_status, "storage_unavailable");
+    assert!(
+        launcher
+            .agents
+            .iter()
+            .all(|entry| entry.agent_id.is_legacy())
+    );
+
+    let claude = reopened.start(AgentId::ClaudeCode, None).unwrap();
+    assert!(
+        reopened
+            .output_until(&claude.terminal.terminal_id, "FAKE-CLAUDE")
+            .contains("FAKE-CLAUDE")
+    );
+    reopened
+        .service
+        .stop(&reopened.terminal, &claude.session.session.id)
+        .unwrap();
 }
 
 #[test]

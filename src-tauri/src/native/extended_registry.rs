@@ -7,7 +7,7 @@ use super::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs, io,
     path::{Path, PathBuf},
 };
@@ -18,6 +18,7 @@ const MAX_RECOVERY_FILES: usize = 16;
 const MAX_RECOVERY_ENTRIES: usize = MAX_RECOVERY_FILES;
 const FILE_NAME: &str = "m9-native-sessions-v1.json";
 const RECOVERY_DIR: &str = "m9-native-recovery-v1";
+const DEFAULT_OVERRIDES_FILE: &str = "m9-native-default-overrides-v1.json";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,6 +27,13 @@ struct Data {
     sessions: Vec<Session>,
     #[serde(default)]
     project_defaults: BTreeMap<String, super::catalogue::AgentId>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DefaultOverrides {
+    schema: u32,
+    projects: BTreeSet<String>,
 }
 
 pub struct ExtendedRegistry {
@@ -43,6 +51,12 @@ pub struct RecoverySnapshot {
 pub struct RecoveryRead {
     pub snapshots: Vec<RecoverySnapshot>,
     pub incomplete: bool,
+}
+
+fn overrides_valid(data: &DefaultOverrides) -> bool {
+    (data.schema == 0 || data.schema == 1)
+        && data.projects.len() <= super::registry::MAX_PROJECTS
+        && data.projects.iter().all(|path| path.len() <= 4096)
 }
 
 fn data_valid(data: &Data) -> bool {
@@ -147,6 +161,113 @@ impl ExtendedRegistry {
 
     pub fn project_default(&self, path: &str) -> Option<super::catalogue::AgentId> {
         self.data.project_defaults.get(path).copied()
+    }
+
+    pub fn recovery_snapshot(&self) -> RecoverySnapshot {
+        RecoverySnapshot {
+            sessions: self.data.sessions.clone(),
+            project_defaults: self.data.project_defaults.clone(),
+        }
+    }
+
+    fn default_overrides(dir: &Path) -> io::Result<(PathBuf, DefaultOverrides)> {
+        store::private_dir(dir)?;
+        let path = dir.join(DEFAULT_OVERRIDES_FILE);
+        let mut data = if path.exists() {
+            let bytes = store::read_bounded(&path, MAX_FILE).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "m9_default_overrides_unreadable",
+                )
+            })?;
+            serde_json::from_slice::<DefaultOverrides>(&bytes).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "m9_default_overrides_invalid")
+            })?
+        } else {
+            DefaultOverrides {
+                schema: 1,
+                ..DefaultOverrides::default()
+            }
+        };
+        if !overrides_valid(&data) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "m9_default_overrides_schema",
+            ));
+        }
+        data.schema = 1;
+        Ok((path, data))
+    }
+
+    /// A durable tombstone records that an explicit legacy-provider choice superseded a
+    /// recovered M9 project default while the primary M9 sidecar was unavailable. The old
+    /// recovery snapshot remains byte-for-byte intact until a healthy sidecar has consumed it.
+    /// Returns whether this project already had a tombstone before this call.
+    pub fn mark_default_overridden(dir: &Path, project: &str) -> io::Result<bool> {
+        if project.is_empty() || project.len() > 4096 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "m9_default_override_project",
+            ));
+        }
+        let (path, mut data) = Self::default_overrides(dir)?;
+        let existed = data.projects.contains(project);
+        if !existed && data.projects.len() >= super::registry::MAX_PROJECTS {
+            return Err(io::Error::new(
+                io::ErrorKind::StorageFull,
+                "m9_default_overrides_full",
+            ));
+        }
+        data.projects.insert(project.to_owned());
+        let bytes = serde_json::to_vec_pretty(&data).map_err(io::Error::other)?;
+        store::write_atomic(&path, &bytes)?;
+        Ok(existed)
+    }
+
+    /// Undoes a newly written tombstone if the provider failed to start. Existing tombstones
+    /// remain in place. The caller supplies the prior membership observed before launch.
+    pub fn restore_default_override(dir: &Path, project: &str, existed: bool) -> io::Result<()> {
+        if existed {
+            return Ok(());
+        }
+        let (path, mut data) = Self::default_overrides(dir)?;
+        if !data.projects.remove(project) {
+            return Ok(());
+        }
+        if data.projects.is_empty() {
+            match fs::remove_file(path) {
+                Ok(()) => fs::File::open(dir)?.sync_all(),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error),
+            }
+        } else {
+            let bytes = serde_json::to_vec_pretty(&data).map_err(io::Error::other)?;
+            store::write_atomic(&path, &bytes)
+        }
+    }
+
+    pub fn read_default_overrides(dir: &Path) -> io::Result<BTreeSet<String>> {
+        let path = dir.join(DEFAULT_OVERRIDES_FILE);
+        if !path.exists() {
+            return Ok(BTreeSet::new());
+        }
+        let (_, data) = Self::default_overrides(dir)?;
+        Ok(data.projects)
+    }
+
+    /// Removes tombstones only after recovered metadata has been migrated and the primary
+    /// registry is durable. A damaged override file remains untouched for manual recovery.
+    pub fn clear_default_overrides(dir: &Path) -> io::Result<()> {
+        let path = dir.join(DEFAULT_OVERRIDES_FILE);
+        if !path.exists() {
+            return Ok(());
+        }
+        let _ = Self::default_overrides(dir)?;
+        match fs::remove_file(path) {
+            Ok(()) => fs::File::open(dir)?.sync_all(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 
     pub fn set_project_default(
