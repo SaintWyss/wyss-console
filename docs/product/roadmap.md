@@ -9,18 +9,18 @@ not a reduced MVP scope.
 
 ## 1. Priority and dependency graph
 
-| Milestone | Deliverable                                                                | Depends on                                                   | Baseline / priority                                                                                                       |
-| --------- | -------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| M0        | Qualification manifest and preservation plan                               | Phase1 consolidated docs                                     | Required evidence foundation; existing tests are inputs                                                                   |
-| M1        | Project-centered workspace and migration                                   | M0; ADR0052 Accepted (architecture only)                     | Highest UX priority; project records partly exist                                                                         |
-| M2        | Claude/Codex Native parity, configuration/profile closure                  | M0; M1 for contextual UI                                     | Highest provider priority; finish partial acceptance                                                                      |
-| M3        | Claude Managed parity and versioned model/effort contract                  | M0, M2 provider evidence; ADR0053 and separate selection ADR | Highest architecture priority; adapter built offline (PR #23), release blocked on ADR0053/0054/0055 and provider evidence |
-| M4        | Faithful persistent terminal and bounded parser isolation                  | M0; M1 identity contracts                                    | Existing host preserved; new screen/lifecycle work                                                                        |
-| M5        | Stronger worker/approval boundaries and qualified concurrency              | M0, M3; owner OD02 where applicable                          | Current F8 cap 1 stays; safety gate for Native OL3/LP4                                                                    |
-| M6        | Structured handoff and finite OL3 coordination                             | M1, M3, M5 for final effectful lanes                         | Serial Managed scheduling can be built without raising cap 1                                                              |
-| M7        | Remote PC gateway and native Android                                       | M1, M4; OD01; M5/OD02 for full-account control               | No production transport/client today                                                                                      |
-| M8        | Whole-product efficiency, accessibility, reliability and personal delivery | M1–M7; M9 for retained extension scope                       | Runs throughout; final closure only with evidence                                                                         |
-| M9        | OpenCode/Hermes/Wyss Agent integration closure                             | M2 contracts; M5/M6 for planner effects                      | Separate extension lane; does not postpone core parity                                                                    |
+| Milestone | Deliverable                                                                | Depends on                                                   | Baseline / priority                                                                                                                     |
+| --------- | -------------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| M0        | Qualification manifest and preservation plan                               | Phase1 consolidated docs                                     | Required evidence foundation; existing tests are inputs                                                                                 |
+| M1        | Project-centered workspace and migration                                   | M0; ADR0052 Accepted (architecture only)                     | Highest UX priority; project records partly exist                                                                                       |
+| M2        | Claude/Codex Native parity, configuration/profile closure                  | M0; M1 for contextual UI                                     | Highest provider priority; finish partial acceptance                                                                                    |
+| M3        | Claude Managed parity and versioned model/effort contract                  | M0, M2 provider evidence; ADR0053 and separate selection ADR | Highest architecture priority; adapter built offline (PR #23), release blocked on ADR0053/0054/0055 and provider evidence               |
+| M4        | Faithful persistent terminal and bounded parser isolation                  | M0; M1 identity contracts                                    | Existing host preserved; new screen/lifecycle work                                                                                      |
+| M5        | Stronger worker/approval boundaries and qualified concurrency              | M0, M3; owner OD02 where applicable                          | Current F8 cap 1 stays; safety gate for Native OL3/LP4                                                                                  |
+| M6        | Structured handoff and finite OL3 coordination                             | M1, M3, M5 for final effectful lanes                         | Serial Managed scheduling can be built without raising cap 1                                                                            |
+| M7        | Remote PC gateway and native Android                                       | M1, M4; OD01; M5/OD02 for full-account control               | No production transport/client today                                                                                                    |
+| M8        | Whole-product efficiency, accessibility, reliability and personal delivery | M1–M7; M9 for retained extension scope                       | Runs throughout; final closure only with evidence                                                                                       |
+| M9        | OpenCode/Hermes/Wyss Agent integration closure                             | M2 contracts; M5/M6 for planner effects                      | Partial version-qualified Native adapters and blocked data-only planner boundary ([record](../acceptance/m9-engineering-2026-10-26.md)) |
 
 M1, provider feasibility in M2/M3, and M4 design can proceed independently once their
 shared identity/capability inputs are fixed. Implementation queues must respect each
@@ -248,6 +248,11 @@ service rollback interrupting sessions. Rollback: tested matching binary/consist
 store snapshot with explicitly approved downtime/loss window; no downgrade/force push.
 
 ### M9 — Retained extensions
+
+> **Engineering slice (2026-10-26):** [M9 record](../acceptance/m9-engineering-2026-10-26.md)
+> adds version-qualified OpenCode Native launch/profile and separate Hermes Native launch,
+> plus a closed data-only Hermes proposal contract. It does not accept a Hermes effectful
+> planner boundary or claim real-provider qualification.
 
 Finish OpenCode supported scope and qualify upstream Hermes Native. Wyss Agent policy/
 effects plus Hermes planning follows owner DN06=D, not a repeated architecture choice.
