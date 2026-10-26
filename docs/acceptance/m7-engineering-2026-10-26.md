@@ -42,6 +42,13 @@ unavailable. It does not establish production remote access.
   the retained handle cannot release bytes. A new request after reconnect cannot
   make the stale handle sendable again; the Java regression exercises that case
   and races first-send against reconnect 250 times.
+- **Terminal stream cursor:** `RemoteTerminalStreamCursor` keeps only a
+  volatile generation/connection-epoch offset. Frames require a matching fresh
+  checkpoint, are bounded to the Rust protocol's 16 KiB frame limit, and must
+  be contiguous. Old frames are ignored, a missing or partially overlapping
+  frame enters an explicit gap state, and only a new checkpoint restores the
+  cursor. Reconnect clears the old attachment. This does not retain terminal
+  bytes, render a screen, authenticate the checkpoint, or connect a gateway.
 - **H1/H2 comparison:**
   - H1, an owner-configured private overlay, reuses its own reachability and
     Android VPN integration but adds a third-party client/control-plane
@@ -95,7 +102,7 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
 | TS-REM-08 channel/MITM/channel-binding                            | BLOCKED                 | No selected transport or handshake.                                                                                                                                                                                  |
 | TS-REM-09 replay and ambiguous action                             | PARTIAL                 | Existing request replay tests plus Android no-replay input tests; no gateway, PTY and process-crash integration.                                                                                                     |
 | TS-REM-10..16 managed, durable journal, key rotation and recovery | NOT_PROVEN / BLOCKED    | No connected authority gateway, persistent host-key/device registry or rotation protocol. Existing policy fixture tests do not prove live behavior.                                                                  |
-| TS-REM-17 terminal escape/screen fidelity                         | NOT_RUN                 | No Android renderer or live terminal stream.                                                                                                                                                                         |
+| TS-REM-17 terminal escape/screen fidelity                         | NOT_RUN                 | Cursor ordering is unit-tested, but there is no Android renderer, authenticated checkpoint, or live terminal stream.                                                                                                                                                                         |
 | TS-REM-18 Android cache/privacy and full listed states            | PARTIAL                 | Empty disconnected states, secure window, horizontal navigation and foreground memory clearing exist; real content cache, notifications, screen lock and five-minute background behavior are not implemented/tested. |
 | TS-HYB-01..14                                                     | BLOCKED / NOT_PROVEN    | OD01 transport selection and actual host/phone are dependencies; no real network or device experiment.                                                                                                               |
 | Android Keystore P-256 keys                                       | IMPLEMENTED, NOT_PROVEN | API code creates separate keys and mandates device auth for presence key; CI builds/tests the SDK target, but physical device/TEE/attestation behavior remains untested.                                             |
@@ -119,6 +126,12 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
 - Java `RemoteInputSequencer` standalone smoke compilation/execution: **PASS**.
   A separate 5,000-cycle concurrent reconnect/send smoke also passed. Neither
   standalone run substitutes for the Android/JUnit build.
+- `RemoteTerminalStreamCursorTest` adds Android/JUnit fixture coverage for
+  pre-checkpoint frames, contiguous offsets, old and overlapping frames, gaps
+  and checkpoint recovery, generation/epoch changes, digest shape, frame bound
+  and offset overflow. This is protocol-state evidence only; the cursor is not
+  connected to a gateway and no terminal rendering or hardware behavior is
+  claimed. Record the final-head Android Actions result after CI completes.
 - The Android JUnit suite covers a stale unsent request handle after reconnect
   followed by a fresh request; the stale handle cannot release either payload,
   while the fresh handle is acknowledged. It also races reconnect with first
