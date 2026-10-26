@@ -34,6 +34,11 @@ closure under the M8 roadmap DoD.
   contrast thresholds, terminal ANSI colors against their terminal surfaces,
   renderer appearance-listener disposal, and Android palette spellings and
   contrast values.
+- The desktop shell now begins keyboard navigation with a visible-on-focus
+  skip link to a programmatically focusable main landmark. Its colors use the
+  three theme tokens, with a contrast boundary and focus outline; a shell test
+  asserts the link target, label and landmark semantics. WebKitGTK keyboard and
+  assistive-technology behavior remains NOT_PROVEN.
 - The light-theme `--faint` token is darkened so it remains at least 4.5:1 on
   every opaque light-theme surface. A regression binds the event timestamp,
   default/hover/selected row states, and those concrete surfaces to the contrast
@@ -44,8 +49,10 @@ closure under the M8 roadmap DoD.
 
 ## Verification
 
-- `npm run check`: **PASS**. Prettier, ESLint, Svelte/TypeScript; 69 Vitest files
-  and 1,081 tests; owned-workspace harness (16); Claude bridge (77); Vite build
+- `npm run check`: **PASS** after the skip-link change. Prettier, ESLint,
+  Svelte/TypeScript; 69 Vitest files and 1,082 tests (including the new shell
+  landmark/skip-link regression); owned-workspace harness (16); Claude bridge
+  (77); Vite build
   (230 modules). The bridge tests emitted existing Python `ResourceWarning`s
   for unclosed test-only files. Vite emitted the repository's advisory for a
   minified chunk above 500 kB; build succeeded.
