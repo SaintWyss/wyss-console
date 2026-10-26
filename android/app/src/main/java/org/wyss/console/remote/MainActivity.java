@@ -101,6 +101,7 @@ public final class MainActivity extends Activity {
 
     private void showScreen() {
         if (body == null) return;
+        RemoteAppearance.Palette palette = RemoteAppearance.palette(theme);
         body.removeAllViews();
         heading(current);
         switch (current) {
