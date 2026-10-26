@@ -92,14 +92,17 @@ for production. This M9 record is not an M6 or M9 production approval.
   security updates.
 - `npm run scan:repo`: **PASS**, 5 checks / 0 failures across 1,606 tracked
   files on corrected source head `7f48ceb`.
-- GitHub Actions run `40289260676` covers the earlier source head `2d3603f` and
-  remains in progress: its frontend/contracts and scanner jobs passed; the Rust
-  job remains at runner dependency installation. It is not final-head CI. The
-  order-independent test-only correction does not change adapter behavior.
-- Independent Sol High static review at `2d3603f` found no actionable issue in
-  the implementation. The final `7f48ceb` test-only delta awaits re-review;
-  neither review status is a formal GitHub approval or real-provider
-  acceptance.
+- GitHub Actions run `40292346348` passed on final PR head
+  `3bbd055f6919620baf243bb9b7fdd5212a080f96`, including frontend/contracts,
+  scanner, formatting, Clippy, focused provider persistence, credential handoff,
+  B1 process, default-feature Rust, fixture-binary exclusion and the complete
+  all-feature Rust regression. The earlier `40289260676` run was canceled and
+  is not acceptance evidence.
+- Independent Sol High static review and re-review of final implementation head
+  `3bbd055` found no actionable issue. The OpenCode exact-version Codex thread
+  was resolved after adding direct and shell-resolved executable version checks
+  plus regression tests. Static review and thread resolution are not formal
+  GitHub approval or real-provider acceptance.
 - No real OpenCode process or provider account was run. No Hermes process was
   run. These are fixtures and source-bound argument/capability tests only.
 
@@ -132,5 +135,5 @@ for production. This M9 record is not an M6 or M9 production approval.
 Managed production concurrency remains one; F8 approvals and authority paths are
 unchanged; Hermes planner admission remains blocked; Native sessions are clearly
 labelled as full-account provider processes. No provider files, credentials,
-services or production data were changed. Final GitHub Rust CI remains pending;
-real OpenCode/Hermes acceptance is unrun. It is not production-ready.
+services or production data were changed. Final-head GitHub CI passed; real
+OpenCode/Hermes acceptance remains unrun. It is not production-ready.
