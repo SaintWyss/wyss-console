@@ -3011,7 +3011,10 @@ mod tests {
             revision: 2,
         };
         coordinator.tick(102).unwrap();
-        assert_eq!(coordinator.get(&a.run_id).unwrap().steps[0].state, StepState::Verifying);
+        assert_eq!(
+            coordinator.get(&a.run_id).unwrap().steps[0].state,
+            StepState::Verifying
+        );
 
         let mut second_step = step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![]);
         second_step.managed_session_id = Some(SECOND_SESSION.into());
@@ -3028,13 +3031,19 @@ mod tests {
         coordinator.tick(120).unwrap();
         assert_eq!(coordinator.get(&b.run_id).unwrap().state, RunState::Expired);
         assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
-        assert_eq!(coordinator.get(&a.run_id).unwrap().steps[0].state, StepState::Verifying);
+        assert_eq!(
+            coordinator.get(&a.run_id).unwrap().steps[0].state,
+            StepState::Verifying
+        );
 
         coordinator.tick(140).unwrap();
         let expired_review = coordinator.get(&a.run_id).unwrap();
         assert_eq!(expired_review.state, RunState::NeedsReview);
         assert_eq!(expired_review.steps[0].state, StepState::NeedsReview);
-        assert_eq!(expired_review.steps[0].failure, Some(FailureCode::PlanExpired));
+        assert_eq!(
+            expired_review.steps[0].failure,
+            Some(FailureCode::PlanExpired)
+        );
         fs::remove_dir_all(root_a).unwrap();
         fs::remove_dir_all(root_b).unwrap();
     }
@@ -3073,7 +3082,10 @@ mod tests {
             .unwrap();
         coordinator.tick(104).unwrap();
         assert_eq!(authority.starts.load(Ordering::SeqCst), 2);
-        assert_eq!(coordinator.get(&a.run_id).unwrap().steps[0].state, StepState::Verifying);
+        assert_eq!(
+            coordinator.get(&a.run_id).unwrap().steps[0].state,
+            StepState::Verifying
+        );
         assert!(matches!(
             coordinator.get(&b.run_id).unwrap().steps[0].state,
             StepState::Starting | StepState::Running
