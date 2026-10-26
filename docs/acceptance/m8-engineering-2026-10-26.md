@@ -40,9 +40,9 @@ closure under the M8 roadmap DoD.
 - `npm run check:rust`: **PASS** on this code and the M7 source baseline; locked
   Rust checks, default/B1 regressions, and Clippy with warnings denied. The M7
   evidence fast-forward after this run changed only its acceptance document.
-- `npm run scan:repo`: **PASS**, 5 checks / 0 failures; scans tracked files in
-  Git and the working tree. A final scan after this evidence commit is required
-  so newly added Android/appearance tests are included.
+- `npm run scan:repo`: **PASS**, 5 checks / 0 failures; all 1,624 tracked files,
+  including the Android/appearance tests and this evidence record, were scanned
+  from Git and the working tree. Re-run after any later integration change.
 - `npm audit --audit-level=moderate`: **0 known vulnerabilities**.
 - Android Gradle/JUnit was not available as a local verified run. Run the
   repository Android GitHub workflow on the final M8 head before treating the
