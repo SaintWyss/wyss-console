@@ -6,6 +6,7 @@ use super::{
     store,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs, io,
@@ -16,9 +17,11 @@ const MAX_FILE: u64 = 2 * 1024 * 1024;
 const MAX_SESSIONS: usize = 200;
 const MAX_RECOVERY_FILES: usize = 16;
 const MAX_RECOVERY_ENTRIES: usize = MAX_RECOVERY_FILES;
+const MAX_DEFAULT_OVERRIDE_ENTRIES: usize =
+    MAX_RECOVERY_FILES * super::registry::MAX_PROJECTS + 2 * super::registry::MAX_PROJECTS;
 const FILE_NAME: &str = "m9-native-sessions-v1.json";
 const RECOVERY_DIR: &str = "m9-native-recovery-v1";
-const DEFAULT_OVERRIDES_FILE: &str = "m9-native-default-overrides-v1.json";
+const DEFAULT_OVERRIDES_FILE: &str = "m9-native-default-overrides-v2.json";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -33,7 +36,7 @@ struct Data {
 #[serde(deny_unknown_fields)]
 struct DefaultOverrides {
     schema: u32,
-    projects: BTreeSet<String>,
+    project_hashes: BTreeSet<String>,
 }
 
 pub struct ExtendedRegistry {
@@ -54,9 +57,27 @@ pub struct RecoveryRead {
 }
 
 fn overrides_valid(data: &DefaultOverrides) -> bool {
-    (data.schema == 0 || data.schema == 1)
-        && data.projects.len() <= super::registry::MAX_PROJECTS
-        && data.projects.iter().all(|path| path.len() <= 4096)
+    data.schema == 2
+        && data.project_hashes.len() <= MAX_DEFAULT_OVERRIDE_ENTRIES
+        && data.project_hashes.iter().all(|key| {
+            key.len() == 64
+                && key
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+}
+
+fn override_key(project: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut digest = Sha256::new();
+    digest.update(b"wyss-console:m9-default-override:v2\0");
+    digest.update(project.as_bytes());
+    let mut key = String::with_capacity(64);
+    for byte in digest.finalize() {
+        key.push(HEX[(byte >> 4) as usize] as char);
+        key.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    key
 }
 
 fn data_valid(data: &Data) -> bool {
@@ -170,6 +191,10 @@ impl ExtendedRegistry {
         }
     }
 
+    pub fn default_override_key(project: &str) -> String {
+        override_key(project)
+    }
+
     fn default_overrides(dir: &Path) -> io::Result<(PathBuf, DefaultOverrides)> {
         store::private_dir(dir)?;
         let path = dir.join(DEFAULT_OVERRIDES_FILE);
@@ -185,7 +210,7 @@ impl ExtendedRegistry {
             })?
         } else {
             DefaultOverrides {
-                schema: 1,
+                schema: 2,
                 ..DefaultOverrides::default()
             }
         };
@@ -195,7 +220,7 @@ impl ExtendedRegistry {
                 "m9_default_overrides_schema",
             ));
         }
-        data.schema = 1;
+        data.schema = 2;
         Ok((path, data))
     }
 
@@ -211,14 +236,15 @@ impl ExtendedRegistry {
             ));
         }
         let (path, mut data) = Self::default_overrides(dir)?;
-        let existed = data.projects.contains(project);
-        if !existed && data.projects.len() >= super::registry::MAX_PROJECTS {
+        let key = override_key(project);
+        let existed = data.project_hashes.contains(&key);
+        if !existed && data.project_hashes.len() >= MAX_DEFAULT_OVERRIDE_ENTRIES {
             return Err(io::Error::new(
                 io::ErrorKind::StorageFull,
                 "m9_default_overrides_full",
             ));
         }
-        data.projects.insert(project.to_owned());
+        data.project_hashes.insert(key);
         let bytes = serde_json::to_vec_pretty(&data).map_err(io::Error::other)?;
         store::write_atomic(&path, &bytes)?;
         Ok(existed)
@@ -231,10 +257,10 @@ impl ExtendedRegistry {
             return Ok(());
         }
         let (path, mut data) = Self::default_overrides(dir)?;
-        if !data.projects.remove(project) {
+        if !data.project_hashes.remove(&override_key(project)) {
             return Ok(());
         }
-        if data.projects.is_empty() {
+        if data.project_hashes.is_empty() {
             match fs::remove_file(path) {
                 Ok(()) => fs::File::open(dir)?.sync_all(),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -252,7 +278,7 @@ impl ExtendedRegistry {
             return Ok(BTreeSet::new());
         }
         let (_, data) = Self::default_overrides(dir)?;
-        Ok(data.projects)
+        Ok(data.project_hashes)
     }
 
     /// Removes tombstones only after recovered metadata has been migrated and the primary

@@ -269,8 +269,15 @@ impl NativeService {
         if let Some(extended) = extended_registry.as_mut() {
             let mut migration_complete = overrides_complete && !recovery.incomplete;
             if migration_complete {
-                for path in &default_overrides {
-                    if extended.clear_project_default(path).is_err() {
+                let current_paths = extended
+                    .recovery_snapshot()
+                    .project_defaults
+                    .into_keys()
+                    .collect::<Vec<_>>();
+                for path in current_paths {
+                    if default_overrides.contains(&ExtendedRegistry::default_override_key(&path))
+                        && extended.clear_project_default(&path).is_err()
+                    {
                         migration_complete = false;
                         break;
                     }
@@ -285,7 +292,8 @@ impl NativeService {
                         }
                     }
                     for (path, agent) in &snapshot.project_defaults {
-                        if !default_overrides.contains(path)
+                        if !default_overrides
+                            .contains(&ExtendedRegistry::default_override_key(path))
                             && extended
                                 .migrate_project_default(path.clone(), *agent)
                                 .is_err()
@@ -306,13 +314,31 @@ impl NativeService {
             }
             if migration_complete {
                 for (path, agent) in migrated_defaults {
-                    if !default_overrides.contains(&path)
+                    if !default_overrides.contains(&ExtendedRegistry::default_override_key(&path))
                         && extended.migrate_project_default(path, agent).is_err()
                     {
                         migration_complete = false;
                         break;
                     }
                 }
+            }
+            if !migration_complete
+                && (!migration_sessions.is_empty() || !migration_defaults.is_empty())
+            {
+                let pending_defaults = migration_defaults
+                    .iter()
+                    .map(|(path, agent)| (path.clone(), *agent))
+                    .collect::<Vec<_>>();
+                // The shared registry still owns these interim records until the safe M1-M6
+                // projection is durable. Copy every pending M9 record first; if bounded
+                // recovery cannot accept them, leave the source registry untouched and refuse
+                // startup instead of losing history on the next restart.
+                ExtendedRegistry::preserve_recovery(
+                    &registry_dir,
+                    &migration_sessions,
+                    &pending_defaults,
+                )
+                .ok()?;
             }
             // Sidecar writes sync their parent directory before this source registry is
             // atomically replaced with the M1-M6-safe projection.
@@ -373,7 +399,9 @@ impl NativeService {
         }
         recovered_sessions.sort_by(|left, right| left.id.cmp(&right.id));
         recovered_sessions.dedup_by(|left, right| left.id == right.id);
-        recovered_defaults.retain(|path, _| !default_overrides.contains(path));
+        recovered_defaults.retain(|path, _| {
+            !default_overrides.contains(&ExtendedRegistry::default_override_key(path))
+        });
         let profiles = ProfileStore::open(base.join("profiles")).ok()?;
         let sessions = base.join("sessions");
         // Nothing is running: every generated directory is stale.
@@ -824,13 +852,20 @@ impl NativeService {
                 let previous = lock(&self.inner.recovered_defaults)
                     .get(&project_key)
                     .copied();
-                let existed = ExtendedRegistry::mark_default_overridden(
-                    &self.inner.base.join("registry"),
-                    &project_key,
-                )
-                .map_err(|_| NativeError::new("store_unavailable"))?;
-                lock(&self.inner.recovered_defaults).remove(&project_key);
-                Some((existed, previous))
+                if previous.is_some() {
+                    let existed = ExtendedRegistry::mark_default_overridden(
+                        &self.inner.base.join("registry"),
+                        &project_key,
+                    )
+                    .map_err(|_| NativeError::new("store_unavailable"))?;
+                    lock(&self.inner.recovered_defaults).remove(&project_key);
+                    Some((existed, previous))
+                } else {
+                    // A launch for a project with no recovered M9 default needs no tombstone.
+                    // This keeps legacy launches independent of optional M9 storage and avoids
+                    // filling the bounded override set with irrelevant project paths.
+                    None
+                }
             } else {
                 None
             };
@@ -929,10 +964,8 @@ impl NativeService {
             let mut registry = lock(&self.inner.registry);
             registry.add(session);
             let _ = registry.save();
-        } else {
-            if let Some(extended) = lock(&self.inner.extended_registry).as_mut() {
-                let _ = extended.add(session);
-            }
+        } else if let Some(extended) = lock(&self.inner.extended_registry).as_mut() {
+            let _ = extended.add(session);
         }
     }
 

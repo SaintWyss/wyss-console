@@ -600,6 +600,118 @@ fn a_corrupt_m9_sidecar_blocks_only_m9_and_keeps_legacy_state_writable() {
         .service
         .stop(&reopened.terminal, &legacy.session.session.id)
         .unwrap();
+    assert!(
+        !world
+            .base
+            .join("registry/m9-native-default-overrides-v2.json")
+            .exists(),
+        "a legacy launch with no recovered M9 default does not spend an override slot"
+    );
+}
+
+#[test]
+fn a_capacity_failed_recovery_durably_preserves_interim_m9_records_across_restart() {
+    let world = World::new();
+    let opencode = world.start(AgentId::Opencode, None).unwrap();
+    let session_id = opencode.session.session.id.clone();
+    let registry_dir = world.base.join("registry");
+    let registry_path = registry_dir.join("registry.json");
+    let mut interim: serde_json::Value =
+        serde_json::from_slice(&fs::read(&registry_path).unwrap()).unwrap();
+    let mut sidecar: serde_json::Value =
+        serde_json::from_slice(&fs::read(registry_dir.join("m9-native-sessions-v1.json")).unwrap())
+            .unwrap();
+    let sidecar_sessions = sidecar["sessions"].as_array_mut().unwrap();
+    let at = sidecar_sessions
+        .iter()
+        .position(|session| session["id"] == session_id)
+        .unwrap();
+    interim["sessions"]
+        .as_array_mut()
+        .unwrap()
+        .push(sidecar_sessions.remove(at));
+    let home_path = world.home.to_string_lossy().into_owned();
+    let home_project = interim["projects"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|project| project["path"] == home_path)
+        .unwrap();
+    home_project["default_agent"] = serde_json::json!("opencode");
+    fs::write(&registry_path, serde_json::to_vec(&interim).unwrap()).unwrap();
+    fs::write(
+        registry_dir.join("m9-native-sessions-v1.json"),
+        serde_json::to_vec(&sidecar).unwrap(),
+    )
+    .unwrap();
+
+    // Fill the healthy sidecar to its exact project-default ceiling, then add one durable
+    // recovery default so migration fails before it reaches the shared-registry records.
+    let mut extended = ExtendedRegistry::open(registry_dir.clone()).unwrap();
+    let mut defaults = extended.recovery_snapshot().project_defaults;
+    let mut candidate = 0;
+    while defaults.len() < super::registry::MAX_PROJECTS {
+        let path = format!("/capacity-fill-{candidate}");
+        candidate += 1;
+        if defaults.contains_key(&path) {
+            continue;
+        }
+        extended
+            .set_project_default(&path, AgentId::Opencode)
+            .unwrap();
+        defaults.insert(path, AgentId::Opencode);
+    }
+    assert_eq!(defaults.len(), super::registry::MAX_PROJECTS);
+    ExtendedRegistry::preserve_recovery(
+        &registry_dir,
+        &[],
+        &[("/recovered-capacity-overflow".to_owned(), AgentId::Hermes)],
+    )
+    .unwrap();
+    world
+        .terminal
+        .close(&opencode.terminal.terminal_id)
+        .unwrap();
+
+    let first = World::open(&world.base, &world.home, &world.bin);
+    assert_eq!(
+        first.launcher_extended().m9_native_status,
+        "storage_unavailable"
+    );
+    let first_sessions = first.sessions_extended(&TerminalService::default(), false);
+    assert!(first_sessions.iter().any(|session| {
+        session.session.id == session_id
+            && session.session.agent_id == AgentId::Opencode
+            && session.session.state == State::Lost
+    }));
+    let recovery = ExtendedRegistry::read_recovery(&registry_dir).unwrap();
+    assert!(recovery.snapshots.iter().any(|snapshot| {
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id)
+    }));
+
+    // A second crash/reopen still finds the interim session in durable recovery, even though the
+    // new default remains over capacity and M9 stays explicitly unavailable.
+    let second = World::open(&world.base, &world.home, &world.bin);
+    assert_eq!(
+        second.launcher_extended().m9_native_status,
+        "storage_unavailable"
+    );
+    let second_sessions = second.sessions_extended(&TerminalService::default(), false);
+    assert!(second_sessions.iter().any(|session| {
+        session.session.id == session_id
+            && session.session.agent_id == AgentId::Opencode
+            && session.session.state == State::Lost
+    }));
+    let recovery = ExtendedRegistry::read_recovery(&registry_dir).unwrap();
+    assert!(recovery.snapshots.iter().any(|snapshot| {
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id)
+    }));
 }
 
 #[test]
@@ -709,10 +821,14 @@ fn a_corrupt_sidecar_migration_recovers_m9_metadata_before_sanitizing_the_m6_reg
     );
     let overrides_path = world
         .base
-        .join("registry/m9-native-default-overrides-v1.json");
+        .join("registry/m9-native-default-overrides-v2.json");
     let overrides: serde_json::Value =
         serde_json::from_slice(&fs::read(&overrides_path).unwrap()).unwrap();
-    assert_eq!(overrides["projects"][0], project_path);
+    assert_eq!(
+        overrides["project_hashes"][0],
+        ExtendedRegistry::default_override_key(&project_path),
+        "the bounded override journal stores a digest, not a workspace path"
+    );
     degraded
         .service
         .stop(&degraded.terminal, &claude.session.session.id)
