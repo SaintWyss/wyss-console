@@ -102,7 +102,7 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
 | TS-REM-08 channel/MITM/channel-binding                            | BLOCKED                 | No selected transport or handshake.                                                                                                                                                                                  |
 | TS-REM-09 replay and ambiguous action                             | PARTIAL                 | Existing request replay tests plus Android no-replay input tests; no gateway, PTY and process-crash integration.                                                                                                     |
 | TS-REM-10..16 managed, durable journal, key rotation and recovery | NOT_PROVEN / BLOCKED    | No connected authority gateway, persistent host-key/device registry or rotation protocol. Existing policy fixture tests do not prove live behavior.                                                                  |
-| TS-REM-17 terminal escape/screen fidelity                         | NOT_RUN                 | Cursor ordering is unit-tested, but there is no Android renderer, authenticated checkpoint, or live terminal stream.                                                                                                                                                                         |
+| TS-REM-17 terminal escape/screen fidelity                         | NOT_RUN                 | Cursor ordering is unit-tested, but there is no Android renderer, authenticated checkpoint, or live terminal stream.                                                                                                 |
 | TS-REM-18 Android cache/privacy and full listed states            | PARTIAL                 | Empty disconnected states, secure window, horizontal navigation and foreground memory clearing exist; real content cache, notifications, screen lock and five-minute background behavior are not implemented/tested. |
 | TS-HYB-01..14                                                     | BLOCKED / NOT_PROVEN    | OD01 transport selection and actual host/phone are dependencies; no real network or device experiment.                                                                                                               |
 | Android Keystore P-256 keys                                       | IMPLEMENTED, NOT_PROVEN | API code creates separate keys and mandates device auth for presence key; CI builds/tests the SDK target, but physical device/TEE/attestation behavior remains untested.                                             |
@@ -129,29 +129,39 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
 - `RemoteTerminalStreamCursorTest` adds Android/JUnit fixture coverage for
   pre-checkpoint frames, contiguous offsets, old and overlapping frames, gaps
   and checkpoint recovery, generation/epoch changes, digest shape, frame bound
-  and offset overflow. This is protocol-state evidence only; the cursor is not
-  connected to a gateway and no terminal rendering or hardware behavior is
-  claimed. Record the final-head Android Actions result after CI completes.
+  and offset overflow. The follow-up watermark regressions reject a repeated
+  identity after a stale reconnect and after explicit disconnect. This is
+  protocol-state evidence only; the cursor is not connected to a gateway and no
+  terminal rendering or hardware behavior is claimed.
 - The Android JUnit suite covers a stale unsent request handle after reconnect
   followed by a fresh request; the stale handle cannot release either payload,
   while the fresh handle is acknowledged. It also races reconnect with first
   payload acquisition and requires the result to be either a closed unsent
-  request or an explicitly ambiguous acquired payload. Android Actions run
-  `40292345934` and M1–M5 integration run `40292345677` passed on implementation
-  revision `eb88e26`, including the Android build/JUnit suite and
-  frontend/contracts, scanner, Rust/B1 and Clippy respectively. Later commits
-  on the M7 PR update acceptance evidence only; the exact current-head workflow
-  conclusions are linked from PR #30. Historical runs are not treated as
-  current-head evidence.
+  request or an explicitly ambiguous acquired payload. The cursor source was
+  added in `1f1f27b`, its initial test expectation was corrected in `f85e865`,
+  and the independent Sol High P2 watermark finding was fixed in `c6c273c`.
+  Android run `40302878602` passed at `f85e865`; it does not cover the watermark
+  fix. The exact `c6c273c` Android build/JUnit run `40304071949` passed.
+  M1–M5 integration run `40304121330` on `c6c273c` reached a frontend
+  formatting failure because the acceptance record at that revision failed
+  Prettier; the scanner step was consequently skipped. Its Rust job was still
+  running at the time of this record, so this run is not a full-suite pass. The
+  acceptance record is now formatted and will be rechecked on its published
+  revision. The earlier
+  `40302472721` failure on `1f1f27b` was a test ordering
+  expectation (frame sent before attachment); the corrected JUnit case runs
+  after attachment and passed on `f85e865`.
 - `npm audit`: 0 known vulnerabilities after locking the compatible Vite
   8.3.5 and undici security updates.
-- Android SDK/Gradle are unavailable locally. The final-head Android and M1–M5
-  CI runs above prove the committed sources compile and pass deterministic CI,
-  not behavior on a phone. No physical Android device or terminal has been
-  exercised, so device/Keystore behavior remains **NOT_PROVEN**.
-- Independent Sol High static review at final source head `0a6d5f7` found no
-  actionable issue; this is a static review result, not a formal GitHub
-  approval, hardware acceptance or production security sign-off. Two resolved
+- Android SDK/Gradle are unavailable locally. The Android run for `c6c273c`
+  proves the committed sources compile and pass deterministic JUnit CI, but CI
+  does not prove behavior on
+  a phone. No physical Android device or terminal has been exercised, so
+  device/Keystore behavior remains **NOT_PROVEN**.
+- Independent Sol High static review of `0a6d5f7` found no actionable issue.
+  Its follow-up on `c6c273c` confirms the watermark P2 is closed with no other
+  code finding. This is a static review result, not a formal GitHub approval,
+  hardware acceptance or production security sign-off. Two resolved
   Codex PR threads identified clipped horizontal navigation and stale-handle
   payload release; source fixes are in `bdf975b` and `09e4c80`. The current
   stale-versus-fresh and concurrent reconnect/acquisition regressions passed the
