@@ -1,5 +1,6 @@
 package org.wyss.console.remote;
 
+import android.hardware.biometrics.BiometricPrompt;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyInfo;
 import android.security.keystore.KeyProperties;
@@ -17,7 +18,7 @@ import java.util.Arrays;
 /** Device P-256 keys are non-exportable Android Keystore entries; this does not authenticate a host. */
 public final class AndroidRemoteIdentity {
     private static final String STORE = "AndroidKeyStore";
-    private static final String PREFIX = "wyss_remote_v1_";
+    private static final String PREFIX = "wyss_remote_v2_";
 
     public static final class Keys {
         public final String aliasId;
@@ -35,6 +36,56 @@ public final class AndroidRemoteIdentity {
             this.connectionSecurityLevel = connectionLevel;
             this.presenceSecurityLevel = presenceLevel;
             this.attested = false;
+        }
+    }
+
+    /** One prompt-bound, single-use presence operation. The caller must pass its CryptoObject to
+     * BiometricPrompt.authenticate and complete only with that prompt's successful result. */
+    public static final class PreparedPresence {
+        private Signature signature;
+        private byte[] challenge;
+        private boolean handedToPrompt;
+        private boolean consumed;
+
+        private PreparedPresence(Signature signature, byte[] challenge) {
+            this.signature = signature;
+            this.challenge = Arrays.copyOf(challenge, challenge.length);
+        }
+
+        public synchronized BiometricPrompt.CryptoObject cryptoObject() {
+            if (consumed || handedToPrompt || signature == null) {
+                throw new IllegalStateException("presence_operation_unavailable");
+            }
+            handedToPrompt = true;
+            return new BiometricPrompt.CryptoObject(signature);
+        }
+
+        public synchronized byte[] complete(BiometricPrompt.CryptoObject authenticated) throws Exception {
+            if (consumed || !handedToPrompt || signature == null || authenticated == null
+                    || authenticated.getSignature() != signature) {
+                invalidate();
+                throw new IllegalStateException("presence_authentication_not_bound");
+            }
+            try {
+                signature.update(challenge);
+                return signature.sign();
+            } finally {
+                invalidate();
+            }
+        }
+
+        /** A cancelled or abandoned prompt cannot later be used to sign. */
+        public synchronized void cancel() {
+            invalidate();
+        }
+
+        private void invalidate() {
+            consumed = true;
+            signature = null;
+            if (challenge != null) {
+                Arrays.fill(challenge, (byte) 0);
+                challenge = null;
+            }
         }
     }
 
@@ -61,8 +112,11 @@ public final class AndroidRemoteIdentity {
                 securityLevel(presence.getPrivate()));
     }
 
-    /** Uses Android's per-use authenticated key. Caller must run the platform auth prompt first. */
-    public static byte[] signPresence(String aliasId, byte[] challenge) throws Exception {
+    /** Prepare the exact signature operation that must be authenticated by BiometricPrompt. */
+    public static PreparedPresence preparePresence(String aliasId, byte[] challenge) throws Exception {
+        if (aliasId == null || !aliasId.matches(PREFIX + "[A-Za-z0-9_-]{1,64}")) {
+            throw new IllegalArgumentException("host_id_invalid");
+        }
         if (challenge == null || challenge.length == 0 || challenge.length > 8192) {
             throw new IllegalArgumentException("challenge_size_invalid");
         }
@@ -72,8 +126,7 @@ public final class AndroidRemoteIdentity {
         if (key == null) throw new IllegalStateException("presence_key_missing");
         Signature signature = Signature.getInstance("SHA256withECDSA");
         signature.initSign((java.security.PrivateKey) key);
-        signature.update(challenge);
-        return signature.sign();
+        return new PreparedPresence(signature, challenge);
     }
 
     private static void ensureKey(KeyStore store, String alias, boolean presence) throws Exception {
@@ -86,8 +139,7 @@ public final class AndroidRemoteIdentity {
                 .setUserAuthenticationRequired(presence);
         if (presence) {
             spec.setUserAuthenticationParameters(
-                    0,
-                    KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL);
+                    0, KeyProperties.AUTH_BIOMETRIC_STRONG);
             spec.setInvalidatedByBiometricEnrollment(true);
         }
         generator.initialize(spec.build());

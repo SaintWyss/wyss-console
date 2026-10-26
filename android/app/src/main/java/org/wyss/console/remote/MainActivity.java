@@ -5,6 +5,7 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -59,8 +60,9 @@ public final class MainActivity extends Activity {
         status.setContentDescription("Connection status: blocked. No network request was sent.");
         root.addView(status);
 
-        ScrollView navigationScroll = new ScrollView(this);
-        navigationScroll.setHorizontalScrollBarEnabled(false);
+        HorizontalScrollView navigationScroll = new HorizontalScrollView(this);
+        navigationScroll.setHorizontalScrollBarEnabled(true);
+        navigationScroll.setFillViewport(false);
         LinearLayout navigation = new LinearLayout(this);
         navigation.setOrientation(LinearLayout.HORIZONTAL);
         for (String screen : SCREENS) {

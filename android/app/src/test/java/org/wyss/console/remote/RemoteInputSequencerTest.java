@@ -3,6 +3,7 @@ package org.wyss.console.remote;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 
 public final class RemoteInputSequencerTest {
@@ -31,6 +32,8 @@ public final class RemoteInputSequencerTest {
         request.payloadForFirstSend();
         RemoteInputSequencer.Result result = sequencer.loseAcknowledgement();
         assertEquals(RemoteInputSequencer.Delivery.OUTCOME_UNKNOWN, result.delivery);
+        assertNull(result.acceptedBytes);
+        assertEquals(Integer.valueOf(2), result.requestedBytes);
         assertEquals(RemoteInputSequencer.Delivery.NEW_INPUT_REQUIRED, sequencer.reconnect(12, 4).delivery);
         assertThrows(IllegalStateException.class, request::payloadForFirstSend);
         assertEquals(2, sequencer.begin(new byte[] {8, 9}, 12, 4).sequence);
@@ -46,16 +49,19 @@ public final class RemoteInputSequencerTest {
 
     @Test public void unsentInputCanBeDroppedWithoutReportingAnExternalEffect() {
         RemoteInputSequencer sequencer = new RemoteInputSequencer();
-        sequencer.begin(new byte[] {3}, 12, 3);
+        RemoteInputSequencer.InputRequest request = sequencer.begin(new byte[] {3}, 12, 3);
         assertEquals(RemoteInputSequencer.Delivery.NEW_INPUT_REQUIRED, sequencer.reconnect(13, 4).delivery);
+        assertThrows(IllegalStateException.class, request::payloadForFirstSend);
     }
 
     @Test public void aStaleAcknowledgementCannotCompleteCurrentInput() {
         RemoteInputSequencer sequencer = new RemoteInputSequencer();
         RemoteInputSequencer.InputRequest request = sequencer.begin(new byte[] {5}, 2, 9);
         request.payloadForFirstSend();
-        assertEquals(RemoteInputSequencer.Delivery.OUTCOME_UNKNOWN,
-                sequencer.acknowledge("older-request", 1).delivery);
+        RemoteInputSequencer.Result stale = sequencer.acknowledge("older-request", 1);
+        assertEquals(RemoteInputSequencer.Delivery.OUTCOME_UNKNOWN, stale.delivery);
+        assertNull(stale.acceptedBytes);
+        assertNull(stale.requestedBytes);
         assertEquals(RemoteInputSequencer.Delivery.ACCEPTED,
                 sequencer.acknowledge(request.requestId, 1).delivery);
     }
@@ -76,7 +82,42 @@ public final class RemoteInputSequencerTest {
         request.payloadForFirstSend();
         RemoteInputSequencer.Result result = sequencer.acknowledge(request.requestId, 3);
         assertEquals(RemoteInputSequencer.Delivery.OUTCOME_UNKNOWN, result.delivery);
-        assertEquals(0, result.acceptedBytes);
+        assertNull(result.acceptedBytes);
+        assertEquals(Integer.valueOf(2), result.requestedBytes);
+        assertThrows(IllegalStateException.class, request::payloadForFirstSend);
+    }
+
+    @Test public void cancellationInvalidatesTheHandleAndKeepsSentOutcomeUnknown() {
+        RemoteInputSequencer sequencer = new RemoteInputSequencer();
+        RemoteInputSequencer.InputRequest request = sequencer.begin(new byte[] {4, 5}, 1, 1);
+        request.payloadForFirstSend();
+
+        RemoteInputSequencer.Result result = sequencer.cancel(request.requestId);
+        assertEquals(RemoteInputSequencer.Delivery.OUTCOME_UNKNOWN, result.delivery);
+        assertNull(result.acceptedBytes);
+        assertEquals(Integer.valueOf(2), result.requestedBytes);
+        assertThrows(IllegalStateException.class, request::payloadForFirstSend);
+    }
+
+    @Test public void cancellationBeforeSendDropsBytesAndRequiresNewInput() {
+        RemoteInputSequencer sequencer = new RemoteInputSequencer();
+        RemoteInputSequencer.InputRequest request = sequencer.begin(new byte[] {7}, 1, 1);
+
+        RemoteInputSequencer.Result result = sequencer.cancel(request.requestId);
+        assertEquals(RemoteInputSequencer.Delivery.NEW_INPUT_REQUIRED, result.delivery);
+        assertNull(result.acceptedBytes);
+        assertEquals(Integer.valueOf(1), result.requestedBytes);
+        assertThrows(IllegalStateException.class, request::payloadForFirstSend);
+    }
+
+    @Test public void acknowledgementBeforeFirstSendCannotClaimDelivery() {
+        RemoteInputSequencer sequencer = new RemoteInputSequencer();
+        RemoteInputSequencer.InputRequest request = sequencer.begin(new byte[] {6}, 1, 1);
+
+        RemoteInputSequencer.Result result = sequencer.acknowledge(request.requestId, 1);
+        assertEquals(RemoteInputSequencer.Delivery.OUTCOME_UNKNOWN, result.delivery);
+        assertNull(result.acceptedBytes);
+        assertEquals(Integer.valueOf(1), result.requestedBytes);
         assertThrows(IllegalStateException.class, request::payloadForFirstSend);
     }
 }
