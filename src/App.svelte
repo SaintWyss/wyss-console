@@ -225,8 +225,11 @@
   });
   // Presentation preferences, applied to every terminal, open or new.
   $effect(() => {
+    const theme = settings.preferences.interface.theme;
+    document.documentElement.dataset.theme = theme;
     const t = settings.preferences.terminal;
     setAppearance({
+      theme,
       fontSize: t.font_size,
       scrollback: t.scrollback,
       cursorStyle: t.cursor_style,

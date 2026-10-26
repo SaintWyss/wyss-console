@@ -119,16 +119,16 @@
     max-width: 72rem;
     margin: 0 auto;
     padding: 1.5rem clamp(1rem, 3vw, 2rem) 3rem;
-    color: var(--text-primary, #20292d);
+    color: var(--text);
   }
 
   header {
-    border-bottom: 1px solid var(--border, #c7c5be);
+    border-bottom: 1px solid var(--glass-line);
     padding-bottom: 1rem;
   }
 
   .eyebrow {
-    color: var(--text-muted, #59666a);
+    color: var(--muted);
     font-size: 0.75rem;
     font-weight: 700;
     letter-spacing: 0.12em;
@@ -140,9 +140,9 @@
   }
 
   .blocked {
-    border-left: 4px solid #9a4e1e;
+    border-left: 4px solid var(--warn-line);
     padding: 0.6rem 0.8rem;
-    background: color-mix(in srgb, #d18a5b 15%, transparent);
+    background: var(--warn-soft);
     font-weight: 650;
   }
 
@@ -156,23 +156,23 @@
   button {
     min-height: 2.75rem;
     flex: 0 0 auto;
-    border: 1px solid var(--border, #9da7a6);
+    border: 1px solid var(--glass-line);
     border-radius: 0.35rem;
     padding: 0.4rem 0.75rem;
     color: inherit;
-    background: var(--surface, #faf9f6);
+    background: var(--surface-control);
     font: inherit;
     cursor: pointer;
   }
 
   button[aria-current='page'] {
-    border-color: #315a78;
-    outline: 2px solid #315a78;
+    border-color: var(--accent);
+    outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
 
   button:disabled {
-    color: var(--text-muted, #59666a);
+    color: var(--muted);
     cursor: not-allowed;
     opacity: 0.72;
   }
@@ -189,7 +189,7 @@
 
   .no-queue {
     margin-top: 2rem;
-    color: var(--text-muted, #59666a);
+    color: var(--muted);
     font-size: 0.9rem;
   }
 

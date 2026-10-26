@@ -102,8 +102,9 @@ fn json(preferences: &Preferences) -> Vec<u8> {
 #[test]
 fn defaults_are_what_the_product_looked_like_before_it_had_any() {
     let defaults = Preferences::default();
-    assert_eq!(defaults.schema_version, 1);
+    assert_eq!(defaults.schema_version, 2);
     assert_eq!(defaults.interface.landing_page, LandingPage::Console);
+    assert_eq!(defaults.interface.theme, AppearanceTheme::Dark);
     assert_eq!(defaults.terminal.font_size, 16);
     assert_eq!(defaults.terminal.scrollback, 5000);
     assert_eq!(defaults.terminal.cursor_style, CursorStyle::Block);
@@ -153,6 +154,7 @@ fn the_vocabulary_has_no_field_for_anything_that_decides() {
         "events.time_format",
         "interface",
         "interface.landing_page",
+        "interface.theme",
         "schema_version",
         "terminal",
         "terminal.cursor_blink",
@@ -198,6 +200,47 @@ fn preferences_persist_across_a_restart_of_the_service() {
 }
 
 #[test]
+fn schema_one_preferences_gain_the_dark_default_without_a_read_write_and_upgrade_on_next_change() {
+    let account = Account::new();
+    let old = br#"{"schema_version":1,"interface":{"landing_page":"sessions"},"terminal":{"font_size":20,"scrollback":12000,"cursor_style":"bar","cursor_blink":true},"events":{"time_format":"h24","default_filter":"approvals"}}"#;
+    account.plant(old);
+    let service = account.service();
+    let view = service.read();
+    assert_eq!(view.storage, Storage::Ready);
+    assert_eq!(view.preferences.schema_version, 2);
+    assert_eq!(
+        view.preferences.interface.landing_page,
+        LandingPage::Sessions
+    );
+    assert_eq!(view.preferences.interface.theme, AppearanceTheme::Dark);
+    assert_eq!(view.preferences.terminal.font_size, 20);
+    assert_eq!(
+        view.preferences.events.default_filter,
+        EventFilter::Approvals
+    );
+    assert_eq!(fs::read(account.file()).unwrap(), old);
+
+    let mut upgraded = view.preferences;
+    upgraded.interface.theme = AppearanceTheme::HighContrast;
+    service.update(upgraded).unwrap();
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(account.file()).unwrap()).unwrap();
+    assert_eq!(saved["schema_version"], 2);
+    assert_eq!(saved["interface"]["theme"], "high_contrast");
+    assert_eq!(account.service().read().preferences, upgraded);
+}
+
+#[test]
+fn schema_one_with_unrecognized_fields_is_preserved_as_recovered_data() {
+    let account = Account::new();
+    let old_with_extra = br#"{"schema_version":1,"interface":{"landing_page":"console","auto_theme":true},"terminal":{"font_size":16,"scrollback":5000,"cursor_style":"block","cursor_blink":false},"events":{"time_format":"system","default_filter":"all"}}"#;
+    account.plant(old_with_extra);
+    let service = account.service();
+    assert_eq!(service.read().storage, Storage::Recovered);
+    assert_eq!(fs::read(account.rejected()).unwrap(), old_with_extra);
+}
+
+#[test]
 fn the_file_and_its_directory_are_private() {
     let account = Account::new();
     account.service().update(changed()).unwrap();
@@ -217,7 +260,7 @@ fn the_saved_file_is_versioned_and_holds_nothing_but_preferences() {
     account.service().update(changed()).unwrap();
     let value: serde_json::Value =
         serde_json::from_slice(&fs::read(account.file()).unwrap()).unwrap();
-    assert_eq!(value["schema_version"], 1);
+    assert_eq!(value["schema_version"], 2);
     assert_eq!(value, serde_json::to_value(changed()).unwrap());
 }
 
@@ -280,10 +323,10 @@ fn every_bound_is_enforced_by_rust() {
 }
 
 #[test]
-fn a_set_of_another_version_is_refused() {
+fn an_unsupported_set_version_is_refused() {
     let account = Account::new();
     let service = account.service();
-    for version in [0, 2, u32::MAX] {
+    for version in [0, 3, u32::MAX] {
         let next = Preferences {
             schema_version: version,
             ..Preferences::default()
@@ -309,6 +352,11 @@ fn every_kind_of_damaged_file_falls_back_to_defaults_and_is_set_aside() {
     word["interface"]["landing_page"] = "settings".into();
     let mut missing = serde_json::to_value(Preferences::default()).unwrap();
     missing.as_object_mut().unwrap().remove("terminal");
+    let mut missing_theme = serde_json::to_value(Preferences::default()).unwrap();
+    missing_theme["interface"]
+        .as_object_mut()
+        .unwrap()
+        .remove("theme");
     let mut version = serde_json::to_value(Preferences::default()).unwrap();
     version["schema_version"] = "1".into();
     let mut zero = serde_json::to_value(Preferences::default()).unwrap();
@@ -336,6 +384,10 @@ fn every_kind_of_damaged_file_falls_back_to_defaults_and_is_set_aside() {
         ("unknown top field", serde_json::to_vec(&top).unwrap()),
         ("unknown word", serde_json::to_vec(&word).unwrap()),
         ("missing section", serde_json::to_vec(&missing).unwrap()),
+        (
+            "missing schema v2 theme",
+            serde_json::to_vec(&missing_theme).unwrap(),
+        ),
         ("version as text", serde_json::to_vec(&version).unwrap()),
         ("version zero", serde_json::to_vec(&zero).unwrap()),
         (
@@ -365,7 +417,7 @@ fn every_kind_of_damaged_file_falls_back_to_defaults_and_is_set_aside() {
 #[test]
 fn a_newer_schema_is_neither_reinterpreted_nor_overwritten() {
     let account = Account::new();
-    let future = br#"{"schema_version":2,"interface":{"landing_page":"console","tabs":[1,2]},"unknown":{"a":1}}"#;
+    let future = br#"{"schema_version":3,"interface":{"landing_page":"console","tabs":[1,2]},"unknown":{"a":1}}"#;
     account.plant(future);
     let service = account.service();
     let view = service.read();

@@ -123,6 +123,7 @@ afterEach(async () => {
   component = undefined;
   await flush();
   resetAppearance();
+  document.documentElement.dataset.theme = 'dark';
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -157,21 +158,27 @@ it('opens from the sidebar with every section, in order, and the defaults select
   );
 });
 
-it('does not pretend to have a light theme', async () => {
+it('offers only the closed appearance themes and does not expose policy settings', async () => {
   await show();
   const section = page().querySelector(
     '[aria-labelledby="settings-appearance"]',
   )!;
-  expect(text(section)).toContain('dark theme');
-  expect(section.querySelectorAll('select, input, button')).toHaveLength(0);
+  expect(select('setting-theme').value).toBe('dark');
+  expect(
+    Array.from(select('setting-theme').options).map((option) => option.value),
+  ).toEqual(['dark', 'light', 'high_contrast']);
+  expect(text(section)).toContain(
+    'does not change provider or approval permissions',
+  );
 });
 
-it('offers exactly seven preferences, none of them free text', async () => {
+it('offers exactly eight preferences, none of them free text', async () => {
   await show();
   const controls = Array.from(
     page().querySelectorAll<HTMLElement>('select, input, textarea'),
   );
   expect(controls.map((c) => c.id)).toEqual([
+    'setting-theme',
     'setting-landing',
     'setting-font',
     'setting-scrollback',
@@ -284,6 +291,7 @@ it('shows what was saved last time, and applies it to the terminals', async () =
   const settings = new FakeDesktopSettings(
     withPreferences((p) => ({
       ...p,
+      interface: { ...p.interface, theme: 'light' },
       terminal: {
         font_size: 20,
         scrollback: 10_000,
@@ -294,12 +302,15 @@ it('shows what was saved last time, and applies it to the terminals', async () =
     })),
   );
   await show(settings);
+  expect(select('setting-theme').value).toBe('light');
+  expect(document.documentElement.dataset.theme).toBe('light');
   expect(select('setting-font').value).toBe('20');
   expect(select('setting-scrollback').value).toBe('10000');
   expect(select('setting-cursor').value).toBe('bar');
   expect(select('setting-time').value).toBe('h12');
   expect(select('setting-filter').value).toBe('security');
   expect(currentAppearance()).toEqual({
+    theme: 'light',
     fontSize: 20,
     scrollback: 10_000,
     cursorStyle: 'bar',
@@ -307,6 +318,9 @@ it('shows what was saved last time, and applies it to the terminals', async () =
   });
   await choose('setting-font', '12');
   expect(currentAppearance().fontSize).toBe(12);
+  await choose('setting-theme', 'high_contrast');
+  expect(document.documentElement.dataset.theme).toBe('high_contrast');
+  expect(currentAppearance().theme).toBe('high_contrast');
 });
 
 it('keeps a scrollback it was handed that is not one of the steps', async () => {
@@ -323,7 +337,10 @@ it('keeps a scrollback it was handed that is not one of the steps', async () => 
 
 it('opens on the preferred view, unless the user already went somewhere', async () => {
   const settings = new FakeDesktopSettings(
-    withPreferences((p) => ({ ...p, interface: { landing_page: 'events' } })),
+    withPreferences((p) => ({
+      ...p,
+      interface: { ...p.interface, landing_page: 'events' },
+    })),
   );
   desktop(settings);
   component = mount(App, { target: document.body });
@@ -335,7 +352,10 @@ it('opens on the preferred view, unless the user already went somewhere', async 
 
   // The answer comes late and the user has already moved: they are not taken away.
   const late = new FakeDesktopSettings(
-    withPreferences((p) => ({ ...p, interface: { landing_page: 'events' } })),
+    withPreferences((p) => ({
+      ...p,
+      interface: { ...p.interface, landing_page: 'events' },
+    })),
   );
   let answer!: (value: unknown) => void;
   const inner = late.read.bind(late);
