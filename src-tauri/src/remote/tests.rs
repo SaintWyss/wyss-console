@@ -11,10 +11,11 @@ use super::{
     grants::{
         self, DAY, Grant, GrantRefused, GrantState, Held, INPUT_CLAIM_MINUTES, Profile, state_of,
     },
-    pairing::{Attempt, ConfirmRequest, MAX_ATTEMPTS, OFFER_SECONDS, Offer},
+    pairing::{Attempt, CONFIRM_SECONDS, ConfirmRequest, MAX_ATTEMPTS, OFFER_SECONDS, Offer},
     primitives::{Random, hex, hmac_sha256, same, sha256, unhex},
     request::{CHALLENGE_SECONDS, Request, StepUp, StepUpVerifier, step_up_message},
 };
+use std::cell::Cell;
 use std::sync::{Mutex, OnceLock};
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
@@ -105,6 +106,13 @@ impl HostConfirm for Silent {
         None
     }
 }
+struct LateYes(Rc<Cell<u64>>, u64);
+impl HostConfirm for LateYes {
+    fn ask(&self, _: &ConfirmRequest) -> Option<bool> {
+        self.0.set(self.1);
+        Some(true)
+    }
+}
 
 const HOST: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 type G = Gateway<MemoryJournal, Stand, Counter>;
@@ -137,7 +145,7 @@ fn enrol(g: &mut G, stand: &Stand, now: u64, key: &[u8]) -> (DeviceId, String) {
     let shown = g.begin_pairing(now);
     let a = attempt(&shown.secret_hex, key, b"transcript-1", "Santiago's phone");
     g.present_pairing(now + 5, &a).unwrap();
-    let id = g.confirm_pairing(now + 10, &Yes).unwrap();
+    let id = g.confirm_pairing(|| now + 10, &Yes).unwrap();
     let fingerprint = g.device(&id).unwrap().presence_fingerprint.clone();
     stand
         .0
@@ -420,7 +428,7 @@ fn before_the_first_offer_the_gateway_does_not_listen_and_pairing_enrols_only_on
             &test_public_keys(b"device-key-A").1,
         )
     );
-    let id = g.confirm_pairing(T0 + 2, &Yes).unwrap();
+    let id = g.confirm_pairing(|| T0 + 2, &Yes).unwrap();
     let d = g.device(&id).unwrap();
     assert_eq!(d.state, DeviceState::Active);
     assert_eq!(d.name, "phone");
@@ -450,11 +458,14 @@ fn a_refused_or_unanswered_or_late_confirmation_enrols_nothing_and_the_offer_is_
             }
         }
         assert_eq!(
-            g.confirm_pairing(T0 + 1, &Dyn(host)),
+            g.confirm_pairing(|| T0 + 1, &Dyn(host)),
             Err(Refusal::PairingRefused)
         );
         assert_eq!(g.devices().count(), 0);
-        assert_eq!(g.confirm_pairing(T0 + 2, &Yes), Err(Refusal::PairingFailed));
+        assert_eq!(
+            g.confirm_pairing(|| T0 + 2, &Yes),
+            Err(Refusal::PairingFailed)
+        );
     }
     // Two minutes is the limit, even for a yes.
     let (mut g, _) = gateway();
@@ -462,10 +473,34 @@ fn a_refused_or_unanswered_or_late_confirmation_enrols_nothing_and_the_offer_is_
     g.present_pairing(T0, &attempt(&shown.secret_hex, b"k", b"t", "p"))
         .unwrap();
     assert_eq!(
-        g.confirm_pairing(T0 + 120, &Yes),
+        g.confirm_pairing(|| T0 + 120, &Yes),
         Err(Refusal::PairingRefused)
     );
     assert_eq!(g.devices().count(), 0);
+}
+
+#[test]
+fn a_pairing_dialog_accepted_after_expiry_does_not_enrol() {
+    let (mut gateway, _) = gateway();
+    let shown = gateway.begin_pairing(T0);
+    gateway
+        .present_pairing(
+            T0,
+            &attempt(&shown.secret_hex, b"slow-phone", b"slow", "phone"),
+        )
+        .unwrap();
+    let clock = Rc::new(Cell::new(T0 + 1));
+    let answer = LateYes(clock.clone(), T0 + CONFIRM_SECONDS);
+
+    assert_eq!(
+        gateway.confirm_pairing(|| clock.get(), &answer),
+        Err(Refusal::PairingRefused)
+    );
+    assert_eq!(gateway.devices().count(), 0);
+    assert_eq!(
+        gateway.confirm_pairing(|| clock.get(), &Yes),
+        Err(Refusal::PairingFailed)
+    );
 }
 
 #[test]
@@ -709,7 +744,7 @@ fn a_revoked_key_cannot_be_enrolled_again_by_any_offer() {
     )
     .unwrap();
     assert_eq!(
-        g.confirm_pairing(T0 + 101, &Yes),
+        g.confirm_pairing(|| T0 + 101, &Yes),
         Err(Refusal::PairingRefused)
     );
     assert_eq!(
@@ -1347,7 +1382,7 @@ fn a_key_that_is_already_enrolled_is_not_enrolled_again_in_any_state() {
     let a = attempt(&shown.secret_hex, b"key-1", b"transcript-2", "again");
     g.present_pairing(T0 + 205, &a).unwrap();
     assert_eq!(
-        g.confirm_pairing(T0 + 210, &Yes),
+        g.confirm_pairing(|| T0 + 210, &Yes),
         Err(Refusal::PairingRefused)
     );
     assert_eq!(g.devices.len(), 1);
@@ -1375,7 +1410,7 @@ fn a_presence_key_cannot_be_reused_with_a_new_connection_identity() {
     );
     g.present_pairing(T0 + 101, &replacement).unwrap();
     assert_eq!(
-        g.confirm_pairing(T0 + 102, &Yes),
+        g.confirm_pairing(|| T0 + 102, &Yes),
         Err(Refusal::PairingRefused)
     );
 }
@@ -1403,7 +1438,7 @@ fn a_revoked_presence_key_cannot_be_reenrolled_with_a_new_connection_identity() 
     );
     g.present_pairing(T0 + 101, &replacement).unwrap();
     assert_eq!(
-        g.confirm_pairing(T0 + 102, &Yes),
+        g.confirm_pairing(|| T0 + 102, &Yes),
         Err(Refusal::PairingRefused)
     );
 }

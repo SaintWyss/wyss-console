@@ -198,12 +198,15 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
     /// revoked is refused, whatever the offer.
     pub fn confirm_pairing(
         &mut self,
-        now: u64,
+        clock: impl Fn() -> u64,
         host: &impl HostConfirm,
     ) -> Result<DeviceId, Refusal> {
-        let now = self.tick(now);
-        let offer = self.offer.as_mut().ok_or(Refusal::PairingFailed)?;
-        let request = offer.confirm_request().ok_or(Refusal::PairingFailed)?;
+        self.tick(clock());
+        let request = self
+            .offer
+            .as_ref()
+            .and_then(Offer::confirm_request)
+            .ok_or(Refusal::PairingFailed)?;
         // A key that is already enrolled, in any state, is not enrolled a second time: pairing again
         // would shed a device's suspicion or suspension. The host deals with the device it has.
         let proposed_fingerprints = [
@@ -221,10 +224,20 @@ impl<J: Journal, V: StepUpVerifier, R: Random> Gateway<J, V, R> {
             })
         });
         if key_already_used {
-            offer.cancel();
+            if let Some(offer) = self.offer.as_mut() {
+                offer.cancel();
+            }
             return Err(Refusal::PairingRefused);
         }
-        let enrolment = offer.confirm(now, host.ask(&request))?;
+        let answer = host.ask(&request);
+        // The dialog may remain open past the offer's lifetime. Read the trusted clock again
+        // after the owner answers so a stale pre-dialog timestamp cannot authorize enrolment.
+        let now = self.tick(clock());
+        let enrolment = self
+            .offer
+            .as_mut()
+            .ok_or(Refusal::PairingFailed)?
+            .confirm(now, answer)?;
         let grants =
             grants::give_profile(Profile::Lp1, now, 30).map_err(|_| Refusal::PairingRefused)?;
         let mut id = [0_u8; 16];
