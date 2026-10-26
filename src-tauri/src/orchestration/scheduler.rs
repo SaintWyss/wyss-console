@@ -673,6 +673,7 @@ pub struct Coordinator {
     journal: Arc<RunJournal>,
     authority: Arc<dyn ManagedAuthority>,
     plans: Mutex<HashMap<String, ActivePlan>>,
+    admission: Mutex<()>,
     started: Mutex<HashMap<(String, String), Instant>>,
     round_robin: Mutex<usize>,
 }
@@ -690,6 +691,7 @@ impl Coordinator {
             journal,
             authority,
             plans: Mutex::new(HashMap::new()),
+            admission: Mutex::new(()),
             started: Mutex::new(HashMap::new()),
             round_robin: Mutex::new(0),
         })
@@ -705,13 +707,40 @@ impl Coordinator {
         if !review.matches(&plan) {
             return Err(CoordinatorError::ReviewStale);
         }
-        let identity = workspace_identity(std::path::Path::new(&plan.workspace_root))
+        // Serialize claim admission through insertion of the volatile plan. SQLite's
+        // equality-only workspace claim is not sufficient for nested roots.
+        let _admission = self
+            .admission
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let canonical = std::fs::canonicalize(&plan.workspace_root)
+            .map_err(|_| CoordinatorError::WorkspaceConflict)?;
+        let identity = workspace_identity(&canonical)
             .map_err(|_| CoordinatorError::InvalidPlan)?;
-        let revision = workspace_revision(std::path::Path::new(&plan.workspace_root))
+        let revision = workspace_revision(&canonical)
             .map_err(|_| CoordinatorError::InvalidPlan)?;
         if identity != plan.workspace_id || revision != plan.workspace_revision {
             return Err(CoordinatorError::WorkspaceConflict);
         }
+        let claims = self.journal.claimed_workspaces().map_err(map_journal)?;
+        let plans = self.plans.lock().unwrap_or_else(PoisonError::into_inner);
+        for (run_id, _identity) in claims {
+            if let Some(active) = plans.get(&run_id) {
+                if active.plan.plan_id == plan.plan_id {
+                    continue; // The journal separately validates exact idempotent replay.
+                }
+                let existing = std::fs::canonicalize(&active.plan.workspace_root)
+                    .map_err(|_| CoordinatorError::WorkspaceConflict)?;
+                if canonical.starts_with(&existing) || existing.starts_with(&canonical) {
+                    return Err(CoordinatorError::WorkspaceConflict);
+                }
+            } else {
+                // A recovered claim still protects an ambiguous effect, but its root
+                // is deliberately not persisted. Never infer non-overlap from digests.
+                return Err(CoordinatorError::WorkspaceConflict);
+            }
+        }
+        drop(plans);
         let mut run = self
             .journal
             .create_run(&plan, &review, now)
@@ -1036,6 +1065,35 @@ impl Coordinator {
     }
 
     fn expire_paused(&self, run: &CoordinatorSnapshot, now: u64) -> Result<(), CoordinatorError> {
+        if run.steps.iter().any(|step| step.state == StepState::Verifying) {
+            for step in &run.steps {
+                if step.state == StepState::Verifying {
+                    self.journal
+                        .set_step_state(
+                            &run.run_id,
+                            &step.step_id,
+                            StepState::Verifying,
+                            StepState::NeedsReview,
+                            Some(FailureCode::PlanExpired),
+                            now,
+                        )
+                        .map_err(map_journal)?;
+                }
+            }
+            let current = self.get(&run.run_id)?;
+            if current.state == RunState::Paused {
+                self.journal
+                    .set_run_state(
+                        &current.run_id,
+                        current.revision,
+                        RunState::NeedsReview,
+                        Some(FailureCode::PlanExpired),
+                        now,
+                    )
+                    .map_err(map_journal)?;
+            }
+            return Ok(());
+        }
         for step in &run.steps {
             if !step.state.terminal() {
                 self.journal
@@ -1291,11 +1349,32 @@ impl Coordinator {
         {
             return Ok(run);
         }
-        let has_live_plan = self
-            .plans
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .contains_key(run_id);
+        let (has_live_plan, plan_expired) = {
+            let plans = self.plans.lock().unwrap_or_else(PoisonError::into_inner);
+            (
+                plans.contains_key(run_id),
+                plans
+                    .get(run_id)
+                    .is_some_and(|active| now >= active.plan.expires_at_unix),
+            )
+        };
+        if plan_expired {
+            for step in &run.steps {
+                if !step.state.terminal() {
+                    self.journal
+                        .set_step_state(
+                            run_id,
+                            &step.step_id,
+                            step.state,
+                            StepState::Cancelled,
+                            Some(FailureCode::PlanExpired),
+                            now,
+                        )
+                        .map_err(map_journal)?;
+                }
+            }
+        }
+        let run = self.get(run_id)?;
         let required_failed = run.steps.iter().any(|step| {
             step.required && matches!(step.state, StepState::Failed | StepState::Blocked)
         });
@@ -1307,7 +1386,7 @@ impl Coordinator {
             RunState::Failed
         } else if required_cancelled {
             RunState::Cancelled
-        } else if has_live_plan {
+        } else if has_live_plan && !plan_expired {
             // The in-memory immutable plan still exists, so the owner resolved each ambiguous
             // effect and the ordinary dependency scheduler may continue.
             RunState::Running
@@ -1387,6 +1466,72 @@ impl Coordinator {
         }
     }
 
+    /// A terminal/paused review fence expires independently of other running work.
+    /// An executed effect never becomes an unreviewed "cancelled" effect.
+    fn expire_inactive(
+        &self,
+        run: &CoordinatorSnapshot,
+        now: u64,
+    ) -> Result<(), CoordinatorError> {
+        if run.state == RunState::Paused {
+            return self.expire_paused(run, now);
+        }
+        if !matches!(
+            run.state,
+            RunState::Running | RunState::Pausing | RunState::Cancelling
+        ) {
+            return Ok(());
+        }
+        if let Some(verifying) = run
+            .steps
+            .iter()
+            .find(|step| step.state == StepState::Verifying)
+        {
+            self.journal
+                .set_step_state(
+                    &run.run_id,
+                    &verifying.step_id,
+                    StepState::Verifying,
+                    StepState::NeedsReview,
+                    Some(FailureCode::PlanExpired),
+                    now,
+                )
+                .map_err(map_journal)?;
+            return Ok(());
+        }
+        if run.state == RunState::Cancelling {
+            self.cancel_unstarted(&run.run_id, now)?;
+            return Ok(());
+        }
+        for step in &run.steps {
+            if !step.state.terminal() {
+                self.journal
+                    .set_step_state(
+                        &run.run_id,
+                        &step.step_id,
+                        step.state,
+                        StepState::Cancelled,
+                        Some(FailureCode::PlanExpired),
+                        now,
+                    )
+                    .map_err(map_journal)?;
+            }
+        }
+        let current = self.get(&run.run_id)?;
+        if matches!(current.state, RunState::Running | RunState::Pausing) {
+            self.journal
+                .set_run_state(
+                    &current.run_id,
+                    current.revision,
+                    RunState::Expired,
+                    Some(FailureCode::PlanExpired),
+                    now,
+                )
+                .map_err(map_journal)?;
+        }
+        Ok(())
+    }
+
     /// Performs one bounded scheduling observation. Called from the headless daemon loop.
     pub fn tick(&self, now: u64) -> Result<(), CoordinatorError> {
         let runs = self.journal.list(128).map_err(map_journal)?;
@@ -1408,13 +1553,28 @@ impl Coordinator {
                 .unwrap_or_else(PoisonError::into_inner)
                 .contains_key(&run.run_id)
         });
+        // Deadlines are per run, not blocked by the global Managed execution slot.
+        // Service all inactive/verification/paused deadlines before polling the live turn.
+        for run in &ordered {
+            if now >= plan_deadline(&self.plans, &run.run_id).unwrap_or(0)
+                && !run.steps.iter().any(|step| {
+                    matches!(step.state, StepState::Starting | StepState::Running)
+                })
+            {
+                self.expire_inactive(run, now)?;
+            }
+        }
+        let ordered = ordered
+            .iter()
+            .map(|run| self.get(&run.run_id))
+            .collect::<Result<Vec<_>, _>>()?;
         // Exactly one current Managed turn is allowed globally. Poll it before considering a
         // new dispatch; another run can never race it into the authority.
         if let Some((run, step)) = ordered.iter().find_map(|run| {
             run.steps
                 .iter()
                 .find(|s| matches!(s.state, StepState::Starting | StepState::Running))
-                .map(|step| (*run, step))
+                .map(|step| (run, step))
         }) {
             if now >= plan_deadline(&self.plans, &run.run_id).unwrap_or(0) {
                 return self.expire_active(run, step, now);
@@ -1435,61 +1595,6 @@ impl Coordinator {
                 run.state,
                 RunState::Running | RunState::Pausing | RunState::Cancelling
             ) {
-                continue;
-            }
-            // Completed effects are not cancelled just because review is pending.
-            // Preserve their workspace claim; an expired verification needs owner review.
-            if let Some(verifying) = run
-                .steps
-                .iter()
-                .find(|step| step.state == StepState::Verifying)
-            {
-                if now >= plan_deadline(&self.plans, &run.run_id).unwrap_or(0) {
-                    self.journal
-                        .set_step_state(
-                            &run.run_id,
-                            &verifying.step_id,
-                            StepState::Verifying,
-                            StepState::NeedsReview,
-                            Some(FailureCode::PlanExpired),
-                            now,
-                        )
-                        .map_err(map_journal)?;
-                }
-                continue;
-            }
-            if now >= plan_deadline(&self.plans, &run.run_id).unwrap_or(0) {
-                let fresh = self.get(&run.run_id)?;
-                if fresh.state == RunState::Cancelling {
-                    self.cancel_unstarted(&fresh.run_id, now)?;
-                    continue;
-                }
-                for step in &fresh.steps {
-                    if !step.state.terminal() {
-                        self.journal
-                            .set_step_state(
-                                &fresh.run_id,
-                                &step.step_id,
-                                step.state,
-                                StepState::Cancelled,
-                                Some(FailureCode::PlanExpired),
-                                now,
-                            )
-                            .map_err(map_journal)?;
-                    }
-                }
-                let fresh = self.get(&run.run_id)?;
-                if matches!(fresh.state, RunState::Running | RunState::Pausing) {
-                    self.journal
-                        .set_run_state(
-                            &fresh.run_id,
-                            fresh.revision,
-                            RunState::Expired,
-                            Some(FailureCode::PlanExpired),
-                            now,
-                        )
-                        .map_err(map_journal)?;
-                }
                 continue;
             }
             self.update_dependencies(&run.run_id, now)?;
@@ -2151,7 +2256,6 @@ impl Coordinator {
                     | StepState::WaitingResource
                     | StepState::AwaitingPermission
                     | StepState::Queued
-                    | StepState::Verifying
             ) {
                 self.journal
                     .set_step_state(
@@ -3094,6 +3198,169 @@ mod tests {
         assert_eq!(authority.starts.load(Ordering::SeqCst), 2);
         fs::remove_dir_all(root_a).unwrap();
         fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn completed_effect_paused_at_expiry_stays_needs_review_with_claim() {
+        let root = root();
+        let (coordinator, _journal, authority) = coordinator(&root);
+        let draft = plan(
+            &root,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        let run = coordinator.submit(draft.clone(), review(&draft), 100).unwrap();
+        coordinator.tick(101).unwrap();
+        *authority.observation.lock().unwrap() = TurnObservation {
+            state: TurnState::Completed,
+            reason: None,
+            revision: 2,
+        };
+        coordinator.tick(102).unwrap();
+        assert_eq!(coordinator.pause(&run.run_id, 103).unwrap().state, RunState::Paused);
+        coordinator.tick(400).unwrap();
+        let held = coordinator.get(&run.run_id).unwrap();
+        assert_eq!(held.state, RunState::NeedsReview);
+        assert_eq!(held.steps[0].state, StepState::NeedsReview);
+        assert_eq!(held.steps[0].failure, Some(FailureCode::PlanExpired));
+
+        let mut other = plan(
+            &root,
+            vec![step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![])],
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        );
+        other.expires_at_unix = 600;
+        other.limits.max_total_seconds = 500;
+        assert_eq!(
+            coordinator.submit(other.clone(), review(&other), 401).unwrap_err(),
+            CoordinatorError::WorkspaceConflict
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stop_does_not_cancel_or_release_a_completed_unverified_effect() {
+        let root = root();
+        let (coordinator, _journal, authority) = coordinator(&root);
+        let draft = plan(
+            &root,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bb8-bbbbbbbbbbbb",
+        );
+        let run = coordinator.submit(draft.clone(), review(&draft), 100).unwrap();
+        coordinator.tick(101).unwrap();
+        *authority.observation.lock().unwrap() = TurnObservation {
+            state: TurnState::Completed,
+            reason: None,
+            revision: 2,
+        };
+        coordinator.tick(102).unwrap();
+        let stopped = coordinator.stop(&run.run_id, 103).unwrap();
+        assert_eq!(stopped.state, RunState::Cancelling);
+        assert_eq!(stopped.steps[0].state, StepState::Verifying);
+        let next = plan(
+            &root,
+            vec![step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![])],
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        );
+        assert_eq!(
+            coordinator.submit(next.clone(), review(&next), 104).unwrap_err(),
+            CoordinatorError::WorkspaceConflict
+        );
+        let reviewed = coordinator
+            .verify_step(&run.run_id, &draft.steps[0].step_id, &workspace_revision(&root).unwrap(), 105)
+            .unwrap();
+        assert_eq!(reviewed.state, RunState::Cancelled);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn active_managed_turn_does_not_starve_another_workspaces_expired_review() {
+        let root_a = root();
+        let root_b = root();
+        let (coordinator, _journal, authority) = coordinator(&root_a);
+        *authority.second_root.lock().unwrap() = Some(root_b.clone());
+        let mut first = plan(
+            &root_a,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        first.expires_at_unix = 120;
+        first.limits.max_total_seconds = 20;
+        let a = coordinator.submit(first.clone(), review(&first), 100).unwrap();
+        coordinator.tick(101).unwrap();
+        *authority.observation.lock().unwrap() = TurnObservation {
+            state: TurnState::Completed,
+            reason: None,
+            revision: 2,
+        };
+        coordinator.tick(102).unwrap();
+
+        let mut second_step = step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![]);
+        second_step.managed_session_id = Some(SECOND_SESSION.into());
+        let second = plan(
+            &root_b,
+            vec![second_step],
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        );
+        let b = coordinator.submit(second.clone(), review(&second), 103).unwrap();
+        coordinator.tick(104).unwrap();
+        *authority.observation.lock().unwrap() = TurnObservation {
+            state: TurnState::Running,
+            reason: None,
+            revision: 2,
+        };
+        coordinator.tick(120).unwrap();
+        assert_eq!(coordinator.get(&a.run_id).unwrap().state, RunState::NeedsReview);
+        assert_eq!(coordinator.get(&a.run_id).unwrap().steps[0].state, StepState::NeedsReview);
+        assert!(matches!(
+            coordinator.get(&b.run_id).unwrap().steps[0].state,
+            StepState::Starting | StepState::Running
+        ));
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 2);
+        fs::remove_dir_all(root_a).unwrap();
+        fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn parent_child_workspace_claims_conflict_in_both_admission_orders() {
+        for parent_first in [true, false] {
+            let root = root();
+            let child = root.join("child");
+            fs::create_dir(&child).unwrap();
+            let (coordinator, _journal, authority) = coordinator(&root);
+            *authority.second_root.lock().unwrap() = Some(child.clone());
+            let parent = plan(
+                &root,
+                vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            );
+            let mut child_step = step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![]);
+            child_step.managed_session_id = Some(SECOND_SESSION.into());
+            let nested = plan(
+                &child,
+                vec![child_step],
+                "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            );
+            let (first, second) = if parent_first { (&parent, &nested) } else { (&nested, &parent) };
+            let accepted = coordinator.submit(first.clone(), review(first), 100).unwrap();
+            coordinator.tick(101).unwrap();
+            *authority.observation.lock().unwrap() = TurnObservation {
+                state: TurnState::Completed,
+                reason: None,
+                revision: 2,
+            };
+            coordinator.tick(102).unwrap();
+            assert_eq!(
+                coordinator.get(&accepted.run_id).unwrap().steps[0].state,
+                StepState::Verifying
+            );
+            assert_eq!(
+                coordinator.submit(second.clone(), review(second), 103).unwrap_err(),
+                CoordinatorError::WorkspaceConflict
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]
