@@ -1217,14 +1217,13 @@ impl Coordinator {
         let current_root = std::fs::canonicalize(&plan.workspace_root)
             .map_err(|_| CoordinatorError::WorkspaceConflict)?;
         if current_root != claimed_root
-            || workspace_identity(&current_root)
-                .map_err(|_| CoordinatorError::WorkspaceConflict)?
+            || workspace_identity(&current_root).map_err(|_| CoordinatorError::WorkspaceConflict)?
                 != plan.workspace_id
         {
             return Err(CoordinatorError::WorkspaceConflict);
         }
-        let actual = workspace_revision(&current_root)
-            .map_err(|_| CoordinatorError::WorkspaceConflict)?;
+        let actual =
+            workspace_revision(&current_root).map_err(|_| CoordinatorError::WorkspaceConflict)?;
         if actual != reviewed_workspace_revision {
             return Err(CoordinatorError::WorkspaceConflict);
         }
@@ -2377,7 +2376,7 @@ mod tests {
     };
     use std::{
         fs,
-        os::unix::fs::{symlink, PermissionsExt},
+        os::unix::fs::{PermissionsExt, symlink},
         path::Path,
         sync::atomic::{AtomicUsize, Ordering},
     };
