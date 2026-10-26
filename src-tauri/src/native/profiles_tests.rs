@@ -311,6 +311,38 @@ fn an_effort_is_passed_the_way_each_agent_documents_and_claude_only_takes_its_ow
 }
 
 #[test]
+fn opencode_profiles_pass_only_the_v1194_model_flag_and_refuse_unqualified_controls() {
+    let with_model = super::profile::plan(
+        &resolved(None, Some("openai/gpt-test")),
+        AgentId::Opencode,
+        true,
+    );
+    assert_eq!(words(&with_model), ["--model", "openai/gpt-test"]);
+    assert!(with_model.not_applicable.is_empty());
+
+    let mut unsupported = body("OpenCode profile");
+    unsupported.applies_to = vec![AgentId::Opencode];
+    unsupported.permission = Some(Permission::ReadOnly);
+    unsupported.hooks = Some(HooksMode::Off);
+    unsupported.skills_off = vec!["skill".to_owned()];
+    let unsupported = super::profile::plan(
+        &super::profile::merge(&[("p".into(), unsupported)]),
+        AgentId::Opencode,
+        true,
+    );
+    assert_eq!(words(&unsupported), Vec::<String>::new());
+    assert_eq!(unsupported.not_applicable.len(), 3);
+
+    let hermes = super::profile::plan(
+        &resolved(None, Some("provider/model")),
+        AgentId::Hermes,
+        true,
+    );
+    assert!(words(&hermes).is_empty());
+    assert!(!hermes.not_applicable.is_empty());
+}
+
+#[test]
 fn an_effort_is_inherited_like_a_model_and_the_nearer_profile_wins() {
     let mut parent = body("parent");
     parent.effort = Some("low".into());

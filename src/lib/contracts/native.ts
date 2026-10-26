@@ -9,7 +9,12 @@
 import type { TerminalInfo } from './terminal';
 import { parseTerminalId } from './identities';
 
-export const AGENT_IDS = ['claude_code', 'codex'] as const;
+export const AGENT_IDS = [
+  'claude_code',
+  'codex',
+  'opencode',
+  'hermes',
+] as const;
 export type AgentId = (typeof AGENT_IDS)[number];
 
 export const SESSION_STATES = [

@@ -121,8 +121,9 @@
   <p class="native-note">
     A profile says what one session should start with. It is applied when the
     session starts and changes no global file: your Claude Code and Codex
-    settings stay as they are. A profile holds names and choices, never a
-    secret.
+    settings stay as they are. OpenCode and Hermes Native retain their own
+    controls; unsupported profile fields are refused. A profile holds names and
+    choices, never a secret.
   </p>
   {#if native.failure}
     <p class="sessions-status failed" role="alert">

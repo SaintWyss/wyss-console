@@ -52,6 +52,8 @@ fn agent_word(agent: AgentId) -> &'static str {
     match agent {
         AgentId::ClaudeCode => "claude_code",
         AgentId::Codex => "codex",
+        AgentId::Opencode => "opencode",
+        AgentId::Hermes => "hermes",
     }
 }
 
@@ -75,7 +77,7 @@ fn current_evidence(
     let entry = launcher_agent(link, agent)?;
     let version = entry["path"]
         .as_str()
-        .and_then(|path| catalogue::probe_version(std::path::Path::new(path)));
+        .and_then(|path| catalogue::probe_provider_version(agent, std::path::Path::new(path)));
     let evidence = capabilities::evidence(agent, version.as_deref());
     Ok((evidence, version))
 }
@@ -174,7 +176,7 @@ fn annotate_launcher(mut launcher: Value) -> Result<Value, HostError> {
             .map_err(|_| HostError::new("internal"))?;
         let version = entry["path"]
             .as_str()
-            .and_then(|path| catalogue::probe_version(std::path::Path::new(path)));
+            .and_then(|path| catalogue::probe_provider_version(agent, std::path::Path::new(path)));
         entry["version"] = version.clone().map_or(Value::Null, Value::String);
         let evidence = capabilities::evidence(agent, version.as_deref());
         entry["profile_capability"] =

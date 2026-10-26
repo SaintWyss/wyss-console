@@ -14,6 +14,8 @@ export type Tone = 'ok' | 'pending' | 'warn' | 'error' | 'idle';
 export const AGENT_LABEL: Record<AgentId, string> = {
   claude_code: 'Claude Code',
   codex: 'Codex',
+  opencode: 'OpenCode',
+  hermes: 'Hermes Agent (Native)',
 };
 
 /** A restart's new session is "restarting" until its process runs. */
@@ -60,6 +62,8 @@ export const FAILURE_TEXT: Record<string, string> = {
     'The profile changed after its preview. Review the new preview and start again.',
   provider_version_unverified:
     'This exact provider build is not verified for profile overrides, so the override was not launched. Choose “No profile — as configured” or use a qualified build.',
+  handoff_target_unverified:
+    'Hermes Native does not have a verified interactive handoff argument. It was not started with this brief.',
   brief_invalid:
     'The brief must start with a “# ” heading, hold no NUL and be at most 16 KiB.',
   limit_reached:
@@ -184,7 +188,11 @@ export function modelFacts(
   let configuredEffort = configured;
   if (config !== null) {
     const provider =
-      session.agent_id === 'claude_code' ? 'claude_code' : 'codex';
+      session.agent_id === 'claude_code'
+        ? 'claude_code'
+        : session.agent_id === 'codex'
+          ? 'codex'
+          : null;
     const keyed = (key: string): string | null => {
       const item = config.find(
         (i) =>
@@ -197,12 +205,17 @@ export function modelFacts(
       return item?.detail?.kind === 'text' ? item.detail.value.text : null;
     };
     // Each agent names its effort key its own way.
-    const effortKey =
-      session.agent_id === 'claude_code'
-        ? 'effortLevel'
-        : 'model_reasoning_effort';
-    configured = keyed('model') ?? 'not set in its files';
-    configuredEffort = keyed(effortKey) ?? 'not set in its files';
+    if (provider) {
+      const effortKey =
+        session.agent_id === 'claude_code'
+          ? 'effortLevel'
+          : 'model_reasoning_effort';
+      configured = keyed('model') ?? 'not set in its files';
+      configuredEffort = keyed(effortKey) ?? 'not set in its files';
+    } else {
+      configured = configuredEffort =
+        'not observed by this provider configuration view';
+    }
   }
   return {
     requested,
@@ -219,9 +232,15 @@ export function modelFacts(
  * verified, so none is offered. The text sends nothing to the terminal and copies nothing.
  */
 export function switchHint(agent: AgentId): string {
-  return agent === 'claude_code'
-    ? 'To change the model in this session, type /model in it. Claude Code also saves your choice as its default.'
-    : 'How to change the model of a running Codex session is not verified, so none is suggested.';
+  switch (agent) {
+    case 'claude_code':
+      return 'To change the model in this session, type /model in it. Claude Code also saves your choice as its default.';
+    case 'codex':
+      return 'How to change the model of a running Codex session is not verified, so none is suggested.';
+    case 'opencode':
+    case 'hermes':
+      return 'How to change the model in a running session is not verified, so none is suggested.';
+  }
 }
 
 export function profilesFor(profiles: Profile[], agent: AgentId): Profile[] {

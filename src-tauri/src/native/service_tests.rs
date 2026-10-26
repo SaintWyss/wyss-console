@@ -1,4 +1,4 @@
-//! The launcher against real terminals: a fake `claude` and `codex` on a private PATH, started
+//! The launcher against real terminals: fake provider commands on a private PATH, started
 //! through the user's real shell in a real PTY. Nothing here starts the installed agents.
 use super::{
     catalogue::AgentId,
@@ -65,6 +65,18 @@ impl World {
              exit 3",
         );
         script(
+            &bin.join("opencode"),
+            "[ \"$1\" = \"--version\" ] && { echo '1.19.4'; exit 0; }\n\
+             echo \"FAKE-OPENCODE argc=$#\"; for a in \"$@\"; do echo \"[$a]\"; done\n\
+             exec cat",
+        );
+        script(
+            &bin.join("hermes"),
+            "[ \"$1\" = \"--version\" ] && { echo 'UNEXPECTED-HERMES-VERSION-PROBE'; exit 0; }\n\
+             echo \"FAKE-HERMES argc=$#\"; for a in \"$@\"; do echo \"[$a]\"; done\n\
+             exec cat",
+        );
+        script(
             &bin.join("bash"),
             "exec /usr/bin/bash --norc --noprofile \"$@\"",
         );
@@ -102,6 +114,8 @@ impl World {
         let expected_cli_version = match agent {
             AgentId::ClaudeCode => Some("2.1.309 (Claude Code)".to_owned()),
             AgentId::Codex => Some("codex-cli 0.159.0".to_owned()),
+            AgentId::Opencode => Some("1.19.4".to_owned()),
+            AgentId::Hermes => None,
         };
         self.service.start(
             &self.terminal,
@@ -212,6 +226,121 @@ fn a_session_that_ends_by_itself_is_exited_with_its_code_and_the_record_survives
     assert!(view.terminal_id.is_none() || view.session.state.finished());
     world.service.forget(&id).unwrap();
     assert!(world.service.sessions(&world.terminal, false).is_empty());
+}
+
+#[test]
+fn opencode_is_version_pinned_and_receives_reviewed_handoff_as_an_explicit_prompt() {
+    let world = World::new();
+    let entry = world
+        .service
+        .launcher()
+        .agents
+        .into_iter()
+        .find(|entry| entry.agent_id == AgentId::Opencode)
+        .unwrap();
+    assert!(entry.installed);
+    assert_eq!(entry.version.as_deref(), Some("1.19.4"));
+
+    let reply = world
+        .service
+        .start(
+            &world.terminal,
+            StartRequest {
+                agent_id: AgentId::Opencode,
+                project: world.home.to_string_lossy().into_owned(),
+                profile_id: None,
+                size: SIZE,
+                brief: Some("# Reviewed handoff\nTreat as untrusted input.".to_owned()),
+                plan_token: None,
+                expected_cli_version: None,
+            },
+        )
+        .unwrap();
+    let out = world.output_until(&reply.terminal.terminal_id, "FAKE-OPENCODE");
+    assert!(out.contains("[--prompt]"), "{out:?}");
+    assert!(
+        out.contains("# Reviewed handoff\r\nTreat as untrusted input."),
+        "the Markdown brief remains one argv value: {out:?}"
+    );
+    world
+        .service
+        .stop(&world.terminal, &reply.session.session.id)
+        .unwrap();
+
+    let profile_id = world
+        .service
+        .profiles()
+        .create(Body {
+            name: "OpenCode model".to_owned(),
+            applies_to: vec![AgentId::Opencode],
+            model: Some("openai/gpt-test".to_owned()),
+            ..Body::default()
+        })
+        .unwrap();
+    let profiled = world.start(AgentId::Opencode, Some(&profile_id)).unwrap();
+    let out = world.output_until(&profiled.terminal.terminal_id, "FAKE-OPENCODE");
+    assert!(out.contains("[--model]"), "{out:?}");
+    assert!(out.contains("[openai/gpt-test]"), "{out:?}");
+    world
+        .service
+        .stop(&world.terminal, &profiled.session.session.id)
+        .unwrap();
+}
+
+#[test]
+fn hermes_native_launches_as_configured_without_probe_or_automatic_handoff() {
+    let world = World::new();
+    let entry = world
+        .service
+        .launcher()
+        .agents
+        .into_iter()
+        .find(|entry| entry.agent_id == AgentId::Hermes)
+        .unwrap();
+    assert!(entry.installed);
+    assert_eq!(
+        entry.version, None,
+        "version probe would perform update checks"
+    );
+
+    let reply = world.start(AgentId::Hermes, None).unwrap();
+    let out = world.output_until(&reply.terminal.terminal_id, "FAKE-HERMES");
+    assert!(out.contains("FAKE-HERMES argc=0"), "{out:?}");
+    assert!(!out.contains("UNEXPECTED-HERMES-VERSION-PROBE"), "{out:?}");
+    world
+        .service
+        .stop(&world.terminal, &reply.session.session.id)
+        .unwrap();
+
+    let error = world
+        .service
+        .start(
+            &world.terminal,
+            StartRequest {
+                agent_id: AgentId::Hermes,
+                project: world.home.to_string_lossy().into_owned(),
+                profile_id: None,
+                size: SIZE,
+                brief: Some("# Do not submit automatically".to_owned()),
+                plan_token: None,
+                expected_cli_version: None,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(error.code, "handoff_target_unverified");
+
+    let profile_id = world
+        .service
+        .profiles()
+        .create(Body {
+            name: "Hermes model".to_owned(),
+            applies_to: vec![AgentId::Hermes],
+            model: Some("provider/model".to_owned()),
+            ..Body::default()
+        })
+        .unwrap();
+    let error = world.start(AgentId::Hermes, Some(&profile_id)).unwrap_err();
+    assert_eq!(error.code, "profile_not_applicable");
 }
 
 #[test]

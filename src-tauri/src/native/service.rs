@@ -284,7 +284,9 @@ impl NativeService {
             .iter()
             .map(|spec| {
                 let path = catalogue::discover(spec, self.inner.path_var.clone(), &self.inner.home);
-                let version = path.as_deref().and_then(catalogue::probe_version);
+                let version = path
+                    .as_deref()
+                    .and_then(|path| catalogue::probe_provider_version(spec.id, path));
                 CatalogueEntry {
                     agent_id: spec.id,
                     name: spec.name,
@@ -514,10 +516,9 @@ impl NativeService {
                 return Err(NativeError::new("provider_version_unverified"));
             }
             if recipe::family(&shell).is_none() {
-                let installed_version = agent
-                    .path
-                    .as_deref()
-                    .and_then(|path| catalogue::probe_version(Path::new(path)));
+                let installed_version = agent.path.as_deref().and_then(|path| {
+                    catalogue::probe_provider_version(request.agent_id, Path::new(path))
+                });
                 if installed_version.as_deref() != Some(version) {
                     return Err(NativeError::new("provider_version_unverified"));
                 }
@@ -543,7 +544,14 @@ impl NativeService {
             if brief.len() > MAX_BRIEF || !brief.starts_with("# ") || brief.contains('\0') {
                 return Err(NativeError::new("brief_invalid"));
             }
-            words.push(brief.clone());
+            match request.agent_id {
+                AgentId::Opencode => {
+                    words.push("--prompt".to_owned());
+                    words.push(brief.clone());
+                }
+                AgentId::Hermes => return Err(NativeError::new("handoff_target_unverified")),
+                AgentId::ClaudeCode | AgentId::Codex => words.push(brief.clone()),
+            }
         }
         if let Some(overlay) = &plan.overlay {
             let write = || -> std::io::Result<()> {
