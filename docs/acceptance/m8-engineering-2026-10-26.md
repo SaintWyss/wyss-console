@@ -116,14 +116,20 @@ the M8 roadmap DoD.
 - `npm run scan:repo` passed 5/5 checks over the tracked repository, and
   `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` passed on
   `f97c67d`.
-- Exact-head M1–M5 Rust/integration and Android Gradle/JUnit Actions are
-  pending for `f97c67d`; results will be recorded here after completion. The
-  successful earlier-head runs listed above do not substitute for those
-  final-head runs.
+- On current PR head `6ecac0f7b0e5b0f9a95b6f3968e31bf3a7984c6c` (docs-only
+  commit after code head `f97c67d2ec533d1c4330fa6fdebfc189f5921571`), M1–M5
+  integration workflow [40325714895](https://github.com/SaintWyss/wyss-console/actions/runs/40325714895)
+  passed both `frontend-and-contracts` and `rust-core-and-v9`, including
+  repository scan, formatting, Clippy, focused V9 and credential handoff,
+  B1 process, default-feature and all-feature Rust regressions. Android
+  build/JUnit workflow [40325714823](https://github.com/SaintWyss/wyss-console/actions/runs/40325714823)
+  also passed on that exact PR head. These are deterministic CI results; they
+  do not establish physical-device or provider acceptance.
 - A final static Sol High review of `64f5bc6..f97c67d` found no actionable
   code, security or architecture findings. It identified the stale baseline
-  text corrected above. Static review is not GitHub approval, hardware/provider
-  acceptance or production acceptance.
+  text corrected above; its follow-up on `6ecac0f` confirmed the correction and
+  found no other evidence mismatch. Static review is not GitHub approval,
+  hardware/provider acceptance or production acceptance.
 
 ## Requirement status
 
@@ -131,7 +137,7 @@ the M8 roadmap DoD.
 | ------------------------------------------------------------------------------ | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Three desktop themes and preference migration                                  | IMPLEMENTED, TESTED                                      | Closed schema/enum, exact v1-to-v2 migration, unknown-shape refusal and full frontend suite.                                                                                                               |
 | Theme semantic contrast and terminal ANSI palette                              | IMPLEMENTED, TESTED                                      | Deterministic CSS and ANSI ratio tests pass; this does not establish assistive-technology usability.                                                                                                       |
-| Native Android theme preference                                                | IMPLEMENTED, DETERMINISTIC CI TESTED / DEVICE NOT_PROVEN | Native UI/storage and Java unit tests added; Android CI passed on code head `15590c5`; physical rendering and touch target behavior remain untested.                                                       |
+| Native Android theme preference                                                | IMPLEMENTED, DETERMINISTIC CI TESTED / DEVICE NOT_PROVEN | Native UI/storage and Java unit tests added; final M8 Android build/JUnit workflow `40325714823` passed on PR head `6ecac0f`; physical rendering and touch target behavior remain untested.                |
 | FP-NFR-01 / M01..M33 on two reference PCs and Android                          | NOT_PROVEN                                               | No raw, provenance-bound reference-device p50/p95 measurements or approved frozen budgets were collected. Requires the two specified reference PCs, supported Android hardware and controlled repetitions. |
 | FP-NFR-02 keyboard, IME, focus, reduced motion, scale and assistive technology | PARTIAL / NOT_PROVEN                                     | Palette/contrast and existing keyboard regressions pass; real WebKitGTK, TalkBack, IME, text scaling, reduced-motion and narrow-device journeys were not exercised.                                        |
 | FP-NFR-03 update, backup, WAL recovery, rollback and power-loss matrix         | NOT_PROVEN                                               | No installed migration, backup/restore, mixed-version or rollback rehearsal was performed. Existing fixture regressions do not substitute for those operations.                                            |
