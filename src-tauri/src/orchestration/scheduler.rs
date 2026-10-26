@@ -715,10 +715,8 @@ impl Coordinator {
             .unwrap_or_else(PoisonError::into_inner);
         let canonical = std::fs::canonicalize(&plan.workspace_root)
             .map_err(|_| CoordinatorError::WorkspaceConflict)?;
-        let identity = workspace_identity(&canonical)
-            .map_err(|_| CoordinatorError::InvalidPlan)?;
-        let revision = workspace_revision(&canonical)
-            .map_err(|_| CoordinatorError::InvalidPlan)?;
+        let identity = workspace_identity(&canonical).map_err(|_| CoordinatorError::InvalidPlan)?;
+        let revision = workspace_revision(&canonical).map_err(|_| CoordinatorError::InvalidPlan)?;
         if identity != plan.workspace_id || revision != plan.workspace_revision {
             return Err(CoordinatorError::WorkspaceConflict);
         }
@@ -1065,7 +1063,11 @@ impl Coordinator {
     }
 
     fn expire_paused(&self, run: &CoordinatorSnapshot, now: u64) -> Result<(), CoordinatorError> {
-        if run.steps.iter().any(|step| step.state == StepState::Verifying) {
+        if run
+            .steps
+            .iter()
+            .any(|step| step.state == StepState::Verifying)
+        {
             for step in &run.steps {
                 if step.state == StepState::Verifying {
                     self.journal
@@ -1468,11 +1470,7 @@ impl Coordinator {
 
     /// A terminal/paused review fence expires independently of other running work.
     /// An executed effect never becomes an unreviewed "cancelled" effect.
-    fn expire_inactive(
-        &self,
-        run: &CoordinatorSnapshot,
-        now: u64,
-    ) -> Result<(), CoordinatorError> {
+    fn expire_inactive(&self, run: &CoordinatorSnapshot, now: u64) -> Result<(), CoordinatorError> {
         if run.state == RunState::Paused {
             return self.expire_paused(run, now);
         }
@@ -1557,9 +1555,10 @@ impl Coordinator {
         // Service all inactive/verification/paused deadlines before polling the live turn.
         for run in &ordered {
             if now >= plan_deadline(&self.plans, &run.run_id).unwrap_or(0)
-                && !run.steps.iter().any(|step| {
-                    matches!(step.state, StepState::Starting | StepState::Running)
-                })
+                && !run
+                    .steps
+                    .iter()
+                    .any(|step| matches!(step.state, StepState::Starting | StepState::Running))
             {
                 self.expire_inactive(run, now)?;
             }
@@ -3209,7 +3208,9 @@ mod tests {
             vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
             "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         );
-        let run = coordinator.submit(draft.clone(), review(&draft), 100).unwrap();
+        let run = coordinator
+            .submit(draft.clone(), review(&draft), 100)
+            .unwrap();
         coordinator.tick(101).unwrap();
         *authority.observation.lock().unwrap() = TurnObservation {
             state: TurnState::Completed,
@@ -3217,7 +3218,10 @@ mod tests {
             revision: 2,
         };
         coordinator.tick(102).unwrap();
-        assert_eq!(coordinator.pause(&run.run_id, 103).unwrap().state, RunState::Paused);
+        assert_eq!(
+            coordinator.pause(&run.run_id, 103).unwrap().state,
+            RunState::Paused
+        );
         coordinator.tick(400).unwrap();
         let held = coordinator.get(&run.run_id).unwrap();
         assert_eq!(held.state, RunState::NeedsReview);
@@ -3232,7 +3236,9 @@ mod tests {
         other.expires_at_unix = 600;
         other.limits.max_total_seconds = 500;
         assert_eq!(
-            coordinator.submit(other.clone(), review(&other), 401).unwrap_err(),
+            coordinator
+                .submit(other.clone(), review(&other), 401)
+                .unwrap_err(),
             CoordinatorError::WorkspaceConflict
         );
         fs::remove_dir_all(root).unwrap();
@@ -3247,7 +3253,9 @@ mod tests {
             vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
             "bbbbbbbb-bbbb-4bbb-8bb8-bbbbbbbbbbbb",
         );
-        let run = coordinator.submit(draft.clone(), review(&draft), 100).unwrap();
+        let run = coordinator
+            .submit(draft.clone(), review(&draft), 100)
+            .unwrap();
         coordinator.tick(101).unwrap();
         *authority.observation.lock().unwrap() = TurnObservation {
             state: TurnState::Completed,
@@ -3264,11 +3272,18 @@ mod tests {
             "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
         );
         assert_eq!(
-            coordinator.submit(next.clone(), review(&next), 104).unwrap_err(),
+            coordinator
+                .submit(next.clone(), review(&next), 104)
+                .unwrap_err(),
             CoordinatorError::WorkspaceConflict
         );
         let reviewed = coordinator
-            .verify_step(&run.run_id, &draft.steps[0].step_id, &workspace_revision(&root).unwrap(), 105)
+            .verify_step(
+                &run.run_id,
+                &draft.steps[0].step_id,
+                &workspace_revision(&root).unwrap(),
+                105,
+            )
             .unwrap();
         assert_eq!(reviewed.state, RunState::Cancelled);
         fs::remove_dir_all(root).unwrap();
@@ -3287,7 +3302,9 @@ mod tests {
         );
         first.expires_at_unix = 120;
         first.limits.max_total_seconds = 20;
-        let a = coordinator.submit(first.clone(), review(&first), 100).unwrap();
+        let a = coordinator
+            .submit(first.clone(), review(&first), 100)
+            .unwrap();
         coordinator.tick(101).unwrap();
         *authority.observation.lock().unwrap() = TurnObservation {
             state: TurnState::Completed,
@@ -3303,7 +3320,9 @@ mod tests {
             vec![second_step],
             "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
         );
-        let b = coordinator.submit(second.clone(), review(&second), 103).unwrap();
+        let b = coordinator
+            .submit(second.clone(), review(&second), 103)
+            .unwrap();
         coordinator.tick(104).unwrap();
         *authority.observation.lock().unwrap() = TurnObservation {
             state: TurnState::Running,
@@ -3311,8 +3330,14 @@ mod tests {
             revision: 2,
         };
         coordinator.tick(120).unwrap();
-        assert_eq!(coordinator.get(&a.run_id).unwrap().state, RunState::NeedsReview);
-        assert_eq!(coordinator.get(&a.run_id).unwrap().steps[0].state, StepState::NeedsReview);
+        assert_eq!(
+            coordinator.get(&a.run_id).unwrap().state,
+            RunState::NeedsReview
+        );
+        assert_eq!(
+            coordinator.get(&a.run_id).unwrap().steps[0].state,
+            StepState::NeedsReview
+        );
         assert!(matches!(
             coordinator.get(&b.run_id).unwrap().steps[0].state,
             StepState::Starting | StepState::Running
@@ -3342,8 +3367,14 @@ mod tests {
                 vec![child_step],
                 "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
             );
-            let (first, second) = if parent_first { (&parent, &nested) } else { (&nested, &parent) };
-            let accepted = coordinator.submit(first.clone(), review(first), 100).unwrap();
+            let (first, second) = if parent_first {
+                (&parent, &nested)
+            } else {
+                (&nested, &parent)
+            };
+            let accepted = coordinator
+                .submit(first.clone(), review(first), 100)
+                .unwrap();
             coordinator.tick(101).unwrap();
             *authority.observation.lock().unwrap() = TurnObservation {
                 state: TurnState::Completed,
@@ -3356,7 +3387,9 @@ mod tests {
                 StepState::Verifying
             );
             assert_eq!(
-                coordinator.submit(second.clone(), review(second), 103).unwrap_err(),
+                coordinator
+                    .submit(second.clone(), review(second), 103)
+                    .unwrap_err(),
                 CoordinatorError::WorkspaceConflict
             );
             fs::remove_dir_all(root).unwrap();
