@@ -120,11 +120,12 @@ for production. This M9 record is not an M6 or M9 production approval.
   GitHub approval or real-provider acceptance. Sol High's review of the final
   test delta at `5dfd6c0` found no actionable issue: both valid JavaScript and
   shell canaries are inventoried without execution. This is static review only.
-- M1–M5 integration workflow `40304623104` is running on source head `5dfd6c0`;
-  it is the current full GitHub Actions evidence and is not yet a pass.
-  Workflow `40304130076` was canceled on `a1303c1` when the current-head run
-  superseded it. Do not treat `6686687`, `3bbd055` or the canceled run as
-  final-head Actions evidence.
+- M1–M5 integration workflow `40304623104` passed on source head `5dfd6c0`,
+  including frontend/contracts, scanner, Clippy and the full Rust regression
+  jobs. The later `eb185a9` commit updates acceptance evidence only; it changes
+  no product source. Workflow `40304130076` was canceled on `a1303c1` when the
+  current-head run superseded it. Do not treat `6686687`, `3bbd055` or the
+  canceled run as final-source Actions evidence.
 - No real OpenCode process or provider account was run. No Hermes process was
   run. These are fixtures and source-bound argument/capability tests only.
 
