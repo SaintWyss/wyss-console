@@ -2,11 +2,15 @@
 
 ## Baseline and scope of this increment
 
-This branch is `feat/m8-whole-product-closure`, based on M7 head
-`03c29e7fb80110741d97fe4ba464739a6276193c`. M6 remains an open engineering
-branch and is not promoted to production acceptance by this record. This is a
-substantial M8 accessibility and appearance increment; it is not whole-product
-closure under the M8 roadmap DoD.
+This branch is `feat/m8-whole-product-reviewed`, based on the separate
+`integration/m7-m9-reviewed` branch at `bbcb9812fccaaf9b583b530e15b6f5c44ad6486f`.
+That integration head contains M7 PR #30 source head `0a6d5f7` plus its evidence
+update `eb88e26`, and M9 PR #31 source head `7f48ceb` plus its evidence update
+`3bbd055`. Independent Sol High static reviews found no
+actionable findings on the updated M7/M9 heads; neither is a GitHub approval or
+production acceptance. M6 PR #29 remains open and unmerged. This is a substantial
+M8 accessibility and appearance increment; it is not whole-product closure
+under the M8 roadmap DoD.
 
 ## Implemented
 
@@ -36,13 +40,28 @@ closure under the M8 roadmap DoD.
   (230 modules). The bridge tests emitted existing Python `ResourceWarning`s
   for unclosed test-only files. Vite emitted the repository's advisory for a
   minified chunk above 500 kB; build succeeded.
+- The repo-scan Vitest file uses a bounded 30-second file timeout because the
+  full Git checkout scan and fixture Git subprocesses exceeded Vitest's default
+  five seconds while Rust builds were loaded. Its assertions are unchanged;
+  the focused file passed 21 tests.
 - Focused appearance/renderer regressions: **10 passed, 0 failed**.
-- `npm run check:rust`: **PASS** on this code and the M7 source baseline; locked
-  Rust checks, default/B1 regressions, and Clippy with warnings denied. The M7
-  evidence fast-forward after this run changed only its acceptance document.
-- `npm run scan:repo`: **PASS**, 5 checks / 0 failures; all 1,624 tracked files,
-  including the Android/appearance tests and this evidence record, were scanned
-  from Git and the working tree. Re-run after any later integration change.
+- `npm run check:rust`: **PASS** on the reviewed M7/M9 integration; formatting,
+  locked cargo check, 1,480 library tests passed / 29 ignored, 559 app-binary
+  tests passed / 16 ignored, credential binary 5 passed / 1 ignored, authority
+  boundary (1), CLI help (1), F8 contracts (10), F8 serve process (8), B1
+  unit tests (136), and Clippy with warnings denied.
+- The first integrated Rust run exposed a test assertion that assumed the
+  expected project digest was at index zero in a sorted set. Both digests were
+  present; the order varied with a random temporary path. M9 changed the test
+  to assert membership, and the focused migration test plus the complete
+  integrated Rust suite then passed. No product behavior was changed for this
+  test correction.
+- Direct B1 process suite: **22 passed, 0 failed**. The standard script's
+  `b1::` filter selects no `b1_process` cases, so this direct invocation covers
+  the process regressions.
+- `npm run scan:repo`: **PASS**, 5 checks / 0 failures; all 1,627 tracked files,
+  including the integrated Android/appearance tests and updated evidence, were
+  scanned from Git and the working tree.
 - `npm audit --audit-level=moderate`: **0 known vulnerabilities**.
 - Android Gradle/JUnit was not available as a local verified run. Run the
   repository Android GitHub workflow on the final M8 head before treating the
