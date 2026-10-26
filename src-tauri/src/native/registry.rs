@@ -84,9 +84,13 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// Reads the file (an unreadable or foreign one is an empty registry, never a reason to
-    /// fail) and marks what was running as lost.
-    pub fn open(dir: PathBuf) -> std::io::Result<(Self, Vec<String>)> {
+    /// Opens the shared registry without committing it so M9 can first move records written by
+    /// an earlier M9 build into its sidecar. The returned shared registry contains only IDs an
+    /// M1-M6 binary can deserialize; the caller must durably save the returned M9 records and
+    /// defaults before saving this projection.
+    pub fn open_for_m9(
+        dir: PathBuf,
+    ) -> std::io::Result<(Self, Vec<String>, Vec<Session>, Vec<(String, AgentId)>)> {
         store::private_dir(&dir)?;
         let path = dir.join("registry.json");
         let mut data: Data = store::read_bounded(&path, MAX_FILE)
@@ -101,9 +105,30 @@ impl Registry {
                 lost.push(session.id.clone());
             }
         }
-        let registry = Self { path, data };
-        registry.save()?;
-        Ok((registry, lost))
+        let mut extended_sessions = Vec::new();
+        data.sessions.retain(|session| {
+            if session.agent_id.is_legacy() {
+                true
+            } else {
+                extended_sessions.push(session.clone());
+                false
+            }
+        });
+        let mut extended_defaults = Vec::new();
+        for project in &mut data.projects {
+            if let Some(agent) = project.default_agent
+                && !agent.is_legacy()
+            {
+                extended_defaults.push((project.path.clone(), agent));
+                project.default_agent = None;
+            }
+        }
+        Ok((
+            Self { path, data },
+            lost,
+            extended_sessions,
+            extended_defaults,
+        ))
     }
 
     pub fn save(&self) -> std::io::Result<()> {

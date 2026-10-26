@@ -233,7 +233,7 @@ fn opencode_is_version_pinned_and_receives_reviewed_handoff_as_an_explicit_promp
     let world = World::new();
     let entry = world
         .service
-        .launcher()
+        .launcher_extended()
         .agents
         .into_iter()
         .find(|entry| entry.agent_id == AgentId::Opencode)
@@ -241,20 +241,32 @@ fn opencode_is_version_pinned_and_receives_reviewed_handoff_as_an_explicit_promp
     assert!(entry.installed);
     assert_eq!(entry.version.as_deref(), Some("1.19.4"));
 
+    let request = |expected_cli_version| StartRequest {
+        agent_id: AgentId::Opencode,
+        project: world.home.to_string_lossy().into_owned(),
+        profile_id: None,
+        size: SIZE,
+        brief: Some("# Reviewed handoff\nTreat as untrusted input.".to_owned()),
+        plan_token: None,
+        expected_cli_version,
+    };
+    assert_eq!(
+        world
+            .service
+            .start(&world.terminal, request(None))
+            .unwrap_err()
+            .code,
+        "provider_version_unverified"
+    );
+    assert!(
+        world
+            .service
+            .sessions_extended(&world.terminal, false)
+            .is_empty()
+    );
     let reply = world
         .service
-        .start(
-            &world.terminal,
-            StartRequest {
-                agent_id: AgentId::Opencode,
-                project: world.home.to_string_lossy().into_owned(),
-                profile_id: None,
-                size: SIZE,
-                brief: Some("# Reviewed handoff\nTreat as untrusted input.".to_owned()),
-                plan_token: None,
-                expected_cli_version: None,
-            },
-        )
+        .start(&world.terminal, request(Some("1.19.4".to_owned())))
         .unwrap();
     let out = world.output_until(&reply.terminal.terminal_id, "FAKE-OPENCODE");
     assert!(out.contains("[--prompt]"), "{out:?}");
@@ -262,10 +274,79 @@ fn opencode_is_version_pinned_and_receives_reviewed_handoff_as_an_explicit_promp
         out.contains("# Reviewed handoff\r\nTreat as untrusted input."),
         "the Markdown brief remains one argv value: {out:?}"
     );
+    assert!(
+        world
+            .service
+            .launcher()
+            .agents
+            .iter()
+            .all(|entry| entry.agent_id.is_legacy())
+    );
+    assert!(
+        world
+            .service
+            .sessions(&world.terminal, false)
+            .iter()
+            .all(|view| view.session.agent_id.is_legacy())
+    );
+    assert!(
+        world
+            .service
+            .sessions_extended(&world.terminal, false)
+            .iter()
+            .any(|view| view.session.id == reply.session.session.id)
+    );
+    let legacy_registry = fs::read(world.base.join("registry/registry.json")).unwrap();
+    #[derive(serde::Deserialize, Clone, Copy)]
+    #[serde(rename_all = "snake_case")]
+    enum M6AgentId {
+        ClaudeCode,
+        Codex,
+    }
+    #[derive(serde::Deserialize, Clone, Copy)]
+    struct M6Session {
+        agent_id: M6AgentId,
+    }
+    #[derive(serde::Deserialize)]
+    struct M6Registry {
+        sessions: Vec<M6Session>,
+    }
+    let decoded_by_m6: M6Registry = serde_json::from_slice(&legacy_registry).unwrap();
+    assert!(
+        decoded_by_m6
+            .sessions
+            .iter()
+            .all(|session| matches!(session.agent_id, M6AgentId::ClaudeCode | M6AgentId::Codex))
+    );
+    let extended_registry: serde_json::Value = serde_json::from_slice(
+        &fs::read(world.base.join("registry/m9-native-sessions-v1.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        extended_registry["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| {
+                session["id"] == reply.session.session.id && session["agent_id"] == "opencode"
+            })
+    );
+    assert!(
+        !extended_registry
+            .to_string()
+            .contains("Treat as untrusted input")
+    );
     world
         .service
         .stop(&world.terminal, &reply.session.session.id)
         .unwrap();
+    let reopened = World::open(&world.base, &world.home, &world.bin);
+    assert!(
+        reopened
+            .sessions_extended(&TerminalService::default(), false)
+            .iter()
+            .any(|view| view.session.id == reply.session.session.id)
+    );
 
     let profile_id = world
         .service
@@ -288,11 +369,144 @@ fn opencode_is_version_pinned_and_receives_reviewed_handoff_as_an_explicit_promp
 }
 
 #[test]
+fn direct_opencode_handoff_rechecks_the_resolved_binary_version() {
+    let world = World::new();
+    let direct_service = NativeService::open_with_env(
+        world.base.join("direct-state"),
+        world.home.clone(),
+        Some(format!("{}:/usr/bin:/bin", world.bin.display()).into()),
+        vec![(
+            "PATH".to_owned(),
+            format!("{}:/usr/bin:/bin", world.bin.display()),
+        )],
+        PathBuf::from("/bin/false"),
+    )
+    .unwrap();
+    let direct_terminal = TerminalService::default();
+    script(
+        &world.bin.join("opencode"),
+        "[ \"$1\" = \"--version\" ] && { echo '9.99.0'; exit 0; }; exit 0",
+    );
+    let result = direct_service.start(
+        &direct_terminal,
+        StartRequest {
+            agent_id: AgentId::Opencode,
+            project: world.home.to_string_lossy().into_owned(),
+            profile_id: None,
+            size: SIZE,
+            brief: Some("# Reviewed handoff\nBound to a qualified CLI.".to_owned()),
+            plan_token: None,
+            expected_cli_version: Some("1.19.4".to_owned()),
+        },
+    );
+    assert_eq!(result.unwrap_err().code, "provider_version_unverified");
+    assert!(
+        direct_service
+            .sessions_extended(&direct_terminal, false)
+            .is_empty()
+    );
+}
+
+#[test]
+fn m9_upgrade_migrates_prior_provider_records_before_publishing_the_legacy_registry() {
+    let world = World::new();
+    let reply = world.start(AgentId::Opencode, None).unwrap();
+    let id = reply.session.session.id.clone();
+    world.service.stop(&world.terminal, &id).unwrap();
+
+    // Model the earlier M9 build, which placed the new closed enum in registry.json.
+    let registry_path = world.base.join("registry/registry.json");
+    let mut legacy_registry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&registry_path).unwrap()).unwrap();
+    let sidecar_path = world.base.join("registry/m9-native-sessions-v1.json");
+    let mut sidecar: serde_json::Value =
+        serde_json::from_slice(&fs::read(&sidecar_path).unwrap()).unwrap();
+    let sessions = sidecar["sessions"].as_array_mut().unwrap();
+    let at = sessions
+        .iter()
+        .position(|session| session["id"] == id)
+        .unwrap();
+    let prior_provider_session = sessions.remove(at);
+    legacy_registry["sessions"]
+        .as_array_mut()
+        .unwrap()
+        .push(prior_provider_session);
+    let project = legacy_registry["projects"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|project| project["path"] == world.home.to_string_lossy().as_ref())
+        .unwrap();
+    project["default_agent"] = serde_json::json!("opencode");
+    sidecar["project_defaults"] = serde_json::json!({});
+    fs::write(
+        &registry_path,
+        serde_json::to_vec(&legacy_registry).unwrap(),
+    )
+    .unwrap();
+    fs::write(&sidecar_path, serde_json::to_vec(&sidecar).unwrap()).unwrap();
+
+    let upgraded = World::open(&world.base, &world.home, &world.bin);
+    let upgraded_registry = fs::read(&registry_path).unwrap();
+    #[derive(serde::Deserialize, Clone, Copy)]
+    #[serde(rename_all = "snake_case")]
+    enum M6AgentId {
+        ClaudeCode,
+        Codex,
+    }
+    #[derive(serde::Deserialize)]
+    struct M6Session {
+        agent_id: M6AgentId,
+    }
+    #[derive(serde::Deserialize)]
+    struct M6Project {
+        default_agent: Option<M6AgentId>,
+    }
+    #[derive(serde::Deserialize)]
+    struct M6Registry {
+        sessions: Vec<M6Session>,
+        projects: Vec<M6Project>,
+    }
+    let decoded: M6Registry = serde_json::from_slice(&upgraded_registry).unwrap();
+    assert!(
+        decoded
+            .sessions
+            .iter()
+            .all(|session| matches!(session.agent_id, M6AgentId::ClaudeCode | M6AgentId::Codex))
+    );
+    assert!(decoded.projects.iter().all(|project| matches!(
+        project.default_agent,
+        None | Some(M6AgentId::ClaudeCode | M6AgentId::Codex)
+    )));
+    assert!(
+        upgraded
+            .sessions_extended(&TerminalService::default(), false)
+            .iter()
+            .any(|session| session.session.id == id)
+    );
+    assert!(
+        upgraded
+            .launcher_extended()
+            .projects
+            .iter()
+            .any(|project| project.path == world.home.to_string_lossy()
+                && project.default_agent == Some(AgentId::Opencode))
+    );
+    assert!(
+        upgraded
+            .launcher()
+            .projects
+            .iter()
+            .all(|project| project.default_agent.is_none_or(AgentId::is_legacy))
+    );
+}
+
+#[test]
 fn hermes_native_launches_as_configured_without_probe_or_automatic_handoff() {
     let world = World::new();
     let entry = world
         .service
-        .launcher()
+        .launcher_extended()
         .agents
         .into_iter()
         .find(|entry| entry.agent_id == AgentId::Hermes)

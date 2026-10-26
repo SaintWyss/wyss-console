@@ -20,6 +20,14 @@ pub enum AgentId {
     Hermes,
 }
 
+impl AgentId {
+    /// Provider IDs added by the M9 build cannot be serialized into the M1-M6 registry or
+    /// native protocol: those binaries deserialize that enum as a closed set.
+    pub fn is_legacy(self) -> bool {
+        matches!(self, Self::ClaudeCode | Self::Codex)
+    }
+}
+
 pub struct AgentSpec {
     pub id: AgentId,
     pub name: &'static str,

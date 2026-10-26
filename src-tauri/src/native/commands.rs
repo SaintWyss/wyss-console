@@ -57,8 +57,31 @@ fn agent_word(agent: AgentId) -> &'static str {
     }
 }
 
+/// Protocol-1 hosts gain M9 through explicitly additive operations. The old operation names
+/// remain legacy projections so an M1-M6 window never deserializes a new closed AgentId.
+fn call_extended_or_legacy(
+    link: &HostLink,
+    extended: &str,
+    legacy: &str,
+    params: Value,
+) -> Result<Value, HostError> {
+    match link.call(extended, params.clone()) {
+        Err(error) if error.code == "unknown_op" => link.call(legacy, params),
+        result => result,
+    }
+}
+
+fn launcher_view(link: &HostLink) -> Result<Value, HostError> {
+    call_extended_or_legacy(
+        link,
+        "native_launcher_extended",
+        "native_launcher",
+        Value::Null,
+    )
+}
+
 fn launcher_agent(link: &HostLink, agent: AgentId) -> Result<Value, HostError> {
-    let launcher = link.call("native_launcher", Value::Null)?;
+    let launcher = launcher_view(link)?;
     launcher["agents"]
         .as_array()
         .and_then(|agents| {
@@ -102,7 +125,7 @@ fn profile_requires_effort_from_list(profiles: &Value, profile_id: &str) -> Opti
 }
 
 fn profile_requires_effort(link: &HostLink, profile_id: &str) -> Result<bool, HostError> {
-    let profiles = link.call("profiles", Value::Null)?;
+    let profiles = call_extended_or_legacy(link, "profiles_extended", "profiles", Value::Null)?;
     profile_requires_effort_from_list(&profiles, profile_id)
         .ok_or_else(|| HostError::new("profile_unknown"))
 }
@@ -248,7 +271,7 @@ fn annotate_preview(
 #[tauri::command]
 pub async fn native_launcher(link: State<'_, HostLink>) -> Answer {
     let link = link.inner().clone();
-    blocking(move || annotate_launcher(link.call("native_launcher", Value::Null)?)).await
+    blocking(move || annotate_launcher(launcher_view(&link)?)).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -281,12 +304,24 @@ pub async fn native_preview(link: State<'_, HostLink>, request: PreviewRequest) 
 }
 
 fn start_with_link(link: &HostLink, request: StartRequest) -> Answer {
+    if !request.agent_id.is_legacy() && !link.has_feature("native_extended_catalogue_v1") {
+        return Err(HostError::new("host_outdated"));
+    }
+    let expected_cli_version = if request.agent_id == AgentId::Opencode && request.brief.is_some() {
+        let (_, version) = current_evidence(link, request.agent_id)?;
+        if version.as_deref() != Some("1.19.4") {
+            return Err(HostError::new("provider_version_unverified"));
+        }
+        Some(version.ok_or_else(|| HostError::new("provider_version_unverified"))?)
+    } else {
+        request.expected_cli_version.clone()
+    };
     check_start_capability(
         link,
         request.agent_id,
         request.profile_id.as_deref(),
         request.plan_token.as_deref(),
-        request.expected_cli_version.as_deref(),
+        expected_cli_version.as_deref(),
     )?;
     let has_profile = request.profile_id.is_some();
     let mut params = json!({
@@ -296,9 +331,16 @@ fn start_with_link(link: &HostLink, request: StartRequest) -> Answer {
         "size": request.size,
         "brief": request.brief,
     });
-    if has_profile && link.has_feature("native_profile_plan_token") {
+    let send_profile_plan = has_profile && link.has_feature("native_profile_plan_token");
+    let send_handoff_version = request.agent_id == AgentId::Opencode && request.brief.is_some();
+    if send_profile_plan {
         params["plan_token"] = json!(request.plan_token);
-        params["expected_cli_version"] = json!(request.expected_cli_version);
+    }
+    // OpenCode handoffs without a profile still bind the exact qualified CLI build. Do not
+    // add the newer field to ordinary legacy starts: protocol-1 M1-M6 hosts reject unknown
+    // StartRequest fields by design.
+    if send_profile_plan || send_handoff_version {
+        params["expected_cli_version"] = json!(expected_cli_version);
     }
     link.call("native_start", params)
 }
@@ -321,7 +363,15 @@ pub struct ListRequest {
 #[tauri::command]
 pub async fn native_sessions(link: State<'_, HostLink>, request: ListRequest) -> Answer {
     let link = link.inner().clone();
-    blocking(move || link.call("native_sessions", json!({"sample": request.sample}))).await
+    blocking(move || {
+        call_extended_or_legacy(
+            &link,
+            "native_sessions_extended",
+            "native_sessions",
+            json!({"sample": request.sample}),
+        )
+    })
+    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -349,7 +399,12 @@ pub async fn native_restart(link: State<'_, HostLink>, request: RestartRequest) 
     well_formed(&request.id)?;
     let link = link.inner().clone();
     blocking(move || {
-        let sessions = link.call("native_sessions", json!({"sample": false}))?;
+        let sessions = call_extended_or_legacy(
+            &link,
+            "native_sessions_extended",
+            "native_sessions",
+            json!({"sample": false}),
+        )?;
         let old = sessions.as_array().and_then(|items| {
             items
                 .iter()
@@ -477,7 +532,8 @@ pub async fn native_project_default(link: State<'_, HostLink>, request: DefaultR
 #[tauri::command]
 pub async fn native_profiles(link: State<'_, HostLink>) -> Answer {
     let link = link.inner().clone();
-    blocking(move || link.call("profiles", Value::Null)).await
+    blocking(move || call_extended_or_legacy(&link, "profiles_extended", "profiles", Value::Null))
+        .await
 }
 
 /// What a profile body needs of the host beyond protocol 1: nothing for a body that existed
@@ -489,6 +545,11 @@ pub(crate) fn needed_feature(body: &Body) -> Option<&'static str> {
 /// Says so plainly when the host that is running cannot keep what the body carries, instead of
 /// letting it answer with a request it does not understand.
 fn host_can_keep(link: &HostLink, body: &Body) -> Result<(), HostError> {
+    if body.applies_to.iter().any(|agent| !agent.is_legacy())
+        && !link.has_feature("native_extended_catalogue_v1")
+    {
+        return Err(HostError::new("host_outdated"));
+    }
     match needed_feature(body) {
         Some(feature) if !link.has_feature(feature) => Err(HostError::new("host_outdated")),
         _ => Ok(()),
@@ -704,15 +765,15 @@ pub fn extension() -> wyss_console::Extension {
 #[cfg(test)]
 mod capability_tests {
     use super::{
-        PreviewRequest, effectful_preview, preview_with_link, profile_requires_effort_from_list,
-        start_with_link,
+        PreviewRequest, effectful_preview, host_can_keep, preview_with_link,
+        profile_requires_effort_from_list, start_with_link,
     };
     use crate::{
         host::{
             client::HostLink,
-            protocol::{Answer as WireAnswer, Request, read_frame, write_frame},
+            protocol::{Answer as WireAnswer, HostError, Request, read_frame, write_frame},
         },
-        native::{catalogue::AgentId, service::StartRequest},
+        native::{catalogue::AgentId, profile::Body, service::StartRequest},
     };
     use serde_json::Value;
     use serde_json::json;
@@ -776,6 +837,18 @@ mod capability_tests {
                                 .lock()
                                 .unwrap()
                                 .push((request.op.clone(), request.params.clone()));
+                            if matches!(
+                                request.op.as_str(),
+                                "native_launcher_extended"
+                                    | "native_sessions_extended"
+                                    | "profiles_extended"
+                            ) {
+                                let _ = write_frame(
+                                    &mut stream,
+                                    &WireAnswer::Err(HostError::new("unknown_op")),
+                                );
+                                continue;
+                            }
                             let value = match request.op.as_str() {
                                 // A protocol-1 host without the additive `features` field.
                                 "hello" => json!({"protocol": 1}),
@@ -847,6 +920,40 @@ mod capability_tests {
             plan_token: Some("old-preview-token".into()),
             expected_cli_version: Some(VERSION.into()),
         }
+    }
+
+    #[test]
+    fn a_legacy_host_cannot_admit_m9_providers_or_profiles_by_direct_ipc() {
+        let host = LegacyHost::new(false);
+        let link = host.link();
+        let mut body = Body::default();
+        body.name = "OpenCode profile".to_owned();
+        body.applies_to = vec![AgentId::Opencode];
+        assert_eq!(
+            host_can_keep(&link, &body).unwrap_err().code,
+            "host_outdated"
+        );
+
+        let error = start_with_link(
+            &link,
+            StartRequest {
+                agent_id: AgentId::Opencode,
+                project: "/tmp/fixture-project".into(),
+                profile_id: None,
+                size: TerminalSize { rows: 24, cols: 80 },
+                brief: None,
+                plan_token: None,
+                expected_cli_version: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "host_outdated");
+        assert!(
+            !host
+                .requests()
+                .iter()
+                .any(|(operation, _)| operation == "native_start")
+        );
     }
 
     #[test]

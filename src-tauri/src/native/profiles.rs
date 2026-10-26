@@ -220,6 +220,21 @@ impl ProfileStore {
         out
     }
 
+    /// Profiles in the protocol accepted by M1-M6 windows. A profile that names an M9-only
+    /// provider is withheld as a whole because older clients deserialize provider IDs closed.
+    pub fn list_legacy(&self) -> Vec<Summary> {
+        self.list()
+            .into_iter()
+            .filter(|summary| {
+                summary
+                    .body
+                    .applies_to
+                    .iter()
+                    .all(|agent| agent.is_legacy())
+            })
+            .collect()
+    }
+
     /// The parent must exist, and following it must not come back to `id` nor go deeper
     /// than `MAX_DEPTH`.
     fn check_extends(&self, id: &str, body: &Body) -> Result<(), ProfileError> {
