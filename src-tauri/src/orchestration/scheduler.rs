@@ -1486,7 +1486,11 @@ impl Coordinator {
         ) {
             return Ok(());
         }
-        if run.steps.iter().any(|step| step.state == StepState::Verifying) {
+        if run
+            .steps
+            .iter()
+            .any(|step| step.state == StepState::Verifying)
+        {
             for step in &run.steps {
                 if step.state == StepState::Verifying {
                     self.journal
