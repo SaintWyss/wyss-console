@@ -242,6 +242,18 @@
     </div>
   {:else}
     <div class="native-main">
+      {#if launcher.m9_native_status === 'storage_unavailable'}
+        <p class="sessions-status failed" role="alert">
+          OpenCode and Hermes are blocked because the private M9 session store
+          could not be read. Its bytes were preserved. Claude Code and Codex
+          remain available.
+        </p>
+      {:else if launcher.m9_native_status === 'legacy_host'}
+        <p class="sessions-status" role="note">
+          This terminal host predates M9. OpenCode and Hermes Native require a
+          matching M9 host; existing Native sessions remain available.
+        </p>
+      {/if}
       {#if handoffSession}
         {#key handoffSession.id}
           <HandoffPanel
