@@ -673,6 +673,7 @@ pub struct Coordinator {
     journal: Arc<RunJournal>,
     authority: Arc<dyn ManagedAuthority>,
     plans: Mutex<HashMap<String, ActivePlan>>,
+    admission: Mutex<()>,
     started: Mutex<HashMap<(String, String), Instant>>,
     round_robin: Mutex<usize>,
 }
@@ -690,6 +691,7 @@ impl Coordinator {
             journal,
             authority,
             plans: Mutex::new(HashMap::new()),
+            admission: Mutex::new(()),
             started: Mutex::new(HashMap::new()),
             round_robin: Mutex::new(0),
         })
@@ -705,13 +707,40 @@ impl Coordinator {
         if !review.matches(&plan) {
             return Err(CoordinatorError::ReviewStale);
         }
-        let identity = workspace_identity(std::path::Path::new(&plan.workspace_root))
+        // Serialize claim admission through insertion of the volatile plan. SQLite's
+        // equality-only workspace claim is not sufficient for nested roots.
+        let _admission = self
+            .admission
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let canonical = std::fs::canonicalize(&plan.workspace_root)
+            .map_err(|_| CoordinatorError::WorkspaceConflict)?;
+        let identity = workspace_identity(&canonical)
             .map_err(|_| CoordinatorError::InvalidPlan)?;
-        let revision = workspace_revision(std::path::Path::new(&plan.workspace_root))
+        let revision = workspace_revision(&canonical)
             .map_err(|_| CoordinatorError::InvalidPlan)?;
         if identity != plan.workspace_id || revision != plan.workspace_revision {
             return Err(CoordinatorError::WorkspaceConflict);
         }
+        let claims = self.journal.claimed_workspaces().map_err(map_journal)?;
+        let plans = self.plans.lock().unwrap_or_else(PoisonError::into_inner);
+        for (run_id, _identity) in claims {
+            if let Some(active) = plans.get(&run_id) {
+                if active.plan.plan_id == plan.plan_id {
+                    continue; // The journal separately validates exact idempotent replay.
+                }
+                let existing = std::fs::canonicalize(&active.plan.workspace_root)
+                    .map_err(|_| CoordinatorError::WorkspaceConflict)?;
+                if canonical.starts_with(&existing) || existing.starts_with(&canonical) {
+                    return Err(CoordinatorError::WorkspaceConflict);
+                }
+            } else {
+                // A recovered claim still protects an ambiguous effect, but its root
+                // is deliberately not persisted. Never infer non-overlap from digests.
+                return Err(CoordinatorError::WorkspaceConflict);
+            }
+        }
+        drop(plans);
         let mut run = self
             .journal
             .create_run(&plan, &review, now)
