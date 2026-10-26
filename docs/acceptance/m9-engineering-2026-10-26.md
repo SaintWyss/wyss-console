@@ -52,8 +52,10 @@ for production. This M9 record is not an M6 or M9 production approval.
   warnings denied.
 - `npm audit`: **0 known vulnerabilities** after the Vite 8.3.5 and undici
   security updates.
-- The final-tree `npm run scan:repo` and GitHub Actions results are pending; run
-  them after the evidence commit is pushed and report them separately.
+- `npm run scan:repo`: **PASS**, 5 checks / 0 failures; all 1,605 tracked files
+  were scanned from Git and the working tree after the implementation commits.
+- GitHub Actions on the final M9 commit remain pending; they will be dispatched
+  after this evidence update is pushed.
 - No real OpenCode process or provider account was run. No Hermes process was
   run. These are fixtures and source-bound argument/capability tests only.
 
