@@ -378,14 +378,17 @@ impl ExtendedRegistry {
         &mut self,
         path: &str,
     ) -> io::Result<Option<super::catalogue::AgentId>> {
-        let previous = self.data.project_defaults.remove(path);
+        // A legacy Claude/Codex launch must not depend on an unrelated M9 sidecar write.
+        // Persist only an actual default removal; a genuine shadowing default still
+        // requires durable clearing before the legacy provider can be launched.
+        let Some(previous) = self.data.project_defaults.remove(path) else {
+            return Ok(None);
+        };
         if let Err(error) = self.save() {
-            if let Some(agent) = previous {
-                self.data.project_defaults.insert(path.to_owned(), agent);
-            }
+            self.data.project_defaults.insert(path.to_owned(), previous);
             return Err(error);
         }
-        Ok(previous)
+        Ok(Some(previous))
     }
 
     /// Persist M9 records extracted from an earlier shared-registry build before the common
@@ -615,6 +618,47 @@ impl ExtendedRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_clear_without_value_never_writes_unavailable_m9_storage() {
+        let directory = std::env::temp_dir().join(format!(
+            "wyss-m9-clear-noop-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let mut registry = ExtendedRegistry::open(directory.clone()).unwrap();
+        let saved = registry.path.clone();
+        registry.path = directory.join("missing-parent").join("unwritable.json");
+        assert_eq!(registry.clear_project_default("/a-project").unwrap(), None);
+        registry.path = saved;
+        assert_eq!(registry.project_default("/a-project"), None);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_default_clear_restores_prior_value_and_keeps_disk_default() {
+        let directory = std::env::temp_dir().join(format!(
+            "wyss-m9-clear-rollback-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let mut registry = ExtendedRegistry::open(directory.clone()).unwrap();
+        registry
+            .set_project_default("/a-project", super::super::catalogue::AgentId::Opencode)
+            .unwrap();
+        let saved = registry.path.clone();
+        registry.path = directory.join("missing-parent").join("unwritable.json");
+        assert!(registry.clear_project_default("/a-project").is_err());
+        assert_eq!(
+            registry.project_default("/a-project"),
+            Some(super::super::catalogue::AgentId::Opencode)
+        );
+        registry.path = saved;
+        let reopened = ExtendedRegistry::open(directory.clone()).unwrap();
+        assert_eq!(
+            reopened.project_default("/a-project"),
+            Some(super::super::catalogue::AgentId::Opencode)
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn recovery_directory_entry_count_is_bounded_and_overflow_fails_closed() {
