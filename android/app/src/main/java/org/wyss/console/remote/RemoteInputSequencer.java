@@ -38,10 +38,6 @@ public final class RemoteInputSequencer {
             return byteCount;
         }
 
-        public synchronized boolean wasSent() {
-            return sent;
-        }
-
         public synchronized byte[] payloadForFirstSend() {
             if (closed || sent || bytes == null) {
                 throw new IllegalStateException("input_already_sent");
@@ -52,9 +48,12 @@ public final class RemoteInputSequencer {
             return payload;
         }
 
-        private synchronized void invalidate() {
+        /** Closes the handle and snapshots delivery state in the same critical section. */
+        private synchronized boolean invalidateAndGetSent() {
+            boolean wasSent = sent;
             closed = true;
             erase();
+            return wasSent;
         }
 
         private void erase() {
@@ -103,8 +102,7 @@ public final class RemoteInputSequencer {
         InputRequest completed = inFlight;
         inFlight = null;
         int requestedBytes = completed.requestedBytes();
-        boolean wasSent = completed.wasSent();
-        completed.invalidate();
+        boolean wasSent = completed.invalidateAndGetSent();
         if (!wasSent || acceptedBytes < 0 || acceptedBytes > requestedBytes) {
             return new Result(Delivery.OUTCOME_UNKNOWN, null, requestedBytes, requestId);
         }
@@ -121,9 +119,8 @@ public final class RemoteInputSequencer {
         }
         InputRequest uncertain = inFlight;
         inFlight = null;
-        boolean wasSent = uncertain.wasSent();
+        boolean wasSent = uncertain.invalidateAndGetSent();
         int requestedBytes = uncertain.requestedBytes();
-        uncertain.invalidate();
         return new Result(
                 wasSent ? Delivery.OUTCOME_UNKNOWN : Delivery.NEW_INPUT_REQUIRED,
                 null,
@@ -140,9 +137,8 @@ public final class RemoteInputSequencer {
         inFlight = null;
         // A generation or epoch change does not resolve whether the old host consumed bytes.
         // Once sent, every reconnect is ambiguous; before the first send, no external effect exists.
-        boolean wasSent = stale.wasSent();
+        boolean wasSent = stale.invalidateAndGetSent();
         int requestedBytes = stale.requestedBytes();
-        stale.invalidate();
         Delivery delivery = wasSent
                 ? Delivery.OUTCOME_UNKNOWN
                 : Delivery.NEW_INPUT_REQUIRED;
@@ -156,9 +152,8 @@ public final class RemoteInputSequencer {
         }
         InputRequest cancelled = inFlight;
         inFlight = null;
-        boolean wasSent = cancelled.wasSent();
+        boolean wasSent = cancelled.invalidateAndGetSent();
         int requestedBytes = cancelled.requestedBytes();
-        cancelled.invalidate();
         return new Result(
                 wasSent ? Delivery.OUTCOME_UNKNOWN : Delivery.NEW_INPUT_REQUIRED,
                 null,

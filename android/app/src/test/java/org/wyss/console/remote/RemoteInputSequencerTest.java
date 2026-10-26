@@ -6,6 +6,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
+
 public final class RemoteInputSequencerTest {
     @Test public void payloadCanBeReadForOneSendOnly() {
         RemoteInputSequencer sequencer = new RemoteInputSequencer();
@@ -119,5 +122,53 @@ public final class RemoteInputSequencerTest {
         assertNull(result.acceptedBytes);
         assertEquals(Integer.valueOf(1), result.requestedBytes);
         assertThrows(IllegalStateException.class, request::payloadForFirstSend);
+    }
+
+    @Test public void reconnectAndFirstSendHaveOneAtomicOutcome() throws Exception {
+        for (int attempt = 0; attempt < 250; attempt++) {
+            RemoteInputSequencer sequencer = new RemoteInputSequencer();
+            RemoteInputSequencer.InputRequest request = sequencer.begin(new byte[] {9}, 1, 1);
+            CountDownLatch ready = new CountDownLatch(2);
+            CountDownLatch start = new CountDownLatch(1);
+            AtomicReference<Boolean> payloadReleased = new AtomicReference<>(false);
+
+            Thread sender = new Thread(() -> {
+                ready.countDown();
+                try {
+                    start.await();
+                    request.payloadForFirstSend();
+                    payloadReleased.set(true);
+                } catch (IllegalStateException closedByReconnect) {
+                    payloadReleased.set(false);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(interrupted);
+                }
+            });
+            AtomicReference<RemoteInputSequencer.Result> reconnectResult = new AtomicReference<>();
+            Thread reconnect = new Thread(() -> {
+                ready.countDown();
+                try {
+                    start.await();
+                    reconnectResult.set(sequencer.reconnect(1, 2));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(interrupted);
+                }
+            });
+
+            sender.start();
+            reconnect.start();
+            ready.await();
+            start.countDown();
+            sender.join();
+            reconnect.join();
+
+            RemoteInputSequencer.Delivery expected = payloadReleased.get()
+                    ? RemoteInputSequencer.Delivery.OUTCOME_UNKNOWN
+                    : RemoteInputSequencer.Delivery.NEW_INPUT_REQUIRED;
+            assertEquals(expected, reconnectResult.get().delivery);
+            assertThrows(IllegalStateException.class, request::payloadForFirstSend);
+        }
     }
 }
