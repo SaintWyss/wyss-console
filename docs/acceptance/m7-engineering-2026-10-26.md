@@ -107,8 +107,8 @@ Sources checked 2026-10-26: [Tailscale Android setup](https://tailscale.com/docs
   files / 1,077 tests, owned harness (16 tests), Claude bridge (77 tests), and
   Vite production build. The build reports the repository's existing >500 kB
   chunk advisory.
-- `npm run scan:repo`: **PASS**, 5 checks / 0 failures. It is being repeated
-  against the fully committed branch so the newly added files are in the scan.
+- `npm run scan:repo`: **PASS**, 5 checks / 0 failures; all 1,620 tracked files
+  were scanned from Git and the working tree after the implementation commits.
 - Java `RemoteInputSequencer` standalone smoke compilation/execution: **PASS**.
   This is not the Android/JUnit build.
 - `npm audit`: 0 known vulnerabilities after locking the compatible Vite
