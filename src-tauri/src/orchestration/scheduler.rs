@@ -3417,6 +3417,72 @@ mod tests {
     }
 
     #[test]
+    fn crash_at_both_owner_confirmation_commit_boundaries_is_recoverable() {
+        for verified_before_crash in [false, true] {
+            let root = root();
+            let (coordinator, journal, authority) = coordinator(&root);
+            let draft = plan(
+                &root,
+                vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            );
+            let run = coordinator
+                .submit(draft.clone(), review(&draft), 100)
+                .unwrap();
+            coordinator.tick(101).unwrap();
+            let step_id = draft.steps[0].step_id.as_str();
+            let attempt = coordinator.get(&run.run_id).unwrap().steps[0]
+                .attempt_id
+                .unwrap();
+            // A real attempted effect became ambiguous; the owner began confirming it.
+            journal
+                .mark_attempt_unknown(&run.run_id, step_id, &attempt, 102)
+                .unwrap();
+            journal
+                .set_step_state(
+                    &run.run_id,
+                    step_id,
+                    StepState::NeedsReview,
+                    StepState::Verifying,
+                    Some(FailureCode::OwnerReviewRequired),
+                    103,
+                )
+                .unwrap();
+            let revision = workspace_revision(&root).unwrap();
+            if verified_before_crash {
+                journal
+                    .verify_step(&run.run_id, step_id, &revision, 104)
+                    .unwrap();
+            }
+            drop(coordinator);
+            let restarted = Coordinator::new(journal.clone(), authority.clone(), 105).unwrap();
+            if verified_before_crash {
+                assert_eq!(restarted.get(&run.run_id).unwrap().state, RunState::Completed);
+            } else {
+                let held = restarted.get(&run.run_id).unwrap();
+                assert_eq!(held.state, RunState::NeedsReview);
+                assert_eq!(held.steps[0].state, StepState::NeedsReview);
+                assert_eq!(journal.claimed_workspaces().unwrap().len(), 1);
+                let root_text = root.to_string_lossy().into_owned();
+                let resolved = restarted
+                    .reconcile(
+                        &run.run_id,
+                        step_id,
+                        ReconcileDecision::ConfirmedCompleted,
+                        Some(&root_text),
+                        Some(&revision),
+                        106,
+                    )
+                    .unwrap();
+                assert_eq!(resolved.state, RunState::Completed);
+            }
+            assert!(journal.claimed_workspaces().unwrap().is_empty());
+            assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
     fn independent_steps_in_same_run_wait_for_owner_verification() {
         let root = root();
         let (coordinator, _journal, authority) = coordinator(&root);
