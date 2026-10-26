@@ -29,6 +29,9 @@ public final class RemoteTerminalStreamCursor {
     private long epoch;
     private long nextOffset;
     private long gapFloorOffset;
+    private long watermarkGeneration;
+    private long watermarkEpoch;
+    private boolean hasWatermark;
 
     public synchronized State state() {
         return state;
@@ -36,16 +39,17 @@ public final class RemoteTerminalStreamCursor {
 
     /** Starts a new volatile attachment. Reconnect always discards the prior cursor. */
     public synchronized Result reconnect(long nextGeneration, long nextEpoch) {
-        State previousState = state;
-        long previousGeneration = generation;
-        long previousEpoch = epoch;
         disconnect();
         if (nextGeneration <= 0 || nextEpoch <= 0) return Result.INVALID;
-        if (previousState != State.DISCONNECTED
-                && nextGeneration == previousGeneration
-                && nextEpoch <= previousEpoch) return Result.STALE_SESSION;
+        if (hasWatermark && (nextGeneration < watermarkGeneration
+                || (nextGeneration == watermarkGeneration && nextEpoch <= watermarkEpoch))) {
+            return Result.STALE_SESSION;
+        }
         generation = nextGeneration;
         epoch = nextEpoch;
+        watermarkGeneration = nextGeneration;
+        watermarkEpoch = nextEpoch;
+        hasWatermark = true;
         nextOffset = 0;
         gapFloorOffset = 0;
         state = State.AWAITING_CHECKPOINT;
