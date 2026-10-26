@@ -98,8 +98,9 @@ closure under the M8 roadmap DoD.
   tests. That M8 delta added desktop skip navigation; the following correction
   changes desktop CSS/tests only. Final-head CI for the correction is tracked
   by M1–M5 integration run `40304125925` and Android run `40304134561` on
-  `d295743`. On that exact head, frontend/contracts and scanner passed; the
-  Rust integration job is still running. Android native build/JUnit passed.
+  `d295743`. The complete M1–M5 workflow `40304125925` and Android
+  build/JUnit workflow `40304134561` both passed on that exact code head. The
+  later `d9cbe92` commit updates this evidence only; no product source changed.
   CI does not prove physical device rendering or touch target measurement.
 - No benchmark was run and no M01..M33 p50/p95 values are claimed here.
 
