@@ -775,14 +775,28 @@ fn opencode_inventory_refuses_a_nested_rules_symlink_without_reading_it() {
 #[test]
 fn opencode_inventory_lists_plugin_metadata_without_executing_the_plugin() {
     let home = Home::new();
-    let marker = home.0.join("plugin-executed");
-    let plugin = home.put(
+    let js_marker = home.0.join("js-plugin-executed");
+    let shell_marker = home.0.join("shell-plugin-executed");
+    let js_plugin = home.put(
         ".config/opencode/plugins/probe.js",
-        &format!("#!/bin/sh\nprintf executed > '{}'\n", marker.display()),
+        &format!(
+            "require('node:fs').writeFileSync('{}', 'executed');\n",
+            js_marker.display()
+        ),
     );
-    fs::set_permissions(&plugin, fs::Permissions::from_mode(0o700)).unwrap();
+    let shell_plugin = home.put(
+        ".config/opencode/plugins/probe.sh",
+        &format!(
+            "#!/bin/sh\nprintf executed > '{}'\n",
+            shell_marker.display()
+        ),
+    );
+    fs::set_permissions(&shell_plugin, fs::Permissions::from_mode(0o700)).unwrap();
     let config = serde_json::json!({
-        "plugin": [format!("file://{}", plugin.display())]
+        "plugin": [
+            format!("file://{}", js_plugin.display()),
+            format!("file://{}", shell_plugin.display())
+        ]
     });
     home.put(
         ".config/opencode/opencode.jsonc",
@@ -790,8 +804,17 @@ fn opencode_inventory_lists_plugin_metadata_without_executing_the_plugin() {
     );
 
     let found = home.read();
+    assert_eq!(items(&found, ItemKind::Plugin).len(), 2);
     named(&found, ItemKind::Plugin, "probe");
-    assert!(!marker.exists(), "inventory must not execute provider code");
+    named(&found, ItemKind::Plugin, "probe.sh");
+    assert!(
+        !js_marker.exists(),
+        "inventory must not import provider code"
+    );
+    assert!(
+        !shell_marker.exists(),
+        "inventory must not execute provider code"
+    );
 }
 
 #[test]
