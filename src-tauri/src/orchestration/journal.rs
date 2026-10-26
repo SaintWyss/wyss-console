@@ -1558,6 +1558,88 @@ mod tests {
     }
 
     #[test]
+    fn interrupted_owner_confirmation_restores_reviewable_step_and_keeps_claim() {
+        let journal = RunJournal::open_in_memory().unwrap();
+        let draft = plan();
+        let accepted = journal.create_run(&draft, &review(&draft), 120).unwrap();
+        journal
+            .set_run_state(&accepted.run_id, accepted.revision, RunState::NeedsReview, None, 121)
+            .unwrap();
+        journal
+            .set_step_state(
+                &accepted.run_id,
+                &draft.steps[0].step_id,
+                StepState::Eligible,
+                StepState::NeedsReview,
+                Some(FailureCode::CoordinatorRestarted),
+                122,
+            )
+            .unwrap();
+        // Crash after first commit in ConfirmedCompleted but before verify_step.
+        journal
+            .set_step_state(
+                &accepted.run_id,
+                &draft.steps[0].step_id,
+                StepState::NeedsReview,
+                StepState::Verifying,
+                Some(FailureCode::OwnerReviewRequired),
+                123,
+            )
+            .unwrap();
+        let recovered = journal.recover_after_restart(124).unwrap();
+        assert_eq!(recovered.len(), 1);
+        let view = journal.get(&accepted.run_id).unwrap().unwrap();
+        assert_eq!(view.state, RunState::NeedsReview);
+        assert_eq!(view.steps[0].state, StepState::NeedsReview);
+        assert_eq!(view.steps[1].state, StepState::Cancelled);
+        assert_eq!(journal.claimed_workspaces().unwrap().len(), 1);
+        // Repeated startup is idempotent: it cannot accidentally free the claim.
+        assert!(journal.recover_after_restart(125).unwrap().is_empty());
+        assert_eq!(journal.claimed_workspaces().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn confirmed_result_committed_before_crash_closes_only_after_safe_recovery() {
+        let journal = RunJournal::open_in_memory().unwrap();
+        let mut draft = plan();
+        draft.steps.truncate(1);
+        let accepted = journal.create_run(&draft, &review(&draft), 120).unwrap();
+        journal
+            .set_run_state(&accepted.run_id, accepted.revision, RunState::NeedsReview, None, 121)
+            .unwrap();
+        journal
+            .set_step_state(
+                &accepted.run_id,
+                &draft.steps[0].step_id,
+                StepState::Eligible,
+                StepState::NeedsReview,
+                Some(FailureCode::CoordinatorRestarted),
+                122,
+            )
+            .unwrap();
+        journal
+            .set_step_state(
+                &accepted.run_id,
+                &draft.steps[0].step_id,
+                StepState::NeedsReview,
+                StepState::Verifying,
+                Some(FailureCode::OwnerReviewRequired),
+                123,
+            )
+            .unwrap();
+        journal
+            .verify_step(&accepted.run_id, &draft.steps[0].step_id, &draft.workspace_revision, 124)
+            .unwrap();
+        // Crash after the durable verified workspace revision but before run closure.
+        let recovered = journal.recover_after_restart(125).unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].state, RunState::Completed);
+        assert_eq!(recovered[0].steps[0].state, StepState::Succeeded);
+        assert!(journal.claimed_workspaces().unwrap().is_empty());
+        assert!(journal.recover_after_restart(126).unwrap().is_empty());
+    }
+
+    #[test]
     fn journal_persists_only_closed_metadata_and_never_prompt_or_objective() {
         let journal = RunJournal::open_in_memory().unwrap();
         let plan = plan();
