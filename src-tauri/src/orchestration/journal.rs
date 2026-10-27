@@ -14,7 +14,7 @@ use std::{
 };
 use uuid::Uuid;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const APPLICATION_ID: i64 = 0x5759_4f52; // "WYOR"
 const MAX_RUNS: usize = 128;
 const MAX_LIST: usize = 128;
@@ -211,7 +211,15 @@ impl RunJournal {
                      CREATE TABLE orchestration_workspace_claims (
                        workspace_id TEXT PRIMARY KEY CHECK(length(workspace_id)=64),
                        run_id TEXT NOT NULL UNIQUE REFERENCES orchestration_runs(run_id),
-                       claimed_at INTEGER NOT NULL CHECK(claimed_at>=0)
+                       claimed_at INTEGER NOT NULL CHECK(claimed_at>=0),
+                       authority_store_id TEXT,
+                       authority_epoch TEXT,
+                       root_binding_id TEXT,
+                       claim_id TEXT,
+                       claim_generation INTEGER CHECK(claim_generation IS NULL OR claim_generation>0),
+                       claim_revision INTEGER CHECK(claim_revision IS NULL OR claim_revision>0),
+                       proof_state TEXT NOT NULL DEFAULT 'identity_unproven'
+                         CHECK(proof_state IN ('pinned','identity_unproven','quarantined'))
                      ) STRICT;
                      CREATE TABLE orchestration_handoffs (
                        handoff_id TEXT PRIMARY KEY CHECK(length(handoff_id)=36),
@@ -260,6 +268,23 @@ impl RunJournal {
                      PRAGMA user_version={SCHEMA_VERSION};
                      COMMIT;"
                 ))
+                .map_err(|_| JournalError::Storage)?;
+        } else if version == 1 && application_id == APPLICATION_ID {
+            // Schema 1 recorded only a path-derived logical workspace ID. Never infer a
+            // physical root from today's filesystem: all existing claims migrate unproven.
+            connection
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN authority_store_id TEXT;
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN authority_epoch TEXT;
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN root_binding_id TEXT;
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN claim_id TEXT;
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN claim_generation INTEGER CHECK(claim_generation IS NULL OR claim_generation>0);
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN claim_revision INTEGER CHECK(claim_revision IS NULL OR claim_revision>0);
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN proof_state TEXT NOT NULL DEFAULT 'identity_unproven' CHECK(proof_state IN ('pinned','identity_unproven','quarantined'));
+                     PRAGMA user_version=2;
+                     COMMIT;",
+                )
                 .map_err(|_| JournalError::Storage)?;
         } else if version != SCHEMA_VERSION || application_id != APPLICATION_ID {
             return Err(JournalError::Incompatible);
@@ -1884,5 +1909,60 @@ mod tests {
         ).unwrap();
         assert!(!contents.contains("SENSITIVE_HANDOFF_BODY_NEVER_STORE"));
         assert!(!contents.contains("Owner-selected objective"));
+    }
+
+    #[test]
+    fn schema_one_claims_migrate_as_identity_unproven_without_backfill() {
+        for populated in [false, true] {
+            let journal = RunJournal::open_in_memory().unwrap();
+            if populated {
+                let plan = plan();
+                journal.create_run(&plan, &review(&plan), 120).unwrap();
+            }
+            let connection = journal.connection.into_inner().unwrap();
+            connection
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                     CREATE TABLE orchestration_workspace_claims_v1 (
+                       workspace_id TEXT PRIMARY KEY CHECK(length(workspace_id)=64),
+                       run_id TEXT NOT NULL UNIQUE REFERENCES orchestration_runs(run_id),
+                       claimed_at INTEGER NOT NULL CHECK(claimed_at>=0)
+                     ) STRICT;
+                     INSERT INTO orchestration_workspace_claims_v1(workspace_id,run_id,claimed_at)
+                       SELECT workspace_id,run_id,claimed_at FROM orchestration_workspace_claims;
+                     DROP TABLE orchestration_workspace_claims;
+                     ALTER TABLE orchestration_workspace_claims_v1 RENAME TO orchestration_workspace_claims;
+                     CREATE INDEX orchestration_claims_run ON orchestration_workspace_claims(run_id);
+                     PRAGMA user_version=1;
+                     COMMIT;",
+                )
+                .unwrap();
+
+            let migrated = RunJournal::from_connection(connection).unwrap();
+            let connection = migrated.connection.lock().unwrap();
+            let version: i64 = connection
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .unwrap();
+            let claims = connection
+                .prepare(
+                    "SELECT proof_state,authority_store_id,authority_epoch,root_binding_id FROM orchestration_workspace_claims",
+                )
+                .unwrap()
+                .query_map([], |row| {
+                    let proof: String = row.get(0)?;
+                    let store: Option<String> = row.get(1)?;
+                    let epoch: Option<String> = row.get(2)?;
+                    let root: Option<String> = row.get(3)?;
+                    Ok((proof, store, epoch, root))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(version, 2);
+            assert_eq!(claims.len(), usize::from(populated));
+            assert!(claims.iter().all(|(proof, store, epoch, root)| {
+                proof == "identity_unproven" && store.is_none() && epoch.is_none() && root.is_none()
+            }));
+        }
     }
 }

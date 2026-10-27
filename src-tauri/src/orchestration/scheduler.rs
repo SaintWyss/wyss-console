@@ -25,7 +25,7 @@ use crate::{
 };
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, PoisonError, atomic::AtomicBool},
     time::{Duration, Instant},
 };
@@ -76,6 +76,34 @@ pub trait ManagedAuthority: Send + Sync + 'static {
         intent_id: &str,
         prompt: &str,
     ) -> Result<StartedTurn, BridgeFault>;
+    /// Capability negotiation is only a gate. A `true` result does not authorize an effect;
+    /// implementations must still consume the authority-owned claim and one-use receipt in
+    /// `start_guarded`. The production F8 bridge stays closed until protocol-2 implements it.
+    fn supports_workspace_guard_v1(&self) -> bool {
+        false
+    }
+    /// M6 must not fall back to ordinary `TurnStart`: the F8 implementation must atomically
+    /// validate the durable workspace claim, pinned root, freshness, approval and receipt.
+    fn start_guarded(
+        &self,
+        _admission: &Admission,
+        _intent_id: &str,
+        _prompt: &str,
+        _workspace_root: &Path,
+        _workspace_id: &str,
+        _workspace_revision: &str,
+    ) -> Result<StartedTurn, BridgeFault> {
+        Err(BridgeFault::Unknown)
+    }
+    /// Owner input is not proof of effect outcome or root identity. Only the authority may
+    /// produce the evidence that permits settlement and eventual claim release.
+    fn verify_workspace_settlement(
+        &self,
+        _workspace_root: &Path,
+        _decision: ReconcileDecision,
+    ) -> Result<(), BridgeFault> {
+        Err(BridgeFault::Unknown)
+    }
     fn observe(&self, turn_id: &str) -> Result<TurnObservation, BridgeFault>;
     fn cancel(&self, step: &StepSnapshot, intent_id: &str) -> Result<(), BridgeFault>;
     fn handoff_start(
@@ -1282,6 +1310,25 @@ impl Coordinator {
         if step.state != StepState::NeedsReview {
             return Err(CoordinatorError::InvalidTransition);
         }
+        if decision != ReconcileDecision::Unknown {
+            let plan = self
+                .plans
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(run_id)
+                .map(|p| p.plan.clone());
+            let root = plan
+                .as_ref()
+                .map(|plan| plan.workspace_root.as_str())
+                .or(workspace_root)
+                .ok_or(CoordinatorError::WorkspaceConflict)?;
+            // A user's decision is not evidence of physical identity or effect outcome.
+            // F8 must prove both from its still-live authority-owned pin before M6 mutates
+            // the journal or releases the blocking claim.
+            self.authority
+                .verify_workspace_settlement(std::path::Path::new(root), decision)
+                .map_err(|_| CoordinatorError::WorkspaceConflict)?;
+        }
         match decision {
             ReconcileDecision::Unknown => Ok(run),
             ReconcileDecision::ConfirmedCompleted => {
@@ -1694,6 +1741,23 @@ impl Coordinator {
                 {
                     continue;
                 }
+                if !self.authority.supports_workspace_guard_v1() {
+                    // No ordinary TurnStart fallback. Leave the M6 claim held and the step
+                    // waiting until F8 can provide the frozen atomic guard contract.
+                    if row.state == StepState::Eligible {
+                        self.journal
+                            .set_step_state(
+                                &run.run_id,
+                                &step.step_id,
+                                row.state,
+                                StepState::WaitingResource,
+                                Some(FailureCode::TrustBoundaryBlocked),
+                                now,
+                            )
+                            .map_err(map_journal)?;
+                    }
+                    continue;
+                }
                 if handoff_receiver {
                     let receiver = step
                         .managed_session_id
@@ -1871,7 +1935,14 @@ impl Coordinator {
                         now,
                     )
                     .map_err(map_journal)?;
-                match self.authority.start(&admission, &intent_id, &step.prompt) {
+                match self.authority.start_guarded(
+                    &admission,
+                    &intent_id,
+                    &step.prompt,
+                    &admission.workspace_root,
+                    &run.workspace_id,
+                    &run.current_workspace_revision,
+                ) {
                     Ok(started) => {
                         self.journal
                             .acknowledge_attempt(
@@ -2376,9 +2447,9 @@ mod tests {
     };
     use std::{
         fs,
-        os::unix::fs::{PermissionsExt, symlink},
+        os::unix::fs::{MetadataExt, PermissionsExt, symlink},
         path::Path,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     };
 
     const SESSION: &str = "11111111-1111-4111-8111-111111111111";
@@ -2389,8 +2460,11 @@ mod tests {
 
     struct FakeAuthority {
         root: PathBuf,
+        root_pin: fs::File,
         second_root: Mutex<Option<PathBuf>>,
+        second_root_pin: Mutex<Option<fs::File>>,
         starts: AtomicUsize,
+        guarded_workspace: AtomicBool,
         cancels: AtomicUsize,
         inspect_fault: Mutex<Option<BridgeFault>>,
         fresh_receiver_fault: Mutex<Option<BridgeFault>>,
@@ -2398,13 +2472,17 @@ mod tests {
         start_fault: Mutex<Option<BridgeFault>>,
         cancel_fault: Mutex<Option<BridgeFault>>,
         observation: Mutex<TurnObservation>,
+        settlement_evidence: Mutex<Option<ReconcileDecision>>,
     }
     impl FakeAuthority {
         fn new(root: PathBuf) -> Self {
             Self {
+                root_pin: fs::File::open(&root).unwrap(),
                 root,
                 second_root: Mutex::new(None),
+                second_root_pin: Mutex::new(None),
                 starts: AtomicUsize::new(0),
+                guarded_workspace: AtomicBool::new(true),
                 cancels: AtomicUsize::new(0),
                 inspect_fault: Mutex::new(None),
                 fresh_receiver_fault: Mutex::new(None),
@@ -2416,10 +2494,82 @@ mod tests {
                     reason: None,
                     revision: 1,
                 }),
+                settlement_evidence: Mutex::new(None),
+            }
+        }
+
+        fn authorize_settlement(&self, decision: ReconcileDecision) {
+            *self.settlement_evidence.lock().unwrap() = Some(decision);
+        }
+
+        fn set_second_root(&self, path: PathBuf) {
+            *self.second_root.lock().unwrap() = Some(path.clone());
+            *self.second_root_pin.lock().unwrap() = Some(fs::File::open(path).unwrap());
+        }
+
+        fn pin_matches(&self, path: &Path) -> Result<(), BridgeFault> {
+            let current = fs::metadata(path).map_err(|_| BridgeFault::Unknown)?;
+            let primary_matches = self
+                .root_pin
+                .metadata()
+                .is_ok_and(|pinned| pinned.dev() == current.dev() && pinned.ino() == current.ino());
+            let secondary_matches = self
+                .second_root_pin
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|pin| pin.metadata().ok())
+                .is_some_and(|pinned| {
+                    pinned.dev() == current.dev() && pinned.ino() == current.ino()
+                });
+            if primary_matches || secondary_matches {
+                Ok(())
+            } else {
+                Err(BridgeFault::Denied)
             }
         }
     }
     impl ManagedAuthority for FakeAuthority {
+        fn supports_workspace_guard_v1(&self) -> bool {
+            self.guarded_workspace.load(Ordering::SeqCst)
+        }
+
+        fn start_guarded(
+            &self,
+            admission: &Admission,
+            intent_id: &str,
+            prompt: &str,
+            workspace_root: &Path,
+            workspace_id: &str,
+            expected_workspace_revision: &str,
+        ) -> Result<StartedTurn, BridgeFault> {
+            self.pin_matches(workspace_root)?;
+            if workspace_id
+                != workspace_identity(workspace_root).map_err(|_| BridgeFault::Denied)?
+                || expected_workspace_revision
+                    != workspace_revision(workspace_root).map_err(|_| BridgeFault::Denied)?
+                || admission.workspace_root != workspace_root
+            {
+                return Err(BridgeFault::Denied);
+            }
+            self.start(admission, intent_id, prompt)
+        }
+
+        fn verify_workspace_settlement(
+            &self,
+            workspace_root: &Path,
+            decision: ReconcileDecision,
+        ) -> Result<(), BridgeFault> {
+            self.pin_matches(workspace_root)?;
+            let mut evidence = self.settlement_evidence.lock().unwrap();
+            if *evidence == Some(decision) {
+                *evidence = None;
+                Ok(())
+            } else {
+                Err(BridgeFault::Unknown)
+            }
+        }
+
         fn verify_fresh_receiver(&self, _session_id: &str) -> Result<(), BridgeFault> {
             if let Some(fault) = self.fresh_receiver_fault.lock().unwrap().take() {
                 return Err(fault);
@@ -3091,7 +3241,7 @@ mod tests {
         let root_a = root();
         let root_b = root();
         let (coordinator, _journal, authority) = coordinator(&root_a);
-        *authority.second_root.lock().unwrap() = Some(root_b.clone());
+        authority.set_second_root(root_b.clone());
 
         let first = plan(
             &root_a,
@@ -3132,7 +3282,7 @@ mod tests {
         let root_a = root();
         let root_b = root();
         let (coordinator, _journal, authority) = coordinator(&root_a);
-        *authority.second_root.lock().unwrap() = Some(root_b.clone());
+        authority.set_second_root(root_b.clone());
 
         let mut first = plan(
             &root_a,
@@ -3193,7 +3343,7 @@ mod tests {
         let root_a = root();
         let root_b = root();
         let (coordinator, _journal, authority) = coordinator(&root_a);
-        *authority.second_root.lock().unwrap() = Some(root_b.clone());
+        authority.set_second_root(root_b.clone());
         let first = plan(
             &root_a,
             vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
@@ -3331,7 +3481,7 @@ mod tests {
         let root_a = root();
         let root_b = root();
         let (coordinator, _journal, authority) = coordinator(&root_a);
-        *authority.second_root.lock().unwrap() = Some(root_b.clone());
+        authority.set_second_root(root_b.clone());
         let mut first = plan(
             &root_a,
             vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
@@ -3393,7 +3543,7 @@ mod tests {
         let link = std::env::temp_dir().join(format!("wyss-orch-alias-{}", Uuid::new_v4()));
         symlink(&original, &link).unwrap();
         let (coordinator, _journal, authority) = coordinator(&original);
-        *authority.second_root.lock().unwrap() = Some(child.clone());
+        authority.set_second_root(child.clone());
         let alias_plan = plan(
             &link,
             vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
@@ -3446,13 +3596,142 @@ mod tests {
     }
 
     #[test]
+    fn restart_cannot_reconcile_equal_content_replacement_without_live_f8_identity() {
+        let root = root();
+        let moved = root.with_extension("moved");
+        let (coordinator, journal, authority) = coordinator(&root);
+        let draft = plan(
+            &root,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        let run = coordinator
+            .submit(draft.clone(), review(&draft), 100)
+            .unwrap();
+        coordinator.tick(101).unwrap();
+        let step_id = &draft.steps[0].step_id;
+        let attempt = coordinator.get(&run.run_id).unwrap().steps[0]
+            .attempt_id
+            .clone()
+            .unwrap();
+        journal
+            .mark_attempt_unknown(&run.run_id, step_id, &attempt, 102)
+            .unwrap();
+        authority.authorize_settlement(ReconcileDecision::ConfirmedCompleted);
+        let reviewed_revision = workspace_revision(&root).unwrap();
+        drop(coordinator);
+
+        fs::rename(&root, &moved).unwrap();
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::metadata(&moved).unwrap().permissions()).unwrap();
+        let restarted = Coordinator::new(journal.clone(), authority, 103).unwrap();
+        let result = restarted.reconcile(
+            &run.run_id,
+            step_id,
+            ReconcileDecision::ConfirmedCompleted,
+            Some(root.to_str().unwrap()),
+            Some(&reviewed_revision),
+            104,
+        );
+        let claims = journal.claimed_workspaces().unwrap();
+        let blocked_and_claimed = result.is_err() && claims.iter().any(|(id, _)| id == &run.run_id);
+
+        fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&moved).unwrap();
+        assert!(
+            blocked_and_claimed,
+            "reconciliation must retain the unresolved claim unless live F8 proves the original root"
+        );
+    }
+
+    #[test]
+    fn production_f8_guard_capability_stays_closed_without_atomic_protocol_support() {
+        let root = root();
+        let authority = F8Authority::new(root.join("runtime"));
+        assert!(!authority.supports_workspace_guard_v1());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn missing_workspace_guard_blocks_before_attempt_and_retains_claim() {
+        let root = root();
+        let (coordinator, journal, authority) = coordinator(&root);
+        authority.guarded_workspace.store(false, Ordering::SeqCst);
+        let draft = plan(
+            &root,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        let accepted = coordinator
+            .submit(draft.clone(), review(&draft), 100)
+            .unwrap();
+        coordinator.tick(101).unwrap();
+
+        let blocked = coordinator.get(&accepted.run_id).unwrap();
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 0);
+        assert_eq!(blocked.steps[0].state, StepState::WaitingResource);
+        assert_eq!(
+            blocked.steps[0].failure,
+            Some(FailureCode::TrustBoundaryBlocked)
+        );
+        assert!(blocked.steps[0].attempt_id.is_none());
+        assert_eq!(journal.claimed_workspaces().unwrap().len(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn owner_confirmation_without_authority_evidence_never_releases_ambiguous_claim() {
+        for decision in [
+            ReconcileDecision::ConfirmedCompleted,
+            ReconcileDecision::ConfirmedNoEffect,
+            ReconcileDecision::ConfirmedCancelled,
+        ] {
+            let root = root();
+            let (coordinator, journal, authority) = coordinator(&root);
+            let draft = plan(
+                &root,
+                vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            );
+            let accepted = coordinator
+                .submit(draft.clone(), review(&draft), 100)
+                .unwrap();
+            coordinator.tick(101).unwrap();
+            let attempt = coordinator.get(&accepted.run_id).unwrap().steps[0]
+                .attempt_id
+                .clone()
+                .unwrap();
+            journal
+                .mark_attempt_unknown(&accepted.run_id, &draft.steps[0].step_id, &attempt, 102)
+                .unwrap();
+
+            let result = coordinator.reconcile(
+                &accepted.run_id,
+                &draft.steps[0].step_id,
+                decision,
+                Some(&draft.workspace_root),
+                Some(&workspace_revision(&root).unwrap()),
+                103,
+            );
+            assert_eq!(result.unwrap_err(), CoordinatorError::WorkspaceConflict);
+            assert_eq!(journal.claimed_workspaces().unwrap().len(), 1);
+            assert_eq!(
+                coordinator.get(&accepted.run_id).unwrap().steps[0].state,
+                StepState::NeedsReview
+            );
+            assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
     fn parent_child_workspace_claims_conflict_in_both_admission_orders() {
         for parent_first in [true, false] {
             let root = root();
             let child = root.join("child");
             fs::create_dir(&child).unwrap();
             let (coordinator, _journal, authority) = coordinator(&root);
-            *authority.second_root.lock().unwrap() = Some(child.clone());
+            authority.set_second_root(child.clone());
             let parent = plan(
                 &root,
                 vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
@@ -3546,6 +3825,7 @@ mod tests {
                 assert_eq!(held.steps[0].state, StepState::NeedsReview);
                 assert_eq!(journal.claimed_workspaces().unwrap().len(), 1);
                 let root_text = root.to_string_lossy().into_owned();
+                authority.authorize_settlement(ReconcileDecision::ConfirmedCompleted);
                 let resolved = restarted
                     .reconcile(
                         &run.run_id,
@@ -3586,6 +3866,7 @@ mod tests {
         assert_eq!(stopped.steps[0].state, StepState::NeedsReview);
         assert_eq!(stopped.steps[1].state, StepState::Eligible);
         let revised = workspace_revision(&root).unwrap();
+        authority.authorize_settlement(ReconcileDecision::ConfirmedCompleted);
         let resolved = coordinator
             .reconcile(
                 &run.run_id,
@@ -3633,6 +3914,7 @@ mod tests {
             .mark_attempt_unknown(&run.run_id, &draft.steps[0].step_id, &attempt, 103)
             .unwrap();
         let revised = workspace_revision(&root).unwrap();
+        authority.authorize_settlement(ReconcileDecision::ConfirmedCompleted);
         let resolved = coordinator
             .reconcile(
                 &run.run_id,
