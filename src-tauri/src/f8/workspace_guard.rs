@@ -298,12 +298,15 @@ mod linux {
             )
             .map_err(|_| E::StorageIncompatible)?;
             tx.execute(
-                "UPDATE workspace_root_bindings SET proof_state='identity_unproven',proof_revision=proof_revision+1 WHERE proof_state='pinned'",
+                "UPDATE guarded_start_receipts SET state='invalidated',receipt_revision=receipt_revision+1 WHERE state='prepared'",
                 [],
             )
             .map_err(|_| E::StorageUnavailable)?;
+            // An observation or fully closed history needs no physical proof to retire.
+            // Anything still referenced by uncertain work keeps its proof-loss barrier.
+            retire_roots_in(&tx, true)?;
             tx.execute(
-                "UPDATE guarded_start_receipts SET state='invalidated',receipt_revision=receipt_revision+1 WHERE state='prepared'",
+                "UPDATE workspace_root_bindings SET proof_state='identity_unproven',proof_revision=proof_revision+1 WHERE proof_state='pinned'",
                 [],
             )
             .map_err(|_| E::StorageUnavailable)?;
@@ -332,6 +335,24 @@ mod linux {
 
         pub fn epoch(&self) -> &str {
             &self.epoch
+        }
+
+        /// Drop a live directory reference only after all authority-owned uses are closed.
+        /// Rows remain immutable identity history; retirement never reconstructs a pin.
+        pub(crate) fn retire_released_roots(&mut self, conn: &mut Connection) -> ControlResult<()> {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| E::StorageUnavailable)?;
+            tx.execute(
+                "UPDATE guarded_start_receipts SET state='invalidated',receipt_revision=receipt_revision+1 WHERE state='prepared' AND claim_id IN (SELECT claim_id FROM workspace_claims WHERE phase='released')",
+                [],
+            ).map_err(|_|E::StorageUnavailable)?;
+            let retired = retire_roots_in(&tx, false)?;
+            tx.commit().map_err(|_| E::StorageUnavailable)?;
+            for root in retired {
+                self.pins.remove(&root);
+            }
+            Ok(())
         }
 
         /// Locator/topology drift revokes dispatch, not the original directory reference.
@@ -519,10 +540,6 @@ mod linux {
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|_| E::StorageUnavailable)?
             };
-            if active_claim_roots.is_empty() {
-                return Ok(true);
-            }
-
             super::super::protocol::canonical(runtime_instance_id)?;
             let candidate_root_id: Option<String> = conn
                 .query_row(
@@ -533,7 +550,9 @@ mod linux {
                 .optional()
                 .map_err(|_| E::StorageUnavailable)?;
             let Some(candidate_root_id) = candidate_root_id else {
-                return Ok(false);
+                // Existing unguarded profiles retain their policy only in an empty claim
+                // domain. A pinned runtime must validate its proof even after claim release.
+                return Ok(active_claim_roots.is_empty());
             };
             let candidate = self.pins.get(&candidate_root_id).ok_or(E::GateDenied)?;
             let candidate_proof: Option<(String, String, String, i64)> = conn
@@ -591,6 +610,7 @@ mod linux {
             conn: &mut Connection,
             locator: &Path,
         ) -> ControlResult<String> {
+            self.retire_released_roots(conn)?;
             if !self.capability_ready(conn)? {
                 return Err(E::GateDenied);
             }
@@ -1135,7 +1155,7 @@ mod linux {
         /// Release is a separate, idempotent operation after M6 has durably committed its
         /// terminal revision. Unsettled/unknown attempts are never force-released.
         pub fn release_claim(
-            &self,
+            &mut self,
             conn: &mut Connection,
             request: &super::super::guard_protocol::ClaimRelease,
         ) -> ControlResult<Claim> {
@@ -1156,6 +1176,7 @@ mod linux {
             }
             if current.2 == "released" && current.5 as u64 == request.coordinator_revision {
                 tx.commit().map_err(|_| E::StorageUnavailable)?;
+                self.retire_released_roots(conn)?;
                 return self.claim_status(conn, &request.claim_id);
             }
             if current.1 as u64 != request.expected_claim_revision
@@ -1185,13 +1206,14 @@ mod linux {
                 return Err(E::StaleRevision);
             }
             tx.commit().map_err(|_| E::StorageUnavailable)?;
+            self.retire_released_roots(conn)?;
             self.claim_status(conn, &request.claim_id)
         }
 
         /// Release a terminal M6 claim only when F8 proves no start receipt or attempt was
         /// ever admitted. The same writer transaction fences a racing start reservation.
         pub fn release_unused_claim(
-            &self,
+            &mut self,
             conn: &mut Connection,
             request: &super::super::guard_protocol::ClaimReleaseUnused,
         ) -> ControlResult<Claim> {
@@ -1210,6 +1232,7 @@ mod linux {
             }
             if current.3 == "released" && current.6 as u64 == request.coordinator_revision {
                 tx.commit().map_err(|_| E::StorageUnavailable)?;
+                self.retire_released_roots(conn)?;
                 return self.claim_status(conn, &request.claim_id);
             }
             if current.1 as u64 != request.expected_claim_revision
@@ -1239,6 +1262,7 @@ mod linux {
                 return Err(E::StaleRevision);
             }
             tx.commit().map_err(|_| E::StorageUnavailable)?;
+            self.retire_released_roots(conn)?;
             self.claim_status(conn, &request.claim_id)
         }
 
@@ -1933,6 +1957,37 @@ mod linux {
             }
             Ok(row.4)
         }
+    }
+
+    fn retire_roots_in(
+        conn: &Connection,
+        include_observations: bool,
+    ) -> ControlResult<Vec<String>> {
+        // A persisted owned-reap audit event is required for every referencing launch.
+        // A stopped desired state, missing ACK, or absent runtime binding is not that proof.
+        let mut stmt = conn.prepare(
+            "SELECT r.root_binding_id FROM workspace_root_bindings r
+             WHERE r.proof_state IN ('pinned','identity_unproven')
+             AND (?1 OR EXISTS(SELECT 1 FROM workspace_claims c WHERE c.root_binding_id=r.root_binding_id AND c.phase='released'))
+             AND NOT EXISTS(SELECT 1 FROM workspace_claims c WHERE c.root_binding_id=r.root_binding_id AND c.phase<>'released')
+             AND NOT EXISTS(SELECT 1 FROM guarded_start_receipts s WHERE s.root_binding_id=r.root_binding_id AND s.state='prepared')
+             AND NOT EXISTS(SELECT 1 FROM guarded_start_receipts s LEFT JOIN guarded_attempts a USING(receipt_id) WHERE s.root_binding_id=r.root_binding_id AND s.state='consumed' AND (a.attempt_id IS NULL OR a.send_state NOT IN ('terminal','known_no_send')))
+             AND NOT EXISTS(SELECT 1 FROM managed_runtime_workspace_bindings b WHERE b.root_binding_id=r.root_binding_id AND NOT EXISTS(SELECT 1 FROM control_events e WHERE json_extract(e.envelope,'$.event_type')='authority.runtime.instance_exited' AND json_extract(e.envelope,'$.payload.runtime_instance_id')=b.runtime_instance_id))
+             AND NOT EXISTS(SELECT 1 FROM managed_runtime_launches l WHERE NOT EXISTS(SELECT 1 FROM managed_runtime_workspace_bindings b WHERE b.runtime_instance_id=l.runtime_instance_id) AND NOT EXISTS(SELECT 1 FROM control_events e WHERE json_extract(e.envelope,'$.event_type')='authority.runtime.instance_exited' AND json_extract(e.envelope,'$.payload.runtime_instance_id')=l.runtime_instance_id))
+             AND NOT EXISTS(SELECT 1 FROM managed_turns t JOIN managed_runtime_workspace_bindings b ON b.runtime_instance_id=t.runtime_instance_id WHERE b.root_binding_id=r.root_binding_id AND t.state IN ('starting','running','indeterminate'))
+             AND NOT EXISTS(SELECT 1 FROM managed_approvals a JOIN managed_runtime_workspace_bindings b ON b.runtime_instance_id=a.runtime_instance_id WHERE b.root_binding_id=r.root_binding_id AND (a.state IN ('pending','indeterminate') OR (a.state='accepted' AND a.effect='dispatched')))",
+        ).map_err(|_|E::StorageUnavailable)?;
+        let roots = stmt
+            .query_map([include_observations], |row| row.get::<_, String>(0))
+            .map_err(|_| E::StorageUnavailable)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| E::StorageUnavailable)?;
+        drop(stmt);
+        for root in &roots {
+            conn.execute("UPDATE workspace_root_bindings SET proof_state='released',proof_revision=proof_revision+1 WHERE root_binding_id=?1",[root])
+                .map_err(|_|E::StorageUnavailable)?;
+        }
+        Ok(roots)
     }
 
     fn now() -> ControlResult<String> {

@@ -315,6 +315,7 @@ pub fn v9_view(c: &Connection) -> ControlResult<Connection> {
 }
 
 fn v9_projection(c: &Connection) -> ControlResult<Connection> {
+    let guarded_intents = validate_guarded_receipts(c)?;
     let schema = v9::expected_v9()?;
     let view = Connection::open_in_memory().map_err(db)?;
     view.pragma_update(None, "foreign_keys", false)
@@ -335,6 +336,48 @@ fn v9_projection(c: &Connection) -> ControlResult<Connection> {
                 row[1] = Value::Integer(9);
             }
         }
+        if matches!(name.as_str(), "managed_turns" | "processed_intents") {
+            let columns = c
+                .prepare(&format!("SELECT * FROM {name} LIMIT 0"))
+                .map_err(invalid)?;
+            let mutation_column = if name == "managed_turns" {
+                "intent_mutation"
+            } else {
+                "mutation"
+            };
+            let mutation_index = columns
+                .column_names()
+                .iter()
+                .position(|column| *column == mutation_column)
+                .ok_or(E::StorageIncompatible)?;
+            let intent_index = columns
+                .column_names()
+                .iter()
+                .position(|column| *column == "intent_id")
+                .ok_or(E::StorageIncompatible)?;
+            for row in &mut rows {
+                let (Value::Text(raw), Value::Text(intent)) =
+                    (&row[mutation_index], &row[intent_index])
+                else {
+                    return Err(E::StorageIncompatible);
+                };
+                let mut mutation =
+                    crate::contracts::control::unique_json(raw.as_bytes()).map_err(invalid)?;
+                if mutation.get("guarded_tuple_digest").is_some() {
+                    if !guarded_intents.contains(intent) {
+                        return Err(E::StorageIncompatible);
+                    }
+                    mutation
+                        .as_object_mut()
+                        .ok_or(E::StorageIncompatible)?
+                        .remove("guarded_tuple_digest");
+                    // Only the disposable V9 validation view drops this V10-only field.
+                    // The source receipt and its replay fingerprint are never modified.
+                    row[mutation_index] =
+                        Value::Text(serde_json::to_string(&mutation).map_err(invalid)?);
+                }
+            }
+        }
         migration::insert_rows(&view, &name, &rows)?;
     }
     for sql in schema
@@ -347,6 +390,56 @@ fn v9_projection(c: &Connection) -> ControlResult<Connection> {
     view.pragma_update(None, "foreign_keys", true).map_err(db)?;
     migration::integrity(&view)?;
     Ok(view)
+}
+
+fn validate_guarded_receipts(c: &Connection) -> ControlResult<BTreeSet<String>> {
+    let invalid_links:i64=c.query_row(
+        "SELECT count(*) FROM guarded_attempts a
+         LEFT JOIN guarded_start_receipts r ON r.receipt_id=a.receipt_id
+         LEFT JOIN workspace_claims c ON c.claim_id=a.claim_id
+         LEFT JOIN managed_turns t ON t.managed_turn_id=a.turn_id
+         LEFT JOIN processed_intents i ON i.intent_id=a.intent_id
+         WHERE r.receipt_id IS NULL OR c.claim_id IS NULL OR t.managed_turn_id IS NULL OR i.intent_id IS NULL
+         OR r.state<>'consumed' OR r.attempt_id IS NOT a.attempt_id OR r.turn_id IS NOT a.turn_id
+         OR r.claim_id<>a.claim_id OR r.tuple_digest<>a.tuple_digest
+         OR r.root_binding_id<>c.root_binding_id OR r.claim_generation<>c.claim_generation
+         OR t.intent_id<>a.intent_id OR i.mutation<>t.intent_mutation",
+        [],|r|r.get(0),
+    ).map_err(invalid)?;
+    let orphan_receipts: i64 = c.query_row(
+        "SELECT count(*) FROM guarded_start_receipts r LEFT JOIN guarded_attempts a ON a.receipt_id=r.receipt_id WHERE r.state='consumed' AND a.attempt_id IS NULL",
+        [],|r|r.get(0),
+    ).map_err(invalid)?;
+    if invalid_links != 0 || orphan_receipts != 0 {
+        return Err(E::StorageIncompatible);
+    }
+    let mut statement=c.prepare("SELECT a.intent_id,a.tuple_digest,i.mutation FROM guarded_attempts a JOIN processed_intents i USING(intent_id)").map_err(invalid)?;
+    let rows = statement
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(invalid)?;
+    let mut intents = BTreeSet::new();
+    for row in rows {
+        let (intent, digest, raw) = row.map_err(invalid)?;
+        let mutation = crate::contracts::control::unique_json(raw.as_bytes()).map_err(invalid)?;
+        if mutation.as_object().is_none_or(|m| m.len() != 3)
+            || mutation["method"] != "managedSession/turn/start"
+            || mutation["guarded_tuple_digest"].as_str() != Some(digest.as_str())
+            || digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(E::StorageIncompatible);
+        }
+        intents.insert(intent);
+    }
+    Ok(intents)
 }
 
 fn rebuild_metadata_v10(tx: &rusqlite::Transaction<'_>) -> ControlResult<()> {
@@ -1496,6 +1589,116 @@ mod tests {
             "lost release acknowledgements are recovered by status, without a second transition"
         );
         assert_eq!(gate_revision, 1);
+
+        // Releasing a claim is not permission to drop an idle runtime's pinned root.
+        let root_state: String = authority
+            .engine()
+            .connection()
+            .query_row(
+                "SELECT proof_state FROM workspace_root_bindings WHERE root_binding_id=?1",
+                [&tuple.root_binding_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(root_state, "pinned");
+        for table in ["guarded_attempts", "guarded_start_receipts"] {
+            let corrupt = migration::clone_database(authority.engine().connection()).unwrap();
+            corrupt
+                .execute(
+                    &format!("UPDATE {table} SET tuple_digest=?1"),
+                    ["f".repeat(64)],
+                )
+                .unwrap();
+            assert!(
+                validate_v10(&corrupt).is_err(),
+                "V10 receipt links must be validated before private V9 normalization"
+            );
+        }
+        let mut lost = migration::clone_database(authority.engine().connection()).unwrap();
+        let successor = crate::f8::workspace_guard::WorkspaceGuard::open(
+            &mut lost,
+            uuid::Uuid::new_v4().to_string(),
+        )
+        .unwrap();
+        assert!(
+            !successor.capability_ready(&lost).unwrap(),
+            "unreaped runtime evidence cannot be retired on proof loss"
+        );
+
+        let changed_parent = workspace_fixture.path("runtime-moved-parent");
+        fs::create_dir(&changed_parent).unwrap();
+        let moved = changed_parent.join("original");
+        fs::rename(&workspace, &moved).unwrap();
+        std::os::unix::fs::symlink(&moved, &workspace).unwrap();
+        let manual = f8_call(
+            &mut authority,
+            &mut client,
+            &mut spawner,
+            &authority_id,
+            "managedSession/turn/start",
+            serde_json::json!({
+                "intent_id":uuid::Uuid::new_v4().to_string(),"managed_session_id":session,"expected_session_revision":1,"prompt":"cannot reuse a drifted root after claim release","runtime_fence":reference.fence()
+            }),
+        );
+        assert_eq!(
+            manual["error"]["code"], "gate_denied",
+            "manual starts still require the runtime root proof with no active claim: {manual}"
+        );
+        let runtime_revision: i64 = authority
+            .engine()
+            .connection()
+            .query_row(
+                "SELECT revision FROM managed_runtimes WHERE managed_session_id=?1",
+                [&session],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let stopped = f8_call(
+            &mut authority,
+            &mut client,
+            &mut spawner,
+            &authority_id,
+            "runtime/stop",
+            serde_json::json!({
+                "intent_id":uuid::Uuid::new_v4().to_string(),"adapter_id":"codex","runtime_kind":"codex","managed_session_id":session,"expected_generation":reference.generation,"expected_revision":runtime_revision,"expected_runtime_instance_id":reference.runtime_instance_id
+            }),
+        );
+        assert!(stopped.get("error").is_none(), "{stopped}");
+        for n in 1..=3 {
+            authority
+                .tick(std::time::Instant::now() + std::time::Duration::from_secs(n))
+                .unwrap();
+        }
+        assert!(authority.engine().reference(&session).is_none());
+        let retired: String = authority
+            .engine()
+            .connection()
+            .query_row(
+                "SELECT proof_state FROM workspace_root_bindings WHERE root_binding_id=?1",
+                [&tuple.root_binding_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            retired, "released",
+            "only owned reap and closed work retire the last runtime reference"
+        );
+        let mut clean = migration::clone_database(authority.engine().connection()).unwrap();
+        drop(authority);
+        let mut successor = crate::f8::workspace_guard::WorkspaceGuard::open(
+            &mut clean,
+            uuid::Uuid::new_v4().to_string(),
+        )
+        .unwrap();
+        assert!(successor.capability_ready(&clean).unwrap());
+        assert!(successor.duplicate_root_fd(&tuple.root_binding_id).is_err());
+        let new_binding = successor
+            .observe_root(&mut clean, std::path::Path::new(&workspace))
+            .unwrap();
+        assert_ne!(
+            new_binding, tuple.root_binding_id,
+            "new enrollment never reconstructs the old proof"
+        );
     }
 
     #[cfg(target_os = "linux")]

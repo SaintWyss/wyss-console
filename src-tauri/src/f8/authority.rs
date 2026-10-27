@@ -465,7 +465,7 @@ impl Authority {
                     }))
                 }
                 O::ClaimRelease(release) => {
-                    let guard = self.workspace_guard.as_ref().ok_or(E::Unsupported)?;
+                    let guard = self.workspace_guard.as_mut().ok_or(E::Unsupported)?;
                     let claim = guard.release_claim(self.engine.connection_mut(), &release)?;
                     Ok(json!({
                         "claim_id": claim.claim_id,
@@ -480,7 +480,7 @@ impl Authority {
                     }))
                 }
                 O::ClaimReleaseUnused(release) => {
-                    let guard = self.workspace_guard.as_ref().ok_or(E::Unsupported)?;
+                    let guard = self.workspace_guard.as_mut().ok_or(E::Unsupported)?;
                     let claim =
                         guard.release_unused_claim(self.engine.connection_mut(), &release)?;
                     Ok(json!({
@@ -1964,6 +1964,9 @@ impl Authority {
                 }
             }
             self.recovery_pending = false;
+        }
+        if due && let Some(guard) = self.workspace_guard.as_mut() {
+            guard.retire_released_roots(self.engine.connection_mut())?;
         }
         Ok(())
     }

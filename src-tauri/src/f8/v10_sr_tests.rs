@@ -1052,3 +1052,111 @@ fn audit_review_unknown_f8_send_must_stay_unknown_and_not_retry() {
     assert_eq!(starts_after_restart, starts);
     assert!(f8_claim.is_ok_and(|claim| claim.phase == "unsettled"));
 }
+
+#[test]
+fn audit_review_clean_restart_after_unused_release_can_enroll_new_work() {
+    use crate::f8::{guard_protocol::ClaimReleaseUnused, workspace_guard::WorkspaceGuard};
+    let (f, mut c, mut g, owner) = audit_review_guard();
+    let a = f.path("a");
+    fs::create_dir(&a).unwrap();
+    let ra = g.observe_root(&mut c, &a).unwrap();
+    let claim = g
+        .acquire_claim(
+            &mut c,
+            &owner,
+            &uuid::Uuid::new_v4().to_string(),
+            1,
+            &"a".repeat(64),
+            &ra,
+        )
+        .unwrap();
+    let released = g
+        .release_unused_claim(
+            &mut c,
+            &ClaimReleaseUnused {
+                claim_id: claim.claim_id,
+                claim_generation: claim.claim_generation,
+                expected_claim_revision: claim.claim_revision,
+                expected_gate_revision: claim.gate_revision,
+                coordinator_revision: 1,
+            },
+        )
+        .unwrap();
+    assert_eq!(released.phase, "released");
+    let active: i64 = c
+        .query_row(
+            "SELECT count(*) FROM workspace_claims WHERE phase<>'released'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(active, 0);
+    drop(g);
+    let g2 = WorkspaceGuard::open(&mut c, uuid::Uuid::new_v4().to_string()).unwrap();
+    let ready = g2.capability_ready(&c).unwrap();
+    eprintln!("active_claims={active}; capability_ready_after_clean_restart={ready}");
+    assert!(
+        ready,
+        "fully released claims must not make every future Managed admission impossible"
+    );
+}
+
+#[test]
+fn sr03_observation_only_restart_retires_history_without_reviving_identity() {
+    use crate::f8::workspace_guard::WorkspaceGuard;
+    let (f, mut c, mut g, _) = audit_review_guard();
+    let root = f.path("observation-only");
+    fs::create_dir(&root).unwrap();
+    let old = g.observe_root(&mut c, &root).unwrap();
+    drop(g);
+    let mut successor = WorkspaceGuard::open(&mut c, uuid::Uuid::new_v4().to_string()).unwrap();
+    assert!(successor.capability_ready(&c).unwrap());
+    assert!(successor.duplicate_root_fd(&old).is_err());
+    let state: String = c
+        .query_row(
+            "SELECT proof_state FROM workspace_root_bindings WHERE root_binding_id=?1",
+            [&old],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(state, "released");
+    assert_ne!(successor.observe_root(&mut c, &root).unwrap(), old);
+}
+
+#[test]
+fn sr03_unreleased_claim_still_quarantines_even_without_an_attempt() {
+    use crate::f8::{guard_protocol::ClaimReleaseUnused, workspace_guard::WorkspaceGuard};
+    let (f, mut c, mut g, owner) = audit_review_guard();
+    let root = f.path("held");
+    fs::create_dir(&root).unwrap();
+    let binding = g.observe_root(&mut c, &root).unwrap();
+    let claim = g
+        .acquire_claim(
+            &mut c,
+            &owner,
+            &uuid::Uuid::new_v4().to_string(),
+            1,
+            &"a".repeat(64),
+            &binding,
+        )
+        .unwrap();
+    drop(g);
+    let mut successor = WorkspaceGuard::open(&mut c, uuid::Uuid::new_v4().to_string()).unwrap();
+    assert!(!successor.capability_ready(&c).unwrap());
+    let quarantined = successor.claim_status(&c, &claim.claim_id).unwrap();
+    assert_eq!(quarantined.phase, "quarantined");
+    assert!(
+        successor
+            .release_unused_claim(
+                &mut c,
+                &ClaimReleaseUnused {
+                    claim_id: claim.claim_id,
+                    claim_generation: claim.claim_generation,
+                    expected_claim_revision: quarantined.claim_revision,
+                    expected_gate_revision: quarantined.gate_revision,
+                    coordinator_revision: 1
+                }
+            )
+            .is_err()
+    );
+}
