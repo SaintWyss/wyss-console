@@ -208,6 +208,23 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
   expect(pill('agent')?.textContent).toContain('Unknown');
 });
 
+it('provides a keyboard skip link to the focusable main content landmark', async () => {
+  component = mount(App, { target: document.body });
+  await flush();
+
+  const skip = document.querySelector<HTMLAnchorElement>('.skip-link');
+  const main = document.querySelector<HTMLElement>('main#main-content');
+  expect(skip?.textContent?.trim()).toBe('Skip to main content');
+  expect(skip?.getAttribute('href')).toBe('#main-content');
+  expect(main?.tabIndex).toBe(-1);
+  expect(skip).not.toBeNull();
+  expect(main).not.toBeNull();
+  if (!skip || !main) return;
+  expect(
+    skip.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
 it('reports a failed terminal in the top-bar runtime status', async () => {
   ipc(
     (after) => (after === null ? views.connected : never()),

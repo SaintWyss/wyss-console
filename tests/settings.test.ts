@@ -2,6 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import {
   CURSOR_STYLES,
+  APPEARANCE_THEMES,
   DEFAULT_PREFERENCES,
   EVENT_FILTER_PREFERENCES,
   LANDING_PAGES,
@@ -32,8 +33,8 @@ function keys(value: unknown, prefix = ''): string[] {
 
 it('has the defaults the desktop has: the product as it was before preferences', () => {
   expect(DEFAULT_PREFERENCES).toEqual({
-    schema_version: 1,
-    interface: { landing_page: 'console' },
+    schema_version: 2,
+    interface: { landing_page: 'console', theme: 'dark' },
     terminal: {
       font_size: 16,
       scrollback: 5000,
@@ -55,6 +56,7 @@ it('names no setting that could decide anything', () => {
       'events.time_format',
       'interface',
       'interface.landing_page',
+      'interface.theme',
       'schema_version',
       'terminal',
       'terminal.cursor_blink',
@@ -75,12 +77,35 @@ it('names no setting that could decide anything', () => {
   // Every value is a closed word, a bounded number or a flag.
   for (const words of [
     LANDING_PAGES,
+    APPEARANCE_THEMES,
     CURSOR_STYLES,
     TIME_FORMATS,
     EVENT_FILTER_PREFERENCES,
     STORAGE_STATES,
   ])
     for (const word of words) expect(word).toMatch(/^[a-z0-9_]{1,16}$/);
+});
+
+it('accepts only the three reviewed appearance themes', () => {
+  for (const theme of APPEARANCE_THEMES)
+    expect(
+      parsePreferences(
+        withPreferences((p) => ({
+          ...p,
+          interface: { ...p.interface, theme },
+        })),
+      ).interface.theme,
+    ).toBe(theme);
+  for (const theme of ['system', 'contrast', 'Dark', '']) {
+    expect(() =>
+      parsePreferences(
+        withPreferences((p) => ({
+          ...p,
+          interface: { ...p.interface, theme } as typeof p.interface,
+        })),
+      ),
+    ).toThrow('settings: invalid_theme');
+  }
 });
 
 it('accepts a set at each bound, and nothing beyond', () => {
@@ -168,7 +193,7 @@ it('refuses a word that is not one of the closed set', () => {
     expect(() => parsePreferences(copy), `${section}.${key}`).toThrow();
   }
   expect(() =>
-    parsePreferences({ ...DEFAULT_PREFERENCES, schema_version: 2 }),
+    parsePreferences({ ...DEFAULT_PREFERENCES, schema_version: 1 }),
   ).toThrow();
 });
 

@@ -2,10 +2,12 @@
   import type { Snippet } from 'svelte';
   import {
     CURSOR_STYLES,
+    APPEARANCE_THEMES,
     EVENT_FILTER_PREFERENCES,
     LANDING_PAGES,
     TIME_FORMATS,
     type CursorStyle,
+    type AppearanceTheme,
     type EventFilterPreference,
     type LandingPage,
     type TimeFormat,
@@ -82,10 +84,27 @@
       : null,
   );
 
+  const THEME_LABEL: Record<AppearanceTheme, string> = {
+    dark: 'Dark',
+    light: 'Light',
+    high_contrast: 'High contrast',
+  };
+
   function landing(event: Event) {
     const page = (event.currentTarget as HTMLSelectElement)
       .value as LandingPage;
-    controller.change((p) => ({ ...p, interface: { landing_page: page } }));
+    controller.change((p) => ({
+      ...p,
+      interface: { ...p.interface, landing_page: page },
+    }));
+  }
+  function appearance(event: Event) {
+    const theme = (event.currentTarget as HTMLSelectElement)
+      .value as AppearanceTheme;
+    controller.change((p) => ({
+      ...p,
+      interface: { ...p.interface, theme },
+    }));
   }
   function fontSize(event: Event) {
     const size = Number((event.currentTarget as HTMLSelectElement).value);
@@ -196,9 +215,24 @@
 
     <section class="settings-section" aria-labelledby="settings-appearance">
       <h3 id="settings-appearance">Appearance</h3>
-      <p class="settings-note">
-        Wyss Console uses its dark theme. There is nothing to choose here yet.
-      </p>
+      <div class="setting-row">
+        <label for="setting-theme">Color theme</label>
+        <select
+          id="setting-theme"
+          aria-describedby="setting-theme-note"
+          disabled={!editable}
+          value={prefs.interface.theme}
+          onchange={appearance}
+        >
+          {#each APPEARANCE_THEMES as theme (theme)}
+            <option value={theme}>{THEME_LABEL[theme]}</option>
+          {/each}
+        </select>
+        <p id="setting-theme-note" class="settings-note setting-hint">
+          Changes appearance only. It does not change provider or approval
+          permissions.
+        </p>
+      </div>
     </section>
 
     <section class="settings-section" aria-labelledby="settings-interface">

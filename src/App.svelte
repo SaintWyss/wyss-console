@@ -225,8 +225,11 @@
   });
   // Presentation preferences, applied to every terminal, open or new.
   $effect(() => {
+    const theme = settings.preferences.interface.theme;
+    document.documentElement.dataset.theme = theme;
     const t = settings.preferences.terminal;
     setAppearance({
+      theme,
       fontSize: t.font_size,
       scrollback: t.scrollback,
       cursorStyle: t.cursor_style,
@@ -348,6 +351,7 @@
     <span class="orb orb-b"></span>
     <span class="orb orb-c"></span>
   </div>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <TopBar
     title={current?.label ?? ''}
     subtitle={current?.subtitle ?? ''}
@@ -362,7 +366,7 @@
     waiting={approvals.pending?.length ?? 0}
     {items}
   />
-  <main class="content">
+  <main id="main-content" class="content" tabindex="-1">
     {#if notice}
       <AuthorityNotice {notice} {retrying} onretry={retry} />
     {/if}

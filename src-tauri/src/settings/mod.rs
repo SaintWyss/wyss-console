@@ -14,8 +14,8 @@ mod store;
 mod tests;
 
 pub use model::{
-    CursorStyle, EventFilter, Events, FONT_SIZE, Interface, Invalid, LandingPage, Preferences,
-    SCHEMA_VERSION, SCROLLBACK, Terminal, TimeFormat,
+    AppearanceTheme, CursorStyle, EventFilter, Events, FONT_SIZE, Interface, Invalid, LandingPage,
+    Preferences, SCHEMA_VERSION, SCROLLBACK, Terminal, TimeFormat,
 };
 pub use service::{About, SettingsError, SettingsFailure, SettingsService, SettingsView, Storage};
 pub use store::{Loaded, MAX_FILE, Store, StoreError};

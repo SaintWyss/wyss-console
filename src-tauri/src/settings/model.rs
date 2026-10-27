@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// The version of the file a preference set is stored in. A file with a larger one was
 /// written by a newer Wyss Console and is not interpreted.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 pub const FONT_SIZE: std::ops::RangeInclusive<u8> = 10..=24;
 pub const SCROLLBACK: std::ops::RangeInclusive<u32> = 500..=50_000;
@@ -39,6 +39,17 @@ pub enum TimeFormat {
     H24,
 }
 
+/// A presentation-only color palette. It is deliberately a closed word, like the other
+/// settings: it cannot name a path, command, provider or policy.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppearanceTheme {
+    #[default]
+    Dark,
+    Light,
+    HighContrast,
+}
+
 /// The filter the Events view starts with. It narrows what is shown of what was read;
 /// it never changes what the authority records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +67,8 @@ pub enum EventFilter {
 #[serde(deny_unknown_fields)]
 pub struct Interface {
     pub landing_page: LandingPage,
+    /// Theme selected for the Console window and terminal renderer.
+    pub theme: AppearanceTheme,
 }
 
 /// How the human terminal looks. What it runs, where and with what is not here: human
@@ -98,6 +111,7 @@ impl Default for Preferences {
             schema_version: SCHEMA_VERSION,
             interface: Interface {
                 landing_page: LandingPage::Console,
+                theme: AppearanceTheme::Dark,
             },
             terminal: Terminal {
                 font_size: 16,
