@@ -39,6 +39,12 @@ pub fn auto_allow() -> Option<Duration> {
         .and_then(|v| v.parse().ok())
         .map(Duration::from_millis)
 }
+pub fn auto_deny() -> Option<Duration> {
+    std::env::var("WYSS_LAB_AUTO_DENY_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .map(Duration::from_millis)
+}
 /// What the page reports about itself while a driver runs.
 #[tauri::command]
 pub fn lab_trace(event: String, detail: String) {

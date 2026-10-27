@@ -539,6 +539,13 @@ fn show(parent: Option<gtk::ApplicationWindow>, prompt: &Prompt, expired: Arc<At
             );
         });
     }
+    if let Some(after) = crate::lab::auto_deny() {
+        let dialog = dialog.clone();
+        gtk::glib::timeout_add_local_once(after, move || {
+            crate::lab::trace("confirm.dialog.auto_deny", "");
+            dialog.response(gtk::ResponseType::Cancel);
+        });
+    }
     if let Some(after) = crate::lab::auto_allow() {
         let dialog = dialog.clone();
         gtk::glib::timeout_add_local_once(after, move || {
