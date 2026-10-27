@@ -52,7 +52,7 @@ pub fn version(c: &Connection) -> ControlResult<i64> {
 }
 pub fn admit(c: &Connection, p: Provider) -> ControlResult<()> {
     match (version(c)?, p) {
-        (8, Provider::Codex) | (9, _) => Ok(()),
+        (8, Provider::Codex) | (9 | 10, _) => Ok(()),
         _ => Err(E::Unsupported),
     }
 }

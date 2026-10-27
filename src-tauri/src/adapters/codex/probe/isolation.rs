@@ -406,6 +406,7 @@ impl Isolation {
             &inherited,
             Some(&mut held),
             Vec::new(),
+            None,
         )?;
         Ok(IsolationLaunch {
             command,
@@ -435,6 +436,7 @@ impl Isolation {
             inherited,
             None,
             Vec::new(),
+            None,
         )
     }
 
@@ -450,6 +452,7 @@ impl Isolation {
         inherited: &[std::ffi::OsString],
         mut f8_grants: Option<&mut Vec<OwnedFd>>,
         f8_mounts: Vec<(OwnedFd, PathBuf)>,
+        f8_workspace: Option<(OwnedFd, PathBuf)>,
     ) -> ProbeResult<Command> {
         let bwrap = fs::symlink_metadata(BWRAP).map_err(|_| ProbeError::RuntimeUnavailable)?;
         if !bwrap.is_file() || bwrap.uid() != 0 || bwrap.mode() & 0o022 != 0 {
@@ -541,6 +544,18 @@ impl Isolation {
         }
         for dir in &self.control {
             command.arg("--tmpfs").arg(dir);
+        }
+        if let Some((fd, destination)) = f8_workspace {
+            if destination != self.workspace {
+                return Err(ProbeError::Protocol);
+            }
+            // The source is the retained F8 directory object. The path is only the mount
+            // location inside the generation namespace; it is never reopened as a source.
+            command
+                .arg("--bind-fd")
+                .arg(fd.as_raw_fd().to_string())
+                .arg(destination);
+            f8_grants.as_mut().ok_or(ProbeError::Protocol)?.push(fd);
         }
         let within = |path: &Path| self.control.iter().any(|c| path.starts_with(c));
         // Of everything the authority owns, the generation gets back its own home and,
@@ -650,6 +665,7 @@ pub(crate) struct F8Attestation {
     pub(crate) home: PathBuf,
     user: PathBuf,
     credential: Option<Credential>,
+    workspace_pin: Option<std::fs::File>,
     identities: Vec<(PathBuf, fs::Metadata)>,
     version_launch: Option<IsolationLaunch>,
 }
@@ -746,6 +762,18 @@ impl F8Attestation {
         self.isolation
             .masks_hold(&self.chain, &self.masked)
             .unwrap_or(false)
+            && self.workspace_pin.as_ref().is_none_or(|pin| {
+                let Ok(pinned) = pin.metadata() else {
+                    return false;
+                };
+                fs::symlink_metadata(&self.isolation.workspace).is_ok_and(|current| {
+                    pinned.is_dir()
+                        && current.is_dir()
+                        && !current.file_type().is_symlink()
+                        && pinned.dev() == current.dev()
+                        && pinned.ino() == current.ino()
+                })
+            })
             && match &self.credential {
                 Some(c) => Isolation::same_credential(c, &self.user).unwrap_or(false),
                 None => matches!(credential(&self.user), Ok(None)),
@@ -776,7 +804,35 @@ impl Isolation {
         cwd: &Path,
         catalog: &Path,
     ) -> crate::contracts::control::ControlResult<(IsolationLaunch, F8Attestation)> {
+        self.prepare_f8_inner(executable, user, cwd, catalog, None)
+    }
+
+    /// Prepare a generation whose workspace source is the F8-retained directory object.
+    pub(crate) fn prepare_f8_with_workspace_fd(
+        self,
+        executable: &Path,
+        user: &Path,
+        cwd: &Path,
+        catalog: &Path,
+        workspace_fd: std::fs::File,
+    ) -> crate::contracts::control::ControlResult<(IsolationLaunch, F8Attestation)> {
+        self.prepare_f8_inner(executable, user, cwd, catalog, Some(workspace_fd))
+    }
+
+    fn prepare_f8_inner(
+        self,
+        executable: &Path,
+        user: &Path,
+        cwd: &Path,
+        catalog: &Path,
+        workspace_fd: Option<std::fs::File>,
+    ) -> crate::contracts::control::ControlResult<(IsolationLaunch, F8Attestation)> {
         use crate::contracts::control::ControlError as E;
+        let workspace_pin = workspace_fd
+            .as_ref()
+            .map(std::fs::File::try_clone)
+            .transpose()
+            .map_err(|_| E::StorageUnavailable)?;
         let prepare = || -> ProbeResult<_> {
             let executable = fs::canonicalize(executable).map_err(unsafe_path)?;
             let binary = fs::symlink_metadata(&executable).map_err(unsafe_path)?;
@@ -792,6 +848,18 @@ impl Isolation {
             let masked = self.layers()?;
             let roots = self.trust_roots()?;
             let credential = credential(user)?;
+            if let Some(pin) = &workspace_pin {
+                let pinned = pin.metadata().map_err(unsafe_path)?;
+                let current = fs::symlink_metadata(&self.workspace).map_err(unsafe_path)?;
+                if !pinned.is_dir()
+                    || !current.is_dir()
+                    || current.file_type().is_symlink()
+                    || pinned.dev() != current.dev()
+                    || pinned.ino() != current.ino()
+                {
+                    return Err(ProbeError::Protocol);
+                }
+            }
             self.prepare()?;
             let mut mounts = Vec::new();
             for (path, bound, executable) in [
@@ -846,6 +914,7 @@ impl Isolation {
                 &[],
                 Some(&mut probe_grants),
                 probe_mounts,
+                None,
             )?;
             probe
                 .env_clear()
@@ -873,6 +942,7 @@ impl Isolation {
                 &inherited,
                 Some(&mut held),
                 mounts,
+                workspace_fd.map(|fd| (fd.into(), self.workspace.clone())),
             )?;
             // The F8 profile starts with a fixed environment. In particular,
             // loader, shell and provider overrides never enter this generation.
@@ -905,11 +975,12 @@ impl Isolation {
                 masked,
                 roots,
                 credential,
+                workspace_pin,
                 identities,
                 version_launch,
             ))
         };
-        let (launch, chain, masked, roots, credential, identities, version_launch) =
+        let (launch, chain, masked, roots, credential, workspace_pin, identities, version_launch) =
             prepare().map_err(|_| E::GateDenied)?;
         let home = self.home();
         Ok((
@@ -922,6 +993,7 @@ impl Isolation {
                 home,
                 user: user.to_path_buf(),
                 credential,
+                workspace_pin,
                 identities,
                 version_launch: Some(version_launch),
             },

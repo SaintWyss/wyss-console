@@ -167,6 +167,32 @@ impl CodexSpawner {
             self.config.allow_credential,
         )
     }
+
+    fn plan_pinned(
+        &self,
+        catalogue: PathBuf,
+        workspace: &str,
+        workspace_fd: std::fs::File,
+    ) -> ControlResult<NativeLocalToolsPlan> {
+        if self.config.check()? != self.config.home {
+            return Err(E::GateDenied);
+        }
+        let isolation = Isolation {
+            workspace: PathBuf::from(workspace),
+            state: self.state.join("codex-local-tools"),
+            control: vec![self.runtime.clone(), self.state.clone()],
+        };
+        NativeLocalToolsPlan::prepare_with_workspace_fd(
+            isolation,
+            &self.config.executable,
+            &self.config.home,
+            &self.cwd,
+            catalogue,
+            CODEX_VERSION,
+            self.config.allow_credential,
+            workspace_fd,
+        )
+    }
 }
 impl Spawner for CodexSpawner {
     fn supports_profile(&self, profile: RuntimeSafetyProfile) -> bool {
@@ -203,6 +229,39 @@ impl Spawner for CodexSpawner {
         Ok(Spawned {
             worker: Box::new(pending::Preparing::start(launch.clone(), move || {
                 owner.plan(catalogue, &workspace)
+            })?),
+        })
+    }
+
+    fn spawn_for_pinned_workspace(
+        &mut self,
+        launch: &RuntimeRef,
+        staging: Option<&mut LaunchStaging>,
+        workspace: &str,
+        root_binding_id: &str,
+        workspace_fd: std::fs::File,
+    ) -> ControlResult<Spawned> {
+        let Some(staging) = staging else {
+            return Err(E::Unsupported);
+        };
+        if crate::f8::protocol::canonical(root_binding_id).is_err() {
+            return Err(E::InvalidRequest);
+        }
+        self.config.check()?;
+        let catalogue = safety::local_tools_catalog(&self.cache()?).map_err(|_| E::Unsupported)?;
+        staging.write_file(CATALOGUE, &catalogue)?;
+        let catalogue = self
+            .staging
+            .join(launch.runtime_instance_id.as_str())
+            .join(CATALOGUE);
+        if !safety::safe_catalog_path(&catalogue) {
+            return Err(E::UnsafePath);
+        }
+        let owner = self.clone();
+        let workspace = workspace.to_owned();
+        Ok(Spawned {
+            worker: Box::new(pending::Preparing::start(launch.clone(), move || {
+                owner.plan_pinned(catalogue, &workspace, workspace_fd)
             })?),
         })
     }

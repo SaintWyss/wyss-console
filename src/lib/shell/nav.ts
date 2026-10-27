@@ -3,6 +3,7 @@ export type ViewId =
   | 'workspace'
   | 'sessions'
   | 'agents'
+  | 'pipelines'
   | 'runtimes'
   | 'providers'
   | 'projects'
@@ -47,6 +48,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: 'Agents',
     subtitle: 'Work with Codex in a session',
     icon: 'M5 8h14v11H5zM12 4v4M9.5 13h.01M14.5 13h.01',
+  },
+  {
+    id: 'pipelines',
+    label: 'Pipelines',
+    subtitle: 'Structured handoff and finite OL3 coordination',
+    icon: 'M5 5h5v5H5zM14 14h5v5h-5zM10 7.5h3a3 3 0 0 1 3 3V14M7.5 10v5a2 2 0 0 0 2 2H14',
   },
   {
     id: 'approvals',

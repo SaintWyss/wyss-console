@@ -480,7 +480,7 @@ impl Response {
                     if data["protocol_version"].as_u64() != Some(2) {
                         return Err(E::ProtocolVersionUnsupported);
                     }
-                    if !matches!(data["storage_schema_version"].as_u64(), Some(8 | 9)) {
+                    if !matches!(data["storage_schema_version"].as_u64(), Some(8..=10)) {
                         return Err(E::StorageIncompatible);
                     }
                     if data["authority_instance_id"] != json!(authority) {

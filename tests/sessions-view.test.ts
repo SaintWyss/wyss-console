@@ -775,7 +775,9 @@ it('keeps the page reachable and every mutation disabled while the authority is 
   expect(button('New session').disabled).toBe(true);
   expect(button('Refresh').disabled).toBe(true);
   expect(ipc.count('managed_sessions_page')).toBe(0);
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+  expect(
+    document.querySelectorAll('.terminal-feature [role="tab"]'),
+  ).toHaveLength(1);
 
   // The authority arrives: its sessions are read. It leaves: they are gone at once.
   answers.shift()!(ready);
@@ -871,7 +873,9 @@ it('keeps the terminal workspace alive across every visit to Sessions', async ()
     expect(terminal().hidden).toBe(true);
     expect(terminal().inert).toBe(true);
     expect(view().hidden).toBe(false);
-    expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+    expect(
+      document.querySelectorAll('.terminal-feature [role="tab"]'),
+    ).toHaveLength(1);
     await open('Console');
     expect(terminal().hidden).toBe(false);
     expect(terminal().inert).toBe(false);

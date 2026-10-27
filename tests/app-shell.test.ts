@@ -138,6 +138,7 @@ it('lists every view, and every one of them exists', () => {
     'Workspace',
     'Sessions',
     'Agents',
+    'Pipelines',
     'Approvals',
     'Events',
     'Configuration',
@@ -151,6 +152,7 @@ it('lists every view, and every one of them exists', () => {
     'workspace',
     'sessions',
     'agents',
+    'pipelines',
     'approvals',
     'events',
     'configuration',
@@ -171,8 +173,8 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
   const nav = Array.from(
     document.querySelectorAll<HTMLButtonElement>('.sidebar .nav-item'),
   );
-  // The twelve views: the eleven of the base navigation and Providers, which only reads.
-  expect(nav).toHaveLength(12);
+  // The thirteen views include Pipelines and Providers, which only reads.
+  expect(nav).toHaveLength(13);
   expect(nav[0].getAttribute('aria-current')).toBe('page');
   expect(nav.every((b) => !b.disabled)).toBe(true);
   expect(nav.map((b) => b.textContent?.trim())).toEqual([
@@ -180,6 +182,7 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
     'Workspace',
     'Sessions',
     'Agents',
+    'Pipelines',
     'Approvals',
     'Events',
     'Configuration',
@@ -267,7 +270,9 @@ it('keeps the human terminal working whatever the authority does', async () => {
     // The terminal was created, is running and has its tab.
     expect(pill('terminal')?.textContent).toContain('Running');
     expect(pill('terminal')?.getAttribute('data-tone')).toBe('ok');
-    expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+    expect(
+      document.querySelectorAll('.terminal-feature [role="tab"]'),
+    ).toHaveLength(1);
     expect(commands.filter((c) => c === 'create_terminal')).toHaveLength(1);
     await unmount(component);
     component = undefined;
@@ -301,5 +306,7 @@ it('follows authority restarts without touching the terminal workspace', async (
   }
   expect(commands.filter((c) => c === 'create_terminal')).toHaveLength(1);
   expect(commands.filter((c) => c === 'close_terminal')).toHaveLength(0);
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+  expect(
+    document.querySelectorAll('.terminal-feature [role="tab"]'),
+  ).toHaveLength(1);
 });

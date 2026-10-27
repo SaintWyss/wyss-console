@@ -59,6 +59,12 @@ pub struct Writer<'c> {
     fault: Fault<'c>,
 }
 
+struct GuardedWrite<'a> {
+    expected_lease_revision: u64,
+    tuple_digest: &'a str,
+    reserve: &'a mut dyn FnMut(&Transaction<'_>, &str) -> ControlResult<()>,
+}
+
 fn stamp(t: OffsetDateTime) -> ControlResult<String> {
     t.format(&Rfc3339).map_err(invalid)
 }
@@ -86,7 +92,7 @@ impl<'c> Writer<'c> {
                 |r| r.get(0),
             )
             .map_err(invalid)?;
-        if !matches!(version, 8 | 9) {
+        if !matches!(version, 8..=10) {
             return Err(E::StorageIncompatible);
         }
         conn.pragma_update(None, "foreign_keys", true).map_err(db)?;
@@ -128,12 +134,55 @@ impl<'c> Writer<'c> {
         intent: &TurnIntent,
         lease_id: &str,
     ) -> ControlResult<(ManagedTurnRecord, bool)> {
+        self.admit_turn_inner(launch, intent, lease_id, None)
+    }
+
+    /// V10-only L1 path. The caller supplies the F8 claim/receipt mutation as a callback that
+    /// runs inside this same writer transaction, before it can commit the turn reservation.
+    pub(super) fn admit_guarded_turn_ex(
+        &mut self,
+        launch: &RuntimeRef,
+        intent: &TurnIntent,
+        lease_id: &str,
+        expected_lease_revision: u64,
+        tuple_digest: &str,
+        reserve: &mut dyn FnMut(&Transaction<'_>, &str) -> ControlResult<()>,
+    ) -> ControlResult<(ManagedTurnRecord, bool)> {
+        if expected_lease_revision == 0 || !valid_fingerprint(tuple_digest) {
+            return Err(E::InvalidRequest);
+        }
+        self.admit_turn_inner(
+            launch,
+            intent,
+            lease_id,
+            Some(GuardedWrite {
+                expected_lease_revision,
+                tuple_digest,
+                reserve,
+            }),
+        )
+    }
+
+    fn admit_turn_inner(
+        &mut self,
+        launch: &RuntimeRef,
+        intent: &TurnIntent,
+        lease_id: &str,
+        mut guarded: Option<GuardedWrite<'_>>,
+    ) -> ControlResult<(ManagedTurnRecord, bool)> {
         launch.validate()?;
         let session = launch.managed_session_id.as_str().to_owned();
-        let mutation = json!({"method":METHOD_TURN,"params":{"intent_id":intent.intent_id,
-            "managed_session_id":session,"expected_session_revision":intent.expected_session_revision,
-            "prompt_fingerprint":intent.prompt_fingerprint,"prompt_byte_length":intent.prompt_byte_length}})
-        .to_string();
+        let mutation = if let Some(guard) = guarded.as_ref() {
+            json!({"method":METHOD_TURN,"guarded_tuple_digest":guard.tuple_digest,"params":{"intent_id":intent.intent_id,
+                "managed_session_id":session,"expected_session_revision":intent.expected_session_revision,
+                "prompt_fingerprint":intent.prompt_fingerprint,"prompt_byte_length":intent.prompt_byte_length}})
+                .to_string()
+        } else {
+            json!({"method":METHOD_TURN,"params":{"intent_id":intent.intent_id,
+                "managed_session_id":session,"expected_session_revision":intent.expected_session_revision,
+                "prompt_fingerprint":intent.prompt_fingerprint,"prompt_byte_length":intent.prompt_byte_length}})
+                .to_string()
+        };
         if !valid_fingerprint(&intent.prompt_fingerprint)
             || !(1..=8192).contains(&intent.prompt_byte_length)
             || intent.expected_session_revision == 0
@@ -141,6 +190,7 @@ impl<'c> Writer<'c> {
             return Err(E::InvalidRequest);
         }
         let (authority, stream) = (self.authority.as_str().to_owned(), self.stream.clone());
+        let schema_version = super::provider::version(self.conn)?;
         let (tx, now) = begin(&mut *self.conn, &*self.clock)?;
         if let Some((m, r)) = receipt(&tx, intent.intent_id.as_str())? {
             if m != mutation {
@@ -202,6 +252,9 @@ impl<'c> Writer<'c> {
             || lease_state != "active"
             || now >= ts(&lease_expires)?
             || !scopes.iter().any(|s| s == "turn_start")
+            || guarded
+                .as_ref()
+                .is_some_and(|guard| lease_revision as u64 != guard.expected_lease_revision)
         {
             return Err(E::GateDenied);
         }
@@ -241,6 +294,9 @@ impl<'c> Writer<'c> {
                 intent.prompt_fingerprint, intent.prompt_byte_length as i64, intent.intent_id.as_str(), mutation, at],
         )
         .map_err(db)?;
+        if let Some(guard) = guarded.as_mut() {
+            (guard.reserve)(&tx, &turn_id)?;
+        }
         step(&mut self.fault, 0)?;
         turn_event(
             &tx,
@@ -258,6 +314,15 @@ impl<'c> Writer<'c> {
         )
         .map_err(db)?;
         step(&mut self.fault, 2)?;
+        if schema_version == 10 {
+            let changed = tx.execute(
+                "UPDATE managed_session_freshness SET ever_started=ever_started+1 WHERE session_id=?1 AND freshness_state='proven' AND ever_started<9223372036854775807",
+                [&session],
+            ).map_err(db)?;
+            if changed != 1 {
+                return Err(E::GateDenied);
+            }
+        }
         tx.commit().map_err(db)?;
         Ok((record, true))
     }
@@ -361,6 +426,18 @@ impl<'c> Writer<'c> {
                 ApprovalReason::TurnEnded,
                 now,
             )?;
+            let schema_version: i64 = tx
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .map_err(db)?;
+            if schema_version >= 10 {
+                // A terminal F8 turn is quiescent evidence for the guarded review protocol.
+                // Keep this update in the same transaction as the authority turn transition.
+                tx.execute(
+                    "UPDATE guarded_attempts SET send_state='verifying' WHERE turn_id=?1 AND send_state='possibly_sent'",
+                    [turn.as_str()],
+                )
+                .map_err(db)?;
+            }
         }
         step(&mut self.fault, 2)?;
         tx.commit().map_err(db)?;

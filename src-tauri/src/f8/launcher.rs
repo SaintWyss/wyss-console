@@ -143,6 +143,52 @@ impl NativeLocalToolsPlan {
         observed_version: &str,
         allow_credential: bool,
     ) -> ControlResult<Self> {
+        Self::prepare_inner(
+            isolation,
+            executable,
+            user,
+            cwd,
+            catalogue,
+            observed_version,
+            allow_credential,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // Preserves the existing launch inputs plus its pinned FD.
+    pub(crate) fn prepare_with_workspace_fd(
+        isolation: crate::adapters::codex::probe::isolation::Isolation,
+        executable: &std::path::Path,
+        user: &std::path::Path,
+        cwd: &std::path::Path,
+        catalogue: PathBuf,
+        observed_version: &str,
+        allow_credential: bool,
+        workspace_fd: std::fs::File,
+    ) -> ControlResult<Self> {
+        Self::prepare_inner(
+            isolation,
+            executable,
+            user,
+            cwd,
+            catalogue,
+            observed_version,
+            allow_credential,
+            Some(workspace_fd),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // Shares one bounded launch constructor across profile modes.
+    fn prepare_inner(
+        isolation: crate::adapters::codex::probe::isolation::Isolation,
+        executable: &std::path::Path,
+        user: &std::path::Path,
+        cwd: &std::path::Path,
+        catalogue: PathBuf,
+        observed_version: &str,
+        allow_credential: bool,
+        workspace_fd: Option<std::fs::File>,
+    ) -> ControlResult<Self> {
         if observed_version != "0.159.0" || !catalogue.is_absolute() {
             return Err(E::Unsupported);
         }
@@ -155,7 +201,12 @@ impl NativeLocalToolsPlan {
             profile: "codex_local_tools_v1".into(),
             revision: 1,
         };
-        let (launch, mut proof) = isolation.prepare_f8(executable, user, cwd, &catalogue)?;
+        let (launch, mut proof) = match workspace_fd {
+            Some(fd) => {
+                isolation.prepare_f8_with_workspace_fd(executable, user, cwd, &catalogue, fd)?
+            }
+            None => isolation.prepare_f8(executable, user, cwd, &catalogue)?,
+        };
         // Check the acquired capability, not the pathname observed before preparation.
         if !allow_credential && proof.has_credential() {
             return Err(E::GateDenied);

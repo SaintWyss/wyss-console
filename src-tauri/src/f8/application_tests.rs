@@ -100,6 +100,40 @@ fn prepared_application_rejects_unmigrated_storage_without_fallback() {
         Err(E::StorageIncompatible)
     ));
 }
+
+#[test]
+fn prepared_application_opens_v10_with_authority_owned_guard_but_keeps_capability_closed() {
+    let mut source = f8_fixture::v7_with_sessions(0);
+    let v8 = migration::prepare(&mut source).unwrap().into_connection();
+    let v9 = crate::f8::v9::migrate(&v8, |_| Ok(())).unwrap();
+    let v10 = crate::f8::v10::migrate(&v9, |_| Ok(())).unwrap();
+    let authority_id = WireUuid::try_from(uuid::Uuid::new_v4().to_string()).unwrap();
+    let (application, _handle) =
+        PreparedApplication::new(v10, authority_id.clone(), None, NoSpawn).unwrap();
+    let authority = application.service().authority();
+    assert_eq!(authority.engine().authority_id(), &authority_id);
+    assert!(
+        !authority.workspace_guard_ready().unwrap(),
+        "the M6 import fence remains closed until an explicit complete snapshot is accepted"
+    );
+    assert_eq!(
+        crate::f8::provider::version(authority.engine().connection()).unwrap(),
+        10
+    );
+    let epoch_count: i64 = authority
+        .engine()
+        .connection()
+        .query_row(
+            "SELECT count(*) FROM authority_epoch_history WHERE authority_epoch=?1",
+            [authority_id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        epoch_count, 1,
+        "the F8 authority instance must be durably unique"
+    );
+}
 #[test]
 fn local_application_runner_negotiates_two_and_shutdown_bypasses_full_admission_queue() {
     let (application, handle) = fixture_application();

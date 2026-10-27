@@ -16,6 +16,7 @@
   import { F8Controller } from './lib/features/f8/controller';
   import { M3Controller } from './lib/features/m3/controller';
   import ProvidersView from './lib/features/m3/ProvidersView.svelte';
+  import PipelinesView from './lib/features/orchestration/PipelinesView.svelte';
   import { desktopM3 } from './lib/desktop/m3-client';
   import { ProjectsController } from './lib/features/projects/controller';
   import ProjectsGate from './lib/features/projects/ProjectsGate.svelte';
@@ -393,6 +394,11 @@
       {approvals}
       {approvalsController}
       onsessions={() => go('sessions')}
+    />
+    <PipelinesView
+      visible={activeView === 'pipelines'}
+      f8Active={f8.gate === 'active'}
+      onruntimes={() => go('runtimes')}
     />
     {#if projects.overview?.enabled}
       <ProjectsView

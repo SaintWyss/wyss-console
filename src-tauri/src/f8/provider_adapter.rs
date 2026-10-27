@@ -236,9 +236,28 @@ impl<W: Worker> NativeCodexWorker<W> {
         self.pending.insert(id, pending);
         Ok(())
     }
+    fn enqueue_critical(&mut self, message: WireMessage, pending: Pending) -> ControlResult<()> {
+        codec(self.state.outbound(&message))?;
+        let Some(CodexRequestId::String(id)) = message.id() else {
+            return Err(E::InvalidRequest);
+        };
+        let id = id.clone();
+        let bytes = codec(message.encode())?;
+        self.worker.send_critical(&bytes)?;
+        self.pending.insert(id, pending);
+        Ok(())
+    }
     fn request(&mut self, operation: ClientOperation, pending: Pending) -> ControlResult<()> {
         let id = self.id()?;
         self.enqueue(codec(operation.encode(id))?, pending)
+    }
+    fn request_critical(
+        &mut self,
+        operation: ClientOperation,
+        pending: Pending,
+    ) -> ControlResult<()> {
+        let id = self.id()?;
+        self.enqueue_critical(codec(operation.encode(id))?, pending)
     }
     fn query(&mut self, method: &str, params: Value, pending: Pending) -> ControlResult<()> {
         let id = self.id()?;
@@ -638,7 +657,9 @@ impl<W: Worker> NativeCodexWorker<W> {
                     thread_id: binding.thread_id.clone(),
                     text,
                 };
-                self.request(
+                // A turn start is never queued for later flush: a stop or lease revocation
+                // after admission must not release stale provider bytes from this worker.
+                self.request_critical(
                     operation,
                     Pending::Turn {
                         managed: managed.clone(),
@@ -762,6 +783,13 @@ impl<W: Worker> Worker for NativeCodexWorker<W> {
         Err(E::RuntimeOperationInProgress)
     }
     fn send(&mut self, frame: &[u8]) -> ControlResult<()> {
+        self.outbound(frame)
+    }
+    fn send_guarded_start(&mut self, frame: &[u8]) -> ControlResult<()> {
+        let value = unique_json(frame)?;
+        if value["method"] != "turn/start" {
+            return Err(E::InvalidRequest);
+        }
         self.outbound(frame)
     }
     fn send_critical(&mut self, frame: &[u8]) -> ControlResult<()> {

@@ -23,6 +23,8 @@ mod native;
 #[cfg(target_os = "linux")]
 mod native_dialog;
 #[cfg(target_os = "linux")]
+mod orchestration_commands;
+#[cfg(target_os = "linux")]
 mod projects;
 // The remote gateway's core (F10a foundations, ADR 0049): decisions with no transport. Nothing
 // constructs it outside its tests, and it is not in the library the authority links.
@@ -54,6 +56,13 @@ fn main() {
     {
         print!("{USAGE}");
         return;
+    }
+    #[cfg(target_os = "linux")]
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|a| a == "--wyss-orchestrator")
+    {
+        std::process::exit(wyss_console::orchestration::daemon::run());
     }
     #[cfg(target_os = "linux")]
     match activation::select(&std::env::args_os().skip(1).collect::<Vec<_>>()) {
@@ -105,6 +114,7 @@ fn main() {
             std::process::exit(2);
         });
         let extension = configuration::extension()
+            .merge(orchestration_commands::extension())
             .merge(host::commands::extension())
             .merge(native::extension())
             .merge(projects::commands::extension())
