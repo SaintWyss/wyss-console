@@ -64,6 +64,38 @@ const CODEX: Evidence = Evidence {
     limitation: "override resolution is not proof that a Native turn used the requested value or was entitled to it",
 };
 
+const OPENCODE: Evidence = Evidence {
+    status: Status::SyntaxVerified,
+    qualified_version: Some("1.19.4"),
+    checked_on: Some("2026-10-26"),
+    operations: &[
+        "model via --model",
+        "project scope through the current working directory",
+        "native TUI by default",
+    ],
+    interface: Some("opencode [project] --model provider/model"),
+    format: Some("OpenCode v1 CLI argument parser"),
+    scope: Some("one Native child process; the selected project is its working directory"),
+    reload_semantics: Some("launch-time only; effective model/provider resolution is unobserved"),
+    source: Some(
+        "anomalyco/opencode@148842ef7cb1bc34192b3fff57d0f9721ab9c801, packages/opencode/src/cli/cmd/tui.ts",
+    ),
+    limitation: "the exact source accepts --model; Wyss does not attest provider resolution or model use",
+};
+
+const HERMES_PROFILE_UNVERIFIED: Evidence = Evidence {
+    status: Status::Unverified,
+    qualified_version: None,
+    checked_on: Some("2026-10-26"),
+    operations: &[],
+    interface: None,
+    format: None,
+    scope: Some("Native full-account CLI/TUI; no Wyss mediation or confinement"),
+    reload_semantics: None,
+    source: Some("NousResearch/hermes-agent@bf0203a794a07aac3ff764972ab9087baa4e4f4e"),
+    limitation: "the pinned upstream has an interactive CLI/TUI, but `hermes --version` performs an update check; no exact installed build is observed and no profile override is applied",
+};
+
 const UNKNOWN: Evidence = Evidence {
     status: Status::Unverified,
     qualified_version: None,
@@ -83,6 +115,8 @@ pub fn evidence(agent: AgentId, version: Option<&str>) -> Evidence {
     match (agent, version) {
         (AgentId::ClaudeCode, Some(v)) if v == CLAUDE.qualified_version.unwrap() => CLAUDE,
         (AgentId::Codex, Some(v)) if v == CODEX.qualified_version.unwrap() => CODEX,
+        (AgentId::Opencode, Some(v)) if v == OPENCODE.qualified_version.unwrap() => OPENCODE,
+        (AgentId::Hermes, _) => HERMES_PROFILE_UNVERIFIED,
         _ => UNKNOWN,
     }
 }
@@ -124,6 +158,19 @@ mod tests {
             codex.scope,
             Some("one Native child process; ~/.codex/config.toml is not written")
         );
+
+        let opencode = evidence(AgentId::Opencode, Some("1.19.4"));
+        assert_eq!(opencode.status, Status::SyntaxVerified);
+        assert!(opencode.operations.contains(&"model via --model"));
+        assert_eq!(
+            evidence(AgentId::Opencode, Some("1.19.5")).status,
+            Status::Unverified
+        );
+
+        let hermes = evidence(AgentId::Hermes, None);
+        assert_eq!(hermes.status, Status::Unverified);
+        assert!(hermes.limitation.contains("performs an update check"));
+        assert!(!permits_profile_overrides(AgentId::Hermes, None));
     }
 
     #[test]

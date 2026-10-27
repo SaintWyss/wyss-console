@@ -124,7 +124,7 @@ describe('the launcher', () => {
       'Starts through your shell (fish)',
     );
     expect(text(document.querySelector('.native-note'))).toContain(
-      'not mediated',
+      'does not mediate',
     );
   });
 

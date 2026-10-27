@@ -396,3 +396,133 @@ it('TS-HAND-02 clears the reviewed handoff when selected context changes', async
     ipc.calls.filter((call) => call.request?.method === 'submit_handoff'),
   ).toHaveLength(0);
 });
+
+for (const state of ['verifying', 'needs_review'] as const) {
+  it(`TS-ORC rejects unseen ${state} drift`, async () => {
+    let changed = false;
+    const calls: string[] = [];
+    const time = Math.floor(Date.now() / 1000);
+    const stepId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const run = {
+      ...snapshot(),
+      state: state === 'verifying' ? 'running' : 'needs_review',
+      steps: [
+        {
+          step_id: stepId,
+          dependencies: [],
+          required: true,
+          provider: 'managed_codex',
+          effect: 'managed_inference',
+          managed_session_id: null,
+          model_id: null,
+          state,
+          attempt_count: 1,
+          attempt_id: null,
+          managed_turn_id: null,
+          authority_instance_id: null,
+          runtime_instance_id: null,
+          runtime_generation: null,
+          turn_revision: null,
+          workspace_revision_after: null,
+          failure: null,
+          updated_at_unix: time,
+        },
+      ],
+    };
+    mockIPC((command, payload) => {
+      const request = (payload as { request?: IpcRequest } | undefined)
+        ?.request;
+      if (command === 'native_sessions') return [];
+      if (command === 'choose_workspace') return { path: TARGET_ROOT };
+      if (command !== 'orchestration_call') return {};
+      if (request?.method === 'list') return [run];
+      if (request?.method === 'workspace_snapshot')
+        return {
+          workspace_id: TARGET_IDENTITY,
+          workspace_revision: changed ? '9'.repeat(64) : TARGET_REVISION,
+        };
+      calls.push(request?.method ?? '');
+      if (request?.method === 'verify_step' || request?.method === 'reconcile')
+        return run;
+      throw new Error('unexpected orchestration call');
+    });
+
+    component = mount(PipelinesView, {
+      target: document.body,
+      props: { visible: true, f8Active: false, onruntimes: () => undefined },
+    });
+    await flush();
+    button('Elegir y observar workspace')!.click();
+    await flush();
+    expect(document.body.textContent).toContain(TARGET_REVISION);
+    changed = true;
+    const confirm =
+      state === 'verifying'
+        ? 'Confirmar salida tras revisar la revisión actual'
+        : 'Confirmo que completó · revisar revisión actual';
+    button(confirm)!.click();
+    await flush();
+    expect(calls).not.toContain('verify_step');
+    expect(calls).not.toContain('reconcile');
+    expect(document.body.textContent).not.toContain(TARGET_REVISION);
+    expect(document.querySelector('[role="alert"]')).not.toBeNull();
+  });
+}
+
+it('TS-ORC confirms an observed workspace digest', async () => {
+  const calls: IpcRequest[] = [];
+  const time = Math.floor(Date.now() / 1000);
+  const run = {
+    ...snapshot(),
+    steps: [
+      {
+        step_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        dependencies: [],
+        required: true,
+        provider: 'managed_codex',
+        effect: 'managed_inference',
+        managed_session_id: null,
+        model_id: null,
+        state: 'verifying',
+        attempt_count: 1,
+        attempt_id: null,
+        managed_turn_id: null,
+        authority_instance_id: null,
+        runtime_instance_id: null,
+        runtime_generation: null,
+        turn_revision: null,
+        workspace_revision_after: null,
+        failure: null,
+        updated_at_unix: time,
+      },
+    ],
+  };
+  mockIPC((command, payload) => {
+    const request = (payload as { request?: IpcRequest } | undefined)?.request;
+    if (command === 'native_sessions') return [];
+    if (command === 'choose_workspace') return { path: TARGET_ROOT };
+    if (command !== 'orchestration_call') return {};
+    if (request?.method === 'list') return [run];
+    if (request?.method === 'workspace_snapshot')
+      return {
+        workspace_id: TARGET_IDENTITY,
+        workspace_revision: TARGET_REVISION,
+      };
+    if (request?.method === 'verify_step') {
+      calls.push(request);
+      return run;
+    }
+    throw new Error('unexpected orchestration call');
+  });
+  component = mount(PipelinesView, {
+    target: document.body,
+    props: { visible: true, f8Active: false, onruntimes: () => undefined },
+  });
+  await flush();
+  button('Elegir y observar workspace')!.click();
+  await flush();
+  button('Confirmar salida tras revisar la revisión actual')!.click();
+  await flush();
+  expect(calls).toHaveLength(1);
+  expect(calls[0].params?.reviewed_workspace_revision).toBe(TARGET_REVISION);
+});

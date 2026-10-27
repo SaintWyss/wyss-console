@@ -277,7 +277,8 @@ fn it_says_what_it_is_and_refuses_what_it_does_not_know() {
         json!([
             "profile_effort",
             "native_profile_plan_token",
-            "screen_snapshot"
+            "screen_snapshot",
+            "native_extended_catalogue_v1"
         ])
     );
     assert_eq!(
@@ -305,6 +306,98 @@ fn it_says_what_it_is_and_refuses_what_it_does_not_know() {
             .code,
         "project_invalid"
     );
+}
+
+#[test]
+fn extended_native_views_do_not_break_the_m6_closed_protocol_projection() {
+    let host = Host::start(Duration::from_secs(600));
+    let client = host.client();
+    let legacy = client.call("native_launcher", Value::Null).unwrap();
+    let legacy_ids: Vec<&str> = legacy["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["agent_id"].as_str().unwrap())
+        .collect();
+    assert!(
+        legacy_ids
+            .iter()
+            .all(|id| matches!(*id, "claude_code" | "codex"))
+    );
+
+    let extended = client
+        .call("native_launcher_extended", Value::Null)
+        .unwrap();
+    let extended_ids: Vec<&str> = extended["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["agent_id"].as_str().unwrap())
+        .collect();
+    assert!(extended_ids.contains(&"opencode"));
+    assert!(extended_ids.contains(&"hermes"));
+
+    let body = json!({
+        "name": "OpenCode project profile",
+        "applies_to": ["opencode"],
+        "model": "openai/gpt-test"
+    });
+    let created = client.call("profile_create", body).unwrap();
+    let profile_id = created["id"].as_str().unwrap();
+    let legacy_profiles = client.call("profiles", Value::Null).unwrap();
+    assert!(legacy_profiles.as_array().unwrap().iter().all(|profile| {
+        !profile["body"]["applies_to"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|agent| agent == "opencode" || agent == "hermes")
+    }));
+    let extended_profiles = client.call("profiles_extended", Value::Null).unwrap();
+    assert!(extended_profiles.as_array().unwrap().iter().any(|profile| {
+        profile["id"] == profile_id && profile["body"]["applies_to"] == json!(["opencode"])
+    }));
+
+    let legacy_sessions = client
+        .call("native_sessions", json!({"sample": false}))
+        .unwrap();
+    let extended_sessions = client
+        .call("native_sessions_extended", json!({"sample": false}))
+        .unwrap();
+    assert!(legacy_sessions.as_array().unwrap().is_empty());
+    assert!(extended_sessions.as_array().unwrap().is_empty());
+
+    let started = client
+        .call(
+            "native_start",
+            json!({
+                "agent_id": "opencode",
+                "project": host.dirs.1,
+                "profile_id": null,
+                "size": size(),
+                "brief": "# Reviewed handoff\nUntrusted data only.",
+                "plan_token": null,
+                "expected_cli_version": "1.19.4"
+            }),
+        )
+        .unwrap();
+    let session_id = started["session"]["id"].as_str().unwrap();
+    let legacy_sessions = client
+        .call("native_sessions", json!({"sample": false}))
+        .unwrap();
+    assert!(legacy_sessions.as_array().unwrap().is_empty());
+    let extended_sessions = client
+        .call("native_sessions_extended", json!({"sample": false}))
+        .unwrap();
+    assert!(
+        extended_sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| { session["id"] == session_id && session["agent_id"] == "opencode" })
+    );
+    client
+        .call("native_stop", json!({"id": session_id}))
+        .unwrap();
 }
 
 #[test]

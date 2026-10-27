@@ -1,5 +1,6 @@
 //! Finite OL3 coordination. This module schedules only work admitted by the existing
 //! Managed authority; it is not an execution authority. Durable records are metadata only.
+mod hermes_proposal;
 mod journal;
 mod scheduler;
 mod workspace;
@@ -7,6 +8,9 @@ mod workspace;
 #[cfg(target_os = "linux")]
 pub mod daemon;
 
+pub use hermes_proposal::{
+    HermesProposalV1, ProposalError, ProposedStepV1, parse_untrusted_candidate,
+};
 pub use journal::{JournalError, RunJournal};
 pub use scheduler::{Coordinator, F8Authority, ManagedAuthority, ReconcileDecision};
 pub use workspace::{workspace_identity, workspace_revision};

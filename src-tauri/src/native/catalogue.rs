@@ -16,6 +16,16 @@ use std::{
 pub enum AgentId {
     ClaudeCode,
     Codex,
+    Opencode,
+    Hermes,
+}
+
+impl AgentId {
+    /// Provider IDs added by the M9 build cannot be serialized into the M1-M6 registry or
+    /// native protocol: those binaries deserialize that enum as a closed set.
+    pub fn is_legacy(self) -> bool {
+        matches!(self, Self::ClaudeCode | Self::Codex)
+    }
 }
 
 pub struct AgentSpec {
@@ -24,7 +34,7 @@ pub struct AgentSpec {
     pub executable: &'static str,
 }
 
-pub const AGENTS: [AgentSpec; 2] = [
+pub const AGENTS: [AgentSpec; 4] = [
     AgentSpec {
         id: AgentId::ClaudeCode,
         name: "Claude Code",
@@ -34,6 +44,16 @@ pub const AGENTS: [AgentSpec; 2] = [
         id: AgentId::Codex,
         name: "Codex",
         executable: "codex",
+    },
+    AgentSpec {
+        id: AgentId::Opencode,
+        name: "OpenCode",
+        executable: "opencode",
+    },
+    AgentSpec {
+        id: AgentId::Hermes,
+        name: "Hermes Agent (Native)",
+        executable: "hermes",
     },
 ];
 
@@ -98,4 +118,16 @@ pub fn probe_version(path: &Path) -> Option<String> {
         .collect();
     let line = line.trim().to_owned();
     (!line.is_empty()).then_some(line)
+}
+
+/// Some provider version commands are not read-only. Hermes `--version` performs a passive
+/// release/update check as part of its normal output. Do not run it during launcher discovery:
+/// Native can still start as configured, while profile overrides stay unavailable until a
+/// future non-networking identity surface is qualified.
+pub fn probe_provider_version(agent: AgentId, path: &Path) -> Option<String> {
+    if agent == AgentId::Hermes {
+        None
+    } else {
+        probe_version(path)
+    }
 }

@@ -234,6 +234,10 @@ pub fn plan(profile: &Resolved, agent: AgentId, applies: bool) -> LaunchPlan {
         match agent {
             AgentId::ClaudeCode => literal(&mut plan, &["--model", model]),
             AgentId::Codex => literal(&mut plan, &["-m", model]),
+            AgentId::Opencode => literal(&mut plan, &["--model", model]),
+            AgentId::Hermes => plan.not_applicable.push(
+                "Hermes profile overrides remain unavailable until this exact installed build can be identified without running provider update checks.".to_owned(),
+            ),
         }
         plan.applied.push(format!("Model: {model}."));
     }
@@ -260,6 +264,9 @@ pub fn plan(profile: &Resolved, agent: AgentId, applies: bool) -> LaunchPlan {
                     "Reasoning effort: {effort} (this session only; Codex reads it as a configuration override)."
                 ));
             }
+            AgentId::Opencode | AgentId::Hermes => plan.not_applicable.push(
+                "This provider has no qualified reasoning-effort profile interface.".to_owned(),
+            ),
         }
     }
     match (agent, body.permission) {
@@ -286,6 +293,9 @@ pub fn plan(profile: &Resolved, agent: AgentId, applies: bool) -> LaunchPlan {
         (AgentId::Codex, Some(Permission::Edits)) => plan
             .not_applicable
             .push("Codex has no separate mode that accepts edits without asking.".to_owned()),
+        (AgentId::Opencode | AgentId::Hermes, Some(_)) => plan.not_applicable.push(
+            "This provider's permission controls are not managed by Native profiles.".to_owned(),
+        ),
     }
     let mut overlay = serde_json::Map::new();
     match (agent, body.hooks) {
@@ -301,6 +311,9 @@ pub fn plan(profile: &Resolved, agent: AgentId, applies: bool) -> LaunchPlan {
         (AgentId::Codex, Some(HooksMode::Off)) => plan
             .not_applicable
             .push("Codex hooks cannot be switched off for one session.".to_owned()),
+        (AgentId::Opencode | AgentId::Hermes, Some(HooksMode::Off)) => plan
+            .not_applicable
+            .push("This provider's hooks cannot be changed by a Native profile.".to_owned()),
     }
     if !body.skills_off.is_empty() {
         match agent {
@@ -319,6 +332,9 @@ pub fn plan(profile: &Resolved, agent: AgentId, applies: bool) -> LaunchPlan {
             AgentId::Codex => plan
                 .not_applicable
                 .push("Codex skills cannot be switched off for one session.".to_owned()),
+            AgentId::Opencode | AgentId::Hermes => plan
+                .not_applicable
+                .push("This provider's skills cannot be changed by a Native profile.".to_owned()),
         }
     }
     if !overlay.is_empty() {

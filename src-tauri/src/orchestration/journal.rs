@@ -2111,6 +2111,105 @@ impl RunJournal {
                 );
             }
         }
+        // A prior owner-confirmed reconciliation can be interrupted between SQLite
+        // transactions. A needs-review run may then contain a Verifying step or a
+        // fully resolved result with no remaining reviewable step. Normalize both
+        // cases under this single transaction; never re-dispatch a lost volatile plan.
+        let review_ids = {
+            let mut statement = tx.prepare(
+                "SELECT run_id FROM orchestration_runs WHERE state='needs_review' ORDER BY created_at,run_id",
+            )?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for run_id in review_ids {
+            let before = get_locked(&tx, &run_id)?.ok_or(JournalError::Storage)?;
+            let mut changed = false;
+            for step in &before.steps {
+                let next = match step.state {
+                    StepState::Verifying | StepState::Starting | StepState::Running => {
+                        Some(StepState::NeedsReview)
+                    }
+                    StepState::Proposed
+                    | StepState::WaitingDependencies
+                    | StepState::Eligible
+                    | StepState::WaitingResource
+                    | StepState::AwaitingPermission
+                    | StepState::Queued => Some(StepState::Cancelled),
+                    _ => None,
+                };
+                if let Some(next) = next {
+                    tx.execute(
+                        "UPDATE orchestration_steps SET state=?3,failure='coordinator_restarted',updated_at=?4 WHERE run_id=?1 AND step_id=?2",
+                        params![run_id, step.step_id, enum_text(&next)?, now as i64],
+                    )?;
+                    changed = true;
+                }
+            }
+            if changed {
+                tx.execute(
+                    "UPDATE orchestration_attempts SET state='unknown',failure='coordinator_restarted',updated_at=?2 WHERE run_id=?1 AND state IN ('dispatching','acknowledged','running')",
+                    params![run_id, now as i64],
+                )?;
+                bump_run(&tx, &run_id, now)?;
+                add_event(
+                    &tx,
+                    &run_id,
+                    None,
+                    None,
+                    "recovered_after_restart",
+                    Some("coordinator_restarted"),
+                    now,
+                )?;
+            }
+            let snapshot = get_locked(&tx, &run_id)?.ok_or(JournalError::Storage)?;
+            if snapshot.steps.iter().all(|step| step.state.terminal()) {
+                let failed = snapshot.steps.iter().any(|step| {
+                    step.required && matches!(step.state, StepState::Failed | StepState::Blocked)
+                });
+                let cancelled = snapshot
+                    .steps
+                    .iter()
+                    .any(|step| step.required && step.state == StepState::Cancelled);
+                let next = if failed {
+                    RunState::Failed
+                } else if cancelled {
+                    RunState::Cancelled
+                } else {
+                    RunState::Completed
+                };
+                tx.execute(
+                    "UPDATE orchestration_runs SET revision=revision+1,state=?2,failure=?3,updated_at=?4 WHERE run_id=?1 AND state='needs_review'",
+                    params![
+                        run_id,
+                        enum_text(&next)?,
+                        if failed || cancelled {
+                            Some(enum_text(&super::FailureCode::OwnerReviewRequired)?)
+                        } else {
+                            None
+                        },
+                        now as i64
+                    ],
+                )?;
+                tx.execute(
+                    "DELETE FROM orchestration_workspace_claims WHERE run_id=?1",
+                    [&run_id],
+                )?;
+                add_event(
+                    &tx,
+                    &run_id,
+                    None,
+                    None,
+                    "run_state_changed",
+                    (failed || cancelled).then_some("owner_review_required"),
+                    now,
+                )?;
+                changed = true;
+            }
+            if changed {
+                recovered.push(get_locked(&tx, &run_id)?.ok_or(JournalError::Storage)?);
+            }
+        }
         tx.commit()?;
         Ok(recovered)
     }

@@ -614,7 +614,10 @@ impl HostCore {
             }
 
             // ---- native sessions ----
+            // The protocol-1 legacy projection keeps its original closed AgentId set. M9
+            // windows opt into the additive operation after hello advertises its feature.
             "native_launcher" => to_value(self.native()?.launcher()),
+            "native_launcher_extended" => to_value(self.native()?.launcher_extended()),
             "native_preview" => {
                 let request: Preview = params(value)?;
                 to_value(
@@ -659,6 +662,13 @@ impl HostCore {
                 let request: Sample = params(value)?;
                 to_value(self.native()?.sessions(&self.terminals, request.sample))
             }
+            "native_sessions_extended" => {
+                let request: Sample = params(value)?;
+                to_value(
+                    self.native()?
+                        .sessions_extended(&self.terminals, request.sample),
+                )
+            }
             "native_stop" => {
                 let request: Id = params(value)?;
                 self.native()?
@@ -694,7 +704,8 @@ impl HostCore {
             }
 
             // ---- profiles ----
-            "profiles" => to_value(self.native()?.profiles().list()),
+            "profiles" => to_value(self.native()?.profiles().list_legacy()),
+            "profiles_extended" => to_value(self.native()?.profiles().list()),
             "profile_create" => {
                 let body: Body = params(value)?;
                 let id = self

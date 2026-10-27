@@ -30,7 +30,9 @@
   );
   let profile = $state<string | null>(null);
   const agents = $derived(
-    (native.launcher?.agents ?? []).filter((a) => a.installed),
+    (native.launcher?.agents ?? []).filter(
+      (a) => a.installed && a.agent_id !== 'hermes',
+    ),
   );
   const profiles = $derived(profilesFor(native.profiles, target));
   const tooLong = $derived(text.length > 16 * 1024);
@@ -95,6 +97,11 @@
     the new agent has only this text and the files, not {session.agent_name}’s
     context, and nothing is moved or ended. Read it and change it before
     starting. Secrets found in it were removed.
+  </p>
+  <p class="native-warning" role="note">
+    Hermes Native remains available as a separate interactive provider. It is
+    omitted here because its pinned CLI does not expose a verified reviewed
+    first-message interface without entering an effectful one-shot mode.
   </p>
   {#if loading}
     <p class="sessions-status" role="status" aria-busy="true">

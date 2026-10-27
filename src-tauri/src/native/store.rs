@@ -23,8 +23,9 @@ pub fn private_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Writes `bytes` to a new file beside `path` (mode 0600), flushes it, and renames it over
-/// `path`: a reader sees the old file or the new one, never half of either.
+/// Writes `bytes` to a new file beside `path` (mode 0600), flushes it, renames it over `path`,
+/// and synchronizes the containing directory. A successful return means both file contents
+/// and the rename are behind a durability barrier; a reader sees old or new, never a partial.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let dir = path.parent().ok_or_else(|| io::Error::other("no parent"))?;
     let tmp = dir.join(format!(".tmp-{}", uuid::Uuid::new_v4().simple()));
@@ -37,7 +38,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
             .open(&tmp)?;
         file.write_all(bytes)?;
         file.sync_all()?;
-        fs::rename(&tmp, path)
+        fs::rename(&tmp, path).and_then(|()| fs::File::open(dir)?.sync_all())
     })();
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
@@ -67,4 +68,23 @@ pub fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn atomic_replacement_returns_only_after_the_new_name_is_visible() {
+        let root = std::env::temp_dir().join(format!(
+            "wyss-native-store-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        private_dir(&root).unwrap();
+        let path = root.join("state.json");
+        write_atomic(&path, b"old").unwrap();
+        write_atomic(&path, b"new").unwrap();
+        assert_eq!(read_bounded(&path, 16).as_deref(), Some(b"new".as_slice()));
+        fs::remove_dir_all(root).unwrap();
+    }
 }
