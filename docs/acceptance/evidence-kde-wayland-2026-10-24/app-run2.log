@@ -1,0 +1,29 @@
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activating service name='org.freedesktop.portal.Desktop' requested by ':1.0' (uid=1000 pid=2808049 comm="/home/saintwyss/wyss-console-qa-0e9a534/.artifacts")
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activating service name='org.freedesktop.impl.portal.PermissionStore' requested by ':1.1' (uid=1000 pid=2808062 comm="/usr/lib/xdg-desktop-portal")
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.PermissionStore'
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activating service name='org.freedesktop.portal.Documents' requested by ':1.1' (uid=1000 pid=2808062 comm="/usr/lib/xdg-desktop-portal")
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Successfully activated service 'org.freedesktop.portal.Documents'
+
+(/usr/lib/xdg-desktop-portal:2808062): xdg-desktop-portal-WARNING **: 00:06:20.696: Choosing gtk.portal for org.freedesktop.impl.portal.Lockdown as a last-resort fallback
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activating service name='org.freedesktop.impl.portal.desktop.gtk' requested by ':1.1' (uid=1000 pid=2808062 comm="/usr/lib/xdg-desktop-portal")
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.desktop.gtk'
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activating service name='org.freedesktop.impl.portal.desktop.kde' requested by ':1.1' (uid=1000 pid=2808062 comm="/usr/lib/xdg-desktop-portal")
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.desktop.kde'
+
+(/usr/lib/xdg-desktop-portal:2808062): xdg-desktop-portal-WARNING **: 00:06:20.810: Failed to connect to PipeWire: Couldn't connect to PipeWire
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activating service name='org.freedesktop.impl.portal.desktop.kwallet' requested by ':1.1' (uid=1000 pid=2808062 comm="/usr/lib/xdg-desktop-portal")
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Successfully activated service 'org.freedesktop.portal.Desktop'
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.desktop.kwallet'
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activating service name='org.a11y.Bus' requested by ':1.0' (uid=1000 pid=2808049 comm="/home/saintwyss/wyss-console-qa-0e9a534/.artifacts")
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Successfully activated service 'org.a11y.Bus'
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activating service name='org.freedesktop.systemd1' requested by ':1.11' (uid=1000 pid=2808135 comm="/usr/bin/dbus-broker-launch --config-file=/usr/sha")
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activated service 'org.freedesktop.systemd1' failed: Process org.freedesktop.systemd1 exited with status 1
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activating service name='org.freedesktop.systemd1' requested by ':1.11' (uid=1000 pid=2808135 comm="/usr/bin/dbus-broker-launch --config-file=/usr/sha")
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activated service 'org.freedesktop.systemd1' failed: Process org.freedesktop.systemd1 exited with status 1
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activating service name='org.freedesktop.systemd1' requested by ':1.11' (uid=1000 pid=2808135 comm="/usr/bin/dbus-broker-launch --config-file=/usr/sha")
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activated service 'org.freedesktop.systemd1' failed: Process org.freedesktop.systemd1 exited with status 1
+
+** (process:2808139): WARNING **: 00:06:21.161: Failed to get atspi registered event listeners: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Could not activate remote peer 'org.a11y.atspi.Registry': unit failed
+
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Activating service name='ca.desrt.dconf' requested by ':1.0' (uid=1000 pid=2808049 comm="/home/saintwyss/wyss-console-qa-0e9a534/.artifacts")
+dbus-daemon[2808048]: [session uid=1000 pid=2808048 pidfd=5] Successfully activated service 'ca.desrt.dconf'

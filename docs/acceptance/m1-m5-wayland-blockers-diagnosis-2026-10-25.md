@@ -1,0 +1,44 @@
+# Wayland E2E blockers: diagnosis and retest — 2026-10-25
+
+**Verdict: PARTIAL, with progress.** A real Codex 0.159.0 Local Tools runtime reached **Ready** from the packaged GUI on KDE Wayland. The three reported blockers are explained; one is a product defect (fixed on a branch), two are invalid test conditions. The turn path, approvals, bind workspace and V9 remain unexercised, and a new GUI-hang defect appeared.
+
+Baseline `0e9a5341…`; fix branch `fix/f8-unsupported-mode-message` (commit `01b4f40`, not pushed); this report on `docs/m1-m5-e2e-acceptance-2026-10-24`. Same packaged binaries and hashes as before.
+
+## Root causes
+
+| # | Reported | Root cause | Class |
+| --- | --- | --- | --- |
+| 2 | Inference start: "console sent a request it should not have" | The production authority's `CodexSpawner::supports_profile` accepts only `CodexLocalToolsV1` (`f8/production.rs:172`). An Inference start reaches `engine.rs` and returns `ControlError::Unsupported`; `f8/gui/view.rs:117` folded `Unsupported` into `F8Failure::Invalid`, so a legitimate refusal read as a client bug. | **Product defect** (misleading failure; the authority's refusal is intended) |
+| 3 | Local Tools: "runtime process could not be started" / "exited" | Three test conditions, found in order: (a) the Codex home had no `models_cache.json`, which `CodexSpawner::cache()` requires → `spawn_failed`; (b) my fixture catalog lacked fields Codex needs (`Error: … missing field display_name`) → runtime exited; (c) with state under `/tmp`, generation 2 still exited; with state under `$HOME` the same setup reached Ready. Codex prints "Refusing to create helper binaries under temporary dir /tmp". Also: an `auth.json` in the Codex home without `--allow-credential` makes the authority refuse to start (`gate_denied`), which is the intended credential gate. | Invalid test conditions + an unhelpful generic message |
+| 1 | Terminal input duplicated with default input method | Not reproduced as a product bug. The renderer only forwards xterm.js `onData`; it adds no composition handling (`renderer.ts`, guards only suppress events while inactive). `ydotool` injects through `/dev/uinput`, which KWin sees as an ordinary keyboard, so it is not a bypass of the IME path. Symptom is `c` doubled and re-sent prefixes, gone with `GTK_IM_MODULE=gtk-im-context-simple`. Most consistent with ibus text-input on Wayland + WebKitGTK + xterm.js composition. **NOT_PROVEN against a physical keyboard** (I cannot produce one). | Open; environment/integration |
+
+Symbols typed wrongly in the `simple` IM test (`'`, `;`, `|`) are ydotool's US keymap against the owner's latam layout, not a defect.
+
+## Fix (branch `fix/f8-unsupported-mode-message`)
+New `F8Failure::Unsupported` (`unsupported`) with its own text ("This authority does not offer that. Nothing changed; try another mode."). `InvalidRequest` still maps to `invalid`; validation, gates and the allowlist are unchanged. Files: `view.rs`, `tests.rs`, `contracts/f8.ts`, `features/f8/present.ts`, `tests/f8-contract.test.ts`.
+Regression: Rust `a_mode_the_authority_does_not_serve_is_not_an_invalid_request`; vitest "tells a mode the authority does not offer from a malformed request". Results: `npm run format:check`, `lint`, `typecheck` clean; `npm test` 1057/1057; `npm run rust:test` exit 0 (1436 + 535 + integration, 0 failed); `rust:clippy` was still running when this was written. **Not retested on the real desktop** with the rebuilt package.
+
+## E2E on the real KDE Wayland desktop (disposable authority, real packaged binaries, no inference)
+| Scenario | Result |
+| --- | --- |
+| Local Tools runtime start, clean repo folder, verified label `…/proj/repo` | PASS — Ready, Codex 0.159.0, "Isolated for" the folder (y02) |
+| Inference start | FAIL → expected refusal by this authority; message fixed on branch |
+| Execution lease: gates before ready runtime, gated checkboxes | PASS (y03/y04) |
+| Grant lease | PASS in the authority (audit "Execution lease granted · #5", Run commands/Change files Allowed after refresh), but the GUI stayed on "Granting the execution lease…" for over a minute and only cleared after a refresh/re-select; the first attempt left no lease and froze that GUI so Alt+F4 did not exit it (killed by PID). **FAIL (new, not diagnosed)** |
+| Capacity-one: second session start while the first is Ready | PASS (inferred): "The authority is busy with another operation" — the message does not distinguish capacity from another operation |
+| Stop runtime with confirmation prompt, then Stopped | PASS (z04/z05); no child left |
+| Authority restart: sessions and generation kept, banner "restarted or replaced… nothing from before is acted on", runtime not restarted | PASS (z06) — V8 image, not V9 |
+| Claude Managed gate | PASS (disabled) |
+| Bind workspace, turns, approvals, refusals during a turn | NOT_PROVEN (no turn started; no credential, by design) |
+| V9 recovery / replay | NOT_PROVEN (Rust tests only) |
+| Process cleanup | PASS after killing 3 leftover GUI/host PIDs of the hung run; production units and launcher unchanged |
+
+## Other findings
+- The folder chosen for one session stayed in the composer for the next session ("Folder: …/repo2" on a stopped session): minor UX.
+- The chooser auto-completes into `.git` for a repo root; the label shows the real selection, so verify it.
+- Safety incident in my test harness: my first injection used the wrong window (a caption match on "Wyss Console" selected the owner's terminal). A few clicks and keystrokes went to that window and a path was pasted into its input box, nothing was sent. The harness now checks the window class before every injection.
+
+## Remaining blockers / next step
+1. Diagnose the lease-grant UI hang (authority log is empty; a hot `authority.sqlite3-journal` stayed present while idle). Needs authority-side tracing: start it under `strace`/`gdb` as a child.
+2. Physical-keyboard check of the IME issue: launch the packaged GUI with the default environment and type a few characters yourself.
+3. Rebuild the package from the fix branch and retest Inference on the desktop, then continue with Bind workspace → turn with a synthetic provider.
