@@ -1160,3 +1160,204 @@ fn sr03_unreleased_claim_still_quarantines_even_without_an_attempt() {
             .is_err()
     );
 }
+
+#[test]
+fn audit_review_authority_enforces_128_run_claim_limit() {
+    let (f, mut c, mut g, owner) = audit_review_guard();
+    for n in 0..129 {
+        let p = f.path(&format!("root-{n}"));
+        fs::create_dir(&p).unwrap();
+        let root = g.observe_root(&mut c, &p).unwrap();
+        let result = g.acquire_claim(
+            &mut c,
+            &owner,
+            &uuid::Uuid::new_v4().to_string(),
+            1,
+            &"a".repeat(64),
+            &root,
+        );
+        if n < 128 {
+            assert!(result.is_ok(), "valid in-budget claim {n}");
+        } else {
+            eprintln!("claim_129={result:?}");
+            assert!(
+                result.is_err(),
+                "F8 authority must enforce the frozen 128-run capacity bound"
+            );
+        }
+    }
+}
+
+type Sr04Ledger = (
+    WorkspaceFixture,
+    Connection,
+    crate::f8::workspace_guard::WorkspaceGuard,
+    String,
+    Vec<(String, String, crate::f8::workspace_guard::Claim)>,
+);
+
+fn sr04_full_ledger(count: usize) -> Sr04Ledger {
+    let (f, mut c, mut g, owner) = audit_review_guard();
+    let mut admitted = Vec::new();
+    for n in 0..count {
+        let path = f.path(&format!("claimed-{n}"));
+        fs::create_dir(&path).unwrap();
+        let root = g.observe_root(&mut c, &path).unwrap();
+        let run = uuid::Uuid::new_v4().to_string();
+        let claim = g
+            .acquire_claim(&mut c, &owner, &run, 1, &"a".repeat(64), &root)
+            .unwrap();
+        admitted.push((run, root, claim));
+    }
+    (f, c, g, owner, admitted)
+}
+
+#[test]
+fn sr04_released_history_frees_capacity_and_replay_uses_no_extra_slot() {
+    use crate::f8::guard_protocol::ClaimReleaseUnused;
+    let (f, mut c, mut g, owner, admitted) = sr04_full_ledger(128);
+    let (run, root, first) = &admitted[0];
+    let replay = g
+        .acquire_claim(&mut c, &owner, run, 1, &"a".repeat(64), root)
+        .unwrap();
+    assert_eq!(
+        &replay, first,
+        "idempotent recovery is permitted at full capacity"
+    );
+    let path = f.path("pending-129");
+    fs::create_dir(&path).unwrap();
+    let pending = g.observe_root(&mut c, &path).unwrap();
+    let next_run = uuid::Uuid::new_v4().to_string();
+    assert_eq!(
+        g.acquire_claim(&mut c, &owner, &next_run, 1, &"a".repeat(64), &pending),
+        Err(E::CapacityExceeded)
+    );
+    g.release_unused_claim(
+        &mut c,
+        &ClaimReleaseUnused {
+            claim_id: first.claim_id.clone(),
+            claim_generation: first.claim_generation,
+            expected_claim_revision: first.claim_revision,
+            expected_gate_revision: first.gate_revision,
+            coordinator_revision: 1,
+        },
+    )
+    .unwrap();
+    assert!(
+        g.duplicate_root_fd(root).is_err(),
+        "only the safely released unused root was retired"
+    );
+    let next = g
+        .acquire_claim(&mut c, &owner, &next_run, 1, &"a".repeat(64), &pending)
+        .unwrap();
+    assert_ne!(next.claim_id, first.claim_id);
+    let (all, active): (i64, i64) = c
+        .query_row(
+            "SELECT count(*),sum(phase<>'released') FROM workspace_claims",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (all, active),
+        (129, 128),
+        "closed history is preserved but does not occupy a live slot"
+    );
+    assert!(
+        g.duplicate_root_fd(&admitted[1].1).is_ok(),
+        "saturation never evicts unresolved roots"
+    );
+}
+
+#[test]
+fn sr04_two_admissions_racing_for_last_slot_have_exactly_one_winner() {
+    let (f, mut c, mut g, owner, _admitted) = sr04_full_ledger(127);
+    let mut candidates = Vec::new();
+    for n in 0..2 {
+        let path = f.path(&format!("candidate-{n}"));
+        fs::create_dir(&path).unwrap();
+        candidates.push(g.observe_root(&mut c, &path).unwrap());
+    }
+    let db = f.path("capacity-race.sqlite3");
+    c.execute("VACUUM INTO ?1", [db.to_str().unwrap()]).unwrap();
+    let guard = Arc::new(g);
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let workers: Vec<_> = candidates
+        .into_iter()
+        .map(|root| {
+            let guard = Arc::clone(&guard);
+            let barrier = Arc::clone(&barrier);
+            let db = db.clone();
+            let owner = owner.clone();
+            std::thread::spawn(move || {
+                let mut conn = Connection::open(db).unwrap();
+                conn.pragma_update(None, "foreign_keys", true).unwrap();
+                conn.busy_timeout(std::time::Duration::from_secs(10))
+                    .unwrap();
+                barrier.wait();
+                guard.acquire_claim(
+                    &mut conn,
+                    &owner,
+                    &uuid::Uuid::new_v4().to_string(),
+                    1,
+                    &"a".repeat(64),
+                    &root,
+                )
+            })
+        })
+        .collect();
+    let results: Vec<_> = workers.into_iter().map(|w| w.join().unwrap()).collect();
+    assert_eq!(
+        results.iter().filter(|r| r.is_ok()).count(),
+        1,
+        "{results:?}"
+    );
+    assert_eq!(
+        results
+            .iter()
+            .filter(|r| matches!(r, Err(E::CapacityExceeded)))
+            .count(),
+        1,
+        "{results:?}"
+    );
+    let active: i64 = Connection::open(db)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM workspace_claims WHERE phase<>'released'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(active, 128);
+}
+
+#[test]
+fn sr04_unclaimed_observations_are_bounded_without_eviction() {
+    let (f, mut c, mut g, _) = audit_review_guard();
+    let mut first = None;
+    for n in 0..128 {
+        let path = f.path(&format!("observation-{n}"));
+        fs::create_dir(&path).unwrap();
+        let binding = g.observe_root(&mut c, &path).unwrap();
+        if first.is_none() {
+            first = Some((path, binding));
+        }
+    }
+    let extra = f.path("observation-129");
+    fs::create_dir(&extra).unwrap();
+    assert_eq!(g.observe_root(&mut c, &extra), Err(E::CapacityExceeded));
+    let (first_path, first_binding) = first.unwrap();
+    assert_eq!(g.observe_root(&mut c, &first_path).unwrap(), first_binding);
+    assert!(g.duplicate_root_fd(&first_binding).is_ok());
+    let roots: i64 = c
+        .query_row(
+            "SELECT count(*) FROM workspace_root_bindings WHERE proof_state='pinned'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        roots, 128,
+        "no uncertainty or pending observation was evicted"
+    );
+}

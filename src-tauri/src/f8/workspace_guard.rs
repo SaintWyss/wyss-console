@@ -34,6 +34,10 @@ mod linux {
     use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
     const MAX_ANCESTORS: usize = 64;
+    // Released history does not occupy a live run slot. All other claim phases do,
+    // including verified-but-unreleased and quarantined ownership.
+    const MAX_UNRELEASED_CLAIMS: i64 = 128;
+    const MAX_UNCLAIMED_ROOTS: i64 = 128;
     const MAX_HANDLE_BYTES: usize = 128;
     const MAX_SNAPSHOT_ENTRIES: usize = 20_000;
     const MAX_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
@@ -650,6 +654,16 @@ mod linux {
             if store != self.store_id || import != "complete" {
                 return Err(E::StaleRevision);
             }
+            let (live_roots, unclaimed_roots): (i64,i64) = tx.query_row(
+                "SELECT count(*),COALESCE(sum(NOT EXISTS(SELECT 1 FROM workspace_claims c WHERE c.root_binding_id=r.root_binding_id AND c.phase<>'released')),0) FROM workspace_root_bindings r WHERE r.authority_store_id=?1 AND r.authority_epoch=?2 AND r.proof_state='pinned'",
+                params![self.store_id,self.epoch],
+                |row|Ok((row.get(0)?,row.get(1)?)),
+            ).map_err(|_|E::StorageUnavailable)?;
+            if unclaimed_roots >= MAX_UNCLAIMED_ROOTS
+                || live_roots >= MAX_UNRELEASED_CLAIMS + MAX_UNCLAIMED_ROOTS
+            {
+                return Err(E::CapacityExceeded);
+            }
             tx.execute(
                 "INSERT INTO workspace_root_bindings(root_binding_id,authority_store_id,authority_epoch,proof_state,proof_revision,filesystem_fingerprint,object_fingerprint,ancestry_fingerprint,mount_id,created_at) VALUES(?1,?2,?3,'pinned',1,?4,?5,?6,?7,?8)",
                 params![root_id, self.store_id, self.epoch, pin.filesystem_fingerprint(), pin.object_fingerprint(), pin.ancestry_fingerprint(), pin.mount_id(), now()?],
@@ -731,6 +745,16 @@ mod linux {
                 if row.5 != "released" {
                     return Err(E::IntentConflict);
                 }
+            }
+            let unreleased: i64 = tx
+                .query_row(
+                    "SELECT count(*) FROM workspace_claims WHERE phase<>'released'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| E::StorageUnavailable)?;
+            if unreleased >= MAX_UNRELEASED_CLAIMS {
+                return Err(E::CapacityExceeded);
             }
             self.require_disjoint_claims(&tx, root_binding_id, None)?;
             // An ordinary Managed turn may have been admitted before this claim arrived.
