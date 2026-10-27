@@ -434,6 +434,15 @@ fn session_mutation(engine: &mut Engine, r: &Request) -> ControlResult<Value> {
                 ],
             )
             .map_err(db)?;
+            if super::provider::version(&tx)? == 10 {
+                let changed = tx.execute(
+                    "UPDATE managed_session_freshness SET freshness_state='proven',authority_epoch=?1,preparation_generation=1,ever_started=0 WHERE session_id=?2 AND freshness_state='unproven' AND preparation_generation=0 AND ever_started=0",
+                    params![authority, session_id.as_str()],
+                ).map_err(db)?;
+                if changed != 1 {
+                    return Err(E::StorageIncompatible);
+                }
+            }
             (
                 session(&tx, session_id.as_str())?,
                 "authority.managed_session.prepared",
@@ -447,6 +456,12 @@ fn session_mutation(engine: &mut Engine, r: &Request) -> ControlResult<Value> {
             }
             let changed = s.control_state != v1::ControlState::Closed;
             if changed {
+                if super::provider::version(&tx)? == 10 {
+                    tx.execute(
+                        "UPDATE managed_session_freshness SET freshness_state='closed',authority_epoch=NULL WHERE session_id=?1",
+                        [p.managed_session_id.as_str()],
+                    ).map_err(db)?;
+                }
                 let pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM managed_turns WHERE managed_session_id=?1 AND state IN ('starting','running')) OR EXISTS(SELECT 1 FROM managed_session_operations WHERE managed_session_id=?1 AND state IN ('reserved','dispatching','indeterminate')) OR EXISTS(SELECT 1 FROM managed_runtimes WHERE managed_session_id=?1 AND desired_state='running')",[p.managed_session_id.as_str()],|r|r.get(0)).map_err(db)?;
                 if pending {
                     return Err(E::RuntimeOperationInProgress);

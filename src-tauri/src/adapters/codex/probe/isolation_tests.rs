@@ -1096,6 +1096,7 @@ fn f8_owned_grant_crosses_exec_and_is_consumed_by_the_real_namespace_launcher() 
             None,
             &[],
             Some(&mut grants), Vec::new(),
+            None,
         )
         .unwrap();
     assert_eq!(grants.len(), 1);
@@ -1131,6 +1132,74 @@ fn f8_owned_grant_crosses_exec_and_is_consumed_by_the_real_namespace_launcher() 
     println!(
         "post-exec bwrap: synthetic validated inode mounted; source owner dropped before spawn"
     );
+}
+
+#[test]
+fn f8_pinned_workspace_fd_mounts_original_object_after_host_path_replacement() {
+    use std::os::{
+        fd::{AsRawFd, FromRawFd},
+        unix::{ffi::OsStrExt, process::CommandExt},
+    };
+
+    let t = Temp::new();
+    let (i, user, _) = t.layout();
+    let original = i.workspace.clone();
+    fs::write(original.join("identity"), "pinned-object").unwrap();
+    let c_path = std::ffi::CString::new(original.as_os_str().as_bytes()).unwrap();
+    // Match RootPin: an O_PATH directory descriptor retained by F8.
+    let raw = unsafe {
+        nix::libc::open(
+            c_path.as_ptr(),
+            nix::libc::O_PATH | nix::libc::O_DIRECTORY | nix::libc::O_CLOEXEC,
+        )
+    };
+    assert!(raw >= 0);
+    let descriptor = unsafe { std::fs::File::from_raw_fd(raw) };
+
+    let moved = t.0.join("repo/sub/moved-workspace");
+    fs::rename(&original, &moved).unwrap();
+    fs::create_dir(&original).unwrap();
+    fs::write(original.join("identity"), "replacement-object").unwrap();
+
+    let mut grants = Vec::new();
+    let mut command = i
+        .launch_inner(
+            Path::new("/bin/sh"),
+            vec!["-c".into(), "cat \"$WORKSPACE/identity\"".into()],
+            &place_of(&i),
+            &Grants {
+                masked: &[],
+                catalog: None,
+                credential: None,
+            },
+            &user,
+            None,
+            &[],
+            Some(&mut grants),
+            Vec::new(),
+            Some((descriptor.into(), i.workspace.clone())),
+        )
+        .unwrap();
+    command.env("WORKSPACE", &i.workspace);
+    assert_eq!(grants.len(), 1, "the pinned source stays owned until spawn");
+    let inherited = grants.iter().map(AsRawFd::as_raw_fd).collect::<Vec<_>>();
+    unsafe {
+        command.pre_exec(move || {
+            for fd in &inherited {
+                if nix::libc::fcntl(*fd, nix::libc::F_SETFD, 0) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+            }
+            Ok(())
+        });
+    }
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "pinned namespace mount must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"pinned-object");
 }
 
 #[test]

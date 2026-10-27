@@ -110,10 +110,16 @@ pub struct Client {
 
 pub struct Authority {
     engine: Engine,
+    /// Present only for an explicitly migrated V10 authority. It never activates Managed
+    /// execution on its own; turn admission still requires the guarded protocol path.
+    #[cfg(target_os = "linux")]
+    workspace_guard: Option<super::workspace_guard::WorkspaceGuard>,
     /// In-memory admission tickets by turn id: transient, launch-scoped, never durable.
     tickets: BTreeMap<String, TurnTicket>,
     /// Retry audit-backed recovery until its transaction actually commits.
     recovery_pending: bool,
+    /// Production execution through the new M6 guard stays off until independent acceptance.
+    managed_execution_enabled: bool,
     /// When the durable expiry of leases and approvals is next looked for.
     housekeeping_at: Option<Instant>,
     /// What the audit log last said of one generation's unexpected exit, and when it was read:
@@ -161,15 +167,56 @@ impl Authority {
     pub fn new(engine: Engine) -> Self {
         Self {
             engine,
+            #[cfg(target_os = "linux")]
+            workspace_guard: None,
             tickets: BTreeMap::new(),
             // A successor must reconcile previous authority work even with no local exits.
             recovery_pending: true,
+            managed_execution_enabled: false,
             housekeeping_at: None,
             exit_lookups: RefCell::new(BTreeMap::new()),
             streams: Default::default(),
             #[cfg(test)]
             post_approval_write: None,
         }
+    }
+
+    /// Open a V10 authority and fence any nonterminal claims if this is a new F8 process.
+    #[cfg(target_os = "linux")]
+    pub fn new_guarded(mut engine: Engine) -> ControlResult<Self> {
+        let epoch = engine.authority_id().as_str().to_owned();
+        let workspace_guard =
+            super::workspace_guard::WorkspaceGuard::open(engine.connection_mut(), epoch)?;
+        Ok(Self {
+            engine,
+            workspace_guard: Some(workspace_guard),
+            tickets: BTreeMap::new(),
+            recovery_pending: true,
+            managed_execution_enabled: false,
+            housekeeping_at: None,
+            exit_lookups: RefCell::new(BTreeMap::new()),
+            streams: Default::default(),
+            #[cfg(test)]
+            post_approval_write: None,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture_enable_guarded_execution(&mut self) {
+        self.managed_execution_enabled = true;
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn workspace_guard_ready(&self) -> ControlResult<bool> {
+        match &self.workspace_guard {
+            Some(guard) => guard.capability_ready(self.engine.connection()),
+            None => Ok(false),
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn workspace_guard_ready(&self) -> ControlResult<bool> {
+        Ok(false)
     }
     pub fn engine(&self) -> &Engine {
         &self.engine
@@ -208,6 +255,20 @@ impl Authority {
         now: Instant,
     ) -> Vec<u8> {
         let id = request_id_of(bytes);
+        if unique_json(bytes)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .is_some_and(|method| {
+                method == "authority/capabilities" || method.starts_with("orchestration/")
+            })
+        {
+            return self.handle_workspace_guard(client, bytes, now);
+        }
         let request = match Request::parse(bytes) {
             Ok(r) => r,
             Err(e) => return self.fail(&id, e),
@@ -219,6 +280,429 @@ impl Authority {
             Ok(result) => self.ok(request.request_id(), result),
             Err(e) => self.fail(request.request_id(), e),
         }
+    }
+
+    fn handle_workspace_guard(
+        &mut self,
+        client: &mut Client,
+        bytes: &[u8],
+        now: Instant,
+    ) -> Vec<u8> {
+        let fallback_id = request_id_of(bytes);
+        let request = match super::guard_protocol::Request::parse(bytes) {
+            Ok(request) => request,
+            Err(error) => return self.fail(&fallback_id, error),
+        };
+        if request.authority_instance_id != self.authority() {
+            return self.fail(&request.request_id, E::CorrelationError);
+        }
+        if client.observed.as_ref() != Some(&request.authority_instance_id) {
+            return self.fail(&request.request_id, E::HandshakeRequired);
+        }
+        let result = (|| -> ControlResult<Value> {
+            use super::guard_protocol::Operation as O;
+            match request.operation {
+                O::Capabilities => {
+                    let guard = self.workspace_guard.as_ref().ok_or(E::Unsupported)?;
+                    let guard_ready = guard.capability_ready(self.engine.connection())?;
+                    Ok(json!({
+                        "capability": "workspace_guard_v1",
+                        "revision": 1,
+                        "authority_store_id": guard.store_id(),
+                        "authority_epoch": guard.epoch(),
+                        "guard_ready": guard_ready,
+                        "managed_execution_enabled": self.managed_execution_enabled,
+                        "ready": guard_ready && self.managed_execution_enabled
+                    }))
+                }
+                O::ImportClaims {
+                    coordinator_store_id,
+                    snapshot_revision,
+                    claims,
+                } => {
+                    let guard = self.workspace_guard.as_ref().ok_or(E::Unsupported)?;
+                    let digest = guard.import_claims(
+                        self.engine.connection_mut(),
+                        &coordinator_store_id,
+                        snapshot_revision,
+                        &claims,
+                    )?;
+                    let guard_ready = guard.capability_ready(self.engine.connection())?;
+                    Ok(json!({
+                        "coordinator_store_id": coordinator_store_id,
+                        "snapshot_revision": snapshot_revision,
+                        "snapshot_digest": digest,
+                        "guard_ready": guard_ready,
+                        "managed_execution_enabled": self.managed_execution_enabled,
+                        "ready": guard_ready && self.managed_execution_enabled
+                    }))
+                }
+                O::ObserveRoot { locator } => {
+                    let guard = self.workspace_guard.as_mut().ok_or(E::Unsupported)?;
+                    let root_binding_id =
+                        guard.observe_root(self.engine.connection_mut(), &locator)?;
+                    Ok(json!({
+                        "root_binding_id": root_binding_id,
+                        "root_observation_revision": 1,
+                        "authority_store_id": guard.store_id(),
+                        "authority_epoch": guard.epoch()
+                    }))
+                }
+                O::AcquireClaim {
+                    coordinator_store_id,
+                    run_id,
+                    plan_revision,
+                    plan_digest,
+                    root_binding_id,
+                } => {
+                    let guard = self.workspace_guard.as_mut().ok_or(E::Unsupported)?;
+                    let claim = guard.acquire_claim(
+                        self.engine.connection_mut(),
+                        &coordinator_store_id,
+                        &run_id,
+                        plan_revision,
+                        &plan_digest,
+                        &root_binding_id,
+                    )?;
+                    Ok(json!({
+                        "claim_id": claim.claim_id,
+                        "root_binding_id": claim.root_binding_id,
+                        "claim_generation": claim.claim_generation,
+                        "claim_revision": claim.claim_revision,
+                        "gate_revision": claim.gate_revision,
+                        "phase": claim.phase,
+                        "gate_state": claim.gate_state,
+                        "settlement_id": claim.settlement_id,
+                        "coordinator_revision": claim.coordinator_revision
+                    }))
+                }
+                O::SetGate {
+                    claim_id,
+                    expected_claim_revision,
+                    expected_gate_revision,
+                    gate,
+                    settlement_id,
+                    coordinator_revision,
+                } => {
+                    let guard = self.workspace_guard.as_mut().ok_or(E::Unsupported)?;
+                    let claim = guard.set_gate(
+                        self.engine.connection_mut(),
+                        &claim_id,
+                        expected_claim_revision,
+                        expected_gate_revision,
+                        &gate,
+                        settlement_id.as_deref(),
+                        coordinator_revision,
+                    )?;
+                    Ok(json!({
+                        "claim_id": claim.claim_id,
+                        "root_binding_id": claim.root_binding_id,
+                        "claim_generation": claim.claim_generation,
+                        "claim_revision": claim.claim_revision,
+                        "gate_revision": claim.gate_revision,
+                        "phase": claim.phase,
+                        "gate_state": claim.gate_state,
+                        "settlement_id": claim.settlement_id,
+                        "coordinator_revision": claim.coordinator_revision
+                    }))
+                }
+                O::ClaimStatus { claim_id } => {
+                    let guard = self.workspace_guard.as_ref().ok_or(E::Unsupported)?;
+                    let claim = guard.claim_status(self.engine.connection(), &claim_id)?;
+                    Ok(json!({
+                        "claim_id": claim.claim_id,
+                        "root_binding_id": claim.root_binding_id,
+                        "claim_generation": claim.claim_generation,
+                        "claim_revision": claim.claim_revision,
+                        "gate_revision": claim.gate_revision,
+                        "phase": claim.phase,
+                        "gate_state": claim.gate_state,
+                        "settlement_id": claim.settlement_id,
+                        "coordinator_revision": claim.coordinator_revision
+                    }))
+                }
+                O::VerificationPrepare(prepare) => {
+                    let guard = self.workspace_guard.as_ref().ok_or(E::Unsupported)?;
+                    let prepared =
+                        guard.prepare_verification(self.engine.connection_mut(), &prepare)?;
+                    Ok(json!({
+                        "observation_id": prepared.observation_id,
+                        "claim_id": prepared.claim_id,
+                        "claim_generation": prepared.claim_generation,
+                        "claim_revision": prepared.claim_revision,
+                        "root_binding_id": prepared.root_binding_id,
+                        "content_digest": prepared.content_digest
+                    }))
+                }
+                O::VerificationCommit(commit) => {
+                    let guard = self.workspace_guard.as_ref().ok_or(E::Unsupported)?;
+                    let claim = guard.commit_verification(self.engine.connection_mut(), &commit)?;
+                    Ok(json!({
+                        "claim_id": claim.claim_id,
+                        "root_binding_id": claim.root_binding_id,
+                        "claim_generation": claim.claim_generation,
+                        "claim_revision": claim.claim_revision,
+                        "gate_revision": claim.gate_revision,
+                        "phase": claim.phase,
+                        "gate_state": claim.gate_state,
+                        "settlement_id": claim.settlement_id,
+                        "coordinator_revision": claim.coordinator_revision
+                    }))
+                }
+                O::ClaimRelease(release) => {
+                    let guard = self.workspace_guard.as_ref().ok_or(E::Unsupported)?;
+                    let claim = guard.release_claim(self.engine.connection_mut(), &release)?;
+                    Ok(json!({
+                        "claim_id": claim.claim_id,
+                        "root_binding_id": claim.root_binding_id,
+                        "claim_generation": claim.claim_generation,
+                        "claim_revision": claim.claim_revision,
+                        "gate_revision": claim.gate_revision,
+                        "phase": claim.phase,
+                        "gate_state": claim.gate_state,
+                        "settlement_id": claim.settlement_id,
+                        "coordinator_revision": claim.coordinator_revision
+                    }))
+                }
+                O::ClaimReleaseUnused(release) => {
+                    let guard = self.workspace_guard.as_ref().ok_or(E::Unsupported)?;
+                    let claim =
+                        guard.release_unused_claim(self.engine.connection_mut(), &release)?;
+                    Ok(json!({
+                        "claim_id": claim.claim_id,
+                        "root_binding_id": claim.root_binding_id,
+                        "claim_generation": claim.claim_generation,
+                        "claim_revision": claim.claim_revision,
+                        "gate_revision": claim.gate_revision,
+                        "phase": claim.phase,
+                        "gate_state": claim.gate_state,
+                        "settlement_id": claim.settlement_id,
+                        "coordinator_revision": claim.coordinator_revision
+                    }))
+                }
+                O::StartPrepare(tuple) => {
+                    if !self.managed_execution_enabled {
+                        return Err(E::GateDenied);
+                    }
+                    if tuple.authority_epoch != self.authority().as_str() {
+                        return Err(E::StaleRevision);
+                    }
+                    let reference = self
+                        .engine
+                        .reference(&tuple.session_id)
+                        .ok_or(E::StaleRevision)?;
+                    if reference.runtime_instance_id.as_str() != tuple.runtime_instance_id
+                        || reference.generation != tuple.runtime_generation
+                    {
+                        return Err(E::StaleRevision);
+                    }
+                    let fence = reference.fence();
+                    let attachment = self
+                        .engine
+                        .attachment(&tuple.session_id)
+                        .ok_or(E::GateDenied)?;
+                    self.engine.observe_fence(&fence)?;
+                    super::operations::require_bound_launch(&self.engine, &fence)?;
+                    self.engine.preflight(&fence, &attachment)?;
+                    let lease =
+                        super::writers::active_lease(self.engine.connection(), &tuple.session_id)?
+                            .ok_or(E::GateDenied)?;
+                    if lease.lease_id.as_str() != tuple.lease_id
+                        || lease.revision != tuple.lease_revision
+                    {
+                        return Err(E::StaleRevision);
+                    }
+                    let prepared = self
+                        .workspace_guard
+                        .as_mut()
+                        .ok_or(E::Unsupported)?
+                        .prepare_start(
+                            self.engine.connection_mut(),
+                            &tuple,
+                            &reference,
+                            &attachment,
+                        )?;
+                    Ok(json!({
+                        "receipt_id": prepared.receipt_id,
+                        "receipt_revision": prepared.receipt_revision,
+                        "expires_at": prepared.expires_at,
+                        "tuple_digest": prepared.tuple_digest
+                    }))
+                }
+                O::StartCommit(commit) => self.guarded_start_commit(commit, now),
+            }
+        })();
+        match result {
+            Ok(value) => {
+                super::guard_protocol::success(&request.request_id, &self.authority(), value)
+                    .unwrap_or_else(|error| self.fail(&request.request_id, error))
+            }
+            Err(error) => self.fail(&request.request_id, error),
+        }
+    }
+
+    fn guarded_start_commit(
+        &mut self,
+        commit: super::guard_protocol::StartCommit,
+        _now: Instant,
+    ) -> ControlResult<Value> {
+        if !self.managed_execution_enabled
+            || super::provider::version(self.engine.connection())? != 10
+        {
+            return Err(E::GateDenied);
+        }
+        let tuple = commit.tuple;
+        let tuple_digest = tuple.digest()?;
+        let prompt_fingerprint = format!("{:x}", Sha256::digest(commit.prompt.as_bytes()));
+        if prompt_fingerprint != tuple.prompt_digest {
+            return Err(E::InvalidRequest);
+        }
+        let intent = TurnIntent {
+            intent_id: WireUuid::try_from(tuple.intent_id.clone())
+                .map_err(|_| E::InvalidRequest)?,
+            expected_session_revision: tuple.session_revision,
+            prompt_fingerprint,
+            prompt_byte_length: commit.prompt.len(),
+        };
+        let reference = self
+            .engine
+            .reference(&tuple.session_id)
+            .ok_or(E::StaleRevision)?;
+        if reference.runtime_instance_id.as_str() != tuple.runtime_instance_id
+            || reference.generation != tuple.runtime_generation
+        {
+            return Err(E::StaleRevision);
+        }
+        let fence = reference.fence();
+        self.engine.observe_fence(&fence)?;
+        super::operations::require_bound_launch(&self.engine, &fence)?;
+        let attachment = self
+            .engine
+            .attachment(&tuple.session_id)
+            .ok_or(E::GateDenied)?;
+        if attachment.revision != tuple.attachment_revision
+            || attachment.profile
+                != match tuple.model_profile {
+                    super::guard_protocol::StartProfile::CodexInferenceV1 => "codex_inference_v1",
+                    super::guard_protocol::StartProfile::CodexLocalToolsV1 => {
+                        "codex_local_tools_v1"
+                    }
+                }
+        {
+            return Err(E::StaleRevision);
+        }
+        self.engine.preflight(&fence, &attachment)?;
+        let lease = super::writers::active_lease(self.engine.connection(), &tuple.session_id)?
+            .ok_or(E::GateDenied)?;
+        if lease.lease_id.as_str() != tuple.lease_id || lease.revision != tuple.lease_revision {
+            return Err(E::StaleRevision);
+        }
+
+        // L1: the F8 claim transition, receipt consumption, turn reservation, idempotence
+        // result and audit link share the existing single writer transaction.
+        let authority = self.authority();
+        let (record, fresh) = {
+            let guard = self.workspace_guard.as_mut().ok_or(E::Unsupported)?;
+            let mut reserve = |tx: &rusqlite::Transaction<'_>, turn_id: &str| {
+                guard.consume_prepared_start_in(
+                    tx,
+                    &tuple,
+                    &commit.receipt_id,
+                    commit.receipt_revision,
+                    &tuple_digest,
+                    turn_id,
+                )
+            };
+            Writer::new(self.engine.connection_mut(), authority.clone())?.admit_guarded_turn_ex(
+                &reference,
+                &intent,
+                lease.lease_id.as_str(),
+                tuple.lease_revision,
+                &tuple_digest,
+                &mut reserve,
+            )?
+        };
+        if !fresh {
+            return Ok(json!({"kind":"turn","value":record,"replayed":true}));
+        }
+
+        let ticket = match self.engine.admit_turn(
+            &fence,
+            &LeaseClaim {
+                lease_id: lease.lease_id.as_str().to_owned(),
+                session: tuple.session_id.clone(),
+            },
+            &attachment,
+            record.managed_turn_id.as_str(),
+            &lease_snapshot(
+                self.engine.connection(),
+                &tuple.session_id,
+                lease.lease_id.as_str(),
+            ),
+            0,
+        ) {
+            Ok(ticket) => ticket,
+            Err(error) => {
+                self.workspace_guard
+                    .as_mut()
+                    .ok_or(E::Unsupported)?
+                    .mark_guarded_attempt_known_no_send(
+                        self.engine.connection_mut(),
+                        &tuple.attempt_id,
+                    )?;
+                self.fail_turn(&record.managed_turn_id)?;
+                return Err(error);
+            }
+        };
+
+        // L2 is persisted before the first transport operation. This transition can happen
+        // only once; crashes or ambiguous writes keep the receipt consumed and claim held.
+        if let Err(error) = self
+            .workspace_guard
+            .as_mut()
+            .ok_or(E::Unsupported)?
+            .mark_guarded_attempt_possibly_sent(self.engine.connection_mut(), &tuple)
+        {
+            let _ = self.engine.end_turn(&ticket);
+            self.workspace_guard
+                .as_mut()
+                .ok_or(E::Unsupported)?
+                .mark_guarded_attempt_known_no_send(
+                    self.engine.connection_mut(),
+                    &tuple.attempt_id,
+                )?;
+            self.fail_turn(&record.managed_turn_id)?;
+            return Err(error);
+        }
+        let frame = serde_json::to_vec(&json!({
+            "method":"turn/start",
+            "turn":record.managed_turn_id,
+            "input":commit.prompt
+        }))
+        .map_err(|_| E::InternalError)?;
+        let lease_view = lease_snapshot(
+            self.engine.connection(),
+            &tuple.session_id,
+            lease.lease_id.as_str(),
+        );
+        if self
+            .engine
+            .write_guarded_start_frame(&ticket, &frame, &lease_view, 0)
+            .is_err()
+        {
+            self.engine.transport_failed(&ticket.reference);
+            let authority = self.authority();
+            Writer::new(self.engine.connection_mut(), authority)?.transition_turn(
+                &record.managed_turn_id,
+                None,
+                TurnState::Indeterminate,
+                Some(TurnReason::DispatchUnknown),
+            )?;
+            return Err(E::ExternalEffectUnknown);
+        }
+        self.tickets
+            .insert(record.managed_turn_id.as_str().to_owned(), ticket);
+        Ok(json!({"kind":"turn","value":record,"replayed":false}))
     }
 
     fn route(
@@ -236,7 +720,56 @@ impl Authority {
             }
             O::Status(_) => self.status("status"),
             O::RuntimeStart(_) => {
-                let o = self.engine.start(request, spawner)?;
+                let schema = super::provider::version(self.engine.connection())?;
+                let pinned = if schema == 10
+                    && matches!(request.operation(), O::RuntimeStart(m) if m.safety_profile.is_some_and(v1::RuntimeSafetyProfile::local_tools))
+                {
+                    let v1::Operation::RuntimeStart(mutation) = request.operation() else {
+                        return Err(E::InvalidRequest);
+                    };
+                    let locator = mutation
+                        .workspace_root
+                        .as_deref()
+                        .ok_or(E::WorkspaceInvalid)?;
+                    #[cfg(target_os = "linux")]
+                    {
+                        let guard = self.workspace_guard.as_ref().ok_or(E::Unsupported)?;
+                        Some(guard.duplicate_root_fd_for_locator(
+                            self.engine.connection(),
+                            std::path::Path::new(locator),
+                        )?)
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        let _ = locator;
+                        return Err(E::Unsupported);
+                    }
+                } else {
+                    None
+                };
+                let root_binding_id = pinned.as_ref().map(|(root, _)| root.clone());
+                let authority_instance_id = self.authority().as_str().to_owned();
+                let o = self
+                    .engine
+                    .start_with_pinned_workspace(request, spawner, pinned)?;
+                if let (Some(root_binding_id), Some(runtime_instance_id)) =
+                    (root_binding_id, o.runtime_instance_id.as_ref())
+                {
+                    #[cfg(target_os = "linux")]
+                    self.workspace_guard
+                        .as_ref()
+                        .ok_or(E::Unsupported)?
+                        .bind_runtime_root(
+                            self.engine.connection_mut(),
+                            o.managed_session_id.as_str(),
+                            runtime_instance_id.as_str(),
+                            o.generation,
+                            &root_binding_id,
+                            &authority_instance_id,
+                        )?;
+                    #[cfg(not(target_os = "linux"))]
+                    return Err(E::Unsupported);
+                }
                 Ok(runtime_control(&o))
             }
             O::RuntimeStop(_) => {
@@ -466,6 +999,7 @@ impl Authority {
         request: &Request,
         p: &crate::contracts::turn::TurnStart,
     ) -> ControlResult<Value> {
+        let schema_version = super::provider::version(self.engine.connection())?;
         let Target::Fenced(fence) = request.target() else {
             return Err(E::InvalidRequest);
         };
@@ -520,6 +1054,18 @@ impl Authority {
         super::operations::require_bound_launch(&self.engine, fence)?;
         let attachment = self.engine.attachment(&session).ok_or(E::GateDenied)?;
         self.engine.preflight(fence, &attachment)?;
+        if schema_version == 10
+            && !self
+                .workspace_guard
+                .as_ref()
+                .ok_or(E::GateDenied)?
+                .ordinary_start_allowed(
+                    self.engine.connection(),
+                    reference.runtime_instance_id.as_str(),
+                )?
+        {
+            return Err(E::GateDenied);
+        }
         let (record, fresh) = Writer::new(self.engine.connection_mut(), authority.clone())?
             .admit_turn_ex(&reference, &intent, lease.lease_id.as_str())?;
         if !fresh {

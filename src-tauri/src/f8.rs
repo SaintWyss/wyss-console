@@ -15,6 +15,8 @@ pub mod engine;
 #[cfg(all(any(feature = "f8-dev", feature = "f8-fixture"), target_os = "linux"))]
 pub mod fixture;
 #[cfg(target_os = "linux")]
+pub mod guard_protocol;
+#[cfg(target_os = "linux")]
 pub mod gui;
 #[cfg(target_os = "linux")]
 pub mod launcher;
@@ -39,11 +41,15 @@ pub mod service;
 #[cfg(target_os = "linux")]
 pub mod staging;
 #[cfg(target_os = "linux")]
+pub mod v10;
+#[cfg(target_os = "linux")]
 pub mod v8;
 #[cfg(target_os = "linux")]
 pub mod v9;
 #[cfg(test)]
 pub(crate) mod v9_candidate;
+#[cfg(target_os = "linux")]
+pub mod workspace_guard;
 #[cfg(target_os = "linux")]
 pub mod writers;
 

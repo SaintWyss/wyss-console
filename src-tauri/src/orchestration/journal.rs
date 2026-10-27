@@ -14,7 +14,11 @@ use std::{
 };
 use uuid::Uuid;
 
-const SCHEMA_VERSION: i64 = 2;
+// Schema 2 is the fail-closed identity checkpoint. Schema 3 adds the durable coordinator ID
+// and immutable M6-to-F8 import snapshot. Schema 4 records F8 settlement receipts and the
+// coordinator revision acknowledged by F8. Schema 5 retains released claim history while
+// allowing a new active generation to claim the same workspace.
+const SCHEMA_VERSION: i64 = 5;
 const APPLICATION_ID: i64 = 0x5759_4f52; // "WYOR"
 const MAX_RUNS: usize = 128;
 const MAX_LIST: usize = 128;
@@ -53,6 +57,90 @@ pub enum CancellationOutcome {
     Refused,
     Unknown,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceImportClaim {
+    pub claim_id: String,
+    pub run_id: String,
+    pub claim_generation: u64,
+    pub source_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceClaimBinding {
+    pub authority_store_id: String,
+    pub authority_epoch: String,
+    pub root_binding_id: String,
+    pub claim_id: String,
+    pub claim_generation: u64,
+    pub claim_revision: u64,
+    pub gate_revision: u64,
+    pub root_observation_revision: u64,
+    pub phase: String,
+    pub gate_state: String,
+    pub settlement_id: Option<String>,
+    pub coordinator_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceSettlementIntent {
+    pub observation_id: String,
+    pub attempt_id: String,
+    pub decision: String,
+    pub reviewed_digest: String,
+}
+
+type WorkspaceClaimBindingRow = (
+    String,
+    String,
+    String,
+    String,
+    i64,
+    i64,
+    i64,
+    i64,
+    String,
+    String,
+    Option<String>,
+    i64,
+);
+type WorkspaceClaimStorageRow = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    String,
+);
+type WorkspaceSettlementRow = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 impl From<rusqlite::Error> for JournalError {
     fn from(_: rusqlite::Error) -> Self {
         Self::Storage
@@ -119,6 +207,7 @@ impl RunJournal {
             .pragma_query_value(None, "application_id", |row| row.get(0))
             .map_err(|_| JournalError::Storage)?;
         if version == 0 && application_id == 0 {
+            let coordinator_store_id = Uuid::new_v4().to_string();
             connection
                 .execute_batch(&format!(
                     "BEGIN IMMEDIATE;
@@ -209,8 +298,8 @@ impl RunJournal {
                        timestamp INTEGER NOT NULL CHECK(timestamp>=0)
                      ) STRICT;
                      CREATE TABLE orchestration_workspace_claims (
-                       workspace_id TEXT PRIMARY KEY CHECK(length(workspace_id)=64),
-                       run_id TEXT NOT NULL UNIQUE REFERENCES orchestration_runs(run_id),
+                       workspace_id TEXT NOT NULL CHECK(length(workspace_id)=64),
+                       run_id TEXT PRIMARY KEY NOT NULL REFERENCES orchestration_runs(run_id),
                        claimed_at INTEGER NOT NULL CHECK(claimed_at>=0),
                        authority_store_id TEXT,
                        authority_epoch TEXT,
@@ -218,9 +307,35 @@ impl RunJournal {
                        claim_id TEXT,
                        claim_generation INTEGER CHECK(claim_generation IS NULL OR claim_generation>0),
                        claim_revision INTEGER CHECK(claim_revision IS NULL OR claim_revision>0),
+                       gate_revision INTEGER CHECK(gate_revision IS NULL OR gate_revision>0),
+                       root_observation_revision INTEGER CHECK(root_observation_revision IS NULL OR root_observation_revision>0),
+                       claim_phase TEXT CHECK(claim_phase IS NULL OR claim_phase IN ('held','unsettled','verified','released','quarantined')),
+                       gate_state TEXT CHECK(gate_state IS NULL OR gate_state IN ('open','paused','stopped','quarantined')),
+                       settlement_id TEXT CHECK(settlement_id IS NULL OR length(settlement_id)=36),
+                       coordinator_revision INTEGER NOT NULL DEFAULT 0 CHECK(coordinator_revision>=0),
+                       settlement_intent_id TEXT CHECK(settlement_intent_id IS NULL OR length(settlement_intent_id)=36),
+                       settlement_attempt_id TEXT CHECK(settlement_attempt_id IS NULL OR length(settlement_attempt_id)=36),
+                       settlement_decision TEXT CHECK(settlement_decision IS NULL OR settlement_decision IN ('confirmed_completed','confirmed_no_effect','confirmed_cancelled')),
+                       settlement_digest TEXT CHECK(settlement_digest IS NULL OR length(settlement_digest)=64),
                        proof_state TEXT NOT NULL DEFAULT 'identity_unproven'
                          CHECK(proof_state IN ('pinned','identity_unproven','quarantined'))
                      ) STRICT;
+                     CREATE TABLE orchestration_metadata (
+                       id INTEGER PRIMARY KEY CHECK(id=1),
+                       coordinator_store_id TEXT NOT NULL UNIQUE CHECK(length(coordinator_store_id)=36)
+                     ) STRICT;
+                     INSERT INTO orchestration_metadata VALUES(1,'{coordinator_store_id}');
+                     CREATE TRIGGER orchestration_metadata_identity_no_update BEFORE UPDATE OF coordinator_store_id ON orchestration_metadata BEGIN SELECT RAISE(ABORT,'immutable_coordinator_identity'); END;
+                     CREATE TRIGGER orchestration_metadata_no_delete BEFORE DELETE ON orchestration_metadata BEGIN SELECT RAISE(ABORT,'immutable_coordinator_identity'); END;
+                     CREATE TABLE orchestration_import_snapshot (
+                       claim_id TEXT PRIMARY KEY CHECK(length(claim_id)=36),
+                       run_id TEXT NOT NULL CHECK(length(run_id)=36),
+                       claim_generation INTEGER NOT NULL CHECK(claim_generation>0),
+                       source_revision INTEGER NOT NULL CHECK(source_revision>0),
+                       identity_state TEXT NOT NULL CHECK(identity_state='identity_unproven')
+                     ) STRICT;
+                     CREATE TRIGGER orchestration_import_snapshot_no_update BEFORE UPDATE ON orchestration_import_snapshot BEGIN SELECT RAISE(ABORT,'immutable_import_snapshot'); END;
+                     CREATE TRIGGER orchestration_import_snapshot_no_delete BEFORE DELETE ON orchestration_import_snapshot BEGIN SELECT RAISE(ABORT,'immutable_import_snapshot'); END;
                      CREATE TABLE orchestration_handoffs (
                        handoff_id TEXT PRIMARY KEY CHECK(length(handoff_id)=36),
                        revision INTEGER NOT NULL CHECK(revision>0),
@@ -245,7 +360,7 @@ impl RunJournal {
                      CREATE INDEX orchestration_attempts_state ON orchestration_attempts(state,run_id);
                      CREATE INDEX orchestration_cancellations_state ON orchestration_cancellations(state,run_id);
                      CREATE INDEX orchestration_events_run ON orchestration_events(run_id,sequence);
-                     CREATE INDEX orchestration_claims_run ON orchestration_workspace_claims(run_id);
+                     CREATE UNIQUE INDEX orchestration_active_workspace_claim ON orchestration_workspace_claims(workspace_id) WHERE claim_phase IS NULL OR claim_phase<>'released';
                      CREATE TRIGGER orchestration_handoffs_no_update BEFORE UPDATE ON orchestration_handoffs BEGIN SELECT RAISE(ABORT,'immutable handoff'); END;
                      CREATE TRIGGER orchestration_handoffs_no_delete BEFORE DELETE ON orchestration_handoffs BEGIN SELECT RAISE(ABORT,'immutable handoff'); END;
                      CREATE TRIGGER orchestration_events_no_update BEFORE UPDATE ON orchestration_events BEGIN SELECT RAISE(ABORT,'append only'); END;
@@ -272,8 +387,9 @@ impl RunJournal {
         } else if version == 1 && application_id == APPLICATION_ID {
             // Schema 1 recorded only a path-derived logical workspace ID. Never infer a
             // physical root from today's filesystem: all existing claims migrate unproven.
+            let coordinator_store_id = Uuid::new_v4().to_string();
             connection
-                .execute_batch(
+                .execute_batch(&format!(
                     "BEGIN IMMEDIATE;
                      ALTER TABLE orchestration_workspace_claims ADD COLUMN authority_store_id TEXT;
                      ALTER TABLE orchestration_workspace_claims ADD COLUMN authority_epoch TEXT;
@@ -281,13 +397,119 @@ impl RunJournal {
                      ALTER TABLE orchestration_workspace_claims ADD COLUMN claim_id TEXT;
                      ALTER TABLE orchestration_workspace_claims ADD COLUMN claim_generation INTEGER CHECK(claim_generation IS NULL OR claim_generation>0);
                      ALTER TABLE orchestration_workspace_claims ADD COLUMN claim_revision INTEGER CHECK(claim_revision IS NULL OR claim_revision>0);
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN gate_revision INTEGER CHECK(gate_revision IS NULL OR gate_revision>0);
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN root_observation_revision INTEGER CHECK(root_observation_revision IS NULL OR root_observation_revision>0);
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN claim_phase TEXT CHECK(claim_phase IS NULL OR claim_phase IN ('held','unsettled','verified','released','quarantined'));
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN gate_state TEXT CHECK(gate_state IS NULL OR gate_state IN ('open','paused','stopped','quarantined'));
                      ALTER TABLE orchestration_workspace_claims ADD COLUMN proof_state TEXT NOT NULL DEFAULT 'identity_unproven' CHECK(proof_state IN ('pinned','identity_unproven','quarantined'));
-                     PRAGMA user_version=2;
+                     CREATE TABLE orchestration_metadata (id INTEGER PRIMARY KEY CHECK(id=1), coordinator_store_id TEXT NOT NULL UNIQUE CHECK(length(coordinator_store_id)=36)) STRICT;
+                     INSERT INTO orchestration_metadata VALUES(1,'{coordinator_store_id}');
+                     CREATE TRIGGER orchestration_metadata_identity_no_update BEFORE UPDATE OF coordinator_store_id ON orchestration_metadata BEGIN SELECT RAISE(ABORT,'immutable_coordinator_identity'); END;
+                     CREATE TRIGGER orchestration_metadata_no_delete BEFORE DELETE ON orchestration_metadata BEGIN SELECT RAISE(ABORT,'immutable_coordinator_identity'); END;
+                     CREATE TABLE orchestration_import_snapshot (claim_id TEXT PRIMARY KEY CHECK(length(claim_id)=36), run_id TEXT NOT NULL CHECK(length(run_id)=36), claim_generation INTEGER NOT NULL CHECK(claim_generation>0), source_revision INTEGER NOT NULL CHECK(source_revision>0), identity_state TEXT NOT NULL CHECK(identity_state='identity_unproven')) STRICT;
+                     CREATE TRIGGER orchestration_import_snapshot_no_update BEFORE UPDATE ON orchestration_import_snapshot BEGIN SELECT RAISE(ABORT,'immutable_import_snapshot'); END;
+                     CREATE TRIGGER orchestration_import_snapshot_no_delete BEFORE DELETE ON orchestration_import_snapshot BEGIN SELECT RAISE(ABORT,'immutable_import_snapshot'); END;
+                     INSERT INTO orchestration_import_snapshot(claim_id,run_id,claim_generation,source_revision,identity_state) SELECT run_id,run_id,1,1,'identity_unproven' FROM orchestration_workspace_claims;
+                     PRAGMA user_version=3;
+                     COMMIT;"
+                ))
+                .map_err(|_| JournalError::Storage)?;
+        } else if version == 2 && application_id == APPLICATION_ID {
+            // Schema 2 was a published fail-closed checkpoint. Upgrade its nullable references
+            // without deriving identity from the current workspace path.
+            let coordinator_store_id = Uuid::new_v4().to_string();
+            connection
+                .execute_batch(&format!(
+                    "BEGIN IMMEDIATE;
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN gate_revision INTEGER CHECK(gate_revision IS NULL OR gate_revision>0);
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN root_observation_revision INTEGER CHECK(root_observation_revision IS NULL OR root_observation_revision>0);
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN claim_phase TEXT CHECK(claim_phase IS NULL OR claim_phase IN ('held','unsettled','verified','released','quarantined'));
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN gate_state TEXT CHECK(gate_state IS NULL OR gate_state IN ('open','paused','stopped','quarantined'));
+                     CREATE TABLE orchestration_metadata (id INTEGER PRIMARY KEY CHECK(id=1), coordinator_store_id TEXT NOT NULL UNIQUE CHECK(length(coordinator_store_id)=36)) STRICT;
+                     INSERT INTO orchestration_metadata VALUES(1,'{coordinator_store_id}');
+                     CREATE TRIGGER orchestration_metadata_identity_no_update BEFORE UPDATE OF coordinator_store_id ON orchestration_metadata BEGIN SELECT RAISE(ABORT,'immutable_coordinator_identity'); END;
+                     CREATE TRIGGER orchestration_metadata_no_delete BEFORE DELETE ON orchestration_metadata BEGIN SELECT RAISE(ABORT,'immutable_coordinator_identity'); END;
+                     CREATE TABLE orchestration_import_snapshot (claim_id TEXT PRIMARY KEY CHECK(length(claim_id)=36), run_id TEXT NOT NULL CHECK(length(run_id)=36), claim_generation INTEGER NOT NULL CHECK(claim_generation>0), source_revision INTEGER NOT NULL CHECK(source_revision>0), identity_state TEXT NOT NULL CHECK(identity_state='identity_unproven')) STRICT;
+                     CREATE TRIGGER orchestration_import_snapshot_no_update BEFORE UPDATE ON orchestration_import_snapshot BEGIN SELECT RAISE(ABORT,'immutable_import_snapshot'); END;
+                     CREATE TRIGGER orchestration_import_snapshot_no_delete BEFORE DELETE ON orchestration_import_snapshot BEGIN SELECT RAISE(ABORT,'immutable_import_snapshot'); END;
+                     INSERT INTO orchestration_import_snapshot(claim_id,run_id,claim_generation,source_revision,identity_state) SELECT run_id,run_id,1,1,'identity_unproven' FROM orchestration_workspace_claims WHERE proof_state<>'pinned';
+                     PRAGMA user_version=3;
+                     COMMIT;"
+                ))
+                .map_err(|_| JournalError::Storage)?;
+        } else if version == 3 && application_id == APPLICATION_ID {
+            // Version 3 already carries the identity-unproven fence. Add only settlement
+            // acknowledgements; no physical identity or settlement is inferred for old rows.
+        } else if version == 4 && application_id == APPLICATION_ID {
+            // Version 4 retained one row per workspace forever. Version 5 rebuilds the claim
+            // table so released history does not prevent admission of a later generation.
+        } else if version != SCHEMA_VERSION || application_id != APPLICATION_ID {
+            return Err(JournalError::Incompatible);
+        }
+        let mut migrated_version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|_| JournalError::Storage)?;
+        if migrated_version == 3 {
+            connection
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN settlement_id TEXT CHECK(settlement_id IS NULL OR length(settlement_id)=36);
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN coordinator_revision INTEGER NOT NULL DEFAULT 0 CHECK(coordinator_revision>=0);
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN settlement_intent_id TEXT CHECK(settlement_intent_id IS NULL OR length(settlement_intent_id)=36);
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN settlement_attempt_id TEXT CHECK(settlement_attempt_id IS NULL OR length(settlement_attempt_id)=36);
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN settlement_decision TEXT CHECK(settlement_decision IS NULL OR settlement_decision IN ('confirmed_completed','confirmed_no_effect','confirmed_cancelled'));
+                     ALTER TABLE orchestration_workspace_claims ADD COLUMN settlement_digest TEXT CHECK(settlement_digest IS NULL OR length(settlement_digest)=64);
+                     PRAGMA user_version=4;
                      COMMIT;",
                 )
                 .map_err(|_| JournalError::Storage)?;
-        } else if version != SCHEMA_VERSION || application_id != APPLICATION_ID {
-            return Err(JournalError::Incompatible);
+            migrated_version = 4;
+        }
+        if migrated_version == 4 {
+            connection
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                     ALTER TABLE orchestration_workspace_claims RENAME TO orchestration_workspace_claims_v4;
+                     CREATE TABLE orchestration_workspace_claims (
+                       workspace_id TEXT NOT NULL CHECK(length(workspace_id)=64),
+                       run_id TEXT PRIMARY KEY NOT NULL REFERENCES orchestration_runs(run_id),
+                       claimed_at INTEGER NOT NULL CHECK(claimed_at>=0),
+                       authority_store_id TEXT,
+                       authority_epoch TEXT,
+                       root_binding_id TEXT,
+                       claim_id TEXT,
+                       claim_generation INTEGER CHECK(claim_generation IS NULL OR claim_generation>0),
+                       claim_revision INTEGER CHECK(claim_revision IS NULL OR claim_revision>0),
+                       gate_revision INTEGER CHECK(gate_revision IS NULL OR gate_revision>0),
+                       root_observation_revision INTEGER CHECK(root_observation_revision IS NULL OR root_observation_revision>0),
+                       claim_phase TEXT CHECK(claim_phase IS NULL OR claim_phase IN ('held','unsettled','verified','released','quarantined')),
+                       gate_state TEXT CHECK(gate_state IS NULL OR gate_state IN ('open','paused','stopped','quarantined')),
+                       settlement_id TEXT CHECK(settlement_id IS NULL OR length(settlement_id)=36),
+                       coordinator_revision INTEGER NOT NULL DEFAULT 0 CHECK(coordinator_revision>=0),
+                       settlement_intent_id TEXT CHECK(settlement_intent_id IS NULL OR length(settlement_intent_id)=36),
+                       settlement_attempt_id TEXT CHECK(settlement_attempt_id IS NULL OR length(settlement_attempt_id)=36),
+                       settlement_decision TEXT CHECK(settlement_decision IS NULL OR settlement_decision IN ('confirmed_completed','confirmed_no_effect','confirmed_cancelled')),
+                       settlement_digest TEXT CHECK(settlement_digest IS NULL OR length(settlement_digest)=64),
+                       proof_state TEXT NOT NULL DEFAULT 'identity_unproven'
+                         CHECK(proof_state IN ('pinned','identity_unproven','quarantined'))
+                     ) STRICT;
+                     INSERT INTO orchestration_workspace_claims(
+                       workspace_id,run_id,claimed_at,authority_store_id,authority_epoch,root_binding_id,
+                       claim_id,claim_generation,claim_revision,gate_revision,root_observation_revision,
+                       claim_phase,gate_state,settlement_id,coordinator_revision,settlement_intent_id,
+                       settlement_attempt_id,settlement_decision,settlement_digest,proof_state
+                     ) SELECT
+                       workspace_id,run_id,claimed_at,authority_store_id,authority_epoch,root_binding_id,
+                       claim_id,claim_generation,claim_revision,gate_revision,root_observation_revision,
+                       claim_phase,gate_state,settlement_id,coordinator_revision,settlement_intent_id,
+                       settlement_attempt_id,settlement_decision,settlement_digest,proof_state
+                     FROM orchestration_workspace_claims_v4;
+                     DROP TABLE orchestration_workspace_claims_v4;
+                     CREATE UNIQUE INDEX orchestration_active_workspace_claim ON orchestration_workspace_claims(workspace_id) WHERE claim_phase IS NULL OR claim_phase<>'released';
+                     PRAGMA user_version=5;
+                     COMMIT;",
+                )
+                .map_err(|_| JournalError::Storage)?;
         }
         let integrity: String = connection
             .pragma_query_value(None, "integrity_check", |row| row.get(0))
@@ -309,12 +531,633 @@ impl RunJournal {
                 |row| row.get(0),
             )
             .map_err(|_| JournalError::Storage)?;
-        if schema_objects != 18 {
+        if schema_objects != 24 {
             return Err(JournalError::Incompatible);
         }
         Ok(Self {
             connection: Mutex::new(connection),
         })
+    }
+
+    pub fn coordinator_store_id(&self) -> Result<String, JournalError> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        connection
+            .query_row(
+                "SELECT coordinator_store_id FROM orchestration_metadata WHERE id=1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| JournalError::Incompatible)
+    }
+
+    /// This immutable snapshot contains only unresolved claims that existed before M6/F8
+    /// identity proof was available. New claims are acquired directly from F8 and never added.
+    pub fn import_snapshot(&self) -> Result<Vec<WorkspaceImportClaim>, JournalError> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut statement = connection.prepare(
+            "SELECT claim_id,run_id,claim_generation,source_revision FROM orchestration_import_snapshot ORDER BY claim_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(WorkspaceImportClaim {
+                claim_id: row.get(0)?,
+                run_id: row.get(1)?,
+                claim_generation: row.get::<_, i64>(2)? as u64,
+                source_revision: row.get::<_, i64>(3)? as u64,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn workspace_claim_binding(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<WorkspaceClaimBinding>, JournalError> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let row: Option<WorkspaceClaimBindingRow> = connection
+            .query_row(
+                "SELECT authority_store_id,authority_epoch,root_binding_id,claim_id,claim_generation,claim_revision,gate_revision,root_observation_revision,claim_phase,gate_state,settlement_id,coordinator_revision FROM orchestration_workspace_claims WHERE run_id=?1 AND proof_state='pinned'",
+                [run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?)),
+            )
+            .optional()?;
+        row.map(
+            |(
+                authority_store_id,
+                authority_epoch,
+                root_binding_id,
+                claim_id,
+                claim_generation,
+                claim_revision,
+                gate_revision,
+                root_observation_revision,
+                phase,
+                gate_state,
+                settlement_id,
+                coordinator_revision,
+            )| {
+                Ok(WorkspaceClaimBinding {
+                    authority_store_id,
+                    authority_epoch,
+                    root_binding_id,
+                    claim_id,
+                    claim_generation: u64::try_from(claim_generation)
+                        .map_err(|_| JournalError::Incompatible)?,
+                    claim_revision: u64::try_from(claim_revision)
+                        .map_err(|_| JournalError::Incompatible)?,
+                    gate_revision: u64::try_from(gate_revision)
+                        .map_err(|_| JournalError::Incompatible)?,
+                    root_observation_revision: u64::try_from(root_observation_revision)
+                        .map_err(|_| JournalError::Incompatible)?,
+                    phase,
+                    gate_state,
+                    settlement_id,
+                    coordinator_revision: u64::try_from(coordinator_revision)
+                        .map_err(|_| JournalError::Incompatible)?,
+                })
+            },
+        )
+        .transpose()
+    }
+
+    /// Bind the exact immutable F8 acquisition receipt before making the run schedulable.
+    pub fn bind_workspace_claim(
+        &self,
+        run_id: &str,
+        binding: &WorkspaceClaimBinding,
+    ) -> Result<(), JournalError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let current: Option<WorkspaceClaimStorageRow> = tx.query_row(
+            "SELECT authority_store_id,authority_epoch,root_binding_id,claim_id,claim_generation,claim_revision,gate_revision,root_observation_revision,claim_phase,gate_state,settlement_id,coordinator_revision,settlement_intent_id,settlement_attempt_id,settlement_decision,settlement_digest,proof_state FROM orchestration_workspace_claims WHERE run_id=?1",
+            [run_id],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?,row.get(8)?,row.get(9)?,row.get(10)?,row.get(11)?,row.get(12)?,row.get(13)?,row.get(14)?,row.get(15)?,row.get(16)?)),
+        ).optional()?;
+        let current = current.ok_or(JournalError::NotFound)?;
+        let expected = (
+            Some(binding.authority_store_id.clone()),
+            Some(binding.authority_epoch.clone()),
+            Some(binding.root_binding_id.clone()),
+            Some(binding.claim_id.clone()),
+            Some(binding.claim_generation as i64),
+            Some(binding.claim_revision as i64),
+            Some(binding.gate_revision as i64),
+            Some(binding.root_observation_revision as i64),
+            Some(binding.phase.clone()),
+            Some(binding.gate_state.clone()),
+            binding.settlement_id.clone(),
+            Some(binding.coordinator_revision as i64),
+            None,
+            None,
+            None,
+            None,
+            "pinned".to_owned(),
+        );
+        if (
+            &current.0,
+            &current.1,
+            &current.2,
+            &current.3,
+            &current.4,
+            &current.5,
+            &current.6,
+            &current.7,
+            &current.8,
+            &current.9,
+            &current.10,
+            &current.11,
+        ) == (
+            &expected.0,
+            &expected.1,
+            &expected.2,
+            &expected.3,
+            &expected.4,
+            &expected.5,
+            &expected.6,
+            &expected.7,
+            &expected.8,
+            &expected.9,
+            &expected.10,
+            &expected.11,
+        ) && (&current.12, &current.13, &current.14, &current.15)
+            == (&expected.12, &expected.13, &expected.14, &expected.15)
+            && current.16 == expected.16
+        {
+            tx.commit()?;
+            return Ok(());
+        }
+        let unbound = current.0.is_none()
+            && current.1.is_none()
+            && current.2.is_none()
+            && current.3.is_none()
+            && current.4.is_none()
+            && current.5.is_none()
+            && current.6.is_none()
+            && current.7.is_none()
+            && current.8.is_none()
+            && current.9.is_none()
+            && current.10.is_none()
+            && current.11 == Some(0)
+            && current.12.is_none()
+            && current.13.is_none()
+            && current.14.is_none()
+            && current.15.is_none()
+            && current.16 == "identity_unproven";
+        if !unbound
+            || binding.phase != "held"
+            || binding.gate_state != "open"
+            || [
+                &binding.authority_store_id,
+                &binding.authority_epoch,
+                &binding.root_binding_id,
+                &binding.claim_id,
+            ]
+            .iter()
+            .any(|id| Uuid::parse_str(id).is_err())
+            || [
+                binding.claim_generation,
+                binding.claim_revision,
+                binding.gate_revision,
+                binding.root_observation_revision,
+            ]
+            .contains(&0)
+        {
+            return Err(JournalError::Stale);
+        }
+        let changed = tx.execute(
+            "UPDATE orchestration_workspace_claims SET authority_store_id=?1,authority_epoch=?2,root_binding_id=?3,claim_id=?4,claim_generation=?5,claim_revision=?6,gate_revision=?7,root_observation_revision=?8,claim_phase=?9,gate_state=?10,settlement_id=?11,coordinator_revision=?12,proof_state='pinned' WHERE run_id=?13 AND proof_state='identity_unproven' AND authority_store_id IS NULL AND claim_id IS NULL",
+            params![binding.authority_store_id,binding.authority_epoch,binding.root_binding_id,binding.claim_id,binding.claim_generation as i64,binding.claim_revision as i64,binding.gate_revision as i64,binding.root_observation_revision as i64,binding.phase,binding.gate_state,binding.settlement_id,binding.coordinator_revision as i64,run_id],
+        )?;
+        if changed != 1 {
+            return Err(JournalError::Stale);
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Mirror an F8 gate CAS only after its authority response is correlated. If the reply was
+    /// lost, the stale local revision remains a fence and the scheduler cannot reopen it.
+    pub fn update_workspace_claim_gate(
+        &self,
+        run_id: &str,
+        expected: &WorkspaceClaimBinding,
+        updated: &WorkspaceClaimBinding,
+    ) -> Result<(), JournalError> {
+        if expected.authority_store_id != updated.authority_store_id
+            || expected.authority_epoch != updated.authority_epoch
+            || expected.root_binding_id != updated.root_binding_id
+            || expected.claim_id != updated.claim_id
+            || expected.claim_generation != updated.claim_generation
+            || expected.root_observation_revision != updated.root_observation_revision
+            || !((expected.phase == updated.phase)
+                || (expected.phase == "verified"
+                    && updated.phase == "held"
+                    && expected.settlement_id.is_some()
+                    && expected.settlement_id == updated.settlement_id
+                    && updated.coordinator_revision > expected.coordinator_revision))
+            || (expected.phase == updated.phase
+                && (expected.settlement_id != updated.settlement_id
+                    || expected.coordinator_revision != updated.coordinator_revision))
+            || !matches!(updated.gate_state.as_str(), "open" | "paused" | "stopped")
+            || !((updated.claim_revision == expected.claim_revision
+                && updated.gate_revision == expected.gate_revision)
+                || (updated.claim_revision == expected.claim_revision + 1
+                    && updated.gate_revision == expected.gate_revision + 1))
+        {
+            return Err(JournalError::Invalid);
+        }
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let changed = connection.execute(
+            "UPDATE orchestration_workspace_claims SET claim_revision=?1,gate_revision=?2,gate_state=?3,claim_phase=?4,settlement_id=?5,coordinator_revision=?6 WHERE run_id=?7 AND proof_state='pinned' AND authority_store_id=?8 AND authority_epoch=?9 AND root_binding_id=?10 AND claim_id=?11 AND claim_generation=?12 AND claim_revision=?13 AND gate_revision=?14 AND root_observation_revision=?15 AND claim_phase=?16 AND gate_state=?17 AND settlement_id IS ?18 AND coordinator_revision=?19",
+            params![updated.claim_revision as i64,updated.gate_revision as i64,updated.gate_state,updated.phase,updated.settlement_id,updated.coordinator_revision as i64,run_id,expected.authority_store_id,expected.authority_epoch,expected.root_binding_id,expected.claim_id,expected.claim_generation as i64,expected.claim_revision as i64,expected.gate_revision as i64,expected.root_observation_revision as i64,expected.phase,expected.gate_state,expected.settlement_id,expected.coordinator_revision as i64],
+        )?;
+        if changed != 1 {
+            drop(connection);
+            let current = self.workspace_claim_binding(run_id)?;
+            return if current.as_ref() == Some(updated) {
+                Ok(())
+            } else {
+                Err(JournalError::Stale)
+            };
+        }
+        Ok(())
+    }
+
+    /// Mirror an F8 release receipt only after M6 has already committed a terminal run.
+    pub fn record_workspace_claim_release(
+        &self,
+        run_id: &str,
+        expected: &WorkspaceClaimBinding,
+        released: &WorkspaceClaimBinding,
+        coordinator_revision: u64,
+    ) -> Result<(), JournalError> {
+        let settled = expected.phase == "verified" && expected.settlement_id.is_some();
+        let unused = expected.phase == "held" && expected.settlement_id.is_none();
+        if (!settled && !unused)
+            || released.authority_store_id != expected.authority_store_id
+            || released.authority_epoch != expected.authority_epoch
+            || released.root_binding_id != expected.root_binding_id
+            || released.claim_id != expected.claim_id
+            || released.claim_generation != expected.claim_generation
+            || released.claim_revision != expected.claim_revision.saturating_add(1)
+            || released.gate_revision != expected.gate_revision.saturating_add(1)
+            || released.phase != "released"
+            || released.gate_state != "stopped"
+            || released.settlement_id != expected.settlement_id
+            || released.coordinator_revision != coordinator_revision
+            || coordinator_revision <= expected.coordinator_revision
+        {
+            return Err(JournalError::Invalid);
+        }
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let changed = if settled {
+            connection.execute(
+                "UPDATE orchestration_workspace_claims SET claim_revision=?1,gate_revision=?2,claim_phase='released',gate_state='stopped',coordinator_revision=?3 WHERE run_id=?4 AND proof_state='pinned' AND authority_store_id=?5 AND authority_epoch=?6 AND root_binding_id=?7 AND claim_id=?8 AND claim_generation=?9 AND claim_revision=?10 AND gate_revision=?11 AND root_observation_revision=?12 AND claim_phase='verified' AND gate_state=?13 AND settlement_id=?14 AND coordinator_revision=?15",
+                params![released.claim_revision as i64,released.gate_revision as i64,released.coordinator_revision as i64,run_id,expected.authority_store_id,expected.authority_epoch,expected.root_binding_id,expected.claim_id,expected.claim_generation as i64,expected.claim_revision as i64,expected.gate_revision as i64,expected.root_observation_revision as i64,expected.gate_state,expected.settlement_id,expected.coordinator_revision as i64],
+            )?
+        } else {
+            connection.execute(
+                "UPDATE orchestration_workspace_claims SET claim_revision=?1,gate_revision=?2,claim_phase='released',gate_state='stopped',coordinator_revision=?3 WHERE run_id=?4 AND proof_state='pinned' AND authority_store_id=?5 AND authority_epoch=?6 AND root_binding_id=?7 AND claim_id=?8 AND claim_generation=?9 AND claim_revision=?10 AND gate_revision=?11 AND root_observation_revision=?12 AND claim_phase='held' AND gate_state=?13 AND settlement_id IS NULL AND coordinator_revision=?14",
+                params![released.claim_revision as i64,released.gate_revision as i64,released.coordinator_revision as i64,run_id,expected.authority_store_id,expected.authority_epoch,expected.root_binding_id,expected.claim_id,expected.claim_generation as i64,expected.claim_revision as i64,expected.gate_revision as i64,expected.root_observation_revision as i64,expected.gate_state,expected.coordinator_revision as i64],
+            )?
+        };
+        if changed == 1 {
+            return Ok(());
+        }
+        drop(connection);
+        if self.workspace_claim_binding(run_id)?.as_ref() == Some(released) {
+            Ok(())
+        } else {
+            Err(JournalError::Stale)
+        }
+    }
+
+    /// Persist the exact settlement request before calling F8. A restart can therefore query
+    /// or replay only this immutable metadata operation; it cannot invent a new review intent.
+    pub fn begin_workspace_settlement(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        expected_step_state: StepState,
+        binding: &WorkspaceClaimBinding,
+        intent: &WorkspaceSettlementIntent,
+    ) -> Result<(), JournalError> {
+        if !valid_uuid(&intent.observation_id)
+            || !valid_uuid(&intent.attempt_id)
+            || !valid_digest(&intent.reviewed_digest)
+            || !matches!(
+                intent.decision.as_str(),
+                "confirmed_completed" | "confirmed_no_effect" | "confirmed_cancelled"
+            )
+            || binding.phase != "unsettled"
+            || binding.settlement_id.is_some()
+        {
+            return Err(JournalError::Invalid);
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let step: Option<(String, Option<String>)> = tx
+            .query_row(
+                "SELECT state,current_attempt_id FROM orchestration_steps WHERE run_id=?1 AND step_id=?2",
+                params![run_id, step_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((state, attempt_id)) = step else {
+            return Err(JournalError::NotFound);
+        };
+        if state != enum_text(&expected_step_state)?
+            || attempt_id.as_deref() != Some(&intent.attempt_id)
+        {
+            return Err(JournalError::Stale);
+        }
+        let current: Option<WorkspaceSettlementRow> = tx
+            .query_row(
+                "SELECT authority_store_id,authority_epoch,root_binding_id,claim_id,claim_generation,claim_revision,gate_revision,root_observation_revision,claim_phase,gate_state,settlement_id,coordinator_revision,settlement_intent_id,settlement_attempt_id,settlement_decision,settlement_digest FROM orchestration_workspace_claims WHERE run_id=?1 AND proof_state='pinned'",
+                [run_id],
+                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?,row.get(8)?,row.get(9)?,row.get(10)?,row.get(11)?,row.get(12)?,row.get(13)?,row.get(14)?,row.get(15)?)),
+            )
+            .optional()?;
+        let Some(current) = current else {
+            return Err(JournalError::NotFound);
+        };
+        let expected = (
+            Some(binding.authority_store_id.clone()),
+            Some(binding.authority_epoch.clone()),
+            Some(binding.root_binding_id.clone()),
+            Some(binding.claim_id.clone()),
+            Some(binding.claim_generation as i64),
+            Some(binding.claim_revision as i64),
+            Some(binding.gate_revision as i64),
+            Some(binding.root_observation_revision as i64),
+            Some(binding.phase.clone()),
+            Some(binding.gate_state.clone()),
+            binding.settlement_id.clone(),
+            Some(binding.coordinator_revision as i64),
+        );
+        if (
+            current.0.clone(),
+            current.1.clone(),
+            current.2.clone(),
+            current.3.clone(),
+            current.4,
+            current.5,
+            current.6,
+            current.7,
+            current.8.clone(),
+            current.9.clone(),
+            current.10.clone(),
+            current.11,
+        ) != expected
+        {
+            return Err(JournalError::Stale);
+        }
+        let requested = (
+            Some(intent.observation_id.clone()),
+            Some(intent.attempt_id.clone()),
+            Some(intent.decision.clone()),
+            Some(intent.reviewed_digest.clone()),
+        );
+        if (
+            current.12.clone(),
+            current.13.clone(),
+            current.14.clone(),
+            current.15.clone(),
+        ) == requested
+        {
+            tx.commit()?;
+            return Ok(());
+        }
+        if current.12.is_some()
+            || current.13.is_some()
+            || current.14.is_some()
+            || current.15.is_some()
+        {
+            return Err(JournalError::Stale);
+        }
+        let changed = tx.execute(
+            "UPDATE orchestration_workspace_claims SET settlement_intent_id=?1,settlement_attempt_id=?2,settlement_decision=?3,settlement_digest=?4 WHERE run_id=?5 AND proof_state='pinned' AND claim_id=?6 AND claim_generation=?7 AND claim_revision=?8 AND gate_revision=?9 AND claim_phase='unsettled' AND settlement_intent_id IS NULL",
+            params![intent.observation_id,intent.attempt_id,intent.decision,intent.reviewed_digest,run_id,binding.claim_id,binding.claim_generation as i64,binding.claim_revision as i64,binding.gate_revision as i64],
+        )?;
+        if changed != 1 {
+            return Err(JournalError::Stale);
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn workspace_settlement_intent(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<WorkspaceSettlementIntent>, JournalError> {
+        let connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        connection
+            .query_row(
+                "SELECT settlement_intent_id,settlement_attempt_id,settlement_decision,settlement_digest FROM orchestration_workspace_claims WHERE run_id=?1 AND proof_state='pinned' AND settlement_intent_id IS NOT NULL",
+                [run_id],
+                |row| Ok(WorkspaceSettlementIntent { observation_id: row.get(0)?, attempt_id: row.get(1)?, decision: row.get(2)?, reviewed_digest: row.get(3)? }),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Commit the F8 settlement receipt and the M6 step transition in one journal transaction.
+    /// F8 remains fenced until a later explicit coordinator-revision acknowledgement.
+    #[allow(clippy::too_many_arguments)] // Inputs bind the step, F8 receipt, and exact reviewed intent.
+    pub fn settle_workspace_step(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        expected_step_state: StepState,
+        next_step_state: StepState,
+        failure: Option<FailureCode>,
+        expected_binding: &WorkspaceClaimBinding,
+        verified_binding: &WorkspaceClaimBinding,
+        intent: &WorkspaceSettlementIntent,
+        now: u64,
+    ) -> Result<CoordinatorSnapshot, JournalError> {
+        let allowed = matches!(
+            (
+                expected_step_state,
+                next_step_state,
+                intent.decision.as_str()
+            ),
+            (
+                StepState::Verifying,
+                StepState::Succeeded,
+                "confirmed_completed"
+            ) | (
+                StepState::NeedsReview,
+                StepState::Succeeded,
+                "confirmed_completed"
+            ) | (
+                StepState::NeedsReview,
+                StepState::Failed,
+                "confirmed_no_effect"
+            ) | (
+                StepState::NeedsReview,
+                StepState::Cancelled,
+                "confirmed_cancelled"
+            )
+        );
+        if !allowed
+            || !valid_digest(&intent.reviewed_digest)
+            || verified_binding.authority_store_id != expected_binding.authority_store_id
+            || verified_binding.authority_epoch != expected_binding.authority_epoch
+            || verified_binding.root_binding_id != expected_binding.root_binding_id
+            || verified_binding.claim_id != expected_binding.claim_id
+            || verified_binding.claim_generation != expected_binding.claim_generation
+            || verified_binding.root_observation_revision
+                != expected_binding.root_observation_revision
+            || verified_binding.claim_revision != expected_binding.claim_revision.saturating_add(1)
+            || verified_binding.gate_revision != expected_binding.gate_revision.saturating_add(1)
+            || verified_binding.phase != "verified"
+            || verified_binding.gate_state != "stopped"
+            || verified_binding.settlement_id.as_deref() != Some(&intent.observation_id)
+            || verified_binding.coordinator_revision != expected_binding.coordinator_revision
+        {
+            return Err(JournalError::Invalid);
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let row: Option<(String, Option<String>)> = tx
+            .query_row(
+                "SELECT state,current_attempt_id FROM orchestration_steps WHERE run_id=?1 AND step_id=?2",
+                params![run_id, step_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((state, attempt_id)) = row else {
+            return Err(JournalError::NotFound);
+        };
+        if state != enum_text(&expected_step_state)?
+            || attempt_id.as_deref() != Some(&intent.attempt_id)
+        {
+            return Err(JournalError::Stale);
+        }
+        let claim: Option<WorkspaceSettlementRow> = tx
+            .query_row(
+                "SELECT authority_store_id,authority_epoch,root_binding_id,claim_id,claim_generation,claim_revision,gate_revision,root_observation_revision,claim_phase,gate_state,settlement_id,coordinator_revision,settlement_intent_id,settlement_attempt_id,settlement_decision,settlement_digest FROM orchestration_workspace_claims WHERE run_id=?1 AND proof_state='pinned'",
+                [run_id],
+                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?,row.get(8)?,row.get(9)?,row.get(10)?,row.get(11)?,row.get(12)?,row.get(13)?,row.get(14)?,row.get(15)?)),
+            )
+            .optional()?;
+        let Some(claim) = claim else {
+            return Err(JournalError::NotFound);
+        };
+        let expected_local = (
+            Some(expected_binding.authority_store_id.clone()),
+            Some(expected_binding.authority_epoch.clone()),
+            Some(expected_binding.root_binding_id.clone()),
+            Some(expected_binding.claim_id.clone()),
+            Some(expected_binding.claim_generation as i64),
+            Some(expected_binding.claim_revision as i64),
+            Some(expected_binding.gate_revision as i64),
+            Some(expected_binding.root_observation_revision as i64),
+            Some(expected_binding.phase.clone()),
+            Some(expected_binding.gate_state.clone()),
+            expected_binding.settlement_id.clone(),
+            Some(expected_binding.coordinator_revision as i64),
+            Some(intent.observation_id.clone()),
+            Some(intent.attempt_id.clone()),
+            Some(intent.decision.clone()),
+            Some(intent.reviewed_digest.clone()),
+        );
+        if (
+            &claim.0, &claim.1, &claim.2, &claim.3, &claim.4, &claim.5, &claim.6, &claim.7,
+            &claim.8, &claim.9, &claim.10, &claim.11,
+        ) != (
+            &expected_local.0,
+            &expected_local.1,
+            &expected_local.2,
+            &expected_local.3,
+            &expected_local.4,
+            &expected_local.5,
+            &expected_local.6,
+            &expected_local.7,
+            &expected_local.8,
+            &expected_local.9,
+            &expected_local.10,
+            &expected_local.11,
+        ) || (&claim.12, &claim.13, &claim.14, &claim.15)
+            != (
+                &expected_local.12,
+                &expected_local.13,
+                &expected_local.14,
+                &expected_local.15,
+            )
+        {
+            return Err(JournalError::Stale);
+        }
+        let next_text = enum_text(&next_step_state)?;
+        let failure_text = failure.map(|value| enum_text(&value)).transpose()?;
+        let changed = tx.execute(
+            "UPDATE orchestration_workspace_claims SET claim_revision=?1,gate_revision=?2,claim_phase='verified',gate_state='stopped',settlement_id=?3 WHERE run_id=?4 AND proof_state='pinned' AND claim_revision=?5 AND gate_revision=?6 AND claim_phase='unsettled' AND settlement_intent_id=?3",
+            params![verified_binding.claim_revision as i64,verified_binding.gate_revision as i64,intent.observation_id,run_id,expected_binding.claim_revision as i64,expected_binding.gate_revision as i64],
+        )?;
+        if changed != 1 {
+            return Err(JournalError::Stale);
+        }
+        let changed = tx.execute(
+            "UPDATE orchestration_steps SET state=?3,failure=?4,workspace_revision_after=?5,updated_at=?6 WHERE run_id=?1 AND step_id=?2 AND state=?7 AND current_attempt_id=?8",
+            params![run_id,step_id,next_text,failure_text,if next_step_state == StepState::Succeeded { Some(intent.reviewed_digest.as_str()) } else { None },now as i64,enum_text(&expected_step_state)?,intent.attempt_id],
+        )?;
+        if changed != 1 {
+            return Err(JournalError::Stale);
+        }
+        tx.execute(
+            "UPDATE orchestration_attempts SET state='terminal',failure=?4,updated_at=?5 WHERE run_id=?1 AND step_id=?2 AND attempt_id=?3",
+            params![run_id,step_id,intent.attempt_id,failure_text,now as i64],
+        )?;
+        if next_step_state == StepState::Succeeded {
+            tx.execute(
+                "UPDATE orchestration_runs SET revision=revision+1,current_workspace_revision=?2,updated_at=?3 WHERE run_id=?1",
+                params![run_id,intent.reviewed_digest,now as i64],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE orchestration_runs SET revision=revision+1,updated_at=?2 WHERE run_id=?1",
+                params![run_id, now as i64],
+            )?;
+        }
+        add_event(
+            &tx,
+            run_id,
+            Some(step_id),
+            Some(&intent.attempt_id),
+            "attempt_finished",
+            failure_text.as_deref(),
+            now,
+        )?;
+        let result = get_locked(&tx, run_id)?.ok_or(JournalError::Storage)?;
+        tx.commit()?;
+        Ok(result)
     }
 
     pub fn create_run(
@@ -399,7 +1242,7 @@ impl RunJournal {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         let mut statement = connection.prepare(
-            "SELECT run_id,workspace_id FROM orchestration_workspace_claims ORDER BY run_id",
+            "SELECT run_id,workspace_id FROM orchestration_workspace_claims WHERE claim_phase IS NULL OR claim_phase<>'released' ORDER BY run_id",
         )?;
         let rows = statement.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -536,9 +1379,11 @@ impl RunJournal {
             "UPDATE orchestration_runs SET revision=revision+1,state=?2,failure=?3,updated_at=?4 WHERE run_id=?1 AND revision=?5",
             params![run_id, enum_text(&next)?, failure.map(|v| enum_text(&v)).transpose()?, now as i64, expected_revision as i64],
         )?;
+        // A terminal M6 row is not authority to release an F8-owned claim. Retain the
+        // immutable binding until an F8 settlement/release receipt is mirrored explicitly.
         if next.terminal() {
             tx.execute(
-                "DELETE FROM orchestration_workspace_claims WHERE run_id=?1",
+                "DELETE FROM orchestration_workspace_claims WHERE run_id=?1 AND proof_state<>'pinned'",
                 [run_id],
             )?;
         }
@@ -683,6 +1528,60 @@ impl RunJournal {
             params![run_id,step_id,attempt_id,turn_id,turn_revision as i64,now as i64],
         )?;
         if updated != 1 {
+            return Err(JournalError::Stale);
+        }
+        tx.execute(
+            "UPDATE orchestration_steps SET state='running',managed_turn_id=?4,turn_revision=?5,updated_at=?6 WHERE run_id=?1 AND step_id=?2 AND current_attempt_id=?3 AND state='starting'",
+            params![run_id,step_id,attempt_id,turn_id,turn_revision as i64,now as i64],
+        )?;
+        bump_run(&tx, run_id, now)?;
+        add_event(
+            &tx,
+            run_id,
+            Some(step_id),
+            Some(attempt_id),
+            "attempt_acknowledged",
+            None,
+            now,
+        )?;
+        let result = get_step_locked(&tx, run_id, step_id)?.ok_or(JournalError::NotFound)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    /// Commit the F8 L1 acknowledgement and its one-step claim revision advance together.
+    /// A missing/stale local claim rolls back the turn acknowledgement; it never retries F8.
+    #[allow(clippy::too_many_arguments)] // Mirrors the immutable attempt tuple and F8 acknowledgement.
+    pub fn acknowledge_guarded_attempt(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        attempt_id: &str,
+        turn_id: &str,
+        turn_revision: u64,
+        claim: &WorkspaceClaimBinding,
+        now: u64,
+    ) -> Result<StepSnapshot, JournalError> {
+        if !valid_uuid(turn_id) || turn_revision == 0 {
+            return Err(JournalError::Invalid);
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let updated = tx.execute(
+            "UPDATE orchestration_attempts SET state='acknowledged',managed_turn_id=?4,turn_revision=?5,updated_at=?6 WHERE run_id=?1 AND step_id=?2 AND attempt_id=?3 AND state='dispatching'",
+            params![run_id,step_id,attempt_id,turn_id,turn_revision as i64,now as i64],
+        )?;
+        if updated != 1 {
+            return Err(JournalError::Stale);
+        }
+        let advanced = tx.execute(
+            "UPDATE orchestration_workspace_claims SET claim_revision=claim_revision+1,claim_phase='unsettled' WHERE run_id=?1 AND proof_state='pinned' AND authority_store_id=?2 AND authority_epoch=?3 AND root_binding_id=?4 AND claim_id=?5 AND claim_generation=?6 AND claim_revision=?7 AND gate_revision=?8 AND claim_phase='held' AND gate_state='open'",
+            params![run_id,claim.authority_store_id,claim.authority_epoch,claim.root_binding_id,claim.claim_id,claim.claim_generation as i64,claim.claim_revision as i64,claim.gate_revision as i64],
+        )?;
+        if advanced != 1 {
             return Err(JournalError::Stale);
         }
         tx.execute(
@@ -1069,6 +1968,14 @@ impl RunJournal {
                 "UPDATE orchestration_attempts SET state='unknown',failure='coordinator_restarted',updated_at=?2 WHERE run_id=?1 AND state IN ('dispatching','acknowledged','running')",
                 params![run_id,now as i64],
             )?;
+            // A step with no attempt record and no current attempt ID cannot have reached F8:
+            // M6 persists the attempt intent before sending the guarded start. Cancel only
+            // those never-started steps; any inconsistent or possibly attempted row stays
+            // in NeedsReview and keeps the authority claim fenced.
+            tx.execute(
+                "UPDATE orchestration_steps AS s SET state='cancelled',failure='coordinator_restarted',updated_at=?2 WHERE run_id=?1 AND state IN ('proposed','waiting_dependencies','eligible','waiting_resource','awaiting_permission','queued') AND current_attempt_id IS NULL AND NOT EXISTS(SELECT 1 FROM orchestration_attempts a WHERE a.run_id=s.run_id AND a.step_id=s.step_id)",
+                params![run_id,now as i64],
+            )?;
             tx.execute(
                 "UPDATE orchestration_steps SET state='needs_review',failure='coordinator_restarted',updated_at=?2 WHERE run_id=?1 AND state NOT IN ('succeeded','skipped','blocked','failed','cancelled')",
                 params![run_id,now as i64],
@@ -1087,7 +1994,7 @@ impl RunJournal {
                 now,
             )?;
             if let Some(view) = get_locked(&tx, &run_id)? {
-                recovered.push(view);
+                record_recovered(&mut recovered, view);
             }
         }
         // A prior owner-confirmed reconciliation can be interrupted between SQLite
@@ -1114,7 +2021,17 @@ impl RunJournal {
                     | StepState::Eligible
                     | StepState::WaitingResource
                     | StepState::AwaitingPermission
-                    | StepState::Queued => Some(StepState::Cancelled),
+                    | StepState::Queued
+                        if step.attempt_id.is_none() =>
+                    {
+                        Some(StepState::Cancelled)
+                    }
+                    StepState::Proposed
+                    | StepState::WaitingDependencies
+                    | StepState::Eligible
+                    | StepState::WaitingResource
+                    | StepState::AwaitingPermission
+                    | StepState::Queued => Some(StepState::NeedsReview),
                     _ => None,
                 };
                 if let Some(next) = next {
@@ -1170,8 +2087,10 @@ impl RunJournal {
                         now as i64
                     ],
                 )?;
+                // Recovery may close historical metadata, but cannot release the durable F8
+                // ownership record. A later explicit F8 release is required.
                 tx.execute(
-                    "DELETE FROM orchestration_workspace_claims WHERE run_id=?1",
+                    "DELETE FROM orchestration_workspace_claims WHERE run_id=?1 AND proof_state<>'pinned'",
                     [&run_id],
                 )?;
                 add_event(
@@ -1186,11 +2105,22 @@ impl RunJournal {
                 changed = true;
             }
             if changed {
-                recovered.push(get_locked(&tx, &run_id)?.ok_or(JournalError::Storage)?);
+                record_recovered(
+                    &mut recovered,
+                    get_locked(&tx, &run_id)?.ok_or(JournalError::Storage)?,
+                );
             }
         }
         tx.commit()?;
         Ok(recovered)
+    }
+}
+
+fn record_recovered(recovered: &mut Vec<CoordinatorSnapshot>, view: CoordinatorSnapshot) {
+    if let Some(existing) = recovered.iter_mut().find(|item| item.run_id == view.run_id) {
+        *existing = view;
+    } else {
+        recovered.push(view);
     }
 }
 
@@ -1536,6 +2466,54 @@ mod tests {
         }
     }
 
+    #[test]
+    fn terminal_run_state_does_not_delete_an_f8_owned_claim() {
+        let journal = RunJournal::open_in_memory().unwrap();
+        let draft = plan();
+        let run = journal.create_run(&draft, &review(&draft), 120).unwrap();
+        let binding = WorkspaceClaimBinding {
+            authority_store_id: Uuid::new_v4().to_string(),
+            authority_epoch: Uuid::new_v4().to_string(),
+            root_binding_id: Uuid::new_v4().to_string(),
+            claim_id: Uuid::new_v4().to_string(),
+            claim_generation: 1,
+            claim_revision: 1,
+            gate_revision: 1,
+            root_observation_revision: 1,
+            phase: "held".into(),
+            gate_state: "open".into(),
+            settlement_id: None,
+            coordinator_revision: 0,
+        };
+        journal.bind_workspace_claim(&run.run_id, &binding).unwrap();
+        let running = journal
+            .set_run_state(&run.run_id, run.revision, RunState::Running, None, 121)
+            .unwrap();
+        let needs_review = journal
+            .set_run_state(
+                &run.run_id,
+                running.revision,
+                RunState::NeedsReview,
+                None,
+                122,
+            )
+            .unwrap();
+        journal
+            .set_run_state(
+                &run.run_id,
+                needs_review.revision,
+                RunState::Failed,
+                Some(super::super::FailureCode::OwnerReviewRequired),
+                123,
+            )
+            .unwrap();
+        assert_eq!(
+            journal.workspace_claim_binding(&run.run_id).unwrap(),
+            Some(binding)
+        );
+        assert_eq!(journal.claimed_workspaces().unwrap().len(), 1);
+    }
+
     fn handoff() -> HandoffEnvelopeV1 {
         let mut envelope = HandoffEnvelopeV1 {
             schema_version: 1,
@@ -1783,23 +2761,31 @@ mod tests {
     }
 
     #[test]
-    fn crash_reconciliation_marks_running_and_queued_work_for_review() {
+    fn crash_reconciliation_cancels_only_never_started_work() {
         let journal = RunJournal::open_in_memory().unwrap();
         let plan = plan();
         let created = journal.create_run(&plan, &review(&plan), 120).unwrap();
         let running = journal
             .set_run_state(&created.run_id, 1, RunState::Running, None, 121)
             .unwrap();
+        journal
+            .begin_attempt(
+                &running.run_id,
+                &running.steps[0].step_id,
+                "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                "ffffffff-ffff-4fff-8fff-ffffffffffff",
+                "99999999-9999-4999-8999-999999999999",
+                1,
+                122,
+            )
+            .unwrap();
         let recovered = journal.recover_after_restart(130).unwrap();
         assert_eq!(recovered.len(), 1);
         assert_eq!(recovered[0].run_id, running.run_id);
         assert_eq!(recovered[0].state, RunState::NeedsReview);
-        assert!(
-            recovered[0]
-                .steps
-                .iter()
-                .all(|step| step.state == StepState::NeedsReview)
-        );
+        assert_eq!(recovered[0].steps[0].state, StepState::NeedsReview);
+        assert_eq!(recovered[0].steps[1].state, StepState::Cancelled);
     }
 
     #[test]
@@ -1923,6 +2909,12 @@ mod tests {
             connection
                 .execute_batch(
                     "BEGIN IMMEDIATE;
+                     DROP TRIGGER orchestration_metadata_identity_no_update;
+                     DROP TRIGGER orchestration_metadata_no_delete;
+                     DROP TRIGGER orchestration_import_snapshot_no_update;
+                     DROP TRIGGER orchestration_import_snapshot_no_delete;
+                     DROP TABLE orchestration_import_snapshot;
+                     DROP TABLE orchestration_metadata;
                      CREATE TABLE orchestration_workspace_claims_v1 (
                        workspace_id TEXT PRIMARY KEY CHECK(length(workspace_id)=64),
                        run_id TEXT NOT NULL UNIQUE REFERENCES orchestration_runs(run_id),
@@ -1958,11 +2950,104 @@ mod tests {
                 .unwrap()
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap();
-            assert_eq!(version, 2);
+            assert_eq!(version, 5);
             assert_eq!(claims.len(), usize::from(populated));
             assert!(claims.iter().all(|(proof, store, epoch, root)| {
                 proof == "identity_unproven" && store.is_none() && epoch.is_none() && root.is_none()
             }));
+            let imported: i64 = connection
+                .query_row(
+                    "SELECT count(*) FROM orchestration_import_snapshot",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(imported, i64::from(populated));
         }
+    }
+
+    #[test]
+    fn schema_four_claim_history_migrates_and_released_workspace_can_be_reclaimed() {
+        let journal = RunJournal::open_in_memory().unwrap();
+        let first_plan = plan();
+        let first = journal
+            .create_run(&first_plan, &review(&first_plan), 120)
+            .unwrap();
+        let connection = journal.connection.into_inner().unwrap();
+        connection
+            .execute_batch(
+                "BEGIN IMMEDIATE;
+                 DROP INDEX orchestration_active_workspace_claim;
+                 ALTER TABLE orchestration_workspace_claims RENAME TO orchestration_workspace_claims_v5;
+                 CREATE TABLE orchestration_workspace_claims (
+                   workspace_id TEXT PRIMARY KEY CHECK(length(workspace_id)=64),
+                   run_id TEXT NOT NULL UNIQUE REFERENCES orchestration_runs(run_id),
+                   claimed_at INTEGER NOT NULL CHECK(claimed_at>=0),
+                   authority_store_id TEXT,
+                   authority_epoch TEXT,
+                   root_binding_id TEXT,
+                   claim_id TEXT,
+                   claim_generation INTEGER CHECK(claim_generation IS NULL OR claim_generation>0),
+                   claim_revision INTEGER CHECK(claim_revision IS NULL OR claim_revision>0),
+                   gate_revision INTEGER CHECK(gate_revision IS NULL OR gate_revision>0),
+                   root_observation_revision INTEGER CHECK(root_observation_revision IS NULL OR root_observation_revision>0),
+                   claim_phase TEXT CHECK(claim_phase IS NULL OR claim_phase IN ('held','unsettled','verified','released','quarantined')),
+                   gate_state TEXT CHECK(gate_state IS NULL OR gate_state IN ('open','paused','stopped','quarantined')),
+                   settlement_id TEXT CHECK(settlement_id IS NULL OR length(settlement_id)=36),
+                   coordinator_revision INTEGER NOT NULL DEFAULT 0 CHECK(coordinator_revision>=0),
+                   settlement_intent_id TEXT CHECK(settlement_intent_id IS NULL OR length(settlement_intent_id)=36),
+                   settlement_attempt_id TEXT CHECK(settlement_attempt_id IS NULL OR length(settlement_attempt_id)=36),
+                   settlement_decision TEXT CHECK(settlement_decision IS NULL OR settlement_decision IN ('confirmed_completed','confirmed_no_effect','confirmed_cancelled')),
+                   settlement_digest TEXT CHECK(settlement_digest IS NULL OR length(settlement_digest)=64),
+                   proof_state TEXT NOT NULL DEFAULT 'identity_unproven'
+                     CHECK(proof_state IN ('pinned','identity_unproven','quarantined'))
+                 ) STRICT;
+                 INSERT INTO orchestration_workspace_claims SELECT * FROM orchestration_workspace_claims_v5;
+                 DROP TABLE orchestration_workspace_claims_v5;
+                 CREATE INDEX orchestration_claims_run ON orchestration_workspace_claims(run_id);
+                 PRAGMA user_version=4;
+                 COMMIT;",
+            )
+            .unwrap();
+
+        let migrated = RunJournal::from_connection(connection).unwrap();
+        let version: i64 = migrated
+            .connection
+            .lock()
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 5);
+        assert_eq!(
+            migrated.workspace_claim_binding(&first.run_id).unwrap(),
+            None
+        );
+        assert_eq!(migrated.claimed_workspaces().unwrap().len(), 1);
+
+        let mut conflicting_plan = plan();
+        conflicting_plan.plan_id = Uuid::new_v4().to_string();
+        assert_eq!(
+            migrated
+                .create_run(&conflicting_plan, &review(&conflicting_plan), 121)
+                .unwrap_err(),
+            JournalError::WorkspaceConflict
+        );
+        migrated
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE orchestration_workspace_claims SET claim_phase='released' WHERE run_id=?1",
+                [&first.run_id],
+            )
+            .unwrap();
+        let mut next_plan = plan();
+        next_plan.plan_id = Uuid::new_v4().to_string();
+        assert!(
+            migrated
+                .create_run(&next_plan, &review(&next_plan), 122)
+                .is_ok()
+        );
+        assert_eq!(migrated.claimed_workspaces().unwrap().len(), 1);
     }
 }

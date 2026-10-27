@@ -134,7 +134,7 @@ impl<S: Spawner> PreparedApplication<S> {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(|_| E::StorageUnavailable)?;
-        if !matches!(version, 8 | 9) {
+        if !matches!(version, 8..=10) {
             return Err(E::StorageIncompatible);
         }
         // A local prepared connection is not itself proof of exclusive authority. Hold
@@ -147,16 +147,34 @@ impl<S: Spawner> PreparedApplication<S> {
         connection
             .execute_batch("BEGIN EXCLUSIVE; COMMIT;")
             .map_err(|_| E::StorageUnavailable)?;
-        if version == 9 {
-            crate::f8::v9::validate_v9(&connection)?;
-        } else {
-            v8::validate_v8(&connection)?;
+        match version {
+            10 => {
+                crate::f8::v10::validate_v10(&connection)?;
+            }
+            9 => {
+                crate::f8::v9::validate_v9(&connection)?;
+            }
+            _ => {
+                v8::validate_v8(&connection)?;
+            }
         }
         let (used, generations) =
             Allocator::new(&mut connection, authority.clone())?.registry_history()?;
         let registry = Registry::with_history(authority.clone(), used, generations)?;
         let engine = Engine::new(connection, authority, registry, staging)?;
-        let mut service = Service::new(Authority::new(engine), spawner);
+        let authority = if version == 10 {
+            #[cfg(target_os = "linux")]
+            {
+                Authority::new_guarded(engine)?
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                return Err(E::Unsupported);
+            }
+        } else {
+            Authority::new(engine)
+        };
+        let mut service = Service::new(authority, spawner);
         service.tick(Instant::now())?;
         Ok(Self::wrap(F8Transport::new(service), writer))
     }

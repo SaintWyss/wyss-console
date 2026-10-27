@@ -1389,6 +1389,85 @@ fn process_worker_frames_flow_through_the_real_meter_and_scheduler() {
 }
 
 #[test]
+fn pinned_workspace_descriptor_is_forwarded_to_the_runtime_spawner() {
+    use std::{fs, os::unix::fs::MetadataExt, path::PathBuf};
+
+    struct Temp(PathBuf);
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    struct PinnedSpawn {
+        frames: Frames,
+        observed: Arc<Mutex<Option<(String, u64, u64)>>>,
+    }
+    impl Spawner for PinnedSpawn {
+        fn descendant_containment(&self) -> bool {
+            true
+        }
+        fn spawn(
+            &mut self,
+            _launch: &RuntimeRef,
+            _staging: Option<&mut LaunchStaging>,
+        ) -> ControlResult<Spawned> {
+            Err(E::Unsupported)
+        }
+        fn spawn_for_pinned_workspace(
+            &mut self,
+            launch: &RuntimeRef,
+            _staging: Option<&mut LaunchStaging>,
+            _workspace: &str,
+            root_binding_id: &str,
+            workspace_fd: std::fs::File,
+        ) -> ControlResult<Spawned> {
+            let metadata = workspace_fd.metadata().map_err(|_| E::WorkspaceInvalid)?;
+            *self.observed.lock().unwrap() =
+                Some((root_binding_id.to_owned(), metadata.dev(), metadata.ino()));
+            Ok(Spawned {
+                worker: Box::new(FakeWorker {
+                    session: launch.managed_session_id.as_str().to_owned(),
+                    frames: self.frames.clone(),
+                    child: None,
+                }),
+            })
+        }
+    }
+
+    let mut rig = Rig::new(1, 0);
+    let session = rig.sessions[0].clone();
+    let path = std::env::temp_dir().join(format!("wyss-f8-pinned-runtime-{}", uuid()));
+    fs::create_dir(&path).unwrap();
+    let temp = Temp(path.clone());
+    let file = std::fs::File::open(&path).unwrap();
+    let metadata = file.metadata().unwrap();
+    let root_binding_id = uuid();
+    let observed = Arc::new(Mutex::new(None));
+    let mut spawn = PinnedSpawn {
+        frames: rig.frames.clone(),
+        observed: observed.clone(),
+    };
+    let request = request(
+        "runtime/start",
+        json!({
+            "intent_id":uuid(), "adapter_id":"codex", "runtime_kind":"codex",
+            "managed_session_id":session, "expected_generation":0, "expected_revision":0,
+            "safety_profile":"codex_local_tools_v1", "workspace_root":path.to_str().unwrap()
+        }),
+    );
+    let outcome = rig
+        .engine
+        .start_with_pinned_workspace(&request, &mut spawn, Some((root_binding_id.clone(), file)))
+        .unwrap();
+    assert!(outcome.reserved);
+    assert_eq!(
+        *observed.lock().unwrap(),
+        Some((root_binding_id, metadata.dev(), metadata.ino()))
+    );
+    drop(temp);
+}
+
+#[test]
 fn a_flooding_process_is_stopped_alone_with_its_exact_budget_key() {
     let mut rig = Rig::new(2, 1);
     let (a, b) = (rig.sessions[0].clone(), rig.sessions[1].clone());

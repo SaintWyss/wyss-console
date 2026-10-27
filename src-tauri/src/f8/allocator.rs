@@ -78,7 +78,7 @@ impl<'c> Allocator<'c> {
                 |r| r.get(0),
             )
             .map_err(invalid)?;
-        if !matches!(version, 8 | 9) {
+        if !matches!(version, 8..=10) {
             return Err(E::StorageIncompatible);
         }
         conn.pragma_update(None, "foreign_keys", true).map_err(db)?;

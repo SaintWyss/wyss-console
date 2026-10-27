@@ -55,6 +55,11 @@ pub trait Worker: Send {
     fn send_critical(&mut self, _frame: &[u8]) -> ControlResult<()> {
         Err(E::Unsupported)
     }
+    /// A first guarded turn frame may not enter a deferred queue. Backends must explicitly
+    /// implement this path; the default refuses rather than weakening L2 to ordinary `send`.
+    fn send_guarded_start(&mut self, _frame: &[u8]) -> ControlResult<()> {
+        Err(E::Unsupported)
+    }
     /// Pushes buffered outbound bytes without blocking.
     fn flush(&mut self) -> ControlResult<()> {
         Ok(())
@@ -141,6 +146,18 @@ pub trait Spawner {
         _workspace: Option<&str>,
     ) -> ControlResult<Spawned> {
         self.spawn(launch, staging)
+    }
+    /// Schema-10 local-tools launches must use the F8-retained directory object as the
+    /// namespace bind source. Implementations that cannot bind that descriptor refuse.
+    fn spawn_for_pinned_workspace(
+        &mut self,
+        _launch: &RuntimeRef,
+        _staging: Option<&mut LaunchStaging>,
+        _workspace: &str,
+        _root_binding_id: &str,
+        _workspace_fd: std::fs::File,
+    ) -> ControlResult<Spawned> {
+        Err(E::Unsupported)
     }
 }
 
@@ -541,6 +558,17 @@ impl Engine {
         request: &Request,
         spawner: &mut dyn Spawner,
     ) -> ControlResult<Outcome> {
+        self.start_with_pinned_workspace(request, spawner, None)
+    }
+
+    /// The optional workspace descriptor is authority-derived and consumed only by a spawner
+    /// that implements the schema-10 pinned-view contract. The caller never supplies an FD.
+    pub fn start_with_pinned_workspace(
+        &mut self,
+        request: &Request,
+        spawner: &mut dyn Spawner,
+        pinned_workspace: Option<(String, std::fs::File)>,
+    ) -> ControlResult<Outcome> {
         let (session, current) = match request.target() {
             super::protocol::Target::Runtime { session, .. } => (
                 session.as_str().to_owned(),
@@ -628,7 +656,7 @@ impl Engine {
             request.operation(),
             v1::Operation::RuntimeStart(m) if m.safety_profile.is_some_and(v1::RuntimeSafetyProfile::local_tools)
         );
-        self.launch(&reference, spawner, tools, workspace)?;
+        self.launch(&reference, spawner, tools, workspace, pinned_workspace)?;
         Ok(outcome)
     }
 
@@ -638,6 +666,7 @@ impl Engine {
         spawner: &mut dyn Spawner,
         tools: bool,
         requested_workspace: Option<String>,
+        pinned_workspace: Option<(String, std::fs::File)>,
     ) -> ControlResult<()> {
         let session = reference.managed_session_id.as_str().to_owned();
         let result = (|| {
@@ -647,8 +676,20 @@ impl Engine {
                 Some(root) => Some(root.create(&reference.runtime_instance_id)?),
                 None => None,
             };
-            let spawned =
-                spawner.spawn_for(reference, staging.as_mut(), requested_workspace.as_deref());
+            let spawned = match (requested_workspace.as_deref(), pinned_workspace) {
+                (Some(workspace), Some((root_binding_id, fd))) => spawner
+                    .spawn_for_pinned_workspace(
+                        reference,
+                        staging.as_mut(),
+                        workspace,
+                        &root_binding_id,
+                        fd,
+                    ),
+                (None, Some(_)) => Err(E::InvalidRequest),
+                (_, None) => {
+                    spawner.spawn_for(reference, staging.as_mut(), requested_workspace.as_deref())
+                }
+            };
             let spawned = match spawned {
                 Ok(s) => s,
                 Err(e) => {
@@ -960,6 +1001,23 @@ impl Engine {
             return Err(E::FrameTooLarge);
         }
         self.authorize(ticket, leases, now_ms)?.worker.send(frame)
+    }
+
+    /// L2 provider admission for an F8-reserved guarded turn. Only a backend with a direct,
+    /// non-buffering start path may implement `send_guarded_start`.
+    pub fn write_guarded_start_frame(
+        &mut self,
+        ticket: &TurnTicket,
+        frame: &[u8],
+        leases: &dyn LeaseView,
+        now_ms: u64,
+    ) -> ControlResult<()> {
+        if frame.len() > MAX_OUTBOUND_FRAME {
+            return Err(E::FrameTooLarge);
+        }
+        self.authorize(ticket, leases, now_ms)?
+            .worker
+            .send_guarded_start(frame)
     }
 
     /// One inbound provider event. It must come from the current launch; it is charged to that

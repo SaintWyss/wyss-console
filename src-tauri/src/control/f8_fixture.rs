@@ -10,7 +10,7 @@ use crate::{
     contracts::{control::*, identities::AgentRuntimeInstanceId},
 };
 use rusqlite::Connection;
-use std::os::unix::fs::DirBuilderExt;
+use std::{os::unix::fs::DirBuilderExt, path::PathBuf};
 
 pub(crate) fn v7_with_completed_turn() -> Connection {
     v7_with_sessions(0)
@@ -19,6 +19,12 @@ pub(crate) fn v7_with_completed_turn() -> Connection {
 /// The same image plus `extra` independent prepared sessions (no binding, no work).
 pub(crate) fn v7_with_sessions(extra: usize) -> Connection {
     let root = std::env::temp_dir().join(format!("wyss-f8-fixture-{}", uuid().as_str()));
+    v7_with_sessions_at(extra, root)
+}
+
+/// As `v7_with_sessions`, but place the bound workspace under a caller-selected filesystem.
+/// Tests use this to exercise the qualified Btrfs/ext4 pin path instead of `/tmp` overlayfs.
+pub(crate) fn v7_with_sessions_at(extra: usize, root: PathBuf) -> Connection {
     std::fs::DirBuilder::new()
         .mode(0o700)
         .create(&root)

@@ -14,6 +14,7 @@ use crate::{
         WireUuid,
         control::{
             AuthorityStatus, ControlError as E, ControlResult, Hello, Operation, ResultValue,
+            unique_json,
         },
     },
     control::{
@@ -136,7 +137,7 @@ pub struct Answer {
 /// versions are not assumed to agree on anything the protocol does not state.
 pub(crate) fn compatible(status: &AuthorityStatus) -> bool {
     status.protocol_version == 2
-        && matches!(status.storage_schema_version, 8 | 9)
+        && matches!(status.storage_schema_version, 8..=10)
         && status.service_version == env!("CARGO_PKG_VERSION")
 }
 
@@ -189,6 +190,59 @@ impl F8Client {
     /// drop the connection on those: nothing says what the peer is doing.
     pub fn call(&mut self, operation: Operation, target: Target) -> Result<Answer, CallError> {
         self.call_checked(operation, target, None)
+    }
+
+    /// One strict closed workspace-guard operation. The server and client use a separately
+    /// versioned method set; these calls cannot be serialized as legacy generic `TurnStart`.
+    pub fn call_workspace_guard(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, CallError> {
+        const METHODS: &[&str] = &[
+            "authority/capabilities",
+            "orchestration/claims/import",
+            "orchestration/root/observe",
+            "orchestration/claim/acquire",
+            "orchestration/claim/gate",
+            "orchestration/claim/status",
+            "orchestration/verification/prepare",
+            "orchestration/verification/commit",
+            "orchestration/claim/release",
+            "orchestration/claim/release-unused",
+            "orchestration/start/prepare",
+            "orchestration/start/commit",
+        ];
+        if !METHODS.contains(&method) {
+            return Err(CallError::Local(E::UnsupportedMethod));
+        }
+        let request_id = uuid();
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "schema_version": 2,
+            "request_id": request_id,
+            "authority_instance_id": self.authority,
+            "method": method,
+            "params": params
+        }))
+        .map_err(|_| CallError::Local(E::InvalidRequest))?;
+        if bytes.len() > crate::contracts::control::MAX_FRAME {
+            return Err(CallError::Local(E::FrameTooLarge));
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        write_frame(&mut self.stream, &bytes, deadline, &self.cancel).map_err(CallError::Broken)?;
+        let bytes = read_frame(&mut self.stream, deadline, &self.cancel)
+            .map_err(CallError::Broken)?
+            .ok_or(CallError::Broken(E::TransportError))?;
+        let is_refusal = unique_json(&bytes).is_ok_and(|value| value.get("error").is_some());
+        super::super::guard_protocol::response_value(&bytes, &request_id, &self.authority).map_err(
+            |error| {
+                if is_refusal {
+                    CallError::Refused(error)
+                } else {
+                    CallError::Broken(error)
+                }
+            },
+        )
     }
     /// A binding create, whose answer is only accepted for the canonical workspace the
     /// caller independently accepted.

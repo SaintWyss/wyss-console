@@ -1,6 +1,8 @@
 //! Finite dependency scheduler over the existing protocol-2 Managed authority.
 //! This module is a client of `wyss-control`, never an execution authority of its own.
-use super::journal::CancellationOutcome;
+use super::journal::{
+    CancellationOutcome, WorkspaceClaimBinding, WorkspaceImportClaim, WorkspaceSettlementIntent,
+};
 use super::{
     CoordinatorError, CoordinatorSnapshot, EffectClass, FailureCode, HandoffConfirmationV1,
     HandoffEnvelopeV1, MAX_RUN_SECONDS, OrchestrationPlanV1, PlanLimitsV1, PlanReviewV1,
@@ -23,6 +25,7 @@ use crate::{
         protocol::{Projection, RuntimeFence, Target},
     },
 };
+use sha2::Digest;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -47,7 +50,26 @@ pub struct Admission {
     runtime_id: String,
     generation: u64,
     session_revision: u64,
+    authority_store_id: String,
+    authority_epoch: String,
+    attachment_revision: u64,
+    lease_id: String,
+    lease_revision: u64,
     workspace_root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct GuardedStartContext {
+    pub coordinator_store_id: String,
+    pub run_id: String,
+    pub plan_revision: u64,
+    pub plan_digest: String,
+    pub step_id: String,
+    pub attempt_id: String,
+    pub model_id: Option<String>,
+    pub effect: EffectClass,
+    pub handoff_receiver: bool,
+    pub claim: WorkspaceClaimBinding,
 }
 
 pub struct StartedTurn {
@@ -64,6 +86,66 @@ pub struct TurnObservation {
 
 /// Test seams return closed enums only. No prose or provider output can reach the journal.
 pub trait ManagedAuthority: Send + Sync + 'static {
+    fn initialize_workspace_guard(
+        &self,
+        _coordinator_store_id: &str,
+        _claims: &[WorkspaceImportClaim],
+    ) -> Result<(), BridgeFault> {
+        Err(BridgeFault::Unknown)
+    }
+    fn acquire_workspace_claim(
+        &self,
+        _coordinator_store_id: &str,
+        _run_id: &str,
+        _plan_revision: u64,
+        _plan_digest: &str,
+        _workspace_root: &Path,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        Err(BridgeFault::Unknown)
+    }
+    fn set_workspace_gate(
+        &self,
+        _claim: &WorkspaceClaimBinding,
+        _gate: &str,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        Err(BridgeFault::Unknown)
+    }
+    fn workspace_claim_status(
+        &self,
+        _claim: &WorkspaceClaimBinding,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        Err(BridgeFault::Unknown)
+    }
+    fn settle_workspace_claim(
+        &self,
+        _claim: &WorkspaceClaimBinding,
+        _workspace_root: &Path,
+        _intent: &WorkspaceSettlementIntent,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        Err(BridgeFault::Unknown)
+    }
+    fn acknowledge_workspace_settlement(
+        &self,
+        _claim: &WorkspaceClaimBinding,
+        _gate: &str,
+        _coordinator_revision: u64,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        Err(BridgeFault::Unknown)
+    }
+    fn release_workspace_claim(
+        &self,
+        _claim: &WorkspaceClaimBinding,
+        _coordinator_revision: u64,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        Err(BridgeFault::Unknown)
+    }
+    fn release_unused_workspace_claim(
+        &self,
+        _claim: &WorkspaceClaimBinding,
+        _coordinator_revision: u64,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        Err(BridgeFault::Unknown)
+    }
     fn inspect(
         &self,
         session_id: &str,
@@ -84,9 +166,11 @@ pub trait ManagedAuthority: Send + Sync + 'static {
     }
     /// M6 must not fall back to ordinary `TurnStart`: the F8 implementation must atomically
     /// validate the durable workspace claim, pinned root, freshness, approval and receipt.
+    #[allow(clippy::too_many_arguments)] // Keeps the existing scheduler boundary explicit.
     fn start_guarded(
         &self,
         _admission: &Admission,
+        _context: &GuardedStartContext,
         _intent_id: &str,
         _prompt: &str,
         _workspace_root: &Path,
@@ -317,6 +401,411 @@ impl F8Authority {
 }
 
 impl ManagedAuthority for F8Authority {
+    fn initialize_workspace_guard(
+        &self,
+        coordinator_store_id: &str,
+        claims: &[WorkspaceImportClaim],
+    ) -> Result<(), BridgeFault> {
+        let imported = claims
+            .iter()
+            .map(|claim| {
+                serde_json::json!({
+                    "claim_id": claim.claim_id,
+                    "run_id": claim.run_id,
+                    "claim_generation": claim.claim_generation,
+                    "source_revision": claim.source_revision
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut client = self.client()?;
+        client
+            .call_workspace_guard(
+                "orchestration/claims/import",
+                serde_json::json!({
+                    "coordinator_store_id": coordinator_store_id,
+                    "snapshot_revision": 1,
+                    "claims": imported
+                }),
+            )
+            .map_err(map_read_fault)?;
+        Ok(())
+    }
+
+    fn acquire_workspace_claim(
+        &self,
+        coordinator_store_id: &str,
+        run_id: &str,
+        plan_revision: u64,
+        plan_digest: &str,
+        workspace_root: &Path,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        let mut client = self.client()?;
+        let capability = client
+            .call_workspace_guard("authority/capabilities", serde_json::json!({}))
+            .map_err(map_read_fault)?;
+        if capability["guard_ready"] != true || capability["managed_execution_enabled"] != true {
+            return Err(BridgeFault::Denied);
+        }
+        let authority_store_id = capability["authority_store_id"]
+            .as_str()
+            .ok_or(BridgeFault::Unknown)?
+            .to_owned();
+        let authority_epoch = capability["authority_epoch"]
+            .as_str()
+            .ok_or(BridgeFault::Unknown)?
+            .to_owned();
+        let root = client
+            .call_workspace_guard(
+                "orchestration/root/observe",
+                serde_json::json!({"locator": workspace_root}),
+            )
+            .map_err(map_read_fault)?;
+        let root_binding_id = root["root_binding_id"]
+            .as_str()
+            .ok_or(BridgeFault::Unknown)?
+            .to_owned();
+        let root_observation_revision = root["root_observation_revision"]
+            .as_u64()
+            .ok_or(BridgeFault::Unknown)?;
+        let claim = client
+            .call_workspace_guard(
+                "orchestration/claim/acquire",
+                serde_json::json!({
+                    "coordinator_store_id": coordinator_store_id,
+                    "run_id": run_id,
+                    "plan_revision": plan_revision,
+                    "plan_digest": plan_digest,
+                    "root_binding_id": root_binding_id
+                }),
+            )
+            .map_err(map_read_fault)?;
+        if claim["root_binding_id"] != root_binding_id || claim["phase"] != "held" {
+            return Err(BridgeFault::Unknown);
+        }
+        Ok(WorkspaceClaimBinding {
+            authority_store_id,
+            authority_epoch,
+            root_binding_id,
+            claim_id: claim["claim_id"]
+                .as_str()
+                .ok_or(BridgeFault::Unknown)?
+                .to_owned(),
+            claim_generation: claim["claim_generation"]
+                .as_u64()
+                .ok_or(BridgeFault::Unknown)?,
+            claim_revision: claim["claim_revision"]
+                .as_u64()
+                .ok_or(BridgeFault::Unknown)?,
+            gate_revision: claim["gate_revision"]
+                .as_u64()
+                .ok_or(BridgeFault::Unknown)?,
+            root_observation_revision,
+            phase: claim["phase"]
+                .as_str()
+                .ok_or(BridgeFault::Unknown)?
+                .to_owned(),
+            gate_state: claim["gate_state"]
+                .as_str()
+                .ok_or(BridgeFault::Unknown)?
+                .to_owned(),
+            settlement_id: claim["settlement_id"].as_str().map(str::to_owned),
+            coordinator_revision: claim["coordinator_revision"]
+                .as_u64()
+                .ok_or(BridgeFault::Unknown)?,
+        })
+    }
+
+    fn set_workspace_gate(
+        &self,
+        claim: &WorkspaceClaimBinding,
+        gate: &str,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        if !matches!(gate, "open" | "paused" | "stopped") {
+            return Err(BridgeFault::Denied);
+        }
+        let mut client = self.client()?;
+        if client.authority().as_str() != claim.authority_epoch {
+            return Err(BridgeFault::Denied);
+        }
+        let value = client
+            .call_workspace_guard(
+                "orchestration/claim/gate",
+                serde_json::json!({
+                    "claim_id": claim.claim_id,
+                    "expected_claim_revision": claim.claim_revision,
+                    "expected_gate_revision": claim.gate_revision,
+                    "gate": gate
+                }),
+            )
+            .map_err(map_read_fault)?;
+        if value["claim_id"] != claim.claim_id
+            || value["root_binding_id"] != claim.root_binding_id
+            || value["phase"] == "quarantined"
+            || value["gate_state"] != gate
+        {
+            return Err(BridgeFault::Unknown);
+        }
+        Ok(WorkspaceClaimBinding {
+            phase: value["phase"]
+                .as_str()
+                .ok_or(BridgeFault::Unknown)?
+                .to_owned(),
+            gate_state: gate.to_owned(),
+            claim_revision: value["claim_revision"]
+                .as_u64()
+                .ok_or(BridgeFault::Unknown)?,
+            gate_revision: value["gate_revision"]
+                .as_u64()
+                .ok_or(BridgeFault::Unknown)?,
+            settlement_id: value["settlement_id"].as_str().map(str::to_owned),
+            coordinator_revision: value["coordinator_revision"]
+                .as_u64()
+                .ok_or(BridgeFault::Unknown)?,
+            ..claim.clone()
+        })
+    }
+
+    fn workspace_claim_status(
+        &self,
+        claim: &WorkspaceClaimBinding,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        let mut client = self.client()?;
+        let capability = client
+            .call_workspace_guard("authority/capabilities", serde_json::json!({}))
+            .map_err(map_read_fault)?;
+        if capability["authority_store_id"] != claim.authority_store_id
+            || capability["authority_epoch"] != claim.authority_epoch
+            || client.authority().as_str() != claim.authority_epoch
+        {
+            return Err(BridgeFault::Denied);
+        }
+        let value = client
+            .call_workspace_guard(
+                "orchestration/claim/status",
+                serde_json::json!({"claim_id": claim.claim_id}),
+            )
+            .map_err(map_read_fault)?;
+        workspace_claim_from_value(claim, &value)
+    }
+
+    fn settle_workspace_claim(
+        &self,
+        claim: &WorkspaceClaimBinding,
+        workspace_root: &Path,
+        intent: &WorkspaceSettlementIntent,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        let current = self.workspace_claim_status(claim)?;
+        if current.phase == "verified"
+            && current.settlement_id.as_deref() == Some(&intent.observation_id)
+            && current.claim_revision == claim.claim_revision.saturating_add(1)
+            && current.gate_revision == claim.gate_revision.saturating_add(1)
+        {
+            return Ok(current);
+        }
+        if current != *claim || claim.phase != "unsettled" {
+            return Err(BridgeFault::Denied);
+        }
+        let mut client = self.client()?;
+        if client.authority().as_str() != claim.authority_epoch {
+            return Err(BridgeFault::Denied);
+        }
+        let prepared = client
+            .call_workspace_guard(
+                "orchestration/verification/prepare",
+                serde_json::json!({
+                    "observation_id": intent.observation_id,
+                    "claim_id": claim.claim_id,
+                    "claim_generation": claim.claim_generation,
+                    "expected_claim_revision": claim.claim_revision,
+                    "root_binding_id": claim.root_binding_id,
+                    "attempt_id": intent.attempt_id,
+                    "locator": workspace_root,
+                    "reviewed_digest": intent.reviewed_digest
+                }),
+            )
+            .map_err(map_read_fault)?;
+        if prepared["observation_id"] != intent.observation_id
+            || prepared["claim_id"] != claim.claim_id
+            || prepared["claim_generation"] != claim.claim_generation
+            || prepared["claim_revision"] != claim.claim_revision
+            || prepared["root_binding_id"] != claim.root_binding_id
+            || prepared["content_digest"] != intent.reviewed_digest
+        {
+            return Err(BridgeFault::Unknown);
+        }
+        let commit = serde_json::json!({
+            "claim_id": claim.claim_id,
+            "claim_generation": claim.claim_generation,
+            "expected_claim_revision": claim.claim_revision,
+            "observation_id": intent.observation_id,
+            "attempt_id": intent.attempt_id,
+            "locator": workspace_root,
+            "decision": intent.decision,
+            "reviewed_digest": intent.reviewed_digest
+        });
+        let answer = client.call_workspace_guard("orchestration/verification/commit", commit);
+        match answer {
+            Ok(value) => {
+                let updated = workspace_claim_from_value(claim, &value)?;
+                if updated.phase != "verified"
+                    || updated.settlement_id.as_deref() != Some(&intent.observation_id)
+                    || updated.claim_revision != claim.claim_revision.saturating_add(1)
+                    || updated.gate_revision != claim.gate_revision.saturating_add(1)
+                    || updated.gate_state != "stopped"
+                {
+                    return Err(BridgeFault::Unknown);
+                }
+                Ok(updated)
+            }
+            Err(_) => {
+                // F8 may have committed and lost only its reply. Resolve the same immutable
+                // observation by claim status; never create another settlement identifier.
+                let updated = self.workspace_claim_status(claim)?;
+                if updated.phase == "verified"
+                    && updated.settlement_id.as_deref() == Some(&intent.observation_id)
+                    && updated.claim_revision == claim.claim_revision.saturating_add(1)
+                    && updated.gate_revision == claim.gate_revision.saturating_add(1)
+                    && updated.gate_state == "stopped"
+                {
+                    Ok(updated)
+                } else {
+                    Err(BridgeFault::Unknown)
+                }
+            }
+        }
+    }
+
+    fn acknowledge_workspace_settlement(
+        &self,
+        claim: &WorkspaceClaimBinding,
+        gate: &str,
+        coordinator_revision: u64,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        if claim.phase != "verified"
+            || claim.settlement_id.is_none()
+            || coordinator_revision == 0
+            || coordinator_revision <= claim.coordinator_revision
+            || !matches!(gate, "open" | "paused" | "stopped")
+        {
+            return Err(BridgeFault::Denied);
+        }
+        let mut client = self.client()?;
+        if client.authority().as_str() != claim.authority_epoch {
+            return Err(BridgeFault::Denied);
+        }
+        let value = client
+            .call_workspace_guard(
+                "orchestration/claim/gate",
+                serde_json::json!({
+                    "claim_id": claim.claim_id,
+                    "expected_claim_revision": claim.claim_revision,
+                    "expected_gate_revision": claim.gate_revision,
+                    "gate": gate,
+                    "settlement_id": claim.settlement_id,
+                    "coordinator_revision": coordinator_revision
+                }),
+            )
+            .map_err(map_read_fault)?;
+        let updated = workspace_claim_from_value(claim, &value)?;
+        if updated.phase != "held"
+            || updated.gate_state != gate
+            || updated.coordinator_revision != coordinator_revision
+            || updated.claim_revision != claim.claim_revision.saturating_add(1)
+            || updated.gate_revision != claim.gate_revision.saturating_add(1)
+        {
+            return Err(BridgeFault::Unknown);
+        }
+        Ok(updated)
+    }
+
+    fn release_workspace_claim(
+        &self,
+        claim: &WorkspaceClaimBinding,
+        coordinator_revision: u64,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        let settlement_id = claim.settlement_id.as_deref().ok_or(BridgeFault::Denied)?;
+        if !matches!(claim.phase.as_str(), "verified" | "released")
+            || coordinator_revision == 0
+            || (claim.phase == "verified" && coordinator_revision <= claim.coordinator_revision)
+            || (claim.phase == "released" && coordinator_revision != claim.coordinator_revision)
+        {
+            return Err(BridgeFault::Denied);
+        }
+        let mut client = self.client()?;
+        if client.authority().as_str() != claim.authority_epoch {
+            return Err(BridgeFault::Denied);
+        }
+        let value = client
+            .call_workspace_guard(
+                "orchestration/claim/release",
+                serde_json::json!({
+                    "claim_id": claim.claim_id,
+                    "claim_generation": claim.claim_generation,
+                    "expected_claim_revision": claim.claim_revision,
+                    "settlement_id": settlement_id,
+                    "coordinator_revision": coordinator_revision
+                }),
+            )
+            .map_err(map_read_fault)?;
+        let updated = workspace_claim_from_value(claim, &value)?;
+        if updated.phase != "released"
+            || updated.gate_state != "stopped"
+            || updated.settlement_id.as_deref() != Some(settlement_id)
+            || updated.coordinator_revision != coordinator_revision
+        {
+            return Err(BridgeFault::Unknown);
+        }
+        Ok(updated)
+    }
+
+    fn release_unused_workspace_claim(
+        &self,
+        claim: &WorkspaceClaimBinding,
+        coordinator_revision: u64,
+    ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+        if claim.phase != "held"
+            || claim.settlement_id.is_some()
+            || coordinator_revision == 0
+            || coordinator_revision <= claim.coordinator_revision
+        {
+            return Err(BridgeFault::Denied);
+        }
+        let mut client = self.client()?;
+        if client.authority().as_str() != claim.authority_epoch {
+            return Err(BridgeFault::Denied);
+        }
+        let value = client
+            .call_workspace_guard(
+                "orchestration/claim/release-unused",
+                serde_json::json!({
+                    "claim_id": claim.claim_id,
+                    "claim_generation": claim.claim_generation,
+                    "expected_claim_revision": claim.claim_revision,
+                    "expected_gate_revision": claim.gate_revision,
+                    "coordinator_revision": coordinator_revision
+                }),
+            )
+            .map_err(map_read_fault)?;
+        let updated = workspace_claim_from_value(claim, &value)?;
+        if updated.phase != "released"
+            || updated.gate_state != "stopped"
+            || updated.settlement_id.is_some()
+            || updated.coordinator_revision != coordinator_revision
+        {
+            return Err(BridgeFault::Unknown);
+        }
+        Ok(updated)
+    }
+
+    fn supports_workspace_guard_v1(&self) -> bool {
+        let Ok(mut client) = self.client() else {
+            return false;
+        };
+        client
+            .call_workspace_guard("authority/capabilities", serde_json::json!({}))
+            .is_ok_and(|value| value["ready"] == true)
+    }
+
     fn verify_fresh_receiver(&self, session_id: &str) -> Result<(), BridgeFault> {
         F8Authority::verify_fresh_receiver(self, session_id)
     }
@@ -338,6 +827,17 @@ impl ManagedAuthority for F8Authority {
     ) -> Result<Admission, BridgeFault> {
         let session = ManagedSessionId::parse(session_id).map_err(|_| BridgeFault::Denied)?;
         let mut client = self.client()?;
+        let capability = client
+            .call_workspace_guard("authority/capabilities", serde_json::json!({}))
+            .map_err(map_read_fault)?;
+        let authority_store_id = capability["authority_store_id"]
+            .as_str()
+            .ok_or(BridgeFault::Unknown)?
+            .to_owned();
+        let authority_epoch = capability["authority_epoch"]
+            .as_str()
+            .ok_or(BridgeFault::Unknown)?
+            .to_owned();
         let session_record = match client
             .call(
                 Operation::Get(Get {
@@ -437,7 +937,7 @@ impl ManagedAuthority for F8Authority {
         {
             return Err(BridgeFault::Denied);
         }
-        match client
+        let active_lease = match client
             .call(
                 Operation::LeaseActive(LeaseActive {
                     session_id: session.clone(),
@@ -447,10 +947,10 @@ impl ManagedAuthority for F8Authority {
             .map_err(map_read_fault)?
             .value
         {
-            ResultValue::ActiveLease(Some(lease)) if lease.session_id == session => (),
+            ResultValue::ActiveLease(Some(lease)) if lease.session_id == session => lease,
             ResultValue::ActiveLease(None) => return Err(BridgeFault::Denied),
             _ => return Err(BridgeFault::Unknown),
-        }
+        };
         match client
             .call(
                 Operation::GateStatus(crate::contracts::control::GateQuery {
@@ -479,7 +979,139 @@ impl ManagedAuthority for F8Authority {
             runtime_id: attached_instance.as_str().to_owned(),
             generation,
             session_revision: session_record.revision,
+            authority_store_id,
+            authority_epoch,
+            attachment_revision: session_binding.binding_revision,
+            lease_id: active_lease.lease_id.as_str().to_owned(),
+            lease_revision: active_lease.revision,
             workspace_root: PathBuf::from(session_binding.workspace_root),
+        })
+    }
+
+    fn start_guarded(
+        &self,
+        admission: &Admission,
+        context: &GuardedStartContext,
+        intent_id: &str,
+        prompt: &str,
+        workspace_root: &Path,
+        workspace_id: &str,
+        expected_workspace_revision: &str,
+    ) -> Result<StartedTurn, BridgeFault> {
+        if prompt.is_empty()
+            || prompt.len() > 8192
+            || workspace_root != admission.workspace_root
+            || workspace_id
+                != workspace_identity(workspace_root).map_err(|_| BridgeFault::Denied)?
+            || expected_workspace_revision
+                != workspace_revision(workspace_root).map_err(|_| BridgeFault::Denied)?
+            || context.claim.authority_store_id != admission.authority_store_id
+            || context.claim.authority_epoch != admission.authority_epoch
+            || context.claim.claim_revision == 0
+            || context.claim.gate_revision == 0
+            || context.claim.root_observation_revision == 0
+            || context.claim.phase != "held"
+            || context.claim.gate_state != "open"
+        {
+            return Err(BridgeFault::Denied);
+        }
+        let effect_class = match context.effect {
+            EffectClass::ManagedInference => {
+                crate::f8::guard_protocol::StartEffect::ManagedInference
+            }
+            EffectClass::ManagedLocalTools => {
+                crate::f8::guard_protocol::StartEffect::ManagedLocalTools
+            }
+            _ => return Err(BridgeFault::Denied),
+        };
+        let model_profile = match effect_class {
+            crate::f8::guard_protocol::StartEffect::ManagedInference => {
+                crate::f8::guard_protocol::StartProfile::CodexInferenceV1
+            }
+            crate::f8::guard_protocol::StartEffect::ManagedLocalTools => {
+                crate::f8::guard_protocol::StartProfile::CodexLocalToolsV1
+            }
+        };
+        let purpose = if context.handoff_receiver {
+            crate::f8::guard_protocol::StartPurpose::HandoffFreshReceiver
+        } else {
+            crate::f8::guard_protocol::StartPurpose::PipelineStep
+        };
+        let tuple = crate::f8::guard_protocol::StartTuple {
+            authority_store_id: context.claim.authority_store_id.clone(),
+            authority_epoch: context.claim.authority_epoch.clone(),
+            coordinator_store_id: context.coordinator_store_id.clone(),
+            run_id: context.run_id.clone(),
+            plan_revision: context.plan_revision,
+            plan_digest: context.plan_digest.clone(),
+            step_id: context.step_id.clone(),
+            attempt_id: context.attempt_id.clone(),
+            intent_id: intent_id.to_owned(),
+            effect_class,
+            prompt_digest: format!("{:x}", sha2::Sha256::digest(prompt.as_bytes())),
+            model_id: context.model_id.clone(),
+            model_profile,
+            root_binding_id: context.claim.root_binding_id.clone(),
+            claim_id: context.claim.claim_id.clone(),
+            claim_generation: context.claim.claim_generation,
+            claim_revision: context.claim.claim_revision,
+            root_observation_revision: context.claim.root_observation_revision,
+            dispatch_gate_revision: context.claim.gate_revision,
+            session_id: admission.session_id.clone(),
+            session_revision: admission.session_revision,
+            attachment_revision: admission.attachment_revision,
+            runtime_instance_id: admission.runtime_id.clone(),
+            runtime_generation: admission.generation,
+            lease_id: admission.lease_id.clone(),
+            lease_revision: admission.lease_revision,
+            approval_reference: None,
+            purpose,
+        };
+        let tuple_digest = tuple.digest().map_err(|_| BridgeFault::Denied)?;
+        let mut client = self.client()?;
+        if client.authority().as_str() != admission.authority_id
+            || client.authority().as_str() != context.claim.authority_epoch
+        {
+            return Err(BridgeFault::Denied);
+        }
+        let prepared = client
+            .call_workspace_guard(
+                "orchestration/start/prepare",
+                serde_json::json!({"tuple": tuple}),
+            )
+            .map_err(map_effect_fault)?;
+        if prepared["tuple_digest"] != tuple_digest {
+            return Err(BridgeFault::Unknown);
+        }
+        let receipt_id = prepared["receipt_id"]
+            .as_str()
+            .ok_or(BridgeFault::Unknown)?
+            .to_owned();
+        let receipt_revision = prepared["receipt_revision"]
+            .as_u64()
+            .ok_or(BridgeFault::Unknown)?;
+        let committed = client
+            .call_workspace_guard(
+                "orchestration/start/commit",
+                serde_json::json!({
+                    "tuple": tuple,
+                    "receipt_id": receipt_id,
+                    "receipt_revision": receipt_revision,
+                    "prompt": prompt
+                }),
+            )
+            .map_err(map_effect_fault)?;
+        if committed["kind"] != "turn" || committed["value"].as_object().is_none() {
+            return Err(BridgeFault::Unknown);
+        }
+        Ok(StartedTurn {
+            turn_id: committed["value"]["managed_turn_id"]
+                .as_str()
+                .ok_or(BridgeFault::Unknown)?
+                .to_owned(),
+            revision: committed["value"]["revision"]
+                .as_u64()
+                .ok_or(BridgeFault::Unknown)?,
         })
     }
 
@@ -692,6 +1324,40 @@ fn map_effect_fault(error: CallError) -> BridgeFault {
     }
 }
 
+fn workspace_claim_from_value(
+    original: &WorkspaceClaimBinding,
+    value: &serde_json::Value,
+) -> Result<WorkspaceClaimBinding, BridgeFault> {
+    if value["claim_id"] != original.claim_id
+        || value["root_binding_id"] != original.root_binding_id
+        || value["claim_generation"] != original.claim_generation
+    {
+        return Err(BridgeFault::Unknown);
+    }
+    let phase = value["phase"].as_str().ok_or(BridgeFault::Unknown)?;
+    let gate_state = value["gate_state"].as_str().ok_or(BridgeFault::Unknown)?;
+    let settlement_id = match &value["settlement_id"] {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(value) => Some(value.clone()),
+        _ => return Err(BridgeFault::Unknown),
+    };
+    Ok(WorkspaceClaimBinding {
+        claim_revision: value["claim_revision"]
+            .as_u64()
+            .ok_or(BridgeFault::Unknown)?,
+        gate_revision: value["gate_revision"]
+            .as_u64()
+            .ok_or(BridgeFault::Unknown)?,
+        phase: phase.to_owned(),
+        gate_state: gate_state.to_owned(),
+        settlement_id,
+        coordinator_revision: value["coordinator_revision"]
+            .as_u64()
+            .ok_or(BridgeFault::Unknown)?,
+        ..original.clone()
+    })
+}
+
 struct ActivePlan {
     plan: OrchestrationPlanV1,
     canonical_root: PathBuf,
@@ -701,6 +1367,7 @@ struct ActivePlan {
 pub struct Coordinator {
     journal: Arc<RunJournal>,
     authority: Arc<dyn ManagedAuthority>,
+    coordinator_store_id: String,
     plans: Mutex<HashMap<String, ActivePlan>>,
     admission: Mutex<()>,
     started: Mutex<HashMap<(String, String), Instant>>,
@@ -713,17 +1380,38 @@ impl Coordinator {
         authority: Arc<dyn ManagedAuthority>,
         now: u64,
     ) -> Result<Self, CoordinatorError> {
-        journal
+        let recovered = journal
             .recover_after_restart(now)
             .map_err(|_| CoordinatorError::JournalUnavailable)?;
-        Ok(Self {
+        let coordinator_store_id = journal
+            .coordinator_store_id()
+            .map_err(|_| CoordinatorError::JournalUnavailable)?;
+        let import_snapshot = journal
+            .import_snapshot()
+            .map_err(|_| CoordinatorError::JournalUnavailable)?;
+        // Initialization is deliberately retriable. Until the F8 import fence confirms this
+        // exact immutable snapshot, capability negotiation remains false and no turn can start.
+        let guard_initialized = authority
+            .initialize_workspace_guard(&coordinator_store_id, &import_snapshot)
+            .is_ok();
+        let coordinator = Self {
             journal,
             authority,
+            coordinator_store_id,
             plans: Mutex::new(HashMap::new()),
             admission: Mutex::new(()),
             started: Mutex::new(HashMap::new()),
             round_robin: Mutex::new(0),
-        })
+        };
+        // If restart recovery durably cancelled a run with no persisted attempts, let F8
+        // release only the held claim for which it independently proves no receipt or attempt
+        // exists. A failed or ambiguous release remains in the journal for an idempotent retry.
+        if guard_initialized {
+            for run in recovered {
+                let _ = coordinator.release_terminal_unused_claim(&run);
+            }
+        }
+        Ok(coordinator)
     }
 
     pub fn submit(
@@ -781,6 +1469,27 @@ impl Coordinator {
             .map_err(map_journal)?;
         if run.state != RunState::Ready {
             return Ok(run);
+        }
+        if self.authority.supports_workspace_guard_v1() {
+            let binding = self
+                .authority
+                .acquire_workspace_claim(
+                    &self.coordinator_store_id,
+                    &run.run_id,
+                    plan.revision,
+                    &review.digest,
+                    Path::new(&plan.workspace_root),
+                )
+                .map_err(|fault| match fault {
+                    BridgeFault::Busy => CoordinatorError::ResourceBusy,
+                    BridgeFault::Denied => CoordinatorError::WorkspaceConflict,
+                    BridgeFault::Unavailable | BridgeFault::Unknown => {
+                        CoordinatorError::AuthorityUnavailable
+                    }
+                })?;
+            self.journal
+                .bind_workspace_claim(&run.run_id, &binding)
+                .map_err(map_journal)?;
         }
         run = self
             .journal
@@ -1058,6 +1767,7 @@ impl Coordinator {
         if run.state != RunState::Running {
             return Err(CoordinatorError::InvalidTransition);
         }
+        self.set_guarded_gate(run_id, "paused")?;
         let next = self
             .journal
             .set_run_state(run_id, run.revision, RunState::Pausing, None, now)
@@ -1094,6 +1804,7 @@ impl Coordinator {
             self.expire_paused(&run, now)?;
             return Err(CoordinatorError::Expired);
         }
+        self.set_guarded_gate(run_id, "open")?;
         self.journal
             .set_run_state(run_id, run.revision, RunState::Running, None, now)
             .map_err(map_journal)
@@ -1149,7 +1860,8 @@ impl Coordinator {
         }
         let current = self.get(&run.run_id)?;
         if current.state == RunState::Paused {
-            self.journal
+            let expired = self
+                .journal
                 .set_run_state(
                     &current.run_id,
                     current.revision,
@@ -1158,6 +1870,7 @@ impl Coordinator {
                     now,
                 )
                 .map_err(map_journal)?;
+            self.release_terminal_unused_claim(&expired)?;
         }
         Ok(())
     }
@@ -1182,9 +1895,14 @@ impl Coordinator {
             return Ok(run);
         }
         if run.state != RunState::Cancelling {
+            // F8's gate CAS is the stop linearization point. A delayed scheduler tick may
+            // still observe Running locally, but F8 will reject its guarded reservation.
+            self.set_guarded_gate(run_id, "stopped")?;
             self.journal
                 .set_run_state(run_id, run.revision, RunState::Cancelling, None, now)
                 .map_err(map_journal)?;
+        } else {
+            self.set_guarded_gate(run_id, "stopped")?;
         }
         let run = self.get(run_id)?;
         if let Some(active) = run
@@ -1255,19 +1973,122 @@ impl Coordinator {
         if actual != reviewed_workspace_revision {
             return Err(CoordinatorError::WorkspaceConflict);
         }
-        self.journal
-            .verify_step(run_id, step_id, &actual, now)
-            .map_err(map_journal)?;
         let run = self.get(run_id)?;
-        if run.state == RunState::NeedsReview
-            && !run
-                .steps
-                .iter()
-                .any(|step| step.state == StepState::NeedsReview)
+        let step = run
+            .steps
+            .iter()
+            .find(|step| step.step_id == step_id)
+            .ok_or(CoordinatorError::UnknownRun)?;
+        if step.state != StepState::Verifying {
+            return Err(CoordinatorError::InvalidTransition);
+        }
+        self.settle_step_with_authority(
+            run_id,
+            step_id,
+            StepState::Verifying,
+            StepState::Succeeded,
+            None,
+            &current_root,
+            &actual,
+            ReconcileDecision::ConfirmedCompleted,
+            now,
+        )?;
+        self.finalize_workspace_settlement(run_id, now)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn settle_step_with_authority(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        expected_step_state: StepState,
+        next_step_state: StepState,
+        failure: Option<FailureCode>,
+        workspace_root: &Path,
+        reviewed_digest: &str,
+        decision: ReconcileDecision,
+        now: u64,
+    ) -> Result<CoordinatorSnapshot, CoordinatorError> {
+        let claim = self
+            .journal
+            .workspace_claim_binding(run_id)
+            .map_err(map_journal)?
+            .ok_or(CoordinatorError::AuthorityUnavailable)?;
+        if claim.phase != "unsettled" {
+            return Err(CoordinatorError::InvalidTransition);
+        }
+        let run = self.get(run_id)?;
+        let step = run
+            .steps
+            .iter()
+            .find(|step| step.step_id == step_id)
+            .ok_or(CoordinatorError::UnknownRun)?;
+        let attempt_id = step
+            .attempt_id
+            .as_deref()
+            .ok_or(CoordinatorError::InvalidTransition)?;
+        let decision_text = match decision {
+            ReconcileDecision::ConfirmedCompleted => "confirmed_completed",
+            ReconcileDecision::ConfirmedNoEffect => "confirmed_no_effect",
+            ReconcileDecision::ConfirmedCancelled => "confirmed_cancelled",
+            ReconcileDecision::Unknown => return Err(CoordinatorError::InvalidTransition),
+        };
+        let intent = match self
+            .journal
+            .workspace_settlement_intent(run_id)
+            .map_err(map_journal)?
         {
-            // A review resolves uncertainty; it never grants a new dispatch.
-            // The owner must submit a fresh reviewed plan to continue.
-            self.close_reconciled_run(run_id, now)
+            Some(intent)
+                if intent.attempt_id == attempt_id
+                    && intent.decision == decision_text
+                    && intent.reviewed_digest == reviewed_digest =>
+            {
+                intent
+            }
+            Some(_) => return Err(CoordinatorError::ReviewStale),
+            None => WorkspaceSettlementIntent {
+                observation_id: Uuid::new_v4().to_string(),
+                attempt_id: attempt_id.to_owned(),
+                decision: decision_text.to_owned(),
+                reviewed_digest: reviewed_digest.to_owned(),
+            },
+        };
+        self.journal
+            .begin_workspace_settlement(run_id, step_id, expected_step_state, &claim, &intent)
+            .map_err(map_journal)?;
+        let verified = self
+            .authority
+            .settle_workspace_claim(&claim, workspace_root, &intent)
+            .map_err(|fault| match fault {
+                BridgeFault::Busy => CoordinatorError::ResourceBusy,
+                BridgeFault::Denied => CoordinatorError::WorkspaceConflict,
+                BridgeFault::Unavailable | BridgeFault::Unknown => {
+                    CoordinatorError::AuthorityUnavailable
+                }
+            })?;
+        self.journal
+            .settle_workspace_step(
+                run_id,
+                step_id,
+                expected_step_state,
+                next_step_state,
+                failure,
+                &claim,
+                &verified,
+                &intent,
+                now,
+            )
+            .map_err(map_journal)
+    }
+
+    fn finalize_workspace_settlement(
+        &self,
+        run_id: &str,
+        now: u64,
+    ) -> Result<CoordinatorSnapshot, CoordinatorError> {
+        let mut run = self.get(run_id)?;
+        if run.state == RunState::NeedsReview {
+            run = self.close_reconciled_run(run_id, now)?;
         } else if run.state == RunState::Pausing
             && !run.steps.iter().any(|step| {
                 matches!(
@@ -1276,14 +2097,76 @@ impl Coordinator {
                 )
             })
         {
-            self.journal
+            run = self
+                .journal
                 .set_run_state(run_id, run.revision, RunState::Paused, None, now)
-                .map_err(map_journal)
+                .map_err(map_journal)?;
         } else if run.state == RunState::Cancelling {
-            self.cancel_unstarted(run_id, now)
+            run = self.cancel_unstarted(run_id, now)?;
         } else {
-            Ok(run)
+            self.finish_if_done(run_id, now)?;
+            run = self.get(run_id)?;
         }
+
+        let Some(claim) = self
+            .journal
+            .workspace_claim_binding(run_id)
+            .map_err(map_journal)?
+        else {
+            return Ok(run);
+        };
+        if claim.phase != "verified" {
+            return Ok(run);
+        }
+        if run.state.terminal() {
+            let released = self
+                .authority
+                .release_workspace_claim(&claim, run.revision)
+                .map_err(|_| CoordinatorError::AuthorityUnavailable)?;
+            self.journal
+                .record_workspace_claim_release(run_id, &claim, &released, run.revision)
+                .map_err(map_journal)?;
+        } else {
+            let gate = match run.state {
+                RunState::Paused => "paused",
+                RunState::Pausing | RunState::Cancelling | RunState::NeedsReview => "stopped",
+                _ => "open",
+            };
+            let acknowledged = self
+                .authority
+                .acknowledge_workspace_settlement(&claim, gate, run.revision)
+                .map_err(|_| CoordinatorError::AuthorityUnavailable)?;
+            self.journal
+                .update_workspace_claim_gate(run_id, &claim, &acknowledged)
+                .map_err(map_journal)?;
+        }
+        self.get(run_id)
+    }
+
+    fn release_terminal_unused_claim(
+        &self,
+        run: &CoordinatorSnapshot,
+    ) -> Result<(), CoordinatorError> {
+        if !run.state.terminal() || run.steps.iter().any(|step| step.attempt_id.is_some()) {
+            return Ok(());
+        }
+        let Some(claim) = self
+            .journal
+            .workspace_claim_binding(&run.run_id)
+            .map_err(map_journal)?
+        else {
+            return Ok(());
+        };
+        if claim.phase != "held" || claim.settlement_id.is_some() {
+            return Ok(());
+        }
+        let released = self
+            .authority
+            .release_unused_workspace_claim(&claim, run.revision)
+            .map_err(|_| CoordinatorError::AuthorityUnavailable)?;
+        self.journal
+            .record_workspace_claim_release(&run.run_id, &claim, &released, run.revision)
+            .map_err(map_journal)
     }
 
     /// Reconciles a restart/transport ambiguity only by explicit owner evidence. `completed`
@@ -1310,25 +2193,6 @@ impl Coordinator {
         if step.state != StepState::NeedsReview {
             return Err(CoordinatorError::InvalidTransition);
         }
-        if decision != ReconcileDecision::Unknown {
-            let plan = self
-                .plans
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .get(run_id)
-                .map(|p| p.plan.clone());
-            let root = plan
-                .as_ref()
-                .map(|plan| plan.workspace_root.as_str())
-                .or(workspace_root)
-                .ok_or(CoordinatorError::WorkspaceConflict)?;
-            // A user's decision is not evidence of physical identity or effect outcome.
-            // F8 must prove both from its still-live authority-owned pin before M6 mutates
-            // the journal or releases the blocking claim.
-            self.authority
-                .verify_workspace_settlement(std::path::Path::new(root), decision)
-                .map_err(|_| CoordinatorError::WorkspaceConflict)?;
-        }
         match decision {
             ReconcileDecision::Unknown => Ok(run),
             ReconcileDecision::ConfirmedCompleted => {
@@ -1342,62 +2206,83 @@ impl Coordinator {
                     .get(run_id)
                     .map(|p| p.plan.clone());
                 let expected = reviewed_workspace_revision.ok_or(CoordinatorError::ReviewStale)?;
-                let root = plan
-                    .as_ref()
-                    .map(|plan| plan.workspace_root.as_str())
-                    .or(workspace_root)
+                let root = workspace_root
+                    .map(PathBuf::from)
+                    .or_else(|| plan.map(|plan| PathBuf::from(plan.workspace_root)))
                     .ok_or(CoordinatorError::WorkspaceConflict)?;
-                if plan.is_none() && workspace_root.is_none() {
-                    return Err(CoordinatorError::WorkspaceConflict);
-                }
-                let root = std::path::Path::new(root);
-                let identity =
-                    workspace_identity(root).map_err(|_| CoordinatorError::WorkspaceConflict)?;
                 let actual =
-                    workspace_revision(root).map_err(|_| CoordinatorError::WorkspaceConflict)?;
-                if identity != run.workspace_id || actual != expected {
+                    workspace_revision(&root).map_err(|_| CoordinatorError::WorkspaceConflict)?;
+                if actual != expected {
                     return Err(CoordinatorError::WorkspaceConflict);
                 }
-                self.journal
-                    .set_step_state(
-                        run_id,
-                        step_id,
-                        StepState::NeedsReview,
-                        StepState::Verifying,
-                        Some(FailureCode::OwnerReviewRequired),
-                        now,
-                    )
-                    .map_err(map_journal)?;
-                self.journal
-                    .verify_step(run_id, step_id, &actual, now)
-                    .map_err(map_journal)?;
-                self.close_reconciled_run(run_id, now)
+                self.settle_step_with_authority(
+                    run_id,
+                    step_id,
+                    StepState::NeedsReview,
+                    StepState::Succeeded,
+                    None,
+                    &root,
+                    &actual,
+                    decision,
+                    now,
+                )?;
+                self.finalize_workspace_settlement(run_id, now)
             }
             ReconcileDecision::ConfirmedNoEffect => {
-                self.journal
-                    .set_step_state(
-                        run_id,
-                        step_id,
-                        StepState::NeedsReview,
-                        StepState::Failed,
-                        Some(FailureCode::OwnerReviewRequired),
-                        now,
-                    )
-                    .map_err(map_journal)?;
-                self.close_reconciled_run(run_id, now)
+                let plan = self
+                    .plans
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(run_id)
+                    .map(|p| p.plan.clone());
+                let root = workspace_root
+                    .map(PathBuf::from)
+                    .or_else(|| plan.map(|plan| PathBuf::from(plan.workspace_root)))
+                    .ok_or(CoordinatorError::WorkspaceConflict)?;
+                let actual =
+                    workspace_revision(&root).map_err(|_| CoordinatorError::WorkspaceConflict)?;
+                self.settle_step_with_authority(
+                    run_id,
+                    step_id,
+                    StepState::NeedsReview,
+                    StepState::Failed,
+                    Some(FailureCode::OwnerReviewRequired),
+                    &root,
+                    &actual,
+                    decision,
+                    now,
+                )?;
+                self.finalize_workspace_settlement(run_id, now)
             }
             ReconcileDecision::ConfirmedCancelled => {
-                self.journal
-                    .set_step_state(
-                        run_id,
-                        step_id,
-                        StepState::NeedsReview,
-                        StepState::Cancelled,
-                        Some(FailureCode::OwnerReviewRequired),
-                        now,
-                    )
-                    .map_err(map_journal)?;
-                self.close_reconciled_run(run_id, now)
+                let plan = self
+                    .plans
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(run_id)
+                    .map(|p| p.plan.clone());
+                let root = workspace_root
+                    .map(PathBuf::from)
+                    .or_else(|| plan.map(|plan| PathBuf::from(plan.workspace_root)))
+                    .ok_or(CoordinatorError::WorkspaceConflict)?;
+                let expected = reviewed_workspace_revision.ok_or(CoordinatorError::ReviewStale)?;
+                let actual =
+                    workspace_revision(&root).map_err(|_| CoordinatorError::WorkspaceConflict)?;
+                if actual != expected {
+                    return Err(CoordinatorError::WorkspaceConflict);
+                }
+                self.settle_step_with_authority(
+                    run_id,
+                    step_id,
+                    StepState::NeedsReview,
+                    StepState::Cancelled,
+                    Some(FailureCode::OwnerReviewRequired),
+                    &root,
+                    &actual,
+                    decision,
+                    now,
+                )?;
+                self.finalize_workspace_settlement(run_id, now)
             }
         }
     }
@@ -1466,6 +2351,36 @@ impl Coordinator {
             .then_some(FailureCode::OwnerReviewRequired);
         self.journal
             .set_run_state(run_id, run.revision, next, failure, now)
+            .map_err(map_journal)
+    }
+
+    /// Keep the durable F8 gate authoritative. The local journal is only a CAS mirror; if F8
+    /// changes and its response is lost, the stale local revision prevents later dispatch.
+    fn set_guarded_gate(&self, run_id: &str, gate: &str) -> Result<(), CoordinatorError> {
+        let Some(expected) = self
+            .journal
+            .workspace_claim_binding(run_id)
+            .map_err(map_journal)?
+        else {
+            // No F8-owned claim means this run was never admitted through guarded Managed
+            // execution. Its scheduler lane remains closed by the missing-claim check.
+            return Ok(());
+        };
+        if gate == "open" && expected.phase != "held" {
+            return Err(CoordinatorError::InvalidTransition);
+        }
+        let updated = self
+            .authority
+            .set_workspace_gate(&expected, gate)
+            .map_err(|fault| match fault {
+                BridgeFault::Busy => CoordinatorError::ResourceBusy,
+                BridgeFault::Denied => CoordinatorError::InvalidTransition,
+                BridgeFault::Unavailable | BridgeFault::Unknown => {
+                    CoordinatorError::AuthorityUnavailable
+                }
+            })?;
+        self.journal
+            .update_workspace_claim_gate(run_id, &expected, &updated)
             .map_err(map_journal)
     }
 
@@ -1921,8 +2836,39 @@ impl Coordinator {
                         .map_err(map_journal)?;
                     continue;
                 }
+                let Some(claim) = self
+                    .journal
+                    .workspace_claim_binding(&run.run_id)
+                    .map_err(map_journal)?
+                else {
+                    if row.state == StepState::Eligible {
+                        self.journal
+                            .set_step_state(
+                                &run.run_id,
+                                &step.step_id,
+                                row.state,
+                                StepState::WaitingResource,
+                                Some(FailureCode::AuthorityUnavailable),
+                                now,
+                            )
+                            .map_err(map_journal)?;
+                    }
+                    continue;
+                };
                 let attempt_id = Uuid::new_v4().to_string();
                 let intent_id = Uuid::new_v4().to_string();
+                let guarded_context = GuardedStartContext {
+                    coordinator_store_id: self.coordinator_store_id.clone(),
+                    run_id: run.run_id.clone(),
+                    plan_revision: run.plan_revision,
+                    plan_digest: run.plan_digest.clone(),
+                    step_id: step.step_id.clone(),
+                    attempt_id: attempt_id.clone(),
+                    model_id: step.model_id.clone(),
+                    effect: step.effect,
+                    handoff_receiver,
+                    claim: claim.clone(),
+                };
                 self.journal
                     .begin_attempt(
                         &run.run_id,
@@ -1937,6 +2883,7 @@ impl Coordinator {
                     .map_err(map_journal)?;
                 match self.authority.start_guarded(
                     &admission,
+                    &guarded_context,
                     &intent_id,
                     &step.prompt,
                     &admission.workspace_root,
@@ -1945,12 +2892,13 @@ impl Coordinator {
                 ) {
                     Ok(started) => {
                         self.journal
-                            .acknowledge_attempt(
+                            .acknowledge_guarded_attempt(
                                 &run.run_id,
                                 &step.step_id,
                                 &attempt_id,
                                 &started.turn_id,
                                 started.revision,
+                                &claim,
                                 now,
                             )
                             .map_err(map_journal)?;
@@ -2340,6 +3288,10 @@ impl Coordinator {
                 .set_run_state(run_id, run.revision, state, None, now)
                 .map_err(map_journal)?;
         }
+        if state.terminal() {
+            let terminal = self.get(run_id)?;
+            self.release_terminal_unused_claim(&terminal)?;
+        }
         Ok(())
     }
 
@@ -2379,7 +3331,8 @@ impl Coordinator {
             )
         }) {
             let expired = run.failure == Some(FailureCode::PlanExpired);
-            self.journal
+            let terminal = self
+                .journal
                 .set_run_state(
                     run_id,
                     run.revision,
@@ -2391,7 +3344,9 @@ impl Coordinator {
                     expired.then_some(FailureCode::PlanExpired),
                     now,
                 )
-                .map_err(map_journal)
+                .map_err(map_journal)?;
+            self.release_terminal_unused_claim(&terminal)?;
+            Ok(terminal)
         } else {
             Ok(run)
         }
@@ -2473,6 +3428,7 @@ mod tests {
         cancel_fault: Mutex<Option<BridgeFault>>,
         observation: Mutex<TurnObservation>,
         settlement_evidence: Mutex<Option<ReconcileDecision>>,
+        claims: Mutex<HashMap<String, WorkspaceClaimBinding>>,
     }
     impl FakeAuthority {
         fn new(root: PathBuf) -> Self {
@@ -2495,6 +3451,7 @@ mod tests {
                     revision: 1,
                 }),
                 settlement_evidence: Mutex::new(None),
+                claims: Mutex::new(HashMap::new()),
             }
         }
 
@@ -2530,6 +3487,191 @@ mod tests {
         }
     }
     impl ManagedAuthority for FakeAuthority {
+        fn initialize_workspace_guard(
+            &self,
+            _coordinator_store_id: &str,
+            _claims: &[WorkspaceImportClaim],
+        ) -> Result<(), BridgeFault> {
+            Ok(())
+        }
+
+        fn acquire_workspace_claim(
+            &self,
+            _coordinator_store_id: &str,
+            _run_id: &str,
+            _plan_revision: u64,
+            _plan_digest: &str,
+            workspace_root: &Path,
+        ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+            self.pin_matches(workspace_root)?;
+            let binding = WorkspaceClaimBinding {
+                authority_store_id: Uuid::new_v4().to_string(),
+                authority_epoch: Uuid::new_v4().to_string(),
+                root_binding_id: Uuid::new_v4().to_string(),
+                claim_id: Uuid::new_v4().to_string(),
+                claim_generation: 1,
+                claim_revision: 1,
+                gate_revision: 1,
+                root_observation_revision: 1,
+                phase: "held".into(),
+                gate_state: "open".into(),
+                settlement_id: None,
+                coordinator_revision: 0,
+            };
+            self.claims
+                .lock()
+                .unwrap()
+                .insert(binding.claim_id.clone(), binding.clone());
+            Ok(binding)
+        }
+
+        fn set_workspace_gate(
+            &self,
+            claim: &WorkspaceClaimBinding,
+            gate: &str,
+        ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+            if !matches!(gate, "open" | "paused" | "stopped")
+                || matches!(claim.phase.as_str(), "released" | "quarantined")
+                || (gate == "open" && claim.phase != "held")
+            {
+                return Err(BridgeFault::Denied);
+            }
+            let mut updated = claim.clone();
+            if updated.gate_state != gate {
+                updated.claim_revision += 1;
+                updated.gate_revision += 1;
+                updated.gate_state = gate.to_owned();
+            }
+            self.claims
+                .lock()
+                .unwrap()
+                .insert(updated.claim_id.clone(), updated.clone());
+            Ok(updated)
+        }
+
+        fn workspace_claim_status(
+            &self,
+            claim: &WorkspaceClaimBinding,
+        ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+            self.claims
+                .lock()
+                .unwrap()
+                .get(&claim.claim_id)
+                .cloned()
+                .ok_or(BridgeFault::Unknown)
+        }
+
+        fn settle_workspace_claim(
+            &self,
+            claim: &WorkspaceClaimBinding,
+            workspace_root: &Path,
+            intent: &WorkspaceSettlementIntent,
+        ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+            self.pin_matches(workspace_root)?;
+            if workspace_revision(workspace_root).map_err(|_| BridgeFault::Denied)?
+                != intent.reviewed_digest
+            {
+                return Err(BridgeFault::Denied);
+            }
+            let expected_decision = match intent.decision.as_str() {
+                "confirmed_completed" => ReconcileDecision::ConfirmedCompleted,
+                "confirmed_no_effect" => ReconcileDecision::ConfirmedNoEffect,
+                "confirmed_cancelled" => ReconcileDecision::ConfirmedCancelled,
+                _ => return Err(BridgeFault::Denied),
+            };
+            if self.settlement_evidence.lock().unwrap().take() != Some(expected_decision) {
+                return Err(BridgeFault::Denied);
+            }
+            let mut claims = self.claims.lock().unwrap();
+            let current = claims.get(&claim.claim_id).ok_or(BridgeFault::Unknown)?;
+            if current != claim || claim.phase != "unsettled" {
+                return Err(BridgeFault::Denied);
+            }
+            let mut updated = claim.clone();
+            updated.phase = "verified".to_owned();
+            updated.gate_state = "stopped".to_owned();
+            updated.claim_revision += 1;
+            updated.gate_revision += 1;
+            updated.settlement_id = Some(intent.observation_id.clone());
+            claims.insert(updated.claim_id.clone(), updated.clone());
+            Ok(updated)
+        }
+
+        fn acknowledge_workspace_settlement(
+            &self,
+            claim: &WorkspaceClaimBinding,
+            gate: &str,
+            coordinator_revision: u64,
+        ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+            if claim.phase != "verified" || coordinator_revision <= claim.coordinator_revision {
+                return Err(BridgeFault::Denied);
+            }
+            let mut claims = self.claims.lock().unwrap();
+            if claims.get(&claim.claim_id) != Some(claim) {
+                return Err(BridgeFault::Denied);
+            }
+            let mut updated = claim.clone();
+            updated.phase = "held".to_owned();
+            updated.gate_state = gate.to_owned();
+            updated.coordinator_revision = coordinator_revision;
+            updated.claim_revision += 1;
+            updated.gate_revision += 1;
+            claims.insert(updated.claim_id.clone(), updated.clone());
+            Ok(updated)
+        }
+
+        fn release_workspace_claim(
+            &self,
+            claim: &WorkspaceClaimBinding,
+            coordinator_revision: u64,
+        ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+            let mut claims = self.claims.lock().unwrap();
+            let current = claims.get(&claim.claim_id).ok_or(BridgeFault::Unknown)?;
+            if current.phase == "released" && current.coordinator_revision == coordinator_revision {
+                return Ok(current.clone());
+            }
+            if current != claim
+                || claim.phase != "verified"
+                || coordinator_revision <= claim.coordinator_revision
+                || claim.settlement_id.is_none()
+            {
+                return Err(BridgeFault::Denied);
+            }
+            let mut updated = claim.clone();
+            updated.phase = "released".to_owned();
+            updated.gate_state = "stopped".to_owned();
+            updated.coordinator_revision = coordinator_revision;
+            updated.claim_revision += 1;
+            updated.gate_revision += 1;
+            claims.insert(updated.claim_id.clone(), updated.clone());
+            Ok(updated)
+        }
+
+        fn release_unused_workspace_claim(
+            &self,
+            claim: &WorkspaceClaimBinding,
+            coordinator_revision: u64,
+        ) -> Result<WorkspaceClaimBinding, BridgeFault> {
+            if claim.phase != "held"
+                || claim.settlement_id.is_some()
+                || coordinator_revision <= claim.coordinator_revision
+            {
+                return Err(BridgeFault::Denied);
+            }
+            let mut claims = self.claims.lock().unwrap();
+            if claims.get(&claim.claim_id) != Some(claim) {
+                return Err(BridgeFault::Denied);
+            }
+            let mut updated = claim.clone();
+            updated.phase = "released".to_owned();
+            updated.gate_state = "stopped".to_owned();
+            updated.coordinator_revision = coordinator_revision;
+            updated.claim_revision += 1;
+            updated.gate_revision += 1;
+            claims.insert(updated.claim_id.clone(), updated.clone());
+            Ok(updated)
+        }
+
         fn supports_workspace_guard_v1(&self) -> bool {
             self.guarded_workspace.load(Ordering::SeqCst)
         }
@@ -2537,6 +3679,7 @@ mod tests {
         fn start_guarded(
             &self,
             admission: &Admission,
+            context: &GuardedStartContext,
             intent_id: &str,
             prompt: &str,
             workspace_root: &Path,
@@ -2552,7 +3695,18 @@ mod tests {
             {
                 return Err(BridgeFault::Denied);
             }
-            self.start(admission, intent_id, prompt)
+            let started = self.start(admission, intent_id, prompt)?;
+            let mut claim = context.claim.clone();
+            if claim.phase != "held" || claim.gate_state != "open" {
+                return Err(BridgeFault::Denied);
+            }
+            claim.phase = "unsettled".to_owned();
+            claim.claim_revision += 1;
+            self.claims
+                .lock()
+                .unwrap()
+                .insert(claim.claim_id.clone(), claim);
+            Ok(started)
         }
 
         fn verify_workspace_settlement(
@@ -2613,6 +3767,11 @@ mod tests {
                 runtime_id: RUNTIME.into(),
                 generation: 1,
                 session_revision: 1,
+                authority_store_id: Uuid::new_v4().to_string(),
+                authority_epoch: AUTHORITY.into(),
+                attachment_revision: 1,
+                lease_id: Uuid::new_v4().to_string(),
+                lease_revision: 1,
                 workspace_root,
             })
         }
@@ -3108,6 +4267,65 @@ mod tests {
     }
 
     #[test]
+    fn guarded_pause_and_uncertain_stop_keep_authority_claim_closed() {
+        let root = root();
+        let (coordinator, journal, authority) = coordinator(&root);
+        let draft = plan(
+            &root,
+            vec![step("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", vec![])],
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        let run = coordinator
+            .submit(draft.clone(), review(&draft), 100)
+            .unwrap();
+
+        coordinator.pause(&run.run_id, 101).unwrap();
+        let paused = journal
+            .workspace_claim_binding(&run.run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (paused.phase.as_str(), paused.gate_state.as_str()),
+            ("held", "paused")
+        );
+        // An exact gate replay must be idempotent and release the journal mutex before
+        // consulting the persisted binding on the zero-row CAS path.
+        coordinator.set_guarded_gate(&run.run_id, "paused").unwrap();
+        coordinator.resume(&run.run_id, 102).unwrap();
+        coordinator.tick(103).unwrap();
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
+        let started = journal
+            .workspace_claim_binding(&run.run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (started.phase.as_str(), started.gate_state.as_str()),
+            ("unsettled", "open")
+        );
+
+        *authority.cancel_fault.lock().unwrap() = Some(BridgeFault::Unknown);
+        assert_eq!(
+            coordinator.stop(&run.run_id, 104).unwrap().state,
+            RunState::NeedsReview
+        );
+        let stopped = journal
+            .workspace_claim_binding(&run.run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (stopped.phase.as_str(), stopped.gate_state.as_str()),
+            ("unsettled", "stopped")
+        );
+        coordinator.tick(105).unwrap();
+        assert_eq!(authority.starts.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            journal.workspace_claim_binding(&run.run_id).unwrap(),
+            Some(stopped)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn paused_plan_expires_and_restart_recovery_does_not_resume_it() {
         let root = root();
         let (coordinator, journal, authority) = coordinator(&root);
@@ -3128,9 +4346,10 @@ mod tests {
         let expired = coordinator.get(&accepted.run_id).unwrap();
         assert_eq!(expired.state, RunState::Expired);
         assert_eq!(expired.failure, Some(FailureCode::PlanExpired));
+        assert!(journal.claimed_workspaces().unwrap().is_empty());
 
-        // A separate run that is still within its envelope becomes NeedsReview after a
-        // coordinator restart; in-memory prompts are never reconstructed from SQLite.
+        // A separate run that never persisted an attempt is cancelled after a coordinator
+        // restart; its unused F8 claim is released only through F8's no-attempt guard.
         let second_draft = plan(
             &root,
             vec![step("cccccccc-cccc-4ccc-8ccc-cccccccccccc", vec![])],
@@ -3140,16 +4359,17 @@ mod tests {
             .submit(second_draft.clone(), review(&second_draft), 100)
             .unwrap();
         coordinator.pause(&second.run_id, 111).unwrap();
-        let restarted = Coordinator::new(journal, authority.clone(), 112).unwrap();
+        let restarted = Coordinator::new(journal.clone(), authority.clone(), 112).unwrap();
         assert_eq!(
             restarted.get(&second.run_id).unwrap().state,
-            RunState::NeedsReview
+            RunState::Cancelled
         );
         assert_eq!(
             restarted.resume(&second.run_id, 113).unwrap_err(),
             CoordinatorError::InvalidTransition
         );
         assert_eq!(authority.starts.load(Ordering::SeqCst), 0);
+        assert!(journal.claimed_workspaces().unwrap().is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -3464,6 +4684,7 @@ mod tests {
                 .unwrap_err(),
             CoordinatorError::WorkspaceConflict
         );
+        authority.authorize_settlement(ReconcileDecision::ConfirmedCompleted);
         let reviewed = coordinator
             .verify_step(
                 &run.run_id,
@@ -3808,7 +5029,10 @@ mod tests {
                 .unwrap();
             let revision = workspace_revision(&root).unwrap();
             if verified_before_crash {
-                journal
+                // Exercise the authority-backed settlement path. A journal-only step update
+                // would manufacture success without F8 proof and must retain the claim.
+                authority.authorize_settlement(ReconcileDecision::ConfirmedCompleted);
+                coordinator
                     .verify_step(&run.run_id, step_id, &revision, 104)
                     .unwrap();
             }
@@ -3968,6 +5192,7 @@ mod tests {
             assert_eq!(waiting.steps[0].state, StepState::Verifying);
             assert_ne!(waiting.steps[1].state, StepState::Verifying);
         }
+        authority.authorize_settlement(ReconcileDecision::ConfirmedCompleted);
         coordinator
             .verify_step(
                 &run.run_id,
