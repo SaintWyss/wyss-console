@@ -1079,7 +1079,8 @@ impl ManagedAuthority for F8Authority {
                 "orchestration/start/prepare",
                 serde_json::json!({"tuple": tuple}),
             )
-            .map_err(map_effect_fault)?;
+            // Preparation cannot execute a turn; commit below crosses that boundary.
+            .map_err(map_read_fault)?;
         if prepared["tuple_digest"] != tuple_digest {
             return Err(BridgeFault::Unknown);
         }
@@ -1100,7 +1101,7 @@ impl ManagedAuthority for F8Authority {
                     "prompt": prompt
                 }),
             )
-            .map_err(map_effect_fault)?;
+            .map_err(map_guarded_commit_fault)?;
         if committed["kind"] != "turn" || committed["value"].as_object().is_none() {
             return Err(BridgeFault::Unknown);
         }
@@ -1318,9 +1319,22 @@ fn require_atomic_fresh_start(snapshot: Result<(), BridgeFault>) -> Result<(), B
 }
 fn map_effect_fault(error: CallError) -> BridgeFault {
     match error {
+        CallError::Refused(
+            E::ExternalEffectUnknown | E::StorageUnavailable | E::TransportError,
+        ) => BridgeFault::Unknown,
         CallError::Refused(E::ActiveTurnExists | E::CapacityExceeded) => BridgeFault::Busy,
         CallError::Refused(_) | CallError::Local(_) => BridgeFault::Denied,
         CallError::Broken(_) => BridgeFault::Unknown,
+    }
+}
+
+/// The strict commit response has no authoritative pre-L1/no-send disposition. A correlated
+/// refusal may follow durable reservation, receipt consumption or a provider write. Preserve
+/// uncertainty until F8 evidence can settle it; only a locally unsent request is a known refusal.
+fn map_guarded_commit_fault(error: CallError) -> BridgeFault {
+    match error {
+        CallError::Local(_) => BridgeFault::Denied,
+        CallError::Refused(_) | CallError::Broken(_) => BridgeFault::Unknown,
     }
 }
 
@@ -5295,5 +5309,33 @@ mod tests {
         );
         assert_eq!(authority.starts.load(Ordering::SeqCst), 0);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn guarded_commit_refusal_is_not_proof_of_no_external_effect() {
+        for error in [
+            E::ExternalEffectUnknown,
+            E::StorageUnavailable,
+            E::TransportError,
+            E::GateDenied,
+            E::ActiveTurnExists,
+        ] {
+            assert_eq!(
+                map_guarded_commit_fault(CallError::Refused(error)),
+                BridgeFault::Unknown
+            );
+        }
+        assert_eq!(
+            map_guarded_commit_fault(CallError::Broken(E::TransportError)),
+            BridgeFault::Unknown
+        );
+        assert_eq!(
+            map_guarded_commit_fault(CallError::Local(E::InvalidRequest)),
+            BridgeFault::Denied
+        );
+        assert_eq!(
+            map_effect_fault(CallError::Refused(E::ExternalEffectUnknown)),
+            BridgeFault::Unknown
+        );
     }
 }

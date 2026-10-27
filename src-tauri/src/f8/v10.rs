@@ -464,8 +464,8 @@ mod tests {
         }
     }
 
-    #[derive(Clone)]
-    struct GuardedFrames(Arc<Mutex<Vec<Vec<u8>>>>);
+    #[derive(Clone, Default)]
+    struct GuardedFrames(Arc<Mutex<Vec<Vec<u8>>>>, Arc<std::sync::atomic::AtomicBool>);
     struct GuardedWorker(GuardedFrames);
     impl Worker for GuardedWorker {
         fn preflight(&mut self, _: &Attachment) -> ControlResult<()> {
@@ -477,6 +477,9 @@ mod tests {
         }
         fn send_guarded_start(&mut self, frame: &[u8]) -> ControlResult<()> {
             self.0.0.lock().unwrap().push(frame.to_vec());
+            if self.0.1.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                return Err(E::ExternalEffectUnknown);
+            }
             Ok(())
         }
         fn containment(&mut self) -> Containment {
@@ -986,7 +989,7 @@ mod tests {
                 rusqlite::params![authority_id.as_str(), session],
             )
             .unwrap();
-        let frames = GuardedFrames(Arc::default());
+        let frames = GuardedFrames::default();
         let mut spawner = GuardedSpawner(frames.clone());
         let mut client = Client::default();
 
@@ -1567,7 +1570,7 @@ mod tests {
         // Production remains default-off. This test-only gate enables the real protocol path
         // against a local Authority and a worker that records, but never executes, provider data.
         authority.fixture_enable_guarded_execution();
-        let frames = GuardedFrames(Arc::default());
+        let frames = GuardedFrames::default();
         let mut spawner = GuardedSpawner(frames.clone());
         let mut client = Client::default();
         let hello = serde_json::to_vec(&serde_json::json!({
