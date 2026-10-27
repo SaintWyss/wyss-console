@@ -135,10 +135,27 @@ class OwnedTests(Base):
             self.assertTrue(os.path.exists(f"/proc/{o.pid}"))
 
     def test_a_process_that_already_exited_is_not_signalled_again(self):
-        with Owned([self.exe, "0"], self.exe) as o:
+        shell = os.path.join(self.dir, "owned-wait")
+        shutil.copy("/bin/sh", shell)
+        release = os.path.join(self.dir, "owned-release")
+        os.mkfifo(release)
+        env = os.environ.copy()
+        env["OWNED_TEST_RELEASE_FIFO"] = release
+        with Owned(
+            [shell, "-c", 'IFS= read -r < "$OWNED_TEST_RELEASE_FIFO"'],
+            shell,
+            env=env,
+        ) as o:
+            # Construction returns only after _verify_launch accepts the executable. The FIFO
+            # then releases this exact child, so process exit cannot race constructor validation.
+            with open(release, "w") as writer:
+                writer.write("exit\n")
             o.proc.wait()
+            signals = []
+            o._send = lambda fd, sig: signals.append(sig)
             o.stop()  # no error, no signal to anything
             o.stop()  # idempotent
+            self.assertEqual(signals, [], "a reaped child must not be signalled again")
         self.assertIsNone(self.decoy.poll())
 
     def test_a_signal_through_a_dead_descriptor_reaches_nobody(self):
