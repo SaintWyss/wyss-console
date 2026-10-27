@@ -24,7 +24,7 @@ const RECOVERY_DIR: &str = "m9-native-recovery-v1";
 const DEFAULT_OVERRIDES_FILE: &str = "m9-native-default-overrides-v2.json";
 const LEGACY_DEFAULT_OVERRIDES_FILE: &str = "m9-native-default-overrides-v1.json";
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Data {
     schema: u32,
@@ -367,8 +367,9 @@ impl ExtendedRegistry {
                 "m9_registry_project_defaults_full",
             ));
         }
+        let previous = self.data.clone();
         self.data.project_defaults.insert(path.to_owned(), agent);
-        self.save()
+        self.save_transition(previous)
     }
 
     /// Removes an M9 default when a newer Native provider supersedes it. The old registry
@@ -381,13 +382,11 @@ impl ExtendedRegistry {
         // A legacy Claude/Codex launch must not depend on an unrelated M9 sidecar write.
         // Persist only an actual default removal; a genuine shadowing default still
         // requires durable clearing before the legacy provider can be launched.
+        let previous_data = self.data.clone();
         let Some(previous) = self.data.project_defaults.remove(path) else {
             return Ok(None);
         };
-        if let Err(error) = self.save() {
-            self.data.project_defaults.insert(path.to_owned(), previous);
-            return Err(error);
-        }
+        self.save_transition(previous_data)?;
         Ok(Some(previous))
     }
 
@@ -556,8 +555,9 @@ impl ExtendedRegistry {
                 "m9_registry_project_defaults_full",
             ));
         }
+        let previous = self.data.clone();
         self.data.project_defaults.entry(path).or_insert(agent);
-        self.save()
+        self.save_transition(previous)
     }
 
     pub fn session(&self, id: &str) -> Option<&Session> {
@@ -589,6 +589,7 @@ impl ExtendedRegistry {
                 "m9_registry_session_duplicate",
             ));
         }
+        let previous = self.data.clone();
         self.data.sessions.push(session);
         while self.data.sessions.len() > MAX_SESSIONS {
             let Some(oldest) = self.data.sessions.iter().position(|s| s.state.finished()) else {
@@ -600,7 +601,7 @@ impl ExtendedRegistry {
             };
             self.data.sessions.remove(oldest);
         }
-        self.save()
+        self.save_transition(previous)
     }
 
     pub fn forget(&mut self, id: &str) -> bool {
@@ -612,6 +613,27 @@ impl ExtendedRegistry {
     pub fn save(&self) -> io::Result<()> {
         let bytes = serde_json::to_vec_pretty(&self.data).map_err(io::Error::other)?;
         store::write_atomic(&self.path, &bytes)
+    }
+
+    /// Roll back only when replacement did not happen. If the rename happened but the
+    /// directory durability barrier failed, keep the in-memory postimage (which matches the
+    /// visible sidecar) and return the error so callers report M9 storage unavailable.
+    fn save_transition(&mut self, previous: Data) -> io::Result<()> {
+        let bytes = match serde_json::to_vec_pretty(&self.data) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.data = previous;
+                return Err(io::Error::other(error));
+            }
+        };
+        match store::write_atomic_staged(&self.path, &bytes) {
+            Ok(()) => Ok(()),
+            Err(store::AtomicWriteError::BeforeRename(error)) => {
+                self.data = previous;
+                Err(error)
+            }
+            Err(store::AtomicWriteError::AfterRename(error)) => Err(error),
+        }
     }
 }
 
@@ -658,6 +680,37 @@ mod tests {
             Some(super::super::catalogue::AgentId::Opencode)
         );
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_default_set_restores_absent_and_existing_values_in_memory_and_on_disk() {
+        for previous in [None, Some(super::super::catalogue::AgentId::Opencode)] {
+            let directory = std::env::temp_dir().join(format!(
+                "wyss-m9-set-rollback-{}",
+                uuid::Uuid::new_v4().simple()
+            ));
+            let mut registry = ExtendedRegistry::open(directory.clone()).unwrap();
+            if let Some(agent) = previous {
+                registry.set_project_default("/a-project", agent).unwrap();
+            }
+            let saved = fs::read(&registry.path).unwrap();
+            fs::remove_file(&registry.path).unwrap();
+            fs::create_dir(&registry.path).unwrap();
+
+            assert!(
+                registry
+                    .set_project_default("/a-project", super::super::catalogue::AgentId::Hermes)
+                    .is_err()
+            );
+            assert_eq!(registry.project_default("/a-project"), previous);
+
+            fs::remove_dir(&registry.path).unwrap();
+            fs::write(&registry.path, saved).unwrap();
+            drop(registry);
+            let reopened = ExtendedRegistry::open(directory.clone()).unwrap();
+            assert_eq!(reopened.project_default("/a-project"), previous);
+            fs::remove_dir_all(directory).unwrap();
+        }
     }
 
     #[test]

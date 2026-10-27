@@ -198,6 +198,15 @@ struct Inner {
     base: PathBuf,
     registry: Mutex<Registry>,
     extended_registry: Mutex<Option<ExtendedRegistry>>,
+    /// Sticky for this service lifetime after an M9 sidecar write reports failure. It keeps
+    /// optional providers unavailable until reopen while legacy launches remain independent.
+    m9_storage_degraded: AtomicBool,
+    /// A failed durable removal of an actual M9 default must not be bypassed by a later
+    /// in-memory no-op; the process must reopen and re-read the authoritative sidecar.
+    m9_default_clear_blocked: AtomicBool,
+    /// M9 sessions whose process started but whose sidecar record could not be committed.
+    /// This volatile entry keeps the live process manageable without claiming durability.
+    volatile_sessions: Mutex<HashMap<String, Session>>,
     recovered_sessions: Vec<Session>,
     recovered_defaults: Mutex<BTreeMap<String, AgentId>>,
     profiles: ProfileStore,
@@ -412,6 +421,9 @@ impl NativeService {
                 base,
                 registry: Mutex::new(registry),
                 extended_registry: Mutex::new(extended_registry),
+                m9_storage_degraded: AtomicBool::new(false),
+                m9_default_clear_blocked: AtomicBool::new(false),
+                volatile_sessions: Mutex::new(HashMap::new()),
                 recovered_sessions,
                 recovered_defaults: Mutex::new(recovered_defaults),
                 profiles,
@@ -502,7 +514,8 @@ impl NativeService {
         let home = self.inner.home.to_string_lossy().into_owned();
         let registry = lock(&self.inner.registry);
         let extended = include_extended.then(|| lock(&self.inner.extended_registry));
-        let extension_ready = extended.as_ref().is_some_and(|stored| stored.is_some());
+        let extension_ready = extended.as_ref().is_some_and(|stored| stored.is_some())
+            && !self.inner.m9_storage_degraded.load(Ordering::Acquire);
         let m9_native_status = if !include_extended {
             "legacy_host"
         } else if extension_ready {
@@ -703,7 +716,15 @@ impl NativeService {
             return Err(NativeError::new("busy"));
         }
         let _starting = Starting(&self.inner.starting);
-        if !request.agent_id.is_legacy() && lock(&self.inner.extended_registry).is_none() {
+        if request.agent_id.is_legacy()
+            && self.inner.m9_default_clear_blocked.load(Ordering::Acquire)
+        {
+            return Err(NativeError::new("store_unavailable"));
+        }
+        if !request.agent_id.is_legacy()
+            && (lock(&self.inner.extended_registry).is_none()
+                || self.inner.m9_storage_degraded.load(Ordering::Acquire))
+        {
             return Err(NativeError::new("store_unavailable"));
         }
         let project = self.project_allowed(&request.project)?;
@@ -835,11 +856,18 @@ impl NativeService {
         let prior_extended_default = if request.agent_id.is_legacy() {
             let mut guard = lock(&self.inner.extended_registry);
             if let Some(extended) = guard.as_mut() {
-                Some(
-                    extended
-                        .clear_project_default(&project.to_string_lossy())
-                        .map_err(|_| NativeError::new("store_unavailable"))?,
-                )
+                match extended.clear_project_default(&project.to_string_lossy()) {
+                    Ok(previous) => Some(previous),
+                    Err(_) => {
+                        self.inner
+                            .m9_storage_degraded
+                            .store(true, Ordering::Release);
+                        self.inner
+                            .m9_default_clear_blocked
+                            .store(true, Ordering::Release);
+                        return Err(NativeError::new("store_unavailable"));
+                    }
+                }
             } else {
                 None
             }
@@ -889,8 +917,13 @@ impl NativeService {
                 }
                 if let Some(Some(previous)) = prior_extended_default
                     && let Some(extended) = lock(&self.inner.extended_registry).as_mut()
+                    && extended
+                        .set_project_default(&project.to_string_lossy(), previous)
+                        .is_err()
                 {
-                    let _ = extended.set_project_default(&project.to_string_lossy(), previous);
+                    self.inner
+                        .m9_storage_degraded
+                        .store(true, Ordering::Release);
                 }
                 let _ = fs::remove_dir_all(&dir);
                 session.state = State::FailedStart;
@@ -912,8 +945,13 @@ impl NativeService {
             }
             if let Some(Some(previous)) = prior_extended_default
                 && let Some(extended) = lock(&self.inner.extended_registry).as_mut()
+                && extended
+                    .set_project_default(&project.to_string_lossy(), previous)
+                    .is_err()
             {
-                let _ = extended.set_project_default(&project.to_string_lossy(), previous);
+                self.inner
+                    .m9_storage_degraded
+                    .store(true, Ordering::Release);
             }
             session.state = State::FailedStart;
             session.ended_at = Some(store::now());
@@ -943,8 +981,15 @@ impl NativeService {
         }
         if !session.agent_id.is_legacy()
             && let Some(extended) = lock(&self.inner.extended_registry).as_mut()
+            && extended
+                .set_project_default(&session.project, session.agent_id)
+                .is_err()
         {
-            let _ = extended.set_project_default(&session.project, session.agent_id);
+            // The provider is already running. Keep it alive, but report M9 storage as
+            // unavailable and do not claim that its default was saved.
+            self.inner
+                .m9_storage_degraded
+                .store(true, Ordering::Release);
         }
         let view = self.view(
             &session,
@@ -964,8 +1009,19 @@ impl NativeService {
             let mut registry = lock(&self.inner.registry);
             registry.add(session);
             let _ = registry.save();
-        } else if let Some(extended) = lock(&self.inner.extended_registry).as_mut() {
-            let _ = extended.add(session);
+        } else {
+            let session_id = session.id.clone();
+            let mut extended_guard = lock(&self.inner.extended_registry);
+            if let Some(extended) = extended_guard.as_mut()
+                && extended.add(session.clone()).is_err()
+            {
+                self.inner
+                    .m9_storage_degraded
+                    .store(true, Ordering::Release);
+                if extended.session(&session_id).is_none() {
+                    lock(&self.inner.volatile_sessions).insert(session_id, session);
+                }
+            }
         }
     }
 
@@ -979,6 +1035,7 @@ impl NativeService {
                     .and_then(|extended| extended.session(id))
                     .cloned()
             })
+            .or_else(|| lock(&self.inner.volatile_sessions).get(id).cloned())
             .or_else(|| {
                 self.inner
                     .recovered_sessions
@@ -1117,7 +1174,7 @@ impl NativeService {
                     session.state = state;
                     session.ended_at = Some(store::now());
                     session.exit_code = code;
-                    session.exit_signal = signal;
+                    session.exit_signal = signal.clone();
                 }
                 let _ = registry.save();
             } else {
@@ -1128,7 +1185,7 @@ impl NativeService {
                             session.state = state;
                             session.ended_at = Some(store::now());
                             session.exit_code = code;
-                            session.exit_signal = signal;
+                            session.exit_signal = signal.clone();
                         }
                         true
                     } else {
@@ -1136,7 +1193,21 @@ impl NativeService {
                     };
                     if found {
                         let _ = extended.save();
+                    } else if let Some(session) = lock(&self.inner.volatile_sessions).get_mut(id)
+                        && !session.state.finished()
+                    {
+                        session.state = state;
+                        session.ended_at = Some(store::now());
+                        session.exit_code = code;
+                        session.exit_signal = signal;
                     }
+                } else if let Some(session) = lock(&self.inner.volatile_sessions).get_mut(id)
+                    && !session.state.finished()
+                {
+                    session.state = state;
+                    session.ended_at = Some(store::now());
+                    session.exit_code = code;
+                    session.exit_signal = signal;
                 }
             }
         }
@@ -1243,6 +1314,7 @@ impl NativeService {
         }
         let registry = lock(&self.inner.registry);
         let extended = lock(&self.inner.extended_registry);
+        let volatile = lock(&self.inner.volatile_sessions);
         let live = lock(&self.inner.live);
         registry
             .data
@@ -1262,6 +1334,12 @@ impl NativeService {
             .chain(
                 include_extended
                     .then_some(self.inner.recovered_sessions.iter())
+                    .into_iter()
+                    .flatten(),
+            )
+            .chain(
+                include_extended
+                    .then_some(volatile.values())
                     .into_iter()
                     .flatten(),
             )

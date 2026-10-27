@@ -597,6 +597,83 @@ fn legacy_launch_with_existing_m9_default_refuses_unpersistable_clear() {
 }
 
 #[test]
+fn failed_m9_default_write_preserves_previous_default_and_reports_storage_unavailable() {
+    let world = World::new();
+    let opencode = world.start(AgentId::Opencode, None).unwrap();
+    let project = world.home.to_string_lossy().into_owned();
+    let sidecar = world.base.join("registry/m9-native-sessions-v1.json");
+    let original = fs::read(&sidecar).unwrap();
+    fs::remove_file(&sidecar).unwrap();
+    fs::create_dir(&sidecar).unwrap();
+
+    // Hermes may start because the terminal effect already succeeded, but its failed optional
+    // default write must not replace OpenCode in memory or be reported as durable.
+    let hermes = world.start(AgentId::Hermes, None).unwrap();
+    assert!(
+        world
+            .output_until(&hermes.terminal.terminal_id, "FAKE-HERMES")
+            .contains("FAKE-HERMES")
+    );
+    let launcher = world.service.launcher_extended();
+    assert_eq!(
+        launcher
+            .projects
+            .iter()
+            .find(|entry| entry.path == project)
+            .unwrap()
+            .default_agent,
+        Some(AgentId::Opencode)
+    );
+    assert_eq!(launcher.m9_native_status, "storage_unavailable");
+    assert_eq!(
+        world
+            .service
+            .session_record(&hermes.session.session.id)
+            .map(|session| session.state),
+        Some(State::Running),
+        "a live provider remains manageable even when its sidecar record was rejected"
+    );
+    assert!(
+        world
+            .service
+            .sessions_extended(&world.terminal, false)
+            .iter()
+            .any(|entry| entry.session.id == hermes.session.session.id)
+    );
+
+    world
+        .service
+        .stop(&world.terminal, &hermes.session.session.id)
+        .unwrap();
+    assert_eq!(
+        world
+            .service
+            .session_record(&hermes.session.session.id)
+            .map(|session| session.state),
+        Some(State::Stopped),
+        "stopping a volatile M9 session must retain its terminal state in memory"
+    );
+    fs::remove_dir(&sidecar).unwrap();
+    fs::write(&sidecar, original).unwrap();
+    let reopened = World::open(&world.base, &world.home, &world.bin);
+    assert_eq!(
+        reopened
+            .launcher_extended()
+            .projects
+            .iter()
+            .find(|entry| entry.path == project)
+            .unwrap()
+            .default_agent,
+        Some(AgentId::Opencode),
+        "restarting must preserve the last successfully persisted default"
+    );
+    world
+        .service
+        .stop(&world.terminal, &opencode.session.session.id)
+        .unwrap();
+}
+
+#[test]
 fn a_corrupt_m9_sidecar_blocks_only_m9_and_keeps_legacy_state_writable() {
     let world = World::new();
     let sidecar_path = world.base.join("registry/m9-native-sessions-v1.json");
