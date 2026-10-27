@@ -132,7 +132,20 @@ mod linux {
             let identity = object_identity(&current)?;
             Ok(identity.object == self.root.object
                 && identity.filesystem == self.root.filesystem
-                && identity.mount_id == self.root.mount_id)
+                && identity.mount_id == self.root.mount_id
+                && self.current_ancestry()? == self.ancestry)
+        }
+
+        /// Re-observe the parents of the retained object, never of a replacement locator.
+        /// Two equal bounded walks reject topology changing during the observation. This is
+        /// cooperating-writer evidence, not a lock against arbitrary host filesystem actors.
+        fn current_ancestry(&self) -> ControlResult<Vec<ObjectIdentity>> {
+            let first = ancestry(&self.fd)?;
+            let second = ancestry(&self.fd)?;
+            if first != second || first.first() != Some(&self.root) {
+                return Err(E::WorkspaceInvalid);
+            }
+            Ok(first)
         }
 
         /// Hash the reviewed tree through the retained directory descriptor. This deliberately
@@ -162,12 +175,15 @@ mod linux {
         /// Parent/child roots conflict; siblings on the same qualified mount remain independent.
         /// Different mounts and unsupported topology are not assumed disjoint.
         pub fn overlap(&self, other: &Self) -> Overlap {
+            let (Ok(ours), Ok(theirs)) = (self.current_ancestry(), other.current_ancestry()) else {
+                return Overlap::Unproven;
+            };
             if self.same_live_object(other)
-                || self.ancestry.iter().any(|ancestor| {
+                || ours.iter().any(|ancestor| {
                     ancestor.filesystem == other.root.filesystem
                         && ancestor.object == other.root.object
                 })
-                || other.ancestry.iter().any(|ancestor| {
+                || theirs.iter().any(|ancestor| {
                     ancestor.filesystem == self.root.filesystem
                         && ancestor.object == self.root.object
                 })
@@ -318,6 +334,81 @@ mod linux {
             &self.epoch
         }
 
+        /// Locator/topology drift revokes dispatch, not the original directory reference.
+        /// Commit this fence independently of a subsequently refused start transaction.
+        pub(crate) fn refresh_dispatch_proofs(&self, conn: &mut Connection) -> ControlResult<()> {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| E::StorageUnavailable)?;
+            for (root_id, pin) in &self.pins {
+                let live: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM workspace_root_bindings WHERE root_binding_id=?1 AND authority_store_id=?2 AND authority_epoch=?3 AND proof_state='pinned' AND proof_revision=?4)",
+                    params![root_id,self.store_id,self.epoch,pin.proof_revision as i64],
+                    |row|row.get(0),
+                ).map_err(|_|E::StorageUnavailable)?;
+                if live && !pin.locator_matches().unwrap_or(false) {
+                    tx.execute(
+                        "UPDATE workspace_root_bindings SET proof_revision=proof_revision+1 WHERE root_binding_id=?1 AND proof_revision=?2",
+                        params![root_id,pin.proof_revision as i64],
+                    ).map_err(|_|E::StorageUnavailable)?;
+                    tx.execute(
+                        "UPDATE workspace_claims SET gate_state='stopped',claim_revision=claim_revision+1,gate_revision=gate_revision+1 WHERE root_binding_id=?1 AND phase NOT IN ('released','quarantined')",
+                        [root_id],
+                    ).map_err(|_|E::StorageUnavailable)?;
+                    tx.execute(
+                        "UPDATE guarded_start_receipts SET state='invalidated',receipt_revision=receipt_revision+1 WHERE root_binding_id=?1 AND state='prepared'",
+                        [root_id],
+                    ).map_err(|_|E::StorageUnavailable)?;
+                }
+            }
+            tx.commit().map_err(|_| E::StorageUnavailable)
+        }
+
+        fn require_disjoint_claims(
+            &self,
+            conn: &Connection,
+            root_id: &str,
+            owning_claim: Option<&str>,
+        ) -> ControlResult<()> {
+            let pin = self.pins.get(root_id).ok_or(E::GateDenied)?;
+            let mut stmt = conn
+                .prepare(
+                    "SELECT claim_id,root_binding_id FROM workspace_claims WHERE phase<>'released'",
+                )
+                .map_err(|_| E::StorageUnavailable)?;
+            let claims = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|_| E::StorageUnavailable)?;
+            for claim in claims {
+                let (claim_id, other_root) = claim.map_err(|_| E::StorageUnavailable)?;
+                if owning_claim == Some(claim_id.as_str()) {
+                    continue;
+                }
+                let other = self.pins.get(&other_root).ok_or(E::GateDenied)?;
+                if pin.same_locator(other) || pin.overlap(other) != Overlap::Disjoint {
+                    return Err(E::WorkspaceInvalid);
+                }
+                if !other.locator_matches().unwrap_or(false) {
+                    // A replacement at a retained locator is a conservative conflict
+                    // domain too. Compare its live object, so spelling an alias of that
+                    // replacement cannot bypass the fence. This observation never
+                    // replaces the original pin or grants execution authority.
+                    let locator_now = RootPin::open(
+                        &other.locator,
+                        self.store_id.clone(),
+                        self.epoch.clone(),
+                        crate::control::store::uuid().as_str().to_owned(),
+                    )?;
+                    if pin.overlap(&locator_now) != Overlap::Disjoint {
+                        return Err(E::WorkspaceInvalid);
+                    }
+                }
+            }
+            Ok(())
+        }
+
         /// Import the complete M6 unresolved-claim snapshot exactly once. Imported workspace
         /// identity is deliberately unproven; any nonempty snapshot keeps admission disabled.
         pub fn import_claims(
@@ -411,9 +502,10 @@ mod linux {
         /// a binding is missing, or the filesystem relationship is unproven, fail closed.
         pub fn ordinary_start_allowed(
             &self,
-            conn: &Connection,
+            conn: &mut Connection,
             runtime_instance_id: &str,
         ) -> ControlResult<bool> {
+            self.refresh_dispatch_proofs(conn)?;
             if !self.capability_ready(conn)? {
                 return Ok(false);
             }
@@ -462,32 +554,34 @@ mod linux {
                 return Ok(false);
             }
 
-            for claim_root_id in active_claim_roots {
-                let claim_pin = self.pins.get(&claim_root_id).ok_or(E::GateDenied)?;
-                let claim_proof: Option<(String, String, String, i64)> = conn
-                    .query_row(
-                        "SELECT proof_state,authority_store_id,authority_epoch,proof_revision FROM workspace_root_bindings WHERE root_binding_id=?1",
-                        [&claim_root_id],
-                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-                    )
-                    .optional()
-                    .map_err(|_| E::StorageUnavailable)?;
-                if !claim_proof.is_some_and(|(state, store, epoch, revision)| {
-                    state == "pinned"
-                        && store == self.store_id
-                        && epoch == self.epoch
-                        && revision as u64 == claim_pin.proof_revision
-                }) || !claim_pin.locator_matches()?
-                {
-                    return Ok(false);
-                }
-                if candidate.same_locator(claim_pin)
-                    || !matches!(candidate.overlap(claim_pin), Overlap::Disjoint)
-                {
-                    return Ok(false);
-                }
+            match self.require_disjoint_claims(conn, &candidate_root_id, None) {
+                Ok(()) => Ok(true),
+                Err(error @ (E::StorageUnavailable | E::StorageIncompatible)) => Err(error),
+                Err(_) => Ok(false),
             }
-            Ok(true)
+        }
+
+        /// Executable approvals keep the same live root/claim fence as their admitted turn.
+        /// Decline/cancel do not use this path and remain available for containment.
+        pub(crate) fn check_executable_approval(
+            &self,
+            conn: &mut Connection,
+            reference: &super::super::protocol::RuntimeRef,
+            turn_id: &str,
+        ) -> ControlResult<()> {
+            self.refresh_dispatch_proofs(conn)?;
+            let root_id = self.runtime_root_binding(
+                conn,
+                reference.managed_session_id.as_str(),
+                reference.runtime_instance_id.as_str(),
+                reference.generation,
+            )?;
+            let owning_claim: Option<String> = conn.query_row(
+                "SELECT c.claim_id FROM guarded_attempts a JOIN workspace_claims c USING(claim_id) WHERE a.turn_id=?1 AND c.root_binding_id=?2 AND c.phase='unsettled' AND c.gate_state='open'",
+                params![turn_id,root_id],
+                |row|row.get(0),
+            ).optional().map_err(|_|E::StorageUnavailable)?;
+            self.require_disjoint_claims(conn, &root_id, owning_claim.as_deref())
         }
 
         /// Bind a transient path to an open directory object and persist only opaque, path-free
@@ -566,8 +660,12 @@ mod linux {
             {
                 return Err(E::InvalidRequest);
             }
+            self.refresh_dispatch_proofs(conn)?;
             let pin = self.pins.get(root_binding_id).ok_or(E::GateDenied)?;
-            if pin.authority_store_id != self.store_id || pin.authority_epoch != self.epoch {
+            if pin.authority_store_id != self.store_id
+                || pin.authority_epoch != self.epoch
+                || !pin.locator_matches()?
+            {
                 return Err(E::StaleRevision);
             }
             let tx = conn
@@ -614,26 +712,7 @@ mod linux {
                     return Err(E::IntentConflict);
                 }
             }
-            let mut stmt = tx
-                .prepare(
-                    "SELECT claim_id,root_binding_id FROM workspace_claims WHERE phase<>'released'",
-                )
-                .map_err(|_| E::StorageUnavailable)?;
-            let active = stmt
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
-                .map_err(|_| E::StorageUnavailable)?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|_| E::StorageUnavailable)?;
-            drop(stmt);
-            for (_, existing_root_id) in active {
-                let existing = self.pins.get(&existing_root_id).ok_or(E::GateDenied)?;
-                match pin.overlap(existing) {
-                    Overlap::Disjoint => {}
-                    Overlap::Conflict | Overlap::Unproven => return Err(E::WorkspaceInvalid),
-                }
-            }
+            self.require_disjoint_claims(&tx, root_binding_id, None)?;
             // An ordinary Managed turn may have been admitted before this claim arrived.
             // Refuse overlapping or identity-unproven active work so its provider approvals
             // cannot continue to mutate a workspace after M6 acquires ownership.
@@ -653,6 +732,9 @@ mod linux {
                     return Err(E::WorkspaceInvalid);
                 };
                 let active_pin = self.pins.get(&active_root_id).ok_or(E::GateDenied)?;
+                if pin.same_locator(active_pin) {
+                    return Err(E::WorkspaceInvalid);
+                }
                 match pin.overlap(active_pin) {
                     Overlap::Disjoint => {}
                     Overlap::Conflict | Overlap::Unproven => {
@@ -1172,6 +1254,7 @@ mod linux {
             use super::super::guard_protocol::{StartEffect, StartProfile, StartPurpose};
             tuple.validate()?;
             reference.validate()?;
+            self.refresh_dispatch_proofs(conn)?;
             if tuple.authority_store_id != self.store_id
                 || tuple.authority_epoch != self.epoch
                 || tuple.session_id != reference.managed_session_id.as_str()
@@ -1210,6 +1293,7 @@ mod linux {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| E::StorageUnavailable)?;
+            self.require_disjoint_claims(&tx, &tuple.root_binding_id, Some(&tuple.claim_id))?;
             let root: (String, String, String, i64) = tx
                 .query_row(
                     "SELECT proof_state,authority_store_id,authority_epoch,proof_revision FROM workspace_root_bindings WHERE root_binding_id=?1",
@@ -1520,6 +1604,7 @@ mod linux {
             conn: &mut Connection,
             tuple: &super::super::guard_protocol::StartTuple,
         ) -> ControlResult<()> {
+            self.refresh_dispatch_proofs(conn)?;
             let pin = self.pins.get(&tuple.root_binding_id).ok_or(E::GateDenied)?;
             if pin.authority_store_id != self.store_id
                 || pin.authority_epoch != self.epoch
@@ -1530,6 +1615,7 @@ mod linux {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| E::StorageUnavailable)?;
+            self.require_disjoint_claims(&tx, &tuple.root_binding_id, Some(&tuple.claim_id))?;
             let root: (String, String, i64) = tx
                 .query_row(
                     "SELECT proof_state,authority_epoch,proof_revision FROM workspace_root_bindings WHERE root_binding_id=?1 AND authority_store_id=?2",
@@ -1656,6 +1742,15 @@ mod linux {
             {
                 return Err(E::StaleRevision);
             }
+            let live: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM workspace_root_bindings WHERE root_binding_id=?1 AND authority_store_id=?2 AND authority_epoch=?3 AND proof_state='pinned' AND proof_revision=?4)",
+                params![root_id,self.store_id,self.epoch,pin.proof_revision as i64],
+                |row|row.get(0),
+            ).map_err(|_|E::StorageUnavailable)?;
+            if !live {
+                return Err(E::StaleRevision);
+            }
+            self.require_disjoint_claims(tx, &root_id, Some(claim_id))?;
             let changed = tx.execute(
                 "UPDATE workspace_claims SET phase='unsettled',claim_revision=claim_revision+1 WHERE claim_id=?1 AND claim_generation=?2 AND claim_revision=?3 AND gate_revision=?4 AND phase='held' AND gate_state='open'",
                 params![claim_id, generation as i64, revision as i64, gate_revision as i64],
@@ -1684,9 +1779,10 @@ mod linux {
         /// Replaced, retargeted, ambiguous, stale, or unsupported roots fail closed.
         pub fn duplicate_root_fd_for_locator(
             &self,
-            conn: &Connection,
+            conn: &mut Connection,
             locator: &Path,
         ) -> ControlResult<(String, File)> {
+            self.refresh_dispatch_proofs(conn)?;
             let candidate = RootPin::open(
                 locator,
                 self.store_id.clone(),
@@ -1733,6 +1829,7 @@ mod linux {
             root_binding_id: &str,
             authority_instance_id: &str,
         ) -> ControlResult<()> {
+            self.refresh_dispatch_proofs(conn)?;
             for id in [
                 session_id,
                 runtime_instance_id,
@@ -1824,6 +1921,14 @@ mod linux {
                 || pin.authority_epoch != self.epoch
                 || !pin.locator_matches()?
             {
+                return Err(E::StaleRevision);
+            }
+            let live: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM workspace_root_bindings WHERE root_binding_id=?1 AND authority_store_id=?2 AND authority_epoch=?3 AND proof_state='pinned' AND proof_revision=?4)",
+                params![row.4,self.store_id,self.epoch,pin.proof_revision as i64],
+                |row|row.get(0),
+            ).map_err(|_|E::StorageUnavailable)?;
+            if !live {
                 return Err(E::StaleRevision);
             }
             Ok(row.4)
@@ -2277,7 +2382,7 @@ mod linux {
                 ]),
                 prepared_start_deadlines: BTreeMap::new(),
             };
-            let conn = Connection::open_in_memory().unwrap();
+            let mut conn = Connection::open_in_memory().unwrap();
             conn.execute_batch(
                 "CREATE TABLE workspace_guard_state(id INTEGER PRIMARY KEY,authority_store_id TEXT,import_state TEXT);
                  CREATE TABLE workspace_imported_claims(claim_id TEXT);
@@ -2293,7 +2398,7 @@ mod linux {
             .unwrap();
             assert!(
                 guard
-                    .ordinary_start_allowed(&conn, "00000000-0000-4000-8000-000000000016")
+                    .ordinary_start_allowed(&mut conn, "00000000-0000-4000-8000-000000000016")
                     .unwrap()
             );
 
@@ -2304,7 +2409,7 @@ mod linux {
             .unwrap();
             assert!(
                 !guard
-                    .ordinary_start_allowed(&conn, "00000000-0000-4000-8000-000000000016")
+                    .ordinary_start_allowed(&mut conn, "00000000-0000-4000-8000-000000000016")
                     .unwrap()
             );
         }

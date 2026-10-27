@@ -128,6 +128,8 @@ pub struct Authority {
     streams: crate::control::turn_stream::Streams,
     #[cfg(test)]
     post_approval_write: Option<fn(&mut Connection)>,
+    #[cfg(test)]
+    post_guarded_reservation: Option<Box<dyn FnOnce() + Send>>,
 }
 
 /// Lease facts read from the database at the moment of an effect.
@@ -178,6 +180,8 @@ impl Authority {
             streams: Default::default(),
             #[cfg(test)]
             post_approval_write: None,
+            #[cfg(test)]
+            post_guarded_reservation: None,
         }
     }
 
@@ -198,12 +202,22 @@ impl Authority {
             streams: Default::default(),
             #[cfg(test)]
             post_approval_write: None,
+            #[cfg(test)]
+            post_guarded_reservation: None,
         })
     }
 
     #[cfg(test)]
     pub(crate) fn fixture_enable_guarded_execution(&mut self) {
         self.managed_execution_enabled = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture_after_guarded_reservation(
+        &mut self,
+        inject: impl FnOnce() + Send + 'static,
+    ) {
+        self.post_guarded_reservation = Some(Box::new(inject));
     }
 
     #[cfg(target_os = "linux")]
@@ -408,6 +422,7 @@ impl Authority {
                 }
                 O::ClaimStatus { claim_id } => {
                     let guard = self.workspace_guard.as_ref().ok_or(E::Unsupported)?;
+                    guard.refresh_dispatch_proofs(self.engine.connection_mut())?;
                     let claim = guard.claim_status(self.engine.connection(), &claim_id)?;
                     Ok(json!({
                         "claim_id": claim.claim_id,
@@ -551,6 +566,10 @@ impl Authority {
         {
             return Err(E::GateDenied);
         }
+        self.workspace_guard
+            .as_ref()
+            .ok_or(E::Unsupported)?
+            .refresh_dispatch_proofs(self.engine.connection_mut())?;
         let tuple = commit.tuple;
         let tuple_digest = tuple.digest()?;
         let prompt_fingerprint = format!("{:x}", Sha256::digest(commit.prompt.as_bytes()));
@@ -601,7 +620,7 @@ impl Authority {
         // L1: the F8 claim transition, receipt consumption, turn reservation, idempotence
         // result and audit link share the existing single writer transaction.
         let authority = self.authority();
-        let (record, fresh) = {
+        let reservation = {
             let guard = self.workspace_guard.as_mut().ok_or(E::Unsupported)?;
             let mut reserve = |tx: &rusqlite::Transaction<'_>, turn_id: &str| {
                 guard.consume_prepared_start_in(
@@ -620,10 +639,26 @@ impl Authority {
                 tuple.lease_revision,
                 &tuple_digest,
                 &mut reserve,
-            )?
+            )
+        };
+        let (record, fresh) = match reservation {
+            Ok(value) => value,
+            Err(error) => {
+                // A refused writer transaction rolls back its own changes. Persist any
+                // filesystem drift fence separately, without consuming the receipt/turn.
+                self.workspace_guard
+                    .as_ref()
+                    .ok_or(E::Unsupported)?
+                    .refresh_dispatch_proofs(self.engine.connection_mut())?;
+                return Err(error);
+            }
         };
         if !fresh {
             return Ok(json!({"kind":"turn","value":record,"replayed":true}));
+        }
+        #[cfg(test)]
+        if let Some(inject) = self.post_guarded_reservation.take() {
+            inject();
         }
 
         let ticket = match self.engine.admit_turn(
@@ -663,6 +698,10 @@ impl Authority {
             .ok_or(E::Unsupported)?
             .mark_guarded_attempt_possibly_sent(self.engine.connection_mut(), &tuple)
         {
+            self.workspace_guard
+                .as_ref()
+                .ok_or(E::Unsupported)?
+                .refresh_dispatch_proofs(self.engine.connection_mut())?;
             let _ = self.engine.end_turn(&ticket);
             self.workspace_guard
                 .as_mut()
@@ -735,7 +774,7 @@ impl Authority {
                     {
                         let guard = self.workspace_guard.as_ref().ok_or(E::Unsupported)?;
                         Some(guard.duplicate_root_fd_for_locator(
-                            self.engine.connection(),
+                            self.engine.connection_mut(),
                             std::path::Path::new(locator),
                         )?)
                     }
@@ -1060,7 +1099,7 @@ impl Authority {
                 .as_ref()
                 .ok_or(E::GateDenied)?
                 .ordinary_start_allowed(
-                    self.engine.connection(),
+                    self.engine.connection_mut(),
                     reference.runtime_instance_id.as_str(),
                 )?
         {
@@ -1095,6 +1134,20 @@ impl Authority {
             serde_json::to_vec(&json!({"method":"turn/start","turn":record.managed_turn_id,
             "input":p.prompt}))
             .map_err(|_| E::InternalError)?;
+        if schema_version == 10
+            && !self
+                .workspace_guard
+                .as_ref()
+                .ok_or(E::GateDenied)?
+                .ordinary_start_allowed(
+                    self.engine.connection_mut(),
+                    reference.runtime_instance_id.as_str(),
+                )?
+        {
+            let _ = self.engine.end_turn(&ticket);
+            self.fail_turn(&record.managed_turn_id)?;
+            return Err(E::GateDenied);
+        }
         if self
             .engine
             .write_frame(&ticket, &frame, &snapshot, 0)
@@ -1356,6 +1409,13 @@ impl Authority {
         }
         if !replay && p.decision == ApprovalDecision::Accept {
             self.engine.approval_action_confined(fence, &item)?;
+            if super::provider::version(self.engine.connection())? == 10 {
+                let reference = self.engine.reference(&session).ok_or(E::StaleRevision)?;
+                self.workspace_guard
+                    .as_ref()
+                    .ok_or(E::GateDenied)?
+                    .check_executable_approval(self.engine.connection_mut(), &reference, &turn)?;
+            }
         }
         let authority = self.authority();
         let decided = Writer::new(self.engine.connection_mut(), authority.clone())?
@@ -1379,8 +1439,24 @@ impl Authority {
                     (Some(t), Some(fp)) => {
                         let snapshot =
                             lease_snapshot(self.engine.connection(), &session, &t.lease_id);
-                        self.engine
-                            .answer_approval(t, &snapshot, 0, &item, fp, word)
+                        let root_check = if p.decision == ApprovalDecision::Accept
+                            && super::provider::version(self.engine.connection())? == 10
+                        {
+                            self.workspace_guard
+                                .as_ref()
+                                .ok_or(E::GateDenied)?
+                                .check_executable_approval(
+                                    self.engine.connection_mut(),
+                                    &t.reference,
+                                    &turn,
+                                )
+                        } else {
+                            Ok(())
+                        };
+                        root_check.and_then(|()| {
+                            self.engine
+                                .answer_approval(t, &snapshot, 0, &item, fp, word)
+                        })
                     }
                     _ => Err(E::StaleRevision),
                 };

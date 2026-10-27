@@ -2009,11 +2009,26 @@ impl Coordinator {
         decision: ReconcileDecision,
         now: u64,
     ) -> Result<CoordinatorSnapshot, CoordinatorError> {
-        let claim = self
+        let mut claim = self
             .journal
             .workspace_claim_binding(run_id)
             .map_err(map_journal)?
             .ok_or(CoordinatorError::AuthorityUnavailable)?;
+        let observed = self
+            .authority
+            .workspace_claim_status(&claim)
+            .map_err(|_| CoordinatorError::AuthorityUnavailable)?;
+        if observed != claim {
+            // F8 may have sealed a drifted locator/topology independently of M6.
+            // Mirror only the same claim's closed gate CAS; this grants no dispatch.
+            if observed.phase != claim.phase || observed.gate_state != "stopped" {
+                return Err(CoordinatorError::WorkspaceConflict);
+            }
+            self.journal
+                .update_workspace_claim_gate(run_id, &claim, &observed)
+                .map_err(map_journal)?;
+            claim = observed;
+        }
         if claim.phase != "unsettled" {
             return Err(CoordinatorError::InvalidTransition);
         }

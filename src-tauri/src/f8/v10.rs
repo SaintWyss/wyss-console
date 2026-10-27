@@ -673,7 +673,7 @@ mod tests {
         let root1 = guard.observe_root(&mut conn, &first_path).unwrap();
         let root2 = guard.observe_root(&mut conn, &second_path).unwrap();
         let (selected_root, pinned_fd) = guard
-            .duplicate_root_fd_for_locator(&conn, &first_path)
+            .duplicate_root_fd_for_locator(&mut conn, &first_path)
             .unwrap();
         assert_eq!(selected_root, root1);
         assert!(pinned_fd.metadata().unwrap().is_dir());
@@ -688,7 +688,7 @@ mod tests {
         fs::create_dir(&first_path).unwrap();
         assert!(
             guard
-                .duplicate_root_fd_for_locator(&conn, &first_path)
+                .duplicate_root_fd_for_locator(&mut conn, &first_path)
                 .is_err()
         );
         assert!(
@@ -700,8 +700,26 @@ mod tests {
             .acquire_claim(&mut conn, COORDINATOR, RUN2, 1, plan_digest, &root2)
             .unwrap();
         assert_ne!(claim1.claim_id, independent.claim_id);
+        let sealed = guard.claim_status(&conn, &claim1.claim_id).unwrap();
+        assert_eq!(
+            sealed.gate_state, "stopped",
+            "root drift revokes dispatch but retains the claim"
+        );
+        assert!(
+            guard
+                .set_gate(&mut conn, &claim1.claim_id, 1, 1, "open", None, None)
+                .is_err()
+        );
         let paused = guard
-            .set_gate(&mut conn, &claim1.claim_id, 1, 1, "paused", None, None)
+            .set_gate(
+                &mut conn,
+                &claim1.claim_id,
+                sealed.claim_revision,
+                sealed.gate_revision,
+                "paused",
+                None,
+                None,
+            )
             .unwrap();
         assert_eq!(
             (paused.phase.as_str(), paused.gate_state.as_str()),
@@ -2039,4 +2057,5 @@ mod tests {
         server.join().unwrap();
         fs::remove_dir_all(&runtime_root).unwrap();
     }
+    include!("v10_sr_tests.rs");
 }
