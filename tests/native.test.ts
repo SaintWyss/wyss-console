@@ -719,6 +719,7 @@ describe('a stop whose M9 record could not be written', () => {
     });
     const controller = new NativeController(() => undefined, undefined, client);
     controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
     answers[0]!([runningOpencode()]);
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(2000);

@@ -222,14 +222,16 @@ export class NativeController {
     });
   }
   /**
-   * The first load discovers the catalogue once alongside profiles, sessions and readiness.
+   * The first load discovers the catalogue once, then reads profiles, sessions and readiness.
    * A listing that observes an ending may have written the store, so readiness is confirmed last.
    */
   private async load() {
     const sessionsSeq = this.sessionsSeq;
     // Discovery attaches the host on first load. The lightweight read deliberately cannot
     // initialize one, so it starts only after that attachment has completed.
-    const first = this.refreshCatalogue().then(() => this.readReadiness());
+    await this.refreshCatalogue();
+    if (this.disposed) return;
+    const first = this.readReadiness();
     const [, profiles, sessions] = await Promise.all([
       first,
       this.client.profiles(),

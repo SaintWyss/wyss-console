@@ -158,6 +158,7 @@ it('attaches discovery before initial readiness and never lets catalogue status 
   controller.setVisible(true);
   await settle();
   expect(client.readiness).not.toHaveBeenCalled();
+  expect(client.sessions).not.toHaveBeenCalled();
   await controller.refreshLauncher();
   expect(controller.state().m9Blocked).toBe(true);
   answer(launcherWithM9('ready'));

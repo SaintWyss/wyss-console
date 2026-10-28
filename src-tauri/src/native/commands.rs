@@ -276,7 +276,7 @@ pub async fn native_launcher(link: State<'_, HostLink>) -> Answer {
 
 /// Additive protocol-1 read. No fallback to discovery: older hosts cannot confirm M9.
 fn readiness_with_link(link: &HostLink) -> Answer {
-    match link.native_readiness() {
+    match link.call_attached("native_readiness", Value::Null) {
         Err(error) if error.code == "unknown_op" => Err(HostError::new("host_outdated")),
         answer => answer,
     }
@@ -374,18 +374,20 @@ pub struct ListRequest {
     sample: bool,
 }
 
+/// Polling may observe endings, but must never initialize or restart a host. Both protocol
+/// projections use the attached-only transport, including the old-host fallback.
+fn sessions_with_link(link: &HostLink, sample: bool) -> Answer {
+    let params = json!({"sample": sample});
+    match link.call_attached("native_sessions_extended", params.clone()) {
+        Err(error) if error.code == "unknown_op" => link.call_attached("native_sessions", params),
+        answer => answer,
+    }
+}
+
 #[tauri::command]
 pub async fn native_sessions(link: State<'_, HostLink>, request: ListRequest) -> Answer {
     let link = link.inner().clone();
-    blocking(move || {
-        call_extended_or_legacy(
-            &link,
-            "native_sessions_extended",
-            "native_sessions",
-            json!({"sample": request.sample}),
-        )
-    })
-    .await
+    blocking(move || sessions_with_link(&link, request.sample)).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -782,7 +784,8 @@ pub fn extension() -> wyss_console::Extension {
 mod capability_tests {
     use super::{
         PreviewRequest, annotate_launcher, effectful_preview, host_can_keep, launcher_view,
-        preview_with_link, profile_requires_effort_from_list, readiness_with_link, start_with_link,
+        preview_with_link, profile_requires_effort_from_list, readiness_with_link,
+        sessions_with_link, start_with_link,
     };
     use crate::{
         host::{
@@ -879,6 +882,7 @@ mod capability_tests {
                                     "agents": [{"agent_id": "claude_code", "path": cli}],
                                     "projects": [], "shell": null
                                 }),
+                                "native_sessions" => json!([]),
                                 "native_preview" => json!({
                                     "applied": ["Model: opus"], "with_cost": [],
                                     "not_applicable": [], "can_start": true,
@@ -973,6 +977,31 @@ mod capability_tests {
     }
 
     #[test]
+    fn session_polling_uses_only_attached_hosts_including_the_legacy_fallback() {
+        let host = LegacyHost::new(false);
+        let link = host.link();
+        assert_eq!(sessions_with_link(&link, false).unwrap(), json!([]));
+        assert_eq!(
+            host.requests()
+                .iter()
+                .map(|(op, _)| op.as_str())
+                .collect::<Vec<_>>(),
+            vec!["native_sessions_extended", "native_sessions"]
+        );
+        drop(host);
+        assert_eq!(
+            sessions_with_link(&link, false).unwrap_err().code,
+            "host_unavailable"
+        );
+        assert_eq!(
+            sessions_with_link(&HostLink::new(), false)
+                .unwrap_err()
+                .code,
+            "host_unavailable"
+        );
+    }
+
+    #[test]
     fn readiness_heartbeat_has_zero_version_probes_and_one_request_per_interval() {
         use crate::{
             host::core::HostCore,
@@ -1037,16 +1066,20 @@ mod capability_tests {
             );
         }
         let started = Instant::now();
+        let mut readiness_elapsed = Duration::ZERO;
         for _ in 0..30 {
+            assert_eq!(sessions_with_link(&link, false).unwrap(), json!([]));
+            let check_started = Instant::now();
             assert_eq!(
                 readiness_with_link(&link).unwrap()["m9_native_status"],
                 "ready"
             );
+            readiness_elapsed += check_started.elapsed();
         }
         let elapsed = started.elapsed();
         assert_eq!(
             requests.lock().unwrap().as_slice(),
-            vec!["native_readiness"; 30]
+            ["native_sessions_extended", "native_readiness"].repeat(30)
         );
         assert_eq!(fs::read_to_string(&log).unwrap(), initial);
         assert!(
@@ -1070,10 +1103,11 @@ mod capability_tests {
         );
         assert_eq!(fs::read_to_string(&log).unwrap(), initial);
         println!(
-            "READINESS_COST intervals=30 simulated_ms=60000 requests=30 external_processes=0 version_probes=0 initial_version_probes={} total_us={} mean_us={}",
+            "READINESS_COST intervals=30 simulated_ms=60000 requests=60 external_processes=0 version_probes=0 initial_version_probes={} total_us={} mean_us={} heartbeat_total_us={}",
             initial.lines().count(),
-            elapsed.as_micros(),
-            elapsed.as_micros() / 30
+            readiness_elapsed.as_micros(),
+            readiness_elapsed.as_micros() / 30,
+            elapsed.as_micros()
         );
         stop.store(true, Ordering::Release);
         server.join().unwrap();

@@ -299,7 +299,11 @@ backend's optional M9 registry and sticky write-failure flag on every request, w
 store lock. It performs no filesystem I/O, provider discovery, version/update checks or process
 creation. Contention is a failed check, not evidence of degraded storage. The client uses only
 its attached host: it never initializes, reconnects, retries or spawns a host for this read.
-An older host returning `unknown_op` becomes `host_outdated`, with no discovery fallback and
+Session polling, including the legacy fallback, also uses the attached-only transport so a
+heartbeat cannot restart a missing host. Initial discovery attaches before either periodic
+resource is first read. User execution commands retain their existing connection behavior.
+Full discovery releases storage/registry locks before probing versions, so an explicit slow
+discovery cannot block concurrent readiness. An older host returning `unknown_op` becomes `host_outdated`, with no discovery fallback and
 M9 unconfirmed/blocked. Missing/malformed answers also fail closed. Claude/Codex legacy
 admission is unchanged. Existing clients continue using the unchanged launcher operations.
 

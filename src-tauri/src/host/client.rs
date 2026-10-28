@@ -170,7 +170,7 @@ impl HostLink {
 
     /// A read of an already attached host. Never initializes, spawns, reconnects or retries.
     /// Readiness must not start a process, even when the previously connected host disappears.
-    pub fn native_readiness(&self) -> Result<Value, HostError> {
+    pub fn call_attached(&self, op: &str, params: Value) -> Result<Value, HostError> {
         let mode = self
             .mode
             .try_lock()
@@ -178,8 +178,8 @@ impl HostLink {
             .clone()
             .ok_or_else(|| HostError::new("host_unavailable"))?;
         match &*mode {
-            Mode::Local(core) => core.call("native_readiness", Value::Null),
-            Mode::Remote(remote) => remote.call("native_readiness", Value::Null),
+            Mode::Local(core) => core.call(op, params),
+            Mode::Remote(remote) => remote.call(op, params),
         }
     }
 

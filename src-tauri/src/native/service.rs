@@ -600,6 +600,10 @@ impl NativeService {
             shown.default_profile.clone_from(&project.default_profile);
             shown.last_used = project.last_used;
         }
+        // Project/storage facts above are already owned snapshots. Version discovery can
+        // block on external CLIs; it must not hold storage locks or delay live readiness.
+        drop(extended);
+        drop(registry);
         let agents = self.agents();
         LauncherView {
             agents: agents
@@ -1489,6 +1493,35 @@ impl NativeService {
 #[cfg(test)]
 mod readiness_tests {
     use super::*;
+
+    #[test]
+    fn slow_discovery_cannot_hold_the_storage_readiness_lock() {
+        let (base, home, bin) = super::super::service_tests::World::directories();
+        let service = super::super::service_tests::World::open(&base, &home, &bin);
+        let marker = bin.join("probe-entered");
+        let release = bin.join("probe-release");
+        super::super::service_tests::script(
+            &bin.join("opencode"),
+            &format!(
+                "[ \"$1\" = \"--version\" ] || exit 81\necho entered > '{}'\nwhile [ ! -f '{}' ]; do /usr/bin/sleep 0.01; done\necho 1.19.4",
+                marker.display(),
+                release.display()
+            ),
+        );
+        let discovery = service.clone();
+        let worker = std::thread::spawn(move || discovery.launcher_extended());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !marker.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let entered = marker.exists();
+        let result = service.readiness();
+        fs::write(release, b"release").unwrap();
+        worker.join().unwrap();
+        fs::remove_dir_all(base.parent().unwrap()).unwrap();
+        assert!(entered, "fake version probe never entered");
+        assert_eq!(result.unwrap().m9_native_status, "ready");
+    }
 
     #[test]
     fn readiness_is_live_bounded_and_never_waits_on_store_or_discovery_locks() {
