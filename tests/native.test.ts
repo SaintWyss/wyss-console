@@ -19,6 +19,7 @@ import {
   modelFacts,
   sharedFolders,
   stateLabel,
+  START_UNRECORDED,
   STOP_UNRECORDED,
   switchHint,
 } from '../src/lib/features/native/present';
@@ -735,6 +736,98 @@ describe('a stop whose M9 record could not be written', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(controller.state().sessions[0]?.state).toBe('stopped');
+    controller.dispose();
+  });
+});
+
+describe('a start whose M9 record could not be written, and the first load', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const storeFailure = () =>
+    new NativeCallError({ code: 'store_unavailable', reasons: [] });
+
+  it('is not retried, says a process may exist, and leaves M9 waiting for the store', async () => {
+    let degraded = false;
+    const client = fakeClient({
+      launcher: vi.fn(async () =>
+        launcherWithM9(degraded ? 'storage_unavailable' : 'ready'),
+      ),
+      start: vi.fn(async () => {
+        degraded = true;
+        throw storeFailure();
+      }),
+    });
+    const controller = new NativeController(() => undefined, undefined, client);
+    controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(await controller.startAgent('claude_code', '/home/u', null)).toBe(
+      false,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.state().failure).toEqual({
+      code: 'store_unavailable',
+      reasons: [START_UNRECORDED],
+    });
+    expect(controller.state().m9Blocked).toBe(true);
+    expect(await controller.startAgent('opencode', '/home/u', null)).toBe(
+      false,
+    );
+    expect(client.start).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(client.start).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+
+  it('treats a restart whose record failed the same way, and reads the launcher again', async () => {
+    let launcherReads = 0;
+    const client = fakeClient({
+      launcher: vi.fn(async () => {
+        launcherReads += 1;
+        return launcherWithM9('ready');
+      }),
+      sessions: vi.fn(async () => [session()]),
+      restart: vi.fn(async () => {
+        throw storeFailure();
+      }),
+    });
+    const controller = new NativeController(() => undefined, undefined, client);
+    controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+    const readsBefore = launcherReads;
+
+    expect(await controller.restart('a'.repeat(32))).toBe(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.state().failure?.reasons).toEqual([START_UNRECORDED]);
+    expect(client.restart).toHaveBeenCalledTimes(1);
+    expect(launcherReads).toBeGreaterThan(readsBefore);
+    controller.dispose();
+  });
+
+  it('lets a slow first answer never restore a readiness that a later read withdrew', async () => {
+    const answers: Array<(l: Launcher) => void> = [];
+    let reads = 0;
+    const client = fakeClient({
+      launcher: vi.fn(() => {
+        reads += 1;
+        if (reads === 1)
+          return new Promise<Launcher>((resolve) => answers.push(resolve));
+        return Promise.resolve(launcherWithM9('storage_unavailable'));
+      }),
+    });
+    const controller = new NativeController(() => undefined, undefined, client);
+    controller.setVisible(true);
+    await controller.refreshLauncher();
+    expect(controller.state().m9Blocked).toBe(true);
+
+    answers[0]!(launcherWithM9('ready'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.state().phase).toBe('ready');
+    expect(controller.state().launcher?.m9_native_status).toBe(
+      'storage_unavailable',
+    );
+    expect(controller.state().m9Blocked).toBe(true);
     controller.dispose();
   });
 });

@@ -23,6 +23,11 @@ export const isM9Agent = (agent: AgentId): boolean =>
   agent === 'opencode' || agent === 'hermes';
 
 /** Shown when the process ended and only its record failed: the stop happened, the write did not. */
+/** Shown when a start or restart failed while its record was written: a process may exist. */
+export const START_UNRECORDED =
+  'The Console could not record this start, so a process may exist. Check the sessions below. Nothing is started again automatically, and OpenCode and Hermes wait until the store is confirmed.';
+
+/** Shown when a stop ended the process and only its record failed. */
 export const STOP_UNRECORDED =
   'The process was stopped, but the Console could not record that. Nothing was started again, and OpenCode and Hermes stay blocked until the store is confirmed.';
 
