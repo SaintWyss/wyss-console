@@ -161,6 +161,38 @@ it('recovers from periodic read failures without an application restart or a pro
   expect(client.stop).not.toHaveBeenCalled();
 });
 
+it('accepts a current confirmation requested after trust was withdrawn even if it is slow too', async () => {
+  const stale = deferred<Launcher>();
+  const current = deferred<Launcher>();
+  let reads = 0;
+  const client = fakeClient({
+    launcher: vi.fn(() => {
+      reads++;
+      if (reads === 1) return Promise.resolve(launcherWithM9('ready'));
+      return reads === 2 ? stale.promise : current.promise;
+    }),
+  });
+  const controller = own(
+    new NativeController(() => undefined, undefined, client),
+  );
+  controller.setVisible(true);
+  await settle();
+  const older = controller.refreshLauncher();
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(controller.state().m9Uncertain).toBe(true);
+  stale.resolve(launcherWithM9('ready'));
+  await older;
+  await settle();
+  expect(controller.state().m9Blocked).toBe(true);
+  expect(client.launcher).toHaveBeenCalledTimes(3);
+  await vi.advanceTimersByTimeAsync(3000);
+  current.resolve(launcherWithM9('ready'));
+  await settle();
+  expect(controller.state().m9Blocked).toBe(false);
+  expect(client.launcher).toHaveBeenCalledTimes(3);
+  expect(client.start).not.toHaveBeenCalled();
+});
+
 it('invalidates a read before the mutation settles and reconciles a possible start effect once', async () => {
   const old = deferred<Launcher>();
   const starting = deferred<ReturnType<typeof reply>>();

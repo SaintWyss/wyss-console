@@ -268,8 +268,10 @@ Launcher checks do not depend on a session transition: another window may end an
 session between reads. With responsive IPC, a degraded store is reflected within one interval
 plus the response time. If its confirmation remains pending at the next heartbeat, M9 becomes
 unconfirmed and OpenCode/Hermes cannot start or restart. Pending background reads are coalesced;
-a stalled read does not create a request on every heartbeat. Its late reply is not trusted to
-restore ready: one fresh confirmation follows its completion. Check again can supersede a stalled
+a stalled read does not create a request on every heartbeat. A read begun before trust was
+withdrawn cannot restore ready with a late reply: one fresh confirmation follows its completion.
+A current confirmation already requested after that withdrawal may succeed even if it is slow;
+this prevents an endless confirmation loop. Check again can supersede a stalled
 confirmation, and double clicks on a pending check are coalesced.
 
 Every local session mutation invalidates earlier launcher and session reads at entry and exit.

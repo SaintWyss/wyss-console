@@ -434,6 +434,7 @@ export class NativeController {
   private readLauncher(): Promise<boolean> {
     if (this.disposed || this.mutations > 0) return Promise.resolve(false);
     const seq = ++this.launcherSeq;
+    const startedConfirmed = !this.m9Uncertain;
     let read: Promise<Launcher>;
     try {
       read = this.client.launcher();
@@ -446,7 +447,7 @@ export class NativeController {
           if (seq !== this.launcherSeq || this.disposed) return false;
           // A reply that outlived its freshness interval may have captured ready before
           // another window degraded the store. Confirm again after it completes.
-          if (this.launcherPending?.slow) return false;
+          if (this.launcherPending?.slow && startedConfirmed) return false;
           this.launcher = launcher;
           this.m9Uncertain = false;
           this.emit();
@@ -461,11 +462,11 @@ export class NativeController {
       )
       .finally(() => {
         if (this.launcherPending?.seq === seq) {
-          const slow = this.launcherPending.slow;
+          const reconfirm = this.launcherPending.slow && startedConfirmed;
           this.launcherPending = null;
           this.emit();
           if (
-            slow &&
+            reconfirm &&
             !this.disposed &&
             this.visible &&
             seq === this.launcherSeq &&
