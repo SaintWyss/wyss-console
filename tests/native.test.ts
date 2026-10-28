@@ -5,8 +5,11 @@ import {
   parsePreview,
   parseSession,
   parseStartReply,
+  type Launcher,
+  type NativeSession,
 } from '../src/lib/contracts/native';
 import { NativeController } from '../src/lib/features/native/controller';
+import { NativeCallError } from '../src/lib/desktop/native-client';
 import {
   failureText,
   restorable,
@@ -16,11 +19,13 @@ import {
   modelFacts,
   sharedFolders,
   stateLabel,
+  STOP_UNRECORDED,
   switchHint,
 } from '../src/lib/features/native/present';
 import {
   fakeClient,
   launcher,
+  launcherWithM9,
   profiles,
   reply,
   session,
@@ -508,5 +513,228 @@ describe('the model of a native session', () => {
     expect(
       modelFacts(session(), [], [modelItem('gpt-6', 'codex')]).configured,
     ).toBe('not set in its files');
+  });
+});
+
+describe('a stop whose M9 record could not be written', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const storeFailure = () =>
+    new NativeCallError({ code: 'store_unavailable', reasons: [] });
+  const runningOpencode = (): NativeSession =>
+    session({ agent_id: 'opencode', agent_name: 'OpenCode' });
+  const stoppedOpencode = (): NativeSession =>
+    session({
+      agent_id: 'opencode',
+      agent_name: 'OpenCode',
+      state: 'stopped',
+      ended_at: 1_700_000_001,
+      terminal_id: null,
+      pid: null,
+    });
+  const id = 'a'.repeat(32);
+
+  it('reads the launcher and the sessions again, blocks OpenCode, and never stops twice', async () => {
+    let stopped = false;
+    const client = fakeClient({
+      launcher: vi.fn(async () =>
+        launcherWithM9(stopped ? 'storage_unavailable' : 'ready'),
+      ),
+      sessions: vi.fn(async () => [
+        stopped ? stoppedOpencode() : runningOpencode(),
+      ]),
+      stop: vi.fn(async () => {
+        stopped = true;
+        throw storeFailure();
+      }),
+    });
+    const controller = new NativeController(() => undefined, undefined, client);
+    controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+    await controller.stop(id);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const state = controller.state();
+    expect(client.stop).toHaveBeenCalledTimes(1);
+    expect(state.sessions[0]?.state).toBe('stopped');
+    expect(state.launcher?.m9_native_status).toBe('storage_unavailable');
+    expect(state.m9Blocked).toBe(true);
+    expect(state.failure).toEqual({
+      code: 'store_unavailable',
+      reasons: [STOP_UNRECORDED],
+    });
+    expect(await controller.startAgent('opencode', '/home/u', null)).toBe(
+      false,
+    );
+    expect(client.start).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(client.stop).toHaveBeenCalledTimes(1);
+    expect(client.restart).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it('keeps M9 waiting while the launcher cannot be read, and reads it again on request', async () => {
+    let failing = false;
+    const client = fakeClient({
+      launcher: vi.fn(async () => {
+        if (failing) throw new Error('the desktop did not answer');
+        return launcherWithM9('ready');
+      }),
+      stop: vi.fn(async () => {
+        failing = true;
+        throw storeFailure();
+      }),
+    });
+    const controller = new NativeController(() => undefined, undefined, client);
+    controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+    await controller.stop(id);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(controller.state().m9Uncertain).toBe(true);
+    expect(controller.state().m9Blocked).toBe(true);
+    expect(controller.state().failure?.reasons).toEqual([STOP_UNRECORDED]);
+    expect(await controller.startAgent('opencode', '/home/u', null)).toBe(
+      false,
+    );
+    expect(client.start).not.toHaveBeenCalled();
+
+    failing = false;
+    await controller.refreshLauncher();
+    expect(controller.state().m9Uncertain).toBe(false);
+    expect(controller.state().m9Blocked).toBe(false);
+    expect(await controller.startAgent('opencode', '/home/u', null)).toBe(true);
+    controller.dispose();
+  });
+
+  it('leaves Claude Code available in the same degraded store', async () => {
+    const client = fakeClient({
+      launcher: vi.fn(async () => launcherWithM9('storage_unavailable')),
+    });
+    const controller = new NativeController(() => undefined, undefined, client);
+    controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(controller.state().m9Blocked).toBe(true);
+    expect(await controller.startAgent('claude_code', '/home/u', null)).toBe(
+      true,
+    );
+    expect(client.start).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+
+  it('changes nothing when the stop is recorded', async () => {
+    let stopped = false;
+    const client = fakeClient({
+      launcher: vi.fn(async () => launcherWithM9('ready')),
+      sessions: vi.fn(async () => [
+        stopped ? stoppedOpencode() : runningOpencode(),
+      ]),
+      stop: vi.fn(async () => {
+        stopped = true;
+      }),
+    });
+    const controller = new NativeController(() => undefined, undefined, client);
+    controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+    await controller.stop(id);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(controller.state().failure).toBeNull();
+    expect(controller.state().m9Blocked).toBe(false);
+    expect(controller.state().sessions[0]?.state).toBe('stopped');
+    expect(await controller.startAgent('opencode', '/home/u', null)).toBe(true);
+    expect(client.stop).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+
+  it('lets the newest launcher read decide, even when an older answer arrives last', async () => {
+    const answers: Array<(l: Launcher) => void> = [];
+    const client = fakeClient({
+      launcher: vi.fn(
+        () => new Promise<Launcher>((resolve) => answers.push(resolve)),
+      ),
+      stop: vi.fn(async () => {
+        throw storeFailure();
+      }),
+    });
+    const controller = new NativeController(() => undefined, undefined, client);
+    controller.setVisible(true);
+    answers[0]!(launcherWithM9('ready'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const older = controller.refreshLauncher();
+    const stopping = controller.stop(id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answers).toHaveLength(3);
+    answers[2]!(launcherWithM9('storage_unavailable'));
+    await vi.advanceTimersByTimeAsync(0);
+    answers[1]!(launcherWithM9('ready'));
+    await Promise.all([older, stopping]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(controller.state().launcher?.m9_native_status).toBe(
+      'storage_unavailable',
+    );
+    expect(controller.state().m9Blocked).toBe(true);
+    controller.dispose();
+  });
+
+  it('reads the launcher again when polling sees a session end by itself', async () => {
+    let ended = false;
+    const client = fakeClient({
+      launcher: vi.fn(async () =>
+        launcherWithM9(ended ? 'storage_unavailable' : 'ready'),
+      ),
+      sessions: vi.fn(async () => [
+        ended ? stoppedOpencode() : runningOpencode(),
+      ]),
+    });
+    const controller = new NativeController(() => undefined, undefined, client);
+    controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.launcher).toHaveBeenCalledTimes(1);
+
+    ended = true;
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.launcher).toHaveBeenCalledTimes(2);
+    expect(controller.state().m9Blocked).toBe(true);
+    controller.dispose();
+  });
+
+  it('reads the sessions again when a read was in flight during the stop', async () => {
+    const answers: Array<(s: NativeSession[]) => void> = [];
+    const client = fakeClient({
+      launcher: vi.fn(async () => launcherWithM9('ready')),
+      sessions: vi.fn(
+        () => new Promise<NativeSession[]>((resolve) => answers.push(resolve)),
+      ),
+      stop: vi.fn(async () => {
+        throw storeFailure();
+      }),
+    });
+    const controller = new NativeController(() => undefined, undefined, client);
+    controller.setVisible(true);
+    answers[0]!([runningOpencode()]);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(answers).toHaveLength(2);
+
+    const stopping = controller.stop(id);
+    await vi.advanceTimersByTimeAsync(0);
+    // The read that was running answers with what was true before the stop; the next one is
+    // requested only once it has answered, so the stop is not lost.
+    expect(answers).toHaveLength(2);
+    answers[1]!([runningOpencode()]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answers).toHaveLength(3);
+    answers[2]!([stoppedOpencode()]);
+    await stopping;
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(controller.state().sessions[0]?.state).toBe('stopped');
+    controller.dispose();
   });
 });

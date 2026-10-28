@@ -12,6 +12,7 @@
     folderName,
     formatBytes,
     groupByProject,
+    isM9Agent,
     modelFacts,
     switchHint,
     profilesFor,
@@ -81,6 +82,7 @@
       !!project &&
       !!chosen?.installed &&
       !native.starting &&
+      !(native.m9Blocked && isM9Agent(agent)) &&
       (profile === null || (previewCurrent && preview?.can_start === true)),
   );
 
@@ -242,11 +244,21 @@
     </div>
   {:else}
     <div class="native-main">
-      {#if launcher.m9_native_status === 'storage_unavailable'}
+      {#if native.m9Uncertain}
+        <p class="sessions-status" role="status">
+          OpenCode and Hermes wait until the Console confirms its private M9
+          session store again.
+          <button
+            type="button"
+            class="action"
+            onclick={() => controller.refreshLauncher()}>Check again</button
+          >
+        </p>
+      {:else if launcher.m9_native_status === 'storage_unavailable'}
         <p class="sessions-status failed" role="alert">
-          OpenCode and Hermes are blocked because the private M9 session store
-          could not be read. Its bytes were preserved. Claude Code and Codex
-          remain available.
+          OpenCode and Hermes are blocked: the Console could not confirm its
+          private M9 session store, because a read or a write failed. Claude
+          Code and Codex stay available where the Console allows them.
         </p>
       {:else if launcher.m9_native_status === 'legacy_host'}
         <p class="sessions-status" role="note">
@@ -571,7 +583,8 @@
                         <button
                           type="button"
                           class="action"
-                          disabled={native.starting}
+                          disabled={native.starting ||
+                            (native.m9Blocked && isM9Agent(session.agent_id))}
                           onclick={() => controller.restart(session.id)}
                           >Restart</button
                         >
@@ -586,7 +599,8 @@
                         <button
                           type="button"
                           class="action"
-                          disabled={native.starting}
+                          disabled={native.starting ||
+                            (native.m9Blocked && isM9Agent(session.agent_id))}
                           onclick={() => controller.restart(session.id)}
                           >Start again</button
                         >

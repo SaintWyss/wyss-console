@@ -18,6 +18,14 @@ export const AGENT_LABEL: Record<AgentId, string> = {
   hermes: 'Hermes Agent (Native)',
 };
 
+/** The agents whose sessions the Console records in its M9 store; the others are legacy. */
+export const isM9Agent = (agent: AgentId): boolean =>
+  agent === 'opencode' || agent === 'hermes';
+
+/** Shown when the process ended and only its record failed: the stop happened, the write did not. */
+export const STOP_UNRECORDED =
+  'The process was stopped, but the Console could not record that. Nothing was started again, and OpenCode and Hermes stay blocked until the store is confirmed.';
+
 /** A restart's new session is "restarting" until its process runs. */
 export function stateLabel(s: NativeSession): { text: string; tone: Tone } {
   switch (s.state) {

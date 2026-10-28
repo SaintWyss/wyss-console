@@ -32,7 +32,7 @@ import {
   stopNative,
 } from '../../desktop/native-client';
 import { currentWorkspace } from './bridge';
-import { restorable } from './present';
+import { STOP_UNRECORDED, isM9Agent, restorable } from './present';
 
 export interface NativeClient {
   launcher(): Promise<Launcher>;
@@ -118,6 +118,10 @@ export interface NativeState {
   notice: string | null;
   /** The profile being edited: an id, `new`, or none. */
   editing: string | null;
+  /** The M9 store is not confirmed since a failed read or write, until a read answers again. */
+  m9Uncertain: boolean;
+  /** Whether OpenCode and Hermes may not start now: the store is degraded or not confirmed. */
+  m9Blocked: boolean;
 }
 
 /**
@@ -140,6 +144,10 @@ export class NativeController {
   private reading = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastShown = '';
+  private m9Uncertain = false;
+  /** The number of the newest launcher read: an older answer never overrides it. */
+  private launcherSeq = 0;
+  private rereadSessions = false;
 
   constructor(
     private readonly publish: (state: NativeState) => void,
@@ -162,6 +170,8 @@ export class NativeController {
       failure: this.failure,
       notice: this.notice,
       editing: this.editing,
+      m9Uncertain: this.m9Uncertain,
+      m9Blocked: this.blocksM9(),
     };
   }
   private emit() {
@@ -214,6 +224,20 @@ export class NativeController {
     } else this.schedule();
   }
 
+  /** Whether an M9 start must wait: the store is degraded, or not confirmed since a failure. */
+  private blocksM9(): boolean {
+    return (
+      this.m9Uncertain ||
+      this.launcher?.m9_native_status === 'storage_unavailable'
+    );
+  }
+  /** Refuses an M9 start (or restart) here, without asking the desktop, while it must wait. */
+  private refuseM9(agent: AgentId | undefined): boolean {
+    if (!agent || !isM9Agent(agent) || !this.blocksM9()) return false;
+    this.failure = { code: 'store_unavailable', reasons: [] };
+    this.emit();
+    return true;
+  }
   private anyRunning(): boolean {
     return this.sessions.some(
       (s) => s.state === 'running' || s.state === 'requested',
@@ -234,7 +258,13 @@ export class NativeController {
   }
 
   refreshSessions() {
-    if (this.disposed || this.reading) return;
+    if (this.disposed) return;
+    // A read already running may have started before the change this call reports: the
+    // next read starts once it has answered, so the last answer is never older than the change.
+    if (this.reading) {
+      this.rereadSessions = true;
+      return;
+    }
     this.stopTimer();
     this.reading = true;
     void this.client.sessions(this.visible).then(
@@ -246,23 +276,51 @@ export class NativeController {
         const shown = shownKey(sessions);
         if (shown !== this.lastShown) {
           this.lastShown = shown;
-          this.sessions = sessions;
+          this.applySessions(sessions);
           this.emit();
         }
-        this.schedule();
+        this.settleRead();
       },
       () => {
         this.reading = false;
-        this.schedule();
+        this.settleRead();
       },
     );
   }
+  /** After a read: a request made while it ran is served now; otherwise the next poll is due. */
+  private settleRead() {
+    if (this.rereadSessions) {
+      this.rereadSessions = false;
+      this.refreshSessions();
+    } else this.schedule();
+  }
+  /** A session that ended on its own may have been the last write of the store: read the launcher. */
+  private applySessions(sessions: NativeSession[]) {
+    const live = (s: NativeSession) =>
+      s.state === 'running' || s.state === 'requested';
+    const wasLive = new Set(this.sessions.filter(live).map((s) => s.id));
+    const ended = sessions.some((s) => !live(s) && wasLive.has(s.id));
+    this.sessions = sessions;
+    if (ended) void this.refreshLauncher();
+  }
+  /**
+   * Reads the launcher again. Only the newest read decides; a read that fails leaves the M9
+   * store unconfirmed, so no OpenCode or Hermes start relies on an earlier ready.
+   */
   async refreshLauncher() {
+    const seq = ++this.launcherSeq;
     try {
-      this.launcher = await this.client.launcher();
+      const launcher = await this.client.launcher();
+      if (seq !== this.launcherSeq || this.disposed) return;
+      this.launcher = launcher;
+      this.m9Uncertain = false;
       this.emit();
     } catch (error) {
-      this.fail(error);
+      if (seq !== this.launcherSeq) return;
+      this.m9Uncertain = true;
+      // A failure already on screen (an unrecorded stop, say) is more specific than this read.
+      if (this.failure?.code === 'store_unavailable') this.emit();
+      else this.fail(error);
     }
   }
   async refreshProfiles() {
@@ -305,6 +363,7 @@ export class NativeController {
     preview: Preview | null = null,
   ): Promise<boolean> {
     if (this.starting || this.disposed) return false;
+    if (this.refuseM9(agent)) return false;
     this.starting = true;
     this.failure = null;
     this.emit();
@@ -337,6 +396,9 @@ export class NativeController {
   }
   async restart(id: string): Promise<boolean> {
     if (this.starting || this.disposed) return false;
+    if (this.refuseM9(this.sessions.find((s) => s.id === id)?.agent_id)) {
+      return false;
+    }
     this.starting = true;
     this.failure = null;
     this.emit();
@@ -349,6 +411,9 @@ export class NativeController {
     } finally {
       this.starting = false;
       this.emit();
+      // A restart stops the old session first: the store may have changed either way.
+      void this.refreshLauncher();
+      this.refreshSessions();
     }
   }
   /**
@@ -393,12 +458,28 @@ export class NativeController {
       return false;
     }
   }
+  /**
+   * Stops the process. The desktop answers once, and nothing is retried here. Whatever the
+   * answer, the launcher and the sessions are read again, so the view shows the store as it is.
+   */
   async stop(id: string) {
     try {
       await this.client.stop(id);
     } catch (error) {
-      this.fail(error);
+      if (
+        error instanceof NativeCallError &&
+        error.failure.code === 'store_unavailable'
+      ) {
+        // The process ended and only its record failed: the store is unconfirmed until a read says so.
+        this.m9Uncertain = true;
+        this.failure = {
+          code: 'store_unavailable',
+          reasons: [STOP_UNRECORDED],
+        };
+        this.emit();
+      } else this.fail(error);
     }
+    void this.refreshLauncher();
     this.refreshSessions();
   }
   async forget(id: string) {

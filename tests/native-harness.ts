@@ -54,6 +54,31 @@ export function launcher(over: Record<string, unknown> = {}): Launcher {
   });
 }
 
+/** The launcher with OpenCode installed beside Claude Code: the M9 agent a degraded store guards. */
+export function launcherWithM9(status: Launcher['m9_native_status']): Launcher {
+  return launcher({
+    m9_native_status: status,
+    agents: [
+      {
+        agent_id: 'claude_code',
+        name: 'Claude Code',
+        executable: 'claude',
+        installed: true,
+        path: '/home/u/.local/bin/claude',
+        version: '2.1.303 (Claude Code)',
+      },
+      {
+        agent_id: 'opencode',
+        name: 'OpenCode',
+        executable: 'opencode',
+        installed: true,
+        path: '/home/u/.opencode/bin/opencode',
+        version: '1.19.4',
+      },
+    ],
+  });
+}
+
 export function session(over: Record<string, unknown> = {}): NativeSession {
   return parseSession({
     id: 'a'.repeat(32),
