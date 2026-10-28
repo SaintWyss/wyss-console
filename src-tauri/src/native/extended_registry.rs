@@ -604,10 +604,17 @@ impl ExtendedRegistry {
         self.save_transition(previous)
     }
 
-    pub fn forget(&mut self, id: &str) -> bool {
+    /// Removes a session record durably. A failure before the rename keeps the record in
+    /// memory, as for every other M9 transition; after the rename the removal is visible and
+    /// the error is still reported.
+    pub fn forget(&mut self, id: &str) -> io::Result<bool> {
+        let previous = self.data.clone();
         let before = self.data.sessions.len();
         self.data.sessions.retain(|session| session.id != id);
-        before != self.data.sessions.len()
+        if before == self.data.sessions.len() {
+            return Ok(false);
+        }
+        self.save_transition(previous).map(|()| true)
     }
 
     pub fn save(&self) -> io::Result<()> {

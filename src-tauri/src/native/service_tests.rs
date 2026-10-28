@@ -597,6 +597,123 @@ fn legacy_launch_with_existing_m9_default_refuses_unpersistable_clear() {
 }
 
 #[test]
+fn a_stop_that_cannot_be_persisted_is_reported_and_withdraws_m9_readiness() {
+    let world = World::new();
+    let running = world.start(AgentId::Opencode, None).unwrap();
+    let id = running.session.session.id.clone();
+    let sidecar = world.base.join("registry/m9-native-sessions-v1.json");
+    let original = fs::read(&sidecar).unwrap();
+    // A directory where the file should be makes the replacing rename fail before it happens,
+    // so the authoritative file still says running.
+    fs::remove_file(&sidecar).unwrap();
+    fs::create_dir(&sidecar).unwrap();
+
+    assert_eq!(
+        world.service.stop(&world.terminal, &id).unwrap_err().code,
+        "store_unavailable"
+    );
+    // The process ended, and memory records that. Nothing claims the ending is durable.
+    assert_eq!(
+        world.service.session_record(&id).unwrap().state,
+        State::Stopped
+    );
+    assert_ne!(
+        world.service.launcher_extended().m9_native_status,
+        "ready",
+        "a failed finish write must not advertise M9 storage as ready"
+    );
+
+    fs::remove_dir(&sidecar).unwrap();
+    fs::write(&sidecar, &original).unwrap();
+    // A reopen re-reads the authoritative file, which says running, and recovers the session
+    // as lost. Nothing is started again.
+    let reopened = World::open(&world.base, &world.home, &world.bin);
+    assert_eq!(reopened.session_record(&id).unwrap().state, State::Lost);
+}
+
+#[test]
+fn a_failed_clear_in_one_project_does_not_block_legacy_launch_in_another() {
+    let world = World::new();
+    let opencode = world.start(AgentId::Opencode, None).unwrap();
+    let sidecar = world.base.join("registry/m9-native-sessions-v1.json");
+    let original = fs::read(&sidecar).unwrap();
+    fs::remove_file(&sidecar).unwrap();
+    fs::create_dir(&sidecar).unwrap();
+
+    // Project A still has the M9 default that could not be removed durably.
+    assert_eq!(
+        world.start(AgentId::ClaudeCode, None).unwrap_err().code,
+        "store_unavailable"
+    );
+
+    // Project B has no M9 default to clear, so its legacy launch does not depend on the sidecar.
+    let other = world.home.join("unrelated-project");
+    fs::create_dir(&other).unwrap();
+    let project = other.to_string_lossy().into_owned();
+    world.service.remember_chosen(project.clone());
+    let legacy = world
+        .service
+        .start(
+            &world.terminal,
+            StartRequest {
+                agent_id: AgentId::ClaudeCode,
+                project,
+                profile_id: None,
+                size: SIZE,
+                brief: None,
+                plan_token: None,
+                expected_cli_version: None,
+            },
+        )
+        .unwrap();
+    let output = world.output_until(&legacy.terminal.terminal_id, "FAKE-CLAUDE");
+    assert!(output.contains("FAKE-CLAUDE"), "{output:?}");
+
+    // The fence stays on project A while its default remains unresolved.
+    assert_eq!(
+        world.start(AgentId::ClaudeCode, None).unwrap_err().code,
+        "store_unavailable"
+    );
+
+    world
+        .service
+        .stop(&world.terminal, &legacy.session.session.id)
+        .unwrap();
+    fs::remove_dir(&sidecar).unwrap();
+    fs::write(&sidecar, &original).unwrap();
+    world
+        .service
+        .stop(&world.terminal, &opencode.session.session.id)
+        .unwrap();
+}
+
+#[test]
+fn a_forget_that_cannot_be_written_keeps_the_record() {
+    let world = World::new();
+    let opencode = world.start(AgentId::Opencode, None).unwrap();
+    let id = opencode.session.session.id.clone();
+    world.service.stop(&world.terminal, &id).unwrap();
+    let sidecar = world.base.join("registry/m9-native-sessions-v1.json");
+    let original = fs::read(&sidecar).unwrap();
+    fs::remove_file(&sidecar).unwrap();
+    fs::create_dir(&sidecar).unwrap();
+
+    assert_eq!(
+        world.service.forget(&id).unwrap_err().code,
+        "store_unavailable"
+    );
+    assert!(
+        world.service.session_record(&id).is_some(),
+        "a removal that was not written must not hide the record"
+    );
+
+    fs::remove_dir(&sidecar).unwrap();
+    fs::write(&sidecar, &original).unwrap();
+    world.service.forget(&id).unwrap();
+    assert!(world.service.session_record(&id).is_none());
+}
+
+#[test]
 fn failed_m9_default_write_preserves_previous_default_and_reports_storage_unavailable() {
     let world = World::new();
     let opencode = world.start(AgentId::Opencode, None).unwrap();

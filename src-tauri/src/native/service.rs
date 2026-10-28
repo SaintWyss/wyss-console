@@ -201,9 +201,9 @@ struct Inner {
     /// Sticky for this service lifetime after an M9 sidecar write reports failure. It keeps
     /// optional providers unavailable until reopen while legacy launches remain independent.
     m9_storage_degraded: AtomicBool,
-    /// A failed durable removal of an actual M9 default must not be bypassed by a later
-    /// in-memory no-op; the process must reopen and re-read the authoritative sidecar.
-    m9_default_clear_blocked: AtomicBool,
+    /// Projects whose actual M9 default could not be removed durably. Only those projects
+    /// refuse legacy launches; the entries end with a reopen, which re-reads the sidecar.
+    m9_default_clear_blocked: Mutex<BTreeSet<String>>,
     /// M9 sessions whose process started but whose sidecar record could not be committed.
     /// This volatile entry keeps the live process manageable without claiming durability.
     volatile_sessions: Mutex<HashMap<String, Session>>,
@@ -422,7 +422,7 @@ impl NativeService {
                 registry: Mutex::new(registry),
                 extended_registry: Mutex::new(extended_registry),
                 m9_storage_degraded: AtomicBool::new(false),
-                m9_default_clear_blocked: AtomicBool::new(false),
+                m9_default_clear_blocked: Mutex::new(BTreeSet::new()),
                 volatile_sessions: Mutex::new(HashMap::new()),
                 recovered_sessions,
                 recovered_defaults: Mutex::new(recovered_defaults),
@@ -716,11 +716,6 @@ impl NativeService {
             return Err(NativeError::new("busy"));
         }
         let _starting = Starting(&self.inner.starting);
-        if request.agent_id.is_legacy()
-            && self.inner.m9_default_clear_blocked.load(Ordering::Acquire)
-        {
-            return Err(NativeError::new("store_unavailable"));
-        }
         if !request.agent_id.is_legacy()
             && (lock(&self.inner.extended_registry).is_none()
                 || self.inner.m9_storage_degraded.load(Ordering::Acquire))
@@ -728,6 +723,15 @@ impl NativeService {
             return Err(NativeError::new("store_unavailable"));
         }
         let project = self.project_allowed(&request.project)?;
+        let project_key = project.to_string_lossy().into_owned();
+        // Only the project whose M9 default could not be removed is fenced. A canonical path
+        // identifies it, so an alias of the same project is fenced too, and unrelated projects
+        // keep their legacy launches.
+        if request.agent_id.is_legacy()
+            && lock(&self.inner.m9_default_clear_blocked).contains(&project_key)
+        {
+            return Err(NativeError::new("store_unavailable"));
+        }
         let agent = self
             .agents()
             .into_iter()
@@ -862,9 +866,7 @@ impl NativeService {
                         self.inner
                             .m9_storage_degraded
                             .store(true, Ordering::Release);
-                        self.inner
-                            .m9_default_clear_blocked
-                            .store(true, Ordering::Release);
+                        lock(&self.inner.m9_default_clear_blocked).insert(project_key.clone());
                         return Err(NativeError::new("store_unavailable"));
                     }
                 }
@@ -874,7 +876,6 @@ impl NativeService {
         } else {
             None
         };
-        let project_key = project.to_string_lossy().into_owned();
         let prior_recovery_override =
             if request.agent_id.is_legacy() && lock(&self.inner.extended_registry).is_none() {
                 let previous = lock(&self.inner.recovered_defaults)
@@ -1086,8 +1087,13 @@ impl NativeService {
                 Err(_) => return Err(NativeError::new("stop_failed")),
             }
         }
-        self.finish(id, State::Stopped, None, None);
-        Ok(())
+        // The process ended above. Success is reported only when that ending was written. If the
+        // write failed, the caller learns it now, while the observed Stopped state stays in memory.
+        if self.finish(id, State::Stopped, None, None) {
+            Ok(())
+        } else {
+            Err(NativeError::new("store_unavailable"))
+        }
     }
 
     /// A new session with the same agent, project and profile. The old one is stopped only
@@ -1153,9 +1159,9 @@ impl NativeService {
             let Some(extended) = extended.as_mut() else {
                 return Err(NativeError::new("store_unavailable"));
             };
-            extended.forget(id);
             extended
-                .save()
+                .forget(id)
+                .map(|_| ())
                 .map_err(|_| NativeError::new("store_unavailable"))
         } else {
             registry.forget(id);
@@ -1165,8 +1171,14 @@ impl NativeService {
         }
     }
 
-    fn finish(&self, id: &str, state: State, code: Option<u32>, signal: Option<String>) {
+    /// Records how a session ended. The process effect is already applied when this runs, so
+    /// the in-memory state always follows the observed process. The return value is `false`
+    /// only when this ending was written to the M9 sidecar and that write failed; a failed
+    /// write also withdraws M9 storage. Volatile sessions have no write here, and their storage
+    /// failure was already reported when they started.
+    fn finish(&self, id: &str, state: State, code: Option<u32>, signal: Option<String>) -> bool {
         lock(&self.inner.live).remove(id);
+        let mut persisted = true;
         {
             let mut registry = lock(&self.inner.registry);
             if let Some(session) = registry.session_mut(id) {
@@ -1192,8 +1204,27 @@ impl NativeService {
                         false
                     };
                     if found {
-                        let _ = extended.save();
-                    } else if let Some(session) = lock(&self.inner.volatile_sessions).get_mut(id)
+                        if extended.save().is_err() {
+                            // Not a durable ending: keep the observed state in memory, but do
+                            // not advertise M9 storage as ready. A reopen re-reads the sidecar,
+                            // where the session still appears running and is recovered as lost.
+                            self.inner
+                                .m9_storage_degraded
+                                .store(true, Ordering::Release);
+                            persisted = false;
+                        }
+                    } else {
+                        if let Some(session) = lock(&self.inner.volatile_sessions).get_mut(id)
+                            && !session.state.finished()
+                        {
+                            session.state = state;
+                            session.ended_at = Some(store::now());
+                            session.exit_code = code;
+                            session.exit_signal = signal;
+                        }
+                    }
+                } else {
+                    if let Some(session) = lock(&self.inner.volatile_sessions).get_mut(id)
                         && !session.state.finished()
                     {
                         session.state = state;
@@ -1201,19 +1232,13 @@ impl NativeService {
                         session.exit_code = code;
                         session.exit_signal = signal;
                     }
-                } else if let Some(session) = lock(&self.inner.volatile_sessions).get_mut(id)
-                    && !session.state.finished()
-                {
-                    session.state = state;
-                    session.ended_at = Some(store::now());
-                    session.exit_code = code;
-                    session.exit_signal = signal;
                 }
             }
         }
         if id_ok(id) {
             let _ = fs::remove_dir_all(self.inner.base.join("sessions").join(id));
         }
+        persisted
     }
 
     /// The native session whose terminal this is, while it runs.
@@ -1306,7 +1331,9 @@ impl NativeService {
                     }
                 },
                 // The terminal service does not know it: nothing says how it ended.
-                Err(_) => self.finish(&id, State::Lost, None, None),
+                Err(_) => {
+                    self.finish(&id, State::Lost, None, None);
+                }
             }
         }
         if sample {
