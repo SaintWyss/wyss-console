@@ -251,6 +251,24 @@ Risk: calling integration coverage “production verified”, unqualified target
 service rollback interrupting sessions. Rollback: tested matching binary/consistent
 store snapshot with explicitly approved downtime/loss window; no downgrade/force push.
 
+> **Owner decision (2026-10-27): two acceptance levels.**
+>
+> - **A. M8 Engineering Integration.** The implemented and independently reviewed
+>   increment (three desktop themes, theme-aware terminal ANSI palette, skip link and
+>   contrast tests, preferences schema 2 with exact v1 migration, Android appearance)
+>   may be integrated into `main` only after: (1) a formal GitHub review of the exact
+>   candidate; (2) the privacy evidence for that candidate passes with no failure;
+>   (3) the repository checks pass on the final tree. This level does not close M8.
+> - **B. Whole-Product Acceptance.** Unchanged and still mandatory: FP-NFR-01 and
+>   M01..M33 on both reference PCs and Android with approved frozen budgets;
+>   FP-NFR-02 on real WebKitGTK, IME, TalkBack and physical devices; FP-NFR-03 installed
+>   update, consistent backup, WAL recovery, rollback and power-loss rehearsals;
+>   JF-01..JF-12 end-to-end journeys including provider and M7 dependencies; every AUD-01
+>   and security gate.
+>
+> Product status: **NOT_ACCEPTED / RELEASE_BLOCKED**. M8 whole-product is **not CLOSED**.
+> Managed, real providers and unauthorized remote functions remain disabled.
+
 ### M9 — Retained extensions
 
 > **Engineering slice (2026-10-26):** [M9 record](../acceptance/m9-engineering-2026-10-26.md)

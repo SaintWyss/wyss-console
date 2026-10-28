@@ -131,6 +131,47 @@ the M8 roadmap DoD.
   found no other evidence mismatch. Static review is not GitHub approval,
   hardware/provider acceptance or production acceptance.
 
+## Owner acceptance decision (2026-10-27)
+
+The owner split M8 into two levels, as recorded in the roadmap. Level A (engineering
+integration) covers this increment. Level B (whole-product acceptance) keeps every
+original requirement; nothing here lowers a threshold, a budget or a security gate.
+
+Level A conditions and status at this record:
+
+| Condition                                                     | Status                                                                           |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Exact candidate `77f0c5d` and the documentation commit on top | Repository checks run on the final tree; see the commit record                   |
+| Independent review of the candidate (local Sol High)          | REJECT on whole-product gates only; no security regression found                 |
+| Formal GitHub review of the exact candidate                   | NOT REQUESTED. Required before integration.                                      |
+| Privacy evidence for the candidate                            | PASS for the existing suites listed below; full product corpus still outstanding |
+
+Privacy evidence on `77f0c5d` (tree `d3e6f23e`, clean worktree). All suites exit 0:
+
+- `redact` (binary): 18 passed, 0 failed.
+- `leak` (library and binary): 1 and 1 passed.
+- `secret` (library): 3 passed; (binary): 13 passed, 2 ignored.
+- `credential` (library): 14 passed, 2 ignored; (binary): 11 passed, 1 ignored.
+- `repo-scan`: 5 passed, 0 failed, over 1720 tracked files.
+
+Credential-shaped strings in the source are synthetic fixtures (for example
+`sk-ant-api03-SECRETVALUE` in `src-tauri/src/f8/claude/credential.rs`). These suites
+are existing unit tests. They are not the final product corpus across journal,
+settings, logs and exports with a live backend, which remains outstanding.
+
+Chromium browser evidence (11 of 11 checks passed) is partial increment evidence on the
+shell: skip link, focus, tab sequence, contrast in three themes for the console view,
+reflow at 320 px, root font scale 200%, and reduced-motion media. It is not a substitute
+for WebKitGTK, terminal-with-backend, IME or TalkBack acceptance.
+
+Level B remains blocked by: FP-NFR-01 (reference hardware and approved budgets),
+FP-NFR-02 (WebKitGTK, IME, TalkBack), FP-NFR-03 (installed update, backup, WAL, rollback),
+JF-01..JF-12 (journeys, providers, M7 OD01/OD02), and the open AUD-01 items (V2 and
+reviewed plan, `model_id`, `approval_reference`, real provider acceptance).
+
+Product status: NOT_ACCEPTED / RELEASE_BLOCKED. M8 whole-product is not CLOSED.
+Managed, real providers and unauthorized remote functions remain disabled.
+
 ## Requirement status
 
 | Requirement                                                                    | Status                                                   | Evidence / limitation                                                                                                                                                                                      |
