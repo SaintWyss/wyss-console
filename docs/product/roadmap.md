@@ -256,9 +256,17 @@ store snapshot with explicitly approved downtime/loss window; no downgrade/force
 > - **A. M8 Engineering Integration.** The implemented and independently reviewed
 >   increment (three desktop themes, theme-aware terminal ANSI palette, skip link and
 >   contrast tests, preferences schema 2 with exact v1 migration, Android appearance)
->   may be integrated into `main` only after: (1) a formal GitHub review of the exact
->   candidate; (2) the privacy evidence for that candidate passes with no failure;
->   (3) the repository checks pass on the final tree. This level does not close M8.
+>   may be integrated into `main` only after: (1) a documented independent technical
+>   review; (2) resolution of every blocking security finding; (3) all required CI
+>   checks succeed on the exact final HEAD; (4) synthetic privacy evidence passes
+>   with its scope declared; and (5) the owner's explicit acceptance is recorded in
+>   PR #32. This level does not close M8.
+>   **Solo-maintainer exception, PR #32 only:** because this repository has one
+>   maintainer, these conditions replace approval by a second GitHub collaborator
+>   exclusively for this increment. Sol High's review is technical evidence, not a
+>   human GitHub approval; no `APPROVED` review is implied or fabricated. The
+>   exception does not apply to another PR, Whole-Product Acceptance, Managed
+>   activation, or any AUD-01, M7 or real-provider gate.
 > - **B. Whole-Product Acceptance.** Unchanged and still mandatory: FP-NFR-01 and
 >   M01..M33 on both reference PCs and Android with approved frozen budgets;
 >   FP-NFR-02 on real WebKitGTK, IME, TalkBack and physical devices; FP-NFR-03 installed

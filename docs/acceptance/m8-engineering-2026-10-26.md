@@ -139,12 +139,53 @@ original requirement; nothing here lowers a threshold, a budget or a security ga
 
 Level A conditions and status at this record:
 
-| Condition                                                     | Status                                                                           |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Exact candidate `77f0c5d` and the documentation commit on top | Repository checks run on the final tree; see the commit record                   |
-| Independent review of the candidate (local Sol High)          | REJECT on whole-product gates only; no security regression found                 |
-| Formal GitHub review of the exact candidate                   | NOT REQUESTED. Required before integration.                                      |
-| Privacy evidence for the candidate                            | PASS for the existing suites listed below; full product corpus still outstanding |
+| Condition                                                  | Status                                                                           |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Exact candidate `77f0c5d` and documentation HEAD `c3bc2d5` | Documentation-only delta; production code is unchanged                           |
+| Independent review of the candidate (local Sol High)       | REJECT on whole-product gates only; no security regression found                 |
+| Required CI on exact HEAD `c3bc2d5`                        | 3/3 completed successfully; see the check links below                            |
+| Approval by a second GitHub collaborator                   | Replaced only for PR #32 by the owner-authorized solo-maintainer exception below |
+| Privacy evidence for the candidate                         | PASS for the existing suites listed below; full product corpus still outstanding |
+| Explicit owner acceptance recorded in PR #32               | PENDING; preparing this exception does not grant merge authorization             |
+
+### Solo-maintainer governance exception — PR #32 only
+
+The owner authorized preparation of this limited exception for **M8 Engineering
+Integration, PR #32**, because the repository has one maintainer. For this increment
+only, approval by a second GitHub collaborator may be replaced by all five conditions:
+
+1. A documented independent technical review.
+2. Resolution of every blocking security finding.
+3. All required CI checks succeeding on the exact final HEAD.
+4. Synthetic privacy evidence with its scope declared.
+5. The owner's explicit acceptance recorded in PR #32.
+
+The local Sol High review is accepted as technical evidence, not as a human GitHub
+approval. Its original REJECT under the whole-product gate is not rewritten as an
+`APPROVED` review. The full report is retained outside the repository with the
+M8 candidate review evidence. No blocking security regression was identified in that review; the inherited
+nonblocking journal duplication and all existing production limitations remain
+documented.
+
+The exception does not approve Whole-Product Acceptance, enable Managed, or remove
+any AUD-01, M7 or real-provider gate. It applies to no other PR. Acceptance and merge
+authorization remain pending; no review submission, commit publication or merge is
+performed by recording this preparation.
+
+GitHub CI was verified on exact HEAD
+`c3bc2d56786ff246009030c5bd3a2564235f4b0f` (tree
+`0bc823715ce0bc3e6cabd3ae2c36fca3c7f2e5bc`), on 2026-10-28 UTC:
+
+| Check                                                                                                         | Final status        |
+| ------------------------------------------------------------------------------------------------------------- | ------------------- |
+| [frontend-and-contracts](https://github.com/SaintWyss/wyss-console/actions/runs/40617793594/job/122584251995) | completed / success |
+| [rust-core-and-v9](https://github.com/SaintWyss/wyss-console/actions/runs/40617793594/job/122584252295)       | completed / success |
+| [android-unit-and-build](https://github.com/SaintWyss/wyss-console/actions/runs/40617793533/job/122584251555) | completed / success |
+
+These results belong to `c3bc2d5`. Publishing this governance update creates a new
+HEAD, which must receive all three successful checks before owner acceptance of
+that HEAD and integration. Success on `c3bc2d5` is not CI evidence for an unpublished
+documentation change or a later commit.
 
 Privacy evidence on `77f0c5d` (tree `d3e6f23e`, clean worktree). All suites exit 0:
 
@@ -205,7 +246,9 @@ Managed, real providers and unauthorized remote functions remain disabled.
 
 No owner services, installed application, credentials, working sessions or
 production data were installed, restarted, migrated or changed for this work.
-The M8 change is reviewable and fixture-tested, but M8 is not complete. The PR
-must remain unmerged pending formal independent GitHub review and the M8
-whole-product evidence gates; neither merge readiness nor production readiness
-is claimed.
+The M8 change is reviewable and fixture-tested, but M8 is not complete. Engineering
+Integration (Level A) remains pending explicit owner acceptance recorded in PR #32
+under the limited solo-maintainer exception and successful required CI on the final
+published HEAD. Whole-Product Acceptance (Level B) remains NOT_ACCEPTED /
+RELEASE_BLOCKED with every original evidence and security gate intact. No production
+acceptance or Managed activation is granted.
