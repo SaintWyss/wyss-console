@@ -261,6 +261,35 @@ asks (28 §5.1). It is never sampled on a timer while nothing is shown.
 | A catalogue agent, in a plain terminal                   | The pane marker "Claude Code, started by hand" (FR-NAT-10). It is **not** a native session: no profile, no registry entry, no lifecycle |
 | Unreadable (permission, a process that exited meanwhile) | "Not known"                                                                                                                             |
 
+### 6.2 Native readiness synchronization
+
+The Native overview uses one heartbeat every 2 seconds for sessions and launcher readiness.
+Launcher checks do not depend on a session transition: another window may end and forget a
+session between reads. With responsive IPC, a degraded store is reflected within one interval
+plus the response time. If its confirmation remains pending at the next heartbeat, M9 becomes
+unconfirmed and OpenCode/Hermes cannot start or restart. Pending background reads are coalesced;
+a stalled read does not create a request on every heartbeat. Its late reply is not trusted to
+restore ready: one fresh confirmation follows its completion. Check again can supersede a stalled
+confirmation, and double clicks on a pending check are coalesced.
+
+Every local session mutation invalidates earlier launcher and session reads at entry and exit.
+Start, Restart, Stop and removal reconcile both views after success or failure, once concurrent
+mutations finish. Their errors take precedence over secondary read failures. A failed Start
+never implies that no process exists and never triggers an automatic retry. Only a current
+valid backend confirmation removes M9 uncertainty; legacy admission remains the backend's
+decision. Initial loading and explicit refreshes use the same launcher generations.
+
+Hiding the overview removes its readiness heartbeat. The existing session-only background poll
+continues every 4 seconds while something runs, without resource sampling; no poll remains when
+hidden and idle. Showing the overview withdraws the cached confirmation and reads both views.
+Disposal removes the heartbeat and invalidates pending responses, which cannot publish or start
+follow-up requests. Already sent IPC cannot be cancelled; its late answer is ignored.
+
+The steady visible cost is one session read and one launcher read per 2 seconds, independent of
+the number of sessions. Immediate mutation/finalization confirmations are additional. Timer and
+request bounds are checked with simulated timers in `tests/native-readiness-sync.test.ts` and
+`tests/native-readiness-view.test.ts`; these are not measurements of host CPU consumption.
+
 ## 7. Interfaces of domains A and B
 
 ### 7.1 Terminal service (IF-TERMINAL)

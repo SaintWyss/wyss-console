@@ -131,6 +131,8 @@ export interface NativeState {
   m9Uncertain: boolean;
   /** Whether OpenCode and Hermes may not start now: the store is degraded or not confirmed. */
   m9Blocked: boolean;
+  /** A current launcher confirmation is already in flight. */
+  checkingLauncher: boolean;
 }
 
 /**
@@ -153,9 +155,12 @@ export class NativeController {
   private reading = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastShown = '';
-  private m9Uncertain = false;
+  private m9Uncertain = true;
   /** The number of the newest launcher read: an older answer never overrides it. */
   private launcherSeq = 0;
+  private launcherPending: { seq: number; slow: boolean } | null = null;
+  private sessionsSeq = 0;
+  private mutations = 0;
   private rereadSessions = false;
 
   constructor(
@@ -181,12 +186,16 @@ export class NativeController {
       editing: this.editing,
       m9Uncertain: this.m9Uncertain,
       m9Blocked: this.blocksM9(),
+      checkingLauncher:
+        this.launcherPending?.seq === this.launcherSeq &&
+        !this.launcherPending.slow,
     };
   }
   private emit() {
     if (!this.disposed) this.publish(this.state());
   }
   private fail(error: unknown) {
+    if (this.disposed) return;
     this.failure =
       error instanceof NativeCallError
         ? error.failure
@@ -201,8 +210,9 @@ export class NativeController {
     this.emit();
     void this.load().catch((error: unknown) => {
       if (this.disposed) return;
+      this.withdrawReadiness();
       this.phase = 'failed';
-      this.fail(error);
+      this.readFailed(error);
     });
   }
   /**
@@ -210,6 +220,7 @@ export class NativeController {
    * the sessions: that listing may observe endings that wrote the store, so it is confirmed last.
    */
   private async load() {
+    const sessionsSeq = this.sessionsSeq;
     const first = this.readLauncher();
     const [, profiles, sessions] = await Promise.all([
       first,
@@ -218,12 +229,15 @@ export class NativeController {
     ]);
     if (this.disposed) return;
     this.profiles = profiles;
-    this.sessions = sessions;
+    if (sessionsSeq === this.sessionsSeq) {
+      this.sessions = sessions;
+      this.lastShown = shownKey(sessions);
+    }
     // Only a listing that shows an ending can have been the one that wrote the store.
-    if (sessions.some((s) => !isLive(s)))
-      await this.readLauncher().catch((error: unknown) => this.fail(error));
+    if (sessionsSeq === this.sessionsSeq && sessions.some((s) => !isLive(s)))
+      await this.refreshLauncher();
     if (this.disposed) return;
-    this.phase = 'ready';
+    this.phase = this.launcher ? 'ready' : 'failed';
     this.emit();
     this.schedule();
   }
@@ -231,14 +245,17 @@ export class NativeController {
   /** Whether the overview is shown. Resources are sampled only then. */
   setVisible(visible: boolean) {
     if (this.disposed || visible === this.visible) return;
+    this.stopTimer();
     this.visible = visible;
     if (visible) {
       this.start0();
       if (this.phase === 'ready') {
+        this.withdrawReadiness();
         void this.refreshLauncher();
         this.refreshSessions();
       }
-    } else this.schedule();
+    }
+    this.schedule();
   }
 
   /** Whether an M9 start must wait: the store is degraded, or not confirmed since a failure. */
@@ -254,12 +271,16 @@ export class NativeController {
    * happened. Any other failure is shown as it is.
    */
   private storeFailed(error: unknown, reason: string) {
+    if (this.disposed) return;
     if (
       error instanceof NativeCallError &&
       error.failure.code === 'store_unavailable'
     ) {
       this.m9Uncertain = true;
-      this.failure = { code: 'store_unavailable', reasons: [reason] };
+      this.failure = {
+        code: 'store_unavailable',
+        reasons: [...error.failure.reasons, reason],
+      };
       this.emit();
     } else this.fail(error);
   }
@@ -275,30 +296,96 @@ export class NativeController {
       (s) => s.state === 'running' || s.state === 'requested',
     );
   }
+  /** No read started before a mutation may confirm its outcome or restore old sessions. */
+  private withdrawReadiness() {
+    this.launcherSeq++;
+    this.sessionsSeq++;
+    this.m9Uncertain = true;
+    this.emit();
+  }
+  private beginMutation() {
+    this.mutations++;
+    this.withdrawReadiness();
+  }
+  private endMutation() {
+    this.mutations--;
+    if (this.disposed) return;
+    this.withdrawReadiness();
+    if (this.mutations === 0) {
+      void this.refreshLauncher();
+      this.refreshSessions();
+      this.schedule();
+    }
+  }
   private stopTimer() {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
   private schedule() {
-    this.stopTimer();
-    if (this.disposed || this.phase !== 'ready') return;
-    if (!this.visible && !this.anyRunning()) return;
+    if (
+      this.disposed ||
+      this.phase !== 'ready' ||
+      (!this.visible && !this.anyRunning())
+    ) {
+      this.stopTimer();
+      return;
+    }
+    if (this.timer !== null) return;
+    // One heartbeat, independent of either IPC completing. A hung sessions read cannot
+    // prevent readiness checks, and neither slow read can accumulate background requests.
     this.timer = setTimeout(
-      () => this.refreshSessions(),
+      () => {
+        this.timer = null;
+        const launcherSeq = this.launcherSeq;
+        this.readSessions(false);
+        // Let an immediately available ending request its own confirmation first. Slow
+        // sessions IPC does not hold this heartbeat up; it still checks readiness now.
+        void Promise.resolve().then(() => {
+          if (
+            !this.disposed &&
+            this.visible &&
+            launcherSeq === this.launcherSeq
+          )
+            this.pollLauncher();
+        });
+        this.schedule();
+      },
       this.visible ? this.every.overview : this.every.background,
     );
   }
+  private pollLauncher() {
+    if (this.launcherPending?.seq === this.launcherSeq) {
+      // A confirmation still pending at the next heartbeat is no longer a trusted ready.
+      // Keep waiting for that request rather than starting another one every interval.
+      if (!this.launcherPending.slow) {
+        this.launcherPending.slow = true;
+        this.m9Uncertain = true;
+        this.emit();
+      }
+    } else if (this.mutations === 0) void this.refreshLauncher();
+  }
 
   refreshSessions() {
+    this.readSessions(true);
+  }
+  private readSessions(fresh: boolean) {
     if (this.disposed) return;
-    // A read already running may have started before the change this call reports: the
-    // next read starts once it has answered, so the last answer is never older than the change.
-    if (this.reading) {
+    if (this.mutations > 0) {
       this.rereadSessions = true;
       return;
     }
-    this.stopTimer();
+    // A read already running may have started before the change this call reports: the
+    // next read starts once it has answered, so the last answer is never older than the change.
+    if (this.reading) {
+      if (fresh) {
+        this.sessionsSeq++;
+        this.rereadSessions = true;
+      }
+      return;
+    }
+    this.rereadSessions = false;
     this.reading = true;
+    const seq = ++this.sessionsSeq;
     void this.client.sessions(this.visible).then(
       (sessions) => {
         this.reading = false;
@@ -306,7 +393,7 @@ export class NativeController {
         // What is drawn is rounded (a percent, a megabyte): a read that would draw the same
         // page changes nothing, so the window does no work for it.
         const shown = shownKey(sessions);
-        if (shown !== this.lastShown) {
+        if (seq === this.sessionsSeq && shown !== this.lastShown) {
           this.lastShown = shown;
           this.applySessions(sessions);
           this.emit();
@@ -321,6 +408,7 @@ export class NativeController {
   }
   /** After a read: a request made while it ran is served now; otherwise the next poll is due. */
   private settleRead() {
+    if (this.disposed) return;
     if (this.rereadSessions) {
       this.rereadSessions = false;
       this.refreshSessions();
@@ -340,36 +428,87 @@ export class NativeController {
    * The one way the launcher is read. Each read takes a number when it starts, and only the
    * newest number may change the launcher: an answer that started earlier can never bring back a
    * readiness that a later read or a failed operation withdrew. A failed newest read leaves M9
-   * unconfirmed until a newer read answers. The error reaches the caller only when it is the newest.
+   * unconfirmed until a newer read answers. Only a current read may report an error, and
+   * secondary read failures never replace the original mutation failure.
    */
-  private readLauncher(): Promise<void> {
+  private readLauncher(): Promise<boolean> {
+    if (this.disposed || this.mutations > 0) return Promise.resolve(false);
     const seq = ++this.launcherSeq;
-    return this.client.launcher().then(
-      (launcher) => {
-        if (seq !== this.launcherSeq || this.disposed) return;
-        this.launcher = launcher;
-        this.m9Uncertain = false;
-        this.emit();
-      },
-      (error: unknown) => {
-        if (seq !== this.launcherSeq) return;
-        this.m9Uncertain = true;
-        throw error;
-      },
-    );
+    let read: Promise<Launcher>;
+    try {
+      read = this.client.launcher();
+    } catch (error) {
+      read = Promise.reject(error);
+    }
+    const result = read
+      .then(
+        (launcher) => {
+          if (seq !== this.launcherSeq || this.disposed) return false;
+          // A reply that outlived its freshness interval may have captured ready before
+          // another window degraded the store. Confirm again after it completes.
+          if (this.launcherPending?.slow) return false;
+          this.launcher = launcher;
+          this.m9Uncertain = false;
+          this.emit();
+          return true;
+        },
+        (error: unknown) => {
+          if (seq !== this.launcherSeq || this.disposed) return false;
+          this.m9Uncertain = true;
+          this.readFailed(error);
+          return false;
+        },
+      )
+      .finally(() => {
+        if (this.launcherPending?.seq === seq) {
+          const slow = this.launcherPending.slow;
+          this.launcherPending = null;
+          this.emit();
+          if (
+            slow &&
+            !this.disposed &&
+            this.visible &&
+            seq === this.launcherSeq &&
+            this.mutations === 0
+          )
+            void this.refreshLauncher();
+        }
+      });
+    this.launcherPending = { seq, slow: false };
+    this.emit();
+    return result;
   }
   async refreshLauncher() {
-    try {
-      await this.readLauncher();
-    } catch (error) {
-      // A failure already on screen (an unrecorded stop or start) is more specific than this read.
-      if (this.failure?.code === 'store_unavailable') this.emit();
-      else this.fail(error);
+    if (this.disposed) return;
+    const confirmed = await this.readLauncher();
+    if (confirmed && !this.disposed && this.phase === 'failed') {
+      // The first load may have failed before sessions/profiles were available. A valid
+      // retry reloads those too, instead of leaving a permanently failed page.
+      this.phase = 'idle';
+      this.start0();
     }
   }
+  private readFailed(error: unknown) {
+    if (this.disposed) return;
+    if (this.failure) this.emit();
+    else this.fail(error);
+  }
+  /** The retry button coalesces double clicks, but may supersede a stalled confirmation. */
+  checkLauncher() {
+    if (
+      this.disposed ||
+      (this.launcherPending?.seq === this.launcherSeq &&
+        !this.launcherPending.slow)
+    )
+      return;
+    void this.refreshLauncher();
+  }
   async refreshProfiles() {
+    if (this.disposed) return;
     try {
-      this.profiles = await this.client.profiles();
+      const profiles = await this.client.profiles();
+      if (this.disposed) return;
+      this.profiles = profiles;
       this.emit();
     } catch (error) {
       this.fail(error);
@@ -410,6 +549,7 @@ export class NativeController {
     if (this.refuseM9(agent)) return false;
     this.starting = true;
     this.failure = null;
+    this.beginMutation();
     this.emit();
     try {
       const reply = await this.client.start(
@@ -419,6 +559,7 @@ export class NativeController {
         brief,
         preview,
       );
+      if (this.disposed) return false;
       this.afterStart(reply);
       return true;
     } catch (error) {
@@ -427,18 +568,17 @@ export class NativeController {
     } finally {
       this.starting = false;
       this.emit();
-      // Whether it worked or not, the start may have written the store: read the launcher again.
-      void this.refreshLauncher();
+      this.endMutation();
     }
   }
   private afterStart(reply: StartReply) {
+    if (this.disposed) return;
     this.sessions = [
       ...this.sessions.filter((s) => s.id !== reply.session.id),
       reply.session,
     ];
     this.lastShown = shownKey(this.sessions);
     this.onstarted(reply);
-    this.refreshSessions();
   }
   async restart(id: string): Promise<boolean> {
     if (this.starting || this.disposed) return false;
@@ -447,9 +587,12 @@ export class NativeController {
     }
     this.starting = true;
     this.failure = null;
+    this.beginMutation();
     this.emit();
     try {
-      this.afterStart(await this.client.restart(id));
+      const reply = await this.client.restart(id);
+      if (this.disposed) return false;
+      this.afterStart(reply);
       return true;
     } catch (error) {
       this.storeFailed(error, START_UNRECORDED);
@@ -457,9 +600,7 @@ export class NativeController {
     } finally {
       this.starting = false;
       this.emit();
-      // A restart stops the old session first: the store may have changed either way.
-      void this.refreshLauncher();
-      this.refreshSessions();
+      this.endMutation();
     }
   }
   /**
@@ -476,16 +617,22 @@ export class NativeController {
   }
   /** Removes the records of every session that is not running. */
   async forgetFinished() {
-    for (const session of this.sessions.filter(
-      (s) => s.state !== 'running' && s.state !== 'requested',
-    ))
-      try {
-        await this.client.forget(session.id);
-      } catch (error) {
-        this.fail(error);
-        break;
-      }
-    this.refreshSessions();
+    if (this.disposed) return;
+    this.beginMutation();
+    try {
+      for (const session of this.sessions.filter(
+        (s) => s.state !== 'running' && s.state !== 'requested',
+      ))
+        try {
+          if (this.disposed) break;
+          await this.client.forget(session.id);
+        } catch (error) {
+          this.fail(error);
+          break;
+        }
+    } finally {
+      this.endMutation();
+    }
   }
   /** The brief for handing a session's work to another agent; the user reviews it. */
   async handoff(id: string): Promise<HandoffBrief | null> {
@@ -509,22 +656,27 @@ export class NativeController {
    * answer, the launcher and the sessions are read again, so the view shows the store as it is.
    */
   async stop(id: string) {
+    if (this.disposed) return;
+    this.beginMutation();
     try {
       await this.client.stop(id);
     } catch (error) {
       // The process ended and only its record failed, when the desktop says so.
       this.storeFailed(error, STOP_UNRECORDED);
+    } finally {
+      this.endMutation();
     }
-    void this.refreshLauncher();
-    this.refreshSessions();
   }
   async forget(id: string) {
+    if (this.disposed) return;
+    this.beginMutation();
     try {
       await this.client.forget(id);
     } catch (error) {
       this.fail(error);
+    } finally {
+      this.endMutation();
     }
-    this.refreshSessions();
   }
   /** Whether this window has a tab for the session. */
   hasTab(id: string): boolean {
@@ -618,6 +770,10 @@ export class NativeController {
 
   dispose() {
     this.disposed = true;
+    this.launcherSeq++;
+    this.sessionsSeq++;
+    this.rereadSessions = false;
+    this.launcherPending = null;
     this.stopTimer();
   }
 }

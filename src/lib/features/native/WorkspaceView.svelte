@@ -239,7 +239,7 @@
       <button
         type="button"
         class="action"
-        onclick={() => controller.refreshLauncher()}>Try again</button
+        onclick={() => controller.checkLauncher()}>Try again</button
       >
     </div>
   {:else}
@@ -251,7 +251,8 @@
           <button
             type="button"
             class="action"
-            onclick={() => controller.refreshLauncher()}>Check again</button
+            disabled={native.checkingLauncher}
+            onclick={() => controller.checkLauncher()}>Check again</button
           >
         </p>
       {:else if launcher.m9_native_status === 'storage_unavailable'}
