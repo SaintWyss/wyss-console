@@ -234,6 +234,7 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     // project the user chose and a profile, the registry, and the profiles. None takes a
     // command, an argument list, an environment or a path.
     'allow-native-launcher',
+    'allow-native-readiness',
     'allow-native-preview',
     'allow-native-start',
     'allow-native-sessions',

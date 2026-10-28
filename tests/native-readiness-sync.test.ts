@@ -54,7 +54,7 @@ it('detects degradation within one visible interval when another window ends and
   let records: NativeSession[] = [];
   let effects = 0;
   const client = fakeClient({
-    launcher: vi.fn(async () =>
+    readiness: vi.fn(async () =>
       launcherWithM9(degraded ? 'storage_unavailable' : 'ready'),
     ),
     sessions: vi.fn(async () => records.map((s) => ({ ...s }))),
@@ -101,7 +101,7 @@ it('detects degradation within one visible interval when another window ends and
 
 it('keeps one heartbeat and one background request per resource when both reads stall', async () => {
   const client = fakeClient({
-    launcher: vi.fn(async () => launcherWithM9('ready')),
+    readiness: vi.fn(async () => launcherWithM9('ready')),
   });
   const controller = own(
     new NativeController(() => undefined, undefined, client),
@@ -110,7 +110,7 @@ it('keeps one heartbeat and one background request per resource when both reads 
   await settle();
   const launcher = deferred<Launcher>();
   const sessions = deferred<NativeSession[]>();
-  vi.mocked(client.launcher).mockImplementation(() => launcher.promise);
+  vi.mocked(client.readiness).mockImplementation(() => launcher.promise);
   vi.mocked(client.sessions).mockImplementation(() => sessions.promise);
   await vi.advanceTimersByTimeAsync(2000);
   expect(controller.state().m9Blocked).toBe(false);
@@ -118,10 +118,10 @@ it('keeps one heartbeat and one background request per resource when both reads 
   expect(controller.state().m9Uncertain).toBe(true);
   expect(controller.state().checkingLauncher).toBe(false); // a manual check may supersede the stalled request
   await vi.advanceTimersByTimeAsync(56_000);
-  expect(client.launcher).toHaveBeenCalledTimes(2);
+  expect(client.readiness).toHaveBeenCalledTimes(2);
   expect(client.sessions).toHaveBeenCalledTimes(2);
   expect(vi.getTimerCount()).toBe(1);
-  vi.mocked(client.launcher).mockResolvedValue(
+  vi.mocked(client.readiness).mockResolvedValue(
     launcherWithM9('storage_unavailable'),
   );
   launcher.resolve(launcherWithM9('ready'));
@@ -130,7 +130,7 @@ it('keeps one heartbeat and one background request per resource when both reads 
   expect(controller.state().launcher?.m9_native_status).toBe(
     'storage_unavailable',
   );
-  expect(client.launcher).toHaveBeenCalledTimes(3);
+  expect(client.readiness).toHaveBeenCalledTimes(3);
   controller.dispose();
   expect(vi.getTimerCount()).toBe(0);
   sessions.resolve([]);
@@ -141,7 +141,7 @@ it('keeps one heartbeat and one background request per resource when both reads 
 it('recovers from periodic read failures without an application restart or a process retry', async () => {
   let failing = false;
   const client = fakeClient({
-    launcher: vi.fn(async () => {
+    readiness: vi.fn(async () => {
       if (failing) throw new Error('unavailable');
       return launcherWithM9('ready');
     }),
@@ -166,7 +166,7 @@ it('accepts a current confirmation requested after trust was withdrawn even if i
   const current = deferred<Launcher>();
   let reads = 0;
   const client = fakeClient({
-    launcher: vi.fn(() => {
+    readiness: vi.fn(() => {
       reads++;
       if (reads === 1) return Promise.resolve(launcherWithM9('ready'));
       return reads === 2 ? stale.promise : current.promise;
@@ -184,12 +184,12 @@ it('accepts a current confirmation requested after trust was withdrawn even if i
   await older;
   await settle();
   expect(controller.state().m9Blocked).toBe(true);
-  expect(client.launcher).toHaveBeenCalledTimes(3);
+  expect(client.readiness).toHaveBeenCalledTimes(3);
   await vi.advanceTimersByTimeAsync(3000);
   current.resolve(launcherWithM9('ready'));
   await settle();
   expect(controller.state().m9Blocked).toBe(false);
-  expect(client.launcher).toHaveBeenCalledTimes(3);
+  expect(client.readiness).toHaveBeenCalledTimes(3);
   expect(client.start).not.toHaveBeenCalled();
 });
 
@@ -200,7 +200,7 @@ it('invalidates a read before the mutation settles and reconciles a possible sta
   const effect = session({ id: 'b'.repeat(32), agent_id: 'opencode' });
   let records: NativeSession[] = [];
   const client = fakeClient({
-    launcher: vi.fn(() =>
+    readiness: vi.fn(() =>
       ++reads === 2
         ? old.promise
         : Promise.resolve(
@@ -270,7 +270,7 @@ it.each(['start', 'restart'] as const)(
       reasons: ['original reason'],
     });
     const client = fakeClient({
-      launcher: vi.fn(async () => {
+      readiness: vi.fn(async () => {
         if (failed) throw new Error('secondary');
         return launcherWithM9('ready');
       }),
@@ -308,7 +308,7 @@ it('waits for concurrent mutations before confirming readiness and never repeats
   const b = deferred<void>();
   let stops = 0;
   const client = fakeClient({
-    launcher: vi.fn(async () =>
+    readiness: vi.fn(async () =>
       launcherWithM9(stops ? 'storage_unavailable' : 'ready'),
     ),
     stop: vi.fn(() => (++stops === 1 ? a.promise : b.promise)),
@@ -324,18 +324,18 @@ it('waits for concurrent mutations before confirming readiness and never repeats
   a.resolve();
   await first;
   await settle();
-  expect(client.launcher).toHaveBeenCalledTimes(1);
+  expect(client.readiness).toHaveBeenCalledTimes(1);
   expect(controller.state().m9Blocked).toBe(true);
   b.reject(storage());
   await second;
   await settle();
-  expect(client.launcher).toHaveBeenCalledTimes(2);
+  expect(client.readiness).toHaveBeenCalledTimes(2);
   expect(client.stop).toHaveBeenCalledTimes(2);
 });
 
 it('clears the visible heartbeat on hide, verifies on show, and creates no duplicate timer', async () => {
   const client = fakeClient({
-    launcher: vi.fn(async () => launcherWithM9('ready')),
+    readiness: vi.fn(async () => launcherWithM9('ready')),
   });
   const controller = own(
     new NativeController(() => undefined, undefined, client),
@@ -346,14 +346,14 @@ it('clears the visible heartbeat on hide, verifies on show, and creates no dupli
   controller.setVisible(false);
   expect(vi.getTimerCount()).toBe(0);
   await vi.advanceTimersByTimeAsync(20_000);
-  expect(client.launcher).toHaveBeenCalledTimes(1);
+  expect(client.readiness).toHaveBeenCalledTimes(1);
   const pending = deferred<Launcher>();
-  vi.mocked(client.launcher).mockReturnValue(pending.promise);
+  vi.mocked(client.readiness).mockReturnValue(pending.promise);
   controller.setVisible(true);
   controller.setVisible(true);
   expect(controller.state().m9Blocked).toBe(true);
   expect(vi.getTimerCount()).toBe(1);
-  expect(client.launcher).toHaveBeenCalledTimes(2);
+  expect(client.readiness).toHaveBeenCalledTimes(2);
   pending.resolve(launcherWithM9('ready'));
   await settle();
   expect(controller.state().m9Blocked).toBe(false);
@@ -409,7 +409,7 @@ it('does not adopt a late Start reply after the controller is disposed', async (
   expect(adopt).not.toHaveBeenCalled();
   expect(publish).toHaveBeenCalledTimes(emitted);
   expect(client.start).toHaveBeenCalledTimes(1);
-  expect(client.launcher).toHaveBeenCalledTimes(1);
+  expect(client.readiness).toHaveBeenCalledTimes(1);
   expect(vi.getTimerCount()).toBe(0);
 });
 
@@ -446,7 +446,7 @@ it('keeps the existing hidden running-session poll without a hidden readiness he
   await settle();
   controller.setVisible(false);
   await vi.advanceTimersByTimeAsync(20_000);
-  expect(client.launcher).toHaveBeenCalledTimes(1);
+  expect(client.readiness).toHaveBeenCalledTimes(1);
   expect(client.sessions).toHaveBeenCalledTimes(6);
   expect(client.sessions).toHaveBeenLastCalledWith(false);
   expect(vi.getTimerCount()).toBe(1);

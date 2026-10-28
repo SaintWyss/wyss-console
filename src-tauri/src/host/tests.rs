@@ -278,7 +278,8 @@ fn it_says_what_it_is_and_refuses_what_it_does_not_know() {
             "profile_effort",
             "native_profile_plan_token",
             "screen_snapshot",
-            "native_extended_catalogue_v1"
+            "native_extended_catalogue_v1",
+            "native_readiness_v1"
         ])
     );
     assert_eq!(

@@ -263,8 +263,8 @@ asks (28 §5.1). It is never sampled on a timer while nothing is shown.
 
 ### 6.2 Native readiness synchronization
 
-The Native overview uses one heartbeat every 2 seconds for sessions and launcher readiness.
-Launcher checks do not depend on a session transition: another window may end and forget a
+The Native overview uses one heartbeat every 2 seconds for sessions and live storage readiness.
+Readiness checks do not depend on a session transition: another window may end and forget a
 session between reads. With responsive IPC, a degraded store is reflected within one interval
 plus the response time. If its confirmation remains pending at the next heartbeat, M9 becomes
 unconfirmed and OpenCode/Hermes cannot start or restart. Pending background reads are coalesced;
@@ -274,12 +274,13 @@ A current confirmation already requested after that withdrawal may succeed even 
 this prevents an endless confirmation loop. Check again can supersede a stalled
 confirmation, and double clicks on a pending check are coalesced.
 
-Every local session mutation invalidates earlier launcher and session reads at entry and exit.
+Every local session mutation invalidates earlier readiness and session reads at entry and exit.
 Start, Restart, Stop and removal reconcile both views after success or failure, once concurrent
 mutations finish. Their errors take precedence over secondary read failures. A failed Start
 never implies that no process exists and never triggers an automatic retry. Only a current
 valid backend confirmation removes M9 uncertainty; legacy admission remains the backend's
-decision. Initial loading and explicit refreshes use the same launcher generations.
+decision. Initial loading and explicit readiness refreshes use the same readiness generations.
+Read failures retain uncertainty rather than claiming storage degradation.
 
 Hiding the overview removes its readiness heartbeat. The existing session-only background poll
 continues every 4 seconds while something runs, without resource sampling; no poll remains when
@@ -287,10 +288,37 @@ hidden and idle. Showing the overview withdraws the cached confirmation and read
 Disposal removes the heartbeat and invalidates pending responses, which cannot publish or start
 follow-up requests. Already sent IPC cannot be cancelled; its late answer is ignored.
 
-The steady visible cost is one session read and one launcher read per 2 seconds, independent of
-the number of sessions. Immediate mutation/finalization confirmations are additional. Timer and
-request bounds are checked with simulated timers in `tests/native-readiness-sync.test.ts` and
-`tests/native-readiness-view.test.ts`; these are not measurements of host CPU consumption.
+Discovery (`native_launcher`) reads providers, versions, capabilities and the project catalogue
+only at initial load (including an explicit retry after a failed load), folder selection or a
+project-default change. Start/Restart/Stop reconciliation, RefreshLauncher, Check again,
+visibility changes and session endings use `native_readiness`; none rediscovers providers.
+A catalogue response cannot overwrite the independently sequenced storage confirmation.
+
+`native_readiness` is additive to protocol 1 (`native_readiness_v1`). It reads the current
+backend's optional M9 registry and sticky write-failure flag on every request, with a nonblocking
+store lock. It performs no filesystem I/O, provider discovery, version/update checks or process
+creation. Contention is a failed check, not evidence of degraded storage. The client uses only
+its attached host: it never initializes, reconnects, retries or spawns a host for this read.
+An older host returning `unknown_op` becomes `host_outdated`, with no discovery fallback and
+M9 unconfirmed/blocked. Missing/malformed answers also fail closed. Claude/Codex legacy
+admission is unchanged. Existing clients continue using the unchanged launcher operations.
+
+Backend `storage_unavailable` blocks M9 until that backend really reports `ready`. A failed
+M9 write remains sticky for the service lifetime; repairing files alone does not clear it.
+Reopening the backend after repair revalidates the store. Readiness never performs repair or
+claims filesystem writability before a write. Initial catalogue failure has no heartbeat;
+Try again explicitly reloads the initial data after a valid readiness check.
+
+The steady visible budget is one session read and one lightweight readiness read per 2 seconds,
+independent of session count, with **zero external processes and zero version probes from
+readiness**. Mutation/finalization confirmations are additional. At most one background read
+per resource is pending; a slow current confirmation follows the existing freshness contract.
+`tests/native-readiness-cost.test.ts` exercises 30 intervals (60 simulated seconds) through the
+actual desktop client with counted fake executables. Rust command tests independently exercise
+the production host/command path and count fake-provider invocations, including backend reopen
+and recovery; 30 local socket checks have a 2-second aggregate fixture budget. This is a local
+fixture budget, not a promise about a saturated installed host. The existing timer, sequencing,
+Stop, uncertain Start/Restart and view suites remain part of the contract.
 
 ## 7. Interfaces of domains A and B
 

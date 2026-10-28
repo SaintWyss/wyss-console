@@ -616,6 +616,9 @@ impl HostCore {
             // ---- native sessions ----
             // The protocol-1 legacy projection keeps its original closed AgentId set. M9
             // windows opt into the additive operation after hello advertises its feature.
+            "native_readiness" => {
+                to_value(self.native()?.readiness().map_err(|e| native_error(&e))?)
+            }
             "native_launcher" => to_value(self.native()?.launcher()),
             "native_launcher_extended" => to_value(self.native()?.launcher_extended()),
             "native_preview" => {

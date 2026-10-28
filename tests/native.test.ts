@@ -539,7 +539,7 @@ describe('a stop whose M9 record could not be written', () => {
   it('reads the launcher and the sessions again, blocks OpenCode, and never stops twice', async () => {
     let stopped = false;
     const client = fakeClient({
-      launcher: vi.fn(async () =>
+      readiness: vi.fn(async () =>
         launcherWithM9(stopped ? 'storage_unavailable' : 'ready'),
       ),
       sessions: vi.fn(async () => [
@@ -578,7 +578,7 @@ describe('a stop whose M9 record could not be written', () => {
   it('keeps M9 waiting while the launcher cannot be read, and reads it again on request', async () => {
     let failing = false;
     const client = fakeClient({
-      launcher: vi.fn(async () => {
+      readiness: vi.fn(async () => {
         if (failing) throw new Error('the desktop did not answer');
         return launcherWithM9('ready');
       }),
@@ -611,7 +611,7 @@ describe('a stop whose M9 record could not be written', () => {
 
   it('leaves Claude Code available in the same degraded store', async () => {
     const client = fakeClient({
-      launcher: vi.fn(async () => launcherWithM9('storage_unavailable')),
+      readiness: vi.fn(async () => launcherWithM9('storage_unavailable')),
     });
     const controller = new NativeController(() => undefined, undefined, client);
     controller.setVisible(true);
@@ -628,7 +628,7 @@ describe('a stop whose M9 record could not be written', () => {
   it('changes nothing when the stop is recorded', async () => {
     let stopped = false;
     const client = fakeClient({
-      launcher: vi.fn(async () => launcherWithM9('ready')),
+      readiness: vi.fn(async () => launcherWithM9('ready')),
       sessions: vi.fn(async () => [
         stopped ? stoppedOpencode() : runningOpencode(),
       ]),
@@ -653,7 +653,7 @@ describe('a stop whose M9 record could not be written', () => {
   it('lets the newest launcher read decide, even when an older answer arrives last', async () => {
     const answers: Array<(l: Launcher) => void> = [];
     const client = fakeClient({
-      launcher: vi.fn(
+      readiness: vi.fn(
         () => new Promise<Launcher>((resolve) => answers.push(resolve)),
       ),
       stop: vi.fn(async () => {
@@ -662,6 +662,7 @@ describe('a stop whose M9 record could not be written', () => {
     });
     const controller = new NativeController(() => undefined, undefined, client);
     controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
     answers[0]!(launcherWithM9('ready'));
     await vi.advanceTimersByTimeAsync(0);
 
@@ -685,7 +686,7 @@ describe('a stop whose M9 record could not be written', () => {
   it('reads the launcher again when polling sees a session end by itself', async () => {
     let ended = false;
     const client = fakeClient({
-      launcher: vi.fn(async () =>
+      readiness: vi.fn(async () =>
         launcherWithM9(ended ? 'storage_unavailable' : 'ready'),
       ),
       sessions: vi.fn(async () => [
@@ -695,12 +696,12 @@ describe('a stop whose M9 record could not be written', () => {
     const controller = new NativeController(() => undefined, undefined, client);
     controller.setVisible(true);
     await vi.advanceTimersByTimeAsync(0);
-    expect(client.launcher).toHaveBeenCalledTimes(1);
+    expect(client.readiness).toHaveBeenCalledTimes(1);
 
     ended = true;
     await vi.advanceTimersByTimeAsync(2000);
     await vi.advanceTimersByTimeAsync(0);
-    expect(client.launcher).toHaveBeenCalledTimes(2);
+    expect(client.readiness).toHaveBeenCalledTimes(2);
     expect(controller.state().m9Blocked).toBe(true);
     controller.dispose();
   });
@@ -708,7 +709,7 @@ describe('a stop whose M9 record could not be written', () => {
   it('reads the sessions again when a read was in flight during the stop', async () => {
     const answers: Array<(s: NativeSession[]) => void> = [];
     const client = fakeClient({
-      launcher: vi.fn(async () => launcherWithM9('ready')),
+      readiness: vi.fn(async () => launcherWithM9('ready')),
       sessions: vi.fn(
         () => new Promise<NativeSession[]>((resolve) => answers.push(resolve)),
       ),
@@ -750,7 +751,7 @@ describe('a start whose M9 record could not be written, and the first load', () 
   it('is not retried, says a process may exist, and leaves M9 waiting for the store', async () => {
     let degraded = false;
     const client = fakeClient({
-      launcher: vi.fn(async () =>
+      readiness: vi.fn(async () =>
         launcherWithM9(degraded ? 'storage_unavailable' : 'ready'),
       ),
       start: vi.fn(async () => {
@@ -783,7 +784,7 @@ describe('a start whose M9 record could not be written, and the first load', () 
   it('treats a restart whose record failed the same way, and reads the launcher again', async () => {
     let launcherReads = 0;
     const client = fakeClient({
-      launcher: vi.fn(async () => {
+      readiness: vi.fn(async () => {
         launcherReads += 1;
         return launcherWithM9('ready');
       }),
@@ -809,7 +810,7 @@ describe('a start whose M9 record could not be written, and the first load', () 
     const answers: Array<(l: Launcher) => void> = [];
     let reads = 0;
     const client = fakeClient({
-      launcher: vi.fn(() => {
+      readiness: vi.fn(() => {
         reads += 1;
         if (reads === 1)
           return new Promise<Launcher>((resolve) => answers.push(resolve));
@@ -818,6 +819,7 @@ describe('a start whose M9 record could not be written, and the first load', () 
     });
     const controller = new NativeController(() => undefined, undefined, client);
     controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
     await controller.refreshLauncher();
     expect(controller.state().m9Blocked).toBe(true);
 

@@ -59,6 +59,7 @@
     "allow-configuration-select-project",
     "allow-configuration-template-export",
     "allow-native-launcher",
+    "allow-native-readiness",
     "allow-native-preview",
     "allow-native-start",
     "allow-native-sessions",

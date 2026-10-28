@@ -33,7 +33,8 @@ it('disables both M9 starts when polling discovers degradation without any sessi
   vi.useFakeTimers();
   let degraded = false;
   const client = fakeClient({
-    launcher: vi.fn(async () =>
+    launcher: vi.fn(async () => both('ready')),
+    readiness: vi.fn(async () =>
       both(degraded ? 'storage_unavailable' : 'ready'),
     ),
   });
@@ -71,7 +72,8 @@ it('coalesces polling during Check again and restores M9 only after a current va
   let pending: Promise<Launcher> | null = null;
   let resolve!: (launcher: Launcher) => void;
   const client = fakeClient({
-    launcher: vi.fn(async () => {
+    launcher: vi.fn(async () => both('ready')),
+    readiness: vi.fn(async () => {
       if (pending) return pending;
       if (failing) throw new Error('read failed');
       return both('ready');
@@ -94,15 +96,15 @@ it('coalesces polling during Check again and restores M9 only after a current va
   pending = new Promise<Launcher>((yes) => {
     resolve = yes;
   });
-  const before = vi.mocked(client.launcher).mock.calls.length;
+  const before = vi.mocked(client.readiness).mock.calls.length;
   button('Check again')!.click();
   button('Check again')!.click();
   await settle();
   expect(button('Check again')?.disabled).toBe(true);
-  expect(client.launcher).toHaveBeenCalledTimes(before + 1);
+  expect(client.readiness).toHaveBeenCalledTimes(before + 1);
   await vi.advanceTimersByTimeAsync(20);
   await settle();
-  expect(client.launcher).toHaveBeenCalledTimes(before + 1);
+  expect(client.readiness).toHaveBeenCalledTimes(before + 1);
   expect(button('Check again')?.disabled).toBe(false); // a stalled read may be superseded explicitly
   expect(button('Start OpenCode')?.disabled).toBe(true);
   pending = null;

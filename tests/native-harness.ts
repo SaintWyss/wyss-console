@@ -175,6 +175,7 @@ export function profiles(): Profile[] {
 export function fakeClient(over: Partial<NativeClient> = {}) {
   const client: NativeClient = {
     launcher: vi.fn(async () => launcher()),
+    readiness: vi.fn(async () => ({ m9_native_status: 'ready' as const })),
     sessions: vi.fn(async () => [] as NativeSession[]),
     profiles: vi.fn(async () => profiles()),
     preview: vi.fn(async () => ({

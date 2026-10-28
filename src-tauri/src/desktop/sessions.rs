@@ -575,6 +575,7 @@ mod tests {
             // of the desktop's own registry. None takes a command, an argument list, an
             // environment or a path.
             "allow-native-launcher",
+            "allow-native-readiness",
             "allow-native-preview",
             "allow-native-start",
             "allow-native-sessions",

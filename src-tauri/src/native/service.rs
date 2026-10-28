@@ -117,6 +117,11 @@ pub struct ProjectView {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ReadinessView {
+    pub m9_native_status: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct LauncherView {
     pub agents: Vec<CatalogueEntry>,
     pub shell: Option<ShellView>,
@@ -493,6 +498,25 @@ impl NativeService {
             path: path.to_string_lossy().into_owned(),
             family,
             through_shell: family.is_some(),
+        })
+    }
+
+    /// Live backend state only: no discovery, disk access, recovery writes or waiting for a
+    /// store writer. A busy/poisoned lock is a failed check, never evidence of degraded storage.
+    pub fn readiness(&self) -> Result<ReadinessView, NativeError> {
+        let stored = self
+            .inner
+            .extended_registry
+            .try_lock()
+            .map_err(|_| NativeError::new("unavailable"))?;
+        Ok(ReadinessView {
+            m9_native_status: if stored.is_some()
+                && !self.inner.m9_storage_degraded.load(Ordering::Acquire)
+            {
+                "ready"
+            } else {
+                "storage_unavailable"
+            },
         })
     }
 
@@ -1459,5 +1483,33 @@ impl NativeService {
         Some(Self {
             inner: Arc::new(inner),
         })
+    }
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use super::*;
+
+    #[test]
+    fn readiness_is_live_bounded_and_never_waits_on_store_or_discovery_locks() {
+        let (base, home, bin) = super::super::service_tests::World::directories();
+        let service = super::super::service_tests::World::open(&base, &home, &bin);
+        let _registry = lock(&service.inner.registry);
+        let _discovery = lock(&service.inner.found);
+        assert_eq!(service.readiness().unwrap().m9_native_status, "ready");
+        let store = lock(&service.inner.extended_registry);
+        let started = Instant::now();
+        assert_eq!(service.readiness().unwrap_err().code, "unavailable");
+        assert!(started.elapsed() < Duration::from_millis(50));
+        drop(store);
+        service
+            .inner
+            .m9_storage_degraded
+            .store(true, Ordering::Release);
+        assert_eq!(
+            service.readiness().unwrap().m9_native_status,
+            "storage_unavailable"
+        );
+        fs::remove_dir_all(base.parent().unwrap()).unwrap();
     }
 }

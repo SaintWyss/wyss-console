@@ -86,6 +86,20 @@ export interface ProjectEntry {
   default_profile: string | null;
   last_used: number;
 }
+/** Live storage confirmation, independent of the provider/project catalogue. */
+export interface Readiness {
+  m9_native_status: 'ready' | 'legacy_host' | 'storage_unavailable';
+}
+export function parseReadiness(value: unknown): Readiness {
+  const o = obj(value, 'readiness');
+  return {
+    m9_native_status: one(
+      o.m9_native_status,
+      ['ready', 'legacy_host', 'storage_unavailable'],
+      'm9_native_status',
+    ),
+  };
+}
 export interface Launcher {
   agents: AgentEntry[];
   shell: ShellInfo | null;

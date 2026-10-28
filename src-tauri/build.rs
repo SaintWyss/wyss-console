@@ -133,6 +133,7 @@ fn main() {
             "configuration_select_project",
             "configuration_template_export",
             "native_launcher",
+            "native_readiness",
             "native_preview",
             "native_start",
             "native_sessions",

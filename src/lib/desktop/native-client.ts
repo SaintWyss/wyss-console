@@ -2,12 +2,14 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   parseFailure,
   parseLauncher,
+  parseReadiness,
   parsePreview,
   parseProfiles,
   parseSessions,
   parseStartReply,
   type AgentId,
   type Launcher,
+  type Readiness,
   type NativeFailure,
   type NativeSession,
   type Preview,
@@ -45,6 +47,9 @@ function checked<T>(answer: unknown, parse: (v: unknown) => T): T {
 
 export async function readLauncher(): Promise<Launcher> {
   return checked(await call('native_launcher'), parseLauncher);
+}
+export async function readReadiness(): Promise<Readiness> {
+  return checked(await call('native_readiness'), parseReadiness);
 }
 export async function previewProfile(
   agent_id: AgentId,

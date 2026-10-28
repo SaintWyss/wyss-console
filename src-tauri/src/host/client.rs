@@ -168,6 +168,21 @@ impl HostLink {
         }
     }
 
+    /// A read of an already attached host. Never initializes, spawns, reconnects or retries.
+    /// Readiness must not start a process, even when the previously connected host disappears.
+    pub fn native_readiness(&self) -> Result<Value, HostError> {
+        let mode = self
+            .mode
+            .try_lock()
+            .map_err(|_| HostError::new("host_unavailable"))?
+            .clone()
+            .ok_or_else(|| HostError::new("host_unavailable"))?;
+        match &*mode {
+            Mode::Local(core) => core.call("native_readiness", Value::Null),
+            Mode::Remote(remote) => remote.call("native_readiness", Value::Null),
+        }
+    }
+
     /// Closes what a window-local host holds. A remote host is left running.
     pub fn close_local(&self) {
         let mode = self

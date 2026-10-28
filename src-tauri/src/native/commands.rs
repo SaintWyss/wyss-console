@@ -274,6 +274,20 @@ pub async fn native_launcher(link: State<'_, HostLink>) -> Answer {
     blocking(move || annotate_launcher(launcher_view(&link)?)).await
 }
 
+/// Additive protocol-1 read. No fallback to discovery: older hosts cannot confirm M9.
+fn readiness_with_link(link: &HostLink) -> Answer {
+    match link.native_readiness() {
+        Err(error) if error.code == "unknown_op" => Err(HostError::new("host_outdated")),
+        answer => answer,
+    }
+}
+
+#[tauri::command]
+pub async fn native_readiness(link: State<'_, HostLink>) -> Answer {
+    let link = link.inner().clone();
+    blocking(move || readiness_with_link(&link)).await
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreviewRequest {
@@ -712,6 +726,7 @@ pub async fn native_handoff_save(
 
 const COMMANDS: &[&str] = &[
     "native_launcher",
+    "native_readiness",
     "native_preview",
     "native_start",
     "native_sessions",
@@ -737,6 +752,7 @@ pub fn extension() -> wyss_console::Extension {
         commands: COMMANDS,
         handler: Box::new(tauri::generate_handler![
             native_launcher,
+            native_readiness,
             native_preview,
             native_start,
             native_sessions,
@@ -765,8 +781,8 @@ pub fn extension() -> wyss_console::Extension {
 #[cfg(test)]
 mod capability_tests {
     use super::{
-        PreviewRequest, effectful_preview, host_can_keep, preview_with_link,
-        profile_requires_effort_from_list, start_with_link,
+        PreviewRequest, annotate_launcher, effectful_preview, host_can_keep, launcher_view,
+        preview_with_link, profile_requires_effort_from_list, readiness_with_link, start_with_link,
     };
     use crate::{
         host::{
@@ -851,6 +867,13 @@ mod capability_tests {
                             }
                             let value = match request.op.as_str() {
                                 // A protocol-1 host without the additive `features` field.
+                                "native_readiness" => {
+                                    let _ = write_frame(
+                                        &mut stream,
+                                        &WireAnswer::Err(HostError::new("unknown_op")),
+                                    );
+                                    continue;
+                                }
                                 "hello" => json!({"protocol": 1}),
                                 "native_launcher" => json!({
                                     "agents": [{"agent_id": "claude_code", "path": cli}],
@@ -920,6 +943,141 @@ mod capability_tests {
             plan_token: Some("old-preview-token".into()),
             expected_cli_version: Some(VERSION.into()),
         }
+    }
+
+    #[test]
+    fn readiness_on_old_disconnected_or_uninitialized_hosts_never_falls_back_to_discovery() {
+        let host = LegacyHost::new(false);
+        let link = host.link();
+        assert_eq!(
+            readiness_with_link(&link).unwrap_err().code,
+            "host_outdated"
+        );
+        assert_eq!(
+            host.requests()
+                .iter()
+                .map(|(op, _)| op.as_str())
+                .collect::<Vec<_>>(),
+            vec!["native_readiness"]
+        );
+        // Default must not initialize a host; disconnected must not reconnect/spawn one.
+        assert_eq!(
+            readiness_with_link(&HostLink::new()).unwrap_err().code,
+            "host_unavailable"
+        );
+        drop(host);
+        assert_eq!(
+            readiness_with_link(&link).unwrap_err().code,
+            "host_unavailable"
+        );
+    }
+
+    #[test]
+    fn readiness_heartbeat_has_zero_version_probes_and_one_request_per_interval() {
+        use crate::{
+            host::core::HostCore,
+            native::service_tests::{World, script},
+        };
+        use std::time::Instant;
+        let (base, home, bin) = World::directories();
+        let log = bin.join("invocations");
+        for name in ["claude", "codex", "opencode", "hermes"] {
+            script(
+                &bin.join(name),
+                &format!(
+                    "printf '%s %s\\n' '{name}' \"$*\" >> '{}'\n[ \"$1\" = \"--version\" ] || exit 81\nprintf '%s\\n' 'fixture-version'",
+                    log.display()
+                ),
+            );
+        }
+        let core = Arc::new(Mutex::new(HostCore::new(Some(World::open(
+            &base, &home, &bin,
+        )))));
+        let socket = bin.join("readiness.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let (server_core, server_stop, server_requests) =
+            (core.clone(), stop.clone(), requests.clone());
+        let server = thread::spawn(move || {
+            while !server_stop.load(Ordering::Acquire) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let request: Request = read_frame(&mut stream).unwrap();
+                        server_requests.lock().unwrap().push(request.op.clone());
+                        let answer = match server_core
+                            .lock()
+                            .unwrap()
+                            .call(&request.op, request.params)
+                        {
+                            Ok(value) => WireAnswer::Ok(value),
+                            Err(error) => WireAnswer::Err(error),
+                        };
+                        let _ = write_frame(&mut stream, &answer);
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_micros(100))
+                    }
+                    Err(e) => panic!("fixture socket: {e}"),
+                }
+            }
+        });
+        let link = HostLink::remote_for_test(socket);
+        annotate_launcher(launcher_view(&link).unwrap()).unwrap();
+        let initial = fs::read_to_string(&log).unwrap();
+        assert!(initial.contains("opencode --version")); // positive control: discovery ran the fakes
+        assert!(!initial.contains("hermes")); // AUD-01: no Hermes passive update probe
+        requests.lock().unwrap().clear();
+        // Make any accidentally invoked version executable fail and record the attempt.
+        for name in ["claude", "codex", "opencode", "hermes"] {
+            script(
+                &bin.join(name),
+                &format!("echo unexpected >> '{}'; exit 82", log.display()),
+            );
+        }
+        let started = Instant::now();
+        for _ in 0..30 {
+            assert_eq!(
+                readiness_with_link(&link).unwrap()["m9_native_status"],
+                "ready"
+            );
+        }
+        let elapsed = started.elapsed();
+        assert_eq!(
+            requests.lock().unwrap().as_slice(),
+            vec!["native_readiness"; 30]
+        );
+        assert_eq!(fs::read_to_string(&log).unwrap(), initial);
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "30 checks exceeded local fixture budget: {elapsed:?}"
+        );
+        // A replacement backend has actually reopened the store: readiness is not a client cache.
+        let sidecar = base.join("registry/m9-native-sessions-v1.json");
+        let original = fs::read(&sidecar).unwrap();
+        fs::write(&sidecar, b"{ corrupt fixture").unwrap();
+        *core.lock().unwrap() = HostCore::new(Some(World::open(&base, &home, &bin)));
+        assert_eq!(
+            readiness_with_link(&link).unwrap()["m9_native_status"],
+            "storage_unavailable"
+        );
+        fs::write(&sidecar, original).unwrap();
+        *core.lock().unwrap() = HostCore::new(Some(World::open(&base, &home, &bin)));
+        assert_eq!(
+            readiness_with_link(&link).unwrap()["m9_native_status"],
+            "ready"
+        );
+        assert_eq!(fs::read_to_string(&log).unwrap(), initial);
+        println!(
+            "READINESS_COST intervals=30 simulated_ms=60000 requests=30 external_processes=0 version_probes=0 initial_version_probes={} total_us={} mean_us={}",
+            initial.lines().count(),
+            elapsed.as_micros(),
+            elapsed.as_micros() / 30
+        );
+        stop.store(true, Ordering::Release);
+        server.join().unwrap();
+        fs::remove_dir_all(base.parent().unwrap()).unwrap();
     }
 
     #[test]

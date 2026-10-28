@@ -55,7 +55,8 @@ describe('the page after a stop whose M9 record failed', () => {
     vi.useFakeTimers();
     let stopped = false;
     const client = fakeClient({
-      launcher: vi.fn(async () =>
+      launcher: vi.fn(async () => launcherWithM9('ready')),
+      readiness: vi.fn(async () =>
         launcherWithM9(stopped ? 'storage_unavailable' : 'ready'),
       ),
       sessions: vi.fn(async () => [
@@ -88,7 +89,8 @@ describe('the page after a stop whose M9 record failed', () => {
     let failing = false;
     let stopped = false;
     const client = fakeClient({
-      launcher: vi.fn(async () => {
+      launcher: vi.fn(async () => launcherWithM9('ready')),
+      readiness: vi.fn(async () => {
         if (failing) throw new Error('the desktop did not answer');
         return launcherWithM9('ready');
       }),
@@ -126,6 +128,7 @@ describe('the page after a stop whose M9 record failed', () => {
     let stopped = false;
     const client = fakeClient({
       launcher: vi.fn(async () => launcherWithM9('ready')),
+      readiness: vi.fn(async () => launcherWithM9('ready')),
       sessions: vi.fn(async () => [
         stopped ? stoppedOpencode() : runningOpencode(),
       ]),

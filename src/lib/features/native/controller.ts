@@ -1,6 +1,7 @@
 import type {
   AgentId,
   Launcher,
+  Readiness,
   NativeFailure,
   NativeSession,
   Preview,
@@ -20,6 +21,7 @@ import {
   previewProfile,
   prepareHandoff,
   readLauncher,
+  readReadiness,
   saveHandoff,
   type HandoffBrief,
   readNativeSessions,
@@ -41,6 +43,7 @@ import {
 
 export interface NativeClient {
   launcher(): Promise<Launcher>;
+  readiness(): Promise<Readiness>;
   sessions(sample: boolean): Promise<NativeSession[]>;
   profiles(): Promise<Profile[]>;
   preview(agent: AgentId, profile: string | null): Promise<Preview>;
@@ -72,6 +75,7 @@ const FIRST_SIZE = { rows: 24, cols: 80 };
 
 const desktopClient: NativeClient = {
   launcher: readLauncher,
+  readiness: readReadiness,
   sessions: readNativeSessions,
   profiles: readProfiles,
   preview: previewProfile,
@@ -144,6 +148,7 @@ export interface NativeState {
 export class NativeController {
   private phase: NativeState['phase'] = 'idle';
   private launcher: Launcher | null = null;
+  private readiness: Readiness | null = null;
   private sessions: NativeSession[] = [];
   private profiles: Profile[] = [];
   private starting = false;
@@ -158,6 +163,7 @@ export class NativeController {
   private m9Uncertain = true;
   /** The number of the newest launcher read: an older answer never overrides it. */
   private launcherSeq = 0;
+  private catalogueSeq = 0;
   private launcherPending: { seq: number; slow: boolean } | null = null;
   private sessionsSeq = 0;
   private mutations = 0;
@@ -216,12 +222,14 @@ export class NativeController {
     });
   }
   /**
-   * The first load. The launcher is read alongside the profiles and sessions, and again after
-   * the sessions: that listing may observe endings that wrote the store, so it is confirmed last.
+   * The first load discovers the catalogue once alongside profiles, sessions and readiness.
+   * A listing that observes an ending may have written the store, so readiness is confirmed last.
    */
   private async load() {
     const sessionsSeq = this.sessionsSeq;
-    const first = this.readLauncher();
+    // Discovery attaches the host on first load. The lightweight read deliberately cannot
+    // initialize one, so it starts only after that attachment has completed.
+    const first = this.refreshCatalogue().then(() => this.readReadiness());
     const [, profiles, sessions] = await Promise.all([
       first,
       this.client.profiles(),
@@ -260,10 +268,7 @@ export class NativeController {
 
   /** Whether an M9 start must wait: the store is degraded, or not confirmed since a failure. */
   private blocksM9(): boolean {
-    return (
-      this.m9Uncertain ||
-      this.launcher?.m9_native_status === 'storage_unavailable'
-    );
+    return this.m9Uncertain || this.readiness?.m9_native_status !== 'ready';
   }
   /**
    * An M9 operation that failed on its record may have had its effect already: the store is
@@ -414,7 +419,7 @@ export class NativeController {
       this.refreshSessions();
     } else this.schedule();
   }
-  /** A session that ended on its own may have been the last write of the store: read the launcher. */
+  /** A session that ended on its own may have been the last write: confirm live storage. */
   private applySessions(sessions: NativeSession[]) {
     const known = new Set(
       this.sessions.filter((s) => !isLive(s)).map((s) => s.id),
@@ -425,19 +430,19 @@ export class NativeController {
     if (newlyEnded) void this.refreshLauncher();
   }
   /**
-   * The one way the launcher is read. Each read takes a number when it starts, and only the
+   * The one way live storage readiness is read. Each read takes a number when it starts, and only the
    * newest number may change the launcher: an answer that started earlier can never bring back a
    * readiness that a later read or a failed operation withdrew. A failed newest read leaves M9
    * unconfirmed until a newer read answers. Only a current read may report an error, and
    * secondary read failures never replace the original mutation failure.
    */
-  private readLauncher(): Promise<boolean> {
+  private readReadiness(): Promise<boolean> {
     if (this.disposed || this.mutations > 0) return Promise.resolve(false);
     const seq = ++this.launcherSeq;
     const startedConfirmed = !this.m9Uncertain;
-    let read: Promise<Launcher>;
+    let read: Promise<Readiness>;
     try {
-      read = this.client.launcher();
+      read = this.client.readiness();
     } catch (error) {
       read = Promise.reject(error);
     }
@@ -448,7 +453,12 @@ export class NativeController {
           // A reply that outlived its freshness interval may have captured ready before
           // another window degraded the store. Confirm again after it completes.
           if (this.launcherPending?.slow && startedConfirmed) return false;
-          this.launcher = launcher;
+          this.readiness = launcher;
+          if (this.launcher)
+            this.launcher = {
+              ...this.launcher,
+              m9_native_status: launcher.m9_native_status,
+            };
           this.m9Uncertain = false;
           this.emit();
           return true;
@@ -479,9 +489,22 @@ export class NativeController {
     this.emit();
     return result;
   }
+  /** Discovery is reserved for initial load and changes to the project catalogue. Its
+   * storage snapshot never confirms readiness or overwrites a newer lightweight answer. */
+  private async refreshCatalogue() {
+    if (this.disposed) return;
+    const seq = ++this.catalogueSeq;
+    const launcher = await this.client.launcher();
+    if (this.disposed || seq !== this.catalogueSeq) return;
+    this.launcher = {
+      ...launcher,
+      m9_native_status: this.readiness?.m9_native_status ?? 'legacy_host',
+    };
+    this.emit();
+  }
   async refreshLauncher() {
     if (this.disposed) return;
-    const confirmed = await this.readLauncher();
+    const confirmed = await this.readReadiness();
     if (confirmed && !this.disposed && this.phase === 'failed') {
       // The first load may have failed before sessions/profiles were available. A valid
       // retry reloads those too, instead of leaving a permanently failed page.
@@ -527,6 +550,7 @@ export class NativeController {
   async choose(): Promise<string | null> {
     try {
       const path = await this.client.chooseProject();
+      await this.refreshCatalogue();
       await this.refreshLauncher();
       return path;
     } catch (error) {
@@ -694,6 +718,7 @@ export class NativeController {
   async setProjectDefault(project: string, profile: string | null) {
     try {
       await this.client.setDefault(project, profile);
+      await this.refreshCatalogue();
       await this.refreshLauncher();
     } catch (error) {
       this.fail(error);
