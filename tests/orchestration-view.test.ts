@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import PipelinesView from '../src/lib/features/orchestration/PipelinesView.svelte';
@@ -174,6 +174,8 @@ function desktop(nativeRows: NativeSession[] = []) {
             first_message: '# Reviewed handoff\n\nnew session only',
           };
         }
+        case 'review_plan':
+          throw { code: 'invalid_plan' };
         case 'submit_handoff':
           return snapshot();
         default:
@@ -525,4 +527,103 @@ it('TS-ORC confirms an observed workspace digest', async () => {
   await flush();
   expect(calls).toHaveLength(1);
   expect(calls[0].params?.reviewed_workspace_revision).toBe(TARGET_REVISION);
+});
+
+it.each(['-5', '0', '61', '1.5', ''])(
+  'rejects invalid minute budget %j without IPC and recovers without changing it',
+  async (value) => {
+    const ipc = desktop();
+    component = mount(PipelinesView, {
+      target: document.body,
+      props: { visible: true, f8Active: false, onruntimes: () => undefined },
+    });
+    await flush();
+    button('Elegir…')!.click();
+    await flush();
+    const objective = label('Objetivo')!.querySelector('input')!;
+    objective.value = 'Synthetic bounded plan';
+    objective.dispatchEvent(new Event('input', { bubbles: true }));
+    const budget = label('Presupuesto total')!.querySelector('input')!;
+    budget.value = value;
+    budget.dispatchEvent(new Event('input', { bubbles: true }));
+    await flush();
+    expect(budget.getAttribute('aria-invalid')).toBe('true');
+    expect(text(document.getElementById('plan-budget-error'))).toContain(
+      'entero entre 1 y 60',
+    );
+    const before = ipc.calls.length;
+    button('Revisar el plan')!.click();
+    await flush();
+    expect(ipc.calls.length).toBe(before);
+    budget.value = '17';
+    budget.dispatchEvent(new Event('input', { bubbles: true }));
+    await flush();
+    expect(budget.getAttribute('aria-invalid')).toBe('false');
+    button('Revisar el plan')!.click();
+    await flush();
+    const review = ipc.calls.find(
+      (call) => call.request?.method === 'review_plan',
+    );
+    expect(review?.request?.params?.plan).toMatchObject({
+      limits: { max_total_seconds: 1020 },
+    });
+  },
+);
+
+it('keeps a failed review visible across successful background refreshes', async () => {
+  vi.useFakeTimers();
+  try {
+    const ipc = desktop();
+    component = mount(PipelinesView, {
+      target: document.body,
+      props: { visible: true, f8Active: false, onruntimes: () => undefined },
+    });
+    await vi.advanceTimersByTimeAsync(50);
+    flushSync();
+    button('Revisar el plan')!.click();
+    await vi.advanceTimersByTimeAsync(50);
+    flushSync();
+    expect(document.body.textContent).toContain('Completa el workspace');
+    await vi.advanceTimersByTimeAsync(3100);
+    flushSync();
+    expect(
+      ipc.calls.filter((c) => c.request?.method === 'list').length,
+    ).toBeGreaterThan(1);
+    expect(document.body.textContent).toContain('Completa el workspace');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('navigates coordination tabs with arrows, Home and End and names the active panel', async () => {
+  desktop();
+  component = mount(PipelinesView, {
+    target: document.body,
+    props: { visible: true, f8Active: false, onruntimes: () => undefined },
+  });
+  await flush();
+  const tabs = [
+    ...document.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+  ];
+  tabs[0].focus();
+  for (const [key, index] of [
+    ['ArrowRight', 1],
+    ['ArrowRight', 0],
+    ['End', 1],
+    ['Home', 0],
+    ['ArrowLeft', 1],
+  ] as const) {
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true }),
+    );
+    await flush();
+    expect(document.activeElement).toBe(tabs[index]);
+    expect(tabs[index].getAttribute('aria-selected')).toBe('true');
+    expect(tabs[index].tabIndex).toBe(0);
+    const panel = document.getElementById(
+      tabs[index].getAttribute('aria-controls')!,
+    );
+    expect(panel?.getAttribute('role')).toBe('tabpanel');
+    expect(panel?.getAttribute('aria-labelledby')).toBe(tabs[index].id);
+  }
 });

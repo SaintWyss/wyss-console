@@ -233,7 +233,8 @@ button:focus-visible {
   grid-row: 2;
   min-height: 0;
   padding: 14px 10px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   border-right: 1px solid var(--glass-line);
 }
 .skip-link {
@@ -536,6 +537,7 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  container-type: inline-size;
 }
 /* A view that is not shown stays mounted and takes no space. */
 .terminal-feature[hidden],
@@ -565,6 +567,14 @@ button:focus-visible {
   padding: 4px;
   overflow-x: auto;
   scrollbar-width: none;
+}
+@container (max-width: 640px) {
+  .workspace-toolbar {
+    flex-wrap: wrap;
+  }
+  .terminal-tabs {
+    flex-basis: 100%;
+  }
 }
 .terminal-tabs::-webkit-scrollbar {
   display: none;

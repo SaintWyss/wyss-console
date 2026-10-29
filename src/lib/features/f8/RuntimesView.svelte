@@ -82,7 +82,7 @@
 >
   <div class="sessions-toolbar">
     <div class="sessions-heading">
-      <h2>Managed runtimes</h2>
+      <h2>Managed runtimes · protocol 2</h2>
       <p class="sessions-count">
         {#if f8.authority && connected}
           {f8.authority.prepared_count} prepared · {f8.authority.closed_count} closed

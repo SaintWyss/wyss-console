@@ -7,6 +7,29 @@ adds narrowly scoped current read-only observations and fixture results, not a r
 production acceptance. Phase1 checks remain in [traceability](traceability.md).
 Historical process IDs and local artifact paths are evidence locators, never cleanup targets.
 
+## Isolated completion candidate
+
+The terminal workspace initializes on the first Console visit after resolving the
+landing preference, then stays mounted across navigation. A failed initial preference
+read settles that decision once and respects navigation already performed. The terminal
+uses a defined, valid absolute HOME as its default cwd; empty or invalid HOME refuses
+creation. Only absent HOME uses the account directory. Explicit requested cwd retains
+its own validation and precedence.
+
+Pipelines rejects a missing, fractional or out-of-range minute budget (1–60) before
+review IPC; it never silently clamps a draft. Validation is associated with the field.
+Background run-list errors and action errors are separate, so polling cannot erase a
+failed action. Coordination tabs support arrows, Home/End and named tab panels. The sidebar scrolls
+at short window heights and Console actions wrap below the tab strip in narrow panes.
+
+The shell status is labelled Authority P1 (protocol 1 in its tooltip and Settings).
+Runtimes identifies its independent protocol 2 link. One connection's status does not
+prove the other is available.
+
+This candidate retains **NOT_ACCEPTED / RELEASE_BLOCKED** whole-product status.
+Managed execution remains disabled. Synthetic IPC, component tests and Xvfb evidence
+cannot satisfy physical-device, actual-provider or installed-operation acceptance.
+
 ## 1. Status vocabulary
 
 | Code | Meaning                                                                   | Required interpretation                                           |

@@ -168,7 +168,7 @@ it('shows the authority starting by itself, with the terminal working meanwhile'
     lifecycle({ phase: 'installing', revision: 2 }),
   );
   // Nobody asked for anything: the desktop said it is installing, and that is shown.
-  expect(pill()).toBe('Authority Installing');
+  expect(pill()).toBe('Authority P1 Installing');
   expect(notice()).toBeNull();
   expect(ipc.count('authority_retry')).toBe(0);
   // The terminal is there and was started. It waits on nothing of this.
@@ -181,16 +181,16 @@ it('shows the authority starting by itself, with the terminal working meanwhile'
   );
 
   await ipc.says(lifecycle({ phase: 'starting', revision: 3 }));
-  expect(pill()).toBe('Authority Starting');
+  expect(pill()).toBe('Authority P1 Starting');
   await ipc.says(lifecycle({ phase: 'connecting', revision: 4 }));
-  expect(pill()).toBe('Authority Starting');
+  expect(pill()).toBe('Authority P1 Starting');
   // The lifecycle says ready before the link has connected. That is not connected.
   await ipc.says(lifecycle({ phase: 'ready', origin: 'managed', revision: 5 }));
   expect(pill()).not.toContain('Connected');
-  expect(pill()).toBe('Authority Offline');
+  expect(pill()).toBe('Authority P1 Offline');
   // The link connects: now it is.
   await ipc.links(connected());
-  expect(pill()).toContain('Authority Connected');
+  expect(pill()).toContain('Authority P1 Connected');
   expect(notice()).toBeNull();
   expect(ipc.count('authority_retry')).toBe(0);
   expect(ipc.count('create_terminal')).toBe(1);
@@ -210,7 +210,7 @@ it('says when the authority could not start and retries once when asked', async 
       },
     }),
   );
-  expect(pill()).toBe('Authority Failed to start');
+  expect(pill()).toBe('Authority P1 Failed to start');
   expect(text(notice()!.querySelector('.authority-notice-title'))).toBe(
     'The Wyss authority could not start',
   );
@@ -253,7 +253,7 @@ it('says when the authority could not start and retries once when asked', async 
   // What comes of it arrives through the follower, not through the answer.
   await ipc.says(lifecycle({ phase: 'starting', revision: 4 }));
   expect(notice()).toBeNull();
-  expect(pill()).toBe('Authority Starting');
+  expect(pill()).toBe('Authority P1 Starting');
   await ipc.says(
     lifecycle({ phase: 'failed', failure: 'startup_failed', revision: 5 }),
   );
@@ -273,7 +273,7 @@ it('says an incompatible authority is running and offers nothing against it', as
     { ...views.waiting_absent, reason: 'incompatible' },
     lifecycle({ phase: 'incompatible', origin: 'external', revision: 2 }),
   );
-  expect(pill()).toBe('Authority Incompatible');
+  expect(pill()).toBe('Authority P1 Incompatible');
   expect(text(notice()!.querySelector('.authority-notice-title'))).toBe(
     'An incompatible Wyss authority is running',
   );
@@ -289,7 +289,7 @@ it('keeps one lifecycle for every view, and no view starts anything for it', asy
     views.waiting_absent,
     lifecycle({ phase: 'failed', failure: 'stopped', revision: 2 }),
   );
-  expect(pill()).toBe('Authority Offline');
+  expect(pill()).toBe('Authority P1 Offline');
   expect(text(notice()!.querySelector('.authority-notice-title'))).toBe(
     'The Wyss authority is not running',
   );
@@ -319,7 +319,7 @@ it('keeps one lifecycle for every view, and no view starts anything for it', asy
       revision: 3,
     }),
   );
-  expect(pill()).toContain('Authority Connected update pending');
+  expect(pill()).toContain('Authority P1 Connected update pending');
   expect(
     document.querySelector('.pill.authority')!.getAttribute('title'),
   ).toContain('a newer authority is installed the next time it starts');
@@ -344,7 +344,7 @@ it('goes on without a lifecycle the bridge cannot answer', async () => {
   });
   component = mount(App, { target: document.body });
   await flush();
-  expect(pill()).toBe('Authority Offline');
+  expect(pill()).toBe('Authority P1 Offline');
   expect(notice()).toBeNull();
   expect(ipc.count('create_terminal')).toBe(1);
 });

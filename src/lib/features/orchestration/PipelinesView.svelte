@@ -70,6 +70,15 @@
     onruntimes: () => void;
   } = $props();
 
+  function tabKey(event: KeyboardEvent, index: number) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : 1 - index;
+    tab = next === 0 ? 'pipelines' : 'handoff';
+    const bar = (event.currentTarget as HTMLElement).parentElement;
+    bar?.querySelectorAll<HTMLButtonElement>('[role=tab]')[next]?.focus();
+  }
+
   const now = () => Math.floor(Date.now() / 1000);
   const newId = () => crypto.randomUUID();
   const initialStep = (): StepDraft => ({
@@ -85,6 +94,7 @@
   let busy = $state(false);
   let loadingRuns = $state(false);
   let lastError = $state('');
+  let runsError = $state('');
   let sessionsError = $state('');
   let runs = $state<CoordinatorSnapshot[]>([]);
   let managedSessions = $state<SessionRow[]>([]);
@@ -93,7 +103,13 @@
   let planWorkspace = $state<WorkspaceSnapshot | null>(null);
   let planProjectId = $state('local-project');
   let objective = $state('');
-  let durationMinutes = $state(30);
+  let durationMinutes = $state<number | undefined>(30);
+  const budgetInvalid = $derived(
+    !Number.isInteger(durationMinutes) ||
+      durationMinutes === undefined ||
+      durationMinutes < 1 ||
+      durationMinutes > 60,
+  );
   let steps = $state<StepDraft[]>([initialStep()]);
   let reviewedPlan = $state<OrchestrationPlanV1 | null>(null);
   let planReview = $state<PlanReviewV1 | null>(null);
@@ -177,11 +193,14 @@
       'El efecto es incierto y queda detenido para revisión humana.',
   };
 
+  function errorText(error: unknown): string {
+    return error instanceof OrchestrationCallError
+      ? (ERROR_TEXT[error.code] ?? 'Falló la operación M6.')
+      : 'No se pudo completar la operación M6.';
+  }
+
   function showError(error: unknown) {
-    lastError =
-      error instanceof OrchestrationCallError
-        ? (ERROR_TEXT[error.code] ?? 'Falló la operación M6.')
-        : 'No se pudo completar la operación M6.';
+    lastError = errorText(error);
   }
 
   async function loadSessions() {
@@ -211,9 +230,9 @@
     loadingRuns = true;
     try {
       runs = await listRuns();
-      lastError = '';
+      runsError = '';
     } catch (error) {
-      showError(error);
+      runsError = errorText(error);
     } finally {
       loadingRuns = false;
     }
@@ -279,7 +298,9 @@
     if (!planWorkspace || !planWorkspaceRoot || !objective.trim())
       throw new Error('draft');
     const created = now();
-    const safeMinutes = Math.max(1, Math.min(60, Math.floor(durationMinutes)));
+    if (budgetInvalid || durationMinutes === undefined)
+      throw new Error('budget');
+    const safeMinutes = durationMinutes;
     const planSteps: StepPlanV1[] = steps.map((step) => ({
       step_id: step.step_id,
       dependencies: step.dependencies.map((step_id) => ({
@@ -326,6 +347,11 @@
     lastError = '';
     busy = true;
     try {
+      if (budgetInvalid) {
+        lastError =
+          'El presupuesto debe ser un número entero entre 1 y 60 minutos.';
+        return;
+      }
       const plan = planFromDraft();
       const current = await workspaceSnapshot(plan.workspace_root);
       if (
@@ -937,23 +963,40 @@
     <button
       class:active={tab === 'pipelines'}
       role="tab"
+      id="coordination-plan-tab"
+      aria-controls="coordination-plan-panel"
+      tabindex={tab === 'pipelines' ? 0 : -1}
+      onkeydown={(event) => tabKey(event, 0)}
       aria-selected={tab === 'pipelines'}
       onclick={() => (tab = 'pipelines')}>Plan y ejecuciones</button
     >
     <button
       class:active={tab === 'handoff'}
       role="tab"
+      id="coordination-handoff-tab"
+      aria-controls="coordination-handoff-panel"
+      tabindex={tab === 'handoff' ? 0 : -1}
+      onkeydown={(event) => tabKey(event, 1)}
       aria-selected={tab === 'handoff'}
       onclick={() => (tab = 'handoff')}>Structured handoff</button
     >
   </div>
+
+  {#if runsError}
+    <p class="m6-alert" role="alert">{runsError}</p>
+  {/if}
 
   {#if lastError}
     <p class="m6-alert" role="alert">{lastError}</p>
   {/if}
 
   {#if tab === 'pipelines'}
-    <div class="m6-layout">
+    <div
+      class="m6-layout"
+      id="coordination-plan-panel"
+      role="tabpanel"
+      aria-labelledby="coordination-plan-tab"
+    >
       <section class="m6-panel" aria-labelledby="plan-title">
         <div class="m6-panel-head">
           <div>
@@ -1003,10 +1046,18 @@
               type="number"
               min="1"
               max="60"
+              step="1"
+              aria-invalid={budgetInvalid}
+              aria-describedby={budgetInvalid ? 'plan-budget-error' : undefined}
               bind:value={durationMinutes}
               oninput={invalidatePlanReview}
             /></label
           >
+          {#if budgetInvalid}
+            <p id="plan-budget-error" class="m6-alert" role="alert">
+              El presupuesto debe ser un número entero entre 1 y 60 minutos.
+            </p>
+          {/if}
           <div class="m6-section-title">
             <h4>Pasos · máximo 16</h4>
             <button
@@ -1374,7 +1425,12 @@
       </section>
     </div>
   {:else}
-    <div class="m6-layout handoff-layout">
+    <div
+      class="m6-layout handoff-layout"
+      id="coordination-handoff-panel"
+      role="tabpanel"
+      aria-labelledby="coordination-handoff-tab"
+    >
       <section class="m6-panel" aria-labelledby="handoff-title">
         <div class="m6-panel-head">
           <div>

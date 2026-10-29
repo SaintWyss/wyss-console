@@ -266,7 +266,9 @@ it('shows the authority, its sessions and the managed agent from the projection'
   expect(authority?.querySelector('.pill-value')?.textContent).toBe(
     'Connected',
   );
-  expect(authority?.getAttribute('title')).toMatch(/^Connected · /);
+  expect(authority?.getAttribute('title')).toMatch(
+    /^Protocol 1 authority · Connected · /,
+  );
   expect(pill('terminal')?.getAttribute('title')).toMatch(
     /^[A-Z][a-z ]+ · Local terminal\./,
   );
@@ -331,4 +333,16 @@ it('follows authority restarts without touching the terminal workspace', async (
   expect(
     document.querySelectorAll('.terminal-feature [role="tab"]'),
   ).toHaveLength(1);
+});
+
+it('names the protocol 1 status independently of protocol 2 runtimes', async () => {
+  component = mount(App, { target: document.body });
+  await flush();
+  expect(pill('authority')?.textContent).toContain('Authority P1');
+  expect(pill('authority')?.getAttribute('title')).toContain(
+    'Protocol 1 authority',
+  );
+  expect(document.querySelector('#settings-authority')?.textContent).toContain(
+    'protocol 1',
+  );
 });

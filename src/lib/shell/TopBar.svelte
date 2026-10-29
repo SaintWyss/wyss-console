@@ -72,9 +72,9 @@
     <span
       class="pill authority"
       data-tone={link.tone}
-      title={`${link.label} · ${link.detail}`}
+      title={`Protocol 1 authority · ${link.label} · ${link.detail}`}
     >
-      <span class="pill-key">Authority</span>
+      <span class="pill-key">Authority P1</span>
       <span class="dot" aria-hidden="true"></span>
       <span class="pill-value">{link.label}</span>
       {#if link.note}<span class="pill-note">{link.note}</span>{/if}

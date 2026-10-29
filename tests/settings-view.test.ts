@@ -137,7 +137,7 @@ it('opens from the sidebar with every section, in order, and the defaults select
       'Interface',
       'Terminal',
       'Events',
-      'Authority',
+      'Authority · protocol 1',
       'About',
       'Reset',
       'Projects and workspaces',

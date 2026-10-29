@@ -348,7 +348,7 @@
     </section>
 
     <section class="settings-section" aria-labelledby="settings-authority">
-      <h3 id="settings-authority">Authority</h3>
+      <h3 id="settings-authority">Authority · protocol 1</h3>
       <dl class="settings-facts">
         {#each facts as fact (fact.term)}
           <dt>{fact.term}</dt>
@@ -373,9 +373,10 @@
         </div>
       {/if}
       <p class="setting-hint">
-        The authority keeps your sessions, approvals and history, and keeps
-        running when this window is closed. Local terminals and these
-        preferences work without it.
+        The protocol 1 authority keeps its sessions, approvals and history, and
+        keeps running when this window is closed. Local terminals and these
+        preferences work without it. Managed runtimes use a separate protocol 2
+        connection, shown in Runtimes.
       </p>
     </section>
 

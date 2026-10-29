@@ -199,6 +199,7 @@ it('lists the sessions with the state of their runtime and opens one with its se
   // The list is the page the authority sent: this session's runtime had not been started.
   expect(text(row)).toContain('Stopped');
   expect(text(view().querySelector('.rt-head .pill'))).toBe('Ready');
+  expect(view().querySelector('h2')?.textContent).toContain('protocol 2');
   const tabs = Array.from(view().querySelectorAll('[role="tab"]'));
   expect(tabs.map((t) => text(t))).toEqual([
     'Overview',

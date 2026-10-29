@@ -230,7 +230,8 @@
     if (settings.phase === 'loading' || opened) return;
     // Preferences that cannot be read leave the window on its default view, the Console, as before.
     if (settings.phase === 'failed') {
-      consoleOpened = true;
+      opened = true;
+      if (activeView === 'console') consoleOpened = true;
       return;
     }
     opened = true;

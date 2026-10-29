@@ -39,7 +39,11 @@ async function settle() {
 }
 
 /** The desktop, with the preference the window opens on and the terminal commands recorded. */
-function desktop(landing: LandingPage, failReads = false) {
+function desktop(
+  landing: LandingPage,
+  failReads = false,
+  readGate?: Promise<void>,
+) {
   const settings = new FakeDesktopSettings(
     withPreferences((p) => ({
       ...p,
@@ -52,6 +56,8 @@ function desktop(landing: LandingPage, failReads = false) {
     const request =
       (payload as { request?: Record<string, unknown> } | undefined)?.request ??
       {};
+    if (command === 'settings_read' && readGate)
+      return readGate.then(() => settings.read());
     const fromSettings = settings.ipc(command, request);
     if (fromSettings) return fromSettings;
     if (command === 'create_terminal') return info;
@@ -61,6 +67,7 @@ function desktop(landing: LandingPage, failReads = false) {
       return { schema_version: 1, name: 'Wyss Console', version: '2.0-test' };
     return never();
   });
+  return settings;
 }
 
 const created = () => commands.filter((c) => c === 'create_terminal').length;
@@ -155,4 +162,39 @@ it('runs work queued before the workspace exists once it has its terminals', () 
   for (const run of waiters) run();
   expect(ran).toEqual(['first:object', 'second']);
   release();
+});
+
+it('a late preference failure does not create a hidden shell after navigating away', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  desktop('sessions', true, gate);
+  component = mount(App, { target: document.body });
+  await settle();
+  await navigateTo('Sessions');
+  release();
+  await settle();
+  expect(created()).toBe(0);
+  expect(commands).not.toContain('host_terminals');
+});
+
+it('retrying failed preferences never reapplies the landing page during this window', async () => {
+  const settings = desktop('sessions', true);
+  component = mount(App, { target: document.body });
+  await settle();
+  expect(created()).toBe(1);
+  await navigateTo('Settings');
+  settings.failReads = false;
+  const retry = document.querySelector<HTMLButtonElement>(
+    '.settings-feature .sessions-status button',
+  );
+  expect(retry).not.toBeNull();
+  retry!.click();
+  await settle();
+  expect(document.querySelector('.context-title')?.textContent).toBe(
+    'Settings',
+  );
+  await navigateTo('Console');
+  expect(created()).toBe(1);
 });
