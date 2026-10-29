@@ -1,0 +1,114 @@
+{
+  "positive_pass": {
+    "pass": true,
+    "detail": ""
+  },
+  "negative_condition_violated_fails": {
+    "pass": true,
+    "detail": ""
+  },
+  "zero_requests_never_pass": {
+    "pass": true,
+    "detail": ["requests_in_range"]
+  },
+  "zero_request_case_keys_not_counted_as_pass": {
+    "pass": true,
+    "detail": {
+      "verdict": "PASS",
+      "reasons": [],
+      "checks": {
+        "requests_in_range": true,
+        "body_absent:beta": true,
+        "stdout_contains:disabled via skillOverrides": true
+      },
+      "unknown": [],
+      "spec_errors": [],
+      "validator_matches": null
+    }
+  },
+  "refusal_text_required": {
+    "pass": true,
+    "detail": ["stdout_contains:disabled via skillOverrides"]
+  },
+  "non_synthetic_key_fails": {
+    "pass": true,
+    "detail": ""
+  },
+  "validator_mismatch_fails": {
+    "pass": true,
+    "detail": ["validator_matches"]
+  },
+  "overlay_without_validator_expectation_is_spec_error": {
+    "pass": true,
+    "detail": ""
+  },
+  "tool_not_attempted_fails": {
+    "pass": true,
+    "detail": ["requests_in_range", "tool_attempted"]
+  },
+  "tool_attempt_proven_passes": {
+    "pass": true,
+    "detail": ""
+  },
+  "tool_attempt_wrong_outcome_fails": {
+    "pass": true,
+    "detail": ""
+  },
+  "lint_missing_negative_inconclusive": {
+    "pass": true,
+    "detail": ""
+  },
+  "lint_missing_requests_inconclusive": {
+    "pass": true,
+    "detail": ""
+  },
+  "disk_tamper_detected_fail": {
+    "pass": true,
+    "detail": ""
+  },
+  "forged_stream_record_detected": {
+    "pass": true,
+    "detail": ["bad_record_at_seq:99"]
+  },
+  "missing_END_inconclusive": {
+    "pass": true,
+    "detail": ""
+  },
+  "wrong_key_stream_incomplete": {
+    "pass": true,
+    "detail": ""
+  },
+  "isolation_failure_stops": {
+    "pass": true,
+    "detail": ""
+  },
+  "listing_parser_accepts_dot_names": {
+    "pass": true,
+    "detail": ["pkg.tool"]
+  },
+  "pair_equal_observable_inconclusive": {
+    "pass": true,
+    "detail": ""
+  },
+  "pair_discriminated_pass": {
+    "pass": true,
+    "detail": ""
+  },
+  "pair_member_fail_fails": {
+    "pass": true,
+    "detail": ""
+  },
+  "v1_case_table_linted": {
+    "pass": true,
+    "detail": {
+      "v1_cases": 24,
+      "not_gradable_under_v2": 22
+    }
+  },
+  "historical_evidence_not_certifiable_retroactively": {
+    "pass": true,
+    "detail": {
+      "cases": 24
+    }
+  }
+}

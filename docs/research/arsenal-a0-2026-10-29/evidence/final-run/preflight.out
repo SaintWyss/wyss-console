@@ -1,0 +1,38 @@
+{
+ "sandbox_all_pass": true,
+ "sandbox_checks": 34,
+ "sandbox_passed": 34,
+ "sandbox_failed": [],
+ "host_control_failed": [
+  "env_only_allowed_names",
+  "home_dir_listing_only_probe",
+  "home_is_disposable",
+  "no_bus_display_env",
+  "no_bus_display_paths",
+  "no_host_codex_daemon_dir",
+  "no_host_codex_socket_reachable",
+  "no_ipv4_routes",
+  "no_new_privs",
+  "no_outbound_connect",
+  "no_real_credential_paths",
+  "no_sensitive_env_names",
+  "only_loopback_interface",
+  "pid1_environ_empty",
+  "pid_namespace_small",
+  "real_home_absent",
+  "tmp_is_private_tmpfs",
+  "user_namespace_mapped",
+  "xdg_inside_home"
+ ],
+ "launcher": {
+  "exit": 0,
+  "timed_out": false,
+  "killed": null,
+  "members_max": 2,
+  "leftovers": [],
+  "pid_ns": 4026532721,
+  "duration_s": 0.76,
+  "markers_peak": 0
+ },
+ "integrity": true
+}

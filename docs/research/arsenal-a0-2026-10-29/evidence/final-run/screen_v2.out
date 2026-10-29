@@ -1,0 +1,31 @@
+PASS cha_preserves_gap
+PASS cuf_preserves_gap
+PASS cup_positions
+PASS el_erases_tail
+PASS cr_overwrites
+PASS save_restore
+PASS osc_title_ignored
+PASS osc_st_terminator
+PASS sgr_ignored
+PASS neg_never_written_absent
+PASS v2_fragmentation_invariant_pilot_bytewise_and_200_random
+PASS NEGCTL_v1_breaks_under_fragmentation_pilot  [v1 differs when fed byte-by-byte (defect reproduced)]
+PASS v2_fragmentation_invariant_retest_bytewise_and_200_random
+PASS NEGCTL_v1_breaks_under_fragmentation_retest  [v1 differs when fed byte-by-byte (defect reproduced)]
+PASS pilot_ok_from_mock
+PASS split_csi_and_utf8  ['  ● ok']
+PASS NEGCTL_v1_split_csi_and_utf8_wrong  ['[3G��� ok']
+PASS scrolled_text_not_visible
+PASS scrolled_text_in_audit_view
+PASS NEGCTL_v1_text_includes_scrollback
+PASS alt_screen_restores_main
+PASS alt_screen_content_audited
+PASS ich_inserts
+PASS dch_deletes
+PASS ech_erases
+PASS il_inserts_line  [['1', '', '2', '3']]
+PASS dl_deletes_line  [['1', '3', '']]
+PASS scroll_region_confines_scroll  [['A', 'C', 'D', '', '']]
+PASS autowrap_deferred
+PASS unknown_sequence_counted  [1]
+ALL_PASS

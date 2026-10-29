@@ -1,0 +1,137 @@
+{
+  "positive_clean_exit_0": {
+    "pass": true,
+    "detail": {
+      "res": {
+        "clean": true,
+        "forced": false,
+        "code": 0
+      },
+      "lat": [0.05]
+    }
+  },
+  "positive_clean_exit_1": {
+    "pass": true,
+    "detail": {
+      "res": {
+        "clean": true,
+        "forced": false,
+        "code": 0
+      },
+      "lat": [0.05]
+    }
+  },
+  "positive_clean_exit_2": {
+    "pass": true,
+    "detail": {
+      "res": {
+        "clean": true,
+        "forced": false,
+        "code": 0
+      },
+      "lat": [0.05]
+    }
+  },
+  "positive_clean_exit_3": {
+    "pass": true,
+    "detail": {
+      "res": {
+        "clean": true,
+        "forced": false,
+        "code": 0
+      },
+      "lat": [0.05]
+    }
+  },
+  "positive_clean_exit_4": {
+    "pass": true,
+    "detail": {
+      "res": {
+        "clean": true,
+        "forced": false,
+        "code": 0
+      },
+      "lat": [0.051]
+    }
+  },
+  "drain_captures_tail_before_exit": {
+    "pass": true,
+    "detail": {
+      "bytes": 466971
+    }
+  },
+  "NEGCTL_v1_drain_misses_tail": {
+    "pass": true,
+    "detail": {
+      "v1_missed_runs_of_5": 5
+    }
+  },
+  "visible_now_excludes_scrollback": {
+    "pass": true,
+    "detail": {
+      "visible": false,
+      "audit_seen": true
+    }
+  },
+  "NEGCTL_v1_visible_matches_scrollback": {
+    "pass": true,
+    "detail": {
+      "v1_visible": true
+    }
+  },
+  "fragmented_confirmation_detected_and_clean_exit": {
+    "pass": true,
+    "detail": {
+      "clean": true,
+      "forced": false,
+      "code": 0
+    }
+  },
+  "no_confirm_forced_bounded": {
+    "pass": true,
+    "detail": {
+      "res": {
+        "clean": false,
+        "forced": true,
+        "code": -15
+      },
+      "elapsed_s": 6.08
+    }
+  },
+  "close_on_exception_kills_reaps_closes": {
+    "pass": true,
+    "detail": {
+      "alive": false,
+      "fd_closed": true,
+      "audit_tail": [
+        {
+          "t": 0.059,
+          "event": "killpg",
+          "sig": 15
+        },
+        {
+          "t": 0.06,
+          "event": "child_exited",
+          "status": 15,
+          "code": -15
+        },
+        {
+          "t": 0.06,
+          "event": "drained",
+          "bytes": 0,
+          "eof": true
+        }
+      ]
+    }
+  },
+  "close_idempotent": {
+    "pass": true,
+    "detail": {}
+  },
+  "NEGCTL_pilot_timing_does_not_exit": {
+    "pass": true,
+    "detail": {
+      "still_running": true
+    }
+  }
+}

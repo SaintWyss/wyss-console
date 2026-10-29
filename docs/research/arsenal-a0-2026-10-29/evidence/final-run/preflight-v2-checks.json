@@ -1,0 +1,223 @@
+{
+  "mode": "sandbox",
+  "all_pass": true,
+  "checks": {
+    "no_new_privs": {
+      "pass": true,
+      "detail": null
+    },
+    "user_namespace_mapped": {
+      "pass": true,
+      "detail": ["1000", "0", "1"]
+    },
+    "home_is_disposable": {
+      "pass": true,
+      "detail": "/home/probe"
+    },
+    "xdg_inside_home": {
+      "pass": true,
+      "detail": {
+        "XDG_CONFIG_HOME": true,
+        "XDG_DATA_HOME": true,
+        "XDG_STATE_HOME": true,
+        "XDG_CACHE_HOME": true
+      }
+    },
+    "real_home_absent": {
+      "pass": true,
+      "detail": null
+    },
+    "home_dir_listing_only_probe": {
+      "pass": true,
+      "detail": ["probe"]
+    },
+    "tmp_is_private_tmpfs": {
+      "pass": true,
+      "detail": {
+        "fstype": "tmpfs",
+        "entries": 0
+      }
+    },
+    "no_host_codex_daemon_dir": {
+      "pass": true,
+      "detail": null
+    },
+    "no_host_codex_socket_reachable": {
+      "pass": true,
+      "detail": null
+    },
+    "no_real_credential_paths": {
+      "pass": true,
+      "detail": null
+    },
+    "env_only_allowed_names": {
+      "pass": true,
+      "detail": []
+    },
+    "no_sensitive_env_names": {
+      "pass": true,
+      "detail": []
+    },
+    "no_inherited_extra_fds": {
+      "pass": true,
+      "detail": {}
+    },
+    "no_bus_display_env": {
+      "pass": true,
+      "detail": []
+    },
+    "no_bus_display_paths": {
+      "pass": true,
+      "detail": []
+    },
+    "no_x11_abstract_socket": {
+      "pass": true,
+      "detail": "ECONNREFUSED"
+    },
+    "only_loopback_interface": {
+      "pass": true,
+      "detail": ["lo"]
+    },
+    "no_ipv4_routes": {
+      "pass": true,
+      "detail": 0
+    },
+    "no_outbound_connect": {
+      "pass": true,
+      "detail": {
+        "public_1.1.1.1:443": "ENETUNREACH",
+        "lan_host_192.168.100.5:22": "ENETUNREACH",
+        "lan_gw_192.168.100.1:53": "ENETUNREACH",
+        "dns_api.anthropic.com": "gaierror",
+        "loopback_listen": "ok"
+      }
+    },
+    "pid_namespace_small": {
+      "pass": true,
+      "detail": 2
+    },
+    "host_provider_pids_invisible": {
+      "pass": true,
+      "detail": {
+        "host_pids_checked": 2
+      }
+    },
+    "pid1_environ_empty": {
+      "pass": true,
+      "detail": 0
+    },
+    "usr_readonly": {
+      "pass": true,
+      "detail": null
+    },
+    "etc_readonly": {
+      "pass": true,
+      "detail": null
+    },
+    "root_readonly": {
+      "pass": true,
+      "detail": null
+    },
+    "harness_readonly": {
+      "pass": true,
+      "detail": null
+    },
+    "provider_binary_readonly": {
+      "pass": true,
+      "detail": null
+    },
+    "work_writable": {
+      "pass": true,
+      "detail": null
+    },
+    "markers_writable": {
+      "pass": true,
+      "detail": null
+    },
+    "provider_binary_digest": {
+      "pass": true,
+      "detail": "4f4178ce41d83e23341ebfbaecdbcf8ea6bf7baea0690025abe49eeec3a5d01d"
+    },
+    "v2_sized_tmpfs_mounts": {
+      "pass": true,
+      "detail": {
+        "mounts": {
+          "/tmp": {
+            "fstype": "tmpfs",
+            "size": "262144k"
+          },
+          "/home/probe": {
+            "fstype": "tmpfs",
+            "size": "262144k"
+          },
+          "/work": {
+            "fstype": "tmpfs",
+            "size": "131072k"
+          },
+          "/markers": {
+            "fstype": "tmpfs",
+            "size": "16384k"
+          }
+        },
+        "expected_size_kib": {
+          "/tmp": "262144k",
+          "/home/probe": "262144k",
+          "/work": "131072k",
+          "/markers": "16384k"
+        }
+      }
+    },
+    "v2_no_writable_host_disk_bind": {
+      "pass": true,
+      "detail": []
+    },
+    "v2_rlimits_applied": {
+      "pass": true,
+      "detail": {
+        "actual": {
+          "RLIMIT_FSIZE": [67108864, 67108864],
+          "RLIMIT_CORE": [0, 0],
+          "RLIMIT_NOFILE": [4096, 4096],
+          "RLIMIT_CPU": [600, 600]
+        },
+        "expected": {
+          "RLIMIT_FSIZE": [67108864, 67108864],
+          "RLIMIT_CORE": [0, 0],
+          "RLIMIT_NOFILE": [4096, 4096],
+          "RLIMIT_CPU": [600, 600]
+        }
+      }
+    },
+    "no_real_home_mount": {
+      "pass": true,
+      "detail": [
+        "/",
+        "/a0/harness",
+        "/dev",
+        "/dev/full",
+        "/dev/null",
+        "/dev/pts",
+        "/dev/random",
+        "/dev/tty",
+        "/dev/urandom",
+        "/dev/zero",
+        "/etc/ca-certificates",
+        "/etc/group",
+        "/etc/ld.so.cache",
+        "/etc/ld.so.conf",
+        "/etc/ld.so.conf.d",
+        "/etc/localtime",
+        "/etc/nsswitch.conf",
+        "/etc/passwd",
+        "/etc/ssl",
+        "/home/probe",
+        "/markers",
+        "/opt/a0/bin/claude",
+        "/proc",
+        "/tmp",
+        "/usr",
+        "/work"
+      ]
+    }
+  }
+}

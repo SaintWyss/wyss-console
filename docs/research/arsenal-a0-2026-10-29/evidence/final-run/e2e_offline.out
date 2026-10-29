@@ -1,0 +1,20 @@
+PASS e2e_ok_passes {"verdict": "PASS", "reasons": [], "killed": null, "leftovers": [], "cleanup": {"staging_removed": true, "evidence_kept": true}}
+PASS e2e_disk_tamper_fails {"verdict": "FAIL", "reasons": ["evidence_tampered"], "killed": null, "leftovers": [], "cleanup": {"staging_removed": true, "evidence_kept": true}}
+PASS e2e_forged_record_detected_or_blocked {"verdict": "FAIL", "reasons": ["evidence_tampered"], "killed": null, "leftovers": [], "cleanup": {"staging_removed": true, "evidence_kept": true}, "forge_blocked": false, "stream_problems": ["bad_record_at_seq:3"]}
+PASS e2e_no_request_not_pass {"verdict": "FAIL", "reasons": ["requests_in_range"], "killed": null, "leftovers": [], "cleanup": {"staging_removed": true, "evidence_kept": true}}
+PASS e2e_validator_mismatch_fails {"verdict": "FAIL", "reasons": ["validator_matches"], "killed": null, "leftovers": [], "cleanup": {"staging_removed": true, "evidence_kept": true}}
+PASS e2e_tool_attempt_proven_passes {"verdict": "PASS", "reasons": [], "killed": null, "leftovers": [], "cleanup": {"staging_removed": true, "evidence_kept": true}}
+PASS e2e_tool_not_attempted_fails {"verdict": "FAIL", "reasons": ["requests_in_range", "tool_attempted"], "killed": null, "leftovers": [], "cleanup": {"staging_removed": true, "evidence_kept": true}}
+PASS e2e_timeout_killed_bounded_clean {"verdict": "INCONCLUSIVE", "reasons": ["evidence_incomplete", "missing_END"], "killed": "timeout", "leftovers": [], "cleanup": {"staging_removed": true, "evidence_kept": true}, "elapsed_s": 8.6}
+PASS e2e_markers_tmpfs_cap_enforced {"verdict": "FAIL", "reasons": ["requests_in_range"], "killed": null, "leftovers": [], "cleanup": {"staging_removed": true, "evidence_kept": true}, "markers_evidence_mib": 16.0, "flood_files": 17, "flood_mib": 16.0, "enospc_seen": true}
+PASS e2e_flood_host_evidence_bounded {"evidence_dir_mib": 37.4}
+PASS e2e_stream_cap_enforced {"verdict": "STOP_ISOLATION", "reasons": ["not_killed_for_storage"], "killed": "stream_cap", "leftovers": [], "cleanup": {"staging_removed": true, "evidence_kept": true}, "stream_log_mib": 47.9}
+PASS e2e_rlimit_fsize_enforced_EFBIG {"verdict": "PASS", "reasons": [], "killed": null, "leftovers": [], "cleanup": {"staging_removed": true, "evidence_kept": true}}
+PASS e2e_home_tmpfs_cap_enforced_ENOSPC {"verdict": "PASS", "reasons": [], "killed": null, "leftovers": [], "cleanup": {"staging_removed": true, "evidence_kept": true}, "stdout": "fill_home: errno=28 after_mib=32"}
+PASS e2e_orphan_counted_in_namespace_and_none_left {"members_max": 4, "leftovers": [], "verdict": "PASS"}
+PASS NEGCTL_v1_name_based_detector_misses_orphan {"v1_saw_sleep": false, "v2_saw_sleep": false}
+PASS e2e_injected_failure_cleans_up {"verdict": "INCONCLUSIVE", "reasons": ["harness_exception:RuntimeError:injected failure after launch (test)"], "killed": null, "leftovers": null, "cleanup": {"staging_removed": true, "evidence_kept": true}}
+PASS e2e_root_cap_refuses_launch {"id": "e2e-rootcap", "refused": "root_cap_exceeded:559218688>1", "verdict": "STOP_STORAGE"}
+PASS e2e_provider_guard_refuses [{"id": "e2e-guard-1", "refused": "provider_execution_not_authorized", "verdict": "REFUSED"}, {"id": "e2e-guard-2", "refused": "provider_execution_not_authorized", "verdict": "REFUSED"}]
+PASS e2e_no_staging_left []
+ALL_PASS

@@ -1,0 +1,15 @@
+PASS positive_clean_exit_0 {"res": {"clean": true, "forced": false, "code": 0}, "lat": [0.05]}
+PASS positive_clean_exit_1 {"res": {"clean": true, "forced": false, "code": 0}, "lat": [0.05]}
+PASS positive_clean_exit_2 {"res": {"clean": true, "forced": false, "code": 0}, "lat": [0.05]}
+PASS positive_clean_exit_3 {"res": {"clean": true, "forced": false, "code": 0}, "lat": [0.05]}
+PASS positive_clean_exit_4 {"res": {"clean": true, "forced": false, "code": 0}, "lat": [0.051]}
+PASS drain_captures_tail_before_exit {"bytes": 466971}
+PASS NEGCTL_v1_drain_misses_tail {"v1_missed_runs_of_5": 5}
+PASS visible_now_excludes_scrollback {"visible": false, "audit_seen": true}
+PASS NEGCTL_v1_visible_matches_scrollback {"v1_visible": true}
+PASS fragmented_confirmation_detected_and_clean_exit {"clean": true, "forced": false, "code": 0}
+PASS no_confirm_forced_bounded {"res": {"clean": false, "forced": true, "code": -15}, "elapsed_s": 6.08}
+PASS close_on_exception_kills_reaps_closes {"alive": false, "fd_closed": true, "audit_tail": [{"t": 0.059, "event": "killpg", "sig": 15}, {"t": 0.06, "event": "child_exited", "status": 15, "code": -15}, {"t": 0.06, "event": "drained", "bytes": 0, "eof": true}]}
+PASS close_idempotent {}
+PASS NEGCTL_pilot_timing_does_not_exit {"still_running": true}
+ALL_PASS
