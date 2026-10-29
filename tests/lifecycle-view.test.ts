@@ -1,3 +1,4 @@
+import { settingsView } from './settings-harness';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { mockIPC } from '@tauri-apps/api/mocks';
@@ -58,6 +59,7 @@ function desktop(link: unknown, first: LifecycleView) {
     retry: (): unknown => lifecycle({ phase: 'checking', revision: 90 }),
   };
   mockIPC((command, payload) => {
+    if (command === 'settings_read') return settingsView();
     const request =
       (payload as { request?: Record<string, unknown> })?.request ?? {};
     calls.push({ command, request });
@@ -328,6 +330,7 @@ it('goes on without a lifecycle the bridge cannot answer', async () => {
   const ipc = desktop(views.waiting_absent, lifecycle());
   // An answer that is not the view: the shell says what the link says, and no more.
   mockIPC((command, payload) => {
+    if (command === 'settings_read') return settingsView();
     const request =
       (payload as { request?: Record<string, unknown> })?.request ?? {};
     ipc.calls.push({ command, request });

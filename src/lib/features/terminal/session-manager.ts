@@ -84,6 +84,8 @@ export class TerminalSessionManager {
   private error?: string;
   private ordinal = 0;
   private started = false;
+  private ready = false;
+  private readyWaiters: Array<() => void> = [];
   private disposed = false;
   private disposal?: Promise<void>;
 
@@ -195,8 +197,27 @@ export class TerminalSessionManager {
   start() {
     if (this.started || this.disposed) return;
     this.started = true;
-    if (this.persistent) void this.restoreOrCreate();
-    else this.create();
+    if (this.persistent)
+      void this.restoreOrCreate().finally(() => this.markReady());
+    else {
+      this.create();
+      this.markReady();
+    }
+  }
+  /**
+   * Runs `run` once the terminals this manager starts with are in place: restored from the host
+   * and laid out, or the first one created. Runs at once when that has already happened.
+   */
+  whenReady(run: () => void) {
+    if (this.ready) run();
+    else this.readyWaiters.push(run);
+  }
+  private markReady() {
+    if (this.ready) return;
+    this.ready = true;
+    const waiters = this.readyWaiters;
+    this.readyWaiters = [];
+    for (const run of waiters) run();
   }
   /**
    * What the host holds is shown again, laid out as the saved layout says (T2); a terminal the

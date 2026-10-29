@@ -13,9 +13,10 @@ use buffer::OutputBuffer;
 use contracts::*;
 use std::{
     collections::{BTreeMap, VecDeque},
+    ffi::OsStr,
     io::Write,
     os::unix::{fs::PermissionsExt, net::UnixStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex, MutexGuard,
         atomic::{AtomicBool, Ordering},
@@ -168,12 +169,17 @@ impl TerminalService {
 
     fn spawn(
         &self,
-        request: CreateTerminal,
+        mut request: CreateTerminal,
         launch: Launch,
         home: PathBuf,
     ) -> Result<TerminalInfo, TerminalError> {
         let size = request.size.validate()?;
-        let cwd = request.cwd.map(PathBuf::from).unwrap_or(home);
+        // An explicit directory is validated below like any other. Without one, the start is the
+        // effective HOME, and the account's home only when HOME is not set at all.
+        let cwd = match request.cwd.take() {
+            Some(cwd) => PathBuf::from(cwd),
+            None => start_dir(std::env::var_os("HOME").as_deref(), &home)?,
+        };
         let cwd = cwd
             .canonicalize()
             .map_err(|error| TerminalError::context(ErrorCode::InvalidCwd, error))?;
@@ -461,6 +467,22 @@ fn shell_and_home() -> Result<(PathBuf, PathBuf), TerminalError> {
         .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
         .ok_or_else(|| TerminalError::new(ErrorCode::InvalidCwd))?;
     Ok((shell, home))
+}
+/// The directory a terminal starts in when its request names none. A HOME that is set must name an
+/// absolute, existing directory, and that is the start: an invalid HOME is refused, never replaced
+/// by the account's home. Symbolic links are resolved, so the start is the canonical target.
+fn start_dir(home: Option<&OsStr>, account_home: &Path) -> Result<PathBuf, TerminalError> {
+    let Some(home) = home else {
+        return Ok(account_home.to_path_buf());
+    };
+    if home.is_empty() || !Path::new(home).is_absolute() {
+        return Err(TerminalError::new(ErrorCode::InvalidCwd));
+    }
+    Path::new(home)
+        .canonicalize()
+        .ok()
+        .filter(|canonical| canonical.is_dir())
+        .ok_or_else(|| TerminalError::new(ErrorCode::InvalidCwd))
 }
 fn executable(path: &std::path::Path) -> bool {
     path.is_absolute()

@@ -1,3 +1,4 @@
+import { settingsView } from './settings-harness';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { mockIPC } from '@tauri-apps/api/mocks';
@@ -42,6 +43,7 @@ function ipc(
 ) {
   const commands: string[] = [];
   mockIPC((command, payload) => {
+    if (command === 'settings_read') return settingsView();
     commands.push(command);
     if (command === 'authority_state')
       return authority(

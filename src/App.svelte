@@ -31,7 +31,7 @@
   import WorkspaceView from './lib/features/native/WorkspaceView.svelte';
   import { SettingsController } from './lib/features/settings/controller';
   import SettingsView from './lib/features/settings/SettingsView.svelte';
-  import { currentWorkspace } from './lib/features/native/bridge';
+  import { whenWorkspaceReady } from './lib/features/native/bridge';
   import { setAppearance } from './lib/features/terminal/appearance';
   import EventsView from './lib/features/events/EventsView.svelte';
   import { SessionsController } from './lib/features/sessions/controller';
@@ -68,6 +68,9 @@
 
   let version = $state('');
   let activeView = $state<ViewId>('console');
+  // The terminal workspace is mounted on the first visit to the Console, and stays mounted after
+  // it. The provisional 'console' above does not count: the preference decides where the window opens.
+  let consoleOpened = $state(false);
   let runtime = $state<RuntimeSummary>(idleRuntime);
   let authority = $state<AuthorityObservation>(pendingAuthority);
   // Whether the authority is being made available, and why not when it is not. The
@@ -117,7 +120,12 @@
       native = next;
     },
     (reply) => {
-      currentWorkspace()?.createNative(reply);
+      // The Console may not be mounted yet: the tab is made once its terminals are restored.
+      whenWorkspaceReady((workspace) => {
+        const tab = workspace.tabOf(reply.session.id);
+        if (tab) workspace.activate(tab);
+        else workspace.createNative(reply);
+      });
       go('console');
     },
   );
@@ -219,9 +227,15 @@
   // The window opens on the view the preferences name, unless the user has already
   // moved: a late answer never takes them somewhere they did not go.
   $effect(() => {
-    if (settings.phase !== 'ready' || opened) return;
+    if (settings.phase === 'loading' || opened) return;
+    // Preferences that cannot be read leave the window on its default view, the Console, as before.
+    if (settings.phase === 'failed') {
+      consoleOpened = true;
+      return;
+    }
     opened = true;
     if (!navigated) activeView = settings.preferences.interface.landing_page;
+    if (activeView === 'console') consoleOpened = true;
   });
   // Presentation preferences, applied to every terminal, open or new.
   $effect(() => {
@@ -286,6 +300,7 @@
 
   function go(view: ViewId) {
     navigated = true;
+    if (view === 'console') consoleOpened = true;
     activeView = view;
   }
 
@@ -370,12 +385,14 @@
     {#if notice}
       <AuthorityNotice {notice} {retrying} onretry={retry} />
     {/if}
-    <!-- Every view stays mounted: leaving the Console never ends a terminal. -->
-    <TerminalView
-      visible={activeView === 'console'}
-      onworkspace={observeWorkspace}
-      onagents={() => go('workspace')}
-    />
+    <!-- Mounted on the first visit to the Console, then kept: leaving the Console never ends a terminal. -->
+    {#if consoleOpened}
+      <TerminalView
+        visible={activeView === 'console'}
+        onworkspace={observeWorkspace}
+        onagents={() => go('workspace')}
+      />
+    {/if}
     <WorkspaceView
       visible={activeView === 'workspace'}
       {native}

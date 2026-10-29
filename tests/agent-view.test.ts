@@ -1,3 +1,4 @@
+import { settingsView } from './settings-harness';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { mockIPC } from '@tauri-apps/api/mocks';
@@ -94,6 +95,7 @@ function desktop() {
     olderOf: new Map<string, ReturnType<typeof cursor>>(),
   };
   mockIPC((command, payload) => {
+    if (command === 'settings_read') return settingsView();
     const request =
       (payload as { request?: Record<string, unknown> })?.request ?? {};
     let resolve!: (value: unknown) => void;

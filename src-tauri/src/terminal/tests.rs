@@ -177,6 +177,60 @@ fn invalid_dimensions_reject_create_and_resize() {
 }
 
 #[test]
+fn start_dir_uses_a_valid_home_in_its_canonical_form() {
+    let home = format!("{}/src", env!("CARGO_MANIFEST_DIR"));
+    let canonical = std::path::Path::new(&home).canonicalize().unwrap();
+    let account = std::path::Path::new("/nonexistent-account-home");
+    assert_eq!(
+        start_dir(Some(OsStr::new(&home)), account).unwrap(),
+        canonical
+    );
+}
+
+#[test]
+fn start_dir_refuses_an_invalid_home_and_never_falls_back_to_the_account_home() {
+    let account = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for home in [
+        "",
+        "relative/path",
+        "/does/not/exist",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"),
+    ] {
+        assert_eq!(
+            start_dir(Some(OsStr::new(home)), account).unwrap_err().code,
+            ErrorCode::InvalidCwd,
+            "HOME={home:?}"
+        );
+    }
+}
+
+#[test]
+fn start_dir_falls_back_to_the_account_home_only_when_home_is_unset() {
+    let account = std::path::Path::new("/account/home");
+    assert_eq!(start_dir(None, account).unwrap(), account);
+}
+
+#[test]
+fn explicit_cwd_takes_precedence_and_is_still_validated() {
+    let service = TerminalService::default();
+    let dir = format!("{}/src", env!("CARGO_MANIFEST_DIR"));
+    let terminal = service
+        .create(CreateTerminal {
+            cwd: Some(dir.clone()),
+            ..request()
+        })
+        .unwrap();
+    assert_eq!(
+        terminal.cwd,
+        std::path::Path::new(&dir)
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+    );
+    service.close(&terminal.terminal_id).unwrap();
+}
+
+#[test]
 fn invalid_cwd_never_falls_back() {
     let service = TerminalService::default();
     for cwd in [
@@ -404,7 +458,9 @@ fn production_shell_selection_uses_account_shell_and_default_home() {
         })
         .unwrap();
     assert_eq!(terminal.shell, expected_shell.to_string_lossy());
-    assert_eq!(terminal.cwd, home.canonicalize().unwrap().to_string_lossy());
+    // The start is the effective HOME, which is the account's home unless HOME is overridden.
+    let start = start_dir(std::env::var_os("HOME").as_deref(), &home).unwrap();
+    assert_eq!(terminal.cwd, start.to_string_lossy());
     // With xterm-256color fish legitimately waits for a renderer handshake.
     // This backend-only regression checks real account-shell spawn/cleanup;
     // interaction and capability replies are validated with the real GUI renderer.
