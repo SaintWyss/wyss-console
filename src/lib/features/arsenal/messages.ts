@@ -15,6 +15,7 @@ const CODE_TEXT: Record<string, string> = {
   not_found:
     'That item is no longer in the library or in your skill folders. Refresh and try again.',
   invalid_request: 'The request was not valid. Check the fields and try again.',
+  not_importable: 'This kind is listed only. Arsenal does not copy it.',
   too_large: 'This file is too large to show here.',
   binary_file: 'This file is not text, so it cannot be shown here.',
   internal: 'Arsenal returned something unexpected. Refresh and try again.',

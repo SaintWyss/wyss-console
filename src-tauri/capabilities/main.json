@@ -59,6 +59,7 @@
     "allow-configuration-select-project",
     "allow-configuration-template-export",
     "allow-arsenal-discover",
+    "allow-arsenal-candidate",
     "allow-arsenal-capabilities",
     "allow-arsenal-capability",
     "allow-arsenal-file",

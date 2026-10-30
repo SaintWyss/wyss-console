@@ -1,5 +1,6 @@
 import type {
   ArsenalProvider,
+  CandidateDetail,
   Detail,
   DiscoverReply,
   FileText,
@@ -33,6 +34,8 @@ export interface ArsenalState {
   discover: DiscoverReply | null;
   discovering: boolean;
   chosen: string | null;
+  /** The files and exclusions of the chosen capability, read on selection. */
+  chosenDetail: CandidateDetail | null;
   busy: 'import' | 'restore' | 'save' | null;
   notice: Notice | null;
   presets: Preset[];
@@ -55,6 +58,7 @@ export class ArsenalController {
     discover: null,
     discovering: false,
     chosen: null,
+    chosenDetail: null,
     busy: null,
     notice: null,
     presets: [],
@@ -179,7 +183,12 @@ export class ArsenalController {
     this.set({ discovering: true, notice: null });
     try {
       const discover = await this.client.discover();
-      this.set({ discover, discovering: false, chosen: null });
+      this.set({
+        discover,
+        discovering: false,
+        chosen: null,
+        chosenDetail: null,
+      });
     } catch (error) {
       this.set({
         discovering: false,
@@ -188,12 +197,22 @@ export class ArsenalController {
     }
   }
 
-  choose(id: string | null) {
-    this.set({ chosen: id, notice: null });
+  /** Chooses a discovered capability and reads its files from the last scan. */
+  async choose(id: string | null) {
+    this.set({ chosen: id, chosenDetail: null, notice: null });
+    if (id === null) return;
+    try {
+      const chosenDetail = await this.client.candidateDetail(id);
+      if (this.state.chosen === id) this.set({ chosenDetail });
+    } catch (error) {
+      this.set({ notice: { tone: 'error', text: failureMessage(error) } });
+    }
   }
 
-  async importSkill(id: string) {
-    const skill = this.state.discover?.skills.find((entry) => entry.id === id);
+  async importCandidate(id: string) {
+    const candidate = this.state.discover?.candidates.find(
+      (entry) => entry.id === id,
+    );
     this.set({ busy: 'import', notice: null });
     try {
       const imported = await this.client.importSkill(id);
@@ -204,7 +223,7 @@ export class ArsenalController {
         busy: null,
         notice: {
           tone: 'ok',
-          text: importMessage(skill?.name ?? 'skill', imported),
+          text: importMessage(candidate?.name ?? 'capability', imported),
         },
       });
     } catch (error) {

@@ -233,6 +233,7 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     // Arsenal (AM1a): the offline library. Reads, one import from a fresh scan, restore, presets and
     // selections, and the configuration preview. None starts a session or writes a provider's files.
     'allow-arsenal-discover',
+    'allow-arsenal-candidate',
     'allow-arsenal-capabilities',
     'allow-arsenal-capability',
     'allow-arsenal-file',

@@ -10,7 +10,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::agentconfig::skills::{MAX_FILE_BYTES, MAX_FILES, MAX_TREE_BYTES, name_ok};
+use crate::agentconfig::catalogue::{MAX_FILE_BYTES, MAX_FILES, MAX_TREE_BYTES, name_ok};
 
 const MAX_PATH_BYTES: usize = 256;
 const MAX_ITEMS: usize = 128;
@@ -707,24 +707,45 @@ fn insert_revision(
     Ok(())
 }
 
+/// The folders a capability is read from. Each belongs to one provider, and a project's folders
+/// are named apart from the account's, so the same name in two projects never shares an identity.
+const SOURCES: [&str; 12] = [
+    "claude_user_skills",
+    "codex_user_skills",
+    "claude_project_skills",
+    "codex_project_skills",
+    "claude_user_agents",
+    "codex_user_agents",
+    "claude_project_agents",
+    "codex_project_agents",
+    "claude_user_rules",
+    "codex_user_rules",
+    "claude_project_rules",
+    "codex_project_rules",
+];
+
 fn validate(new: &NewCapability) -> Result<(), Error> {
-    let known_source = matches!(
-        new.source.as_str(),
-        "claude_user_skills" | "codex_user_skills"
-    );
+    let owner = if new.source.starts_with("claude_") {
+        "claude_code"
+    } else {
+        "codex"
+    };
     if !name_ok(&new.name)
         || !is_provider(&new.provider)
-        || new.kind != "skill"
-        || !known_source
+        || new.provider != owner
+        || !SOURCES.contains(&new.source.as_str())
         || new.description.chars().count() > 500
         || new.origin.len() > 512
     {
         return Err(Error::Invalid);
     }
-    if new.files.is_empty() || new.files.len() > MAX_FILES {
-        return Err(Error::Invalid);
-    }
-    if !new.files.iter().any(|(path, _)| path == "SKILL.md") {
+    // A skill is a folder with a SKILL.md. An agent or a rule is one file of its own.
+    let shape_ok = match new.kind.as_str() {
+        "skill" => new.files.iter().any(|(path, _)| path == "SKILL.md"),
+        "agent" | "rule" => new.files.len() == 1,
+        _ => false,
+    };
+    if !shape_ok || new.files.is_empty() || new.files.len() > MAX_FILES {
         return Err(Error::Invalid);
     }
     let mut seen = HashSet::new();
@@ -963,6 +984,42 @@ mod tests {
         assert_eq!(reopened.import(&skill("other", b"x")), Err(Error::Busy));
         holder.execute_batch("ROLLBACK;").unwrap();
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn agents_and_rules_are_one_file_from_their_own_folder_of_their_own_provider() {
+        let mut store = memory();
+        let agent = |source: &str, provider: &str, files: Vec<(String, Vec<u8>)>| NewCapability {
+            identity: identity(provider, "agent", source, "reviewer"),
+            provider: provider.into(),
+            source: source.into(),
+            kind: "agent".into(),
+            name: "reviewer".into(),
+            description: "Reviews".into(),
+            origin: "~/.claude/agents/reviewer.md".into(),
+            files,
+        };
+        let one = vec![("reviewer.md".to_owned(), b"body".to_vec())];
+        assert_eq!(
+            store
+                .import(&agent("claude_user_agents", "claude_code", one.clone()))
+                .unwrap()
+                .outcome,
+            Outcome::Created
+        );
+        let two = vec![one[0].clone(), ("extra.md".to_owned(), b"x".to_vec())];
+        assert_eq!(
+            store.import(&agent("claude_user_agents", "claude_code", two)),
+            Err(Error::Invalid)
+        );
+        assert_eq!(
+            store.import(&agent("claude_user_agents", "codex", one.clone())),
+            Err(Error::Invalid)
+        );
+        assert_eq!(
+            store.import(&agent("opencode_user_agents", "codex", one)),
+            Err(Error::Invalid)
+        );
     }
 
     #[test]

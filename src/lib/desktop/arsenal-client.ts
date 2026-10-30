@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import {
+  parseCandidateDetail,
   parseDetail,
   parseDiscover,
   parseFileText,
@@ -13,6 +14,7 @@ import {
   parseSummaries,
   type ArsenalFailure,
   type ArsenalProvider,
+  type CandidateDetail,
   type Detail,
   type FileText,
   type Imported,
@@ -69,6 +71,10 @@ async function answer<T>(
 /** Every request names something the library or a fresh scan already holds, never a path. */
 export const arsenalClient = {
   discover: () => answer('arsenal_discover', parseDiscover),
+  candidateDetail: (id: string) =>
+    answer<CandidateDetail>('arsenal_candidate', parseCandidateDetail, {
+      request: { id },
+    }),
   capabilities: () => answer<Summary[]>('arsenal_capabilities', parseSummaries),
   capability: (capability: string, revision: number | null) =>
     answer<Detail>('arsenal_capability', parseDetail, {

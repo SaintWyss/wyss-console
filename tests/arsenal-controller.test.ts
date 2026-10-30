@@ -4,6 +4,7 @@ import {
   parseDiscover,
   parseImportFailure,
   parseSummaries,
+  type Candidate,
   type Detail,
   type DiscoverReply,
   type Preset,
@@ -60,31 +61,38 @@ const detail = (revision: number): Detail => ({
   files: [{ path: 'SKILL.md', sha256: 'e'.repeat(64), size: 9 }],
 });
 
+const candidate: Candidate = {
+  id: 'id-design',
+  tree_hash: 'c'.repeat(64),
+  status: 'not_imported',
+  importable: true,
+  compatibility: 'unverified',
+  capability: null,
+  duplicates: [],
+  name_collisions: [],
+  kind: 'skill',
+  provider: 'claude_code',
+  source: 'claude_user_skills',
+  scope: 'user',
+  name: 'design',
+  description: 'Plans screens',
+  origin: '~/.claude/skills/design',
+  executes_code: false,
+  blocked: null,
+  managed_by: null,
+  file_count: 1,
+  excluded_count: 0,
+  review_count: 0,
+};
+
 const discovered: DiscoverReply = {
+  project: null,
   sources: [
     { source: 'claude_user_skills', state: 'read' },
     { source: 'codex_user_skills', state: 'absent' },
   ],
-  skills: [
-    {
-      id: 'id-design',
-      tree_hash: 'c'.repeat(64),
-      status: 'not_imported',
-      capability: null,
-      duplicates: [],
-      name_collisions: [],
-      provider: 'claude_code',
-      source: 'claude_user_skills',
-      name: 'design',
-      description: 'Plans screens',
-      origin: '~/.claude/skills/design',
-      files: [{ path: 'SKILL.md', size: 9, sha256: 'e'.repeat(64) }],
-      excluded: [],
-      review: [],
-      executes_code: false,
-      blocked: null,
-    },
-  ],
+  candidates: [candidate],
+  composites: [],
   truncated: false,
 };
 
@@ -127,6 +135,12 @@ function fakeClient(overrides: Partial<ArsenalClient> = {}): ArsenalClient {
     selections: vi.fn(async () => [selection]),
     saveSelection: vi.fn(async () => selection),
     deleteSelection: vi.fn(async () => undefined),
+    candidateDetail: vi.fn(async (id: string) => ({
+      id,
+      files: [],
+      excluded: [],
+      review: [],
+    })),
     preview: vi.fn(async (): Promise<Preview> => ({
       selection,
       status: 'not_applied',
@@ -134,6 +148,7 @@ function fakeClient(overrides: Partial<ArsenalClient> = {}): ArsenalClient {
         {
           capability: 'cap-design',
           state: 'resolved',
+          kind: 'skill',
           name: 'design',
           provider: 'claude_code',
           revision: 2,
@@ -186,11 +201,11 @@ describe('Arsenal controller', () => {
     expect(broken.last().notice?.text).toContain('could not be opened');
   });
 
-  it('imports a discovered skill, says what changed, and refreshes the scan and the library', async () => {
+  it('imports a discovered capability, says what changed, and refreshes the scan and the library', async () => {
     const client = fakeClient();
     const { controller, last } = controllerWith(client);
     await controller.discover();
-    await controller.importSkill('id-design');
+    await controller.importCandidate('id-design');
     expect(client.importSkill).toHaveBeenCalledWith('id-design');
     expect(last().notice).toEqual({
       tone: 'ok',
@@ -210,7 +225,7 @@ describe('Arsenal controller', () => {
     });
     const { controller, last } = controllerWith(client);
     await controller.discover();
-    await controller.importSkill('id-design');
+    await controller.importCandidate('id-design');
     expect(last().notice?.text).toBe(
       'design is already imported at revision 2. Nothing changed.',
     );
@@ -224,7 +239,7 @@ describe('Arsenal controller', () => {
     });
     const { controller, last } = controllerWith(client);
     await controller.discover();
-    await controller.importSkill('id-design');
+    await controller.importCandidate('id-design');
     expect(last().notice?.tone).toBe('error');
     expect(last().notice?.text).toContain('looks like a secret');
     expect(last().busy).toBeNull();
@@ -303,12 +318,59 @@ describe('Arsenal contracts', () => {
     expect(() => parseSummaries([{ id: 'x' }])).toThrow(ArsenalShapeError);
     expect(() =>
       parseDiscover({
+        project: null,
         sources: [{ source: 's', state: 'maybe' }],
-        skills: [],
+        candidates: [],
+        composites: [],
         truncated: false,
       }),
     ).toThrow(ArsenalShapeError);
     expect(() => parseDiscover('not an object')).toThrow(ArsenalShapeError);
+  });
+
+  it('keeps read-only entries, composites and the project name the window shows', () => {
+    const reply = parseDiscover({
+      project: 'app',
+      sources: [],
+      candidates: [
+        {
+          ...candidate,
+          id: 'id-hook',
+          kind: 'hook',
+          name: 'pre-commit',
+          status: 'read_only',
+          importable: false,
+          compatibility: 'unsupported',
+          blocked: 'read_only_kind',
+        },
+        {
+          ...candidate,
+          id: 'id-gsd',
+          name: 'gsd-help',
+          importable: false,
+          blocked: 'symbolic_link',
+          managed_by: {
+            composite: 'GSD Core',
+            version: '1.15.0',
+            artifacts: 1950,
+          },
+        },
+      ],
+      composites: [
+        {
+          name: 'GSD Core 1.15.0',
+          version: '1.15.0',
+          artifacts: 1950,
+          members: 1,
+          origin: '~/.local/share/wyss/gsd-core/1.15.0',
+        },
+      ],
+      truncated: false,
+    });
+    expect(reply.project).toBe('app');
+    expect(reply.candidates[0].status).toBe('read_only');
+    expect(reply.candidates[1].managed_by?.composite).toBe('GSD Core');
+    expect(reply.composites[0].members).toBe(1);
   });
 
   it('keeps the failure code and the blocking reason of a refused call', () => {

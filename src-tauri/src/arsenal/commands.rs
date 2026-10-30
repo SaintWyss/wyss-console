@@ -1,10 +1,12 @@
-//! The window's commands for Arsenal. None takes a path. A discovered skill is named by its
-//! identity, and the desktop scans again before it reads or copies anything, so the window can
-//! never point the importer at a file of its own choosing.
+//! The window's commands for Arsenal. None takes a path. A discovered capability is named by its
+//! identity, and the desktop scans again, with the project it accepted, before it reads or copies
+//! anything, so the window can never point the importer at a file of its own choosing.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::State;
 
 use super::Arsenal;
@@ -12,9 +14,14 @@ use super::store::{
     self, Detail, Error, FileInfo, Imported, NewCapability, Preset, PresetInput, Selection,
     SelectionInput, Store, Summary,
 };
-use crate::agentconfig::skills::{self, Scan, Skill, SourceReport};
+use crate::agentconfig::catalogue::{
+    self, Candidate, Composite, Excluded, FileDigest, ManagedBy, Scan, SourceReport,
+};
+use crate::configuration::Configuration;
 
 const PREVIEW_BYTES: usize = 1024 * 1024;
+/// The kinds Arsenal can copy. Hooks, MCP servers and plugins are listed and never imported.
+const IMPORTABLE: [&str; 3] = ["skill", "agent", "rule"];
 
 #[derive(Debug, Serialize)]
 pub struct ArsenalError {
@@ -42,26 +49,55 @@ impl From<Error> for ArsenalError {
     }
 }
 
-/// One skill as the window shows it: what the scan read, and how it stands against the library.
-#[derive(Debug, Serialize)]
-pub struct SkillView {
+/// One discovered capability as the list shows it. The files and exclusions of the chosen one come
+/// from `arsenal_candidate`, so a long scan stays a small reply.
+#[derive(Debug, Clone, Serialize)]
+pub struct CandidateView {
+    /// Stable identity: the kind, provider, source and name, and the project for a project's own.
     pub id: String,
     pub tree_hash: String,
-    /// `not_imported`, `imported` (the library holds this content) or `source_changed`.
+    /// `not_imported`, `imported`, `source_changed`, or `read_only` for hooks, MCP servers and plugins.
     pub status: &'static str,
+    pub importable: bool,
+    /// `unverified` when the format is known, `partial` when it holds scripts, `unsupported` when
+    /// Arsenal does not handle the kind yet. None of them says a session uses it.
+    pub compatibility: &'static str,
     pub capability: Option<String>,
-    /// Other skills in this scan whose content is identical.
+    /// Other importable capabilities with identical content.
     pub duplicates: Vec<String>,
-    /// Other skills in this scan with the same name.
+    /// Other importable capabilities with the same name.
     pub name_collisions: Vec<String>,
-    #[serde(flatten)]
-    pub skill: Skill,
+    pub kind: &'static str,
+    pub provider: &'static str,
+    pub source: String,
+    pub scope: &'static str,
+    pub name: String,
+    pub description: String,
+    pub origin: String,
+    pub blocked: Option<&'static str>,
+    pub managed_by: Option<ManagedBy>,
+    pub executes_code: bool,
+    pub file_count: usize,
+    pub excluded_count: usize,
+    pub review_count: usize,
+}
+
+/// What a discovered capability holds: its files, what was left out, and what to review.
+#[derive(Debug, Clone, Serialize)]
+pub struct CandidateDetail {
+    pub id: String,
+    pub files: Vec<FileDigest>,
+    pub excluded: Vec<Excluded>,
+    pub review: Vec<Excluded>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct DiscoverReply {
+    /// The selected project's folder name, when a project is open.
+    pub project: Option<String>,
     pub sources: Vec<SourceReport>,
-    pub skills: Vec<SkillView>,
+    pub candidates: Vec<CandidateView>,
+    pub composites: Vec<Composite>,
     pub truncated: bool,
 }
 
@@ -104,6 +140,7 @@ pub struct PreviewItem {
     pub capability: String,
     /// `resolved`, `missing` (the capability is gone) or `revision_missing` (the pin is gone).
     pub state: &'static str,
+    pub kind: String,
     pub name: String,
     pub provider: String,
     pub revision: Option<i64>,
@@ -116,7 +153,7 @@ pub struct PreviewItem {
 
 #[derive(Debug, Serialize)]
 pub struct Conflict {
-    /// `name_collision`: two capabilities with one name. `duplicate_content`: two with one content.
+    /// `name_collision`, `duplicate_content`, or `instruction_overlap` (two rules for one provider).
     pub code: &'static str,
     pub capabilities: Vec<String>,
 }
@@ -134,6 +171,7 @@ pub struct Preview {
 
 const COMMANDS: &[&str] = &[
     "arsenal_discover",
+    "arsenal_candidate",
     "arsenal_capabilities",
     "arsenal_capability",
     "arsenal_file",
@@ -154,6 +192,7 @@ pub fn extension() -> wyss_console::Extension {
         commands: COMMANDS,
         handler: Box::new(tauri::generate_handler![
             arsenal_discover,
+            arsenal_candidate,
             arsenal_capabilities,
             arsenal_capability,
             arsenal_file,
@@ -172,55 +211,186 @@ pub fn extension() -> wyss_console::Extension {
     }
 }
 
-fn identity_of(skill: &Skill) -> String {
-    store::identity(skill.provider, "skill", skill.source, &skill.name)
+/// The identity a capability is stored and named by. A project's capability carries a digest of the
+/// project folder, so two projects with the same file name never share one.
+pub fn identity_of(candidate: &Candidate, project: Option<&Path>) -> String {
+    let source = match (candidate.scope, project) {
+        ("project", Some(project)) => format!("{}@{}", candidate.source, scope_key(project)),
+        _ => candidate.source.clone(),
+    };
+    store::identity(candidate.provider, candidate.kind, &source, &candidate.name)
 }
 
-fn scan_or_refuse() -> Result<Scan, ArsenalError> {
-    skills::scan_process().ok_or(ArsenalError::code("discovery_unavailable"))
+/// The identity of each scanned capability, unique within the scan. Two entries can share one (two
+/// hooks with one name in one file); the later one takes its position as a suffix, so the list never
+/// repeats a key and an import names the same entry the scan showed.
+fn ids_of(candidates: &[Candidate], project: Option<&Path>) -> Vec<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    candidates
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| {
+            let identity = identity_of(candidate, project);
+            if seen.insert(identity.clone()) {
+                identity
+            } else {
+                format!("{identity}#{index}")
+            }
+        })
+        .collect()
+}
+
+fn scope_key(project: &Path) -> String {
+    format!(
+        "{:x}",
+        Sha256::digest(project.as_os_str().as_encoded_bytes())
+    )
+    .chars()
+    .take(16)
+    .collect()
+}
+
+fn is_importable(candidate: &Candidate) -> bool {
+    candidate.blocked.is_none() && IMPORTABLE.contains(&candidate.kind)
+}
+
+/// What is known about a kind, for its provider. A format is known for a skill, an agent or a rule;
+/// whether a launched session uses it is not verified until AM1b.
+fn compatibility_of(candidate: &Candidate) -> &'static str {
+    match candidate.kind {
+        "skill" | "agent" | "rule" if candidate.executes_code => "partial",
+        "skill" | "agent" | "rule" => "unverified",
+        _ => "unsupported",
+    }
 }
 
 #[tauri::command]
-fn arsenal_discover(arsenal: State<'_, Arsenal>) -> Result<DiscoverReply, ArsenalError> {
-    let scan = scan_or_refuse()?;
-    arsenal
-        .with_store(|store| discover_reply(store, scan))
-        .map_err(ArsenalError::from)
+async fn arsenal_discover(
+    arsenal: State<'_, Arsenal>,
+    configuration: State<'_, Configuration>,
+) -> Result<DiscoverReply, ArsenalError> {
+    let project = configuration.selected_project();
+    let store = arsenal.handle().map_err(ArsenalError::from)?;
+    let kept = arsenal.details_handle();
+    blocking(move || {
+        let scan = catalogue::scan_process(project.clone())
+            .ok_or(ArsenalError::code("discovery_unavailable"))?;
+        let (reply, details) = {
+            let store = store
+                .lock()
+                .map_err(|_| ArsenalError::from(Error::Storage))?;
+            discover_reply(&store, scan, project.as_deref()).map_err(ArsenalError::from)?
+        };
+        *kept.lock().map_err(|_| ArsenalError::code("internal"))? = details;
+        Ok(reply)
+    })
+    .await
 }
 
-/// Joins a scan with the library: the status of each skill and what it duplicates or collides with.
-fn discover_reply(store: &Store, scan: Scan) -> Result<DiscoverReply, Error> {
-    let ids: Vec<String> = scan.skills.iter().map(identity_of).collect();
+/// The files and exclusions of a capability from the last scan. It is read, never rescanned.
+#[tauri::command]
+fn arsenal_candidate(
+    arsenal: State<'_, Arsenal>,
+    request: IdRequest,
+) -> Result<CandidateDetail, ArsenalError> {
+    arsenal
+        .candidate_detail(&request.id)
+        .ok_or(ArsenalError::code("not_found"))
+}
+
+/// Runs a scan or an import off the window's thread: reading a large account takes seconds.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, ArsenalError> + Send + 'static,
+) -> Result<T, ArsenalError> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|_| ArsenalError::code("internal"))?
+}
+
+/// Joins a scan with the library: the status of each capability, what it duplicates or collides with.
+/// The list keeps counts; the details of each capability are returned beside it.
+fn discover_reply(
+    store: &Store,
+    scan: Scan,
+    project: Option<&Path>,
+) -> Result<(DiscoverReply, BTreeMap<String, CandidateDetail>), Error> {
+    let ids: Vec<String> = ids_of(&scan.candidates, project);
     let trees: Vec<String> = scan
-        .skills
+        .candidates
         .iter()
-        .map(|skill| store::tree_digest(&skill.content))
+        .map(|candidate| store::tree_digest(&candidate.content))
         .collect();
-    let names: Vec<String> = scan.skills.iter().map(|skill| skill.name.clone()).collect();
-    let mut skills = Vec::with_capacity(scan.skills.len());
-    for (index, skill) in scan.skills.into_iter().enumerate() {
-        let duplicates = others(&ids, index, |other| trees[other] == trees[index]);
-        let name_collisions = others(&ids, index, |other| names[other] == names[index]);
-        let (status, capability) = match store.current(&ids[index])? {
-            None => ("not_imported", None),
-            Some(current) if current.tree_hash == trees[index] => ("imported", Some(current.id)),
-            Some(current) => ("source_changed", Some(current.id)),
-        };
-        skills.push(SkillView {
+    let names: Vec<String> = scan
+        .candidates
+        .iter()
+        .map(|candidate| candidate.name.clone())
+        .collect();
+    let importable: Vec<bool> = scan.candidates.iter().map(is_importable).collect();
+    let mut candidates = Vec::with_capacity(scan.candidates.len());
+    let mut details = BTreeMap::new();
+    for (index, candidate) in scan.candidates.into_iter().enumerate() {
+        let duplicates = others(&ids, index, |other| {
+            importable[index] && importable[other] && trees[other] == trees[index]
+        });
+        let name_collisions = others(&ids, index, |other| {
+            importable[index] && importable[other] && names[other] == names[index]
+        });
+        let (status, capability) =
+            if IMPORTABLE.contains(&candidate.kind) || candidate.blocked.is_none() {
+                match store.current(&ids[index])? {
+                    None => ("not_imported", None),
+                    Some(current) if current.tree_hash == trees[index] => {
+                        ("imported", Some(current.id))
+                    }
+                    Some(current) => ("source_changed", Some(current.id)),
+                }
+            } else {
+                ("read_only", None)
+            };
+        candidates.push(CandidateView {
             id: ids[index].clone(),
             tree_hash: trees[index].clone(),
             status,
+            importable: importable[index],
+            compatibility: compatibility_of(&candidate),
             capability,
             duplicates,
             name_collisions,
-            skill,
+            kind: candidate.kind,
+            provider: candidate.provider,
+            source: candidate.source.clone(),
+            scope: candidate.scope,
+            name: candidate.name.clone(),
+            description: candidate.description.clone(),
+            origin: candidate.origin.clone(),
+            blocked: candidate.blocked,
+            managed_by: candidate.managed_by.clone(),
+            executes_code: candidate.executes_code,
+            file_count: candidate.files.len(),
+            excluded_count: candidate.excluded.len(),
+            review_count: candidate.review.len(),
         });
+        details.insert(
+            ids[index].clone(),
+            CandidateDetail {
+                id: ids[index].clone(),
+                files: candidate.files,
+                excluded: candidate.excluded,
+                review: candidate.review,
+            },
+        );
     }
-    Ok(DiscoverReply {
+    let reply = DiscoverReply {
+        project: project
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            .map(str::to_owned),
         sources: scan.sources,
-        skills,
+        candidates,
+        composites: scan.composites,
         truncated: scan.truncated,
-    })
+    };
+    Ok((reply, details))
 }
 
 fn others(ids: &[String], index: usize, same: impl Fn(usize) -> bool) -> Vec<String> {
@@ -265,36 +435,51 @@ fn arsenal_file(
     })
 }
 
-/// Imports the skill with this identity, from a fresh scan. A skill that cannot be imported says why.
+/// Imports the capability with this identity, from a fresh scan. One that cannot be imported says why.
 #[tauri::command]
-fn arsenal_import(
+async fn arsenal_import(
     arsenal: State<'_, Arsenal>,
+    configuration: State<'_, Configuration>,
     request: IdRequest,
 ) -> Result<Imported, ArsenalError> {
-    let mut skill = scan_or_refuse()?
-        .skills
-        .into_iter()
-        .find(|skill| identity_of(skill) == request.id)
-        .ok_or(ArsenalError::code("not_found"))?;
-    if let Some(reason) = skill.blocked {
-        return Err(ArsenalError {
-            code: "blocked",
-            reason: Some(reason),
-        });
-    }
-    let new = NewCapability {
-        identity: request.id,
-        provider: skill.provider.to_owned(),
-        source: skill.source.to_owned(),
-        kind: "skill".to_owned(),
-        name: skill.name.clone(),
-        description: skill.description.clone(),
-        origin: skill.origin.clone(),
-        files: std::mem::take(&mut skill.content),
-    };
-    arsenal
-        .with_store(|store| store.import(&new))
-        .map_err(ArsenalError::from)
+    let project = configuration.selected_project();
+    let store = arsenal.handle().map_err(ArsenalError::from)?;
+    blocking(move || {
+        let mut scan = catalogue::scan_process(project.clone())
+            .ok_or(ArsenalError::code("discovery_unavailable"))?;
+        let index = ids_of(&scan.candidates, project.as_deref())
+            .iter()
+            .position(|id| *id == request.id)
+            .ok_or(ArsenalError::code("not_found"))?;
+        let mut candidate = scan.candidates.swap_remove(index);
+        if !IMPORTABLE.contains(&candidate.kind) {
+            return Err(ArsenalError {
+                code: "not_importable",
+                reason: Some("read_only_kind"),
+            });
+        }
+        if let Some(reason) = candidate.blocked {
+            return Err(ArsenalError {
+                code: "blocked",
+                reason: Some(reason),
+            });
+        }
+        let new = NewCapability {
+            identity: request.id,
+            provider: candidate.provider.to_owned(),
+            source: candidate.source.clone(),
+            kind: candidate.kind.to_owned(),
+            name: candidate.name.clone(),
+            description: candidate.description.clone(),
+            origin: candidate.origin.clone(),
+            files: std::mem::take(&mut candidate.content),
+        };
+        let mut store = store
+            .lock()
+            .map_err(|_| ArsenalError::from(Error::Storage))?;
+        store.import(&new).map_err(ArsenalError::from)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -374,6 +559,15 @@ fn arsenal_preview(
         .map_err(ArsenalError::from)
 }
 
+/// A capability of a selection that resolves, for the conflict checks.
+struct Resolved {
+    capability: String,
+    kind: String,
+    provider: String,
+    name: String,
+    tree: String,
+}
+
 /// The configuration a selection would make, stated exactly and never as active.
 pub fn preview(store: &Store, selection_id: &str) -> Result<Preview, Error> {
     let selection = store
@@ -382,8 +576,7 @@ pub fn preview(store: &Store, selection_id: &str) -> Result<Preview, Error> {
         .find(|selection| selection.id == selection_id)
         .ok_or(Error::NotFound)?;
     let mut items = Vec::with_capacity(selection.items.len());
-    // (provider, name, content, capability) of every item that resolves, for the conflict checks.
-    let mut resolved: Vec<(String, String, String, String)> = Vec::new();
+    let mut resolved: Vec<Resolved> = Vec::new();
     for item in &selection.items {
         let pinned = item.revision.is_some();
         match store.detail(&item.capability, item.revision) {
@@ -396,15 +589,17 @@ pub fn preview(store: &Store, selection_id: &str) -> Result<Preview, Error> {
                     .unwrap_or_default();
                 let (compatibility, reason) =
                     compatibility(&detail.summary.provider, &selection.provider, &detail.files);
-                resolved.push((
-                    detail.summary.provider.clone(),
-                    detail.summary.name.clone(),
-                    tree_hash.clone(),
-                    item.capability.clone(),
-                ));
+                resolved.push(Resolved {
+                    capability: item.capability.clone(),
+                    kind: detail.summary.kind.clone(),
+                    provider: detail.summary.provider.clone(),
+                    name: detail.summary.name.clone(),
+                    tree: tree_hash.clone(),
+                });
                 items.push(PreviewItem {
                     capability: item.capability.clone(),
                     state: "resolved",
+                    kind: detail.summary.kind,
                     name: detail.summary.name,
                     provider: detail.summary.provider,
                     revision: Some(detail.revision),
@@ -422,6 +617,7 @@ pub fn preview(store: &Store, selection_id: &str) -> Result<Preview, Error> {
                 items.push(PreviewItem {
                     capability: item.capability.clone(),
                     state,
+                    kind: String::new(),
                     name: String::new(),
                     provider: String::new(),
                     revision: item.revision,
@@ -451,7 +647,7 @@ fn compatibility(provider: &str, selected: &str, files: &[FileInfo]) -> (&'stati
             format!("Built for {provider}; this selection is for {selected}."),
         );
     }
-    if files.iter().any(|file| skills::is_script(&file.path)) {
+    if files.iter().any(|file| catalogue::is_script(&file.path)) {
         return (
             "partial",
             "Contains scripts. They are stored and never run by Wyss; use in a launched session is not verified.".into(),
@@ -459,28 +655,36 @@ fn compatibility(provider: &str, selected: &str, files: &[FileInfo]) -> (&'stati
     }
     (
         "unverified",
-        "The skill format is known. Use in a launched session is not verified yet.".into(),
+        "The format is known. Use in a launched session is not verified yet.".into(),
     )
 }
 
-/// Two or more resolved capabilities with one name, or with one content, are conflicts to show.
-fn conflicts(resolved: &[(String, String, String, String)]) -> Vec<Conflict> {
+/// Groups that matter: one name, one content, or two rules for one provider.
+fn conflicts(resolved: &[Resolved]) -> Vec<Conflict> {
     let mut by_name: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     let mut by_content: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for (_, name, tree, capability) in resolved {
+    let mut by_rules: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for entry in resolved {
         by_name
-            .entry(name.as_str())
+            .entry(entry.name.as_str())
             .or_default()
-            .push(capability.as_str());
+            .push(entry.capability.as_str());
         by_content
-            .entry(tree.as_str())
+            .entry(entry.tree.as_str())
             .or_default()
-            .push(capability.as_str());
+            .push(entry.capability.as_str());
+        if entry.kind == "rule" {
+            by_rules
+                .entry(entry.provider.as_str())
+                .or_default()
+                .push(entry.capability.as_str());
+        }
     }
     let mut conflicts = Vec::new();
     for (code, groups) in [
         ("name_collision", by_name),
         ("duplicate_content", by_content),
+        ("instruction_overlap", by_rules),
     ] {
         for mut ids in groups.into_values() {
             ids.sort_unstable();
@@ -499,45 +703,55 @@ fn conflicts(resolved: &[(String, String, String, String)]) -> Vec<Conflict> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agentconfig::skills::Scan;
     use rusqlite::Connection;
 
-    fn skill(name: &str, body: &[u8]) -> Skill {
-        Skill {
+    fn candidate(kind: &'static str, name: &str, body: &[u8]) -> Candidate {
+        Candidate {
+            kind,
             provider: "claude_code",
-            source: "claude_user_skills",
+            source: format!("claude_user_{}s", kind),
+            scope: "user",
             name: name.to_owned(),
             description: String::new(),
-            origin: format!("~/.claude/skills/{name}"),
+            origin: format!("~/.claude/{kind}s/{name}"),
             files: Vec::new(),
             excluded: Vec::new(),
             review: Vec::new(),
             executes_code: false,
             blocked: None,
-            content: vec![("SKILL.md".to_owned(), body.to_vec())],
+            managed_by: None,
+            content: vec![(
+                if kind == "skill" {
+                    "SKILL.md"
+                } else {
+                    "file.md"
+                }
+                .to_owned(),
+                body.to_vec(),
+            )],
         }
     }
 
-    fn import(store: &mut Store, name: &str, body: &[u8]) -> store::Imported {
-        let found = skill(name, body);
+    fn import(store: &mut Store, candidate: &mut Candidate) -> store::Imported {
         store
             .import(&NewCapability {
-                identity: identity_of(&found),
-                provider: found.provider.to_owned(),
-                source: found.source.to_owned(),
-                kind: "skill".to_owned(),
-                name: found.name.clone(),
-                description: found.description.clone(),
-                origin: found.origin.clone(),
-                files: found.content,
+                identity: identity_of(candidate, None),
+                provider: candidate.provider.to_owned(),
+                source: candidate.source.clone(),
+                kind: candidate.kind.to_owned(),
+                name: candidate.name.clone(),
+                description: candidate.description.clone(),
+                origin: candidate.origin.clone(),
+                files: std::mem::take(&mut candidate.content),
             })
             .unwrap()
     }
 
-    fn scan(skills: Vec<Skill>) -> Scan {
+    fn scan(candidates: Vec<Candidate>) -> Scan {
         Scan {
             sources: Vec::new(),
-            skills,
+            candidates,
+            composites: Vec::new(),
             truncated: false,
         }
     }
@@ -545,39 +759,74 @@ mod tests {
     #[test]
     fn a_scan_is_joined_with_the_library_by_content_not_by_name() {
         let mut store = Store::open(Connection::open_in_memory().unwrap()).unwrap();
-        import(&mut store, "design", b"one");
-        let reply = discover_reply(
+        import(&mut store, &mut candidate("skill", "design", b"one"));
+        let (reply, _) = discover_reply(
             &store,
             scan(vec![
-                skill("design", b"one"),
-                skill("tokens", b"two"),
-                skill("design", b"changed"),
+                candidate("skill", "design", b"one"),
+                candidate("skill", "tokens", b"two"),
             ]),
+            None,
         )
         .unwrap();
-        let status: Vec<&str> = reply.skills.iter().map(|skill| skill.status).collect();
-        assert_eq!(status, ["imported", "not_imported", "source_changed"]);
-        assert!(reply.skills[0].capability.is_some());
+        let status: Vec<&str> = reply.candidates.iter().map(|view| view.status).collect();
+        assert_eq!(status, ["imported", "not_imported"]);
+        assert!(reply.candidates[0].capability.is_some());
+        // The same name with changed content is the same capability in a later scan.
+        let (changed, _) = discover_reply(
+            &store,
+            scan(vec![candidate("skill", "design", b"changed")]),
+            None,
+        )
+        .unwrap();
+        assert_eq!(changed.candidates[0].status, "source_changed");
     }
 
     #[test]
-    fn identical_skills_in_one_scan_are_marked_as_duplicates_of_each_other() {
+    fn read_only_kinds_are_listed_never_imported_and_say_so() {
         let store = Store::open(Connection::open_in_memory().unwrap()).unwrap();
-        let reply = discover_reply(
+        let mut hook = candidate("hook", "pre-commit", b"");
+        hook.blocked = Some("read_only_kind");
+        hook.content.clear();
+        let (reply, _) = discover_reply(&store, scan(vec![hook]), None).unwrap();
+        assert_eq!(reply.candidates[0].status, "read_only");
+        assert!(!reply.candidates[0].importable);
+        assert_eq!(reply.candidates[0].compatibility, "unsupported");
+    }
+
+    #[test]
+    fn identical_capabilities_in_one_scan_duplicate_each_other_and_a_project_is_its_own_identity() {
+        let store = Store::open(Connection::open_in_memory().unwrap()).unwrap();
+        let (reply, _) = discover_reply(
             &store,
-            scan(vec![skill("design", b"same"), skill("copy", b"same")]),
+            scan(vec![
+                candidate("skill", "design", b"same"),
+                candidate("skill", "copy", b"same"),
+            ]),
+            None,
         )
         .unwrap();
-        assert_eq!(reply.skills[0].duplicates, vec![reply.skills[1].id.clone()]);
-        assert_eq!(reply.skills[1].duplicates, vec![reply.skills[0].id.clone()]);
-        assert!(reply.skills[0].name_collisions.is_empty());
+        assert_eq!(
+            reply.candidates[0].duplicates,
+            vec![reply.candidates[1].id.clone()]
+        );
+        let mut local = candidate("skill", "design", b"same");
+        local.scope = "project";
+        local.source = "claude_project_skills".into();
+        let project_a = identity_of(&local, Some(Path::new("/home/u/a")));
+        let project_b = identity_of(&local, Some(Path::new("/home/u/b")));
+        assert_ne!(project_a, project_b);
+        assert_ne!(
+            project_a,
+            identity_of(&candidate("skill", "design", b"same"), None)
+        );
     }
 
     #[test]
     fn a_selection_previews_as_not_applied_and_names_its_conflicts() {
         let mut store = Store::open(Connection::open_in_memory().unwrap()).unwrap();
-        let first = import(&mut store, "design", b"same");
-        let second = import(&mut store, "copy", b"same");
+        let first = import(&mut store, &mut candidate("skill", "design", b"same"));
+        let second = import(&mut store, &mut candidate("skill", "copy", b"same"));
         let selection = store
             .save_selection(&store::SelectionInput {
                 id: None,
@@ -601,13 +850,45 @@ mod tests {
         assert_eq!(preview.items[0].compatibility, "unverified");
         assert_eq!(preview.conflicts.len(), 1);
         assert_eq!(preview.conflicts[0].code, "duplicate_content");
-        assert_eq!(preview.conflicts[0].capabilities.len(), 2);
+    }
+
+    #[test]
+    fn two_rules_for_one_provider_are_an_instruction_overlap() {
+        let mut store = Store::open(Connection::open_in_memory().unwrap()).unwrap();
+        let mut style = candidate("rule", "style", b"two spaces");
+        let mut brief = candidate("rule", "brief", b"be brief");
+        let first = import(&mut store, &mut style);
+        let second = import(&mut store, &mut brief);
+        let selection = store
+            .save_selection(&store::SelectionInput {
+                id: None,
+                name: "Rules".into(),
+                provider: "claude_code".into(),
+                items: vec![
+                    store::Item {
+                        capability: first.capability,
+                        revision: None,
+                    },
+                    store::Item {
+                        capability: second.capability,
+                        revision: None,
+                    },
+                ],
+            })
+            .unwrap();
+        let preview = preview(&store, &selection.id).unwrap();
+        assert!(
+            preview
+                .conflicts
+                .iter()
+                .any(|conflict| conflict.code == "instruction_overlap")
+        );
     }
 
     #[test]
     fn a_selection_for_another_provider_is_unsupported_for_its_items() {
         let mut store = Store::open(Connection::open_in_memory().unwrap()).unwrap();
-        let design = import(&mut store, "design", b"one");
+        let design = import(&mut store, &mut candidate("skill", "design", b"one"));
         let selection = store
             .save_selection(&store::SelectionInput {
                 id: None,
@@ -624,7 +905,7 @@ mod tests {
     }
 
     #[test]
-    fn a_script_in_a_skill_is_partial_because_it_is_never_run() {
+    fn a_script_in_a_capability_is_partial_because_it_is_never_run() {
         let files = vec![FileInfo {
             path: "run.sh".to_owned(),
             sha256: String::new(),

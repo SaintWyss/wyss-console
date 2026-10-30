@@ -77,6 +77,12 @@ impl Configuration {
         }
     }
 
+    /// The project the user selected and the engine accepted, for read-only discovery. The window
+    /// never names it: it is set through `configuration_select_project` and validated there.
+    pub fn selected_project(&self) -> Option<std::path::PathBuf> {
+        self.changes.as_ref().and_then(|changes| changes.project())
+    }
+
     fn service(&self) -> Result<&InventoryService, ConfigurationError> {
         self.inventory
             .as_ref()

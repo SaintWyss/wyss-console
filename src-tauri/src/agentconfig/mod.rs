@@ -48,6 +48,7 @@ pub(crate) use acl::{
 };
 #[cfg(test)]
 mod adapter_tests;
+pub mod catalogue;
 mod change;
 pub mod changes;
 #[cfg(test)]
@@ -88,7 +89,6 @@ mod roots;
 pub mod service;
 #[cfg(test)]
 mod service_tests;
-pub mod skills;
 #[cfg(test)]
 mod tests;
 mod tomlspan;

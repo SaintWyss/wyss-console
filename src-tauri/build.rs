@@ -133,6 +133,7 @@ fn main() {
             "configuration_select_project",
             "configuration_template_export",
             "arsenal_discover",
+            "arsenal_candidate",
             "arsenal_capabilities",
             "arsenal_capability",
             "arsenal_file",

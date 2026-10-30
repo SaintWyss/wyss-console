@@ -5,12 +5,18 @@ export const PROVIDERS = ['claude_code', 'codex'] as const;
 export type ArsenalProvider = (typeof PROVIDERS)[number];
 
 export type ImportOutcome = 'created' | 'new_revision' | 'unchanged';
-export type SkillStatus = 'not_imported' | 'imported' | 'source_changed';
+/** What a discovered capability is. Only the first three can be copied into the library. */
+export type CandidateKind =
+  'skill' | 'agent' | 'rule' | 'hook' | 'mcp_server' | 'plugin';
+export type CandidateStatus =
+  'not_imported' | 'imported' | 'source_changed' | 'read_only';
+export type CandidateScope = 'user' | 'project';
 export type SourceState = 'read' | 'absent' | 'unreadable';
 export type Compatibility =
   'supported' | 'partial' | 'unsupported' | 'unverified';
 export type PreviewState = 'resolved' | 'missing' | 'revision_missing';
-export type ConflictCode = 'name_collision' | 'duplicate_content';
+export type ConflictCode =
+  'name_collision' | 'duplicate_content' | 'instruction_overlap';
 
 export interface Summary {
   id: string;
@@ -99,34 +105,67 @@ export interface FileDigest {
   sha256: string;
 }
 
-export interface SkillView {
+/** A composite collection a link is installed from, found through the link's target. */
+export interface ManagedBy {
+  composite: string;
+  version: string;
+  artifacts: number;
+}
+
+/** One discovered capability. `id` is what import names; nothing here is a path to act on. */
+export interface Candidate {
   id: string;
   tree_hash: string;
-  status: SkillStatus;
+  status: CandidateStatus;
+  importable: boolean;
+  compatibility: Compatibility;
   capability: string | null;
   duplicates: string[];
   name_collisions: string[];
+  kind: CandidateKind;
   provider: ArsenalProvider;
   source: string;
+  scope: CandidateScope;
   name: string;
   description: string;
   origin: string;
+  executes_code: boolean;
+  blocked: string | null;
+  managed_by: ManagedBy | null;
+  file_count: number;
+  excluded_count: number;
+  review_count: number;
+}
+
+/** What a chosen capability holds, read on selection from the last scan. */
+export interface CandidateDetail {
+  id: string;
   files: FileDigest[];
   excluded: Excluded[];
   review: Excluded[];
-  executes_code: boolean;
-  blocked: string | null;
+}
+
+export interface Composite {
+  name: string;
+  version: string;
+  artifacts: number;
+  /** How many of this scan's entries are installed from it. */
+  members: number;
+  origin: string;
 }
 
 export interface DiscoverReply {
+  project: string | null;
   sources: SourceReport[];
-  skills: SkillView[];
+  candidates: Candidate[];
+  composites: Composite[];
   truncated: boolean;
 }
 
 export interface PreviewItem {
   capability: string;
   state: PreviewState;
+  kind: string;
   name: string;
   provider: string;
   revision: number | null;
@@ -215,7 +254,21 @@ function provider(value: unknown, what: string): ArsenalProvider {
   return oneOf(value, PROVIDERS, what);
 }
 
-const SKILL_STATUSES = ['not_imported', 'imported', 'source_changed'] as const;
+const CANDIDATE_KINDS = [
+  'skill',
+  'agent',
+  'rule',
+  'hook',
+  'mcp_server',
+  'plugin',
+] as const;
+const CANDIDATE_STATUSES = [
+  'not_imported',
+  'imported',
+  'source_changed',
+  'read_only',
+] as const;
+const CANDIDATE_SCOPES = ['user', 'project'] as const;
 const SOURCE_STATES = ['read', 'absent', 'unreadable'] as const;
 const COMPATIBILITIES = [
   'supported',
@@ -224,7 +277,11 @@ const COMPATIBILITIES = [
   'unverified',
 ] as const;
 const PREVIEW_STATES = ['resolved', 'missing', 'revision_missing'] as const;
-const CONFLICT_CODES = ['name_collision', 'duplicate_content'] as const;
+const CONFLICT_CODES = [
+  'name_collision',
+  'duplicate_content',
+  'instruction_overlap',
+] as const;
 const OUTCOMES = ['created', 'new_revision', 'unchanged'] as const;
 
 export function parseSummary(value: unknown): Summary {
@@ -334,46 +391,85 @@ export function parseSelections(value: unknown): Selection[] {
   return list(value, 'selection list', parseSelection);
 }
 
-function parseSkillView(value: unknown): SkillView {
-  const v = record(value, 'skill');
+function parseExcluded(value: unknown): Excluded {
+  const e = record(value, 'excluded entry');
+  return { path: text(e.path, 'path'), reason: text(e.reason, 'reason') };
+}
+
+function parseManagedBy(value: unknown): ManagedBy | null {
+  return nullable(value, (managed) => {
+    const m = record(managed, 'managed by');
+    return {
+      composite: text(m.composite, 'composite'),
+      version: text(m.version, 'version'),
+      artifacts: integer(m.artifacts, 'artifacts'),
+    };
+  });
+}
+
+function parseCandidate(value: unknown): Candidate {
+  const v = record(value, 'candidate');
   return {
     id: text(v.id, 'id'),
     tree_hash: text(v.tree_hash, 'tree_hash'),
-    status: oneOf(v.status, SKILL_STATUSES, 'status'),
+    status: oneOf(v.status, CANDIDATE_STATUSES, 'status'),
+    importable: flag(v.importable, 'importable'),
+    compatibility: oneOf(v.compatibility, COMPATIBILITIES, 'compatibility'),
     capability: nullable(v.capability, (id) => text(id, 'capability')),
     duplicates: list(v.duplicates, 'duplicates', (id) => text(id, 'duplicate')),
     name_collisions: list(v.name_collisions, 'name_collisions', (id) =>
       text(id, 'name collision'),
     ),
+    kind: oneOf(v.kind, CANDIDATE_KINDS, 'kind'),
     provider: provider(v.provider, 'provider'),
     source: text(v.source, 'source'),
+    scope: oneOf(v.scope, CANDIDATE_SCOPES, 'scope'),
     name: text(v.name, 'name'),
     description: text(v.description, 'description'),
     origin: text(v.origin, 'origin'),
-    files: list(v.files, 'files', (file) => {
-      const f = record(file, 'file digest');
-      return {
-        path: text(f.path, 'path'),
-        size: integer(f.size, 'size'),
-        sha256: text(f.sha256, 'sha256'),
-      };
-    }),
-    excluded: list(v.excluded, 'excluded', (entry) => {
-      const e = record(entry, 'excluded entry');
-      return { path: text(e.path, 'path'), reason: text(e.reason, 'reason') };
-    }),
-    review: list(v.review, 'review', (entry) => {
-      const e = record(entry, 'review entry');
-      return { path: text(e.path, 'path'), reason: text(e.reason, 'reason') };
-    }),
     executes_code: flag(v.executes_code, 'executes_code'),
     blocked: nullable(v.blocked, (reason) => text(reason, 'blocked')),
+    managed_by: parseManagedBy(v.managed_by),
+    file_count: integer(v.file_count, 'file_count'),
+    excluded_count: integer(v.excluded_count, 'excluded_count'),
+    review_count: integer(v.review_count, 'review_count'),
+  };
+}
+
+function parseFileDigest(value: unknown): FileDigest {
+  const f = record(value, 'file digest');
+  return {
+    path: text(f.path, 'path'),
+    size: integer(f.size, 'size'),
+    sha256: text(f.sha256, 'sha256'),
+  };
+}
+
+export function parseCandidateDetail(value: unknown): CandidateDetail {
+  const v = record(value, 'candidate detail');
+  return {
+    id: text(v.id, 'id'),
+    files: list(v.files, 'files', parseFileDigest),
+    excluded: list(v.excluded, 'excluded', parseExcluded),
+    review: list(v.review, 'review', parseExcluded),
+  };
+}
+
+function parseComposite(value: unknown): Composite {
+  const v = record(value, 'composite');
+  return {
+    name: text(v.name, 'name'),
+    version: text(v.version, 'version'),
+    artifacts: integer(v.artifacts, 'artifacts'),
+    members: integer(v.members, 'members'),
+    origin: text(v.origin, 'origin'),
   };
 }
 
 export function parseDiscover(value: unknown): DiscoverReply {
   const v = record(value, 'discovery');
   return {
+    project: nullable(v.project, (name) => text(name, 'project')),
     sources: list(v.sources, 'sources', (source) => {
       const s = record(source, 'source');
       return {
@@ -381,7 +477,8 @@ export function parseDiscover(value: unknown): DiscoverReply {
         state: oneOf(s.state, SOURCE_STATES, 'state'),
       };
     }),
-    skills: list(v.skills, 'skills', parseSkillView),
+    candidates: list(v.candidates, 'candidates', parseCandidate),
+    composites: list(v.composites, 'composites', parseComposite),
     truncated: flag(v.truncated, 'truncated'),
   };
 }
@@ -404,6 +501,7 @@ export function parsePreview(value: unknown): Preview {
       return {
         capability: text(i.capability, 'capability'),
         state: oneOf(i.state, PREVIEW_STATES, 'state'),
+        kind: text(i.kind, 'kind'),
         name: text(i.name, 'name'),
         provider: text(i.provider, 'provider'),
         revision: nullable(i.revision, (number) => integer(number, 'revision')),

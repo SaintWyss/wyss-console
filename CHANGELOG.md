@@ -10,6 +10,21 @@
 - Presets and selections are saved per owner. A selection's configuration preview is always labelled
   `NOT APPLIED`: nothing is launched and no provider session uses it. Enforcement is AM1b.
 
+## 2026-10-30 — Arsenal: project discovery, agents, rules and composites
+
+- Discovery also reads the selected project: its rules (`CLAUDE.md`, `AGENTS.md`, `.claude/rules`), agents
+  and skills. The project is the one the configuration already accepted; the window never sends a path.
+- Agents and rules are copied as single files, the same way as skills. Hooks, MCP servers and plugins are
+  listed read only: a hook runs code, an MCP definition can hold credentials, a plugin brings both.
+- GSD Core is recognised from the links that install it (its payload manifest), and shown as a composite with
+  its member count. Its links are never followed or copied.
+- Identities are unique within a scan. The discovery list carries counts; the files of a chosen capability
+  load on selection, so a large account no longer returns one large reply.
+- Presets and selections show each capability's kind; two rules for one provider are reported as an
+  instruction overlap.
+- Credential checks: a credential value in a file blocks it; a credential word in prose lists the file for
+  review. Heuristic, not a guarantee.
+
 ## 2026-10-23 — M3: Claude Managed adapter, built offline (release blocked)
 
 - New **Providers** view: what each profile (Codex and Claude, Inference and Local tools) can do and exactly why

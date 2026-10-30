@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { Summary, SkillView } from '../src/lib/contracts/arsenal';
+import type { Candidate, Summary } from '../src/lib/contracts/arsenal';
 import {
+  IMPORTABLE_KINDS,
   filterDiscover,
   filterLibrary,
-  LIBRARY_COMPATIBILITY,
+  libraryCompatibility,
   librarySources,
 } from '../src/lib/features/arsenal/catalogue';
 
@@ -11,11 +12,12 @@ const summary = (
   name: string,
   provider: Summary['provider'],
   source: string,
+  kind: string = 'skill',
 ): Summary => ({
   id: `${provider}-${name}`,
   provider,
   source,
-  kind: 'skill',
+  kind,
   name,
   description: `${name} description`,
   origin: `~/.claude/skills/${name}`,
@@ -25,27 +27,29 @@ const summary = (
   updated_at: 1,
 });
 
-const skill = (
-  name: string,
-  status: SkillView['status'],
-  provider: SkillView['provider'],
-): SkillView => ({
-  id: `${provider}-${name}`,
+const candidate = (overrides: Partial<Candidate>): Candidate => ({
+  id: 'id',
   tree_hash: 'b'.repeat(64),
-  status,
+  status: 'not_imported',
+  importable: true,
+  compatibility: 'unverified',
   capability: null,
   duplicates: [],
   name_collisions: [],
-  provider,
-  source: provider === 'codex' ? 'codex_user_skills' : 'claude_user_skills',
-  name,
-  description: `${name} description`,
-  origin: `~/.claude/skills/${name}`,
-  files: [],
-  excluded: [],
-  review: [],
+  kind: 'skill',
+  provider: 'claude_code',
+  source: 'claude_user_skills',
+  scope: 'user',
+  name: 'design',
+  description: 'design description',
+  origin: '~/.claude/skills/design',
+  file_count: 0,
+  excluded_count: 0,
+  review_count: 0,
   executes_code: false,
   blocked: null,
+  managed_by: null,
+  ...overrides,
 });
 
 const library = [
@@ -83,8 +87,14 @@ describe('Arsenal library filters', () => {
     expect(library).toHaveLength(3);
   });
 
-  it('reports compatibility as unverified until a launched session proves it, and filters on it', () => {
-    expect(LIBRARY_COMPATIBILITY).toBe('unverified');
+  it('says a format is unverified for a launched session, and unsupported for a kind the library does not hold', () => {
+    expect(libraryCompatibility(library[0])).toBe('unverified');
+    expect(
+      libraryCompatibility(summary('x', 'codex', 'codex_user_rules', 'rule')),
+    ).toBe('unverified');
+    expect(
+      libraryCompatibility(summary('x', 'codex', 'codex_user_rules', 'hook')),
+    ).toBe('unsupported');
     expect(
       filterLibrary(library, { ...none, compatibility: 'supported' }),
     ).toEqual([]);
@@ -96,28 +106,58 @@ describe('Arsenal library filters', () => {
       'codex_user_skills',
     ]);
   });
+
+  it('holds only skills, agents and rules: the kinds that can be copied', () => {
+    expect([...IMPORTABLE_KINDS]).toEqual(['skill', 'agent', 'rule']);
+  });
 });
 
 describe('Arsenal discovery filters', () => {
   const scan = [
-    skill('design', 'not_imported', 'claude_code'),
-    skill('review', 'imported', 'codex'),
-    skill('tokens', 'source_changed', 'claude_code'),
+    candidate({ id: 'a', name: 'design', status: 'not_imported' }),
+    candidate({
+      id: 'b',
+      name: 'review',
+      provider: 'codex',
+      source: 'codex_user_skills',
+      status: 'imported',
+    }),
+    candidate({ id: 'c', name: 'tokens', status: 'source_changed' }),
+    candidate({
+      id: 'd',
+      name: 'pre-commit',
+      kind: 'hook',
+      importable: false,
+      status: 'read_only',
+      blocked: 'read_only_kind',
+      compatibility: 'unsupported',
+    }),
+    candidate({
+      id: 'e',
+      name: 'reviewer',
+      kind: 'agent',
+      scope: 'project',
+      source: 'claude_project_agents',
+      status: 'not_imported',
+    }),
   ];
+  const names = (filter: Partial<Parameters<typeof filterDiscover>[1]>) =>
+    filterDiscover(scan, {
+      query: '',
+      provider: 'all',
+      kind: 'all',
+      scope: 'all',
+      status: 'all',
+      ...filter,
+    }).map((entry) => entry.name);
 
-  it('filters a scan by status and provider; a scan is never a library entry', () => {
-    expect(
-      filterDiscover(scan, {
-        query: '',
-        provider: 'all',
-        status: 'source_changed',
-      }).map((entry) => entry.name),
-    ).toEqual(['tokens']);
-    expect(
-      filterDiscover(scan, { query: '', provider: 'codex', status: 'all' }).map(
-        (entry) => entry.name,
-      ),
-    ).toEqual(['review']);
-    expect(scan).toHaveLength(3);
+  it('filters a scan by status, provider, kind and scope; a scan is never a library entry', () => {
+    expect(names({ status: 'source_changed' })).toEqual(['tokens']);
+    expect(names({ provider: 'codex' })).toEqual(['review']);
+    expect(names({ kind: 'agent' })).toEqual(['reviewer']);
+    expect(names({ kind: 'hook' })).toEqual(['pre-commit']);
+    expect(names({ scope: 'project' })).toEqual(['reviewer']);
+    expect(names({ status: 'read_only' })).toEqual(['pre-commit']);
+    expect(scan).toHaveLength(5);
   });
 });

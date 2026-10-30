@@ -1,21 +1,25 @@
 <script lang="ts">
   import type {
     ArsenalProvider,
+    Candidate,
+    CandidateKind,
+    CandidateScope,
+    CandidateStatus,
     Compatibility,
     Item,
     Preset,
     Selection,
-    SkillStatus,
-    SkillView,
     Summary,
   } from '../../contracts/arsenal';
   import { blockedText } from './messages';
   import {
     filterDiscover,
     filterLibrary,
+    libraryCompatibility,
     librarySources,
-    LIBRARY_COMPATIBILITY,
+    type KindFilter,
     type ProviderFilter,
+    type ScopeFilter,
   } from './catalogue';
   import type {
     ArsenalController,
@@ -43,20 +47,51 @@
     claude_code: 'Claude Code',
     codex: 'Codex',
   };
-  const SOURCE_LABEL: Record<string, string> = {
-    claude_user_skills: 'Claude user skills',
-    codex_user_skills: 'Codex user skills',
+  const KIND_LABEL: Record<CandidateKind, string> = {
+    skill: 'Skill',
+    agent: 'Agent',
+    rule: 'Rule',
+    hook: 'Hook',
+    mcp_server: 'MCP server',
+    plugin: 'Plugin',
   };
-  const STATUS_LABEL: Record<SkillStatus, string> = {
+  const SCOPE_LABEL: Record<CandidateScope, string> = {
+    user: 'Account',
+    project: 'Project',
+  };
+  const STATUS_LABEL: Record<CandidateStatus, string> = {
     not_imported: 'Not imported',
     imported: 'Imported',
     source_changed: 'Source changed',
+    read_only: 'Read only',
   };
   const COMPATIBILITY_LABEL: Record<Compatibility, string> = {
     supported: 'Supported',
     partial: 'Partial',
     unsupported: 'Unsupported',
     unverified: 'Unverified',
+  };
+  /** Why a read-only kind is listed and never copied. Said once, next to the entry. */
+  const READ_ONLY_NOTE: Record<string, string> = {
+    hook: 'A hook runs code. Arsenal lists it and never copies or runs it.',
+    mcp_server:
+      'An MCP definition can hold credentials. Arsenal lists it and never copies it.',
+    plugin:
+      'A plugin brings code and hooks. Arsenal lists it; importing plugins is not available yet.',
+  };
+  const SOURCE_LABEL: Record<string, string> = {
+    claude_user_skills: 'Claude user skills',
+    codex_user_skills: 'Codex user skills',
+    claude_project_skills: 'Claude project skills',
+    codex_project_skills: 'Codex project skills',
+    claude_user_agents: 'Claude user agents',
+    codex_user_agents: 'Codex user agents',
+    claude_project_agents: 'Claude project agents',
+    codex_project_agents: 'Codex project agents',
+    claude_user_rules: 'Claude user rules',
+    codex_user_rules: 'Codex user rules',
+    claude_project_rules: 'Claude project rules',
+    codex_project_rules: 'Codex project rules',
   };
   const EXCLUDED_LABEL: Record<string, string> = {
     credential_name: 'Credential file, not copied',
@@ -73,6 +108,11 @@
     absent: 'not present',
     unreadable: 'could not be read',
   };
+  const CONFLICT_LABEL: Record<string, string> = {
+    name_collision: 'Same name',
+    duplicate_content: 'Same content',
+    instruction_overlap: 'Two rules for one provider',
+  };
 
   // Library filters
   let libraryQuery = $state('');
@@ -82,7 +122,9 @@
   // Discover filters
   let discoverQuery = $state('');
   let discoverProvider = $state<ProviderFilter>('all');
-  let discoverStatus = $state<SkillStatus | 'all'>('all');
+  let discoverKind = $state<KindFilter>('all');
+  let discoverScope = $state<ScopeFilter>('all');
+  let discoverStatus = $state<CandidateStatus | 'all'>('all');
   // Drafts
   let presetDraft = $state({
     id: null as string | null,
@@ -109,19 +151,33 @@
     }),
   );
   const sources = $derived(librarySources(arsenal.library));
-  const skills = $derived(
-    filterDiscover(arsenal.discover?.skills ?? [], {
+  const candidates = $derived(
+    filterDiscover(arsenal.discover?.candidates ?? [], {
       query: discoverQuery,
       provider: discoverProvider,
+      kind: discoverKind,
+      scope: discoverScope,
       status: discoverStatus,
     }),
   );
-  const chosen = $derived<SkillView | null>(
-    arsenal.discover?.skills.find((skill) => skill.id === arsenal.chosen) ??
-      null,
+  const chosen = $derived<Candidate | null>(
+    arsenal.discover?.candidates.find(
+      (candidate) => candidate.id === arsenal.chosen,
+    ) ?? null,
   );
   const busy = $derived(arsenal.busy !== null);
+  const detail = $derived(
+    arsenal.chosenDetail && chosen && arsenal.chosenDetail.id === chosen.id
+      ? arsenal.chosenDetail
+      : null,
+  );
 
+  function nameOfCandidate(id: string): string {
+    return (
+      arsenal.discover?.candidates.find((candidate) => candidate.id === id)
+        ?.name ?? id
+    );
+  }
   function inItems(items: Item[], id: string): boolean {
     return items.some((item) => item.capability === id);
   }
@@ -135,6 +191,9 @@
       arsenal.library.find((item) => item.id === id)?.name ??
       'Missing capability'
     );
+  }
+  function kindOf(item: Summary): string {
+    return KIND_LABEL[item.kind as CandidateKind] ?? item.kind;
   }
   function newPreset() {
     presetDraft = { id: null, name: '', description: '', items: [] };
@@ -202,6 +261,12 @@
   }
   function excludedText(reason: string): string {
     return EXCLUDED_LABEL[reason] ?? reason;
+  }
+  function importLabel(candidate: Candidate): string {
+    if (arsenal.busy === 'import') return 'Importing…';
+    if (candidate.status === 'imported') return 'Already imported';
+    if (candidate.status === 'source_changed') return 'Import as new revision';
+    return 'Import';
   }
   function onTab(event: KeyboardEvent, index: number) {
     const keys = ['ArrowRight', 'ArrowLeft', 'Home', 'End'];
@@ -325,8 +390,8 @@
 
         {#if arsenal.library.length === 0 && arsenal.phase === 'ready'}
           <p class="arsenal-empty">
-            Nothing is imported yet. Open Discover to import a skill you already
-            have.
+            Nothing is imported yet. Open Discover to import a capability you
+            already have.
           </p>
         {:else if visibleLibrary.length === 0 && arsenal.library.length > 0}
           <p class="arsenal-empty">No capabilities match these filters.</p>
@@ -343,13 +408,14 @@
               >
                 <span class="arsenal-row-name">{item.name}</span>
                 <span class="arsenal-badges">
+                  <span class="pill">{kindOf(item)}</span>
                   <span class="pill">{PROVIDER_LABEL[item.provider]}</span>
                   <span class="pill"
                     >{SOURCE_LABEL[item.source] ?? item.source}</span
                   >
                   <span class="pill">Revision {item.revision}</span>
                   <span class="pill"
-                    >{COMPATIBILITY_LABEL[LIBRARY_COMPATIBILITY]}</span
+                    >{COMPATIBILITY_LABEL[libraryCompatibility(item)]}</span
                   >
                 </span>
               </button>
@@ -362,9 +428,10 @@
           <section class="arsenal-detail" aria-label="Capability details">
             <h3>{opened.summary.name}</h3>
             <p class="arsenal-muted">
-              {PROVIDER_LABEL[opened.summary.provider]} · {SOURCE_LABEL[
-                opened.summary.source
-              ] ?? opened.summary.source} · Revision {revisionOf(opened)}
+              {KIND_LABEL[opened.summary.kind as CandidateKind] ??
+                opened.summary.kind} · {PROVIDER_LABEL[opened.summary.provider]} ·
+              {SOURCE_LABEL[opened.summary.source] ?? opened.summary.source} · Revision
+              {revisionOf(opened)}
             </p>
             {#if opened.summary.description}<p>
                 {opened.summary.description}
@@ -461,12 +528,33 @@
             </select>
           </label>
           <label
+            >Kind
+            <select bind:value={discoverKind}>
+              <option value="all">All</option>
+              <option value="skill">Skills</option>
+              <option value="agent">Agents</option>
+              <option value="rule">Rules</option>
+              <option value="mcp_server">MCP servers</option>
+              <option value="hook">Hooks</option>
+              <option value="plugin">Plugins</option>
+            </select>
+          </label>
+          <label
+            >Where
+            <select bind:value={discoverScope}>
+              <option value="all">Account and project</option>
+              <option value="user">Account</option>
+              <option value="project">Project</option>
+            </select>
+          </label>
+          <label
             >Status
             <select bind:value={discoverStatus}>
               <option value="all">All</option>
               <option value="not_imported">Not imported</option>
               <option value="imported">Imported</option>
               <option value="source_changed">Source changed</option>
+              <option value="read_only">Read only</option>
             </select>
           </label>
           <button
@@ -480,9 +568,17 @@
         </div>
 
         {#if arsenal.discovering && arsenal.discover === null}
-          <p role="status">Reading installed skills…</p>
+          <p role="status">Reading installed capabilities…</p>
         {:else if arsenal.discover}
-          <ul class="arsenal-sources" aria-label="Skill folders">
+          <p class="arsenal-muted">
+            {#if arsenal.discover.project}
+              Project: {arsenal.discover.project}
+            {:else}
+              No project selected. Project capabilities are not listed; select a
+              project in Configuration.
+            {/if}
+          </p>
+          <ul class="arsenal-sources" aria-label="Capability folders">
             {#each arsenal.discover.sources as source (source.source)}
               <li>
                 {SOURCE_LABEL[source.source] ?? source.source}: {SOURCE_STATE_LABEL[
@@ -493,35 +589,61 @@
           </ul>
           {#if arsenal.discover.truncated}
             <p role="alert">
-              The folder has more skills than the scan shows. Some are not
+              The folders have more entries than the scan shows. Some are not
               listed.
             </p>
           {/if}
-          {#if arsenal.discover.skills.length === 0}
+
+          {#each arsenal.discover.composites as composite (composite.name)}
+            <section class="arsenal-detail" aria-label="Composite collection">
+              <h3>{composite.name}</h3>
+              <p class="arsenal-muted">
+                {composite.members} linked here · {composite.artifacts} artifacts
+                in the package · read only
+              </p>
+              <p>
+                This collection is installed by its own tool. Its members are
+                listed below and are not copied.
+              </p>
+            </section>
+          {/each}
+
+          {#if arsenal.discover.candidates.length === 0}
             <p class="arsenal-empty">
-              No skills found in your Claude or Codex folders.
+              No capabilities found in your Claude, Codex or project folders.
             </p>
-          {:else if skills.length === 0}
-            <p class="arsenal-empty">No skills match these filters.</p>
+          {:else if candidates.length === 0}
+            <p class="arsenal-empty">No capabilities match these filters.</p>
           {/if}
-          <ul class="arsenal-list" aria-label="Installed skills">
-            {#each skills as skill (skill.id)}
+
+          <ul class="arsenal-list" aria-label="Discovered capabilities">
+            {#each candidates as candidate (candidate.id)}
               <li class="arsenal-row-item">
                 <button
                   class="arsenal-row"
                   type="button"
-                  aria-pressed={arsenal.chosen === skill.id}
-                  onclick={() => controller.choose(skill.id)}
+                  aria-pressed={arsenal.chosen === candidate.id}
+                  onclick={() => controller.choose(candidate.id)}
                 >
-                  <span class="arsenal-row-name">{skill.name}</span>
+                  <span class="arsenal-row-name">{candidate.name}</span>
                   <span class="arsenal-badges">
-                    <span class="pill">{PROVIDER_LABEL[skill.provider]}</span>
-                    <span class="pill">{STATUS_LABEL[skill.status]}</span>
-                    {#if skill.blocked}<span class="pill">Blocked</span>{/if}
-                    {#if skill.duplicates.length > 0}<span class="pill"
+                    <span class="pill">{KIND_LABEL[candidate.kind]}</span>
+                    <span class="pill"
+                      >{PROVIDER_LABEL[candidate.provider]}</span
+                    >
+                    <span class="pill">{SCOPE_LABEL[candidate.scope]}</span>
+                    <span class="pill">{STATUS_LABEL[candidate.status]}</span>
+                    {#if candidate.managed_by}<span class="pill"
+                        >{candidate.managed_by.composite}
+                        {candidate.managed_by.version}</span
+                      >{/if}
+                    {#if candidate.blocked && candidate.status !== 'read_only' && !candidate.managed_by}<span
+                        class="pill">Blocked</span
+                      >{/if}
+                    {#if candidate.duplicates.length > 0}<span class="pill"
                         >Duplicate content</span
                       >{/if}
-                    {#if skill.name_collisions.length > 0}<span class="pill"
+                    {#if candidate.name_collisions.length > 0}<span class="pill"
                         >Name collision</span
                       >{/if}
                   </span>
@@ -531,105 +653,112 @@
           </ul>
 
           {#if chosen}
-            <section class="arsenal-detail" aria-label="Skill to import">
+            <section class="arsenal-detail" aria-label="Capability to import">
               <h3>{chosen.name}</h3>
               <p class="arsenal-muted">
-                {PROVIDER_LABEL[chosen.provider]} · {SOURCE_LABEL[
+                {KIND_LABEL[chosen.kind]} · {PROVIDER_LABEL[chosen.provider]} · {SOURCE_LABEL[
                   chosen.source
-                ] ?? chosen.source} · {STATUS_LABEL[chosen.status]}
+                ] ?? chosen.source} · {SCOPE_LABEL[chosen.scope]} · {STATUS_LABEL[
+                  chosen.status
+                ]}
               </p>
               {#if chosen.description}<p>{chosen.description}</p>{/if}
               <dl class="arsenal-facts">
                 <dt>Read from</dt>
                 <dd><code>{chosen.origin}</code></dd>
-                <dt>Content</dt>
-                <dd><code>{chosen.tree_hash.slice(0, 16)}</code></dd>
-              </dl>
-              {#if chosen.executes_code}
-                <p class="arsenal-warn">
-                  Contains scripts. Arsenal copies them and never runs them.
-                </p>
-              {/if}
-              {#if chosen.duplicates.length > 0}
-                <p>
-                  Same content as {chosen.duplicates
-                    .map(
-                      (id) =>
-                        arsenal.discover?.skills.find((s) => s.id === id)
-                          ?.name ?? id,
-                    )
-                    .join(', ')}.
-                </p>
-              {/if}
-              {#if chosen.name_collisions.length > 0}
-                <p>
-                  Another skill here has the same name. Both can be imported;
-                  they stay separate.
-                </p>
-              {/if}
-
-              <h4>Files that will be copied</h4>
-              <ul class="arsenal-files">
-                {#each chosen.files as file (file.path)}
-                  <li>
-                    <span>{file.path}</span>
-                    <span class="arsenal-muted">{file.size} B</span>
-                  </li>
-                {/each}
-              </ul>
-              {#if chosen.excluded.length > 0}
-                <h4>Not copied</h4>
-                <ul class="arsenal-files">
-                  {#each chosen.excluded as entry (entry.path)}
-                    <li>
-                      <span>{entry.path}</span>
-                      <span class="arsenal-muted"
-                        >{excludedText(entry.reason)}</span
-                      >
-                    </li>
-                  {/each}
-                </ul>
-              {/if}
-
-              {#if chosen.review.length > 0}
-                <h4>Review before importing</h4>
-                <p class="arsenal-muted">
-                  These files use a credential word. They are copied; check that
-                  none holds a real value.
-                </p>
-                <ul class="arsenal-files">
-                  {#each chosen.review as entry (entry.path)}
-                    <li>
-                      <span>{entry.path}</span>
-                      <span class="arsenal-muted"
-                        >Mentions a credential word</span
-                      >
-                    </li>
-                  {/each}
-                </ul>
-              {/if}
-
-              {#if chosen.blocked}
-                <p role="alert">{blockedText(chosen.blocked)}</p>
-              {/if}
-              <button
-                class="action"
-                type="button"
-                disabled={busy ||
-                  chosen.blocked !== null ||
-                  chosen.status === 'imported'}
-                onclick={() => controller.importSkill(chosen.id)}
-              >
-                {#if arsenal.busy === 'import'}
-                  Importing…
-                {:else if chosen.status === 'imported'}
-                  Already imported
-                {:else if chosen.status === 'source_changed'}
-                  Import as new revision
-                {:else}
-                  Import
+                {#if chosen.tree_hash}
+                  <dt>Content</dt>
+                  <dd><code>{chosen.tree_hash.slice(0, 16)}</code></dd>
                 {/if}
-              </button>
+                <dt>Compatibility</dt>
+                <dd>{COMPATIBILITY_LABEL[chosen.compatibility]}</dd>
+              </dl>
+
+              {#if chosen.status === 'read_only'}
+                <p class="arsenal-muted">
+                  {READ_ONLY_NOTE[chosen.kind] ??
+                    'Listed only. Arsenal does not copy it.'}
+                </p>
+              {:else}
+                {#if chosen.executes_code}
+                  <p class="arsenal-warn">
+                    Contains scripts. Arsenal copies them and never runs them.
+                  </p>
+                {/if}
+                {#if chosen.duplicates.length > 0}
+                  <p>
+                    Same content as {chosen.duplicates
+                      .map(nameOfCandidate)
+                      .join(', ')}.
+                  </p>
+                {/if}
+                {#if chosen.name_collisions.length > 0}
+                  <p>
+                    Another capability here has the same name. Both can be
+                    imported; they stay separate.
+                  </p>
+                {/if}
+
+                <h4>Files that will be copied</h4>
+                <ul class="arsenal-files">
+                  {#each detail?.files ?? [] as file (file.path)}
+                    <li>
+                      <span>{file.path}</span>
+                      <span class="arsenal-muted">{file.size} B</span>
+                    </li>
+                  {/each}
+                </ul>
+                {#if (detail?.excluded.length ?? 0) > 0}
+                  <h4>Not copied</h4>
+                  <ul class="arsenal-files">
+                    {#each detail?.excluded ?? [] as entry (entry.path)}
+                      <li>
+                        <span>{entry.path}</span>
+                        <span class="arsenal-muted"
+                          >{excludedText(entry.reason)}</span
+                        >
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+                {#if (detail?.review.length ?? 0) > 0}
+                  <h4>Review before importing</h4>
+                  <p class="arsenal-muted">
+                    These files use a credential word. They are copied; check
+                    that none holds a real value.
+                  </p>
+                  <ul class="arsenal-files">
+                    {#each detail?.review ?? [] as entry (entry.path)}
+                      <li>
+                        <span>{entry.path}</span>
+                        <span class="arsenal-muted"
+                          >Mentions a credential word</span
+                        >
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+
+                {#if chosen.managed_by}
+                  <p role="alert">
+                    This is a link into {chosen.managed_by.composite}
+                    {chosen.managed_by.version}. It is read only: GSD Core
+                    installs it, so Arsenal does not copy it.
+                  </p>
+                {:else if chosen.blocked}
+                  <p role="alert">{blockedText(chosen.blocked)}</p>
+                {/if}
+                <button
+                  class="action"
+                  type="button"
+                  disabled={busy ||
+                    !chosen.importable ||
+                    chosen.status === 'imported'}
+                  onclick={() => controller.importCandidate(chosen.id)}
+                >
+                  {importLabel(chosen)}
+                </button>
+              {/if}
             </section>
           {/if}
         {/if}
@@ -725,7 +854,7 @@
               <legend>Capabilities</legend>
               {#if arsenal.library.length === 0}
                 <p class="arsenal-muted">
-                  Import a skill first; presets are built from the library.
+                  Import a capability first; presets are built from the library.
                 </p>
               {/if}
               {#each arsenal.library as item (item.id)}
@@ -738,7 +867,8 @@
                   />
                   {item.name}
                   <span class="arsenal-muted"
-                    >{PROVIDER_LABEL[item.provider]} · revision {item.revision}</span
+                    >{kindOf(item)} · {PROVIDER_LABEL[item.provider]} · revision {item.revision}
+                    · {COMPATIBILITY_LABEL[libraryCompatibility(item)]}</span
                   >
                 </label>
               {/each}
@@ -883,8 +1013,9 @@
                   />
                   {item.name}
                   <span class="arsenal-muted"
-                    >{PROVIDER_LABEL[item.provider]}{item.provider !==
-                    selectionDraft.provider
+                    >{kindOf(item)} · {PROVIDER_LABEL[
+                      item.provider
+                    ]}{item.provider !== selectionDraft.provider
                       ? ' · different provider'
                       : ''}</span
                   >
@@ -918,7 +1049,8 @@
                   <span>{item.name || 'Missing capability'}</span>
                   {#if item.state === 'resolved'}
                     <span class="arsenal-muted"
-                      >revision {item.revision}{item.pinned
+                      >{KIND_LABEL[item.kind as CandidateKind] ?? item.kind} · revision
+                      {item.revision}{item.pinned
                         ? ' (pinned)'
                         : ' (current)'}</span
                     >
@@ -941,9 +1073,7 @@
               <ul class="arsenal-files">
                 {#each preview.conflicts as conflict, index (index)}
                   <li>
-                    {conflict.code === 'name_collision'
-                      ? 'Same name'
-                      : 'Same content'}: {conflict.capabilities
+                    {CONFLICT_LABEL[conflict.code] ?? conflict.code}: {conflict.capabilities
                       .map(nameOf)
                       .join(', ')}
                   </li>
@@ -1134,16 +1264,11 @@
   }
   @media (min-width: 768px) {
     .arsenal-filters {
-      grid-template-columns: 2fr 1fr 1fr 1fr auto;
+      grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr auto;
       align-items: end;
     }
     .arsenal-split {
       grid-template-columns: 1fr 1fr;
-    }
-  }
-  @media (max-width: 767px) {
-    .arsenal-panel {
-      font-size: 16px;
     }
   }
   @media (prefers-reduced-motion: reduce) {

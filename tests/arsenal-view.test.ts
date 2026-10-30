@@ -5,7 +5,12 @@ import type {
   ArsenalController,
   ArsenalState,
 } from '../src/lib/features/arsenal/controller';
-import type { Preview, SkillView, Summary } from '../src/lib/contracts/arsenal';
+import type {
+  Candidate,
+  Composite,
+  Preview,
+  Summary,
+} from '../src/lib/contracts/arsenal';
 
 let component: ReturnType<typeof mount> | undefined;
 afterEach(() => {
@@ -31,23 +36,28 @@ const design: Summary = {
   updated_at: 1,
 };
 
-const skill = (overrides: Partial<SkillView>): SkillView => ({
+const candidate = (overrides: Partial<Candidate>): Candidate => ({
   id: 'id-x',
   tree_hash: 'f'.repeat(64),
   status: 'not_imported',
+  importable: true,
+  compatibility: 'unverified',
   capability: null,
   duplicates: [],
   name_collisions: [],
+  kind: 'skill',
   provider: 'claude_code',
   source: 'claude_user_skills',
+  scope: 'user',
   name: 'tokens',
   description: 'Design tokens',
   origin: '~/.claude/skills/tokens',
-  files: [{ path: 'SKILL.md', size: 12, sha256: 'a'.repeat(64) }],
-  excluded: [{ path: 'credentials.json', reason: 'credential_name' }],
-  review: [],
+  file_count: 0,
+  excluded_count: 0,
+  review_count: 0,
   executes_code: false,
   blocked: null,
+  managed_by: null,
   ...overrides,
 });
 
@@ -66,7 +76,21 @@ function stateWith(overrides: Partial<ArsenalState>): ArsenalState {
     presets: [],
     selections: [],
     preview: null,
+    chosenDetail: null,
     ...overrides,
+  };
+}
+
+function discoverWith(
+  candidates: Candidate[],
+  composites: Composite[] = [],
+): NonNullable<ArsenalState['discover']> {
+  return {
+    project: null,
+    sources: [{ source: 'claude_user_skills', state: 'read' }],
+    candidates,
+    composites,
+    truncated: false,
   };
 }
 
@@ -74,7 +98,7 @@ function controllerMock() {
   return {
     setTab: vi.fn(),
     choose: vi.fn(),
-    importSkill: vi.fn(),
+    importCandidate: vi.fn(),
     discover: vi.fn(),
     refresh: vi.fn(),
     open: vi.fn(),
@@ -105,13 +129,19 @@ function render(state: ArsenalState, controller = controllerMock()) {
   };
 }
 
+const buttonNamed = (root: HTMLElement, label: string) =>
+  [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent?.trim() === label,
+  );
+
 describe('Arsenal view', () => {
-  it('lists the library with its provider, source, revision and compatibility, and says what it is not', () => {
+  it('lists the library with its kind, provider, revision and compatibility, and says what it is not', () => {
     const { root } = render(stateWith({}));
     expect(text(root)).toContain(
       'Installed does not mean imported. Nothing here changes a session.',
     );
     expect(text(root)).toContain('design');
+    expect(text(root)).toContain('Skill');
     expect(text(root)).toContain('Revision 2');
     expect(text(root)).toContain('Unverified');
   });
@@ -130,27 +160,31 @@ describe('Arsenal view', () => {
     expect(controller.open).toHaveBeenCalledWith('cap-design');
   });
 
-  it('marks an imported skill as imported and blocks a skill that cannot be imported, saying why', () => {
+  it('marks an imported skill as imported, and blocks a skill that cannot be imported, saying why', () => {
     const { root, controller } = render(
       stateWith({
         tab: 'discover',
-        discover: {
-          sources: [{ source: 'claude_user_skills', state: 'read' }],
-          truncated: false,
-          skills: [
-            skill({ id: 'id-tokens', status: 'imported', name: 'tokens' }),
-            skill({ id: 'id-leaky', name: 'leaky', blocked: 'needs_secret' }),
-          ],
+        discover: discoverWith([
+          candidate({ id: 'id-tokens', status: 'imported', name: 'tokens' }),
+          candidate({
+            id: 'id-leaky',
+            name: 'leaky',
+            importable: false,
+            blocked: 'needs_secret',
+          }),
+        ]),
+        chosenDetail: {
+          id: 'id-leaky',
+          files: [],
+          excluded: [{ path: 'credentials.json', reason: 'credential_name' }],
+          review: [],
         },
         chosen: 'id-leaky',
       }),
     );
     expect(text(root)).toContain('Imported');
     expect(text(root)).toContain('Credential file, not copied');
-    const importButton = [
-      ...root.querySelectorAll<HTMLButtonElement>('button'),
-    ].find((button) => button.textContent?.trim() === 'Import');
-    expect(importButton?.disabled).toBe(true);
+    expect(buttonNamed(root, 'Import')?.disabled).toBe(true);
     expect(root.querySelector('[role="alert"]')?.textContent).toContain(
       'looks like a secret',
     );
@@ -162,16 +196,105 @@ describe('Arsenal view', () => {
     const { root } = render(
       stateWith({
         tab: 'discover',
-        discover: {
-          sources: [{ source: 'claude_user_skills', state: 'read' }],
-          truncated: false,
-          skills: [skill({ id: 'id-tokens', status: 'source_changed' })],
-        },
+        discover: discoverWith([
+          candidate({ id: 'id-tokens', status: 'source_changed' }),
+        ]),
         chosen: 'id-tokens',
       }),
     );
     expect(text(root)).toContain('Import as new revision');
     expect(text(root)).not.toContain('active');
+  });
+
+  it('lists files that use a credential word for review, and still allows the import', () => {
+    const { root } = render(
+      stateWith({
+        tab: 'discover',
+        discover: discoverWith([
+          candidate({
+            id: 'id-prose',
+            name: 'prose',
+          }),
+        ]),
+        chosenDetail: {
+          id: 'id-prose',
+          files: [{ path: 'SKILL.md', size: 12, sha256: 'a'.repeat(64) }],
+          excluded: [],
+          review: [{ path: 'SKILL.md', reason: 'mentions_credential' }],
+        },
+        chosen: 'id-prose',
+      }),
+    );
+    expect(text(root)).toContain('Review before importing');
+    expect(text(root)).toContain('Mentions a credential word');
+    expect(buttonNamed(root, 'Import')?.disabled).toBe(false);
+  });
+
+  it('shows a hook as read only: named, explained, and with no import action', () => {
+    const { root } = render(
+      stateWith({
+        tab: 'discover',
+        discover: discoverWith([
+          candidate({
+            id: 'id-hook',
+            kind: 'hook',
+            name: 'pre-commit',
+            status: 'read_only',
+            importable: false,
+            compatibility: 'unsupported',
+            blocked: 'read_only_kind',
+          }),
+        ]),
+        chosen: 'id-hook',
+      }),
+    );
+    expect(text(root)).toContain(
+      'A hook runs code. Arsenal lists it and never copies or runs it.',
+    );
+    expect(buttonNamed(root, 'Import')).toBeUndefined();
+  });
+
+  it('shows a composite collection and a link into it as read only, not as a blocked skill', () => {
+    const composite: Composite = {
+      name: 'GSD Core 1.15.0',
+      version: '1.15.0',
+      artifacts: 1950,
+      members: 1,
+      origin: '~/.local/share/wyss/gsd-core/1.15.0',
+    };
+    const { root } = render(
+      stateWith({
+        tab: 'discover',
+        discover: discoverWith(
+          [
+            candidate({
+              id: 'id-gsd',
+              name: 'gsd-help',
+              importable: false,
+              blocked: 'symbolic_link',
+              managed_by: {
+                composite: 'GSD Core',
+                version: '1.15.0',
+                artifacts: 1950,
+              },
+            }),
+          ],
+          [composite],
+        ),
+        chosen: 'id-gsd',
+      }),
+    );
+    expect(text(root)).toContain('GSD Core 1.15.0');
+    expect(text(root)).toContain('1950 artifacts in the package · read only');
+    expect(text(root)).toContain('It is read only: GSD Core installs it');
+    expect(buttonNamed(root, 'Import')?.disabled).toBe(true);
+  });
+
+  it('says when no project is selected, so project capabilities are not mistaken for absent ones', () => {
+    const { root } = render(
+      stateWith({ tab: 'discover', discover: discoverWith([]) }),
+    );
+    expect(text(root)).toContain('No project selected');
   });
 
   it('keeps a preset without a name from being saved and says what to fix', async () => {
@@ -190,33 +313,7 @@ describe('Arsenal view', () => {
     );
   });
 
-  it('lists files that use a credential word for review, and still allows the import', () => {
-    const { root } = render(
-      stateWith({
-        tab: 'discover',
-        discover: {
-          sources: [{ source: 'claude_user_skills', state: 'read' }],
-          truncated: false,
-          skills: [
-            skill({
-              id: 'id-prose',
-              name: 'prose',
-              review: [{ path: 'SKILL.md', reason: 'mentions_credential' }],
-            }),
-          ],
-        },
-        chosen: 'id-prose',
-      }),
-    );
-    expect(text(root)).toContain('Review before importing');
-    expect(text(root)).toContain('Mentions a credential word');
-    const importButton = [
-      ...root.querySelectorAll<HTMLButtonElement>('button'),
-    ].find((button) => button.textContent?.trim() === 'Import');
-    expect(importButton?.disabled).toBe(false);
-  });
-
-  it('labels a configuration preview NOT APPLIED and states that dependencies are not analysed', () => {
+  it('labels a configuration preview NOT APPLIED, names instruction overlaps, and states that dependencies are not analysed', () => {
     const preview: Preview = {
       selection: {
         id: 'sel-1',
@@ -231,6 +328,7 @@ describe('Arsenal view', () => {
         {
           capability: 'cap-design',
           state: 'resolved',
+          kind: 'skill',
           name: 'design',
           provider: 'claude_code',
           revision: 2,
@@ -240,12 +338,18 @@ describe('Arsenal view', () => {
           reason: 'Built for claude_code; this selection is for codex.',
         },
       ],
-      conflicts: [],
+      conflicts: [
+        {
+          code: 'instruction_overlap',
+          capabilities: ['cap-design', 'cap-brief'],
+        },
+      ],
       dependencies: 'not_analysed',
     };
     const { root } = render(stateWith({ tab: 'selections', preview }));
     expect(text(root)).toContain('NOT APPLIED');
     expect(text(root)).toContain('Dependencies: not analysed in this version.');
     expect(text(root)).toContain('Unsupported');
+    expect(text(root)).toContain('Two rules for one provider');
   });
 });
