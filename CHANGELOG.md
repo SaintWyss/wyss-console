@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-30 — Arsenal: project selection read only for shared folders
+
+- A project folder that another account can write is now accepted read only. Before, it was refused: a repository
+  whose access list gives the `agent` account write access could not be selected at all. The group bit was not the
+  cause, since the group belongs to the owner alone.
+- A read-only project is listed by Arsenal, its capabilities show as `shared_path` and are never copied, and its
+  files stay read only in Configuration. Account folders keep their policy.
+- Still refused: a folder anybody can write, a folder another account owns, a link on the way, and a provider's own
+  folder. A `.claude`, `.codex`, `.opencode` or `.agents` folder is refused wherever it sits, so it cannot be a
+  project root.
+
 ## 2026-10-30 — Arsenal: faster discovery and one-entry import
 
 - Discovery reads a folder's entries on up to six threads, and stops reading a skill folder once it passes a

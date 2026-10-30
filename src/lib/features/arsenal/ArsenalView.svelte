@@ -699,7 +699,11 @@
                   </p>
                 {/if}
 
-                <h4>Files that will be copied</h4>
+                <h4>
+                  {chosen.importable
+                    ? 'Files that will be copied'
+                    : 'Files in this capability'}
+                </h4>
                 <ul class="arsenal-files">
                   {#each detail?.files ?? [] as file (file.path)}
                     <li>

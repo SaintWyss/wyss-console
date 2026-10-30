@@ -12,7 +12,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use super::inventory::{self, Environment};
-use super::model::{Bounds, ItemKind, ProviderId, Scope, SourceFailure};
+use super::model::{Bounds, ItemKind, PathTrust, ProviderId, Scope, SourceFailure};
 use super::reader::{ConfigReader, EntryKind};
 use super::redact::{self, SecretClass};
 use super::roots::ApprovedRoots;
@@ -678,7 +678,11 @@ fn assemble(
         excluded: tree.excluded,
         review: tree.review,
         executes_code: tree.executes_code,
-        blocked: tree.blocked,
+        // A project read through a shared folder is listed, never copied: its folder is writable by its group,
+        // and the group was accepted only as read-only discovery (project.rs). Account folders keep their policy.
+        blocked: tree
+            .blocked
+            .or((tree.shared && folder.scope == "project").then_some("shared_path")),
         managed_by: None,
         content: tree.files,
     }
@@ -692,6 +696,8 @@ struct Tree {
     blocked: Option<&'static str>,
     executes_code: bool,
     bytes: usize,
+    /// A file was read through a folder another account can write. See `assemble`.
+    shared: bool,
 }
 
 fn take_file(reader: &ConfigReader, path: &Path, relative: String, tree: &mut Tree) {
@@ -707,7 +713,12 @@ fn take_file(reader: &ConfigReader, path: &Path, relative: String, tree: &mut Tr
         return;
     }
     let bytes = match reader.read_file(path) {
-        Ok(file) => file.bytes().to_vec(),
+        Ok(file) => {
+            if matches!(file.trust(), PathTrust::ReadOnly(_)) {
+                tree.shared = true;
+            }
+            file.bytes().to_vec()
+        }
         Err(failure) => {
             tree.excluded.push(Excluded {
                 path: relative,
@@ -1316,6 +1327,76 @@ mod tests {
         // Reading stops at the first entry past the limit: the rest of the folder is never opened.
         assert_eq!(found.files.len(), MAX_FILES + 1);
         fs::remove_dir_all(home).unwrap();
+    }
+
+    fn folder_of(scope: &'static str, path: &str) -> Folder {
+        Folder {
+            kind: "rule",
+            provider: "claude_code",
+            source: "claude_project_rules",
+            scope,
+            path: PathBuf::from(path),
+            shape: Shape::Named("CLAUDE.md"),
+        }
+    }
+
+    /// One rule file read through a folder another account can write, or not.
+    fn read_rule(shared: bool) -> Tree {
+        Tree {
+            files: vec![("CLAUDE.md".to_owned(), b"Use the house style.".to_vec())],
+            shared,
+            ..Tree::default()
+        }
+    }
+
+    #[test]
+    fn a_project_read_through_a_shared_folder_is_listed_but_never_copied() {
+        let project = folder_of("project", "/home/u/repo");
+        let shared = assemble(
+            &project,
+            "CLAUDE",
+            "~/repo/CLAUDE.md".to_owned(),
+            String::new(),
+            read_rule(true),
+        );
+        assert_eq!(shared.blocked, Some("shared_path"));
+        // Still listed, with its file, so the owner sees what the project holds.
+        assert_eq!(shared.name, "CLAUDE");
+        assert_eq!(shared.files.len(), 1);
+        // Negative controls: the same file in a folder only this account can write is copied as usual,
+        // and an account folder keeps its own policy when it is read through a shared path.
+        let own = assemble(
+            &project,
+            "CLAUDE",
+            "~/repo/CLAUDE.md".to_owned(),
+            String::new(),
+            read_rule(false),
+        );
+        assert_eq!(own.blocked, None);
+        let account = folder_of("user", "/home/u/.claude/rules");
+        let account_rule = assemble(
+            &account,
+            "CLAUDE",
+            "~/.claude/rules/CLAUDE.md".to_owned(),
+            String::new(),
+            read_rule(true),
+        );
+        assert_eq!(account_rule.blocked, None);
+    }
+
+    #[test]
+    fn a_reason_found_before_the_sharing_keeps_its_place() {
+        let project = folder_of("project", "/home/u/repo");
+        let mut tree = read_rule(true);
+        tree.blocked = Some("needs_secret");
+        let candidate = assemble(
+            &project,
+            "CLAUDE",
+            "~/repo/CLAUDE.md".to_owned(),
+            String::new(),
+            tree,
+        );
+        assert_eq!(candidate.blocked, Some("needs_secret"));
     }
 
     #[test]

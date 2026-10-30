@@ -192,6 +192,33 @@ describe('Arsenal view', () => {
     expect(controller.choose).toHaveBeenCalledWith('id-tokens');
   });
 
+  it('lists a project in a folder another account can write read only, and says why it is not copied', () => {
+    const { root } = render(
+      stateWith({
+        tab: 'discover',
+        discover: discoverWith([
+          candidate({
+            id: 'id-claude',
+            kind: 'rule',
+            name: 'CLAUDE',
+            scope: 'project',
+            source: 'claude_project_rules',
+            importable: false,
+            blocked: 'shared_path',
+          }),
+        ]),
+        chosen: 'id-claude',
+      }),
+    );
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain(
+      'another account can write',
+    );
+    expect(buttonNamed(root, 'Import')?.disabled).toBe(true);
+    // Nothing is copied from it, so the file list must not promise a copy.
+    expect(text(root)).toContain('Files in this capability');
+    expect(text(root)).not.toContain('Files that will be copied');
+  });
+
   it('offers a new revision when the source changed, and never claims the session uses it', () => {
     const { root } = render(
       stateWith({

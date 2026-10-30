@@ -34,6 +34,8 @@ const BLOCK_TEXT: Record<string, string> = {
   too_deep: 'This skill nests folders deeper than the import limit.',
   unreadable: 'A file of this skill could not be read.',
   unstable: 'This skill changed while it was being read. Scan again.',
+  shared_path:
+    'This project is in a folder another account can write. Arsenal lists it as read only and does not copy it.',
 };
 
 export function failureMessage(error: unknown): string {
