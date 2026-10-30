@@ -230,6 +230,21 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-configuration-project',
     'allow-configuration-select-project',
     'allow-configuration-template-export',
+    // Arsenal (AM1a): the offline library. Reads, one import from a fresh scan, restore, presets and
+    // selections, and the configuration preview. None starts a session or writes a provider's files.
+    'allow-arsenal-discover',
+    'allow-arsenal-capabilities',
+    'allow-arsenal-capability',
+    'allow-arsenal-file',
+    'allow-arsenal-import',
+    'allow-arsenal-restore',
+    'allow-arsenal-presets',
+    'allow-arsenal-preset-write',
+    'allow-arsenal-preset-delete',
+    'allow-arsenal-selections',
+    'allow-arsenal-selection-write',
+    'allow-arsenal-selection-delete',
+    'allow-arsenal-preview',
     // Native agent sessions (F3): the closed catalogue, a start that names an agent, a
     // project the user chose and a profile, the registry, and the profiles. None takes a
     // command, an argument list, an environment or a path.

@@ -57,6 +57,8 @@ function desktop(inventory: () => unknown = () => fixture) {
         return listing([]);
       case 'managed_approvals':
         return approvals.empty;
+      case 'arsenal_capabilities':
+        return [];
       case 'terminal_read_output':
         return never();
       case 'get_app_info':
@@ -135,4 +137,18 @@ it('does not take the desktop’s answer on faith', async () => {
   await flush();
   expect(text(view())).toContain('The configuration could not be read');
   expect(view().querySelector('.configuration-row')).toBeNull();
+});
+
+it('opens Arsenal on its own library, not on the provider inventory', async () => {
+  const ipc = desktop();
+  component = mount(App, { target: document.body });
+  await flush();
+  nav('Arsenal').click();
+  await flush();
+  const arsenal = document.querySelector<HTMLElement>('.arsenal-feature')!;
+  expect(arsenal.hidden).toBe(false);
+  expect(ipc.count('arsenal_capabilities')).toBe(1);
+  expect(ipc.count('configuration_inventory')).toBe(0);
+  expect(text(arsenal)).toContain('Installed does not mean imported');
+  expect(text(arsenal)).toContain('Nothing is imported yet');
 });

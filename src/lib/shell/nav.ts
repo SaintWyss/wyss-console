@@ -10,6 +10,7 @@ export type ViewId =
   | 'remote'
   | 'approvals'
   | 'events'
+  | 'arsenal'
   | 'configuration'
   | 'models'
   | 'profiles'
@@ -73,6 +74,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: 'Events',
     subtitle: 'What the authority recorded',
     icon: 'M3 12h4l2.5-6 4 12 2.5-6H21',
+  },
+  {
+    id: 'arsenal',
+    label: 'Arsenal',
+    subtitle: 'Installed capabilities',
+    icon: 'M4 5h16v14H4zM8 9h8M8 13h8M8 17h5',
   },
   {
     id: 'configuration',

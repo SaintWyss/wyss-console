@@ -7,6 +7,8 @@
   import { AgentController } from './lib/features/agent/controller';
   import ApprovalsView from './lib/features/approvals/ApprovalsView.svelte';
   import { ApprovalsController } from './lib/features/approvals/controller';
+  import ArsenalView from './lib/features/arsenal/ArsenalView.svelte';
+  import { ArsenalController } from './lib/features/arsenal/controller';
   import ConfigurationView from './lib/features/configuration/ConfigurationView.svelte';
   import { ChangesController } from './lib/features/configuration/changes-controller';
   import { ConfigurationController } from './lib/features/configuration/controller';
@@ -104,6 +106,11 @@
     configuration = next;
   });
   let configuration = $state(configurationController.state());
+  // The Arsenal library: read while its view is shown; it changes only what the owner asks for.
+  const arsenalController = new ArsenalController((next) => {
+    arsenal = next;
+  });
+  let arsenal = $state(arsenalController.snapshot());
   // Changing it: a plan is drafted, confirmed here, and applied by the desktop, which asks
   // again in a window of its own when the change is risky.
   const changesController = new ChangesController(
@@ -202,6 +209,9 @@
     );
   });
   $effect(() => {
+    arsenalController.setVisible(activeView === 'arsenal');
+  });
+  $effect(() => {
     if (activeView === 'models') sessionsController.setVisible(true);
     else sessionsController.setVisible(activeView === 'sessions');
   });
@@ -288,6 +298,7 @@
       approvalsController.dispose();
       eventsController.dispose();
       configurationController.dispose();
+      arsenalController.dispose();
       changesController.dispose();
       nativeController.dispose();
       modelsController.dispose();
@@ -469,6 +480,11 @@
       controller={configurationController}
       {changes}
       {changesController}
+    />
+    <ArsenalView
+      visible={activeView === 'arsenal'}
+      {arsenal}
+      controller={arsenalController}
     />
     <ModelsView
       visible={activeView === 'models'}

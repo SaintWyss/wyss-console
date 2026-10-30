@@ -195,7 +195,7 @@ fn end_of_value(bytes: &[u8], from: usize) -> usize {
 }
 
 /// Prefixes of tokens issued by common services.
-const TOKEN_PREFIXES: [&str; 16] = [
+pub(super) const TOKEN_PREFIXES: [&str; 16] = [
     "sk-",
     "sk_",
     "pk_",

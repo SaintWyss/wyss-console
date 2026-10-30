@@ -144,6 +144,7 @@ it('lists every view, and every one of them exists', () => {
     'Remote PCs',
     'Approvals',
     'Events',
+    'Arsenal',
     'Configuration',
     'Models',
     'Profiles',
@@ -159,6 +160,7 @@ it('lists every view, and every one of them exists', () => {
     'remote',
     'approvals',
     'events',
+    'arsenal',
     'configuration',
     'models',
     'profiles',
@@ -177,8 +179,8 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
   const nav = Array.from(
     document.querySelectorAll<HTMLButtonElement>('.sidebar .nav-item'),
   );
-  // The fourteen views include Pipelines and Providers, which only read.
-  expect(nav).toHaveLength(14);
+  // The fifteen views include Pipelines, Arsenal and Providers, which only read.
+  expect(nav).toHaveLength(15);
   expect(nav[0].getAttribute('aria-current')).toBe('page');
   expect(nav.every((b) => !b.disabled)).toBe(true);
   expect(nav.map((b) => b.textContent?.trim())).toEqual([
@@ -190,6 +192,7 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
     'Remote PCs',
     'Approvals',
     'Events',
+    'Arsenal',
     'Configuration',
     'Models',
     'Providers',

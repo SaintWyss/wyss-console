@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-30 — Arsenal AM1a: offline capability library (not applied to sessions)
+
+- New **Arsenal** view. It reads your Claude Code and Codex user skill folders, copies the skills you import into
+  a private library (SQLite plus content checked by SHA-256), and keeps immutable revisions: importing identical
+  content changes nothing, changed content adds a revision, and an earlier revision can be restored.
+- Imports never run scripts, never follow a link out of a skill folder, leave out credential-named files, and
+  block a skill whose text holds something that looks like a secret. Source folders are never written.
+- Presets and selections are saved per owner. A selection's configuration preview is always labelled
+  `NOT APPLIED`: nothing is launched and no provider session uses it. Enforcement is AM1b.
+
 ## 2026-10-23 — M3: Claude Managed adapter, built offline (release blocked)
 
 - New **Providers** view: what each profile (Codex and Claude, Inference and Local tools) can do and exactly why

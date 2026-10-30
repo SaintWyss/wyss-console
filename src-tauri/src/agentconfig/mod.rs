@@ -88,6 +88,7 @@ mod roots;
 pub mod service;
 #[cfg(test)]
 mod service_tests;
+pub mod skills;
 #[cfg(test)]
 mod tests;
 mod tomlspan;

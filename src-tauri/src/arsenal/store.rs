@@ -1,0 +1,1040 @@
+//! Arsenal's database: capabilities, their immutable revisions with the content of every file, and
+//! the presets and selections built from them. One SQLite file in the private data directory.
+//! Each change is one transaction, so a failed import leaves no partial revision and no pointer to
+//! content that is not stored. Triggers refuse to change a stored revision, file or blob.
+
+use std::collections::HashSet;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+use crate::agentconfig::skills::{MAX_FILE_BYTES, MAX_FILES, MAX_TREE_BYTES, name_ok};
+
+const MAX_PATH_BYTES: usize = 256;
+const MAX_ITEMS: usize = 128;
+const SCHEMA_VERSION: i64 = 1;
+const SCHEMA: &str = "
+CREATE TABLE capability (
+    id TEXT PRIMARY KEY,
+    identity TEXT NOT NULL UNIQUE,
+    provider TEXT NOT NULL,
+    source TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    current_revision INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE revision (
+    capability_id TEXT NOT NULL REFERENCES capability(id),
+    number INTEGER NOT NULL,
+    tree_hash TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    description TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (capability_id, number)
+);
+CREATE TABLE blob (
+    hash TEXT PRIMARY KEY,
+    content BLOB NOT NULL
+);
+CREATE TABLE revision_file (
+    capability_id TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    relpath TEXT NOT NULL,
+    sha256 TEXT NOT NULL REFERENCES blob(hash),
+    size INTEGER NOT NULL,
+    PRIMARY KEY (capability_id, number, relpath),
+    FOREIGN KEY (capability_id, number) REFERENCES revision(capability_id, number)
+);
+CREATE TABLE preset (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    items TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE selection (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    items TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TRIGGER revision_fixed BEFORE UPDATE ON revision BEGIN
+    SELECT RAISE(ABORT, 'arsenal revisions are immutable');
+END;
+CREATE TRIGGER revision_kept BEFORE DELETE ON revision BEGIN
+    SELECT RAISE(ABORT, 'arsenal revisions are immutable');
+END;
+CREATE TRIGGER revision_file_fixed BEFORE UPDATE ON revision_file BEGIN
+    SELECT RAISE(ABORT, 'arsenal revision files are immutable');
+END;
+CREATE TRIGGER revision_file_kept BEFORE DELETE ON revision_file BEGIN
+    SELECT RAISE(ABORT, 'arsenal revision files are immutable');
+END;
+CREATE TRIGGER blob_fixed BEFORE UPDATE ON blob BEGIN
+    SELECT RAISE(ABORT, 'arsenal content is immutable');
+END;
+CREATE TRIGGER blob_kept BEFORE DELETE ON blob BEGIN
+    SELECT RAISE(ABORT, 'arsenal content is immutable');
+END;
+";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    Invalid,
+    NotFound,
+    Busy,
+    Corrupt,
+    Storage,
+    Unsupported,
+}
+
+impl From<rusqlite::Error> for Error {
+    fn from(error: rusqlite::Error) -> Self {
+        match error.sqlite_error_code() {
+            Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => {
+                Self::Busy
+            }
+            Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase) => {
+                Self::Corrupt
+            }
+            _ => Self::Storage,
+        }
+    }
+}
+
+/// The SHA-256 of some bytes, in lowercase hex.
+pub fn digest(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+/// The identity of a skill tree: its files' paths and digests, sorted by path. Two trees with
+/// the same value hold the same content, wherever they were read.
+pub fn tree_digest(files: &[(String, Vec<u8>)]) -> String {
+    let mut entries: Vec<(&str, String)> = files
+        .iter()
+        .map(|(path, bytes)| (path.as_str(), digest(bytes)))
+        .collect();
+    entries.sort();
+    let mut hasher = Sha256::new();
+    for (path, hash) in entries {
+        hasher.update(path.as_bytes());
+        hasher.update([0]);
+        hasher.update(hash.as_bytes());
+        hasher.update(b"\n");
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+/// The stable identity of a capability: what it is and where it comes from, never its content.
+pub fn identity(provider: &str, kind: &str, source: &str, name: &str) -> String {
+    digest(format!("{provider}\0{kind}\0{source}\0{name}").as_bytes())
+}
+
+/// What an import copies. `files` are the relative paths and bytes of the whole tree.
+pub struct NewCapability {
+    pub identity: String,
+    pub provider: String,
+    pub source: String,
+    pub kind: String,
+    pub name: String,
+    pub description: String,
+    pub origin: String,
+    pub files: Vec<(String, Vec<u8>)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Outcome {
+    Created,
+    NewRevision,
+    Unchanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Imported {
+    pub capability: String,
+    pub revision: i64,
+    pub outcome: Outcome,
+}
+
+/// The capability that an identity names, with its current revision and that revision's digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Current {
+    pub id: String,
+    pub revision: i64,
+    pub tree_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Summary {
+    pub id: String,
+    pub provider: String,
+    pub source: String,
+    pub kind: String,
+    pub name: String,
+    pub description: String,
+    pub origin: String,
+    pub revision: i64,
+    pub revisions: i64,
+    pub tree_hash: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RevisionInfo {
+    pub number: i64,
+    pub tree_hash: String,
+    pub origin: String,
+    pub created_at: i64,
+    pub files: i64,
+    pub bytes: i64,
+    pub current: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FileInfo {
+    pub path: String,
+    pub sha256: String,
+    pub size: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Detail {
+    pub summary: Summary,
+    /// The revision whose files are listed: the current one unless another was asked for.
+    pub revision: i64,
+    pub revisions: Vec<RevisionInfo>,
+    pub files: Vec<FileInfo>,
+}
+
+/// One capability in a preset or selection. `revision: None` follows the current revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Item {
+    pub capability: String,
+    pub revision: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Preset {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub items: Vec<Item>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PresetInput {
+    pub id: Option<String>,
+    pub name: String,
+    pub description: String,
+    pub items: Vec<Item>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Selection {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub items: Vec<Item>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelectionInput {
+    pub id: Option<String>,
+    pub name: String,
+    pub provider: String,
+    pub items: Vec<Item>,
+}
+
+/// The one connection of the Arsenal database. Every write takes the write lock first, so two
+/// writers, in this process or another, run one after the other or the second one reports `Busy`.
+pub struct Store {
+    db: Connection,
+}
+
+const SUMMARY: &str = "SELECT c.id, c.provider, c.source, c.kind, c.name, r.description, r.origin, \
+     c.current_revision, (SELECT COUNT(*) FROM revision x WHERE x.capability_id = c.id), \
+     r.tree_hash, c.updated_at \
+     FROM capability c JOIN revision r ON r.capability_id = c.id AND r.number = c.current_revision";
+
+impl Store {
+    /// Opens the database, creating the schema when the file is new. A file of another schema
+    /// version, or one that fails SQLite's own check, is refused instead of being used.
+    pub fn open(db: Connection) -> Result<Self, Error> {
+        db.busy_timeout(Duration::from_secs(5))?;
+        db.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        match version {
+            0 => {
+                let tx = db.unchecked_transaction()?;
+                tx.execute_batch(SCHEMA)?;
+                tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
+                tx.commit()?;
+            }
+            SCHEMA_VERSION => {}
+            _ => return Err(Error::Unsupported),
+        }
+        let check: String = db.query_row("PRAGMA quick_check(1)", [], |row| row.get(0))?;
+        if check != "ok" {
+            return Err(Error::Corrupt);
+        }
+        Ok(Self { db })
+    }
+
+    /// Stores a skill tree as a new capability, a new revision of a known one, or nothing when the
+    /// content is the same as the current revision. Nothing is written unless the whole tree is valid.
+    pub fn import(&mut self, new: &NewCapability) -> Result<Imported, Error> {
+        validate(new)?;
+        let tree = tree_digest(&new.files);
+        let now = now();
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<(String, i64, String)> = tx
+            .query_row(
+                "SELECT c.id, c.current_revision, r.tree_hash FROM capability c \
+                 JOIN revision r ON r.capability_id = c.id AND r.number = c.current_revision \
+                 WHERE c.identity = ?1",
+                [&new.identity],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        let imported = match current {
+            Some((id, number, tree_hash)) if tree_hash == tree => Imported {
+                capability: id,
+                revision: number,
+                outcome: Outcome::Unchanged,
+            },
+            Some((id, number, _)) => {
+                let next = number.checked_add(1).ok_or(Error::Invalid)?;
+                insert_revision(&tx, &id, next, &tree, new, now)?;
+                tx.execute(
+                    "UPDATE capability SET current_revision = ?2, updated_at = ?3 WHERE id = ?1",
+                    params![id, next, now],
+                )?;
+                Imported {
+                    capability: id,
+                    revision: next,
+                    outcome: Outcome::NewRevision,
+                }
+            }
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO capability (id, identity, provider, source, kind, name, \
+                     current_revision, created_at, updated_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?7)",
+                    params![
+                        id,
+                        new.identity,
+                        new.provider,
+                        new.source,
+                        new.kind,
+                        new.name,
+                        now
+                    ],
+                )?;
+                insert_revision(&tx, &id, 1, &tree, new, now)?;
+                Imported {
+                    capability: id,
+                    revision: 1,
+                    outcome: Outcome::Created,
+                }
+            }
+        };
+        tx.commit()?;
+        Ok(imported)
+    }
+
+    pub fn list(&self) -> Result<Vec<Summary>, Error> {
+        let mut statement = self
+            .db
+            .prepare(&format!("{SUMMARY} ORDER BY c.name, c.provider, c.source"))?;
+        let rows = statement.query_map([], summary_row)?;
+        let summaries = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(summaries)
+    }
+
+    /// One capability, with its revisions and the files of `number` (the current revision by default).
+    pub fn detail(&self, id: &str, number: Option<i64>) -> Result<Detail, Error> {
+        let summary = self.summary(id)?;
+        let revision = number.unwrap_or(summary.revision);
+        let files = self.files(id, revision)?;
+        let revisions = self.revisions(id, summary.revision)?;
+        Ok(Detail {
+            summary,
+            revision,
+            revisions,
+            files,
+        })
+    }
+
+    /// The stored bytes of one file of one revision, checked against the digest they were stored under.
+    pub fn file(&self, id: &str, number: i64, path: &str) -> Result<Vec<u8>, Error> {
+        let (hash, content): (String, Option<Vec<u8>>) = self
+            .db
+            .query_row(
+                "SELECT f.sha256, b.content FROM revision_file f \
+                 LEFT JOIN blob b ON b.hash = f.sha256 \
+                 WHERE f.capability_id = ?1 AND f.number = ?2 AND f.relpath = ?3",
+                params![id, number, path],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or(Error::NotFound)?;
+        let content = content.ok_or(Error::Corrupt)?;
+        if digest(&content) != hash {
+            return Err(Error::Corrupt);
+        }
+        Ok(content)
+    }
+
+    /// Makes an existing revision the current one. No revision is created and nothing is copied.
+    pub fn restore(&mut self, id: &str, number: i64) -> Result<(), Error> {
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !revision_exists(&tx, id, number)? {
+            return Err(Error::NotFound);
+        }
+        tx.execute(
+            "UPDATE capability SET current_revision = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, number, now()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn current(&self, identity: &str) -> Result<Option<Current>, Error> {
+        let current = self
+            .db
+            .query_row(
+                "SELECT c.id, c.current_revision, r.tree_hash FROM capability c \
+                 JOIN revision r ON r.capability_id = c.id AND r.number = c.current_revision \
+                 WHERE c.identity = ?1",
+                [identity],
+                |row| {
+                    Ok(Current {
+                        id: row.get(0)?,
+                        revision: row.get(1)?,
+                        tree_hash: row.get(2)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(current)
+    }
+
+    pub fn presets(&self) -> Result<Vec<Preset>, Error> {
+        let mut statement = self.db.prepare(
+            "SELECT id, name, description, items, created_at, updated_at FROM preset \
+             ORDER BY name, id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (id, name, description, items, created_at, updated_at) = row?;
+            Ok(Preset {
+                id,
+                name,
+                description,
+                items: decode_items(&items)?,
+                created_at,
+                updated_at,
+            })
+        })
+        .collect()
+    }
+
+    /// Creates a preset, or replaces the name, description and items of `input.id`.
+    pub fn save_preset(&mut self, input: &PresetInput) -> Result<Preset, Error> {
+        check_text(&input.name, 80, true)?;
+        check_text(&input.description, 500, false)?;
+        check_items(&input.items)?;
+        let items = encode_items(&input.items)?;
+        let now = now();
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        check_references(&tx, &input.items)?;
+        let id = match &input.id {
+            Some(id) => {
+                let changed = tx.execute(
+                    "UPDATE preset SET name = ?2, description = ?3, items = ?4, updated_at = ?5 \
+                     WHERE id = ?1",
+                    params![id, input.name.trim(), input.description, items, now],
+                )?;
+                if changed == 0 {
+                    return Err(Error::NotFound);
+                }
+                id.clone()
+            }
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO preset (id, name, description, items, created_at, updated_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+                    params![id, input.name.trim(), input.description, items, now],
+                )?;
+                id
+            }
+        };
+        tx.commit()?;
+        self.presets()?
+            .into_iter()
+            .find(|preset| preset.id == id)
+            .ok_or(Error::Storage)
+    }
+
+    pub fn delete_preset(&mut self, id: &str) -> Result<(), Error> {
+        let removed = self.db.execute("DELETE FROM preset WHERE id = ?1", [id])?;
+        if removed == 0 {
+            return Err(Error::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn selections(&self) -> Result<Vec<Selection>, Error> {
+        let mut statement = self.db.prepare(
+            "SELECT id, name, provider, items, created_at, updated_at FROM selection \
+             ORDER BY name, id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (id, name, provider, items, created_at, updated_at) = row?;
+            Ok(Selection {
+                id,
+                name,
+                provider,
+                items: decode_items(&items)?,
+                created_at,
+                updated_at,
+            })
+        })
+        .collect()
+    }
+
+    pub fn save_selection(&mut self, input: &SelectionInput) -> Result<Selection, Error> {
+        check_text(&input.name, 80, true)?;
+        if !is_provider(&input.provider) {
+            return Err(Error::Invalid);
+        }
+        check_items(&input.items)?;
+        let items = encode_items(&input.items)?;
+        let now = now();
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        check_references(&tx, &input.items)?;
+        let id = match &input.id {
+            Some(id) => {
+                let changed = tx.execute(
+                    "UPDATE selection SET name = ?2, provider = ?3, items = ?4, updated_at = ?5 \
+                     WHERE id = ?1",
+                    params![id, input.name.trim(), input.provider, items, now],
+                )?;
+                if changed == 0 {
+                    return Err(Error::NotFound);
+                }
+                id.clone()
+            }
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO selection (id, name, provider, items, created_at, updated_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+                    params![id, input.name.trim(), input.provider, items, now],
+                )?;
+                id
+            }
+        };
+        tx.commit()?;
+        self.selections()?
+            .into_iter()
+            .find(|selection| selection.id == id)
+            .ok_or(Error::Storage)
+    }
+
+    pub fn delete_selection(&mut self, id: &str) -> Result<(), Error> {
+        let removed = self
+            .db
+            .execute("DELETE FROM selection WHERE id = ?1", [id])?;
+        if removed == 0 {
+            return Err(Error::NotFound);
+        }
+        Ok(())
+    }
+
+    fn summary(&self, id: &str) -> Result<Summary, Error> {
+        self.db
+            .query_row(&format!("{SUMMARY} WHERE c.id = ?1"), [id], summary_row)
+            .optional()?
+            .ok_or(Error::NotFound)
+    }
+
+    fn files(&self, id: &str, number: i64) -> Result<Vec<FileInfo>, Error> {
+        if !revision_exists(&self.db, id, number)? {
+            return Err(Error::NotFound);
+        }
+        let mut statement = self.db.prepare(
+            "SELECT relpath, sha256, size FROM revision_file \
+             WHERE capability_id = ?1 AND number = ?2 ORDER BY relpath",
+        )?;
+        let rows = statement.query_map(params![id, number], |row| {
+            Ok(FileInfo {
+                path: row.get(0)?,
+                sha256: row.get(1)?,
+                size: row.get(2)?,
+            })
+        })?;
+        let files = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(files)
+    }
+
+    fn revisions(&self, id: &str, current: i64) -> Result<Vec<RevisionInfo>, Error> {
+        let mut statement = self.db.prepare(
+            "SELECT r.number, r.tree_hash, r.origin, r.created_at, \
+             (SELECT COUNT(*) FROM revision_file f WHERE f.capability_id = r.capability_id AND f.number = r.number), \
+             (SELECT COALESCE(SUM(f.size), 0) FROM revision_file f WHERE f.capability_id = r.capability_id AND f.number = r.number) \
+             FROM revision r WHERE r.capability_id = ?1 ORDER BY r.number DESC",
+        )?;
+        let rows = statement.query_map([id], |row| {
+            let number: i64 = row.get(0)?;
+            Ok(RevisionInfo {
+                number,
+                tree_hash: row.get(1)?,
+                origin: row.get(2)?,
+                created_at: row.get(3)?,
+                files: row.get(4)?,
+                bytes: row.get(5)?,
+                current: number == current,
+            })
+        })?;
+        let revisions = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(revisions)
+    }
+}
+
+fn revision_exists(db: &Connection, id: &str, number: i64) -> Result<bool, Error> {
+    Ok(db
+        .query_row(
+            "SELECT 1 FROM revision WHERE capability_id = ?1 AND number = ?2",
+            params![id, number],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+fn summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Summary> {
+    Ok(Summary {
+        id: row.get(0)?,
+        provider: row.get(1)?,
+        source: row.get(2)?,
+        kind: row.get(3)?,
+        name: row.get(4)?,
+        description: row.get(5)?,
+        origin: row.get(6)?,
+        revision: row.get(7)?,
+        revisions: row.get(8)?,
+        tree_hash: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+fn insert_revision(
+    tx: &Transaction<'_>,
+    id: &str,
+    number: i64,
+    tree: &str,
+    new: &NewCapability,
+    now: i64,
+) -> Result<(), Error> {
+    tx.execute(
+        "INSERT INTO revision (capability_id, number, tree_hash, origin, description, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![id, number, tree, new.origin, new.description, now],
+    )?;
+    for (path, bytes) in &new.files {
+        let hash = digest(bytes);
+        tx.execute(
+            "INSERT OR IGNORE INTO blob (hash, content) VALUES (?1, ?2)",
+            params![hash, bytes.as_slice()],
+        )?;
+        tx.execute(
+            "INSERT INTO revision_file (capability_id, number, relpath, sha256, size) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                id,
+                number,
+                path,
+                hash,
+                i64::try_from(bytes.len()).map_err(|_| Error::Invalid)?
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn validate(new: &NewCapability) -> Result<(), Error> {
+    let known_source = matches!(
+        new.source.as_str(),
+        "claude_user_skills" | "codex_user_skills"
+    );
+    if !name_ok(&new.name)
+        || !is_provider(&new.provider)
+        || new.kind != "skill"
+        || !known_source
+        || new.description.chars().count() > 500
+        || new.origin.len() > 512
+    {
+        return Err(Error::Invalid);
+    }
+    if new.files.is_empty() || new.files.len() > MAX_FILES {
+        return Err(Error::Invalid);
+    }
+    if !new.files.iter().any(|(path, _)| path == "SKILL.md") {
+        return Err(Error::Invalid);
+    }
+    let mut seen = HashSet::new();
+    let mut total = 0_usize;
+    for (path, bytes) in &new.files {
+        if !valid_path(path) || !seen.insert(path.as_str()) || bytes.len() > MAX_FILE_BYTES {
+            return Err(Error::Invalid);
+        }
+        total += bytes.len();
+    }
+    if total > MAX_TREE_BYTES {
+        return Err(Error::Invalid);
+    }
+    Ok(())
+}
+
+/// A relative path of plain components: no empty part, no `.` or `..`, no control character.
+fn valid_path(path: &str) -> bool {
+    path.len() <= MAX_PATH_BYTES
+        && path.split('/').all(|part| {
+            !part.is_empty()
+                && part != "."
+                && part != ".."
+                && part.len() <= 128
+                && !part.contains('\\')
+                && !part.chars().any(char::is_control)
+        })
+}
+
+fn is_provider(provider: &str) -> bool {
+    matches!(provider, "claude_code" | "codex")
+}
+
+fn check_text(value: &str, max_chars: usize, required: bool) -> Result<(), Error> {
+    let trimmed = value.trim();
+    if (required && trimmed.is_empty())
+        || value.chars().count() > max_chars
+        || value.chars().any(char::is_control)
+    {
+        return Err(Error::Invalid);
+    }
+    Ok(())
+}
+
+/// Items are unique by capability and bounded. A pinned revision must be a positive number.
+fn check_items(items: &[Item]) -> Result<(), Error> {
+    if items.len() > MAX_ITEMS {
+        return Err(Error::Invalid);
+    }
+    let mut seen = HashSet::new();
+    for item in items {
+        if !seen.insert(item.capability.as_str()) || item.revision.is_some_and(|number| number < 1)
+        {
+            return Err(Error::Invalid);
+        }
+    }
+    Ok(())
+}
+
+/// Every item names a capability that exists, and a pinned revision that exists for it.
+fn check_references(tx: &Transaction<'_>, items: &[Item]) -> Result<(), Error> {
+    for item in items {
+        let exists: bool = tx
+            .query_row(
+                "SELECT 1 FROM capability WHERE id = ?1",
+                [&item.capability],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !exists {
+            return Err(Error::NotFound);
+        }
+        let pinned_missing = match item.revision {
+            Some(number) => !revision_exists(tx, &item.capability, number)?,
+            None => false,
+        };
+        if pinned_missing {
+            return Err(Error::NotFound);
+        }
+    }
+    Ok(())
+}
+
+fn encode_items(items: &[Item]) -> Result<String, Error> {
+    serde_json::to_string(items).map_err(|_| Error::Invalid)
+}
+
+fn decode_items(text: &str) -> Result<Vec<Item>, Error> {
+    serde_json::from_str(text).map_err(|_| Error::Corrupt)
+}
+
+fn now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|elapsed| i64::try_from(elapsed.as_secs()).ok())
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn skill(name: &str, body: &[u8]) -> NewCapability {
+        NewCapability {
+            identity: identity("claude_code", "skill", "claude_user_skills", name),
+            provider: "claude_code".into(),
+            source: "claude_user_skills".into(),
+            kind: "skill".into(),
+            name: name.into(),
+            description: "test".into(),
+            origin: format!("~/.claude/skills/{name}"),
+            files: vec![
+                ("SKILL.md".into(), body.to_vec()),
+                ("refs/notes.md".into(), b"notes".to_vec()),
+            ],
+        }
+    }
+
+    fn memory() -> Store {
+        Store::open(Connection::open_in_memory().unwrap()).unwrap()
+    }
+
+    fn temp_path(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "arsenal-{tag}-{}.sqlite",
+            uuid::Uuid::new_v4().simple()
+        ))
+    }
+
+    #[test]
+    fn duplicates_do_not_create_revisions_and_changes_do() {
+        let mut store = memory();
+        let first = store.import(&skill("design", b"one")).unwrap();
+        assert_eq!(first.outcome, Outcome::Created);
+        let again = store.import(&skill("design", b"one")).unwrap();
+        assert_eq!(again.outcome, Outcome::Unchanged);
+        assert_eq!(again.capability, first.capability);
+        assert_eq!(again.revision, 1);
+        let changed = store.import(&skill("design", b"two")).unwrap();
+        assert_eq!(changed.outcome, Outcome::NewRevision);
+        assert_eq!(changed.revision, 2);
+        let detail = store.detail(&first.capability, None).unwrap();
+        assert_eq!(detail.summary.revision, 2);
+        assert_eq!(detail.revisions.len(), 2);
+        assert!(detail.revisions[0].current);
+    }
+
+    #[test]
+    fn restore_moves_the_pointer_and_reads_old_content_unchanged() {
+        let mut store = memory();
+        let first = store.import(&skill("design", b"one")).unwrap();
+        store.import(&skill("design", b"two")).unwrap();
+        store.restore(&first.capability, 1).unwrap();
+        let detail = store.detail(&first.capability, None).unwrap();
+        assert_eq!(detail.summary.revision, 1);
+        assert_eq!(detail.summary.revisions, 2);
+        assert_eq!(
+            store.file(&first.capability, 1, "SKILL.md").unwrap(),
+            b"one"
+        );
+        assert_eq!(store.restore(&first.capability, 9), Err(Error::NotFound));
+    }
+
+    #[test]
+    fn invalid_trees_are_refused_and_leave_nothing_behind() {
+        let mut store = memory();
+        let mut escape = skill("design", b"one");
+        escape.files.push(("../escape.md".into(), b"x".to_vec()));
+        assert_eq!(store.import(&escape), Err(Error::Invalid));
+        let mut no_skill = skill("design", b"one");
+        no_skill.files.remove(0);
+        assert_eq!(store.import(&no_skill), Err(Error::Invalid));
+        let bad_name = skill("../design", b"one");
+        assert_eq!(store.import(&bad_name), Err(Error::Invalid));
+        assert!(store.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_failure_in_the_middle_of_an_import_rolls_everything_back() {
+        let mut store = memory();
+        store
+            .db
+            .execute_batch(
+                "CREATE TRIGGER fail_on_notes BEFORE INSERT ON revision_file \
+                 WHEN NEW.relpath = 'refs/notes.md' BEGIN SELECT RAISE(ABORT, 'injected'); END;",
+            )
+            .unwrap();
+        assert_eq!(store.import(&skill("design", b"one")), Err(Error::Storage));
+        let counts: (i64, i64, i64) = store
+            .db
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM capability), (SELECT COUNT(*) FROM revision), \
+                 (SELECT COUNT(*) FROM blob)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(counts, (0, 0, 0));
+    }
+
+    #[test]
+    fn stored_revisions_cannot_be_edited_and_tampered_content_is_detected() {
+        let mut store = memory();
+        let first = store.import(&skill("design", b"one")).unwrap();
+        assert!(
+            store
+                .db
+                .execute("UPDATE revision SET origin = 'x'", [])
+                .is_err()
+        );
+        store.db.execute_batch("DROP TRIGGER blob_fixed;").unwrap();
+        store
+            .db
+            .execute("UPDATE blob SET content = ?1", [b"bad".as_slice()])
+            .unwrap();
+        assert_eq!(
+            store.file(&first.capability, 1, "SKILL.md"),
+            Err(Error::Corrupt)
+        );
+    }
+
+    #[test]
+    fn data_survives_reopening_and_a_second_writer_is_refused_while_one_holds_the_lock() {
+        let path = temp_path("reopen");
+        {
+            let mut store = Store::open(Connection::open(&path).unwrap()).unwrap();
+            store.import(&skill("design", b"persisted")).unwrap();
+        }
+        let mut reopened = Store::open(Connection::open(&path).unwrap()).unwrap();
+        assert_eq!(reopened.list().unwrap().len(), 1);
+        let holder = Connection::open(&path).unwrap();
+        holder.execute_batch("BEGIN IMMEDIATE;").unwrap();
+        reopened.db.busy_timeout(Duration::from_millis(50)).unwrap();
+        assert_eq!(reopened.import(&skill("other", b"x")), Err(Error::Busy));
+        holder.execute_batch("ROLLBACK;").unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_damaged_or_foreign_file_is_refused_at_open() {
+        let path = temp_path("damaged");
+        std::fs::write(&path, b"this is not a sqlite database at all, just text").unwrap();
+        assert!(Store::open(Connection::open(&path).unwrap()).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn presets_and_selections_persist_and_reject_unknown_references() {
+        let mut store = memory();
+        let design = store.import(&skill("design", b"one")).unwrap();
+        let preset = store
+            .save_preset(&PresetInput {
+                id: None,
+                name: " Frontend ".into(),
+                description: "React and TypeScript".into(),
+                items: vec![Item {
+                    capability: design.capability.clone(),
+                    revision: Some(1),
+                }],
+            })
+            .unwrap();
+        assert_eq!(preset.name, "Frontend");
+        let renamed = store
+            .save_preset(&PresetInput {
+                id: Some(preset.id.clone()),
+                name: "Frontend TS".into(),
+                description: String::new(),
+                items: vec![],
+            })
+            .unwrap();
+        assert_eq!(renamed.name, "Frontend TS");
+        assert!(renamed.items.is_empty());
+        assert_eq!(
+            store.save_preset(&PresetInput {
+                id: None,
+                name: "Broken".into(),
+                description: String::new(),
+                items: vec![Item {
+                    capability: "missing".into(),
+                    revision: None,
+                }],
+            }),
+            Err(Error::NotFound)
+        );
+        let selection = store
+            .save_selection(&SelectionInput {
+                id: None,
+                name: "Codex frontend".into(),
+                provider: "codex".into(),
+                items: vec![Item {
+                    capability: design.capability,
+                    revision: None,
+                }],
+            })
+            .unwrap();
+        assert_eq!(store.selections().unwrap(), vec![selection.clone()]);
+        assert_eq!(
+            store.save_selection(&SelectionInput {
+                id: None,
+                name: "Other provider".into(),
+                provider: "opencode".into(),
+                items: vec![],
+            }),
+            Err(Error::Invalid)
+        );
+        store.delete_selection(&selection.id).unwrap();
+        store.delete_preset(&renamed.id).unwrap();
+        assert!(store.presets().unwrap().is_empty());
+        assert_eq!(store.delete_preset(&renamed.id), Err(Error::NotFound));
+    }
+}

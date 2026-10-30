@@ -4,6 +4,8 @@
 // authority binary links, so that binary cannot contain it (C-02, TS-SEC-03).
 #[cfg(target_os = "linux")]
 mod agentconfig;
+#[cfg(target_os = "linux")]
+mod arsenal;
 // The window commands of the above: the one place that names both it and the toolkit.
 #[cfg(target_os = "linux")]
 mod activation;
@@ -118,7 +120,8 @@ fn main() {
             .merge(host::commands::extension())
             .merge(native::extension())
             .merge(projects::commands::extension())
-            .merge(credentials::commands::extension());
+            .merge(credentials::commands::extension())
+            .merge(arsenal::commands::extension());
         #[cfg(feature = "m3-fixture")]
         if let Some((service, fixture_extension)) = fixture {
             wyss_console::run_with_m3(
