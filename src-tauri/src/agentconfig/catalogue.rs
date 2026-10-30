@@ -99,17 +99,43 @@ pub struct Candidate {
     pub content: Vec<(String, Vec<u8>)>,
 }
 
-/// A composite collection found through its members' links.
+/// A composite collection: a GSD Core payload found through its members' links, or a Claude Code
+/// plugin package found through the provider's own install record. It is described, never copied.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Composite {
+    /// Stable key: `gsd_core@<version>` or `claude_plugin:<plugin>@<marketplace>`.
+    pub key: String,
+    /// `gsd_core` or `claude_plugin`.
+    pub kind: &'static str,
+    pub provider: &'static str,
     pub name: String,
     pub version: String,
+    pub description: String,
+    /// Artifacts its manifest declares; 0 when it has no manifest of that kind.
     pub artifacts: u64,
     /// How many of this scan's entries are installed from it.
     pub members: usize,
     /// Where its payload lives, with the home folder shown as `~`.
     pub origin: String,
+    /// The provider's own switch for it, when it has one and states it.
+    pub enabled: Option<bool>,
+    /// It controls how work is run (plan, execute, verify), so two of them in one session conflict.
+    pub methodology: bool,
+    pub skills: Vec<String>,
+    pub agents: Vec<String>,
+    pub commands: usize,
+    pub hooks: bool,
+    pub mcp: bool,
+    /// Manifest artifact counts by category, for a payload with a manifest.
+    pub categories: Vec<(String, u64)>,
+    pub limitations: Vec<&'static str>,
 }
+
+/// Composites that control how work runs. Named in the Arsenal design (2.1, `controlling`); the
+/// list only marks a conflict when two are kept together, it enables nothing.
+const METHODOLOGIES: [&str; 2] = ["GSD Core", "superpowers"];
+/// Most plugin packages read from one install record.
+const MAX_PLUGINS: usize = 64;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Scan {
@@ -134,6 +160,73 @@ pub fn scan_entry_process(
 ) -> Option<Scan> {
     let only = Only { kind, source, name };
     Environment::from_process(project).map(|env| scan_with(&env, Some(only)))
+}
+
+/// What one provider would load for a session: its skill folders (account and project), the
+/// composites they link into, its plugin packages, and the MCP servers it has configured.
+#[derive(Debug, Clone)]
+pub struct LaunchScan {
+    pub skills: Vec<Candidate>,
+    pub composites: Vec<Composite>,
+    pub mcp_servers: std::collections::BTreeSet<String>,
+    /// A folder listed more entries than are read. The exclusion would be incomplete.
+    pub truncated: bool,
+    /// Skill folders that exist but could not be read. The exclusion would be incomplete.
+    pub unreadable: Vec<&'static str>,
+}
+
+/// A project folder accepted by the same checks Configuration applies, or `None`.
+pub fn validate_project_process(path: &Path) -> Option<PathBuf> {
+    let env = Environment::from_process(None)?;
+    super::project::validate(&env, path).ok()
+}
+
+pub fn launch_scan_process(project: Option<PathBuf>, provider: &str) -> Option<LaunchScan> {
+    Environment::from_process(project).map(|env| launch_scan(&env, provider))
+}
+
+pub fn launch_scan(env: &Environment, provider: &str) -> LaunchScan {
+    let mut scan = Scan {
+        sources: Vec::new(),
+        candidates: Vec::new(),
+        composites: Vec::new(),
+        truncated: false,
+    };
+    let manifests = Mutex::new(BTreeMap::new());
+    let mut unreadable = Vec::new();
+    for folder in folders(env) {
+        if folder.kind != "skill" || folder.provider != provider {
+            continue;
+        }
+        if scan_folder(env, &folder, None, &mut scan, &manifests) == SourceState::Unreadable {
+            unreadable.push(folder.source);
+        }
+    }
+    let mut composites = composites(env, &scan.candidates);
+    if provider == "claude_code" {
+        composites.extend(plugin_packages(env));
+    }
+    let wanted = match provider {
+        "claude_code" => ProviderId::ClaudeCode,
+        _ => ProviderId::Codex,
+    };
+    let mcp_servers = inventory::inventory(env, Bounds::PROPOSED)
+        .map(|inventory| {
+            inventory
+                .items
+                .iter()
+                .filter(|item| item.kind == ItemKind::McpServer && item.provider == wanted)
+                .map(|item| item.name.as_str().to_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    LaunchScan {
+        skills: scan.candidates,
+        composites,
+        mcp_servers,
+        truncated: scan.truncated,
+        unreadable,
+    }
 }
 
 /// The same scan with `home` as the account folder. Used by tests and fixtures.
@@ -357,6 +450,7 @@ fn scan_with(env: &Environment, only: Option<Only<'_>>) -> Scan {
     if only.is_none() {
         scan.candidates.extend(read_only_entries(env));
         scan.composites = composites(env, &scan.candidates);
+        scan.composites.extend(plugin_packages(env));
     }
     scan
 }
@@ -889,28 +983,245 @@ fn gsd_manifest(root: &Path, version: &str) -> Option<ManagedBy> {
     })
 }
 
-/// Composites found through this scan's links, each with how many of its links are here.
+/// Composites found through this scan's links, each with its linked members and its manifest's
+/// artifact categories.
 fn composites(env: &Environment, candidates: &[Candidate]) -> Vec<Composite> {
-    let mut found: BTreeMap<(String, String), (u64, usize)> = BTreeMap::new();
-    for managed in candidates
-        .iter()
-        .filter_map(|candidate| candidate.managed_by.as_ref())
-    {
+    type Found = (u64, Vec<String>, Vec<String>, BTreeMap<&'static str, usize>);
+    let mut found: BTreeMap<(String, String), Found> = BTreeMap::new();
+    for candidate in candidates {
+        let Some(managed) = candidate.managed_by.as_ref() else {
+            continue;
+        };
         let entry = found
             .entry((managed.composite.to_owned(), managed.version.clone()))
-            .or_insert((managed.artifacts, 0));
-        entry.1 += 1;
+            .or_insert_with(|| (managed.artifacts, Vec::new(), Vec::new(), BTreeMap::new()));
+        match candidate.kind {
+            "skill" => entry.1.push(candidate.name.clone()),
+            "agent" => entry.2.push(candidate.name.clone()),
+            _ => {}
+        }
+        *entry.3.entry(candidate.provider).or_insert(0) += 1;
     }
     found
         .into_iter()
-        .map(|((name, version), (artifacts, members))| Composite {
-            origin: origin(&env.home, &env.home.join(GSD_BASE), &version),
-            name: format!("{name} {version}"),
-            version,
-            artifacts,
-            members,
+        .map(|((name, version), (artifacts, mut skills, mut agents, providers))| {
+            skills.sort();
+            skills.dedup();
+            agents.sort();
+            agents.dedup();
+            let members = providers.values().sum();
+            let provider = match (providers.contains_key("claude_code"), providers.contains_key("codex")) {
+                (true, true) => "shared",
+                (false, true) => "codex",
+                _ => "claude_code",
+            };
+            Composite {
+                key: format!("gsd_core@{version}"),
+                kind: "gsd_core",
+                provider,
+                origin: origin(&env.home, &env.home.join(GSD_BASE), &version),
+                categories: gsd_categories(&env.home.join(GSD_BASE).join(&version)),
+                methodology: METHODOLOGIES.contains(&name.as_str()),
+                name: format!("{name} {version}"),
+                description: "Spec-driven workflow: phases, plans, executor and verifier agents.".into(),
+                version,
+                artifacts,
+                members,
+                enabled: None,
+                commands: 0,
+                hooks: false,
+                mcp: false,
+                skills,
+                agents,
+                limitations: vec![
+                    "Installed by GSD Core as links; Arsenal lists its members and never copies them.",
+                    "Its hooks and engine are managed by the GSD Core install, not by Arsenal.",
+                    "Per-agent skills for GSD stages are project scoped (.planning/config.json) and are not set here.",
+                ],
+            }
         })
         .collect()
+}
+
+/// Artifact counts by category from a GSD Core manifest, read through the payload's own root.
+fn gsd_categories(root: &Path) -> Vec<(String, u64)> {
+    let Some(reader) = ApprovedRoots::new([root.to_path_buf()])
+        .ok()
+        .and_then(|roots| ConfigReader::new(roots, Bounds::PROPOSED).ok())
+    else {
+        return Vec::new();
+    };
+    let Ok(file) = reader.read_file(&root.join("manifest.json")) else {
+        return Vec::new();
+    };
+    let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(file.bytes()) else {
+        return Vec::new();
+    };
+    let mut counts: BTreeMap<String, u64> = BTreeMap::new();
+    for artifact in manifest["artifacts"].as_array().into_iter().flatten() {
+        if let Some(category) = artifact["category"].as_str()
+            && category.len() <= 64
+        {
+            *counts.entry(category.to_owned()).or_insert(0) += 1;
+        }
+    }
+    counts.into_iter().collect()
+}
+
+/// Claude Code plugin packages from the provider's install record (`plugins/installed_plugins.json`).
+/// Each install path must lie inside `plugins/cache`; its manifest and the names of its skills,
+/// agents and commands are read there, through the same bounded, link-refusing reader. Nothing in a
+/// package is copied or run, and whether it is enabled comes from `settings.json` as written.
+pub fn plugin_packages(env: &Environment) -> Vec<Composite> {
+    let plugins = env.claude_dir().join("plugins");
+    let cache = plugins.join("cache");
+    let Some(reader) = ApprovedRoots::new([plugins.clone()])
+        .ok()
+        .and_then(|roots| ConfigReader::new(roots, Bounds::PROPOSED).ok())
+    else {
+        return Vec::new();
+    };
+    let Ok(record) = reader.read_file(&plugins.join("installed_plugins.json")) else {
+        return Vec::new();
+    };
+    let Ok(record) = serde_json::from_slice::<serde_json::Value>(record.bytes()) else {
+        return Vec::new();
+    };
+    let enabled = enabled_plugins(env);
+    let Ok(cache_real) = std::fs::canonicalize(&cache) else {
+        return Vec::new();
+    };
+    let mut packages = Vec::new();
+    let Some(entries) = record["plugins"].as_object() else {
+        return Vec::new();
+    };
+    for (key, installs) in entries.iter().take(MAX_PLUGINS) {
+        let Some((plugin, _marketplace)) = key.split_once('@') else {
+            continue;
+        };
+        if !name_ok(plugin) || key.len() > 128 {
+            continue;
+        }
+        let Some(install) = installs.as_array().and_then(|list| list.first()) else {
+            continue;
+        };
+        let Some(path) = install["installPath"].as_str().map(PathBuf::from) else {
+            continue;
+        };
+        // The record is the provider's, but a path it names is still only read inside the cache.
+        let Ok(real) = std::fs::canonicalize(&path) else {
+            continue;
+        };
+        if !real.starts_with(&cache_real) || real == cache_real {
+            continue;
+        }
+        let manifest = reader
+            .read_file(&real.join(".claude-plugin/plugin.json"))
+            .ok()
+            .and_then(|file| serde_json::from_slice::<serde_json::Value>(file.bytes()).ok());
+        let text = |field: &str| {
+            manifest
+                .as_ref()
+                .and_then(|m| m[field].as_str())
+                .map(|value| value.chars().take(DESCRIPTION_CHARS).collect::<String>())
+        };
+        let version = install["version"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| text("version"))
+            .unwrap_or_default();
+        let names = |folder: &str, files: bool| -> Vec<String> {
+            let Ok(listing) = reader.list_directory(&real.join(folder)) else {
+                return Vec::new();
+            };
+            let mut names: Vec<String> = listing
+                .entries
+                .iter()
+                .filter_map(|entry| {
+                    let name = entry.name.to_str()?;
+                    let name = if files {
+                        name.strip_suffix(".md")?
+                    } else {
+                        if !matches!(entry.kind, EntryKind::Directory) {
+                            return None;
+                        }
+                        name
+                    };
+                    name_ok(name).then(|| name.to_owned())
+                })
+                .collect();
+            names.sort();
+            names.truncate(MAX_ENTRIES);
+            names
+        };
+        let exists = |relative: &str| reader.read_file(&real.join(relative)).is_ok();
+        let skills = names("skills", false);
+        let agents = names("agents", true);
+        let commands = names("commands", true).len();
+        let hooks = exists("hooks/hooks.json");
+        let mcp = exists(".mcp.json");
+        let mut limitations = vec![
+            "Plugin skills are not switched off by skillOverrides; a plugin is enabled or disabled as a whole.",
+            "Importing a plugin is not available: it brings code, hooks or servers.",
+        ];
+        if hooks {
+            limitations.push("It registers hooks, which run code at session events.");
+        }
+        if mcp {
+            limitations.push("It declares MCP servers.");
+        }
+        packages.push(Composite {
+            key: format!("claude_plugin:{key}"),
+            kind: "claude_plugin",
+            provider: "claude_code",
+            name: plugin.to_owned(),
+            description: text("description").unwrap_or_default(),
+            version,
+            artifacts: 0,
+            members: skills.len() + agents.len() + commands,
+            origin: origin(
+                &env.home,
+                real.parent().unwrap_or(&real),
+                real.file_name().and_then(|n| n.to_str()).unwrap_or(""),
+            ),
+            enabled: enabled.get(key.as_str()).copied(),
+            methodology: METHODOLOGIES.contains(&plugin),
+            skills,
+            agents,
+            commands,
+            hooks,
+            mcp,
+            categories: Vec::new(),
+            limitations,
+        });
+    }
+    packages
+}
+
+/// `enabledPlugins` from the account's Claude Code settings, as written there.
+fn enabled_plugins(env: &Environment) -> BTreeMap<String, bool> {
+    let claude = env.claude_dir();
+    let Some(reader) = ApprovedRoots::new([claude.clone()])
+        .ok()
+        .and_then(|roots| ConfigReader::new(roots, Bounds::PROPOSED).ok())
+    else {
+        return BTreeMap::new();
+    };
+    let Ok(file) = reader.read_file(&claude.join("settings.json")) else {
+        return BTreeMap::new();
+    };
+    let Ok(settings) = serde_json::from_slice::<serde_json::Value>(file.bytes()) else {
+        return BTreeMap::new();
+    };
+    settings["enabledPlugins"]
+        .as_object()
+        .map(|map| {
+            map.iter()
+                .filter_map(|(key, value)| value.as_bool().map(|on| (key.clone(), on)))
+                .take(MAX_PLUGINS)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Hooks, MCP servers and plugins from the inventory. They are listed so the owner can see them, and

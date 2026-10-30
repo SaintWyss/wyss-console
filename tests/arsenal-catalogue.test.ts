@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { Candidate, Summary } from '../src/lib/contracts/arsenal';
+import type {
+  Candidate,
+  Compatibility,
+  LibraryItem,
+} from '../src/lib/contracts/arsenal';
 import {
   IMPORTABLE_KINDS,
   filterDiscover,
@@ -10,10 +14,11 @@ import {
 
 const summary = (
   name: string,
-  provider: Summary['provider'],
+  provider: LibraryItem['provider'],
   source: string,
   kind: string = 'skill',
-): Summary => ({
+  status: Compatibility = 'supported',
+): LibraryItem => ({
   id: `${provider}-${name}`,
   provider,
   source,
@@ -25,6 +30,7 @@ const summary = (
   revisions: 1,
   tree_hash: 'a'.repeat(64),
   updated_at: 1,
+  compatibility: { status, reason: 'from the desktop' },
 });
 
 const candidate = (overrides: Partial<Candidate>): Candidate => ({
@@ -87,16 +93,24 @@ describe('Arsenal library filters', () => {
     expect(library).toHaveLength(3);
   });
 
-  it('says a format is unverified for a launched session, and unsupported for a kind the library does not hold', () => {
-    expect(libraryCompatibility(library[0])).toBe('unverified');
+  it('shows the compatibility the desktop judged, and filters by it', () => {
+    expect(libraryCompatibility(library[0])).toBe('supported');
+    const missing = summary(
+      'x',
+      'codex',
+      'codex_user_rules',
+      'rule',
+      'missing_dependency',
+    );
+    expect(libraryCompatibility(missing)).toBe('missing_dependency');
     expect(
-      libraryCompatibility(summary('x', 'codex', 'codex_user_rules', 'rule')),
-    ).toBe('unverified');
+      filterLibrary([...library, missing], {
+        ...none,
+        compatibility: 'missing_dependency',
+      }).map((item) => item.name),
+    ).toEqual(['x']);
     expect(
-      libraryCompatibility(summary('x', 'codex', 'codex_user_rules', 'hook')),
-    ).toBe('unsupported');
-    expect(
-      filterLibrary(library, { ...none, compatibility: 'supported' }),
+      filterLibrary(library, { ...none, compatibility: 'unverified' }),
     ).toEqual([]);
   });
 

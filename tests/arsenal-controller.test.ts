@@ -1,16 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   ArsenalShapeError,
+  parseBinding,
   parseDiscover,
   parseImportFailure,
   parseSummaries,
+  parseTerminalPlan,
   type Candidate,
   type Detail,
   type DiscoverReply,
   type Preset,
   type Preview,
   type Selection,
-  type Summary,
+  type LibraryItem,
 } from '../src/lib/contracts/arsenal';
 import {
   ArsenalCallError,
@@ -21,7 +23,7 @@ import {
   type ArsenalState,
 } from '../src/lib/features/arsenal/controller';
 
-const design: Summary = {
+const design: LibraryItem = {
   id: 'cap-design',
   provider: 'claude_code',
   source: 'claude_user_skills',
@@ -33,10 +35,13 @@ const design: Summary = {
   revisions: 2,
   tree_hash: 'c'.repeat(64),
   updated_at: 1,
+  compatibility: { status: 'supported', reason: 'own format' },
 };
 
 const detail = (revision: number): Detail => ({
   summary: { ...design, revision: 2 },
+  compatibility: { status: 'supported', reason: 'own format' },
+  dependencies: [],
   revision,
   revisions: [
     {
@@ -101,6 +106,7 @@ const selection: Selection = {
   name: 'Frontend',
   provider: 'codex',
   items: [{ capability: 'cap-design', revision: null }],
+  composites: [],
   created_at: 1,
   updated_at: 1,
 };
@@ -135,6 +141,14 @@ function fakeClient(overrides: Partial<ArsenalClient> = {}): ArsenalClient {
     selections: vi.fn(async () => [selection]),
     saveSelection: vi.fn(async () => selection),
     deleteSelection: vi.fn(async () => undefined),
+    bindings: vi.fn(async () => []),
+    terminalPlan: vi.fn(async () => {
+      throw new Error('not in this test');
+    }),
+    bindTerminal: vi.fn(async () => {
+      throw new Error('not in this test');
+    }),
+    projectSelection: vi.fn(async () => null),
     candidateDetail: vi.fn(async (id: string) => ({
       id,
       files: [],
@@ -154,12 +168,13 @@ function fakeClient(overrides: Partial<ArsenalClient> = {}): ArsenalClient {
           revision: 2,
           pinned: false,
           tree_hash: 'c'.repeat(64),
-          compatibility: 'unsupported',
-          reason: 'Built for claude_code; this selection is for codex.',
+          compatibility: 'requires_qualification',
+          reason: 'A Claude Code skill; Codex needs a qualified way in.',
+          dependencies: [],
         },
       ],
       conflicts: [],
-      dependencies: 'not_analysed',
+      dependencies: 'analysed',
     })),
     ...overrides,
   } as ArsenalClient;
@@ -294,6 +309,7 @@ describe('Arsenal controller', () => {
       name: 'Frontend',
       provider: 'codex',
       items: [{ capability: 'cap-design', revision: null }],
+      composites: [],
     });
     expect(saved).toBe(true);
     expect(last().notice?.text).toBe(
@@ -311,6 +327,7 @@ describe('Arsenal controller', () => {
       name: 'Frontend',
       provider: 'codex',
       items: [],
+      composites: [],
     });
     expect(last().preview).toBeNull();
     expect(last().notice?.text).toBe(
@@ -339,8 +356,10 @@ describe('Arsenal controller', () => {
     const { controller, last } = controllerWith(fakeClient());
     await controller.loadPreview('sel-1');
     expect(last().preview?.status).toBe('not_applied');
-    expect(last().preview?.dependencies).toBe('not_analysed');
-    expect(last().preview?.items[0].compatibility).toBe('unsupported');
+    expect(last().preview?.dependencies).toBe('analysed');
+    expect(last().preview?.items[0].compatibility).toBe(
+      'requires_qualification',
+    );
   });
 });
 
@@ -389,19 +408,103 @@ describe('Arsenal contracts', () => {
       ],
       composites: [
         {
+          key: 'gsd_core@1.15.0',
+          kind: 'gsd_core',
+          provider: 'claude_code',
           name: 'GSD Core 1.15.0',
           version: '1.15.0',
+          description: '',
           artifacts: 1950,
           members: 1,
           origin: '~/.local/share/wyss/gsd-core/1.15.0',
+          enabled: null,
+          methodology: true,
+          skills: ['gsd-help'],
+          agents: [],
+          commands: 0,
+          hooks: false,
+          mcp: false,
+          categories: [['skill', 216]],
+          limitations: ['Installed by GSD Core as links.'],
         },
       ],
       truncated: false,
     });
     expect(reply.project).toBe('app');
+    expect(reply.composites[0].categories).toEqual([['skill', 216]]);
     expect(reply.candidates[0].status).toBe('read_only');
     expect(reply.candidates[1].managed_by?.composite).toBe('GSD Core');
     expect(reply.composites[0].members).toBe(1);
+  });
+
+  it('reads a terminal plan and a binding, and refuses a plan that claims more than it can', () => {
+    const plan = {
+      selection: 'sel-1',
+      selection_name: 'Frontend',
+      provider: 'claude_code',
+      provider_version: '2.1.314 (Claude Code)',
+      project: 'app',
+      status: 'ready',
+      can_apply: false,
+      enforcement: {
+        state: 'unqualified',
+        reason: 'Skill exclusion is not qualified.',
+        evidence: null,
+      },
+      items: [
+        {
+          capability: 'cap-design',
+          name: 'design',
+          kind: 'skill',
+          provider: 'claude_code',
+          revision: 2,
+          pinned: true,
+          tree_hash: 'c'.repeat(64),
+          state: 'prepared',
+          reason: 'The installed copy is exactly revision 2.',
+          compatibility: { status: 'supported', reason: 'own format' },
+          dependencies: [{ kind: 'tool', name: 'Read', state: 'declared' }],
+        },
+      ],
+      kept: ['design'],
+      excluded: ['tokens'],
+      untouched: ['Hooks, permissions and MCP servers: as your settings say.'],
+      composites: [],
+      conflicts: [],
+      warnings: [],
+      overlay: '{"skillOverrides":{"tokens":"off"}}',
+      config_hash: 'e'.repeat(64),
+    };
+    const parsed = parseTerminalPlan(plan);
+    expect(parsed.enforcement.state).toBe('unqualified');
+    expect(parsed.items[0].dependencies[0].state).toBe('declared');
+    expect(() =>
+      parseTerminalPlan({ ...plan, enforcement: { state: 'verified' } }),
+    ).toThrow(ArsenalShapeError);
+    const binding = parseBinding({
+      session_id: 'a'.repeat(32),
+      selection_id: 'sel-1',
+      selection_name: 'Frontend',
+      provider: 'claude_code',
+      provider_version: null,
+      project: '/home/u/app',
+      config_hash: 'e'.repeat(64),
+      state: 'not_applied',
+      reason: 'Skill exclusion is not qualified.',
+      plan,
+      created_at: 1,
+      verification: 'not_observed',
+    });
+    expect(binding.plan?.excluded).toEqual(['tokens']);
+    // A binding never says a configuration was verified.
+    expect(() =>
+      parseBinding({
+        ...binding,
+        plan,
+        state: 'applied',
+        verification: 'verified',
+      }),
+    ).toThrow(ArsenalShapeError);
   });
 
   it('keeps the failure code and the blocking reason of a refused call', () => {

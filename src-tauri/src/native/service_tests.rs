@@ -111,7 +111,7 @@ impl World {
         agent: AgentId,
         profile: Option<&str>,
     ) -> Result<super::service::StartReply, super::service::NativeError> {
-        let preview = self.service.preview(agent, profile)?;
+        let preview = self.service.preview(agent, profile, None)?;
         let expected_cli_version = match agent {
             AgentId::ClaudeCode => Some("2.1.309 (Claude Code)".to_owned()),
             AgentId::Codex => Some("codex-cli 0.159.0".to_owned()),
@@ -121,6 +121,7 @@ impl World {
         self.service.start(
             &self.terminal,
             StartRequest {
+                arsenal: None,
                 agent_id: agent,
                 project: self.home.to_string_lossy().into_owned(),
                 profile_id: profile.map(str::to_owned),
@@ -243,6 +244,7 @@ fn opencode_is_version_pinned_and_receives_reviewed_handoff_as_an_explicit_promp
     assert_eq!(entry.version.as_deref(), Some("1.19.4"));
 
     let request = |expected_cli_version| StartRequest {
+        arsenal: None,
         agent_id: AgentId::Opencode,
         project: world.home.to_string_lossy().into_owned(),
         profile_id: None,
@@ -391,6 +393,7 @@ fn direct_opencode_handoff_rechecks_the_resolved_binary_version() {
     let result = direct_service.start(
         &direct_terminal,
         StartRequest {
+            arsenal: None,
             agent_id: AgentId::Opencode,
             project: world.home.to_string_lossy().into_owned(),
             profile_id: None,
@@ -656,6 +659,7 @@ fn a_failed_clear_in_one_project_does_not_block_legacy_launch_in_another() {
         .start(
             &world.terminal,
             StartRequest {
+                arsenal: None,
                 agent_id: AgentId::ClaudeCode,
                 project,
                 profile_id: None,
@@ -817,6 +821,7 @@ fn a_corrupt_m9_sidecar_blocks_only_m9_and_keeps_legacy_state_writable() {
     let blocked = reopened.service.start(
         &reopened.terminal,
         StartRequest {
+            arsenal: None,
             agent_id: AgentId::Opencode,
             project: reopened.home.to_string_lossy().into_owned(),
             profile_id: None,
@@ -1277,6 +1282,7 @@ fn hermes_native_launches_as_configured_without_probe_or_automatic_handoff() {
         .start(
             &world.terminal,
             StartRequest {
+                arsenal: None,
                 agent_id: AgentId::Hermes,
                 project: world.home.to_string_lossy().into_owned(),
                 profile_id: None,
@@ -1321,7 +1327,7 @@ fn stopping_ends_the_process_and_restarting_makes_a_new_session_of_the_same_kind
 
     let preview = world
         .service
-        .preview(AgentId::ClaudeCode, Some("template-review"))
+        .preview(AgentId::ClaudeCode, Some("template-review"), None)
         .unwrap();
     let second = world
         .service
@@ -1376,7 +1382,7 @@ fn a_stale_restart_preview_leaves_the_existing_native_session_running() {
     world.output_until(&first.terminal.terminal_id, "SESSION=");
     let preview = world
         .service
-        .preview(AgentId::ClaudeCode, Some(&profile_id))
+        .preview(AgentId::ClaudeCode, Some(&profile_id), None)
         .unwrap();
     let mut changed = body;
     changed.model = Some("opus".to_owned());
@@ -1446,7 +1452,7 @@ fn a_shell_version_mismatch_during_restart_keeps_the_previous_session_running() 
     world.output_until(&first.terminal.terminal_id, "SESSION=");
     let preview = world
         .service
-        .preview(AgentId::ClaudeCode, Some(&profile_id))
+        .preview(AgentId::ClaudeCode, Some(&profile_id), None)
         .unwrap();
 
     let changed_bin = world.base.parent().unwrap().join("changed-bin");
@@ -1505,6 +1511,7 @@ fn only_a_folder_the_user_chose_or_a_known_project_can_be_a_project() {
     let elsewhere = world.home.parent().unwrap().join("elsewhere");
     fs::create_dir_all(&elsewhere).unwrap();
     let request = |path: &Path| StartRequest {
+        arsenal: None,
         agent_id: AgentId::Codex,
         project: path.to_string_lossy().into_owned(),
         profile_id: None,
@@ -1563,12 +1570,15 @@ fn a_profile_the_agent_cannot_apply_refuses_to_start_and_starts_nothing() {
     assert_eq!(refused.code, "profile_not_applicable");
     assert!(refused.reasons[0].contains("Codex hooks"));
     assert!(world.service.sessions(&world.terminal, false).is_empty());
-    let preview = world.service.preview(AgentId::Codex, Some(&id)).unwrap();
+    let preview = world
+        .service
+        .preview(AgentId::Codex, Some(&id), None)
+        .unwrap();
     assert!(!preview.can_start);
     // The same profile is fine for the agent that can do it, and says what it costs.
     let preview = world
         .service
-        .preview(AgentId::ClaudeCode, Some(&id))
+        .preview(AgentId::ClaudeCode, Some(&id), None)
         .unwrap();
     assert!(preview.can_start && preview.with_cost[0].contains("this session only"));
     // A profile for another agent is not applicable either.
@@ -1602,7 +1612,7 @@ fn a_profile_change_after_preview_refuses_the_stale_start_without_creating_a_ses
     let id = world.service.profiles().create(body.clone()).unwrap();
     let preview = world
         .service
-        .preview(AgentId::ClaudeCode, Some(&id))
+        .preview(AgentId::ClaudeCode, Some(&id), None)
         .unwrap();
     body.model = Some("opus".to_owned());
     world.service.profiles().save(&id, body).unwrap();
@@ -1612,6 +1622,7 @@ fn a_profile_change_after_preview_refuses_the_stale_start_without_creating_a_ses
         .start(
             &world.terminal,
             StartRequest {
+                arsenal: None,
                 agent_id: AgentId::ClaudeCode,
                 project: world.home.to_string_lossy().into_owned(),
                 profile_id: Some(id),
@@ -1841,6 +1852,7 @@ fn real_agents_start_in_native_terminals_and_stop() {
             .start(
                 &terminal,
                 StartRequest {
+                    arsenal: None,
                     agent_id: agent,
                     project: project.to_string_lossy().into_owned(),
                     profile_id: None,
@@ -1924,6 +1936,7 @@ fn a_reviewed_brief_is_the_agents_first_message_as_one_word_and_a_bad_one_is_ref
         world.service.start(
             &world.terminal,
             StartRequest {
+                arsenal: None,
                 agent_id: AgentId::ClaudeCode,
                 project: world.home.to_string_lossy().into_owned(),
                 profile_id: None,
@@ -1952,4 +1965,111 @@ fn a_reviewed_brief_is_the_agents_first_message_as_one_word_and_a_bad_one_is_ref
             "{bad:.12}"
         );
     }
+}
+
+fn arsenal_launch(off: &[&str]) -> super::arsenal::ArsenalLaunch {
+    super::arsenal::ArsenalLaunch {
+        selection: "6f1d2b8e-0000-4000-8000-00000000a001".to_owned(),
+        selection_name: "Frontend".to_owned(),
+        config_hash: "c".repeat(64),
+        skills_off: off.iter().map(|s| (*s).to_owned()).collect(),
+    }
+}
+
+fn arsenal_start(
+    world: &World,
+    launch: Option<super::arsenal::ArsenalLaunch>,
+    plan_token: Option<String>,
+    version: &str,
+) -> Result<super::service::StartReply, super::service::NativeError> {
+    world.service.start(
+        &world.terminal,
+        StartRequest {
+            agent_id: AgentId::ClaudeCode,
+            project: world.home.to_string_lossy().into_owned(),
+            profile_id: None,
+            size: SIZE,
+            brief: None,
+            plan_token,
+            expected_cli_version: Some(version.to_owned()),
+            arsenal: launch,
+        },
+    )
+}
+
+#[test]
+fn an_arsenal_exclusion_is_refused_on_a_build_without_its_own_evidence() {
+    let world = World::new();
+    let launch = arsenal_launch(&["design"]);
+    let preview = world
+        .service
+        .preview(AgentId::ClaudeCode, None, Some(&launch))
+        .unwrap();
+    // 2.1.309 has profile syntax evidence, which does not qualify skill exclusion.
+    let error = arsenal_start(
+        &world,
+        Some(launch.clone()),
+        preview.plan_token.clone(),
+        "2.1.309 (Claude Code)",
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "arsenal_unqualified");
+    // Without the preview's token the start is refused before any version is considered.
+    let error = arsenal_start(&world, Some(launch), None, "2.1.309 (Claude Code)").unwrap_err();
+    assert_eq!(error.code, "profile_preview_required");
+    assert!(world.service.sessions(&world.terminal, false).is_empty());
+}
+
+#[test]
+fn a_qualified_build_launches_with_only_the_exclusion_overlay_and_keeps_it_for_restart() {
+    let world = World::new();
+    let version = super::capabilities::ARSENAL_TEST_VERSION;
+    super::service_tests::script(
+        &world.bin.join("claude"),
+        &format!(
+            "[ \"$1\" = \"--version\" ] && {{ echo '{version}'; exit 0; }}\n\
+             echo \"FAKE-CLAUDE argc=$#\"; prev=''; for a in \"$@\"; do\n\
+             [ \"$prev\" = \"--settings\" ] && {{ echo OVERLAY-BEGIN; tr -d '\\n ' < \"$a\"; echo; echo OVERLAY-END; }}\n\
+             prev=\"$a\"; done\n\
+             exec cat"
+        ),
+    );
+    let launch = arsenal_launch(&["design", "gsd-help"]);
+    let preview = world
+        .service
+        .preview(AgentId::ClaudeCode, None, Some(&launch))
+        .unwrap();
+    assert!(preview.can_start);
+    assert!(preview.applied[0].contains("2 installed skill(s) switched off"));
+    // The token binds the exclusion: another exclusion does not start with it.
+    let other = arsenal_launch(&["design"]);
+    assert_eq!(
+        arsenal_start(&world, Some(other), preview.plan_token.clone(), version)
+            .unwrap_err()
+            .code,
+        "profile_preview_stale"
+    );
+    let reply = arsenal_start(&world, Some(launch.clone()), preview.plan_token, version).unwrap();
+    let out = world.output_until(&reply.terminal.terminal_id, "OVERLAY-END");
+    assert!(
+        out.contains(r#"{"skillOverrides":{"design":"off","gsd-help":"off"}}"#),
+        "{out:?}"
+    );
+    assert_eq!(reply.session.session.arsenal.as_ref(), Some(&launch));
+    let id = reply.session.session.id.clone();
+    let restart_preview = world
+        .service
+        .preview(AgentId::ClaudeCode, None, Some(&launch))
+        .unwrap();
+    let restarted = world
+        .service
+        .restart(
+            &world.terminal,
+            &id,
+            SIZE,
+            restart_preview.plan_token,
+            Some(version.to_owned()),
+        )
+        .unwrap();
+    assert_eq!(restarted.session.session.arsenal.as_ref(), Some(&launch));
 }

@@ -3,6 +3,7 @@
 //! holds no thread: state is refreshed from the terminal when the overview asks, and process
 //! resources are sampled only then (nothing runs while the view is hidden).
 use super::{
+    arsenal::{self, ArsenalLaunch},
     capabilities,
     catalogue::{self, AGENTS, AgentId},
     extended_registry::{ExtendedRegistry, RecoveryRead},
@@ -163,6 +164,10 @@ pub struct StartRequest {
     /// the user's shell before executing the shell-resolved binary.
     #[serde(default)]
     pub expected_cli_version: Option<String>,
+    /// Installed skills an Arsenal selection switches off for this session. Bound to the plan
+    /// token like a profile, and refused for any build without its own exclusion evidence.
+    #[serde(default)]
+    pub arsenal: Option<ArsenalLaunch>,
 }
 
 /// A session as the window sees it: the registry's record plus what is observed now.
@@ -662,7 +667,27 @@ impl NativeService {
 
     // ---- profiles applied -----------------------------------------------------------------
 
+    /// The plan of a profile and an Arsenal exclusion together, the profile's reference, the
+    /// token that binds both to a preview, and whether the profile alone changes the launch.
     fn plan_for(
+        &self,
+        agent: AgentId,
+        profile_id: Option<&str>,
+        launch: Option<&ArsenalLaunch>,
+    ) -> Result<(LaunchPlan, Option<ProfileRef>, Option<String>, bool), NativeError> {
+        let (mut plan, profile_ref, token) = self.profile_plan_for(agent, profile_id)?;
+        let profile_effective = !plan.applied.is_empty() || !plan.with_cost.is_empty();
+        let Some(launch) = launch else {
+            return Ok((plan, profile_ref, token, profile_effective));
+        };
+        arsenal::apply(&mut plan, agent, launch);
+        let material = serde_json::to_vec(&(agent, profile_id, &token, launch, &plan))
+            .map_err(|_| NativeError::new("internal"))?;
+        let token = format!("{:x}", Sha256::digest(material));
+        Ok((plan, profile_ref, Some(token), profile_effective))
+    }
+
+    fn profile_plan_for(
         &self,
         agent: AgentId,
         profile_id: Option<&str>,
@@ -706,8 +731,9 @@ impl NativeService {
         &self,
         agent: AgentId,
         profile_id: Option<&str>,
+        launch: Option<&ArsenalLaunch>,
     ) -> Result<PreviewView, NativeError> {
-        let (plan, _, plan_token) = self.plan_for(agent, profile_id)?;
+        let (plan, _, plan_token, _) = self.plan_for(agent, profile_id, launch)?;
         Ok(PreviewView {
             can_start: plan.not_applicable.is_empty(),
             applied: plan.applied,
@@ -766,9 +792,12 @@ impl NativeService {
             .find(|a| a.agent_id == request.agent_id)
             .filter(|a| a.installed)
             .ok_or_else(|| NativeError::new("agent_not_installed"))?;
-        let (plan, profile_ref, plan_token) =
-            self.plan_for(request.agent_id, request.profile_id.as_deref())?;
-        if request.profile_id.is_some() {
+        let (plan, profile_ref, plan_token, profile_effective) = self.plan_for(
+            request.agent_id,
+            request.profile_id.as_deref(),
+            request.arsenal.as_ref(),
+        )?;
+        if request.profile_id.is_some() || request.arsenal.is_some() {
             match (request.plan_token.as_deref(), plan_token.as_deref()) {
                 (Some(expected), Some(actual)) if expected == actual => {}
                 (None, _) => return Err(NativeError::new("profile_preview_required")),
@@ -786,16 +815,25 @@ impl NativeService {
         let shell = self
             .user_shell()
             .map_err(|_| NativeError::new("spawn_failed"))?;
-        let has_overrides = !plan.applied.is_empty() || !plan.with_cost.is_empty();
+        let arsenal_bound = request.arsenal.is_some();
         let version_bound_handoff =
             request.agent_id == AgentId::Opencode && request.brief.is_some();
-        let version_bound = has_overrides || version_bound_handoff;
+        let version_bound = profile_effective || arsenal_bound || version_bound_handoff;
         if version_bound {
             let Some(version) = request.expected_cli_version.as_deref() else {
                 return Err(NativeError::new("provider_version_unverified"));
             };
-            if !capabilities::permits_profile_overrides(request.agent_id, Some(version)) {
+            if (profile_effective || version_bound_handoff)
+                && !capabilities::permits_profile_overrides(request.agent_id, Some(version))
+            {
                 return Err(NativeError::new("provider_version_unverified"));
+            }
+            // The exclusion has its own evidence: a build qualified for profile syntax is not
+            // thereby qualified to hide skills, and the other way round.
+            if arsenal_bound
+                && !capabilities::permits_arsenal_exclusion(request.agent_id, Some(version))
+            {
+                return Err(NativeError::new("arsenal_unqualified"));
             }
             if recipe::family(&shell).is_none() {
                 let installed_version = agent.path.as_deref().and_then(|path| {
@@ -873,6 +911,7 @@ impl NativeService {
             error: None,
             restart_of: restart.map(|(of, _)| of.to_owned()),
             restarts: restart.map_or(0, |(_, n)| n),
+            arsenal: request.arsenal.clone(),
         };
         let mut env = vec![("WYSS_NATIVE_SESSION_ID".to_owned(), id.clone())];
         if version_guard {
@@ -1151,6 +1190,7 @@ impl NativeService {
                 brief: None,
                 plan_token,
                 expected_cli_version,
+                arsenal: old.arsenal.clone(),
             },
             Some((id, old.restarts + 1)),
         )?;

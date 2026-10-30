@@ -3,8 +3,10 @@
 //! and starts nothing. Import, presets and selections never change a provider's files or a session.
 //! The window reaches it through `commands`.
 
+pub mod analysis;
 pub mod commands;
 pub mod store;
+pub mod terminal;
 
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
@@ -39,6 +41,11 @@ impl Arsenal {
 
     pub(super) fn candidate_detail(&self, id: &str) -> Option<commands::CandidateDetail> {
         self.details.lock().ok()?.get(id).cloned()
+    }
+
+    /// The shared store for a Native start, which rebuilds its exclusion off the window's thread.
+    pub(crate) fn launch_handle(&self) -> Option<Arc<Mutex<Store>>> {
+        self.store.clone().ok()
     }
 
     /// The shared store, for work that runs off the window's thread and locks it there.

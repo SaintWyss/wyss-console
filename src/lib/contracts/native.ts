@@ -144,10 +144,18 @@ export interface NativeSession {
   error: string | null;
   restart_of: string | null;
   restarts: number;
+  /** The Arsenal exclusion the host launched it with, as the host recorded it. */
+  arsenal?: SessionArsenal | null;
   plane: 'native';
   terminal_id: string | null;
   pid: number | null;
   usage: Usage | null;
+}
+export interface SessionArsenal {
+  selection: string;
+  selection_name: string;
+  config_hash: string;
+  skills_off: number;
 }
 export interface StartReply {
   session: NativeSession;
@@ -368,6 +376,16 @@ export function parseSession(value: unknown): NativeSession {
     error: orNull(o.error, (v) => str(v, 'error')),
     restart_of: orNull(o.restart_of, (v) => str(v, 'restart_of')),
     restarts: num(o.restarts, 'restarts'),
+    // Absent on sessions started without an exclusion, and on hosts that predate it.
+    arsenal: orNull(o.arsenal ?? null, (v) => {
+      const a = obj(v, 'arsenal');
+      return {
+        selection: str(a.selection, 'selection'),
+        selection_name: str(a.selection_name, 'selection_name'),
+        config_hash: str(a.config_hash, 'config_hash'),
+        skills_off: arr(a.skills_off, 'skills_off').length,
+      };
+    }),
     plane: 'native',
     terminal_id: orNull(o.terminal_id, (v) => str(v, 'terminal_id')),
     pid: orNull(o.pid, (v) => num(v, 'pid')),

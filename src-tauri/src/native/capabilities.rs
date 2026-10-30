@@ -135,9 +135,84 @@ pub fn allows_start_with_profile(
     !has_effective_overrides || permits_profile_overrides(agent, version)
 }
 
+/// Evidence that one exact build honours an Arsenal skill exclusion: a `--settings` overlay that
+/// holds only `skillOverrides` with `off` values, launched in one Native child. Recorded only from
+/// a focused qualification of that build; a passing older build does not qualify a newer one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ArsenalEvidence {
+    pub qualified_version: &'static str,
+    pub checked_on: &'static str,
+    pub operation: &'static str,
+    pub source: &'static str,
+    pub limitation: &'static str,
+}
+
+/// Claude Code builds whose skill exclusion passed a focused qualification. Empty: the A0 runs on
+/// 2.1.312 were judged NO-GO by the independent review, and the installed build has not been
+/// qualified since. Until a record is added here, Arsenal previews and records, and never applies.
+const ARSENAL_CLAUDE: &[ArsenalEvidence] = &[];
+
+/// A build that exists only in tests, so the enabled path is exercised without qualifying a real one.
+#[cfg(test)]
+pub const ARSENAL_TEST_VERSION: &str = "0.0.0-arsenal-test (Claude Code)";
+#[cfg(test)]
+const ARSENAL_TEST: ArsenalEvidence = ArsenalEvidence {
+    qualified_version: ARSENAL_TEST_VERSION,
+    checked_on: "test",
+    operation: "skillOverrides=off through --settings",
+    source: "unit test fixture",
+    limitation: "not a real build",
+};
+
+/// The exclusion evidence for this exact build, if any. Codex, OpenCode and Hermes have none: the
+/// Codex `[[skills.config]]` session layer is not proven on any installed build.
+pub fn arsenal_exclusion(agent: AgentId, version: Option<&str>) -> Option<ArsenalEvidence> {
+    let version = version?;
+    if agent != AgentId::ClaudeCode {
+        return None;
+    }
+    #[cfg(test)]
+    if version == ARSENAL_TEST_VERSION {
+        return Some(ARSENAL_TEST);
+    }
+    ARSENAL_CLAUDE
+        .iter()
+        .find(|record| record.qualified_version == version)
+        .copied()
+}
+
+pub fn permits_arsenal_exclusion(agent: AgentId, version: Option<&str>) -> bool {
+    arsenal_exclusion(agent, version).is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arsenal_exclusion_needs_its_own_record_for_the_exact_claude_build() {
+        // Profile syntax evidence does not qualify skill exclusion, and no real build is qualified.
+        for version in [
+            None,
+            Some("2.1.309 (Claude Code)"),
+            Some("2.1.312 (Claude Code)"),
+            Some("2.1.314 (Claude Code)"),
+        ] {
+            assert!(!permits_arsenal_exclusion(AgentId::ClaudeCode, version));
+        }
+        assert!(permits_arsenal_exclusion(
+            AgentId::ClaudeCode,
+            Some(ARSENAL_TEST_VERSION)
+        ));
+        assert!(!permits_arsenal_exclusion(
+            AgentId::Codex,
+            Some(ARSENAL_TEST_VERSION)
+        ));
+        assert!(!permits_arsenal_exclusion(
+            AgentId::Codex,
+            Some("codex-cli 0.159.0")
+        ));
+    }
 
     #[test]
     fn only_the_exact_observed_builds_receive_their_own_syntax_evidence() {

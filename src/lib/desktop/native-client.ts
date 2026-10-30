@@ -51,14 +51,20 @@ export async function readLauncher(): Promise<Launcher> {
 export async function readReadiness(): Promise<Readiness> {
   return checked(await call('native_readiness'), parseReadiness);
 }
+/** What the window says about an Arsenal selection: which, the plan it saw, and the project. */
+export interface ArsenalStart {
+  selection: string;
+  config_hash: string;
+  project: string;
+}
 export async function previewProfile(
   agent_id: AgentId,
   profile_id: string | null,
+  arsenal: ArsenalStart | null = null,
 ): Promise<Preview> {
-  return checked(
-    await call('native_preview', { request: { agent_id, profile_id } }),
-    parsePreview,
-  );
+  const request: Record<string, unknown> = { agent_id, profile_id };
+  if (arsenal) request.arsenal = arsenal;
+  return checked(await call('native_preview', { request }), parsePreview);
 }
 /** Starts an agent in a terminal. The terminal it runs in is adopted for reading. */
 export async function startNative(
@@ -68,19 +74,20 @@ export async function startNative(
   size: TerminalSize,
   brief: string | null = null,
   preview: Pick<Preview, 'plan_token' | 'provider_version'> | null = null,
+  arsenal: ArsenalStart | null = null,
 ): Promise<StartReply> {
+  const request: Record<string, unknown> = {
+    agent_id,
+    project,
+    profile_id,
+    size,
+    brief,
+    plan_token: preview?.plan_token ?? null,
+    expected_cli_version: preview?.provider_version ?? null,
+  };
+  if (arsenal) request.arsenal = arsenal;
   const reply = checked(
-    await call('native_start', {
-      request: {
-        agent_id,
-        project,
-        profile_id,
-        size,
-        brief,
-        plan_token: preview?.plan_token ?? null,
-        expected_cli_version: preview?.provider_version ?? null,
-      },
-    }),
+    await call('native_start', { request }),
     parseStartReply,
   );
   adoptTerminal(reply.terminal);

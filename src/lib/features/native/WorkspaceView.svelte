@@ -1,6 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import HandoffPanel from './HandoffPanel.svelte';
+  import ArsenalTerminalPanel from '../arsenal/ArsenalTerminalPanel.svelte';
+  import { sessionArsenalLine, type ArsenalChoice } from '../arsenal/terminal';
+  import { arsenalClient } from '../../desktop/arsenal-client';
+  import type { Binding } from '../../contracts/arsenal';
   import { hostIsRemote } from '../../desktop/terminal-client';
   import type { AgentId, NativeSession, Preview } from '../../contracts/native';
   import type { ConfigItem } from '../../contracts/configuration';
@@ -48,6 +52,17 @@
   let previewFailedFor = $state<string | null>(null);
   let previewRetry = $state(0);
   let now = $state(Date.now());
+  let arsenalChoice = $state<ArsenalChoice | null>(null);
+  let arsenalNote = $state<string | null>(null);
+  let bindings = $state<Binding[]>([]);
+  async function readBindings() {
+    try {
+      bindings = await arsenalClient.bindings();
+    } catch {
+      // The library may be unavailable; sessions are still listed without their Arsenal line.
+      bindings = [];
+    }
+  }
   let handingOff = $state<string | null>(null);
   const handoffSession = $derived(
     native.sessions.find((s) => s.id === handingOff) ?? null,
@@ -83,7 +98,9 @@
       !!chosen?.installed &&
       !native.starting &&
       !(native.m9Blocked && isM9Agent(agent)) &&
-      (profile === null || (previewCurrent && preview?.can_start === true)),
+      (profile === null || (previewCurrent && preview?.can_start === true)) &&
+      (arsenalChoice === null ||
+        (!arsenalChoice.pending && arsenalChoice.ready)),
   );
 
   // The first time the launcher is known: an installed agent and the home folder.
@@ -168,6 +185,7 @@
   let held = $state(false);
   onMount(() => {
     controller.start0();
+    void readBindings();
     void hostIsRemote().then((remote) => (held = remote));
   });
 
@@ -181,6 +199,35 @@
   }
   async function launch() {
     if (!canStart || !agent || !project) return;
+    const choice = arsenalChoice;
+    if (choice && !choice.pending) {
+      // Applied: the preview that binds the exclusion. Recorded only: the profile's own preview.
+      const reply = await controller.startWithArsenal(
+        agent,
+        project,
+        profile,
+        choice.apply ? choice.preview : preview,
+        choice.apply ? choice.start : null,
+      );
+      if (!reply) return;
+      try {
+        const binding = await arsenalClient.bindTerminal(
+          reply.session.id,
+          choice.start.selection,
+          choice.start.config_hash,
+        );
+        arsenalNote =
+          binding.state === 'applied'
+            ? `Started with ${binding.selection_name} applied.`
+            : `Started without applying ${binding.selection_name}; the selection is recorded.`;
+      } catch {
+        arsenalNote =
+          'The terminal started, but Arsenal could not record its selection.';
+      }
+      void readBindings();
+      onconsole();
+      return;
+    }
     if (await controller.startAgent(agent, project, profile, null, preview))
       onconsole();
   }
@@ -422,6 +469,21 @@
           {/if}
         </div>
 
+        <ArsenalTerminalPanel
+          {agent}
+          {project}
+          {profile}
+          profileKey={previewContext}
+          previewer={(start) =>
+            agent
+              ? controller.preview(agent, profile, start)
+              : Promise.reject(new Error('agent'))}
+          onchange={(choice) => (arsenalChoice = choice)}
+        />
+        {#if arsenalNote}
+          <p class="event-meta" role="status">{arsenalNote}</p>
+        {/if}
+
         {#if launcher.shell}
           <p class="event-meta">
             {#if launcher.shell.through_shell}
@@ -532,6 +594,8 @@
                         · started directly{/if}
                       {#if session.restarts > 0}
                         · restart {session.restarts}{/if}
+                      {#if sessionArsenalLine(session, bindings)}
+                        · {sessionArsenalLine(session, bindings)}{/if}
                       {#if session.state === 'running' && session.pid}
                         · process {session.pid}{/if}
                       {#if session.usage}

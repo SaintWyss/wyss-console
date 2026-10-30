@@ -5,11 +5,14 @@
 //! dialog returned. The sessions themselves live in the host (F9): these commands only
 //! validate the request and pass it on, and the answer comes back as the host made it.
 use super::{
+    arsenal::ArsenalLaunch,
     capabilities::{self, Evidence, Status},
     catalogue::{self, AgentId},
     profile::Body,
     service::StartRequest,
 };
+use crate::arsenal::{Arsenal, commands::TerminalRequest};
+use crate::configuration::Configuration;
 use crate::host::{client::HostLink, protocol::HostError};
 use crate::native_dialog::{choose_file_titled, choose_folder};
 use serde::{Deserialize, Serialize};
@@ -105,6 +108,33 @@ fn current_evidence(
     Ok((evidence, version))
 }
 
+/// The exact build of `agent` the host would launch, as its `--version` reports it now.
+pub(crate) fn provider_version(
+    link: &HostLink,
+    agent: AgentId,
+) -> Result<Option<String>, HostError> {
+    current_evidence(link, agent).map(|(_, version)| version)
+}
+
+/// The projects the host lists for a launch: each path, and whether it is the home folder.
+pub(crate) fn known_projects(link: &HostLink) -> Result<Vec<(String, bool)>, HostError> {
+    let launcher = launcher_view(link)?;
+    Ok(launcher["projects"]
+        .as_array()
+        .map(|projects| {
+            projects
+                .iter()
+                .filter_map(|project| {
+                    Some((
+                        project["path"].as_str()?.to_owned(),
+                        project["home"].as_bool().unwrap_or(false),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
 fn effectful_preview(preview: &Value) -> bool {
     ["applied", "with_cost"].iter().any(|key| {
         preview[*key]
@@ -156,9 +186,20 @@ fn check_start_capability(
     link: &HostLink,
     agent: AgentId,
     profile_id: Option<&str>,
+    launch: Option<&ArsenalLaunch>,
     plan_token: Option<&str>,
     expected_cli_version: Option<&str>,
 ) -> Result<(), HostError> {
+    if let Some(launch) = launch {
+        return check_arsenal_start(
+            link,
+            agent,
+            profile_id,
+            launch,
+            plan_token,
+            expected_cli_version,
+        );
+    }
     let Some(profile_id) = profile_id else {
         return Ok(());
     };
@@ -190,6 +231,80 @@ fn check_start_capability(
     Ok(())
 }
 
+/// A start that carries an Arsenal exclusion: the host must know the field, the preview of exactly
+/// this profile and exclusion must be the one shown, the build must be the one previewed and have
+/// its own exclusion evidence, and a profile with effect still needs its own syntax evidence.
+fn check_arsenal_start(
+    link: &HostLink,
+    agent: AgentId,
+    profile_id: Option<&str>,
+    launch: &ArsenalLaunch,
+    plan_token: Option<&str>,
+    expected_cli_version: Option<&str>,
+) -> Result<(), HostError> {
+    if !link.has_feature("native_arsenal_v1") || !link.has_feature("native_profile_plan_token") {
+        return Err(HostError::new("host_outdated"));
+    }
+    let preview = link.call(
+        "native_preview",
+        json!({"agent_id": agent, "profile_id": profile_id, "arsenal": launch}),
+    )?;
+    let actual_token = preview["plan_token"]
+        .as_str()
+        .ok_or_else(|| HostError::new("host_outdated"))?;
+    if plan_token != Some(actual_token) {
+        return Err(HostError::new("profile_preview_stale"));
+    }
+    let (_, version) = current_evidence(link, agent)?;
+    if version.as_deref() != expected_cli_version
+        || !capabilities::permits_arsenal_exclusion(agent, expected_cli_version)
+    {
+        return Err(HostError::new("arsenal_unqualified"));
+    }
+    if let Some(profile_id) = profile_id {
+        let profile_only = link.call(
+            "native_preview",
+            json!({"agent_id": agent, "profile_id": profile_id}),
+        )?;
+        if effectful_preview(&profile_only)
+            && !capabilities::allows_start_with_profile(agent, expected_cli_version, true)
+        {
+            return Err(HostError::new("provider_version_unverified"));
+        }
+    }
+    Ok(())
+}
+
+/// What the window may say about an Arsenal selection: which one, the plan it saw, and the project.
+/// It never carries skill names; the desktop rebuilds the exclusion from the library.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArsenalStart {
+    selection: String,
+    config_hash: String,
+    project: String,
+}
+
+fn arsenal_launch(
+    store: Option<std::sync::Arc<std::sync::Mutex<crate::arsenal::store::Store>>>,
+    selected: Option<std::path::PathBuf>,
+    link: &HostLink,
+    agent: AgentId,
+    request: &ArsenalStart,
+) -> Result<ArsenalLaunch, HostError> {
+    crate::arsenal::commands::launch_for(
+        store,
+        link,
+        selected.as_deref(),
+        &TerminalRequest {
+            selection: request.selection.clone(),
+            agent_id: agent,
+            project: Some(request.project.clone()),
+        },
+        &request.config_hash,
+    )
+}
+
 fn annotate_launcher(mut launcher: Value) -> Result<Value, HostError> {
     let agents = launcher["agents"]
         .as_array_mut()
@@ -215,6 +330,16 @@ fn annotate_preview(
     profile_id: Option<&str>,
 ) -> Result<Value, HostError> {
     let (evidence, version) = current_evidence(link, agent)?;
+    if preview["arsenal"].as_bool() == Some(true)
+        && !capabilities::permits_arsenal_exclusion(agent, version.as_deref())
+    {
+        preview["can_start"] = Value::Bool(false);
+        push_string(
+            &mut preview,
+            "not_applicable",
+            "Skill exclusion is not qualified for this provider build.".to_owned(),
+        );
+    }
     push_string(
         &mut preview,
         "warnings",
@@ -293,13 +418,26 @@ pub async fn native_readiness(link: State<'_, HostLink>) -> Answer {
 pub struct PreviewRequest {
     agent_id: AgentId,
     profile_id: Option<String>,
+    #[serde(default)]
+    arsenal: Option<ArsenalStart>,
 }
 
-fn preview_with_link(link: &HostLink, request: PreviewRequest) -> Answer {
-    let preview = link.call(
-        "native_preview",
-        json!({"agent_id": request.agent_id, "profile_id": request.profile_id}),
-    )?;
+fn preview_with_link(
+    link: &HostLink,
+    request: PreviewRequest,
+    launch: Option<ArsenalLaunch>,
+) -> Answer {
+    let mut params = json!({"agent_id": request.agent_id, "profile_id": request.profile_id});
+    if let Some(launch) = &launch {
+        if !link.has_feature("native_arsenal_v1") {
+            return Err(HostError::new("host_outdated"));
+        }
+        params["arsenal"] = json!(launch);
+    }
+    let mut preview = link.call("native_preview", params)?;
+    if launch.is_some() {
+        preview["arsenal"] = Value::Bool(true);
+    }
     annotate_preview(
         link,
         preview,
@@ -309,12 +447,45 @@ fn preview_with_link(link: &HostLink, request: PreviewRequest) -> Answer {
 }
 
 #[tauri::command]
-pub async fn native_preview(link: State<'_, HostLink>, request: PreviewRequest) -> Answer {
+pub async fn native_preview(
+    link: State<'_, HostLink>,
+    arsenal: State<'_, Arsenal>,
+    configuration: State<'_, Configuration>,
+    request: PreviewRequest,
+) -> Answer {
     if let Some(id) = request.profile_id.as_deref() {
         profile_id(id)?;
     }
+    let launch = match &request.arsenal {
+        None => None,
+        Some(start) => {
+            let (store, selected) = (arsenal.launch_handle(), configuration.selected_project());
+            let link = link.inner().clone();
+            let (agent, start) = (request.agent_id, start.clone());
+            Some(blocking(move || arsenal_launch(store, selected, &link, agent, &start)).await?)
+        }
+    };
     let link = link.inner().clone();
-    blocking(move || preview_with_link(&link, request)).await
+    blocking(move || preview_with_link(&link, request, launch)).await
+}
+
+/// A start as the window asks for it. It is `StartRequest` without the exclusion itself: the window
+/// names a selection and the plan it previewed, and the desktop rebuilds what the host receives.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WindowStart {
+    agent_id: AgentId,
+    project: String,
+    profile_id: Option<String>,
+    size: TerminalSize,
+    #[serde(default)]
+    brief: Option<String>,
+    #[serde(default)]
+    plan_token: Option<String>,
+    #[serde(default)]
+    expected_cli_version: Option<String>,
+    #[serde(default)]
+    arsenal: Option<ArsenalStart>,
 }
 
 fn start_with_link(link: &HostLink, request: StartRequest) -> Answer {
@@ -334,10 +505,11 @@ fn start_with_link(link: &HostLink, request: StartRequest) -> Answer {
         link,
         request.agent_id,
         request.profile_id.as_deref(),
+        request.arsenal.as_ref(),
         request.plan_token.as_deref(),
         expected_cli_version.as_deref(),
     )?;
-    let has_profile = request.profile_id.is_some();
+    let has_profile = request.profile_id.is_some() || request.arsenal.is_some();
     let mut params = json!({
         "agent_id": request.agent_id,
         "project": request.project,
@@ -356,14 +528,44 @@ fn start_with_link(link: &HostLink, request: StartRequest) -> Answer {
     if send_profile_plan || send_handoff_version {
         params["expected_cli_version"] = json!(expected_cli_version);
     }
+    if let Some(launch) = &request.arsenal {
+        params["arsenal"] = json!(launch);
+    }
     link.call("native_start", params)
 }
 
 #[tauri::command]
-pub async fn native_start(link: State<'_, HostLink>, request: StartRequest) -> Answer {
+pub async fn native_start(
+    link: State<'_, HostLink>,
+    arsenal: State<'_, Arsenal>,
+    configuration: State<'_, Configuration>,
+    request: WindowStart,
+) -> Answer {
     if let Some(id) = request.profile_id.as_deref() {
         profile_id(id)?;
     }
+    let launch = match &request.arsenal {
+        None => None,
+        Some(start) if start.project != request.project => {
+            return Err(HostError::new("request_invalid"));
+        }
+        Some(start) => {
+            let (store, selected) = (arsenal.launch_handle(), configuration.selected_project());
+            let link = link.inner().clone();
+            let (agent, start) = (request.agent_id, start.clone());
+            Some(blocking(move || arsenal_launch(store, selected, &link, agent, &start)).await?)
+        }
+    };
+    let request = StartRequest {
+        agent_id: request.agent_id,
+        project: request.project,
+        profile_id: request.profile_id,
+        size: request.size,
+        brief: request.brief,
+        plan_token: request.plan_token,
+        expected_cli_version: request.expected_cli_version,
+        arsenal: launch,
+    };
     let link = link.inner().clone();
     blocking(move || start_with_link(&link, request)).await
 }
@@ -411,9 +613,15 @@ pub struct RestartRequest {
 }
 
 #[tauri::command]
-pub async fn native_restart(link: State<'_, HostLink>, request: RestartRequest) -> Answer {
+pub async fn native_restart(
+    link: State<'_, HostLink>,
+    arsenal: State<'_, Arsenal>,
+    configuration: State<'_, Configuration>,
+    request: RestartRequest,
+) -> Answer {
     well_formed(&request.id)?;
     let link = link.inner().clone();
+    let (store, selected) = (arsenal.launch_handle(), configuration.selected_project());
     blocking(move || {
         let sessions = call_extended_or_legacy(
             &link,
@@ -430,6 +638,9 @@ pub async fn native_restart(link: State<'_, HostLink>, request: RestartRequest) 
             let agent = serde_json::from_value::<AgentId>(old["agent_id"].clone())
                 .map_err(|_| HostError::new("internal"))?;
             let profile_id = old["profile"]["id"].as_str();
+            if old["arsenal"].is_object() {
+                return restart_with_arsenal(&link, store, selected, &request, old, agent);
+            }
             let (plan_token, expected_cli_version) = if let Some(profile_id) = profile_id {
                 let supports_plan_token = link.has_feature("native_profile_plan_token");
                 let preview = link.call(
@@ -466,6 +677,7 @@ pub async fn native_restart(link: State<'_, HostLink>, request: RestartRequest) 
                 &link,
                 agent,
                 profile_id,
+                None,
                 plan_token.as_deref(),
                 expected_cli_version.as_deref(),
             )?;
@@ -483,6 +695,65 @@ pub async fn native_restart(link: State<'_, HostLink>, request: RestartRequest) 
         }
     })
     .await
+}
+
+/// A session launched with an Arsenal exclusion restarts with it only while the library and the
+/// installed skills still give the same configuration; otherwise it is refused as stale, because a
+/// skill installed since would be exposed by the old exclusion.
+fn restart_with_arsenal(
+    link: &HostLink,
+    store: Option<std::sync::Arc<std::sync::Mutex<crate::arsenal::store::Store>>>,
+    selected: Option<std::path::PathBuf>,
+    request: &RestartRequest,
+    old: &Value,
+    agent: AgentId,
+) -> Answer {
+    let launched: ArsenalLaunch =
+        serde_json::from_value(old["arsenal"].clone()).map_err(|_| HostError::new("internal"))?;
+    let project = old["project"]
+        .as_str()
+        .ok_or_else(|| HostError::new("internal"))?;
+    let launch = arsenal_launch(
+        store,
+        selected,
+        link,
+        agent,
+        &ArsenalStart {
+            selection: launched.selection.clone(),
+            config_hash: launched.config_hash.clone(),
+            project: project.to_owned(),
+        },
+    )?;
+    if launch != launched {
+        return Err(HostError::new("arsenal_plan_stale"));
+    }
+    let profile_id = old["profile"]["id"].as_str();
+    let preview = link.call(
+        "native_preview",
+        json!({"agent_id": agent, "profile_id": profile_id, "arsenal": &launch}),
+    )?;
+    let plan_token = preview["plan_token"]
+        .as_str()
+        .ok_or_else(|| HostError::new("host_outdated"))?
+        .to_owned();
+    let (_, version) = current_evidence(link, agent)?;
+    check_start_capability(
+        link,
+        agent,
+        profile_id,
+        Some(&launch),
+        Some(&plan_token),
+        version.as_deref(),
+    )?;
+    link.call(
+        "native_restart",
+        json!({
+            "id": request.id,
+            "size": request.size,
+            "plan_token": plan_token,
+            "expected_cli_version": version,
+        }),
+    )
 }
 
 #[tauri::command]
@@ -939,6 +1210,7 @@ mod capability_tests {
 
     fn start_request() -> StartRequest {
         StartRequest {
+            arsenal: None,
             agent_id: AgentId::ClaudeCode,
             project: "/tmp/fixture-project".into(),
             profile_id: Some(PROFILE_ID.into()),
@@ -947,6 +1219,73 @@ mod capability_tests {
             plan_token: Some("old-preview-token".into()),
             expected_cli_version: Some(VERSION.into()),
         }
+    }
+
+    fn arsenal_launch() -> crate::native::arsenal::ArsenalLaunch {
+        crate::native::arsenal::ArsenalLaunch {
+            selection: "0b1c4e1a-0000-4000-8000-000000000001".into(),
+            selection_name: "Frontend".into(),
+            config_hash: "b".repeat(64),
+            skills_off: vec!["design".into()],
+        }
+    }
+
+    #[test]
+    fn a_host_without_the_arsenal_feature_never_receives_an_exclusion() {
+        let host = LegacyHost::new(false);
+        let link = host.link();
+        let request = StartRequest {
+            arsenal: Some(arsenal_launch()),
+            profile_id: None,
+            ..start_request()
+        };
+        assert_eq!(
+            start_with_link(&link, request).unwrap_err().code,
+            "host_outdated"
+        );
+        assert_eq!(
+            preview_with_link(
+                &link,
+                PreviewRequest {
+                    agent_id: AgentId::ClaudeCode,
+                    profile_id: None,
+                    arsenal: None,
+                },
+                Some(arsenal_launch()),
+            )
+            .unwrap_err()
+            .code,
+            "host_outdated"
+        );
+        // Nothing that could start or preview with the exclusion reached the host.
+        assert!(
+            host.requests()
+                .iter()
+                .all(|(op, params)| op != "native_start" && params.get("arsenal").is_none())
+        );
+    }
+
+    #[test]
+    fn the_window_cannot_send_skill_names_in_a_start_or_preview() {
+        let start = serde_json::json!({
+            "agent_id": "claude_code", "project": "/tmp/p", "profile_id": null,
+            "size": {"rows": 24, "cols": 80},
+            "arsenal": {"selection": "s", "config_hash": "h", "project": "/tmp/p",
+                        "skills_off": ["design"]}
+        });
+        assert!(serde_json::from_value::<super::WindowStart>(start).is_err());
+        let launch_shape = serde_json::json!({
+            "agent_id": "claude_code", "project": "/tmp/p", "profile_id": null,
+            "size": {"rows": 24, "cols": 80},
+            "arsenal": arsenal_launch()
+        });
+        assert!(serde_json::from_value::<super::WindowStart>(launch_shape).is_err());
+        let preview = serde_json::json!({
+            "agent_id": "claude_code", "profile_id": null,
+            "arsenal": {"selection": "s", "config_hash": "h", "project": "/tmp/p",
+                        "skills_off": []}
+        });
+        assert!(serde_json::from_value::<PreviewRequest>(preview).is_err());
     }
 
     #[test]
@@ -1131,6 +1470,7 @@ mod capability_tests {
         let error = start_with_link(
             &link,
             StartRequest {
+                arsenal: None,
                 agent_id: AgentId::Opencode,
                 project: "/tmp/fixture-project".into(),
                 profile_id: None,
@@ -1196,7 +1536,9 @@ mod capability_tests {
             PreviewRequest {
                 agent_id: AgentId::ClaudeCode,
                 profile_id: Some(PROFILE_ID.into()),
+                arsenal: None,
             },
+            None,
         )
         .unwrap();
         assert_eq!(preview["can_start"], true);
@@ -1238,7 +1580,9 @@ mod capability_tests {
             PreviewRequest {
                 agent_id: AgentId::ClaudeCode,
                 profile_id: Some(PROFILE_ID.into()),
+                arsenal: None,
             },
+            None,
         )
         .unwrap();
         assert_eq!(preview["can_start"], false);

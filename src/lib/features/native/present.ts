@@ -75,6 +75,17 @@ export const FAILURE_TEXT: Record<string, string> = {
     'The profile changed after its preview. Review the new preview and start again.',
   provider_version_unverified:
     'This exact provider build is not verified for profile overrides, so the override was not launched. Choose “No profile — as configured” or use a qualified build.',
+  arsenal_unqualified:
+    'Skill exclusion is not qualified for this exact provider build, so nothing was started with it. Start without applying the selection, or use a qualified build.',
+  arsenal_plan_stale:
+    'The Arsenal plan changed since it was shown: the library, the installed skills or the provider build moved. Review the new plan and start again.',
+  arsenal_blocked:
+    'The Arsenal plan has items that cannot be carried or names a skill that is not installed, so nothing was started with it.',
+  arsenal_unavailable:
+    'The Arsenal library or the installed skills could not be read, so nothing was started with the selection.',
+  arsenal_selection_unknown: 'That Arsenal selection no longer exists.',
+  arsenal_project_refused:
+    'Arsenal does not read this project folder, so its selection cannot be applied here.',
   handoff_target_unverified:
     'Hermes Native does not have a verified interactive handoff argument. It was not started with this brief.',
   brief_invalid:

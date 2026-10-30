@@ -3,23 +3,31 @@
 //! anything, so the window can never point the importer at a file of its own choosing.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::State;
 
 use super::Arsenal;
+use super::analysis::{self, Compatibility, Dependency};
 use super::store::{
-    self, Detail, Error, FileInfo, Imported, NewCapability, Preset, PresetInput, Selection,
+    self, Binding, Detail, Error, Imported, NewCapability, Preset, PresetInput, Selection,
     SelectionInput, Store, Summary,
 };
+use super::terminal::{self, TerminalPlan};
 use crate::agentconfig::catalogue::{
-    self, Candidate, Composite, Excluded, FileDigest, ManagedBy, Scan, SourceReport,
+    self, Candidate, Composite, Excluded, FileDigest, LaunchScan, ManagedBy, Scan, SourceReport,
 };
 use crate::configuration::Configuration;
+use crate::host::{client::HostLink, protocol::HostError};
+use crate::native::{arsenal::ArsenalLaunch, capabilities, catalogue::AgentId};
 
 const PREVIEW_BYTES: usize = 1024 * 1024;
+/// Most stored bytes one preview or plan reads to analyse dependencies. Past it, the remaining
+/// items are judged by their file names only and their dependencies are left unknown.
+const ANALYSIS_BYTES: usize = 64 * 1024 * 1024;
 /// The kinds Arsenal can copy. Hooks, MCP servers and plugins are listed and never imported.
 const IMPORTABLE: [&str; 3] = ["skill", "agent", "rule"];
 
@@ -156,9 +164,10 @@ pub struct PreviewItem {
     pub revision: Option<i64>,
     pub pinned: bool,
     pub tree_hash: Option<String>,
-    /// `supported`, `partial`, `unsupported` or `unverified`.
+    /// `supported`, `unsupported`, `unverified`, `requires_qualification` or `missing_dependency`.
     pub compatibility: &'static str,
     pub reason: String,
+    pub dependencies: Vec<Dependency>,
 }
 
 #[derive(Debug, Serialize)]
@@ -175,8 +184,51 @@ pub struct Preview {
     pub status: &'static str,
     pub items: Vec<PreviewItem>,
     pub conflicts: Vec<Conflict>,
-    /// Dependencies are not analysed yet; the window says so instead of showing none.
+    /// `analysed` when every item's files were read, `partial` when the reading budget ran out.
     pub dependencies: &'static str,
+}
+
+/// A library entry with what its format means for its own provider.
+#[derive(Debug, Serialize)]
+pub struct LibraryItem {
+    #[serde(flatten)]
+    pub summary: Summary,
+    pub compatibility: Compatibility,
+}
+
+/// One capability with its compatibility and the dependencies its files declare or point at.
+#[derive(Debug, Serialize)]
+pub struct DetailView {
+    #[serde(flatten)]
+    pub detail: Detail,
+    pub compatibility: Compatibility,
+    pub dependencies: Vec<Dependency>,
+}
+
+/// The terminal a plan is for: a saved selection, the agent, and the launcher's project.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalRequest {
+    pub selection: String,
+    pub agent_id: AgentId,
+    /// A project path as the launcher lists it; `None` or the home entry means no project.
+    #[serde(default)]
+    pub project: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BindRequest {
+    session_id: String,
+    selection: String,
+    config_hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectSelectionRequest {
+    project: String,
+    agent_id: AgentId,
 }
 
 const COMMANDS: &[&str] = &[
@@ -194,6 +246,10 @@ const COMMANDS: &[&str] = &[
     "arsenal_selection_write",
     "arsenal_selection_delete",
     "arsenal_preview",
+    "arsenal_terminal_plan",
+    "arsenal_terminal_bind",
+    "arsenal_terminal_bindings",
+    "arsenal_project_selection",
 ];
 
 /// What the desktop binary hands to the library for Arsenal: the commands and the state they use.
@@ -214,7 +270,11 @@ pub fn extension() -> wyss_console::Extension {
             arsenal_selections,
             arsenal_selection_write,
             arsenal_selection_delete,
-            arsenal_preview
+            arsenal_preview,
+            arsenal_terminal_plan,
+            arsenal_terminal_bind,
+            arsenal_terminal_bindings,
+            arsenal_project_selection
         ]),
         install: Box::new(|builder| builder.manage(Arsenal::start())),
         on_exit: None,
@@ -267,12 +327,13 @@ fn is_importable(candidate: &Candidate) -> bool {
     candidate.blocked.is_none() && IMPORTABLE.contains(&candidate.kind)
 }
 
-/// What is known about a kind, for its provider. A format is known for a skill, an agent or a rule;
-/// whether a launched session uses it is not verified until AM1b.
+/// What is known about a kind, for its own provider: the provider's own format, read from its own
+/// folder, is `supported`; one holding scripts is `unverified` (their requirements are not checked);
+/// hooks, MCP servers and plugins are `unsupported` because Arsenal does not hold them.
 fn compatibility_of(candidate: &Candidate) -> &'static str {
     match candidate.kind {
-        "skill" | "agent" | "rule" if candidate.executes_code => "partial",
-        "skill" | "agent" | "rule" => "unverified",
+        "skill" | "agent" | "rule" if candidate.executes_code => "unverified",
+        "skill" | "agent" | "rule" => "supported",
         _ => "unsupported",
     }
 }
@@ -413,20 +474,66 @@ fn others(ids: &[String], index: usize, same: impl Fn(usize) -> bool) -> Vec<Str
         .collect()
 }
 
+/// The library, each entry with its compatibility judged from its file names.
+pub fn library(store: &Store) -> Result<Vec<LibraryItem>, Error> {
+    store
+        .list()?
+        .into_iter()
+        .map(|summary| {
+            let detail = store.detail(&summary.id, None)?;
+            let paths: Vec<&str> = detail.files.iter().map(|f| f.path.as_str()).collect();
+            let compatibility = analysis::compatibility(
+                &summary.kind,
+                &summary.provider,
+                &summary.provider,
+                &paths,
+                &[],
+            );
+            Ok(LibraryItem {
+                summary,
+                compatibility,
+            })
+        })
+        .collect()
+}
+
 #[tauri::command]
-fn arsenal_capabilities(arsenal: State<'_, Arsenal>) -> Result<Vec<Summary>, ArsenalError> {
+fn arsenal_capabilities(arsenal: State<'_, Arsenal>) -> Result<Vec<LibraryItem>, ArsenalError> {
     arsenal
-        .with_store(|store| store.list())
+        .with_store(|store| library(store))
         .map_err(ArsenalError::from)
+}
+
+pub fn detail_view(
+    store: &Store,
+    capability: &str,
+    revision: Option<i64>,
+) -> Result<DetailView, Error> {
+    let detail = store.detail(capability, revision)?;
+    let content = store.revision_content(capability, detail.revision)?;
+    let dependencies = analysis::dependencies(&content, None);
+    let paths: Vec<&str> = detail.files.iter().map(|f| f.path.as_str()).collect();
+    let compatibility = analysis::compatibility(
+        &detail.summary.kind,
+        &detail.summary.provider,
+        &detail.summary.provider,
+        &paths,
+        &dependencies,
+    );
+    Ok(DetailView {
+        detail,
+        compatibility,
+        dependencies,
+    })
 }
 
 #[tauri::command]
 fn arsenal_capability(
     arsenal: State<'_, Arsenal>,
     request: CapabilityRequest,
-) -> Result<Detail, ArsenalError> {
+) -> Result<DetailView, ArsenalError> {
     arsenal
-        .with_store(|store| store.detail(&request.capability, request.revision))
+        .with_store(|store| detail_view(store, &request.capability, request.revision))
         .map_err(ArsenalError::from)
 }
 
@@ -508,11 +615,11 @@ async fn arsenal_import(
 fn arsenal_restore(
     arsenal: State<'_, Arsenal>,
     request: RestoreRequest,
-) -> Result<Detail, ArsenalError> {
+) -> Result<DetailView, ArsenalError> {
     arsenal
         .with_store(|store| {
             store.restore(&request.capability, request.revision)?;
-            store.detail(&request.capability, None)
+            detail_view(store, &request.capability, None)
         })
         .map_err(ArsenalError::from)
 }
@@ -590,45 +697,52 @@ struct Resolved {
     tree: String,
 }
 
-/// The configuration a selection would make, stated exactly and never as active.
-pub fn preview(store: &Store, selection_id: &str) -> Result<Preview, Error> {
-    let selection = store
-        .selections()?
-        .into_iter()
-        .find(|selection| selection.id == selection_id)
-        .ok_or(Error::NotFound)?;
-    let mut items = Vec::with_capacity(selection.items.len());
-    let mut resolved: Vec<Resolved> = Vec::new();
+/// The selection's items as the library holds them now, with their files while the reading budget
+/// lasts. The second value says whether every resolved item's files were read.
+pub fn resolve_items(
+    store: &Store,
+    selection: &Selection,
+) -> Result<(Vec<terminal::Resolved>, bool), Error> {
+    let mut budget = ANALYSIS_BYTES;
+    let mut complete = true;
+    let mut resolved = Vec::with_capacity(selection.items.len());
     for item in &selection.items {
         let pinned = item.revision.is_some();
         match store.detail(&item.capability, item.revision) {
             Ok(detail) => {
+                let size: usize = detail
+                    .files
+                    .iter()
+                    .map(|f| usize::try_from(f.size).unwrap_or(usize::MAX))
+                    .sum();
+                let files = if size <= budget {
+                    budget -= size;
+                    store.revision_content(&item.capability, detail.revision)?
+                } else {
+                    complete = false;
+                    // Names only: compatibility can still see scripts, dependencies stay unknown.
+                    detail
+                        .files
+                        .iter()
+                        .map(|f| (f.path.clone(), Vec::new()))
+                        .collect()
+                };
                 let tree_hash = detail
                     .revisions
                     .iter()
                     .find(|revision| revision.number == detail.revision)
                     .map(|revision| revision.tree_hash.clone())
                     .unwrap_or_default();
-                let (compatibility, reason) =
-                    compatibility(&detail.summary.provider, &selection.provider, &detail.files);
-                resolved.push(Resolved {
-                    capability: item.capability.clone(),
-                    kind: detail.summary.kind.clone(),
-                    provider: detail.summary.provider.clone(),
-                    name: detail.summary.name.clone(),
-                    tree: tree_hash.clone(),
-                });
-                items.push(PreviewItem {
+                resolved.push(terminal::Resolved {
                     capability: item.capability.clone(),
                     state: "resolved",
-                    kind: detail.summary.kind,
                     name: detail.summary.name,
+                    kind: detail.summary.kind,
                     provider: detail.summary.provider,
                     revision: Some(detail.revision),
                     pinned,
-                    tree_hash: Some(tree_hash),
-                    compatibility,
-                    reason,
+                    tree_hash,
+                    files,
                 });
             }
             Err(Error::NotFound) => {
@@ -636,49 +750,99 @@ pub fn preview(store: &Store, selection_id: &str) -> Result<Preview, Error> {
                     Ok(_) => "revision_missing",
                     Err(_) => "missing",
                 };
-                items.push(PreviewItem {
+                resolved.push(terminal::Resolved {
                     capability: item.capability.clone(),
                     state,
-                    kind: String::new(),
                     name: String::new(),
+                    kind: String::new(),
                     provider: String::new(),
                     revision: item.revision,
                     pinned,
-                    tree_hash: None,
-                    compatibility: "unverified",
-                    reason: "The library no longer holds this capability or revision.".into(),
+                    tree_hash: String::new(),
+                    files: Vec::new(),
                 });
             }
             Err(error) => return Err(error),
         }
     }
-    Ok(Preview {
-        status: "not_applied",
-        conflicts: conflicts(&resolved),
-        items,
-        dependencies: "not_analysed",
-        selection,
-    })
+    Ok((resolved, complete))
 }
 
-/// Compatibility is stated per provider from what is known: the skill format, and whether it holds scripts.
-fn compatibility(provider: &str, selected: &str, files: &[FileInfo]) -> (&'static str, String) {
-    if provider != selected {
-        return (
-            "unsupported",
-            format!("Built for {provider}; this selection is for {selected}."),
+/// The configuration a selection would make, stated exactly and never as active.
+pub fn preview(store: &Store, selection_id: &str) -> Result<Preview, Error> {
+    let selection = store
+        .selections()?
+        .into_iter()
+        .find(|selection| selection.id == selection_id)
+        .ok_or(Error::NotFound)?;
+    let (resolved_items, complete) = resolve_items(store, &selection)?;
+    let mut items = Vec::with_capacity(resolved_items.len());
+    let mut resolved: Vec<Resolved> = Vec::new();
+    for item in resolved_items {
+        if item.state != "resolved" {
+            items.push(PreviewItem {
+                capability: item.capability,
+                state: item.state,
+                kind: String::new(),
+                name: String::new(),
+                provider: String::new(),
+                revision: item.revision,
+                pinned: item.pinned,
+                tree_hash: None,
+                compatibility: "unverified",
+                reason: "The library no longer holds this capability or revision.".into(),
+                dependencies: Vec::new(),
+            });
+            continue;
+        }
+        let dependencies = analysis::dependencies(&item.files, None);
+        let paths: Vec<&str> = item.files.iter().map(|(path, _)| path.as_str()).collect();
+        let verdict = analysis::compatibility(
+            &item.kind,
+            &item.provider,
+            &selection.provider,
+            &paths,
+            &dependencies,
         );
+        resolved.push(Resolved {
+            capability: item.capability.clone(),
+            kind: item.kind.clone(),
+            provider: item.provider.clone(),
+            name: item.name.clone(),
+            tree: item.tree_hash.clone(),
+        });
+        items.push(PreviewItem {
+            capability: item.capability,
+            state: "resolved",
+            kind: item.kind,
+            name: item.name,
+            provider: item.provider,
+            revision: item.revision,
+            pinned: item.pinned,
+            tree_hash: Some(item.tree_hash),
+            compatibility: verdict.status,
+            reason: verdict.reason,
+            dependencies,
+        });
     }
-    if files.iter().any(|file| catalogue::is_script(&file.path)) {
-        return (
-            "partial",
-            "Contains scripts. They are stored and never run by Wyss; use in a launched session is not verified.".into(),
-        );
+    let conflicts = conflicts(&resolved);
+    // A capability in a blocking group is conflicting, whatever its format says.
+    for conflict in conflicts.iter().filter(|c| c.code == "name_collision") {
+        for item in items
+            .iter_mut()
+            .filter(|item| conflict.capabilities.contains(&item.capability))
+        {
+            item.compatibility = "conflicting";
+            item.reason = "Another capability of this selection has the same name.".into();
+        }
     }
-    (
-        "unverified",
-        "The format is known. Use in a launched session is not verified yet.".into(),
-    )
+    Ok(Preview {
+        status: "not_applied",
+        conflicts,
+        items,
+        dependencies: if complete { "analysed" } else { "partial" },
+        selection,
+    })
 }
 
 /// Groups that matter: one name, one content, or two rules for one provider.
@@ -720,6 +884,289 @@ fn conflicts(resolved: &[Resolved]) -> Vec<Conflict> {
         }
     }
     conflicts
+}
+
+fn host_failure(error: HostError) -> ArsenalError {
+    ArsenalError {
+        code: "host_unavailable",
+        reason: match error.code.as_str() {
+            "agent_not_installed" => Some("agent_not_installed"),
+            "host_outdated" => Some("host_outdated"),
+            _ => None,
+        },
+    }
+}
+
+fn provider_word(agent: AgentId) -> Option<&'static str> {
+    match agent {
+        AgentId::ClaudeCode => Some("claude_code"),
+        AgentId::Codex => Some("codex"),
+        AgentId::Opencode | AgentId::Hermes => None,
+    }
+}
+
+/// The terminal's project, accepted only when the host lists it for a launch (or it is the project
+/// selected in Configuration), and only after the same root checks Configuration applies. The home
+/// entry, or none, means no project folders are read.
+fn terminal_project(
+    link: &HostLink,
+    selected: Option<&Path>,
+    requested: Option<&str>,
+) -> Result<Option<PathBuf>, ArsenalError> {
+    let Some(requested) = requested else {
+        return Ok(None);
+    };
+    if requested.len() > 4096 || requested.contains('\0') {
+        return Err(ArsenalError::code("invalid_request"));
+    }
+    let known = super::super::native::commands::known_projects(link).map_err(host_failure)?;
+    let entry = known.iter().find(|(path, _)| path == requested);
+    if entry.is_some_and(|(_, home)| *home) {
+        return Ok(None);
+    }
+    let selected_matches = selected.is_some_and(|path| path == Path::new(requested));
+    if entry.is_none() && !selected_matches {
+        return Err(ArsenalError::code("project_unknown"));
+    }
+    catalogue::validate_project_process(Path::new(requested))
+        .map(Some)
+        .ok_or(ArsenalError::code("project_refused"))
+}
+
+/// One terminal plan, computed now: the selection as stored, the installed skills as read now, and
+/// the provider build as the host would launch it. Returns the plan and the installed skills.
+fn plan_now(
+    store: &Arc<Mutex<Store>>,
+    link: &HostLink,
+    selected: Option<&Path>,
+    request: &TerminalRequest,
+) -> Result<(TerminalPlan, LaunchScan), ArsenalError> {
+    let provider =
+        provider_word(request.agent_id).ok_or(ArsenalError::code("provider_unsupported"))?;
+    let project = terminal_project(link, selected, request.project.as_deref())?;
+    let version = super::super::native::commands::provider_version(link, request.agent_id)
+        .map_err(host_failure)?;
+    let (selection, items) = {
+        let store = store
+            .lock()
+            .map_err(|_| ArsenalError::from(Error::Storage))?;
+        let selection = store
+            .selections()?
+            .into_iter()
+            .find(|selection| selection.id == request.selection)
+            .ok_or(ArsenalError::code("not_found"))?;
+        let (items, _) = resolve_items(&store, &selection)?;
+        (selection, items)
+    };
+    if selection.provider != provider {
+        return Err(ArsenalError {
+            code: "invalid_request",
+            reason: Some("selection_for_another_provider"),
+        });
+    }
+    let installed = catalogue::launch_scan_process(project.clone(), provider)
+        .ok_or(ArsenalError::code("discovery_unavailable"))?;
+    let evidence = capabilities::arsenal_exclusion(request.agent_id, version.as_deref());
+    let plan = terminal::plan(terminal::Input {
+        selection: &selection,
+        items,
+        provider,
+        version,
+        evidence,
+        installed: &installed,
+        project: project.as_ref().map(|path| {
+            (
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("project")
+                    .to_owned(),
+                path.to_string_lossy().into_owned(),
+            )
+        }),
+    });
+    Ok((plan, installed))
+}
+
+/// The exclusion a start carries, rebuilt from the library and the disk right before the start.
+/// It must be the configuration the window previewed (same hash), applicable on this exact build,
+/// and pass the allow-list check; otherwise the start is refused and nothing is launched.
+pub(crate) fn launch_for(
+    store: Option<Arc<Mutex<Store>>>,
+    link: &HostLink,
+    selected: Option<&Path>,
+    request: &TerminalRequest,
+    config_hash: &str,
+) -> Result<ArsenalLaunch, HostError> {
+    let store = store.ok_or_else(|| HostError::new("arsenal_unavailable"))?;
+    let (plan, installed) = plan_now(&store, link, selected, request).map_err(|error| {
+        HostError::new(match error.code {
+            "not_found" => "arsenal_selection_unknown",
+            "project_unknown" | "project_refused" => "arsenal_project_refused",
+            _ => "arsenal_unavailable",
+        })
+    })?;
+    if plan.config_hash != config_hash {
+        return Err(HostError::new("arsenal_plan_stale"));
+    }
+    if plan.enforcement.state != "available" {
+        return Err(HostError::new("arsenal_unqualified"));
+    }
+    if !plan.can_apply {
+        return Err(HostError::new("arsenal_blocked"));
+    }
+    terminal::validate_exclusion(&plan.excluded, &installed)
+        .map_err(|_| HostError::new("arsenal_blocked"))?;
+    Ok(ArsenalLaunch {
+        selection: plan.selection,
+        selection_name: plan.selection_name,
+        config_hash: plan.config_hash,
+        skills_off: plan.excluded,
+    })
+}
+
+#[tauri::command]
+async fn arsenal_terminal_plan(
+    arsenal: State<'_, Arsenal>,
+    configuration: State<'_, Configuration>,
+    link: State<'_, HostLink>,
+    request: TerminalRequest,
+) -> Result<TerminalPlan, ArsenalError> {
+    let store = arsenal.handle().map_err(ArsenalError::from)?;
+    let selected = configuration.selected_project();
+    let link = link.inner().clone();
+    blocking(move || plan_now(&store, &link, selected.as_deref(), &request).map(|(plan, _)| plan))
+        .await
+}
+
+fn hex(text: &str, length: usize) -> bool {
+    text.len() == length
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// A binding as the window reads it: the record, its plan as data, and what was observed.
+fn binding_view(binding: Binding) -> serde_json::Value {
+    let plan: serde_json::Value = serde_json::from_str(&binding.plan).unwrap_or_default();
+    let mut value = serde_json::to_value(&binding).unwrap_or_default();
+    value["plan"] = plan;
+    // No provider listing is read back from a launched session yet, so nothing is "verified".
+    value["verification"] = serde_json::Value::String("not_observed".into());
+    value
+}
+
+/// Records what a terminal started with. Whether the selection was applied is read from the host's
+/// own session record, never taken from the window: the session must carry this exact exclusion.
+#[tauri::command]
+async fn arsenal_terminal_bind(
+    arsenal: State<'_, Arsenal>,
+    configuration: State<'_, Configuration>,
+    link: State<'_, HostLink>,
+    request: BindRequest,
+) -> Result<serde_json::Value, ArsenalError> {
+    if !hex(&request.session_id, 32) || !hex(&request.config_hash, 64) {
+        return Err(ArsenalError::code("invalid_request"));
+    }
+    let store = arsenal.handle().map_err(ArsenalError::from)?;
+    let selected = configuration.selected_project();
+    let link = link.inner().clone();
+    blocking(move || {
+        let params = serde_json::json!({"sample": false});
+        let sessions = match link.call_attached("native_sessions_extended", params.clone()) {
+            Err(error) if error.code == "unknown_op" => {
+                link.call_attached("native_sessions", params)
+            }
+            answer => answer,
+        }
+        .map_err(host_failure)?;
+        let session = sessions
+            .as_array()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|item| item["id"].as_str() == Some(request.session_id.as_str()))
+            })
+            .cloned()
+            .ok_or(ArsenalError::code("session_unknown"))?;
+        let agent: AgentId = serde_json::from_value(session["agent_id"].clone())
+            .map_err(|_| ArsenalError::code("provider_unsupported"))?;
+        let project = session["project"]
+            .as_str()
+            .ok_or(ArsenalError::code("session_unknown"))?
+            .to_owned();
+        let terminal_request = TerminalRequest {
+            selection: request.selection.clone(),
+            agent_id: agent,
+            project: Some(project.clone()),
+        };
+        let (plan, _) = plan_now(&store, &link, selected.as_deref(), &terminal_request)?;
+        let launched = &session["arsenal"];
+        let applied = launched["config_hash"].as_str() == Some(request.config_hash.as_str())
+            && launched["selection"].as_str() == Some(request.selection.as_str());
+        let mut reason = if applied {
+            "Started with this exact exclusion. Whether the provider used it is not observed."
+                .to_owned()
+        } else if plan.enforcement.state != "available" {
+            plan.enforcement.reason.clone()
+        } else {
+            "Started without applying the selection.".to_owned()
+        };
+        if plan.config_hash != request.config_hash {
+            reason.push_str(" The configuration changed between the preview and this record.");
+        }
+        let binding = Binding {
+            session_id: request.session_id,
+            selection_id: plan.selection.clone(),
+            selection_name: plan.selection_name.clone(),
+            provider: plan.provider.clone(),
+            provider_version: plan.provider_version.clone(),
+            project,
+            config_hash: request.config_hash,
+            state: if applied { "applied" } else { "not_applied" }.to_owned(),
+            reason: reason.chars().take(500).collect(),
+            plan: serde_json::to_string(&plan).map_err(|_| ArsenalError::code("internal"))?,
+            created_at: i64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            )
+            .unwrap_or(0),
+        };
+        store
+            .lock()
+            .map_err(|_| ArsenalError::from(Error::Storage))?
+            .bind_terminal(&binding)?;
+        Ok(binding_view(binding))
+    })
+    .await
+}
+
+#[tauri::command]
+fn arsenal_terminal_bindings(
+    arsenal: State<'_, Arsenal>,
+) -> Result<Vec<serde_json::Value>, ArsenalError> {
+    arsenal
+        .with_store(|store| store.bindings())
+        .map(|bindings| bindings.into_iter().map(binding_view).collect())
+        .map_err(ArsenalError::from)
+}
+
+/// The selection this project last started a terminal of this provider with. A lookup by name only:
+/// nothing is read from the project folder.
+#[tauri::command]
+fn arsenal_project_selection(
+    arsenal: State<'_, Arsenal>,
+    request: ProjectSelectionRequest,
+) -> Result<Option<String>, ArsenalError> {
+    let provider =
+        provider_word(request.agent_id).ok_or(ArsenalError::code("provider_unsupported"))?;
+    if request.project.len() > 4096 {
+        return Err(ArsenalError::code("invalid_request"));
+    }
+    arsenal
+        .with_store(|store| store.project_selection(&request.project, provider))
+        .map_err(ArsenalError::from)
 }
 
 #[cfg(test)]
@@ -851,6 +1298,7 @@ mod tests {
         let second = import(&mut store, &mut candidate("skill", "copy", b"same"));
         let selection = store
             .save_selection(&store::SelectionInput {
+                composites: Vec::new(),
                 id: None,
                 name: "Frontend".into(),
                 provider: "claude_code".into(),
@@ -868,8 +1316,8 @@ mod tests {
             .unwrap();
         let preview = preview(&store, &selection.id).unwrap();
         assert_eq!(preview.status, "not_applied");
-        assert_eq!(preview.dependencies, "not_analysed");
-        assert_eq!(preview.items[0].compatibility, "unverified");
+        assert_eq!(preview.dependencies, "analysed");
+        assert_eq!(preview.items[0].compatibility, "supported");
         assert_eq!(preview.conflicts.len(), 1);
         assert_eq!(preview.conflicts[0].code, "duplicate_content");
     }
@@ -883,6 +1331,7 @@ mod tests {
         let second = import(&mut store, &mut brief);
         let selection = store
             .save_selection(&store::SelectionInput {
+                composites: Vec::new(),
                 id: None,
                 name: "Rules".into(),
                 provider: "claude_code".into(),
@@ -913,6 +1362,7 @@ mod tests {
         let design = import(&mut store, &mut candidate("skill", "design", b"one"));
         let selection = store
             .save_selection(&store::SelectionInput {
+                composites: Vec::new(),
                 id: None,
                 name: "Codex".into(),
                 provider: "codex".into(),
@@ -923,19 +1373,8 @@ mod tests {
             })
             .unwrap();
         let preview = preview(&store, &selection.id).unwrap();
-        assert_eq!(preview.items[0].compatibility, "unsupported");
-    }
-
-    #[test]
-    fn a_script_in_a_capability_is_partial_because_it_is_never_run() {
-        let files = vec![FileInfo {
-            path: "run.sh".to_owned(),
-            sha256: String::new(),
-            size: 0,
-        }];
-        let (label, reason) = compatibility("claude_code", "claude_code", &files);
-        assert_eq!(label, "partial");
-        assert!(reason.contains("never run"));
+        // Codex reads the same SKILL.md format; this copy still needs a qualified way in.
+        assert_eq!(preview.items[0].compatibility, "requires_qualification");
     }
 
     #[test]

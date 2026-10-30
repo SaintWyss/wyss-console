@@ -13,7 +13,25 @@ export type CandidateStatus =
 export type CandidateScope = 'user' | 'project';
 export type SourceState = 'read' | 'absent' | 'unreadable';
 export type Compatibility =
-  'supported' | 'partial' | 'unsupported' | 'unverified';
+  | 'supported'
+  | 'unsupported'
+  | 'unverified'
+  | 'requires_qualification'
+  | 'conflicting'
+  | 'missing_dependency';
+/** A compatibility word with the sentence that justifies it. */
+export interface Verdict {
+  status: Compatibility;
+  reason: string;
+}
+export type DependencyKind = 'tool' | 'mcp_server' | 'file';
+export type DependencyState = 'declared' | 'present' | 'missing' | 'unknown';
+/** Something a capability's files declare or point at. Read, never resolved by running it. */
+export interface Dependency {
+  kind: DependencyKind;
+  name: string;
+  state: DependencyState;
+}
 export type PreviewState = 'resolved' | 'missing' | 'revision_missing';
 export type ConflictCode =
   'name_collision' | 'duplicate_content' | 'instruction_overlap';
@@ -30,6 +48,11 @@ export interface Summary {
   revisions: number;
   tree_hash: string;
   updated_at: number;
+}
+
+/** A library entry with what its format means for its own provider. */
+export interface LibraryItem extends Summary {
+  compatibility: Verdict;
 }
 
 export interface RevisionInfo {
@@ -53,6 +76,8 @@ export interface Detail {
   revision: number;
   revisions: RevisionInfo[];
   files: FileInfo[];
+  compatibility: Verdict;
+  dependencies: Dependency[];
 }
 
 export interface FileText {
@@ -85,6 +110,8 @@ export interface Selection {
   name: string;
   provider: ArsenalProvider;
   items: Item[];
+  /** Keys of installed composites whose members stay exposed. */
+  composites: string[];
   created_at: number;
   updated_at: number;
 }
@@ -145,13 +172,27 @@ export interface CandidateDetail {
   review: Excluded[];
 }
 
+export type CompositeKind = 'gsd_core' | 'claude_plugin';
 export interface Composite {
+  key: string;
+  kind: CompositeKind;
+  provider: ArsenalProvider | 'shared';
   name: string;
   version: string;
+  description: string;
   artifacts: number;
   /** How many of this scan's entries are installed from it. */
   members: number;
   origin: string;
+  enabled: boolean | null;
+  methodology: boolean;
+  skills: string[];
+  agents: string[];
+  commands: number;
+  hooks: boolean;
+  mcp: boolean;
+  categories: [string, number][];
+  limitations: string[];
 }
 
 export interface DiscoverReply {
@@ -173,6 +214,7 @@ export interface PreviewItem {
   tree_hash: string | null;
   compatibility: Compatibility;
   reason: string;
+  dependencies: Dependency[];
 }
 
 export interface Conflict {
@@ -185,7 +227,83 @@ export interface Preview {
   status: 'not_applied';
   items: PreviewItem[];
   conflicts: Conflict[];
-  dependencies: 'not_analysed';
+  /** `partial` when the reading budget ran out before every item's files were read. */
+  dependencies: 'analysed' | 'partial';
+}
+
+export type EnforcementState =
+  'available' | 'unqualified' | 'version_unknown' | 'incomplete_inventory';
+export type PlanItemState = 'prepared' | 'rejected' | 'unsupported' | 'missing';
+export type PlanStatus = 'ready' | 'partial' | 'blocked';
+export type PlanConflictCode =
+  | 'name_collision'
+  | 'duplicate_content'
+  | 'instruction_overlap'
+  | 'methodology_conflict'
+  | 'scope_shadow';
+
+export interface PlanItem {
+  capability: string;
+  name: string;
+  kind: string;
+  provider: string;
+  revision: number | null;
+  pinned: boolean;
+  tree_hash: string | null;
+  state: PlanItemState;
+  reason: string;
+  compatibility: Verdict;
+  dependencies: Dependency[];
+}
+
+/** The configuration one terminal would start with, computed now. Never a claim that it is active. */
+export interface TerminalPlan {
+  selection: string;
+  selection_name: string;
+  provider: ArsenalProvider;
+  provider_version: string | null;
+  project: string | null;
+  status: PlanStatus;
+  can_apply: boolean;
+  enforcement: {
+    state: EnforcementState;
+    reason: string;
+    evidence: { qualified_version: string; checked_on: string } | null;
+  };
+  items: PlanItem[];
+  kept: string[];
+  excluded: string[];
+  untouched: string[];
+  composites: {
+    key: string;
+    name: string;
+    kind: CompositeKind;
+    kept: boolean;
+    methodology: boolean;
+    enabled: boolean | null;
+    skills: number;
+  }[];
+  conflicts: { code: PlanConflictCode; names: string[]; blocking: boolean }[];
+  warnings: string[];
+  overlay: string | null;
+  config_hash: string;
+}
+
+/** What a terminal started with, read from the host's own record right after the start. */
+export interface Binding {
+  session_id: string;
+  selection_id: string;
+  selection_name: string;
+  provider: ArsenalProvider;
+  provider_version: string | null;
+  project: string;
+  config_hash: string;
+  state: 'applied' | 'not_applied';
+  reason: string;
+  plan: TerminalPlan | null;
+  created_at: number;
+  /** No provider listing is read back yet, so nothing is ever `verified`. */
+  verification: 'not_observed';
 }
 
 /** The window's failure: a stable code, and for a blocked skill, the reason it is blocked. */
@@ -272,9 +390,18 @@ const CANDIDATE_SCOPES = ['user', 'project'] as const;
 const SOURCE_STATES = ['read', 'absent', 'unreadable'] as const;
 const COMPATIBILITIES = [
   'supported',
-  'partial',
   'unsupported',
   'unverified',
+  'requires_qualification',
+  'conflicting',
+  'missing_dependency',
+] as const;
+const DEPENDENCY_KINDS = ['tool', 'mcp_server', 'file'] as const;
+const DEPENDENCY_STATES = [
+  'declared',
+  'present',
+  'missing',
+  'unknown',
 ] as const;
 const PREVIEW_STATES = ['resolved', 'missing', 'revision_missing'] as const;
 const CONFLICT_CODES = [
@@ -301,8 +428,30 @@ export function parseSummary(value: unknown): Summary {
   };
 }
 
-export function parseSummaries(value: unknown): Summary[] {
-  return list(value, 'capability list', parseSummary);
+function parseVerdict(value: unknown): Verdict {
+  const v = record(value, 'compatibility');
+  return {
+    status: oneOf(v.status, COMPATIBILITIES, 'status'),
+    reason: text(v.reason, 'reason'),
+  };
+}
+
+function parseDependency(value: unknown): Dependency {
+  const v = record(value, 'dependency');
+  return {
+    kind: oneOf(v.kind, DEPENDENCY_KINDS, 'kind'),
+    name: text(v.name, 'name'),
+    state: oneOf(v.state, DEPENDENCY_STATES, 'state'),
+  };
+}
+
+export function parseLibraryItem(value: unknown): LibraryItem {
+  const v = record(value, 'library item');
+  return { ...parseSummary(v), compatibility: parseVerdict(v.compatibility) };
+}
+
+export function parseSummaries(value: unknown): LibraryItem[] {
+  return list(value, 'capability list', parseLibraryItem);
 }
 
 function parseRevisionInfo(value: unknown): RevisionInfo {
@@ -334,6 +483,8 @@ export function parseDetail(value: unknown): Detail {
     revision: integer(v.revision, 'revision'),
     revisions: list(v.revisions, 'revisions', parseRevisionInfo),
     files: list(v.files, 'files', parseFileInfo),
+    compatibility: parseVerdict(v.compatibility),
+    dependencies: list(v.dependencies, 'dependencies', parseDependency),
   };
 }
 
@@ -382,6 +533,9 @@ export function parseSelection(value: unknown): Selection {
     name: text(v.name, 'name'),
     provider: provider(v.provider, 'provider'),
     items: list(v.items, 'items', parseItem),
+    composites: list(v.composites, 'composites', (key) =>
+      text(key, 'composite'),
+    ),
     created_at: integer(v.created_at, 'created_at'),
     updated_at: integer(v.updated_at, 'updated_at'),
   };
@@ -455,14 +609,42 @@ export function parseCandidateDetail(value: unknown): CandidateDetail {
   };
 }
 
+const COMPOSITE_KINDS = ['gsd_core', 'claude_plugin'] as const;
+const strings = (value: unknown, what: string): string[] =>
+  list(value, what, (item) => text(item, what));
+
 function parseComposite(value: unknown): Composite {
   const v = record(value, 'composite');
   return {
+    key: text(v.key, 'key'),
+    kind: oneOf(v.kind, COMPOSITE_KINDS, 'kind'),
+    provider: oneOf(
+      v.provider,
+      ['claude_code', 'codex', 'shared'] as const,
+      'provider',
+    ),
     name: text(v.name, 'name'),
     version: text(v.version, 'version'),
+    description: text(v.description, 'description'),
     artifacts: integer(v.artifacts, 'artifacts'),
     members: integer(v.members, 'members'),
     origin: text(v.origin, 'origin'),
+    enabled: nullable(v.enabled, (on) => flag(on, 'enabled')),
+    methodology: flag(v.methodology, 'methodology'),
+    skills: strings(v.skills, 'skills'),
+    agents: strings(v.agents, 'agents'),
+    commands: integer(v.commands, 'commands'),
+    hooks: flag(v.hooks, 'hooks'),
+    mcp: flag(v.mcp, 'mcp'),
+    categories: list(v.categories, 'categories', (pair) => {
+      if (!Array.isArray(pair) || pair.length !== 2)
+        throw new ArsenalShapeError('category');
+      return [text(pair[0], 'category'), integer(pair[1], 'count')] as [
+        string,
+        number,
+      ];
+    }),
+    limitations: strings(v.limitations, 'limitations'),
   };
 }
 
@@ -509,6 +691,7 @@ export function parsePreview(value: unknown): Preview {
         tree_hash: nullable(i.tree_hash, (hash) => text(hash, 'tree_hash')),
         compatibility: oneOf(i.compatibility, COMPATIBILITIES, 'compatibility'),
         reason: text(i.reason, 'reason'),
+        dependencies: list(i.dependencies, 'dependencies', parseDependency),
       };
     }),
     conflicts: list(v.conflicts, 'conflicts', (conflict) => {
@@ -522,8 +705,128 @@ export function parsePreview(value: unknown): Preview {
     }),
     dependencies: oneOf(
       v.dependencies,
-      ['not_analysed'] as const,
+      ['analysed', 'partial'] as const,
       'dependencies',
     ),
   };
+}
+
+const ENFORCEMENT_STATES = [
+  'available',
+  'unqualified',
+  'version_unknown',
+  'incomplete_inventory',
+] as const;
+const PLAN_ITEM_STATES = [
+  'prepared',
+  'rejected',
+  'unsupported',
+  'missing',
+] as const;
+const PLAN_CONFLICTS = [
+  'name_collision',
+  'duplicate_content',
+  'instruction_overlap',
+  'methodology_conflict',
+  'scope_shadow',
+] as const;
+
+export function parseTerminalPlan(value: unknown): TerminalPlan {
+  const v = record(value, 'terminal plan');
+  const e = record(v.enforcement, 'enforcement');
+  return {
+    selection: text(v.selection, 'selection'),
+    selection_name: text(v.selection_name, 'selection_name'),
+    provider: provider(v.provider, 'provider'),
+    provider_version: nullable(v.provider_version, (t) => text(t, 'version')),
+    project: nullable(v.project, (t) => text(t, 'project')),
+    status: oneOf(v.status, ['ready', 'partial', 'blocked'] as const, 'status'),
+    can_apply: flag(v.can_apply, 'can_apply'),
+    enforcement: {
+      state: oneOf(e.state, ENFORCEMENT_STATES, 'enforcement state'),
+      reason: text(e.reason, 'enforcement reason'),
+      evidence: nullable(e.evidence, (evidence) => {
+        const x = record(evidence, 'evidence');
+        return {
+          qualified_version: text(x.qualified_version, 'qualified_version'),
+          checked_on: text(x.checked_on, 'checked_on'),
+        };
+      }),
+    },
+    items: list(v.items, 'plan items', (item) => {
+      const i = record(item, 'plan item');
+      return {
+        capability: text(i.capability, 'capability'),
+        name: text(i.name, 'name'),
+        kind: text(i.kind, 'kind'),
+        provider: text(i.provider, 'provider'),
+        revision: nullable(i.revision, (n) => integer(n, 'revision')),
+        pinned: flag(i.pinned, 'pinned'),
+        tree_hash: nullable(i.tree_hash, (t) => text(t, 'tree_hash')),
+        state: oneOf(i.state, PLAN_ITEM_STATES, 'state'),
+        reason: text(i.reason, 'reason'),
+        compatibility: parseVerdict(i.compatibility),
+        dependencies: list(i.dependencies, 'dependencies', parseDependency),
+      };
+    }),
+    kept: strings(v.kept, 'kept'),
+    excluded: strings(v.excluded, 'excluded'),
+    untouched: strings(v.untouched, 'untouched'),
+    composites: list(v.composites, 'plan composites', (item) => {
+      const c = record(item, 'plan composite');
+      return {
+        key: text(c.key, 'key'),
+        name: text(c.name, 'name'),
+        kind: oneOf(c.kind, COMPOSITE_KINDS, 'kind'),
+        kept: flag(c.kept, 'kept'),
+        methodology: flag(c.methodology, 'methodology'),
+        enabled: nullable(c.enabled, (on) => flag(on, 'enabled')),
+        skills: integer(c.skills, 'skills'),
+      };
+    }),
+    conflicts: list(v.conflicts, 'plan conflicts', (item) => {
+      const c = record(item, 'plan conflict');
+      return {
+        code: oneOf(c.code, PLAN_CONFLICTS, 'code'),
+        names: strings(c.names, 'names'),
+        blocking: flag(c.blocking, 'blocking'),
+      };
+    }),
+    warnings: strings(v.warnings, 'warnings'),
+    overlay: nullable(v.overlay, (t) => text(t, 'overlay')),
+    config_hash: text(v.config_hash, 'config_hash'),
+  };
+}
+
+export function parseBinding(value: unknown): Binding {
+  const v = record(value, 'binding');
+  return {
+    session_id: text(v.session_id, 'session_id'),
+    selection_id: text(v.selection_id, 'selection_id'),
+    selection_name: text(v.selection_name, 'selection_name'),
+    provider: provider(v.provider, 'provider'),
+    provider_version: nullable(v.provider_version, (t) => text(t, 'version')),
+    project: text(v.project, 'project'),
+    config_hash: text(v.config_hash, 'config_hash'),
+    state: oneOf(v.state, ['applied', 'not_applied'] as const, 'state'),
+    reason: text(v.reason, 'reason'),
+    // A record whose plan no longer parses still says what it was; its details are dropped.
+    plan: (() => {
+      try {
+        return parseTerminalPlan(v.plan);
+      } catch {
+        return null;
+      }
+    })(),
+    created_at: integer(v.created_at, 'created_at'),
+    verification: oneOf(
+      v.verification,
+      ['not_observed'] as const,
+      'verification',
+    ),
+  };
+}
+
+export function parseBindings(value: unknown): Binding[] {
+  return list(value, 'bindings', parseBinding);
 }

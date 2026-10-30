@@ -58,6 +58,9 @@ pub struct Session {
     pub error: Option<String>,
     pub restart_of: Option<String>,
     pub restarts: u32,
+    /// The Arsenal exclusion it was launched with; a restart launches with the same one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arsenal: Option<super::arsenal::ArsenalRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -272,6 +272,8 @@ struct Restart {
 struct Preview {
     agent_id: crate::native::catalogue::AgentId,
     profile_id: Option<String>,
+    #[serde(default)]
+    arsenal: Option<crate::native::arsenal::ArsenalLaunch>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -625,7 +627,11 @@ impl HostCore {
                 let request: Preview = params(value)?;
                 to_value(
                     self.native()?
-                        .preview(request.agent_id, request.profile_id.as_deref())
+                        .preview(
+                            request.agent_id,
+                            request.profile_id.as_deref(),
+                            request.arsenal.as_ref(),
+                        )
                         .map_err(|e| native_error(&e))?,
                 )
             }

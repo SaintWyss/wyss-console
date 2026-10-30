@@ -570,6 +570,26 @@ mod tests {
             "allow-configuration-project",
             "allow-configuration-select-project",
             "allow-configuration-template-export",
+            // Arsenal (AM1a): the library and its terminal plans. None takes a path: a
+            // capability is named by its identity, a project by the launcher's own list.
+            "allow-arsenal-discover",
+            "allow-arsenal-candidate",
+            "allow-arsenal-capabilities",
+            "allow-arsenal-capability",
+            "allow-arsenal-file",
+            "allow-arsenal-import",
+            "allow-arsenal-restore",
+            "allow-arsenal-presets",
+            "allow-arsenal-preset-write",
+            "allow-arsenal-preset-delete",
+            "allow-arsenal-selections",
+            "allow-arsenal-selection-write",
+            "allow-arsenal-selection-delete",
+            "allow-arsenal-preview",
+            "allow-arsenal-terminal-plan",
+            "allow-arsenal-terminal-bind",
+            "allow-arsenal-terminal-bindings",
+            "allow-arsenal-project-selection",
             // Native agent sessions and session profiles (F3, ADR 0035): an agent of the
             // closed catalogue, a project the native dialog returned, a session or a profile
             // of the desktop's own registry. None takes a command, an argument list, an

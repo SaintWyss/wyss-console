@@ -14,7 +14,10 @@ use crate::agentconfig::catalogue::{MAX_FILE_BYTES, MAX_FILES, MAX_TREE_BYTES, n
 
 const MAX_PATH_BYTES: usize = 256;
 const MAX_ITEMS: usize = 128;
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
+/// Most terminal bindings kept; the oldest go first.
+const MAX_BINDINGS: i64 = 500;
+const MAX_COMPOSITES: usize = 16;
 const SCHEMA: &str = "
 CREATE TABLE capability (
     id TEXT PRIMARY KEY,
@@ -83,6 +86,31 @@ END;
 CREATE TRIGGER blob_kept BEFORE DELETE ON blob BEGIN
     SELECT RAISE(ABORT, 'arsenal content is immutable');
 END;
+";
+/// Version 2: a selection names the composites it keeps; a terminal remembers the configuration it
+/// started with; a project remembers the selection it last used per provider.
+const SCHEMA_V2: &str = "
+ALTER TABLE selection ADD COLUMN composites TEXT NOT NULL DEFAULT '[]';
+CREATE TABLE terminal_binding (
+    session_id TEXT PRIMARY KEY,
+    selection_id TEXT NOT NULL,
+    selection_name TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    provider_version TEXT,
+    project TEXT NOT NULL,
+    config_hash TEXT NOT NULL,
+    state TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    plan TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE project_selection (
+    project TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    selection_id TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (project, provider)
+);
 ";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +275,8 @@ pub struct Selection {
     pub name: String,
     pub provider: String,
     pub items: Vec<Item>,
+    /// Keys of installed composites whose members this selection keeps exposed.
+    pub composites: Vec<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -258,6 +288,26 @@ pub struct SelectionInput {
     pub name: String,
     pub provider: String,
     pub items: Vec<Item>,
+    #[serde(default)]
+    pub composites: Vec<String>,
+}
+
+/// What a terminal started with, as Arsenal recorded it right after the start.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Binding {
+    pub session_id: String,
+    pub selection_id: String,
+    pub selection_name: String,
+    pub provider: String,
+    pub provider_version: Option<String>,
+    pub project: String,
+    pub config_hash: String,
+    /// `applied` (the host launched it with this exact configuration) or `not_applied`.
+    pub state: String,
+    pub reason: String,
+    /// The plan as computed at the start, in JSON.
+    pub plan: String,
+    pub created_at: i64,
 }
 
 /// The one connection of the Arsenal database. Every write takes the write lock first, so two
@@ -282,6 +332,14 @@ impl Store {
             0 => {
                 let tx = db.unchecked_transaction()?;
                 tx.execute_batch(SCHEMA)?;
+                tx.execute_batch(SCHEMA_V2)?;
+                tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
+                tx.commit()?;
+            }
+            // A version 1 library keeps every row; the new column starts empty for each selection.
+            1 => {
+                let tx = db.unchecked_transaction()?;
+                tx.execute_batch(SCHEMA_V2)?;
                 tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
                 tx.commit()?;
             }
@@ -518,7 +576,7 @@ impl Store {
 
     pub fn selections(&self) -> Result<Vec<Selection>, Error> {
         let mut statement = self.db.prepare(
-            "SELECT id, name, provider, items, created_at, updated_at FROM selection \
+            "SELECT id, name, provider, items, created_at, updated_at, composites FROM selection \
              ORDER BY name, id",
         )?;
         let rows = statement.query_map([], |row| {
@@ -529,15 +587,17 @@ impl Store {
                 row.get::<_, String>(3)?,
                 row.get::<_, i64>(4)?,
                 row.get::<_, i64>(5)?,
+                row.get::<_, String>(6)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, name, provider, items, created_at, updated_at) = row?;
+            let (id, name, provider, items, created_at, updated_at, composites) = row?;
             Ok(Selection {
                 id,
                 name,
                 provider,
                 items: decode_items(&items)?,
+                composites: serde_json::from_str(&composites).map_err(|_| Error::Corrupt)?,
                 created_at,
                 updated_at,
             })
@@ -551,34 +611,44 @@ impl Store {
             return Err(Error::Invalid);
         }
         check_items(&input.items)?;
+        check_composites(&input.composites)?;
         let items = encode_items(&input.items)?;
+        let composites = serde_json::to_string(&input.composites).map_err(|_| Error::Invalid)?;
         let now = now();
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         check_references(&tx, &input.items)?;
-        let id = match &input.id {
-            Some(id) => {
-                let changed = tx.execute(
-                    "UPDATE selection SET name = ?2, provider = ?3, items = ?4, updated_at = ?5 \
-                     WHERE id = ?1",
-                    params![id, input.name.trim(), input.provider, items, now],
+        let id =
+            match &input.id {
+                Some(id) => {
+                    let changed = tx.execute(
+                    "UPDATE selection SET name = ?2, provider = ?3, items = ?4, updated_at = ?5, \
+                     composites = ?6 WHERE id = ?1",
+                    params![id, input.name.trim(), input.provider, items, now, composites],
                 )?;
-                if changed == 0 {
-                    return Err(Error::NotFound);
+                    if changed == 0 {
+                        return Err(Error::NotFound);
+                    }
+                    id.clone()
                 }
-                id.clone()
-            }
-            None => {
-                let id = uuid::Uuid::new_v4().to_string();
-                tx.execute(
-                    "INSERT INTO selection (id, name, provider, items, created_at, updated_at) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-                    params![id, input.name.trim(), input.provider, items, now],
-                )?;
-                id
-            }
-        };
+                None => {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    tx.execute(
+                        "INSERT INTO selection (id, name, provider, items, created_at, updated_at, \
+                     composites) VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)",
+                        params![
+                            id,
+                            input.name.trim(),
+                            input.provider,
+                            items,
+                            now,
+                            composites
+                        ],
+                    )?;
+                    id
+                }
+            };
         tx.commit()?;
         self.selections()?
             .into_iter()
@@ -594,6 +664,134 @@ impl Store {
             return Err(Error::NotFound);
         }
         Ok(())
+    }
+
+    /// Every file of one revision, each checked against the digest it was stored under.
+    pub fn revision_content(&self, id: &str, number: i64) -> Result<Vec<(String, Vec<u8>)>, Error> {
+        let files = self.files(id, number)?;
+        let mut content = Vec::with_capacity(files.len());
+        let mut total = 0_usize;
+        for file in files {
+            let bytes = self.file(id, number, &file.path)?;
+            total += bytes.len();
+            if total > MAX_TREE_BYTES {
+                return Err(Error::Corrupt);
+            }
+            content.push((file.path, bytes));
+        }
+        Ok(content)
+    }
+
+    /// Records what a terminal started with. A session is recorded once; the oldest records go
+    /// when there are more than `MAX_BINDINGS`. The project remembers the selection for its provider.
+    pub fn bind_terminal(&mut self, binding: &Binding) -> Result<(), Error> {
+        let id_ok = binding.session_id.len() == 32
+            && binding
+                .session_id
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !id_ok
+            || !is_provider(&binding.provider)
+            || !matches!(binding.state.as_str(), "applied" | "not_applied")
+            || binding.project.len() > 4096
+            || binding.plan.len() > 1024 * 1024
+            || binding.reason.chars().count() > 500
+        {
+            return Err(Error::Invalid);
+        }
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let exists: bool = tx
+            .query_row(
+                "SELECT 1 FROM selection WHERE id = ?1",
+                [&binding.selection_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !exists {
+            return Err(Error::NotFound);
+        }
+        tx.execute(
+            "INSERT INTO terminal_binding (session_id, selection_id, selection_name, provider, \
+             provider_version, project, config_hash, state, reason, plan, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                binding.session_id,
+                binding.selection_id,
+                binding.selection_name,
+                binding.provider,
+                binding.provider_version,
+                binding.project,
+                binding.config_hash,
+                binding.state,
+                binding.reason,
+                binding.plan,
+                binding.created_at
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO project_selection (project, provider, selection_id, updated_at) \
+             VALUES (?1, ?2, ?3, ?4) ON CONFLICT (project, provider) \
+             DO UPDATE SET selection_id = excluded.selection_id, updated_at = excluded.updated_at",
+            params![
+                binding.project,
+                binding.provider,
+                binding.selection_id,
+                binding.created_at
+            ],
+        )?;
+        tx.execute(
+            "DELETE FROM terminal_binding WHERE session_id IN (SELECT session_id FROM \
+             terminal_binding ORDER BY created_at DESC, session_id LIMIT -1 OFFSET ?1)",
+            [MAX_BINDINGS],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn bindings(&self) -> Result<Vec<Binding>, Error> {
+        let mut statement = self.db.prepare(
+            "SELECT session_id, selection_id, selection_name, provider, provider_version, \
+             project, config_hash, state, reason, plan, created_at FROM terminal_binding \
+             ORDER BY created_at DESC, session_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(Binding {
+                session_id: row.get(0)?,
+                selection_id: row.get(1)?,
+                selection_name: row.get(2)?,
+                provider: row.get(3)?,
+                provider_version: row.get(4)?,
+                project: row.get(5)?,
+                config_hash: row.get(6)?,
+                state: row.get(7)?,
+                reason: row.get(8)?,
+                plan: row.get(9)?,
+                created_at: row.get(10)?,
+            })
+        })?;
+        let bindings = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(bindings)
+    }
+
+    /// The selection a project last started a terminal of this provider with, if it still exists.
+    pub fn project_selection(
+        &self,
+        project: &str,
+        provider: &str,
+    ) -> Result<Option<String>, Error> {
+        let id = self
+            .db
+            .query_row(
+                "SELECT p.selection_id FROM project_selection p JOIN selection s \
+                 ON s.id = p.selection_id WHERE p.project = ?1 AND p.provider = ?2",
+                params![project, provider],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(id)
     }
 
     fn summary(&self, id: &str) -> Result<Summary, Error> {
@@ -826,6 +1024,24 @@ fn check_references(tx: &Transaction<'_>, items: &[Item]) -> Result<(), Error> {
         if pinned_missing {
             return Err(Error::NotFound);
         }
+    }
+    Ok(())
+}
+
+/// Composite keys: a few, unique, short and plain.
+fn check_composites(keys: &[String]) -> Result<(), Error> {
+    let mut seen = HashSet::new();
+    if keys.len() > MAX_COMPOSITES
+        || keys.iter().any(|key| {
+            key.is_empty()
+                || key.len() > 128
+                || !key.bytes().all(|b| {
+                    b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b':' | b'@')
+                })
+                || !seen.insert(key.as_str())
+        })
+    {
+        return Err(Error::Invalid);
     }
     Ok(())
 }
@@ -1070,6 +1286,7 @@ mod tests {
         );
         let selection = store
             .save_selection(&SelectionInput {
+                composites: Vec::new(),
                 id: None,
                 name: "Codex frontend".into(),
                 provider: "codex".into(),
@@ -1082,6 +1299,7 @@ mod tests {
         assert_eq!(store.selections().unwrap(), vec![selection.clone()]);
         assert_eq!(
             store.save_selection(&SelectionInput {
+                composites: Vec::new(),
                 id: None,
                 name: "Other provider".into(),
                 provider: "opencode".into(),
@@ -1093,5 +1311,139 @@ mod tests {
         store.delete_preset(&renamed.id).unwrap();
         assert!(store.presets().unwrap().is_empty());
         assert_eq!(store.delete_preset(&renamed.id), Err(Error::NotFound));
+    }
+
+    #[test]
+    fn a_version_1_library_is_upgraded_in_place_and_keeps_its_rows() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(SCHEMA).unwrap();
+        db.execute_batch("PRAGMA user_version = 1;").unwrap();
+        db.execute(
+            "INSERT INTO selection (id, name, provider, items, created_at, updated_at) \
+             VALUES ('s1', 'Old', 'codex', '[]', 1, 1)",
+            [],
+        )
+        .unwrap();
+        let store = Store::open(db).unwrap();
+        let version: i64 = store
+            .db
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let selections = store.selections().unwrap();
+        assert_eq!(selections.len(), 1);
+        assert_eq!(selections[0].name, "Old");
+        assert!(selections[0].composites.is_empty());
+        assert!(store.bindings().unwrap().is_empty());
+    }
+
+    fn binding(session: &str, selection: &str, at: i64) -> Binding {
+        Binding {
+            session_id: session.to_owned(),
+            selection_id: selection.to_owned(),
+            selection_name: "Frontend".into(),
+            provider: "claude_code".into(),
+            provider_version: Some("2.1.314 (Claude Code)".into()),
+            project: "/home/u/app".into(),
+            config_hash: "a".repeat(64),
+            state: "not_applied".into(),
+            reason: "unqualified".into(),
+            plan: "{}".into(),
+            created_at: at,
+        }
+    }
+
+    #[test]
+    fn a_terminal_binding_is_recorded_once_remembers_the_project_and_is_bounded() {
+        let mut store = Store::open(Connection::open_in_memory().unwrap()).unwrap();
+        let selection = store
+            .save_selection(&SelectionInput {
+                id: None,
+                name: "Frontend".into(),
+                provider: "claude_code".into(),
+                items: Vec::new(),
+                composites: vec!["gsd_core@1.15.0".into()],
+            })
+            .unwrap();
+        assert_eq!(selection.composites, ["gsd_core@1.15.0"]);
+        let session = "0123456789abcdef0123456789abcdef";
+        store
+            .bind_terminal(&binding(session, &selection.id, 10))
+            .unwrap();
+        // The same session is not recorded twice, and an unknown selection is refused.
+        assert!(
+            store
+                .bind_terminal(&binding(session, &selection.id, 11))
+                .is_err()
+        );
+        assert_eq!(
+            store.bind_terminal(&binding(&"b".repeat(32), "nope", 12)),
+            Err(Error::NotFound)
+        );
+        for bad in [
+            Binding {
+                session_id: "../x".into(),
+                ..binding(session, &selection.id, 1)
+            },
+            Binding {
+                state: "verified".into(),
+                ..binding(&"c".repeat(32), &selection.id, 1)
+            },
+            Binding {
+                provider: "opencode".into(),
+                ..binding(&"d".repeat(32), &selection.id, 1)
+            },
+        ] {
+            assert_eq!(store.bind_terminal(&bad), Err(Error::Invalid));
+        }
+        assert_eq!(
+            store
+                .project_selection("/home/u/app", "claude_code")
+                .unwrap(),
+            Some(selection.id.clone())
+        );
+        assert_eq!(
+            store.project_selection("/home/u/app", "codex").unwrap(),
+            None
+        );
+        for index in 0..MAX_BINDINGS + 5 {
+            store
+                .bind_terminal(&binding(
+                    &format!("{index:032x}"),
+                    &selection.id,
+                    100 + index,
+                ))
+                .unwrap();
+        }
+        let kept = store.bindings().unwrap();
+        assert_eq!(kept.len() as i64, MAX_BINDINGS);
+        assert_eq!(kept[0].session_id, format!("{:032x}", MAX_BINDINGS + 4));
+        // Deleting the selection leaves the record and forgets the project's choice.
+        store.delete_selection(&selection.id).unwrap();
+        assert_eq!(
+            store
+                .project_selection("/home/u/app", "claude_code")
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn composite_keys_are_checked() {
+        let mut store = Store::open(Connection::open_in_memory().unwrap()).unwrap();
+        for composites in [
+            vec!["a b".to_owned()],
+            vec!["x".to_owned(), "x".to_owned()],
+            (0..17).map(|i| format!("k{i}")).collect(),
+        ] {
+            let input = SelectionInput {
+                id: None,
+                name: "S".into(),
+                provider: "codex".into(),
+                items: Vec::new(),
+                composites,
+            };
+            assert_eq!(store.save_selection(&input), Err(Error::Invalid));
+        }
     }
 }

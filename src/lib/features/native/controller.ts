@@ -23,6 +23,7 @@ import {
   readLauncher,
   readReadiness,
   saveHandoff,
+  type ArsenalStart,
   type HandoffBrief,
   readNativeSessions,
   readProfiles,
@@ -46,13 +47,18 @@ export interface NativeClient {
   readiness(): Promise<Readiness>;
   sessions(sample: boolean): Promise<NativeSession[]>;
   profiles(): Promise<Profile[]>;
-  preview(agent: AgentId, profile: string | null): Promise<Preview>;
+  preview(
+    agent: AgentId,
+    profile: string | null,
+    arsenal?: ArsenalStart | null,
+  ): Promise<Preview>;
   start(
     agent: AgentId,
     project: string,
     profile: string | null,
     brief?: string | null,
     preview?: Pick<Preview, 'plan_token' | 'provider_version'> | null,
+    arsenal?: ArsenalStart | null,
   ): Promise<StartReply>;
   prepareHandoff(id: string): Promise<HandoffBrief>;
   saveHandoff(text: string): Promise<boolean>;
@@ -79,8 +85,15 @@ const desktopClient: NativeClient = {
   sessions: readNativeSessions,
   profiles: readProfiles,
   preview: previewProfile,
-  start: (agent, project, profile, brief = null, preview = null) =>
-    startNative(agent, project, profile, FIRST_SIZE, brief, preview),
+  start: (
+    agent,
+    project,
+    profile,
+    brief = null,
+    preview = null,
+    arsenal = null,
+  ) =>
+    startNative(agent, project, profile, FIRST_SIZE, brief, preview, arsenal),
   prepareHandoff,
   saveHandoff,
   restart: (id) => restartNative(id, FIRST_SIZE),
@@ -560,8 +573,14 @@ export class NativeController {
       return null;
     }
   }
-  preview(agent: AgentId, profile: string | null): Promise<Preview> {
-    return this.client.preview(agent, profile);
+  preview(
+    agent: AgentId,
+    profile: string | null,
+    arsenal: ArsenalStart | null = null,
+  ): Promise<Preview> {
+    return arsenal
+      ? this.client.preview(agent, profile, arsenal)
+      : this.client.preview(agent, profile);
   }
 
   /** Starts the agent; the window gets its terminal. One start at a time. */
@@ -572,26 +591,57 @@ export class NativeController {
     brief: string | null = null,
     preview: Preview | null = null,
   ): Promise<boolean> {
-    if (this.starting || this.disposed) return false;
-    if (this.refuseM9(agent)) return false;
+    return (
+      (await this.startReply(agent, project, profile, brief, preview, null)) !==
+      null
+    );
+  }
+
+  /**
+   * Starts the agent with an Arsenal selection named, and returns the reply so the caller can
+   * record what the terminal carries. The desktop rebuilds the exclusion; the window never sends it.
+   */
+  async startWithArsenal(
+    agent: AgentId,
+    project: string,
+    profile: string | null,
+    preview: Preview | null,
+    arsenal: ArsenalStart | null,
+  ): Promise<StartReply | null> {
+    return this.startReply(agent, project, profile, null, preview, arsenal);
+  }
+
+  private async startReply(
+    agent: AgentId,
+    project: string,
+    profile: string | null,
+    brief: string | null,
+    preview: Preview | null,
+    arsenal: ArsenalStart | null,
+  ): Promise<StartReply | null> {
+    if (this.starting || this.disposed) return null;
+    if (this.refuseM9(agent)) return null;
     this.starting = true;
     this.failure = null;
     this.beginMutation();
     this.emit();
     try {
-      const reply = await this.client.start(
-        agent,
-        project,
-        profile,
-        brief,
-        preview,
-      );
-      if (this.disposed) return false;
+      const reply = arsenal
+        ? await this.client.start(
+            agent,
+            project,
+            profile,
+            brief,
+            preview,
+            arsenal,
+          )
+        : await this.client.start(agent, project, profile, brief, preview);
+      if (this.disposed) return null;
       this.afterStart(reply);
-      return true;
+      return reply;
     } catch (error) {
       this.storeFailed(error, START_UNRECORDED);
-      return false;
+      return null;
     } finally {
       this.starting = false;
       this.emit();

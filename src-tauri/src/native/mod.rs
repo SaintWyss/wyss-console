@@ -1,5 +1,6 @@
 //! Native agent sessions (F3): the launcher, the registry and the profiles. Desktop only: like
 //! the configuration engine, it is not in the library the authority links (C-02).
+pub mod arsenal;
 pub mod capabilities;
 pub mod catalogue;
 pub mod commands;

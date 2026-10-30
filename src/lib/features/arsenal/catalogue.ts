@@ -4,7 +4,7 @@ import type {
   CandidateKind,
   CandidateStatus,
   Compatibility,
-  Summary,
+  LibraryItem,
 } from '../../contracts/arsenal';
 
 export type ProviderFilter = ArsenalProvider | 'all';
@@ -34,20 +34,18 @@ export const IMPORTABLE_KINDS: readonly CandidateKind[] = [
 ];
 
 /**
- * Compatibility of an imported capability with its provider. The format is known for the kinds the
- * library holds; whether a launched session uses it is not verified until AM1b.
+ * Compatibility of an imported capability with its own provider, as the desktop judged it from its
+ * files. Whether a terminal uses it is the terminal plan's question, never this one's.
  */
-export function libraryCompatibility(item: Summary): Compatibility {
-  return IMPORTABLE_KINDS.includes(item.kind as CandidateKind)
-    ? 'unverified'
-    : 'unsupported';
+export function libraryCompatibility(item: LibraryItem): Compatibility {
+  return item.compatibility.status;
 }
 
 /** Filters the library. Matching is plain text over name, description and origin. */
 export function filterLibrary(
-  items: readonly Summary[],
+  items: readonly LibraryItem[],
   filter: LibraryFilter,
-): Summary[] {
+): LibraryItem[] {
   const needle = filter.query.trim().toLocaleLowerCase();
   return items.filter(
     (item) =>
@@ -64,7 +62,7 @@ export function filterLibrary(
 }
 
 /** The sources present in the library, in the order they first appear. */
-export function librarySources(items: readonly Summary[]): string[] {
+export function librarySources(items: readonly LibraryItem[]): string[] {
   return [...new Set(items.map((item) => item.source))];
 }
 

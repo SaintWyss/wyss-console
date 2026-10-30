@@ -1,5 +1,6 @@
 import type {
   ArsenalProvider,
+  Binding,
   CandidateDetail,
   Detail,
   DiscoverReply,
@@ -7,8 +8,8 @@ import type {
   Item,
   Preset,
   Preview,
+  LibraryItem,
   Selection,
-  Summary,
 } from '../../contracts/arsenal';
 import {
   arsenalClient,
@@ -17,7 +18,13 @@ import {
 } from '../../desktop/arsenal-client';
 import { failureMessage, importMessage } from './messages';
 
-export type ArsenalTab = 'library' | 'discover' | 'presets' | 'selections';
+export type ArsenalTab =
+  | 'library'
+  | 'discover'
+  | 'composites'
+  | 'presets'
+  | 'selections'
+  | 'terminals';
 
 export interface Notice {
   tone: 'ok' | 'error';
@@ -28,7 +35,7 @@ export interface ArsenalState {
   tab: ArsenalTab;
   /** `unavailable`: the library could not be opened at all. `failed`: a read did not come back whole. */
   phase: 'idle' | 'loading' | 'ready' | 'unavailable' | 'failed';
-  library: Summary[];
+  library: LibraryItem[];
   opened: Detail | null;
   file: FileText | null;
   discover: DiscoverReply | null;
@@ -41,6 +48,8 @@ export interface ArsenalState {
   presets: Preset[];
   selections: Selection[];
   preview: Preview | null;
+  /** What started terminals carry, newest first. */
+  bindings: Binding[];
 }
 
 /**
@@ -64,6 +73,7 @@ export class ArsenalController {
     presets: [],
     selections: [],
     preview: null,
+    bindings: [],
   };
   private visible = false;
   private disposed = false;
@@ -96,8 +106,17 @@ export class ArsenalController {
   setTab(tab: ArsenalTab) {
     this.set({ tab, notice: null });
     if (tab === 'presets') void this.loadPresets();
-    if (tab === 'selections') void this.loadSelections();
-    if (tab === 'discover' && this.state.discover === null)
+    if (tab === 'selections') {
+      void this.loadSelections();
+      void this.loadPresets();
+      // The composites a selection may keep come from the scan.
+      if (this.state.discover === null) void this.discover();
+    }
+    if (tab === 'terminals') void this.loadBindings();
+    if (
+      (tab === 'discover' || tab === 'composites') &&
+      this.state.discover === null
+    )
       void this.discover();
   }
 
@@ -298,6 +317,7 @@ export class ArsenalController {
     name: string;
     provider: ArsenalProvider;
     items: Item[];
+    composites: string[];
   }) {
     this.set({ busy: 'save', notice: null });
     try {
@@ -347,6 +367,14 @@ export class ArsenalController {
         preview: null,
         notice: { tone: 'error', text: failureMessage(error) },
       });
+    }
+  }
+
+  async loadBindings() {
+    try {
+      this.set({ bindings: await this.client.bindings() });
+    } catch (error) {
+      this.set({ notice: { tone: 'error', text: failureMessage(error) } });
     }
   }
 }

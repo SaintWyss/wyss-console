@@ -6,6 +6,8 @@
     CandidateScope,
     CandidateStatus,
     Compatibility,
+    Composite,
+    Dependency,
     Item,
     Preset,
     Selection,
@@ -40,8 +42,10 @@
   const TABS: { id: ArsenalTab; label: string }[] = [
     { id: 'library', label: 'Library' },
     { id: 'discover', label: 'Discover' },
+    { id: 'composites', label: 'Composites' },
     { id: 'presets', label: 'Presets' },
     { id: 'selections', label: 'Selections' },
+    { id: 'terminals', label: 'Terminals' },
   ];
   const PROVIDER_LABEL: Record<ArsenalProvider, string> = {
     claude_code: 'Claude Code',
@@ -67,9 +71,22 @@
   };
   const COMPATIBILITY_LABEL: Record<Compatibility, string> = {
     supported: 'Supported',
-    partial: 'Partial',
     unsupported: 'Unsupported',
     unverified: 'Unverified',
+    requires_qualification: 'Needs provider qualification',
+    conflicting: 'Conflicting',
+    missing_dependency: 'Missing dependency',
+  };
+  const DEPENDENCY_KIND: Record<Dependency['kind'], string> = {
+    tool: 'Tool',
+    mcp_server: 'MCP server',
+    file: 'File',
+  };
+  const DEPENDENCY_STATE: Record<Dependency['state'], string> = {
+    declared: 'declared, not checked offline',
+    present: 'present',
+    missing: 'missing',
+    unknown: 'unknown',
   };
   /** Why a read-only kind is listed and never copied. Said once, next to the entry. */
   const READ_ONLY_NOTE: Record<string, string> = {
@@ -112,6 +129,8 @@
     name_collision: 'Same name',
     duplicate_content: 'Same content',
     instruction_overlap: 'Two rules for one provider',
+    methodology_conflict: 'Two methodologies',
+    scope_shadow: 'Installed in account and project',
   };
 
   // Library filters
@@ -138,7 +157,9 @@
     name: '',
     provider: 'claude_code' as ArsenalProvider,
     items: [] as Item[],
+    composites: [] as string[],
   });
+  let startFromPreset = $state<string>('');
   let selectionError = $state<string | null>(null);
   let confirmDelete = $state<string | null>(null);
 
@@ -185,6 +206,59 @@
     return inItems(items, id)
       ? items.filter((item) => item.capability !== id)
       : [...items, { capability: id, revision: null }];
+  }
+  /** Pins an item to a revision, or lets it follow the current one. */
+  function pin(items: Item[], id: string, value: string): Item[] {
+    return items.map((item) =>
+      item.capability === id
+        ? { ...item, revision: value === 'current' ? null : Number(value) }
+        : item,
+    );
+  }
+  function revisionsOf(id: string): number[] {
+    const count =
+      arsenal.library.find((item) => item.id === id)?.revisions ?? 0;
+    return Array.from({ length: count }, (_, index) => count - index);
+  }
+  function compositeFor(provider: ArsenalProvider): Composite[] {
+    return (arsenal.discover?.composites ?? []).filter(
+      (composite) =>
+        composite.kind === 'gsd_core' &&
+        (composite.provider === provider || composite.provider === 'shared'),
+    );
+  }
+  function toggleComposite(key: string) {
+    selectionDraft.composites = selectionDraft.composites.includes(key)
+      ? selectionDraft.composites.filter((entry) => entry !== key)
+      : [...selectionDraft.composites, key];
+  }
+  function applyPreset(id: string) {
+    const preset = arsenal.presets.find((entry) => entry.id === id);
+    if (!preset) return;
+    const known = new Set(selectionDraft.items.map((item) => item.capability));
+    selectionDraft.items = [
+      ...selectionDraft.items,
+      ...preset.items
+        .filter((item) => !known.has(item.capability))
+        .map((item) => ({ ...item })),
+    ];
+    startFromPreset = '';
+  }
+  function copySelection(selection: Selection) {
+    selectionDraft = {
+      id: null,
+      name: `Copy of ${selection.name}`,
+      provider: selection.provider,
+      items: selection.items.map((item) => ({ ...item })),
+      composites: [...selection.composites],
+    };
+    selectionError = null;
+  }
+  function when(seconds: number): string {
+    return new Date(seconds * 1000).toLocaleString(undefined, {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
   }
   function nameOf(id: string): string {
     return (
@@ -237,6 +311,7 @@
       name: selection.name,
       provider: selection.provider,
       items: selection.items.map((item) => ({ ...item })),
+      composites: [...selection.composites],
     };
     selectionError = null;
   }
@@ -253,6 +328,7 @@
         name: '',
         provider: selectionDraft.provider,
         items: [],
+        composites: [],
       };
     }
   }
@@ -380,9 +456,9 @@
             >Compatibility
             <select bind:value={libraryCompat}>
               <option value="all">All</option>
-              <option value="unverified">Unverified</option>
               <option value="supported">Supported</option>
-              <option value="partial">Partial</option>
+              <option value="unverified">Unverified</option>
+              <option value="missing_dependency">Missing dependency</option>
               <option value="unsupported">Unsupported</option>
             </select>
           </label>
@@ -441,11 +517,42 @@
               <dd><code>{opened.summary.origin}</code></dd>
               <dt>Content</dt>
               <dd><code>{opened.summary.tree_hash.slice(0, 16)}</code></dd>
+              <dt>Compatibility</dt>
+              <dd>
+                <span class="pill"
+                  >{COMPATIBILITY_LABEL[opened.compatibility.status]}</span
+                >
+                {opened.compatibility.reason}
+              </dd>
               <dt>Use in a session</dt>
               <dd>
-                Not applied. Use in a launched session is not verified yet.
+                Only through a terminal plan: Workspace shows, per terminal,
+                whether this revision is installed and whether it can be
+                applied.
               </dd>
             </dl>
+            <h4>Dependencies</h4>
+            {#if opened.dependencies.length === 0}
+              <p class="arsenal-muted">
+                Its files declare and point at nothing Arsenal can check.
+              </p>
+            {:else}
+              <ul class="arsenal-files" aria-label="Dependencies">
+                {#each opened.dependencies as dep (dep.kind + dep.name)}
+                  <li>
+                    <span
+                      >{DEPENDENCY_KIND[dep.kind]}:
+                      <code>{dep.name}</code></span
+                    >
+                    <span
+                      class={dep.state === 'missing'
+                        ? 'arsenal-warn'
+                        : 'arsenal-muted'}>{DEPENDENCY_STATE[dep.state]}</span
+                    >
+                  </li>
+                {/each}
+              </ul>
+            {/if}
 
             <h4>Files in revision {opened.revision}</h4>
             <ul class="arsenal-files">
@@ -594,19 +701,17 @@
             </p>
           {/if}
 
-          {#each arsenal.discover.composites as composite (composite.name)}
-            <section class="arsenal-detail" aria-label="Composite collection">
-              <h3>{composite.name}</h3>
-              <p class="arsenal-muted">
-                {composite.members} linked here · {composite.artifacts} artifacts
-                in the package · read only
-              </p>
-              <p>
-                This collection is installed by its own tool. Its members are
-                listed below and are not copied.
-              </p>
-            </section>
-          {/each}
+          {#if arsenal.discover.composites.length > 0}
+            <p class="arsenal-muted">
+              {arsenal.discover.composites.length} composite collection(s) installed.
+              <button
+                class="action"
+                type="button"
+                onclick={() => controller.setTab('composites')}
+                >Open Composites</button
+              >
+            </p>
+          {/if}
 
           {#if arsenal.discover.candidates.length === 0}
             <p class="arsenal-empty">
@@ -769,6 +874,160 @@
       </div>
     {/if}
 
+    {#if arsenal.tab === 'composites'}
+      <div
+        id="arsenal-panel-composites"
+        role="tabpanel"
+        aria-labelledby="arsenal-tab-composites"
+        class="arsenal-panel"
+      >
+        <p class="configuration-note">
+          A composite is installed by its own tool: GSD Core by its installer, a
+          plugin by Claude Code. Arsenal describes it and never copies it.
+        </p>
+        {#if arsenal.discovering && arsenal.discover === null}
+          <p role="status">Reading installed composites…</p>
+        {:else if arsenal.discover && arsenal.discover.composites.length === 0}
+          <p class="arsenal-empty">
+            No composite collection is installed in your Claude or Codex
+            folders.
+          </p>
+        {/if}
+        {#each arsenal.discover?.composites ?? [] as composite (composite.key)}
+          <section class="arsenal-detail" aria-label={composite.name}>
+            <h3>{composite.name}</h3>
+            <p class="arsenal-badges">
+              <span class="pill"
+                >{composite.kind === 'gsd_core'
+                  ? 'GSD Core payload'
+                  : 'Claude Code plugin'}</span
+              >
+              {#if composite.version}<span class="pill"
+                  >Version {composite.version}</span
+                >{/if}
+              {#if composite.enabled !== null}<span class="pill"
+                  >{composite.enabled ? 'Enabled' : 'Disabled'} in your settings</span
+                >{/if}
+              {#if composite.methodology}<span class="pill">Methodology</span
+                >{/if}
+              <span class="pill">Not importable</span>
+            </p>
+            {#if composite.description}<p>{composite.description}</p>{/if}
+            <dl class="arsenal-facts">
+              <dt>Source</dt>
+              <dd><code>{composite.origin}</code></dd>
+              <dt>Members</dt>
+              <dd>
+                {composite.skills.length} skills · {composite.agents.length} agents
+                {#if composite.commands > 0}· {composite.commands} commands{/if}
+                {#if composite.artifacts > 0}· {composite.artifacts} artifacts in
+                  its manifest{/if}
+              </dd>
+              <dt>Runs code</dt>
+              <dd>
+                {composite.hooks
+                  ? 'Yes: it registers hooks.'
+                  : composite.kind === 'gsd_core'
+                    ? 'Its hooks and engine belong to the GSD Core install.'
+                    : 'No hooks declared.'}
+                {composite.mcp ? ' It declares MCP servers.' : ''}
+              </dd>
+            </dl>
+            {#if composite.categories.length > 0}
+              <h4>Manifest</h4>
+              <ul class="arsenal-files">
+                {#each composite.categories as [category, count] (category)}
+                  <li>
+                    <span>{category.replaceAll('_', ' ')}</span><span
+                      class="arsenal-muted">{count}</span
+                    >
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            <h4>Limits</h4>
+            <ul class="arsenal-files">
+              {#each composite.limitations as line (line)}<li>{line}</li>{/each}
+            </ul>
+            {#if composite.skills.length > 0}
+              <details>
+                <summary>Skills ({composite.skills.length})</summary>
+                <p class="arsenal-member-list">{composite.skills.join(', ')}</p>
+              </details>
+            {/if}
+            {#if composite.agents.length > 0}
+              <details>
+                <summary>Agents ({composite.agents.length})</summary>
+                <p class="arsenal-member-list">{composite.agents.join(', ')}</p>
+              </details>
+            {/if}
+          </section>
+        {/each}
+      </div>
+    {/if}
+
+    {#if arsenal.tab === 'terminals'}
+      <div
+        id="arsenal-panel-terminals"
+        role="tabpanel"
+        aria-labelledby="arsenal-tab-terminals"
+        class="arsenal-panel"
+      >
+        <p class="configuration-note">
+          What each terminal started with, recorded right after its start from
+          the host's own session record. Applied means the host launched it with
+          that exact exclusion; whether the provider then used each skill is not
+          observed.
+        </p>
+        <button
+          class="action"
+          type="button"
+          onclick={() => controller.loadBindings()}>Refresh</button
+        >
+        {#if arsenal.bindings.length === 0}
+          <p class="arsenal-empty">
+            No terminal has started with a selection yet. Choose one in
+            Workspace when starting Claude Code or Codex.
+          </p>
+        {/if}
+        <ul class="arsenal-list" aria-label="Terminal configurations">
+          {#each arsenal.bindings as binding (binding.session_id)}
+            <li class="arsenal-detail">
+              <h3>{binding.selection_name}</h3>
+              <p class="arsenal-badges">
+                <span class="pill"
+                  >{binding.state === 'applied'
+                    ? 'APPLIED'
+                    : 'NOT APPLIED'}</span
+                >
+                <span class="pill">Use not observed</span>
+                <span class="pill">{PROVIDER_LABEL[binding.provider]}</span>
+                {#if binding.provider_version}<span class="pill"
+                    >{binding.provider_version}</span
+                  >{/if}
+              </p>
+              <p>{binding.reason}</p>
+              <p class="arsenal-muted">
+                <code>{binding.project}</code> · {when(binding.created_at)} · session
+                <code>{binding.session_id.slice(0, 8)}</code>
+              </p>
+              {#if binding.plan}
+                <p class="arsenal-muted">
+                  {binding.plan.items.filter((i) => i.state === 'prepared')
+                    .length} prepared · {binding.plan.excluded.length} installed skills
+                  {binding.state === 'applied'
+                    ? 'switched off'
+                    : 'would have been switched off'} · {binding.plan.kept
+                    .length}
+                  kept
+                </p>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+
     {#if arsenal.tab === 'presets'}
       <div
         id="arsenal-panel-presets"
@@ -881,9 +1140,26 @@
               <ul class="arsenal-files" aria-label="Inspect preset">
                 {#each presetDraft.items as item (item.capability)}
                   <li>
-                    {nameOf(item.capability)} · {item.revision === null
-                      ? 'follows current revision'
-                      : `pinned to revision ${item.revision}`}
+                    <span>{nameOf(item.capability)}</span>
+                    <label class="arsenal-pin"
+                      >Revision
+                      <select
+                        value={item.revision === null
+                          ? 'current'
+                          : String(item.revision)}
+                        onchange={(event) =>
+                          (presetDraft.items = pin(
+                            presetDraft.items,
+                            item.capability,
+                            event.currentTarget.value,
+                          ))}
+                      >
+                        <option value="current">Follow current</option>
+                        {#each revisionsOf(item.capability) as number (number)}
+                          <option value={String(number)}>Pin {number}</option>
+                        {/each}
+                      </select>
+                    </label>
                   </li>
                 {/each}
               </ul>
@@ -921,6 +1197,7 @@
                   name: '',
                   provider: 'claude_code',
                   items: [],
+                  composites: [],
                 };
                 controller.clearNotice();
               }}>New selection</button
@@ -952,6 +1229,12 @@
                     type="button"
                     onclick={() => controller.loadPreview(selection.id)}
                     >Preview {selection.name}</button
+                  >
+                  <button
+                    class="action"
+                    type="button"
+                    onclick={() => copySelection(selection)}
+                    >Duplicate {selection.name}</button
                   >
                   {#if confirmDelete === selection.id}
                     <button
@@ -1026,6 +1309,82 @@
                 </label>
               {/each}
             </fieldset>
+            {#if arsenal.presets.length > 0}
+              <label
+                >Add a preset's capabilities
+                <select
+                  bind:value={startFromPreset}
+                  onchange={() => applyPreset(startFromPreset)}
+                >
+                  <option value="">Choose a preset…</option>
+                  {#each arsenal.presets as preset (preset.id)}
+                    <option value={preset.id}>{preset.name}</option>
+                  {/each}
+                </select>
+              </label>
+            {/if}
+            {#if selectionDraft.items.length > 0}
+              <ul
+                class="arsenal-files"
+                aria-label="Revisions in this selection"
+              >
+                {#each selectionDraft.items as item (item.capability)}
+                  <li>
+                    <span>{nameOf(item.capability)}</span>
+                    <label class="arsenal-pin"
+                      >Revision
+                      <select
+                        value={item.revision === null
+                          ? 'current'
+                          : String(item.revision)}
+                        onchange={(event) =>
+                          (selectionDraft.items = pin(
+                            selectionDraft.items,
+                            item.capability,
+                            event.currentTarget.value,
+                          ))}
+                      >
+                        <option value="current">Follow current</option>
+                        {#each revisionsOf(item.capability) as number (number)}
+                          <option value={String(number)}>Pin {number}</option>
+                        {/each}
+                      </select>
+                    </label>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            <fieldset>
+              <legend>Keep installed composites</legend>
+              {#if arsenal.discover === null}
+                <p class="arsenal-muted">
+                  {arsenal.discovering
+                    ? 'Reading installed composites…'
+                    : 'Installed composites are read from Discover.'}
+                </p>
+              {:else if compositeFor(selectionDraft.provider).length === 0}
+                <p class="arsenal-muted">
+                  No composite installed for this provider. Plugins are not
+                  listed here: their skills are switched as a whole, outside
+                  Arsenal.
+                </p>
+              {/if}
+              {#each compositeFor(selectionDraft.provider) as composite (composite.key)}
+                <label class="arsenal-check">
+                  <input
+                    type="checkbox"
+                    checked={selectionDraft.composites.includes(composite.key)}
+                    onchange={() => toggleComposite(composite.key)}
+                  />
+                  {composite.name}
+                  <span class="arsenal-muted"
+                    >{composite.skills.length} skills stay exposed{composite.methodology
+                      ? ' · methodology'
+                      : ''}</span
+                  >
+                </label>
+              {/each}
+            </fieldset>
             {#if selectionError}<p
                 id="selection-error"
                 role="alert"
@@ -1062,6 +1421,12 @@
                       >{COMPATIBILITY_LABEL[item.compatibility]}</span
                     >
                     <span class="arsenal-muted">{item.reason}</span>
+                    {#each item.dependencies.filter((dep) => dep.state === 'missing') as dep (dep.kind + dep.name)}
+                      <span class="arsenal-warn"
+                        >Missing {DEPENDENCY_KIND[dep.kind].toLowerCase()}
+                        {dep.name}</span
+                      >
+                    {/each}
                   {:else if item.state === 'revision_missing'}
                     <span class="arsenal-warn">Pinned revision is gone.</span>
                   {:else}
@@ -1085,7 +1450,13 @@
               </ul>
             {/if}
             <p class="arsenal-muted">
-              Dependencies: not analysed in this version.
+              {preview.dependencies === 'analysed'
+                ? 'Dependencies were read from every file. Tools are declared, not checked; MCP servers are checked per terminal.'
+                : 'Some items were too large to read here; their dependencies are not listed.'}
+            </p>
+            <p class="arsenal-muted">
+              To see what a terminal would actually start with, choose this
+              selection in Workspace when starting Claude Code or Codex.
             </p>
           </section>
         {/if}
@@ -1114,6 +1485,17 @@
   }
   .arsenal-tab {
     min-height: 44px;
+  }
+  .arsenal-pin {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+  .arsenal-member-list {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    overflow-wrap: anywhere;
   }
   .arsenal-tab[aria-selected='true'] {
     background: var(--accent-soft);
