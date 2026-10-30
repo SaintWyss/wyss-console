@@ -68,6 +68,14 @@ async function answer<T>(
   }
 }
 
+/** The entry an import names, as the last scan listed it. The backend reads that entry again. */
+export interface ImportTarget {
+  id: string;
+  kind: string;
+  source: string;
+  name: string;
+}
+
 /** Every request names something the library or a fresh scan already holds, never a path. */
 export const arsenalClient = {
   discover: () => answer('arsenal_discover', parseDiscover),
@@ -84,8 +92,8 @@ export const arsenalClient = {
     answer<FileText>('arsenal_file', parseFileText, {
       request: { capability, revision, path },
     }),
-  importSkill: (id: string) =>
-    answer<Imported>('arsenal_import', parseImported, { request: { id } }),
+  importSkill: (target: ImportTarget) =>
+    answer<Imported>('arsenal_import', parseImported, { request: target }),
   restore: (capability: string, revision: number) =>
     answer<Detail>('arsenal_restore', parseDetail, {
       request: { capability, revision },

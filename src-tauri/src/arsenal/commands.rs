@@ -107,6 +107,16 @@ pub struct IdRequest {
     id: String,
 }
 
+/// The entry an import names, as the last scan showed it. The id is what must match, read again now.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportRequest {
+    id: String,
+    kind: String,
+    source: String,
+    name: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilityRequest {
@@ -222,20 +232,23 @@ pub fn identity_of(candidate: &Candidate, project: Option<&Path>) -> String {
 }
 
 /// The identity of each scanned capability, unique within the scan. Two entries can share one (two
-/// hooks with one name in one file); the later one takes its position as a suffix, so the list never
-/// repeats a key and an import names the same entry the scan showed.
+/// hooks with one name in one file); the later ones take their occurrence as a suffix, so the list never
+/// repeats a key and an import names the same entry the scan showed. Entries keep their order, so a
+/// scan of only one identity numbers its entries the same way.
 fn ids_of(candidates: &[Candidate], project: Option<&Path>) -> Vec<String> {
-    let mut seen = std::collections::BTreeSet::new();
+    let mut occurrences: BTreeMap<String, usize> = BTreeMap::new();
     candidates
         .iter()
-        .enumerate()
-        .map(|(index, candidate)| {
+        .map(|candidate| {
             let identity = identity_of(candidate, project);
-            if seen.insert(identity.clone()) {
+            let seen = occurrences.entry(identity.clone()).or_insert(0);
+            let id = if *seen == 0 {
                 identity
             } else {
-                format!("{identity}#{index}")
-            }
+                format!("{identity}#{seen}")
+            };
+            *seen += 1;
+            id
         })
         .collect()
 }
@@ -435,18 +448,27 @@ fn arsenal_file(
     })
 }
 
-/// Imports the capability with this identity, from a fresh scan. One that cannot be imported says why.
+/// Imports the capability with this identity. It is read from disk now, as a full scan would read it;
+/// only the entry the request names is read. One that cannot be imported says why.
 #[tauri::command]
 async fn arsenal_import(
     arsenal: State<'_, Arsenal>,
     configuration: State<'_, Configuration>,
-    request: IdRequest,
+    request: ImportRequest,
 ) -> Result<Imported, ArsenalError> {
+    if !IMPORTABLE.contains(&request.kind.as_str()) {
+        return Err(ArsenalError::code("not_importable"));
+    }
     let project = configuration.selected_project();
     let store = arsenal.handle().map_err(ArsenalError::from)?;
     blocking(move || {
-        let mut scan = catalogue::scan_process(project.clone())
-            .ok_or(ArsenalError::code("discovery_unavailable"))?;
+        let mut scan = catalogue::scan_entry_process(
+            project.clone(),
+            &request.kind,
+            &request.source,
+            &request.name,
+        )
+        .ok_or(ArsenalError::code("discovery_unavailable"))?;
         let index = ids_of(&scan.candidates, project.as_deref())
             .iter()
             .position(|id| *id == request.id)
@@ -914,5 +936,24 @@ mod tests {
         let (label, reason) = compatibility("claude_code", "claude_code", &files);
         assert_eq!(label, "partial");
         assert!(reason.contains("never run"));
+    }
+
+    #[test]
+    fn duplicates_are_numbered_within_their_identity_so_a_one_entry_scan_names_the_same_ids() {
+        let full = [
+            candidate("skill", "design", b"one"),
+            candidate("skill", "tokens", b"two"),
+            candidate("skill", "design", b"three"),
+        ];
+        let full_ids = ids_of(&full, None);
+        assert_eq!(full_ids[2], format!("{}#1", full_ids[0]));
+        let one_identity = [
+            candidate("skill", "design", b"one"),
+            candidate("skill", "design", b"three"),
+        ];
+        assert_eq!(
+            ids_of(&one_identity, None),
+            [full_ids[0].clone(), full_ids[2].clone()]
+        );
     }
 }

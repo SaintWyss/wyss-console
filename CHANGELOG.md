@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-30 — Arsenal: faster discovery and one-entry import
+
+- Discovery reads a folder's entries on up to six threads, and stops reading a skill folder once it passes a
+  limit (256 files or 8 MiB): the folder is blocked either way. Release build, this account with a project open:
+  discovery took about 8.6 s before and 0.65–0.74 s now. The largest folder (`gstack`, 14,467 files) is no
+  longer read in full.
+- Import reads only the entry it names, with the same checks as a full scan: a scan of one entry takes 3–4 ms
+  and the store write under 0.4 ms.
+- Duplicate identities are numbered by their occurrence (`#1`, `#2`), so a one-entry read names them as the full
+  scan does. Arsenal has not been released, so no stored id depends on the old numbering.
+- Saving a selection drops the open preview of that selection: the preview showed the version before the save.
+- The configuration still refuses a project under a group-writable folder, so a repository in a `775` folder
+  cannot be selected as the project.
+
 ## 2026-10-30 — Arsenal AM1a: offline capability library (not applied to sessions)
 
 - New **Arsenal** view. It reads your Claude Code and Codex user skill folders, copies the skills you import into

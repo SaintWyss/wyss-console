@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -121,6 +122,18 @@ pub struct Scan {
 /// The capabilities of this process's account, and of `project` when one is open.
 pub fn scan_process(project: Option<PathBuf>) -> Option<Scan> {
     Environment::from_process(project).map(|env| scan(&env))
+}
+
+/// One entry, read from disk now, the way a full scan lists it: the same folders, reads and checks,
+/// for the entries of `kind` in `source` called `name`. Import revalidates through this, not a full scan.
+pub fn scan_entry_process(
+    project: Option<PathBuf>,
+    kind: &str,
+    source: &str,
+    name: &str,
+) -> Option<Scan> {
+    let only = Only { kind, source, name };
+    Environment::from_process(project).map(|env| scan_with(&env, Some(only)))
 }
 
 /// The same scan with `home` as the account folder. Used by tests and fixtures.
@@ -307,7 +320,19 @@ fn folder(
     }
 }
 
+/// Which entries a scan keeps: one entry, by its kind, its source and its name.
+#[derive(Clone, Copy)]
+struct Only<'a> {
+    kind: &'a str,
+    source: &'a str,
+    name: &'a str,
+}
+
 fn scan(env: &Environment) -> Scan {
+    scan_with(env, None)
+}
+
+fn scan_with(env: &Environment, only: Option<Only<'_>>) -> Scan {
     let mut scan = Scan {
         sources: Vec::new(),
         candidates: Vec::new(),
@@ -315,9 +340,13 @@ fn scan(env: &Environment) -> Scan {
         truncated: false,
     };
     let mut states: BTreeMap<&'static str, SourceState> = BTreeMap::new();
-    let mut manifests = BTreeMap::new();
+    let manifests = Mutex::new(BTreeMap::new());
     for folder in folders(env) {
-        let state = scan_folder(env, &folder, &mut scan, &mut manifests);
+        if only.is_some_and(|only| only.kind != folder.kind || only.source != folder.source) {
+            continue;
+        }
+        let name = only.map(|only| only.name);
+        let state = scan_folder(env, &folder, name, &mut scan, &manifests);
         let merged = states.entry(folder.source).or_insert(SourceState::Absent);
         *merged = merge(*merged, state);
     }
@@ -325,8 +354,10 @@ fn scan(env: &Environment) -> Scan {
         .into_iter()
         .map(|(source, state)| SourceReport { source, state })
         .collect();
-    scan.candidates.extend(read_only_entries(env));
-    scan.composites = composites(env, &scan.candidates);
+    if only.is_none() {
+        scan.candidates.extend(read_only_entries(env));
+        scan.composites = composites(env, &scan.candidates);
+    }
     scan
 }
 
@@ -339,11 +370,25 @@ fn merge(current: SourceState, next: SourceState) -> SourceState {
     }
 }
 
+/// One listed entry the scan keeps, before its candidate is built.
+struct Entry {
+    name: String,
+    stem: String,
+    kind: EntryKind,
+}
+
+/// Threads that build one folder's candidates at once. Reads are syscall bound, so this is more than
+/// the cores a single thread would use, and no more: past it the threads only contend.
+const SCAN_THREADS: usize = 6;
+
+/// The listing is read in order and cut at `MAX_ENTRIES` before `only` filters it, so a scan of one
+/// entry keeps exactly the entries a full scan keeps.
 fn scan_folder(
     env: &Environment,
     folder: &Folder,
+    only: Option<&str>,
     scan: &mut Scan,
-    manifests: &mut BTreeMap<PathBuf, Option<ManagedBy>>,
+    manifests: &Mutex<BTreeMap<PathBuf, Option<ManagedBy>>>,
 ) -> SourceState {
     let Some(reader) = ApprovedRoots::new([folder.path.clone()])
         .ok()
@@ -356,6 +401,7 @@ fn scan_folder(
         Err(SourceFailure::Missing) => return SourceState::Absent,
         Err(_) => return SourceState::Unreadable,
     };
+    let mut entries = Vec::new();
     let mut found = 0;
     for entry in listing.entries {
         let Some(name) = entry.name.to_str() else {
@@ -388,21 +434,87 @@ fn scan_folder(
             break;
         }
         found += 1;
-        let origin = origin(&env.home, &folder.path, name);
-        let link = folder.path.join(name);
-        let candidate = match (entry.kind, folder.shape) {
-            (EntryKind::Link, _) => {
-                let mut candidate = blocked(folder, stem, origin, "symbolic_link");
-                candidate.managed_by = composite_of(env, &link, manifests);
-                candidate
-            }
-            (EntryKind::Directory, _) => read_skill(&reader, folder, stem, &link, origin),
-            (EntryKind::File, _) => file_candidate(&reader, folder, stem, name, &link, origin),
-            (EntryKind::Other, _) => continue,
-        };
-        scan.candidates.push(candidate);
+        if only.is_some_and(|wanted| wanted != stem) {
+            continue;
+        }
+        entries.push(Entry {
+            name: name.to_owned(),
+            stem: stem.to_owned(),
+            kind: entry.kind,
+        });
     }
+    let built = parallel_map(&entries, |entry| {
+        candidate_of(env, &reader, folder, entry, manifests)
+    });
+    scan.candidates.extend(built.into_iter().flatten());
     SourceState::Read
+}
+
+/// The candidate of one entry. A link is never followed: it is blocked, and it names the composite it
+/// links into. An entry of another kind is not a capability and yields nothing.
+fn candidate_of(
+    env: &Environment,
+    reader: &ConfigReader,
+    folder: &Folder,
+    entry: &Entry,
+    manifests: &Mutex<BTreeMap<PathBuf, Option<ManagedBy>>>,
+) -> Option<Candidate> {
+    let origin = origin(&env.home, &folder.path, &entry.name);
+    let link = folder.path.join(&entry.name);
+    match entry.kind {
+        EntryKind::Link => {
+            let mut candidate = blocked(folder, &entry.stem, origin, "symbolic_link");
+            candidate.managed_by = composite_of(env, &link, manifests);
+            Some(candidate)
+        }
+        EntryKind::Directory => Some(read_skill(reader, folder, &entry.stem, &link, origin)),
+        EntryKind::File => Some(file_candidate(
+            reader,
+            folder,
+            &entry.stem,
+            &entry.name,
+            &link,
+            origin,
+        )),
+        EntryKind::Other => None,
+    }
+}
+
+/// Maps `items` on up to `SCAN_THREADS` threads, and returns the results in the order of `items`.
+/// Threads take every `threads`-th item, so one large skill does not hold back a whole chunk.
+fn parallel_map<T: Sync, U: Send>(items: &[T], map: impl Fn(&T) -> U + Sync) -> Vec<U> {
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |count| count.get())
+        .min(SCAN_THREADS);
+    if threads < 2 || items.len() < 2 {
+        return items.iter().map(map).collect();
+    }
+    std::thread::scope(|scope| {
+        let map = &map;
+        let workers: Vec<_> = (0..threads)
+            .map(|first| {
+                scope.spawn(move || {
+                    items
+                        .iter()
+                        .enumerate()
+                        .skip(first)
+                        .step_by(threads)
+                        .map(|(index, item)| (index, map(item)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let mut done: Vec<(usize, U)> = workers
+            .into_iter()
+            .flat_map(|worker| {
+                worker
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            })
+            .collect();
+        done.sort_by_key(|(index, _)| *index);
+        done.into_iter().map(|(_, value)| value).collect()
+    })
 }
 
 fn blocked(folder: &Folder, name: &str, origin: String, reason: &'static str) -> Candidate {
@@ -443,7 +555,20 @@ fn file_candidate(
     assemble(folder, name, origin, description, tree)
 }
 
-/// A skill folder: every file under it is read, and a link anywhere under it is never followed.
+/// The limit a tree has passed, if it has passed one. Reading on past it could only confirm the block.
+fn tree_limit(tree: &Tree) -> Option<&'static str> {
+    if tree.files.len() > MAX_FILES {
+        Some("too_many_files")
+    } else if tree.bytes > MAX_TREE_BYTES {
+        Some("tree_too_large")
+    } else {
+        None
+    }
+}
+
+/// A skill folder: every file under it is read, and a link anywhere under it is never followed. Once
+/// the tree passes a limit it is blocked, so the walk stops there: a folder of thousands of files is
+/// not read in full only to be refused.
 fn read_skill(
     reader: &ConfigReader,
     folder: &Folder,
@@ -453,7 +578,7 @@ fn read_skill(
 ) -> Candidate {
     let mut tree = Tree::default();
     let mut pending = vec![(dir.to_path_buf(), String::new(), 0_usize)];
-    while let Some((current, prefix, depth)) = pending.pop() {
+    'walk: while let Some((current, prefix, depth)) = pending.pop() {
         let listing = match reader.list_directory(&current) {
             Ok(listing) => listing,
             Err(failure) if prefix.is_empty() => {
@@ -469,6 +594,10 @@ fn read_skill(
             }
         };
         for entry in listing.entries {
+            if let Some(reason) = tree_limit(&tree) {
+                tree.blocked.get_or_insert(reason);
+                break 'walk;
+            }
             let child = entry.name.to_string_lossy().into_owned();
             let relative = join(&prefix, &child);
             if entry.name.to_str().is_none() {
@@ -695,7 +824,7 @@ pub fn is_script(path: &str) -> bool {
 fn composite_of(
     env: &Environment,
     link: &Path,
-    manifests: &mut BTreeMap<PathBuf, Option<ManagedBy>>,
+    manifests: &Mutex<BTreeMap<PathBuf, Option<ManagedBy>>>,
 ) -> Option<ManagedBy> {
     let target = std::fs::read_link(link).ok()?;
     let target = if target.is_absolute() {
@@ -717,11 +846,20 @@ fn composite_of(
         return None;
     }
     let root = base.join(&version);
-    if let Some(known) = manifests.get(&root) {
-        return known.clone();
+    // The lock guards the cache only: two threads that miss at once read the same manifest, which is harmless.
+    let known = manifests
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&root)
+        .cloned();
+    if let Some(known) = known {
+        return known;
     }
     let found = gsd_manifest(&root, &version);
-    manifests.insert(root, found.clone());
+    manifests
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(root, found.clone());
     found
 }
 
@@ -1074,5 +1212,119 @@ mod tests {
         assert!(!name_ok(".hidden"));
         assert!(!name_ok("with space"));
         assert!(!name_ok(&"a".repeat(65)));
+    }
+
+    fn entry_home(home: PathBuf, only: Only<'_>) -> Scan {
+        scan_with(
+            &Environment {
+                home,
+                claude_config_dir: None,
+                codex_home: None,
+                project: None,
+                system: PathBuf::from("/etc"),
+                declared_writers: Vec::new(),
+            },
+            Some(only),
+        )
+    }
+
+    fn paths(candidate: &Candidate) -> Vec<&str> {
+        candidate
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_scan_of_one_entry_lists_that_entry_as_the_full_scan_does() {
+        let home = home();
+        for name in ["design", "brief", "tokens"] {
+            let skill = home.join(".claude/skills").join(name);
+            fs::create_dir_all(skill.join("refs")).unwrap();
+            fs::write(
+                skill.join("SKILL.md"),
+                format!("---\nname: {name}\n---\nbody"),
+            )
+            .unwrap();
+            fs::write(skill.join("refs/notes.md"), "notes").unwrap();
+        }
+        let full = scan_home(home.clone(), None);
+        let one = entry_home(
+            home.clone(),
+            Only {
+                kind: "skill",
+                source: "claude_user_skills",
+                name: "brief",
+            },
+        );
+        let expected = find(&full, "skill", "brief");
+        assert_eq!(one.candidates.len(), 1);
+        assert_eq!(one.candidates[0].name, "brief");
+        assert_eq!(one.candidates[0].blocked, expected.blocked);
+        assert_eq!(paths(&one.candidates[0]), paths(expected));
+        assert!(one.composites.is_empty());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn an_entry_past_the_listing_limit_is_not_listed_by_a_partial_scan_either() {
+        let home = home();
+        let names: Vec<String> = (0..MAX_ENTRIES + 4)
+            .map(|index| format!("skill-{index:03}"))
+            .collect();
+        for name in &names {
+            let skill = home.join(".claude/skills").join(name);
+            fs::create_dir_all(&skill).unwrap();
+            fs::write(skill.join("SKILL.md"), "---\nname: x\n---\nbody").unwrap();
+        }
+        let full = scan_home(home.clone(), None);
+        assert!(full.truncated);
+        let cut = names
+            .iter()
+            .find(|name| {
+                full.candidates
+                    .iter()
+                    .all(|candidate| candidate.name != **name)
+            })
+            .unwrap();
+        let one = entry_home(
+            home.clone(),
+            Only {
+                kind: "skill",
+                source: "claude_user_skills",
+                name: cut,
+            },
+        );
+        assert!(one.candidates.is_empty());
+        assert!(one.truncated);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_tree_past_the_file_limit_stops_being_read_and_is_blocked() {
+        let home = home();
+        let skill = home.join(".claude/skills/huge");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "---\nname: huge\n---\nbody").unwrap();
+        for index in 0..(MAX_FILES + 100) {
+            fs::write(skill.join(format!("f{index:04}.md")), "x").unwrap();
+        }
+        let scan = scan_home(home.clone(), None);
+        let found = find(&scan, "skill", "huge");
+        assert_eq!(found.blocked, Some("too_many_files"));
+        // Reading stops at the first entry past the limit: the rest of the folder is never opened.
+        assert_eq!(found.files.len(), MAX_FILES + 1);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn parallel_map_returns_its_results_in_the_order_of_its_items() {
+        let items: Vec<u32> = (0..500).collect();
+        let doubled = parallel_map(&items, |item| item * 2);
+        assert_eq!(
+            doubled,
+            items.iter().map(|item| item * 2).collect::<Vec<_>>()
+        );
     }
 }

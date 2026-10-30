@@ -206,13 +206,28 @@ describe('Arsenal controller', () => {
     const { controller, last } = controllerWith(client);
     await controller.discover();
     await controller.importCandidate('id-design');
-    expect(client.importSkill).toHaveBeenCalledWith('id-design');
+    expect(client.importSkill).toHaveBeenCalledWith({
+      id: 'id-design',
+      kind: 'skill',
+      source: 'claude_user_skills',
+      name: 'design',
+    });
     expect(last().notice).toEqual({
       tone: 'ok',
       text: 'Imported design as revision 1.',
     });
     expect(client.discover).toHaveBeenCalledTimes(2);
     expect(client.capabilities).toHaveBeenCalled();
+  });
+
+  it('refuses to import an entry the last scan did not list, and sends nothing to the desktop', async () => {
+    const client = fakeClient();
+    const { controller, last } = controllerWith(client);
+    await controller.discover();
+    await controller.importCandidate('id-not-listed');
+    expect(client.importSkill).not.toHaveBeenCalled();
+    expect(last().notice?.tone).toBe('error');
+    expect(last().busy).toBeNull();
   });
 
   it('says nothing changed when the same content is imported again', async () => {
@@ -285,6 +300,22 @@ describe('Arsenal controller', () => {
       'Saved selection Frontend. It is not applied.',
     );
     expect(client.selections).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops the preview of a selection once it is saved, so no preview shows the version before the save', async () => {
+    const { controller, last } = controllerWith(fakeClient());
+    await controller.loadPreview('sel-1');
+    expect(last().preview?.selection.id).toBe('sel-1');
+    await controller.saveSelection({
+      id: 'sel-1',
+      name: 'Frontend',
+      provider: 'codex',
+      items: [],
+    });
+    expect(last().preview).toBeNull();
+    expect(last().notice?.text).toBe(
+      'Saved selection Frontend. It is not applied.',
+    );
   });
 
   it('reports a preset save the library refused and keeps the draft', async () => {

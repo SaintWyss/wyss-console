@@ -215,7 +215,16 @@ export class ArsenalController {
     );
     this.set({ busy: 'import', notice: null });
     try {
-      const imported = await this.client.importSkill(id);
+      // The request names the entry the last scan listed. One it did not list is refused, not guessed.
+      if (!candidate) {
+        throw new ArsenalCallError({ code: 'not_found', reason: null });
+      }
+      const imported = await this.client.importSkill({
+        id,
+        kind: candidate.kind,
+        source: candidate.source,
+        name: candidate.name,
+      });
       // The scan and the library are read first: those reads clear the notice, so it comes last.
       await this.discover();
       await this.refresh();
@@ -292,9 +301,15 @@ export class ArsenalController {
   }) {
     this.set({ busy: 'save', notice: null });
     try {
-      await this.client.saveSelection(input);
+      const saved = await this.client.saveSelection(input);
+      // A preview of this selection shows what was saved before: it is dropped, not left to mislead.
+      const preview =
+        this.state.preview?.selection.id === saved.id
+          ? null
+          : this.state.preview;
       this.set({
         busy: null,
+        preview,
         notice: {
           tone: 'ok',
           text: `Saved selection ${input.name.trim()}. It is not applied.`,
