@@ -1,7 +1,7 @@
 <script lang="ts">
   import { summarizeAgent, type AuthorityObservation } from './authority';
   import { summarizeLink, type LifecycleObservation } from './lifecycle';
-  import type { RuntimeSummary } from './runtime';
+  import type { RuntimeSummary, RuntimeTone } from './runtime';
 
   let {
     title,
@@ -9,6 +9,7 @@
     runtime,
     authority,
     lifecycle,
+    f8,
     version,
   }: {
     title: string;
@@ -18,6 +19,8 @@
     authority: AuthorityObservation;
     /** What is being done to make the authority available, while it is not. */
     lifecycle: LifecycleObservation;
+    /** The protocol-2 link, when this desktop is started against it. It replaces the pill. */
+    f8: { label: string; tone: RuntimeTone; note: string | null } | null;
     version: string;
   } = $props();
   const agent = $derived(summarizeAgent(authority));
@@ -69,16 +72,29 @@
       <span class="dot" aria-hidden="true"></span>
       <span class="pill-value">{agent.label}</span>
     </span>
-    <span
-      class="pill authority"
-      data-tone={link.tone}
-      title={`Protocol 1 authority · ${link.label} · ${link.detail}`}
-    >
-      <span class="pill-key">Authority P1</span>
-      <span class="dot" aria-hidden="true"></span>
-      <span class="pill-value">{link.label}</span>
-      {#if link.note}<span class="pill-note">{link.note}</span>{/if}
-    </span>
+    {#if f8}
+      <span
+        class="pill authority"
+        data-tone={f8.tone}
+        title={`Protocol 2 authority · ${f8.label}${f8.note ? ` · ${f8.note}` : ''}`}
+      >
+        <span class="pill-key">Authority P2</span>
+        <span class="dot" aria-hidden="true"></span>
+        <span class="pill-value">{f8.label}</span>
+        {#if f8.note}<span class="pill-note">{f8.note}</span>{/if}
+      </span>
+    {:else}
+      <span
+        class="pill authority"
+        data-tone={link.tone}
+        title={`Protocol 1 authority · ${link.label} · ${link.detail}`}
+      >
+        <span class="pill-key">Authority P1</span>
+        <span class="dot" aria-hidden="true"></span>
+        <span class="pill-value">{link.label}</span>
+        {#if link.note}<span class="pill-note">{link.note}</span>{/if}
+      </span>
+    {/if}
     {#if version}<span class="version">v{version}</span>{/if}
   </div>
 </header>

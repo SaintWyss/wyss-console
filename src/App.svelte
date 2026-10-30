@@ -16,6 +16,7 @@
   import CredentialsView from './lib/features/credentials/CredentialsView.svelte';
   import { EventsController } from './lib/features/events/controller';
   import { F8Controller } from './lib/features/f8/controller';
+  import { linkText } from './lib/features/f8/present';
   import { M3Controller } from './lib/features/m3/controller';
   import ProvidersView from './lib/features/m3/ProvidersView.svelte';
   import PipelinesView from './lib/features/orchestration/PipelinesView.svelte';
@@ -385,6 +386,7 @@
     {runtime}
     {authority}
     {lifecycle}
+    f8={f8.gate === 'active' && f8.link ? linkText(f8.link) : null}
     {version}
   />
   <Sidebar

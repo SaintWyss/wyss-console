@@ -369,7 +369,7 @@
   <div class="sessions-toolbar arsenal-head">
     <div class="sessions-heading">
       <h2>Arsenal</h2>
-      <p class="sessions-count">Capabilities you own · offline</p>
+      <p class="sessions-count">Capabilities installed on this machine</p>
     </div>
     <button
       class="action"
