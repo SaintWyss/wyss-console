@@ -513,7 +513,7 @@ impl NativeService {
             .inner
             .extended_registry
             .try_lock()
-            .map_err(|_| NativeError::new("unavailable"))?;
+            .map_err(|_| NativeError::new("readiness_busy"))?;
         Ok(ReadinessView {
             m9_native_status: if stored.is_some()
                 && !self.inner.m9_storage_degraded.load(Ordering::Acquire)
@@ -1572,7 +1572,7 @@ mod readiness_tests {
         assert_eq!(service.readiness().unwrap().m9_native_status, "ready");
         let store = lock(&service.inner.extended_registry);
         let started = Instant::now();
-        assert_eq!(service.readiness().unwrap_err().code, "unavailable");
+        assert_eq!(service.readiness().unwrap_err().code, "readiness_busy");
         assert!(started.elapsed() < Duration::from_millis(50));
         drop(store);
         service

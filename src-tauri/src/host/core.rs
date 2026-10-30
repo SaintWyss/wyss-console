@@ -29,7 +29,10 @@ use wyss_console::{
     },
     terminal::{
         TerminalService,
-        contracts::{CreateTerminal, ErrorCode, Launch, TerminalError, TerminalInfo, TerminalSize},
+        contracts::{
+            CreateTerminal, ErrorCode, Launch, TerminalError, TerminalInfo, TerminalSize,
+            TerminalState,
+        },
     },
 };
 
@@ -436,10 +439,19 @@ impl HostCore {
         let mut rows: Vec<(u64, Value)> = Vec::new();
         for (key, entry) in lock(&self.table).iter() {
             let inner = lock(&entry.inner);
-            let info = self
-                .terminals
-                .status(&terminal_id(key)?)
-                .unwrap_or_else(|_| inner.status.clone());
+            let info = match self.terminals.status(&terminal_id(key)?) {
+                Ok(info) if info.state == TerminalState::Closed => continue,
+                Ok(info) => info,
+                Err(error)
+                    if matches!(
+                        error.code,
+                        ErrorCode::AlreadyClosed | ErrorCode::UnknownTerminal
+                    ) =>
+                {
+                    continue;
+                }
+                Err(_) => inner.status.clone(),
+            };
             let native = self
                 .native
                 .as_ref()
@@ -966,3 +978,40 @@ fn pump(terminals: &TerminalService, id: &TerminalId, entry: &Entry) {
 
 #[allow(dead_code)]
 const _RING_CAPACITY: usize = ring::CAPACITY;
+
+#[cfg(test)]
+mod listing_tests {
+    use super::*;
+
+    #[test]
+    fn closed_terminals_are_not_restored_even_when_the_output_pump_already_ended() {
+        let host = HostCore::new(None);
+        let info = host
+            .terminals
+            .create_launch(
+                CreateTerminal {
+                    size: TerminalSize { rows: 24, cols: 80 },
+                    cwd: None,
+                },
+                Launch {
+                    program: "/bin/sh".into(),
+                    args: vec!["-c".into(), "printf fixture".into()],
+                    env: vec![],
+                    remove_env: vec![],
+                },
+            )
+            .unwrap();
+        let id = info.terminal_id.clone();
+        host.track(info, "Fixture".into());
+        let entry = host.entry(id.as_str()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !lock(&entry.inner).eof {
+            assert!(Instant::now() < deadline, "fixture output did not end");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // Exited terminals keep their last output. Closing them is a different state.
+        assert_eq!(host.list().unwrap().as_array().unwrap().len(), 1);
+        host.terminals.close(&id).unwrap();
+        assert!(host.list().unwrap().as_array().unwrap().is_empty());
+    }
+}

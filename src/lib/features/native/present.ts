@@ -99,6 +99,8 @@ export const FAILURE_TEXT: Record<string, string> = {
   still_running: 'A running session cannot be removed. Stop it first.',
   stop_failed: 'The session could not be stopped.',
   store_unavailable: 'The Console could not write its own state.',
+  readiness_busy:
+    'Session storage is busy. Readiness could not be checked; it will be retried.',
   unavailable:
     'The Console has no private folder to keep native sessions in, so it cannot start agents.',
   request_invalid: 'The request was not valid.',

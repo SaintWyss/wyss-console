@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { NativeCallError } from '../src/lib/desktop/native-client';
 import NativeHarness from './NativeHarness.svelte';
 import type { Launcher } from '../src/lib/contracts/native';
 import { fakeClient, launcherWithM9 } from './native-harness';
@@ -116,4 +117,34 @@ it('coalesces polling during Check again and restores M9 only after a current va
     'wait until the Console confirms',
   );
   expect(client.start).not.toHaveBeenCalled();
+});
+
+it('reports a contended readiness lock without claiming the private folder is missing', async () => {
+  vi.useFakeTimers();
+  let busy = false;
+  const client = fakeClient({
+    launcher: vi.fn(async () => both('ready')),
+    readiness: vi.fn(async () => {
+      if (busy)
+        throw new NativeCallError({ code: 'readiness_busy', reasons: [] });
+      return both('ready');
+    }),
+  });
+  component = mount(NativeHarness, {
+    target: document.body,
+    props: { client },
+  });
+  await settle();
+  busy = true;
+  await vi.advanceTimersByTimeAsync(20);
+  await settle();
+  expect(document.body.textContent).toContain('Session storage is busy');
+  expect(document.body.textContent).not.toContain('no private folder');
+  document.querySelector<HTMLInputElement>('input[value="opencode"]')!.click();
+  await settle();
+  expect(button('Start OpenCode')?.disabled).toBe(true);
+  busy = false;
+  await vi.advanceTimersByTimeAsync(20);
+  await settle();
+  expect(button('Start OpenCode')?.disabled).toBe(false);
 });
