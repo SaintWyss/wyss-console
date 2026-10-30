@@ -5,6 +5,7 @@ the owner's application does next to a copy under test.
     python3 -I -m unittest benchmarks.test_owned     (from the repository root)
 """
 import os
+import hashlib
 import re
 import shutil
 import signal
@@ -233,6 +234,35 @@ class NoKillByNameTests(unittest.TestCase):
     # Only owned.py may signal, and only through descriptors it holds.
     MAY_SIGNAL = {"owned.py"}
 
+    # Frozen A0 evidence predating Arsenal. These drivers signal children/isolated
+    # namespaces; preserve their recorded semantics, not a general signalling exemption.
+    # A changed byte revokes the exception. See README.md, "Historical A0 evidence".
+    HISTORICAL_A0 = {
+        "scripts/research/a0/harness-v1/pty_driver.py": "b05ae487ec5b115913ba2c93d8e576e096504b97b70e5aced25154f160b29565",
+        "scripts/research/a0/harness-v1/test_exit_driver.py": "8659cbed4c28e0d31ccb8352b28991d6fc102af4cb507aa1d33074fd4079df6a",
+        "scripts/research/a0/harness-v2/launch.py": "08a5206fb0f24ddf0ce517f137f5e3a50991ea86d60ab5f83ef6356d1a517c01",
+        "scripts/research/a0/harness-v2/limits.py": "48d0f4b7db9866e86655c902eb1c1ef0d5763c56dabd44e610142a2e33589daf",
+        "scripts/research/a0/harness-v2/pty_driver.py": "7047ce60b750132d546ea6077f260bb2e250df57a9612fb75b9d3fbd4094d362",
+        "scripts/research/a0/tests/test_driver_v2.py": "22d59412faa6d051acc4f2802f18b3086cd1c7b44d5348e260adb907993a5f7f",
+    }
+
+    @classmethod
+    def historical_a0(cls, relative_path, content):
+        return cls.HISTORICAL_A0.get(relative_path) == hashlib.sha256(content).hexdigest()
+
+    def test_historical_exceptions_are_exact_and_revoke_on_any_change(self):
+        root = os.path.dirname(HERE)
+        for path in self.HISTORICAL_A0:
+            with open(os.path.join(root, path), "rb") as f:
+                content = f.read()
+            self.assertTrue(self.historical_a0(path, content), path)
+            for changed in (content + b"\nos.kill(1, 9)\n", content.replace(b"os.kill", b"os.killpg", 1)):
+                self.assertFalse(self.historical_a0(path, changed), path)
+            self.assertFalse(self.historical_a0("scripts/new.py", content))
+            self.assertFalse(self.historical_a0("other/" + path, content))
+        self.assertTrue(self.findings("new.py", "os.kill(pid, 9)"))
+        self.assertTrue(self.findings("new.py", "os.killpg(pid, 9)"))
+
     @classmethod
     def findings(cls, name, line):
         if name.endswith(".py"):
@@ -277,6 +307,10 @@ class NoKillByNameTests(unittest.TestCase):
                     if not n.endswith((".sh", ".py", ".mjs", ".js")) or n == "test_owned.py":
                         continue
                     path = os.path.join(dirpath, n)
+                    with open(path, "rb") as f:
+                        content = f.read()
+                    if self.historical_a0(os.path.relpath(path, root), content):
+                        continue
                     with open(path, errors="replace") as f:
                         for i, line in enumerate(f, 1):
                             code = line.split("#", 1)[0] if n.endswith((".sh", ".py")) else line

@@ -69,3 +69,17 @@ python3 -I benchmarks/m1_gui_report.py OUT_DIR
 build looks like before adoption); `--seed DIR` copies `layout.json`, `native/` and `configuration/trusted-writers` of
 a backup into the run's own state, so the import can be rehearsed on a copy of real records (the originals are
 only read).
+
+## Historical A0 evidence
+
+`test_owned.py` freezes six exact A0 source paths from baseline `43ed2fd` by
+whole-file SHA-256. Their eight findings are child PID/group cleanup, namespace
+cleanup, and a signal-zero liveness probe in the historical PTY drivers and their
+negative controls. They are real uses of bare-PID APIs, not name-based process
+selection and not false matches. Rewriting them would invalidate the recorded A0
+evidence. This exception preserves that evidence; it does not certify those
+drivers for new desktop tests. Use `Owned` for new harnesses.
+
+No directory, basename, or signalling expression is exempt. Any byte change
+revokes an exception, and the regression checks appended dangerous code and
+changed paths. All other scripts, including new research scripts, remain scanned.
