@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-30 — Arsenal integration gate
+
+- The host excludes closed terminals from its restore listing even if their output pump has already ended. Exited terminals still retain their output.
+
+- The harness preserves historical A0 sources through exact path/content exceptions; changes and new scripts remain subject to the ownership rule.
+- Readiness distinguishes a busy session-store lock from a missing private folder, and still blocks unconfirmed M9 starts.
+- Arsenal › Terminals recovers restarted sessions from the host and their recorded launch snapshot. Provider, project, version and applied exclusion must match; provider use stays unobserved. Offline hosts retain existing records.
+
 ## 2026-10-30 — Arsenal: per-terminal selections, applied only on a qualified build
 
 - **Workspace › Start an agent** has an Arsenal selection for Claude Code and Codex. The desktop computes the

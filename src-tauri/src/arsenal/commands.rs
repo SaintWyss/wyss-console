@@ -1160,14 +1160,99 @@ async fn arsenal_terminal_bind(
     .await
 }
 
+/// Reconcile only host-attested restarts with an existing immutable launch snapshot.
+/// A restart is a new session; it must not disappear from Arsenal merely because the
+/// Workspace's original Start button was not involved. Never infer provider use.
+fn record_restarted_bindings(store: &mut Store, sessions: &serde_json::Value) -> Result<(), Error> {
+    let Some(sessions) = sessions.as_array() else {
+        return Ok(());
+    };
+    let mut bindings = store.bindings()?;
+    let selections = store.selections()?;
+    // Repeated passes also cover a chain returned in newest-first order.
+    for _ in 0..sessions.len() {
+        let mut added = false;
+        for session in sessions {
+            let Some(id) = session["id"].as_str().filter(|id| hex(id, 32)) else {
+                continue;
+            };
+            if bindings.iter().any(|b| b.session_id == id) {
+                continue;
+            }
+            let Some(parent) = session["restart_of"].as_str() else {
+                continue;
+            };
+            let Some(previous) = bindings.iter().find(|b| b.session_id == parent) else {
+                continue;
+            };
+            if session["project"].as_str() != Some(previous.project.as_str())
+                || session["agent_id"].as_str() != Some(previous.provider.as_str())
+                || session["version"].as_str() != previous.provider_version.as_deref()
+            {
+                continue;
+            }
+            let plan: serde_json::Value = serde_json::from_str(&previous.plan).unwrap_or_default();
+            let launched = &session["arsenal"];
+            let same_launch = if previous.state == "applied" {
+                launched["selection"].as_str() == Some(previous.selection_id.as_str())
+                    && launched["config_hash"].as_str() == Some(previous.config_hash.as_str())
+                    && plan["config_hash"].as_str() == Some(previous.config_hash.as_str())
+                    && launched["skills_off"].is_array()
+                    && launched["skills_off"] == plan["excluded"]
+            } else {
+                launched.is_null()
+            };
+            if !same_launch {
+                continue;
+            }
+            let mut binding = previous.clone();
+            binding.session_id = id.to_owned();
+            binding.created_at = session["started_at"]
+                .as_i64()
+                .unwrap_or(previous.created_at);
+            // A deleted selection must not break listing the surviving historical records.
+            if !selections.iter().any(|s| s.id == binding.selection_id) {
+                continue;
+            }
+            store.bind_restarted_terminal(&binding)?;
+            bindings.push(binding);
+            added = true;
+        }
+        if !added {
+            break;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
-fn arsenal_terminal_bindings(
+async fn arsenal_terminal_bindings(
     arsenal: State<'_, Arsenal>,
+    link: State<'_, HostLink>,
 ) -> Result<Vec<serde_json::Value>, ArsenalError> {
-    arsenal
-        .with_store(|store| store.bindings())
-        .map(|bindings| bindings.into_iter().map(binding_view).collect())
-        .map_err(ArsenalError::from)
+    let store = arsenal.handle().map_err(ArsenalError::from)?;
+    let link = link.inner().clone();
+    blocking(move || {
+        let params = serde_json::json!({"sample": false});
+        let sessions = match link.call_attached("native_sessions_extended", params.clone()) {
+            Err(error) if error.code == "unknown_op" => {
+                link.call_attached("native_sessions", params)
+            }
+            answer => answer,
+        };
+        let mut store = store
+            .lock()
+            .map_err(|_| ArsenalError::from(Error::Storage))?;
+        // An offline host does not make the already recorded configurations disappear.
+        if let Ok(sessions) = sessions {
+            record_restarted_bindings(&mut store, &sessions)?;
+        }
+        store
+            .bindings()
+            .map(|rows| rows.into_iter().map(binding_view).collect())
+            .map_err(ArsenalError::from)
+    })
+    .await
 }
 
 /// The selection this project last started a terminal of this provider with. A lookup by name only:
@@ -1241,6 +1326,121 @@ mod tests {
             composites: Vec::new(),
             truncated: false,
         }
+    }
+
+    #[test]
+    fn restarted_terminals_keep_only_host_attested_configuration_snapshots() {
+        let mut store = Store::open(Connection::open_in_memory().unwrap()).unwrap();
+        let selection = store
+            .save_selection(&store::SelectionInput {
+                id: None,
+                name: "Restart fixture".into(),
+                provider: "claude_code".into(),
+                items: vec![],
+                composites: vec![],
+            })
+            .unwrap();
+        let original = Binding {
+            session_id: "a".repeat(32),
+            selection_id: selection.id.clone(),
+            selection_name: selection.name,
+            provider: "claude_code".into(),
+            provider_version: Some("2.1.314 (Claude Code)".into()),
+            project: "/tmp/fixture".into(),
+            config_hash: "b".repeat(64),
+            state: "applied".into(),
+            reason: "Use not observed".into(),
+            plan: serde_json::json!({"config_hash": "b".repeat(64), "excluded": ["other"]})
+                .to_string(),
+            created_at: 1,
+        };
+        store.bind_terminal(&original).unwrap();
+        let restarted = serde_json::json!({
+            "id": "c".repeat(32), "restart_of": original.session_id,
+            "project": original.project, "agent_id": original.provider,
+            "version": original.provider_version, "started_at": 2,
+            "arsenal": {"selection": original.selection_id,
+                "config_hash": original.config_hash, "skills_off": ["other"]}
+        });
+        // Every authority/binding field must agree; unrelated sessions cannot inherit APPLIED.
+        for (pointer, value) in [
+            ("/restart_of", serde_json::json!("d".repeat(32))),
+            ("/project", serde_json::json!("/tmp/elsewhere")),
+            ("/agent_id", serde_json::json!("codex")),
+            ("/version", serde_json::json!("2.1.315 (Claude Code)")),
+            ("/arsenal/selection", serde_json::json!("other")),
+            ("/arsenal/config_hash", serde_json::json!("d".repeat(64))),
+            ("/arsenal/skills_off", serde_json::json!([])),
+            ("/arsenal", serde_json::Value::Null),
+        ] {
+            let mut changed = restarted.clone();
+            *changed.pointer_mut(pointer).unwrap() = value;
+            record_restarted_bindings(&mut store, &serde_json::json!([changed])).unwrap();
+            assert_eq!(
+                store.bindings().unwrap(),
+                vec![original.clone()],
+                "{pointer}"
+            );
+        }
+        let mut successor = restarted.clone();
+        successor["id"] = serde_json::json!("d".repeat(32));
+        successor["restart_of"] = restarted["id"].clone();
+        let latest = store
+            .save_selection(&store::SelectionInput {
+                id: None,
+                name: "Later choice".into(),
+                provider: "claude_code".into(),
+                items: vec![],
+                composites: vec![],
+            })
+            .unwrap();
+        let mut later = original.clone();
+        later.session_id = "1".repeat(32);
+        later.selection_id = latest.id.clone();
+        later.created_at = 100;
+        store.bind_terminal(&later).unwrap();
+        let sessions = serde_json::json!([successor, restarted]);
+        record_restarted_bindings(&mut store, &sessions).unwrap();
+        record_restarted_bindings(&mut store, &sessions).unwrap();
+        let rows = store.bindings().unwrap();
+        assert_eq!(rows.len(), 4);
+        assert_eq!(
+            store
+                .project_selection(&original.project, &original.provider)
+                .unwrap(),
+            Some(latest.id)
+        );
+        let recovered = rows
+            .iter()
+            .find(|r| r.session_id == "c".repeat(32))
+            .unwrap();
+        store.bind_restarted_terminal(recovered).unwrap();
+        assert_eq!(store.bindings().unwrap().len(), 4);
+        assert!(
+            rows.iter()
+                .all(|r| r.state == "applied" && r.plan == original.plan)
+        );
+        assert!(
+            rows.iter()
+                .all(|r| binding_view(r.clone())["verification"] == "not_observed")
+        );
+        // NOT APPLIED remains NOT APPLIED on restart, with no fabricated enforcement.
+        let mut unqualified = original.clone();
+        unqualified.session_id = "e".repeat(32);
+        unqualified.state = "not_applied".into();
+        store.bind_terminal(&unqualified).unwrap();
+        let mut session = sessions[1].clone();
+        session["id"] = serde_json::json!("f".repeat(32));
+        session["restart_of"] = serde_json::json!(unqualified.session_id);
+        session["arsenal"] = serde_json::Value::Null;
+        record_restarted_bindings(&mut store, &serde_json::json!([session])).unwrap();
+        assert!(
+            store
+                .bindings()
+                .unwrap()
+                .iter()
+                .any(|r| r.session_id == "f".repeat(32) && r.state == "not_applied")
+        );
     }
 
     #[test]

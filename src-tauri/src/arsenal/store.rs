@@ -685,6 +685,15 @@ impl Store {
     /// Records what a terminal started with. A session is recorded once; the oldest records go
     /// when there are more than `MAX_BINDINGS`. The project remembers the selection for its provider.
     pub fn bind_terminal(&mut self, binding: &Binding) -> Result<(), Error> {
+        self.record_terminal(binding, true)
+    }
+
+    /// Recover history idempotently without changing the project's current selection.
+    pub fn bind_restarted_terminal(&mut self, binding: &Binding) -> Result<(), Error> {
+        self.record_terminal(binding, false)
+    }
+
+    fn record_terminal(&mut self, binding: &Binding, remember: bool) -> Result<(), Error> {
         let id_ok = binding.session_id.len() == 32
             && binding
                 .session_id
@@ -713,10 +722,17 @@ impl Store {
         if !exists {
             return Err(Error::NotFound);
         }
+        let conflict = if remember {
+            ""
+        } else {
+            " ON CONFLICT(session_id) DO NOTHING"
+        };
         tx.execute(
-            "INSERT INTO terminal_binding (session_id, selection_id, selection_name, provider, \
+            &format!(
+                "INSERT INTO terminal_binding (session_id, selection_id, selection_name, provider, \
              provider_version, project, config_hash, state, reason, plan, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11){conflict}"
+            ),
             params![
                 binding.session_id,
                 binding.selection_id,
@@ -731,17 +747,19 @@ impl Store {
                 binding.created_at
             ],
         )?;
-        tx.execute(
-            "INSERT INTO project_selection (project, provider, selection_id, updated_at) \
+        if remember {
+            tx.execute(
+                "INSERT INTO project_selection (project, provider, selection_id, updated_at) \
              VALUES (?1, ?2, ?3, ?4) ON CONFLICT (project, provider) \
              DO UPDATE SET selection_id = excluded.selection_id, updated_at = excluded.updated_at",
-            params![
-                binding.project,
-                binding.provider,
-                binding.selection_id,
-                binding.created_at
-            ],
-        )?;
+                params![
+                    binding.project,
+                    binding.provider,
+                    binding.selection_id,
+                    binding.created_at
+                ],
+            )?;
+        }
         tx.execute(
             "DELETE FROM terminal_binding WHERE session_id IN (SELECT session_id FROM \
              terminal_binding ORDER BY created_at DESC, session_id LIMIT -1 OFFSET ?1)",
