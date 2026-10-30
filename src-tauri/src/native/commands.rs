@@ -1266,6 +1266,32 @@ mod capability_tests {
     }
 
     #[test]
+    fn an_arsenal_plan_reads_only_a_project_the_host_lists_or_configuration_accepted() {
+        let host = LegacyHost::new(false);
+        let link = host.link();
+        let refused = |selected: Option<&str>, requested: &str| {
+            crate::arsenal::commands::terminal_project(
+                &link,
+                selected.map(std::path::Path::new),
+                Some(requested),
+            )
+            .unwrap_err()
+            .code_of()
+        };
+        // The fixture host lists no project: an arbitrary folder is not read.
+        assert_eq!(refused(None, "/etc"), "project_unknown");
+        assert_eq!(refused(None, "/home/u/.claude/skills"), "project_unknown");
+        // Named by Configuration, it still has to pass Configuration's root checks.
+        assert_eq!(refused(Some("/etc"), "/etc"), "project_refused");
+        assert_eq!(refused(None, "/tmp/a\0b"), "invalid_request");
+        // No project means no project folder is read at all.
+        assert_eq!(
+            crate::arsenal::commands::terminal_project(&link, None, None).unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn the_window_cannot_send_skill_names_in_a_start_or_preview() {
         let start = serde_json::json!({
             "agent_id": "claude_code", "project": "/tmp/p", "profile_id": null,

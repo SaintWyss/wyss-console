@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import HandoffPanel from './HandoffPanel.svelte';
   import ArsenalTerminalPanel from '../arsenal/ArsenalTerminalPanel.svelte';
   import { sessionArsenalLine, type ArsenalChoice } from '../arsenal/terminal';
@@ -54,6 +54,15 @@
   let now = $state(Date.now());
   let arsenalChoice = $state<ArsenalChoice | null>(null);
   let arsenalNote = $state<string | null>(null);
+  // Bumped when the Arsenal plan must be computed again: the view is shown, or a start was refused.
+  let arsenalRefresh = $state(0);
+  $effect(() => {
+    if (visible) arsenalRefresh = untrack(() => arsenalRefresh) + 1;
+  });
+  $effect(() => {
+    if (native.failure?.code.startsWith('arsenal_'))
+      arsenalRefresh = untrack(() => arsenalRefresh) + 1;
+  });
   let bindings = $state<Binding[]>([]);
   async function readBindings() {
     try {
@@ -474,6 +483,7 @@
           {project}
           {profile}
           profileKey={previewContext}
+          refreshKey={arsenalRefresh}
           previewer={(start) =>
             agent
               ? controller.preview(agent, profile, start)

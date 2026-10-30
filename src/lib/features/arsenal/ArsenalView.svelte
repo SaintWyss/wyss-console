@@ -379,7 +379,8 @@
     >
   </div>
   <p class="configuration-note">
-    Installed does not mean imported. Nothing here changes a session.
+    Installed does not mean imported. A selection reaches a terminal only when
+    you start one with it from Workspace.
   </p>
 
   <div class="arsenal-tabs" role="tablist" aria-label="Arsenal sections">

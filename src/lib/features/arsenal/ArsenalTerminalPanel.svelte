@@ -26,6 +26,7 @@
     project,
     profile,
     profileKey = null,
+    refreshKey = 0,
     previewer,
     onchange,
     client = arsenalClient,
@@ -36,6 +37,8 @@
     profile: string | null;
     /** Changes when the chosen profile's saved revision changes. */
     profileKey?: string | null;
+    /** Changes when the plan must be computed again: the view is shown again, a start was refused. */
+    refreshKey?: number;
     /** The Native preview of the profile with this selection applied. */
     previewer: (start: ArsenalStart) => Promise<Preview>;
     onchange: (choice: ArsenalChoice | null) => void;
@@ -53,6 +56,7 @@
   let preview = $state<Preview | null>(null);
   let previewing = $state(false);
   let previewFailed = $state<string | null>(null);
+  let reloads = $state(0);
 
   const provider = $derived<ArsenalProvider | null>(
     agent === 'claude_code' || agent === 'codex' ? agent : null,
@@ -64,6 +68,7 @@
   const applying = $derived(!!plan && plan.can_apply && apply);
 
   async function load() {
+    reloads++;
     try {
       selections = await client.selections();
       loadFailed = null;
@@ -97,6 +102,9 @@
     const id = selected;
     const a = agent;
     const p = project;
+    // The installed skills and the provider build can change while the plan is on screen.
+    void refreshKey;
+    void reloads;
     const seq = ++planSeq;
     plan = null;
     planFailed = null;
@@ -231,7 +239,7 @@
         <p class="event-meta">{plan.enforcement.reason}</p>
         <p class="event-meta">
           {counts.prepared} prepared · {counts.rejected} rejected · {counts.unsupported}
-          not carried · {plan.kept.length} installed skills stay · {plan
+          not carried · {plan.kept.length} installed skill(s) stay · {plan
             .excluded.length} would be switched off
         </p>
         {#each plan.conflicts as conflict, index (index)}

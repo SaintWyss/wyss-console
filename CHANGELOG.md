@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-10-30 — Arsenal: per-terminal selections, applied only on a qualified build
+
+- **Workspace › Start an agent** has an Arsenal selection for Claude Code and Codex. The desktop computes the
+  terminal plan from the library, the skills installed right now (account and project) and the exact provider
+  build: each selected skill is `prepared` only when the installed copy is exactly that revision, the other
+  installed skills are named for switching off, and conflicts (same name, two methodologies kept) block it.
+  The plan shows the exact session settings file it would write.
+- **Applied only where qualified.** Claude Code `2.1.314` passed a focused qualification of skill exclusion
+  (9/9 sandboxed cases, record in `docs/research/arsenal-am1a/ARSENAL-Q314-QUALIFICATION-2026-10-30.md`). On any
+  other build, and on every Codex build, the plan is shown as `NOT APPLIED` and Start needs an explicit "start
+  without applying it". The window names a selection and its plan hash; the desktop rebuilds the exclusion,
+  checks names against the installed skills and the build, and the host binds it to the preview token.
+  Hooks, permissions, MCP servers, plugin skills and built-in skills are never changed.
+- **What a terminal started with** is recorded from the host's own session record: applied or not applied,
+  and always "use not observed". Arsenal › Terminals lists them; each session line in Workspace says it. A
+  project remembers its last selection per provider. A restart keeps the exclusion only while the plan is
+  unchanged.
+- Library: compatibility is judged from the files (supported, unverified, needs provider qualification,
+  missing dependency, conflicting) and dependencies are listed: declared tools, `mcp__` servers, files of its
+  own tree. Selections pin revisions, take a preset's capabilities, keep installed composites, and can be
+  duplicated.
+- Arsenal › Composites describes GSD Core (manifest categories, members, limits) and Claude Code plugin
+  packages (version, members, hooks, MCP, enabled state). Neither is copied.
+- Store schema 2, upgraded in place from 1. Host feature `native_arsenal_v1`: an older host refuses the
+  Arsenal start (`host_outdated`) and keeps its sessions.
+
 ## 2026-10-30 — Arsenal: project selection read only for shared folders
 
 - A project folder that another account can write is now accepted read only. Before, it was refused: a repository

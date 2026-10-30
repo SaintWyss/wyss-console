@@ -42,6 +42,11 @@ impl ArsenalError {
     fn code(code: &'static str) -> Self {
         Self { code, reason: None }
     }
+
+    #[cfg(test)]
+    pub(crate) fn code_of(&self) -> &'static str {
+        self.code
+    }
 }
 
 impl From<Error> for ArsenalError {
@@ -474,20 +479,33 @@ fn others(ids: &[String], index: usize, same: impl Fn(usize) -> bool) -> Vec<Str
         .collect()
 }
 
-/// The library, each entry with its compatibility judged from its file names.
+/// The library, each entry with the compatibility its detail shows: judged from its files and
+/// their dependencies while the reading budget lasts, from its file names after that.
 pub fn library(store: &Store) -> Result<Vec<LibraryItem>, Error> {
+    let mut budget = ANALYSIS_BYTES;
     store
         .list()?
         .into_iter()
         .map(|summary| {
             let detail = store.detail(&summary.id, None)?;
+            let size: usize = detail
+                .files
+                .iter()
+                .map(|f| usize::try_from(f.size).unwrap_or(usize::MAX))
+                .sum();
+            let dependencies = if size <= budget {
+                budget -= size;
+                analysis::dependencies(&store.revision_content(&summary.id, detail.revision)?, None)
+            } else {
+                Vec::new()
+            };
             let paths: Vec<&str> = detail.files.iter().map(|f| f.path.as_str()).collect();
             let compatibility = analysis::compatibility(
                 &summary.kind,
                 &summary.provider,
                 &summary.provider,
                 &paths,
-                &[],
+                &dependencies,
             );
             Ok(LibraryItem {
                 summary,
@@ -908,7 +926,7 @@ fn provider_word(agent: AgentId) -> Option<&'static str> {
 /// The terminal's project, accepted only when the host lists it for a launch (or it is the project
 /// selected in Configuration), and only after the same root checks Configuration applies. The home
 /// entry, or none, means no project folders are read.
-fn terminal_project(
+pub(crate) fn terminal_project(
     link: &HostLink,
     selected: Option<&Path>,
     requested: Option<&str>,

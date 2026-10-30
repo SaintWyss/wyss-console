@@ -197,6 +197,26 @@ describe('Arsenal in a terminal start', () => {
     expect(text()).toContain('The launch preview refuses this combination');
   });
 
+  it('computes the plan again when the view asks, so a changed build is never shown as the old plan', async () => {
+    const fake = client(plan(), 'sel-1');
+    const choices: (ArsenalChoice | null)[] = [];
+    const props = $state({
+      agent: 'claude_code' as const,
+      project: '/home/u/app',
+      profile: null,
+      refreshKey: 0,
+      previewer: vi.fn(async () => preview(true)),
+      onchange: (choice: ArsenalChoice | null) => choices.push(choice),
+      client: fake,
+    });
+    component = mount(ArsenalTerminalPanel, { target: document.body, props });
+    await settle();
+    expect(fake.terminalPlan).toHaveBeenCalledTimes(1);
+    props.refreshKey = 1;
+    await settle();
+    expect(fake.terminalPlan).toHaveBeenCalledTimes(2);
+  });
+
   it('says a session line from the host record first, and never says a skill was used', () => {
     const binding: Binding = {
       session_id: 's1',

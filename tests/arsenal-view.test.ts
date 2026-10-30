@@ -141,7 +141,7 @@ describe('Arsenal view', () => {
   it('lists the library with its kind, provider, revision and compatibility, and says what it is not', () => {
     const { root } = render(stateWith({}));
     expect(text(root)).toContain(
-      'Installed does not mean imported. Nothing here changes a session.',
+      'Installed does not mean imported. A selection reaches a terminal only when you start one with it from Workspace.',
     );
     expect(text(root)).toContain('design');
     expect(text(root)).toContain('Skill');
