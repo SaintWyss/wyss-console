@@ -147,10 +147,16 @@ pub struct ArsenalEvidence {
     pub limitation: &'static str,
 }
 
-/// Claude Code builds whose skill exclusion passed a focused qualification. Empty: the A0 runs on
-/// 2.1.312 were judged NO-GO by the independent review, and the installed build has not been
-/// qualified since. Until a record is added here, Arsenal previews and records, and never applies.
-const ARSENAL_CLAUDE: &[ArsenalEvidence] = &[];
+/// Claude Code builds whose skill exclusion passed a focused qualification. The A0 runs on 2.1.312
+/// were judged NO-GO by the independent review and are not listed; any build without a record here
+/// is previewed and recorded, never applied.
+const ARSENAL_CLAUDE: &[ArsenalEvidence] = &[ArsenalEvidence {
+    qualified_version: "2.1.314 (Claude Code)",
+    checked_on: "2026-10-30",
+    operation: "--settings overlay holding only skillOverrides=off for installed user and project skills",
+    source: "docs/research/arsenal-am1a/ARSENAL-Q314-QUALIFICATION-2026-10-30.md (harness-v2, 9/9 pre-registered cases)",
+    limitation: "plugin and built-in skills are not switched off; concurrent sessions and provider use of each skill are not observed",
+}];
 
 /// A build that exists only in tests, so the enabled path is exercised without qualifying a real one.
 #[cfg(test)]
@@ -191,15 +197,25 @@ mod tests {
 
     #[test]
     fn arsenal_exclusion_needs_its_own_record_for_the_exact_claude_build() {
-        // Profile syntax evidence does not qualify skill exclusion, and no real build is qualified.
+        // Profile syntax evidence does not qualify skill exclusion; only the exact qualified line does.
         for version in [
             None,
             Some("2.1.309 (Claude Code)"),
             Some("2.1.312 (Claude Code)"),
-            Some("2.1.314 (Claude Code)"),
+            Some("2.1.315 (Claude Code)"),
+            Some("2.1.314"),
         ] {
             assert!(!permits_arsenal_exclusion(AgentId::ClaudeCode, version));
         }
+        assert!(permits_arsenal_exclusion(
+            AgentId::ClaudeCode,
+            Some("2.1.314 (Claude Code)")
+        ));
+        // The record does not lend profile syntax evidence to the same build.
+        assert!(!permits_profile_overrides(
+            AgentId::ClaudeCode,
+            Some("2.1.314 (Claude Code)")
+        ));
         assert!(permits_arsenal_exclusion(
             AgentId::ClaudeCode,
             Some(ARSENAL_TEST_VERSION)

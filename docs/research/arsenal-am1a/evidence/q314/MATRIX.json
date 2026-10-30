@@ -1,0 +1,209 @@
+[
+  {
+    "id": "Q-C0",
+    "verdict": "PASS",
+    "reasons": [],
+    "listed": {
+      "requests_in_range": true,
+      "keys_synthetic": true,
+      "desc_present:alpha": true,
+      "desc_present:beta": true,
+      "desc_present:gamma": true,
+      "desc_present:proj": true,
+      "desc_absent:hidden": true,
+      "body_absent:alpha": true,
+      "body_absent:beta": true,
+      "body_absent:gamma": true,
+      "body_absent:proj": true,
+      "agents": true,
+      "listed_fixture_exact": true
+    },
+    "exit": 0,
+    "proxy": []
+  },
+  {
+    "id": "Q-S1-1",
+    "verdict": "PASS",
+    "reasons": [],
+    "listed": {
+      "requests_in_range": true,
+      "keys_synthetic": true,
+      "desc_present:alpha": true,
+      "desc_present:gamma": true,
+      "desc_absent:beta": true,
+      "desc_absent:proj": true,
+      "desc_absent:hidden": true,
+      "body_absent:alpha": true,
+      "body_absent:beta": true,
+      "body_absent:gamma": true,
+      "body_absent:proj": true,
+      "agents": true,
+      "listed_fixture_exact": true,
+      "validator_matches": true
+    },
+    "exit": 0,
+    "proxy": []
+  },
+  {
+    "id": "Q-S1-2",
+    "verdict": "PASS",
+    "reasons": [],
+    "listed": {
+      "requests_in_range": true,
+      "keys_synthetic": true,
+      "desc_present:alpha": true,
+      "desc_present:gamma": true,
+      "desc_absent:beta": true,
+      "desc_absent:proj": true,
+      "desc_absent:hidden": true,
+      "body_absent:alpha": true,
+      "body_absent:beta": true,
+      "body_absent:gamma": true,
+      "body_absent:proj": true,
+      "agents": true,
+      "listed_fixture_exact": true,
+      "validator_matches": true
+    },
+    "exit": 0,
+    "proxy": []
+  },
+  {
+    "id": "Q-S1-3",
+    "verdict": "PASS",
+    "reasons": [],
+    "listed": {
+      "requests_in_range": true,
+      "keys_synthetic": true,
+      "desc_present:alpha": true,
+      "desc_present:gamma": true,
+      "desc_absent:beta": true,
+      "desc_absent:proj": true,
+      "desc_absent:hidden": true,
+      "body_absent:alpha": true,
+      "body_absent:beta": true,
+      "body_absent:gamma": true,
+      "body_absent:proj": true,
+      "agents": true,
+      "listed_fixture_exact": true,
+      "validator_matches": true
+    },
+    "exit": 0,
+    "proxy": []
+  },
+  {
+    "id": "Q-S2-1",
+    "verdict": "PASS",
+    "reasons": [],
+    "listed": {
+      "requests_in_range": true,
+      "keys_synthetic": true,
+      "desc_present:beta": true,
+      "desc_present:proj": true,
+      "desc_absent:alpha": true,
+      "desc_absent:gamma": true,
+      "desc_absent:hidden": true,
+      "body_absent:alpha": true,
+      "body_absent:beta": true,
+      "body_absent:gamma": true,
+      "body_absent:proj": true,
+      "agents": true,
+      "listed_fixture_exact": true,
+      "validator_matches": true
+    },
+    "exit": 0,
+    "proxy": []
+  },
+  {
+    "id": "Q-S2-2",
+    "verdict": "PASS",
+    "reasons": [],
+    "listed": {
+      "requests_in_range": true,
+      "keys_synthetic": true,
+      "desc_present:beta": true,
+      "desc_present:proj": true,
+      "desc_absent:alpha": true,
+      "desc_absent:gamma": true,
+      "desc_absent:hidden": true,
+      "body_absent:alpha": true,
+      "body_absent:beta": true,
+      "body_absent:gamma": true,
+      "body_absent:proj": true,
+      "agents": true,
+      "listed_fixture_exact": true,
+      "validator_matches": true
+    },
+    "exit": 0,
+    "proxy": []
+  },
+  {
+    "id": "Q-S2-3",
+    "verdict": "PASS",
+    "reasons": [],
+    "listed": {
+      "requests_in_range": true,
+      "keys_synthetic": true,
+      "desc_present:beta": true,
+      "desc_present:proj": true,
+      "desc_absent:alpha": true,
+      "desc_absent:gamma": true,
+      "desc_absent:hidden": true,
+      "body_absent:alpha": true,
+      "body_absent:beta": true,
+      "body_absent:gamma": true,
+      "body_absent:proj": true,
+      "agents": true,
+      "listed_fixture_exact": true,
+      "validator_matches": true
+    },
+    "exit": 0,
+    "proxy": []
+  },
+  {
+    "id": "Q-H1",
+    "verdict": "PASS",
+    "reasons": [],
+    "listed": {
+      "requests_in_range": true,
+      "keys_synthetic": true,
+      "desc_present:alpha": true,
+      "desc_present:gamma": true,
+      "desc_absent:beta": true,
+      "desc_absent:proj": true,
+      "desc_absent:hidden": true,
+      "body_absent:alpha": true,
+      "body_absent:beta": true,
+      "body_absent:gamma": true,
+      "body_absent:proj": true,
+      "agents": true,
+      "listed_fixture_exact": true,
+      "marker_present:hook-SessionStart": true,
+      "marker_present:hook-UserPromptSubmit": true,
+      "validator_matches": true
+    },
+    "exit": 0,
+    "proxy": []
+  },
+  {
+    "id": "Q-S1-I",
+    "verdict": "PASS",
+    "reasons": [],
+    "listed": {
+      "requests_in_range": true,
+      "keys_synthetic": true,
+      "desc_present:alpha": true,
+      "desc_present:gamma": true,
+      "desc_absent:beta": true,
+      "desc_absent:proj": true,
+      "desc_absent:hidden": true,
+      "agents": true,
+      "listed_fixture_exact": true,
+      "validator_matches": true
+    },
+    "exit": 0,
+    "proxy": [
+      "CONNECT downloads.claude.ai:443 HTTP/1.1",
+      "CONNECT github.com:443 HTTP/1.1"
+    ]
+  }
+]

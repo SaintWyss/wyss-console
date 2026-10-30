@@ -1,0 +1,186 @@
+[
+  {
+    "id": "Q-C0",
+    "mode": "H",
+    "settings": "plain",
+    "expect": {
+      "requests": [1, 6],
+      "listed_fixture_exact": ["a0-alpha", "a0-beta", "a0-gamma", "a0-proj"],
+      "desc_present": ["alpha", "beta", "gamma", "proj"],
+      "desc_absent": ["hidden"],
+      "body_absent": ["alpha", "beta", "gamma", "proj"],
+      "agents": true
+    },
+    "args": []
+  },
+  {
+    "id": "Q-S1-1",
+    "mode": "H",
+    "settings": "plain",
+    "expect": {
+      "requests": [1, 6],
+      "listed_fixture_exact": ["a0-alpha", "a0-gamma"],
+      "desc_present": ["alpha", "gamma"],
+      "desc_absent": ["beta", "proj", "hidden"],
+      "body_absent": ["alpha", "beta", "gamma", "proj"],
+      "agents": true,
+      "validator": true
+    },
+    "overlay": {
+      "skillOverrides": {
+        "a0-beta": "off",
+        "a0-proj": "off"
+      }
+    },
+    "args": ["--settings", "{OVERLAY}"]
+  },
+  {
+    "id": "Q-S1-2",
+    "mode": "H",
+    "settings": "plain",
+    "expect": {
+      "requests": [1, 6],
+      "listed_fixture_exact": ["a0-alpha", "a0-gamma"],
+      "desc_present": ["alpha", "gamma"],
+      "desc_absent": ["beta", "proj", "hidden"],
+      "body_absent": ["alpha", "beta", "gamma", "proj"],
+      "agents": true,
+      "validator": true
+    },
+    "overlay": {
+      "skillOverrides": {
+        "a0-beta": "off",
+        "a0-proj": "off"
+      }
+    },
+    "args": ["--settings", "{OVERLAY}"]
+  },
+  {
+    "id": "Q-S1-3",
+    "mode": "H",
+    "settings": "plain",
+    "expect": {
+      "requests": [1, 6],
+      "listed_fixture_exact": ["a0-alpha", "a0-gamma"],
+      "desc_present": ["alpha", "gamma"],
+      "desc_absent": ["beta", "proj", "hidden"],
+      "body_absent": ["alpha", "beta", "gamma", "proj"],
+      "agents": true,
+      "validator": true
+    },
+    "overlay": {
+      "skillOverrides": {
+        "a0-beta": "off",
+        "a0-proj": "off"
+      }
+    },
+    "args": ["--settings", "{OVERLAY}"]
+  },
+  {
+    "id": "Q-S2-1",
+    "mode": "H",
+    "settings": "plain",
+    "expect": {
+      "requests": [1, 6],
+      "listed_fixture_exact": ["a0-beta", "a0-proj"],
+      "desc_present": ["beta", "proj"],
+      "desc_absent": ["alpha", "gamma", "hidden"],
+      "body_absent": ["alpha", "beta", "gamma", "proj"],
+      "agents": true,
+      "validator": true
+    },
+    "overlay": {
+      "skillOverrides": {
+        "a0-alpha": "off",
+        "a0-gamma": "off"
+      }
+    },
+    "args": ["--settings", "{OVERLAY}"]
+  },
+  {
+    "id": "Q-S2-2",
+    "mode": "H",
+    "settings": "plain",
+    "expect": {
+      "requests": [1, 6],
+      "listed_fixture_exact": ["a0-beta", "a0-proj"],
+      "desc_present": ["beta", "proj"],
+      "desc_absent": ["alpha", "gamma", "hidden"],
+      "body_absent": ["alpha", "beta", "gamma", "proj"],
+      "agents": true,
+      "validator": true
+    },
+    "overlay": {
+      "skillOverrides": {
+        "a0-alpha": "off",
+        "a0-gamma": "off"
+      }
+    },
+    "args": ["--settings", "{OVERLAY}"]
+  },
+  {
+    "id": "Q-S2-3",
+    "mode": "H",
+    "settings": "plain",
+    "expect": {
+      "requests": [1, 6],
+      "listed_fixture_exact": ["a0-beta", "a0-proj"],
+      "desc_present": ["beta", "proj"],
+      "desc_absent": ["alpha", "gamma", "hidden"],
+      "body_absent": ["alpha", "beta", "gamma", "proj"],
+      "agents": true,
+      "validator": true
+    },
+    "overlay": {
+      "skillOverrides": {
+        "a0-alpha": "off",
+        "a0-gamma": "off"
+      }
+    },
+    "args": ["--settings", "{OVERLAY}"]
+  },
+  {
+    "id": "Q-H1",
+    "mode": "H",
+    "settings": "hooked",
+    "expect": {
+      "requests": [1, 6],
+      "listed_fixture_exact": ["a0-alpha", "a0-gamma"],
+      "desc_present": ["alpha", "gamma"],
+      "desc_absent": ["beta", "proj", "hidden"],
+      "body_absent": ["alpha", "beta", "gamma", "proj"],
+      "agents": true,
+      "validator": true,
+      "markers_present": ["hook-SessionStart", "hook-UserPromptSubmit"]
+    },
+    "overlay": {
+      "skillOverrides": {
+        "a0-beta": "off",
+        "a0-proj": "off"
+      }
+    },
+    "args": ["--settings", "{OVERLAY}"]
+  },
+  {
+    "id": "Q-S1-I",
+    "mode": "I",
+    "settings": "plain",
+    "expect": {
+      "requests": [1, 6],
+      "listed_fixture_exact": ["a0-alpha", "a0-gamma"],
+      "desc_present": ["alpha", "gamma"],
+      "desc_absent": ["beta", "proj", "hidden"],
+      "agents": true,
+      "validator": true
+    },
+    "overlay": {
+      "skillOverrides": {
+        "a0-beta": "off",
+        "a0-proj": "off"
+      }
+    },
+    "args": ["--settings", "{OVERLAY}"],
+    "startup_wait": 15,
+    "prompt": "ping"
+  }
+]
