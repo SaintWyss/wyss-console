@@ -176,6 +176,12 @@ pub struct LaunchScan {
     pub truncated: bool,
     /// Skill folders that exist but could not be read. The exclusion would be incomplete.
     pub unreadable: Vec<&'static str>,
+    /// For each of `skills`, in order: the `SKILL.md` the provider reads, as an absolute path through
+    /// the folder it is installed in (a link is named, not resolved). `None` for an entry without one.
+    pub skill_files: Vec<Option<PathBuf>>,
+    /// Installed skills the provider's own configuration already switches off: Claude Code's
+    /// `skillOverrides` (account, project, local), Codex's `[[skills.config]]` with `enabled = false`.
+    pub base_off: std::collections::BTreeSet<String>,
 }
 
 /// A project folder accepted by the same checks Configuration applies, or `None`.
@@ -208,6 +214,7 @@ pub fn launch_scan(env: &Environment, provider: &str) -> LaunchScan {
     let mut composites = composites(env, &scan.candidates);
     if provider == "claude_code" {
         composites.extend(plugin_packages(env));
+    } else {
         composites.extend(codex_plugin_packages(env));
     }
     let wanted = match provider {
@@ -224,13 +231,117 @@ pub fn launch_scan(env: &Environment, provider: &str) -> LaunchScan {
                 .collect()
         })
         .unwrap_or_default();
+    let skill_files: Vec<Option<PathBuf>> = scan
+        .candidates
+        .iter()
+        .map(|candidate| {
+            (candidate.blocked != Some("no_skill_file")).then(|| {
+                let folder = candidate.origin.strip_prefix("~/").map_or_else(
+                    || PathBuf::from(&candidate.origin),
+                    |rest| env.home.join(rest),
+                );
+                folder.join("SKILL.md")
+            })
+        })
+        .collect();
+    let base_off = if provider == "claude_code" {
+        claude_base_off(env)
+    } else {
+        codex_base_off(env, &scan.candidates, &skill_files)
+    };
     LaunchScan {
         skills: scan.candidates,
         composites,
         mcp_servers,
         truncated: scan.truncated,
         unreadable,
+        skill_files,
+        base_off,
     }
+}
+
+/// Skill names Claude Code's own settings switch off, the most specific file winning: the account's
+/// `settings.json`, then the project's `.claude/settings.json`, then its `.claude/settings.local.json`.
+fn claude_base_off(env: &Environment) -> std::collections::BTreeSet<String> {
+    let mut files = vec![env.claude_dir().join("settings.json")];
+    if let Some(project) = &env.project {
+        files.push(project.join(".claude/settings.json"));
+        files.push(project.join(".claude/settings.local.json"));
+    }
+    let mut value: BTreeMap<String, bool> = BTreeMap::new();
+    for file in files {
+        let Some(parent) = file.parent() else {
+            continue;
+        };
+        let Some(reader) = ApprovedRoots::new([parent.to_path_buf()])
+            .ok()
+            .and_then(|roots| ConfigReader::new(roots, Bounds::PROPOSED).ok())
+        else {
+            continue;
+        };
+        let Ok(read) = reader.read_file(&file) else {
+            continue;
+        };
+        let Ok(settings) = serde_json::from_slice::<serde_json::Value>(read.bytes()) else {
+            continue;
+        };
+        if let Some(overrides) = settings["skillOverrides"].as_object() {
+            for (name, state) in overrides.iter().take(MAX_ENTRIES) {
+                if let Some(state) = state.as_str() {
+                    value.insert(name.clone(), state == "off");
+                }
+            }
+        }
+    }
+    value
+        .into_iter()
+        .filter_map(|(name, off)| off.then_some(name))
+        .collect()
+}
+
+/// Installed Codex skills its `config.toml` switches off: a `[[skills.config]]` entry whose `path` is
+/// the skill's `SKILL.md` (through its folder or its resolved file) with `enabled = false`. A folder
+/// path is ignored, as Codex ignores it; the last entry for a file wins.
+fn codex_base_off(
+    env: &Environment,
+    skills: &[Candidate],
+    files: &[Option<PathBuf>],
+) -> std::collections::BTreeSet<String> {
+    let codex = env.codex_dir();
+    let Some(reader) = ApprovedRoots::new([codex.clone()])
+        .ok()
+        .and_then(|roots| ConfigReader::new(roots, Bounds::PROPOSED).ok())
+    else {
+        return Default::default();
+    };
+    let Ok(config) = reader.read_file(&codex.join("config.toml")) else {
+        return Default::default();
+    };
+    let Ok(Some(config)) = super::reader::parse_toml(config.bytes(), &Bounds::PROPOSED) else {
+        return Default::default();
+    };
+    let mut enabled: BTreeMap<PathBuf, bool> = BTreeMap::new();
+    for entry in config["skills"]["config"].as_array().into_iter().flatten() {
+        let (Some(path), Some(on)) = (entry["path"].as_str(), entry["enabled"].as_bool()) else {
+            continue;
+        };
+        enabled.insert(PathBuf::from(path), on);
+    }
+    skills
+        .iter()
+        .zip(files)
+        .filter_map(|(skill, file)| {
+            let file = file.as_ref()?;
+            let real = std::fs::canonicalize(file).ok();
+            let off = [Some(file.clone()), real]
+                .into_iter()
+                .flatten()
+                .filter_map(|path| enabled.get(&path))
+                .last()
+                .is_some_and(|on| !on);
+            off.then(|| skill.name.clone())
+        })
+        .collect()
 }
 
 /// The same scan with `home` as the account folder. Used by tests and fixtures.
@@ -1658,6 +1769,77 @@ mod tests {
         );
         let escape = plugin("escape");
         assert!(escape.version.is_empty() && escape.skills.is_empty());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    fn launch_env(home: &Path, project: Option<PathBuf>) -> Environment {
+        Environment {
+            home: home.to_path_buf(),
+            claude_config_dir: None,
+            codex_home: None,
+            project,
+            system: PathBuf::from("/etc"),
+            declared_writers: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_launch_scan_reads_what_each_providers_own_configuration_already_switches_off() {
+        let home = home();
+        for name in ["design", "tokens"] {
+            let skill = home.join(".claude/skills").join(name);
+            fs::create_dir_all(&skill).unwrap();
+            fs::write(skill.join("SKILL.md"), format!("---\nname: {name}\n---\n")).unwrap();
+        }
+        fs::write(
+            home.join(".claude/settings.json"),
+            r#"{"skillOverrides":{"design":"off","tokens":"on"}}"#,
+        )
+        .unwrap();
+        let project = home.join("app");
+        fs::create_dir_all(project.join(".claude")).unwrap();
+        fs::write(
+            project.join(".claude/settings.local.json"),
+            r#"{"skillOverrides":{"tokens":"off"}}"#,
+        )
+        .unwrap();
+        let claude = launch_scan(&launch_env(&home, Some(project.clone())), "claude_code");
+        assert_eq!(
+            claude.base_off.iter().collect::<Vec<_>>(),
+            ["design", "tokens"]
+        );
+        assert!(claude.composites.iter().all(|c| c.kind != "codex_plugin"));
+
+        for name in ["alpha", "beta", "gamma"] {
+            let skill = home.join(".agents/skills").join(name);
+            fs::create_dir_all(&skill).unwrap();
+            fs::write(skill.join("SKILL.md"), format!("---\nname: {name}\n---\n")).unwrap();
+        }
+        let file = |name: &str| home.join(".agents/skills").join(name).join("SKILL.md");
+        fs::create_dir_all(home.join(".codex")).unwrap();
+        fs::write(
+            home.join(".codex/config.toml"),
+            format!(
+                "[[skills.config]]\npath = {:?}\nenabled = false\n\n[[skills.config]]\npath = {:?}\nenabled = false\n\n[[skills.config]]\npath = {:?}\nenabled = false\n\n[[skills.config]]\npath = {:?}\nenabled = true\n",
+                file("alpha").display().to_string(),
+                home.join(".agents/skills/beta").display().to_string(),
+                file("gamma").display().to_string(),
+                file("gamma").display().to_string(),
+            ),
+        )
+        .unwrap();
+        let codex = launch_scan(&launch_env(&home, None), "codex");
+        // A folder path is ignored, as Codex ignores it; the last entry for a file wins.
+        assert_eq!(codex.base_off.iter().collect::<Vec<_>>(), ["alpha"]);
+        let alpha = codex
+            .skills
+            .iter()
+            .position(|skill| skill.name == "alpha")
+            .unwrap();
+        assert_eq!(
+            codex.skill_files[alpha].as_deref(),
+            Some(file("alpha").as_path())
+        );
         fs::remove_dir_all(home).unwrap();
     }
 

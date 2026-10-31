@@ -10,13 +10,14 @@ use std::io::{self, Read, Write};
 pub const PROTOCOL: u32 = 1;
 /// Additions to protocol 1 that a window may need to ask about before it relies on them.
 /// A feature is never removed; a host without the name does not have it.
-pub const FEATURES: [&str; 6] = [
+pub const FEATURES: [&str; 7] = [
     "profile_effort",
     "native_profile_plan_token",
     "screen_snapshot",
     "native_extended_catalogue_v1",
     "native_readiness_v1",
     "native_arsenal_v1",
+    "native_arsenal_codex_v1",
 ];
 pub const MAX_FRAME: usize = 1024 * 1024;
 

@@ -13,6 +13,9 @@ use super::analysis::{self, Compatibility, Dependency};
 use super::store::{self, Selection};
 use crate::agentconfig::catalogue::{Composite, LaunchScan};
 use crate::native::arsenal::MAX_SKILLS_OFF;
+
+/// Codex's own skills, which it installs and replaces itself: never switched off.
+const SYSTEM_SKILLS: &str = "codex_system_skills";
 use crate::native::capabilities::ArsenalEvidence;
 
 /// One item of the selection as the library holds it now.
@@ -100,6 +103,11 @@ pub struct TerminalPlan {
     pub kept: Vec<String>,
     /// Installed skills the session would not expose.
     pub excluded: Vec<String>,
+    /// Kept skills the provider's own configuration already switches off. Arsenal never switches a
+    /// skill on, so these stay off in the session.
+    pub inherited_off: Vec<String>,
+    /// For a provider that switches skills off by file (Codex): the `SKILL.md` of each excluded skill.
+    pub excluded_files: Vec<String>,
     /// What this configuration does not change, said so nothing is implied.
     pub untouched: Vec<String>,
     pub composites: Vec<PlanComposite>,
@@ -220,22 +228,66 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
             ));
         }
     }
-    let installed_names: BTreeSet<&str> = installed.iter().map(|s| s.name.as_str()).collect();
+    // Skills the provider installs and replaces itself stay as they are.
+    let switchable = |skill: &crate::agentconfig::catalogue::Candidate| {
+        skill.source != SYSTEM_SKILLS && skill.blocked != Some("no_skill_file")
+    };
+    let installed_names: BTreeSet<&str> = installed
+        .iter()
+        .filter(|skill| switchable(skill))
+        .map(|s| s.name.as_str())
+        .collect();
     let excluded: Vec<String> = installed_names
         .iter()
         .filter(|name| !kept.contains(**name))
         .map(|name| (*name).to_owned())
         .collect();
+    let excluded_files: Vec<String> = if provider == "codex" {
+        let mut files: Vec<String> = installed
+            .iter()
+            .zip(&input.installed.skill_files)
+            .filter(|(skill, _)| switchable(skill) && !kept.contains(&skill.name))
+            .filter_map(|(_, file)| file.as_ref().map(|f| f.to_string_lossy().into_owned()))
+            .collect();
+        files.sort();
+        files.dedup();
+        files
+    } else {
+        Vec::new()
+    };
+    let inherited_off: Vec<String> = kept
+        .iter()
+        .filter(|name| input.installed.base_off.contains(*name))
+        .cloned()
+        .collect();
+    if !inherited_off.is_empty() {
+        warnings.push(format!(
+            "{} kept skill(s) are switched off in your own {} configuration and stay off: {}.",
+            inherited_off.len(),
+            analysis::provider_label(provider),
+            inherited_off.join(", ")
+        ));
+    }
     let conflicts = conflicts(&items, &composites, &input.installed.skills);
     let mut untouched = vec![
         "Hooks, permissions and MCP servers: as your settings say.".to_owned(),
         "The provider's built-in skills.".to_owned(),
     ];
+    if provider == "codex" {
+        untouched.push(
+            "Codex's own system skills (~/.codex/skills/.system) and the skills your config.toml already switches."
+                .to_owned(),
+        );
+    }
     let enabled_plugins: Vec<&Composite> = input
         .installed
         .composites
         .iter()
-        .filter(|c| c.kind == "claude_plugin" && c.enabled == Some(true) && !c.skills.is_empty())
+        .filter(|c| {
+            matches!(c.kind, "claude_plugin" | "codex_plugin")
+                && c.enabled == Some(true)
+                && !c.skills.is_empty()
+        })
         .collect();
     for plugin in &enabled_plugins {
         untouched.push(format!(
@@ -268,8 +320,12 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
     } else {
         "ready"
     };
-    let overlay = (provider == "claude_code").then(|| overlay_text(&excluded));
-    let config_hash = config_hash(&input, &items, &excluded);
+    let overlay = match provider {
+        "claude_code" => Some(overlay_text(&excluded)),
+        "codex" => Some(crate::native::arsenal::codex_config_value(&excluded_files)),
+        _ => None,
+    };
+    let config_hash = config_hash(&input, &items, &excluded, &excluded_files);
     TerminalPlan {
         selection: input.selection.id.clone(),
         selection_name: input.selection.name.clone(),
@@ -282,6 +338,8 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
         items,
         kept: kept.into_iter().collect(),
         excluded,
+        inherited_off,
+        excluded_files,
         untouched,
         composites,
         conflicts,
@@ -472,7 +530,38 @@ pub fn validate_exclusion(excluded: &[String], installed: &LaunchScan) -> Result
     Ok(())
 }
 
-fn config_hash(input: &Input<'_>, items: &[PlanItem], excluded: &[String]) -> String {
+/// The same check for exclusion by file: every path is the `SKILL.md` of an installed skill this
+/// provider may switch, read through its folder, exists as a file now, and appears once. Codex
+/// ignores a path it does not know without saying so, so an unknown path is refused here instead.
+pub fn validate_files(files: &[String], installed: &LaunchScan) -> Result<(), &'static str> {
+    let known: BTreeSet<String> = installed
+        .skills
+        .iter()
+        .zip(&installed.skill_files)
+        .filter(|(skill, _)| skill.source != SYSTEM_SKILLS)
+        .filter_map(|(_, file)| file.as_ref().map(|f| f.to_string_lossy().into_owned()))
+        .collect();
+    let mut seen = BTreeSet::new();
+    if files.len() > MAX_SKILLS_OFF {
+        return Err("too_many");
+    }
+    for file in files {
+        if !known.contains(file) || !seen.insert(file.as_str()) {
+            return Err("unknown_or_repeated_file");
+        }
+        if !std::path::Path::new(file).is_file() {
+            return Err("missing_file");
+        }
+    }
+    Ok(())
+}
+
+fn config_hash(
+    input: &Input<'_>,
+    items: &[PlanItem],
+    excluded: &[String],
+    excluded_files: &[String],
+) -> String {
     let material = serde_json::json!({
         "selection": input.selection.id,
         "updated": input.selection.updated_at,
@@ -484,6 +573,7 @@ fn config_hash(input: &Input<'_>, items: &[PlanItem], excluded: &[String]) -> St
             &item.capability, item.revision, &item.tree_hash, item.state
         )).collect::<Vec<_>>(),
         "excluded": excluded,
+        "excluded_files": excluded_files,
     });
     format!("{:x}", Sha256::digest(material.to_string().as_bytes()))
 }
@@ -567,6 +657,8 @@ mod tests {
             mcp_servers: ["context7".to_owned()].into(),
             truncated: false,
             unreadable: Vec::new(),
+            skill_files: Vec::new(),
+            base_off: Default::default(),
         }
     }
 
@@ -613,6 +705,14 @@ mod tests {
             project: Some(("app".into(), "key".into())),
         }
     }
+
+    const CODEX_EVIDENCE: ArsenalEvidence = ArsenalEvidence {
+        qualified_version: "codex-cli 0.159.0",
+        checked_on: "test",
+        operation: "test",
+        source: "test",
+        limitation: "test",
+    };
 
     const EVIDENCE: ArsenalEvidence = ArsenalEvidence {
         qualified_version: "2.1.314 (Claude Code)",
@@ -737,16 +837,117 @@ mod tests {
     }
 
     #[test]
-    fn codex_is_never_available_and_says_why() {
+    fn codex_without_its_own_record_is_not_applied_and_says_why() {
         let installed = scan(Vec::new(), Vec::new());
         let mut sel = selection(&[]);
         sel.provider = "codex".into();
         let mut inp = input(&sel, Vec::new(), &installed, None);
         inp.provider = "codex";
-        inp.version = Some("codex-cli 0.159.0".into());
+        inp.version = Some("codex-cli 0.160.0".into());
         let plan = plan(inp);
         assert_eq!(plan.enforcement.state, "unqualified");
         assert!(plan.enforcement.reason.contains("skills.config"));
-        assert!(plan.overlay.is_none());
+        assert!(!plan.can_apply);
+    }
+
+    fn codex_skill(name: &str, source: &str, body: &[u8]) -> Candidate {
+        Candidate {
+            provider: "codex",
+            source: source.into(),
+            ..skill(name, "user", body)
+        }
+    }
+
+    #[test]
+    fn codex_switches_off_by_file_keeps_system_skills_and_names_what_its_config_already_switched_off()
+     {
+        let mut installed = scan(
+            vec![
+                codex_skill("design", "codex_user_skills", b"one"),
+                codex_skill("tokens", "codex_user_skills", b"two"),
+                codex_skill("old", "codex_user_skills", b"three"),
+                codex_skill("probe", "codex_project_skills", b"four"),
+                codex_skill("imagegen", "codex_system_skills", b"sys"),
+            ],
+            Vec::new(),
+        );
+        installed.skill_files = vec![
+            Some("/h/.agents/skills/design/SKILL.md".into()),
+            Some("/h/.agents/skills/tokens/SKILL.md".into()),
+            Some("/h/.agents/skills/old/SKILL.md".into()),
+            Some("/p/.agents/skills/probe/SKILL.md".into()),
+            Some("/h/.codex/skills/.system/imagegen/SKILL.md".into()),
+        ];
+        installed.base_off = ["old".to_owned()].into();
+        let mut sel = selection(&[]);
+        sel.provider = "codex".into();
+        let mut design = item("design", b"one");
+        design.provider = "codex".into();
+        let mut old = item("old", b"three");
+        old.provider = "codex".into();
+        let mut inp = input(&sel, vec![design, old], &installed, Some(CODEX_EVIDENCE));
+        inp.provider = "codex";
+        inp.version = Some("codex-cli 0.159.0".into());
+        let plan = plan(inp);
+        assert!(plan.can_apply, "{:?}", plan.enforcement);
+        assert_eq!(plan.excluded, ["probe", "tokens"]);
+        assert_eq!(
+            plan.excluded_files,
+            [
+                "/h/.agents/skills/tokens/SKILL.md",
+                "/p/.agents/skills/probe/SKILL.md"
+            ]
+        );
+        assert_eq!(plan.inherited_off, ["old"]);
+        assert!(plan.warnings.iter().any(|w| w.contains("stay off: old")));
+        let value = plan.overlay.unwrap();
+        let parsed: toml::Table =
+            toml::from_str(&value.replacen("skills.config=", "x=", 1)).unwrap();
+        let entries = parsed["x"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(
+            entries
+                .iter()
+                .all(|e| e["enabled"].as_bool() == Some(false))
+        );
+        assert!(!value.contains(".system"));
+    }
+
+    #[test]
+    fn a_claude_skill_its_settings_switch_off_is_kept_but_reported_off() {
+        let mut installed = scan(vec![skill("design", "user", b"one")], Vec::new());
+        installed.base_off = ["design".to_owned()].into();
+        let sel = selection(&[]);
+        let plan = plan(input(
+            &sel,
+            vec![item("design", b"one")],
+            &installed,
+            Some(EVIDENCE),
+        ));
+        assert_eq!(plan.kept, ["design"]);
+        assert_eq!(plan.inherited_off, ["design"]);
+        assert!(plan.excluded_files.is_empty());
+    }
+
+    #[test]
+    fn a_file_outside_the_installed_ones_or_gone_from_disk_is_refused() {
+        let dir = std::env::temp_dir().join(format!("arsenal-files-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        std::fs::write(dir.join("a/SKILL.md"), "x").unwrap();
+        let real = dir.join("a/SKILL.md").to_string_lossy().into_owned();
+        let gone = dir.join("b/SKILL.md").to_string_lossy().into_owned();
+        let mut installed = scan(
+            vec![
+                codex_skill("a", "codex_user_skills", b"x"),
+                codex_skill("b", "codex_user_skills", b"y"),
+            ],
+            Vec::new(),
+        );
+        installed.skill_files = vec![Some(real.clone().into()), Some(gone.clone().into())];
+        assert!(validate_files(&[real.clone()], &installed).is_ok());
+        assert_eq!(validate_files(&[gone], &installed), Err("missing_file"));
+        assert!(validate_files(&["/etc/SKILL.md".into()], &installed).is_err());
+        assert!(validate_files(&[real.clone(), real], &installed).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

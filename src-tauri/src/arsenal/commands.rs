@@ -1049,11 +1049,14 @@ pub(crate) fn launch_for(
     }
     terminal::validate_exclusion(&plan.excluded, &installed)
         .map_err(|_| HostError::new("arsenal_blocked"))?;
+    terminal::validate_files(&plan.excluded_files, &installed)
+        .map_err(|_| HostError::new("arsenal_blocked"))?;
     Ok(ArsenalLaunch {
         selection: plan.selection,
         selection_name: plan.selection_name,
         config_hash: plan.config_hash,
         skills_off: plan.excluded,
+        skill_files_off: plan.excluded_files,
     })
 }
 

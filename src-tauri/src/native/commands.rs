@@ -242,7 +242,10 @@ fn check_arsenal_start(
     plan_token: Option<&str>,
     expected_cli_version: Option<&str>,
 ) -> Result<(), HostError> {
-    if !link.has_feature("native_arsenal_v1") || !link.has_feature("native_profile_plan_token") {
+    if !link.has_feature("native_arsenal_v1")
+        || !link.has_feature("native_profile_plan_token")
+        || (agent == AgentId::Codex && !link.has_feature("native_arsenal_codex_v1"))
+    {
         return Err(HostError::new("host_outdated"));
     }
     let preview = link.call(
@@ -429,7 +432,9 @@ fn preview_with_link(
 ) -> Answer {
     let mut params = json!({"agent_id": request.agent_id, "profile_id": request.profile_id});
     if let Some(launch) = &launch {
-        if !link.has_feature("native_arsenal_v1") {
+        if !link.has_feature("native_arsenal_v1")
+            || (request.agent_id == AgentId::Codex && !link.has_feature("native_arsenal_codex_v1"))
+        {
             return Err(HostError::new("host_outdated"));
         }
         params["arsenal"] = json!(launch);
@@ -1227,6 +1232,7 @@ mod capability_tests {
             selection_name: "Frontend".into(),
             config_hash: "b".repeat(64),
             skills_off: vec!["design".into()],
+            skill_files_off: Vec::new(),
         }
     }
 

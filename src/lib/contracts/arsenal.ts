@@ -273,6 +273,10 @@ export interface TerminalPlan {
   items: PlanItem[];
   kept: string[];
   excluded: string[];
+  /** Kept skills the provider's own configuration already switches off; they stay off. */
+  inherited_off: string[];
+  /** Codex: the SKILL.md of each excluded skill, which is what its switch names. */
+  excluded_files: string[];
   untouched: string[];
   composites: {
     key: string;
@@ -771,6 +775,8 @@ export function parseTerminalPlan(value: unknown): TerminalPlan {
     }),
     kept: strings(v.kept, 'kept'),
     excluded: strings(v.excluded, 'excluded'),
+    inherited_off: strings(v.inherited_off, 'inherited_off'),
+    excluded_files: strings(v.excluded_files, 'excluded_files'),
     untouched: strings(v.untouched, 'untouched'),
     composites: list(v.composites, 'plan composites', (item) => {
       const c = record(item, 'plan composite');

@@ -267,8 +267,10 @@
         <p class="event-meta">{plan.enforcement.reason}</p>
         <p class="event-meta">
           {counts.prepared} prepared · {counts.rejected} rejected · {counts.unsupported}
-          not carried · {plan.kept.length} installed skill(s) stay · {plan
-            .excluded.length} would be switched off
+          not carried · {plan.kept.length - plan.inherited_off.length} installed skill(s)
+          stay{#if plan.inherited_off.length > 0}{' · '}{plan.inherited_off
+              .length} already off in your settings{/if} ·
+          {plan.excluded.length} would be switched off
         </p>
         {#each plan.conflicts as conflict, index (index)}
           <p class={conflict.blocking ? 'native-warning' : 'event-meta'}>
@@ -305,7 +307,11 @@
         </details>
         {#if plan.overlay}
           <details>
-            <summary>Session settings it would write</summary>
+            <summary
+              >{plan.provider === 'codex'
+                ? 'Session flag it would add (with --no-daemon)'
+                : 'Session settings it would write'}</summary
+            >
             <pre class="arsenal-overlay">{plan.overlay}</pre>
           </details>
         {/if}

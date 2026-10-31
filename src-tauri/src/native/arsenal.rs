@@ -23,6 +23,40 @@ pub struct ArsenalLaunch {
     pub config_hash: String,
     /// Installed skills switched off for this session, by their exact provider names.
     pub skills_off: Vec<String>,
+    /// For Codex, which switches skills off by file: the `SKILL.md` of each skill switched off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skill_files_off: Vec<String>,
+}
+
+/// Longest `SKILL.md` path one launch may name.
+const MAX_FILE_PATH: usize = 4096;
+
+/// A `SKILL.md` Codex reads, named the way the launch names it: absolute, plain, never one of Codex's
+/// own system skills.
+fn skill_file_ok(path: &str) -> bool {
+    path.len() <= MAX_FILE_PATH
+        && path.starts_with('/')
+        && path.ends_with("/SKILL.md")
+        && !path.chars().any(char::is_control)
+        && !path
+            .split('/')
+            .any(|part| part == ".." || part == "." || part == ".system")
+}
+
+/// The value of Codex's `-c` flag that switches these skills off for one session:
+/// `skills.config=[{path = "…/SKILL.md", enabled = false}, …]`, serialized as TOML so no path can
+/// change its shape. Codex adds these entries to the account's own and never switches one on.
+pub fn codex_config_value(files: &[String]) -> String {
+    let entries: Vec<toml::Value> = files
+        .iter()
+        .map(|file| {
+            let mut table = toml::map::Map::new();
+            table.insert("path".to_owned(), toml::Value::String(file.clone()));
+            table.insert("enabled".to_owned(), toml::Value::Boolean(false));
+            toml::Value::Table(table)
+        })
+        .collect();
+    format!("skills.config={}", toml::Value::Array(entries))
 }
 
 /// What a session keeps of the launch: enough to say what it started with, and to restart it.
@@ -67,6 +101,15 @@ impl ArsenalLaunch {
         {
             return Err("arsenal_invalid");
         }
+        let mut files = BTreeSet::new();
+        if self.skill_files_off.len() > MAX_SKILLS_OFF
+            || self
+                .skill_files_off
+                .iter()
+                .any(|file| !skill_file_ok(file) || !files.insert(file.as_str()))
+        {
+            return Err("arsenal_invalid");
+        }
         Ok(())
     }
 }
@@ -80,10 +123,21 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
             .push("The Arsenal selection is not well formed.".to_owned());
         return;
     }
-    if agent != AgentId::ClaudeCode {
-        plan.not_applicable
-            .push("Arsenal can switch skills off for one session only in Claude Code.".to_owned());
-        return;
+    match agent {
+        AgentId::ClaudeCode if launch.skill_files_off.is_empty() => {}
+        AgentId::Codex => return apply_codex(plan, launch),
+        AgentId::ClaudeCode => {
+            plan.not_applicable
+                .push("The Arsenal selection is not well formed.".to_owned());
+            return;
+        }
+        _ => {
+            plan.not_applicable.push(
+                "Arsenal can switch skills off for one session only in Claude Code and Codex."
+                    .to_owned(),
+            );
+            return;
+        }
     }
     let mut overlay: Map<String, Value> = match plan.overlay.as_deref() {
         None => Map::new(),
@@ -127,6 +181,41 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
     plan.overlay = serde_json::to_string_pretty(&Value::Object(overlay)).ok();
 }
 
+/// Codex: the session runs without the shared background server, so the switch reaches only this
+/// process, and with one `-c skills.config=[…]` naming each skill's `SKILL.md` with
+/// `enabled = false`. Every file must exist now: Codex ignores a path it does not know silently.
+fn apply_codex(plan: &mut LaunchPlan, launch: &ArsenalLaunch) {
+    if !launch.skills_off.is_empty() && launch.skill_files_off.is_empty() {
+        plan.not_applicable
+            .push("The Arsenal selection names skills but not their files.".to_owned());
+        return;
+    }
+    if launch
+        .skill_files_off
+        .iter()
+        .any(|file| !std::path::Path::new(file).is_file())
+    {
+        plan.not_applicable.push(
+            "A skill the Arsenal selection switches off is no longer installed. Check the plan again."
+                .to_owned(),
+        );
+        return;
+    }
+    let literal = |plan: &mut LaunchPlan, word: String| {
+        plan.words.push(super::profile::Word::Literal(word));
+    };
+    literal(plan, "--no-daemon".to_owned());
+    if !launch.skill_files_off.is_empty() {
+        literal(plan, "-c".to_owned());
+        literal(plan, codex_config_value(&launch.skill_files_off));
+    }
+    plan.applied.push(format!(
+        "Arsenal selection \"{}\": {} installed skill(s) switched off for this session, which runs without the shared Codex server.",
+        launch.selection_name,
+        launch.skills_off.len()
+    ));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +227,7 @@ mod tests {
             selection_name: "Frontend".to_owned(),
             config_hash: "a".repeat(64),
             skills_off: off.iter().map(|s| (*s).to_owned()).collect(),
+            skill_files_off: Vec::new(),
         }
     }
 
@@ -191,6 +281,49 @@ mod tests {
     }
 
     #[test]
+    fn a_codex_exclusion_runs_without_the_shared_server_and_names_each_file_off() {
+        let dir = std::env::temp_dir().join(format!("arsenal-codex-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("a b")).unwrap();
+        std::fs::write(dir.join("a b/SKILL.md"), "x").unwrap();
+        let file = dir.join("a b/SKILL.md").to_string_lossy().into_owned();
+        let with = |files: Vec<String>| ArsenalLaunch {
+            skill_files_off: files,
+            ..launch(&["a"])
+        };
+        let mut plan = LaunchPlan::default();
+        apply(&mut plan, AgentId::Codex, &with(vec![file.clone()]));
+        assert!(plan.not_applicable.is_empty(), "{:?}", plan.not_applicable);
+        assert!(plan.overlay.is_none());
+        let words: Vec<String> = plan
+            .words
+            .iter()
+            .map(|w| match w {
+                Word::Literal(text) => text.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(words[..2], ["--no-daemon".to_owned(), "-c".to_owned()]);
+        let value: toml::Table =
+            toml::from_str(&words[2].replacen("skills.config=", "x=", 1)).unwrap();
+        assert_eq!(value["x"][0]["path"].as_str(), Some(file.as_str()));
+        assert_eq!(value["x"][0]["enabled"].as_bool(), Some(false));
+        // A file that is gone by start time is not silently ignored by the provider: it is refused.
+        std::fs::remove_dir_all(&dir).unwrap();
+        let mut gone = LaunchPlan::default();
+        apply(&mut gone, AgentId::Codex, &with(vec![file]));
+        assert_eq!(gone.not_applicable.len(), 1);
+        assert!(gone.words.is_empty());
+        // Claude never takes files.
+        let mut claude = LaunchPlan::default();
+        apply(
+            &mut claude,
+            AgentId::ClaudeCode,
+            &with(vec!["/h/.agents/skills/a/SKILL.md".into()]),
+        );
+        assert_eq!(claude.not_applicable.len(), 1);
+    }
+
+    #[test]
     fn hooks_off_codex_and_malformed_launches_do_not_apply() {
         let body = Body {
             name: "P".into(),
@@ -202,6 +335,7 @@ mod tests {
         apply(&mut plan, AgentId::ClaudeCode, &launch(&["a"]));
         assert_eq!(plan.not_applicable.len(), 1);
 
+        // Codex needs the file of each name: names alone do not apply.
         let mut codex = LaunchPlan::default();
         apply(&mut codex, AgentId::Codex, &launch(&["a"]));
         assert_eq!(codex.not_applicable.len(), 1);
@@ -224,6 +358,19 @@ mod tests {
             apply(&mut plan, AgentId::ClaudeCode, &bad);
             assert_eq!(plan.not_applicable.len(), 1, "{bad:?}");
             assert!(plan.overlay.is_none());
+        }
+        for bad_file in [
+            "relative/SKILL.md",
+            "/h/.agents/skills/a",
+            "/h/.codex/skills/.system/imagegen/SKILL.md",
+            "/h/../etc/SKILL.md",
+            "/h/a\nb/SKILL.md",
+        ] {
+            let bad = ArsenalLaunch {
+                skill_files_off: vec![bad_file.into()],
+                ..launch(&["a"])
+            };
+            assert!(bad.validate().is_err(), "{bad_file}");
         }
         let too_many: Vec<String> = (0..=MAX_SKILLS_OFF).map(|i| format!("s{i}")).collect();
         let refs: Vec<&str> = too_many.iter().map(String::as_str).collect();

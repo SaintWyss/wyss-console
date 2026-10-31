@@ -69,6 +69,8 @@ function plan(overrides: Partial<TerminalPlan> = {}): TerminalPlan {
     ],
     kept: ['design'],
     excluded: ['tokens', 'gsd-help'],
+    inherited_off: [],
+    excluded_files: [],
     untouched: ['Hooks, permissions and MCP servers: as your settings say.'],
     composites: [],
     conflicts: [],
@@ -239,6 +241,42 @@ describe('Arsenal in a terminal start', () => {
       ...document.querySelectorAll<HTMLLabelElement>('#native-arsenal label'),
     ].map((option) => option.textContent?.trim());
     expect(options).toContain('Later');
+  });
+
+  it('counts a kept skill its settings switch off as off, and names the Codex flag it adds', async () => {
+    const codex = plan({
+      provider: 'codex',
+      provider_version: 'codex-cli 0.159.0',
+      kept: ['design', 'old'],
+      inherited_off: ['old'],
+      excluded: ['tokens'],
+      excluded_files: ['/h/.agents/skills/tokens/SKILL.md'],
+      overlay:
+        'skills.config=[{ path = "/h/.agents/skills/tokens/SKILL.md", enabled = false }]',
+    });
+    const fake = {
+      selections: vi.fn(async () => [
+        { ...selection, provider: 'codex' as const },
+      ]),
+      terminalPlan: vi.fn(async () => codex),
+      projectSelection: vi.fn(async () => 'sel-1'),
+    } as unknown as ArsenalClient;
+    component = mount(ArsenalTerminalPanel, {
+      target: document.body,
+      props: {
+        agent: 'codex',
+        project: '/home/u/app',
+        profile: null,
+        previewer: vi.fn(async () => preview(true)),
+        onchange: () => {},
+        client: fake,
+      },
+    });
+    await settle();
+    expect(text()).toContain(
+      '1 installed skill(s) stay · 1 already off in your settings',
+    );
+    expect(text()).toContain('Session flag it would add (with --no-daemon)');
   });
 
   it('says a session line from the host record first, and never says a skill was used', () => {

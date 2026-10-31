@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-31 — Arsenal applies selections to Codex; plans respect the provider's own settings
+
+- **Codex `codex-cli 0.159.0`** applies an Arsenal selection to one terminal: the session starts with
+  `--no-daemon` (its own server, not the shared one) and `-c skills.config=[{path = <SKILL.md>,
+enabled = false}, …]` for each installed skill the selection leaves out. Qualification:
+  `docs/research/arsenal-am1a/ARSENAL-CODEX-0159-QUALIFICATION-2026-10-31.md`. Codex's own system skills and
+  plugin skills are left as they are; a path Codex would ignore silently (folder, unknown, gone) is refused
+  before the start. Any other Codex build stays `NOT APPLIED`. The host announces `native_arsenal_codex_v1`.
+- **Effective configuration.** A terminal plan reads what the provider's own configuration already switches
+  off (Claude Code `skillOverrides` in the account, project and local settings; Codex `[[skills.config]]`)
+  and shows those kept skills as "already off in your settings": Arsenal never switches a skill on.
+- A Claude plan no longer lists Codex plugins among its composites.
+
 ## 2026-10-31 — Arsenal: every Codex skill folder, and presets from a capability
 
 - Discover reads Codex's own skill folder `~/.codex/skills` (shown as "Codex home skills") besides

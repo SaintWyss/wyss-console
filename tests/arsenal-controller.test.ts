@@ -629,6 +629,8 @@ describe('Arsenal contracts', () => {
       ],
       kept: ['design'],
       excluded: ['tokens'],
+      inherited_off: [],
+      excluded_files: [],
       untouched: ['Hooks, permissions and MCP servers: as your settings say.'],
       composites: [],
       conflicts: [],

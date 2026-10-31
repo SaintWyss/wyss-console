@@ -158,6 +158,17 @@ const ARSENAL_CLAUDE: &[ArsenalEvidence] = &[ArsenalEvidence {
     limitation: "plugin and built-in skills are not switched off; concurrent sessions and provider use of each skill are not observed",
 }];
 
+/// Codex builds whose per-session skill switch passed a focused qualification: the session runs with
+/// `--no-daemon` (its own embedded server, not the shared one) and one
+/// `-c skills.config=[{path = <SKILL.md>, enabled = false}, …]`.
+const ARSENAL_CODEX: &[ArsenalEvidence] = &[ArsenalEvidence {
+    qualified_version: "codex-cli 0.159.0",
+    checked_on: "2026-10-31",
+    operation: "--no-daemon and -c skills.config=[{path=<SKILL.md>, enabled=false}] for installed user, home and project skills",
+    source: "docs/research/arsenal-am1a/ARSENAL-CODEX-0159-QUALIFICATION-2026-10-31.md (prompt-input probes and two concurrent interactive sessions)",
+    limitation: "plugin and system skills are not switched off; a folder path is ignored by Codex, so only SKILL.md paths are used; the session does not join the shared Codex server; provider use of each skill is not observed",
+}];
+
 /// A build that exists only in tests, so the enabled path is exercised without qualifying a real one.
 #[cfg(test)]
 pub const ARSENAL_TEST_VERSION: &str = "0.0.0-arsenal-test (Claude Code)";
@@ -170,18 +181,19 @@ const ARSENAL_TEST: ArsenalEvidence = ArsenalEvidence {
     limitation: "not a real build",
 };
 
-/// The exclusion evidence for this exact build, if any. Codex, OpenCode and Hermes have none: the
-/// Codex `[[skills.config]]` session layer is not proven on any installed build.
+/// The exclusion evidence for this exact build, if any. OpenCode and Hermes have none.
 pub fn arsenal_exclusion(agent: AgentId, version: Option<&str>) -> Option<ArsenalEvidence> {
     let version = version?;
-    if agent != AgentId::ClaudeCode {
-        return None;
-    }
+    let records = match agent {
+        AgentId::ClaudeCode => ARSENAL_CLAUDE,
+        AgentId::Codex => ARSENAL_CODEX,
+        _ => return None,
+    };
     #[cfg(test)]
-    if version == ARSENAL_TEST_VERSION {
+    if agent == AgentId::ClaudeCode && version == ARSENAL_TEST_VERSION {
         return Some(ARSENAL_TEST);
     }
-    ARSENAL_CLAUDE
+    records
         .iter()
         .find(|record| record.qualified_version == version)
         .copied()
@@ -224,10 +236,14 @@ mod tests {
             AgentId::Codex,
             Some(ARSENAL_TEST_VERSION)
         ));
-        assert!(!permits_arsenal_exclusion(
+        assert!(permits_arsenal_exclusion(
             AgentId::Codex,
             Some("codex-cli 0.159.0")
         ));
+        for other in ["codex-cli 0.158.0", "codex-cli 0.160.0", "0.159.0"] {
+            assert!(!permits_arsenal_exclusion(AgentId::Codex, Some(other)));
+        }
+        assert!(!permits_arsenal_exclusion(AgentId::Codex, None));
     }
 
     #[test]
