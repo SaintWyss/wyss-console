@@ -105,9 +105,10 @@ pub struct Candidate {
 /// plugin package found through the provider's own install record. It is described, never copied.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Composite {
-    /// Stable key: `gsd_core@<version>` or `claude_plugin:<plugin>@<marketplace>`.
+    /// Stable key: `gsd_core@<version>`, `claude_plugin:<plugin>@<marketplace>` or
+    /// `codex_plugin:<plugin>@<marketplace>`.
     pub key: String,
-    /// `gsd_core` or `claude_plugin`.
+    /// `gsd_core`, `claude_plugin` or `codex_plugin`.
     pub kind: &'static str,
     pub provider: &'static str,
     pub name: String,
@@ -207,6 +208,7 @@ pub fn launch_scan(env: &Environment, provider: &str) -> LaunchScan {
     let mut composites = composites(env, &scan.candidates);
     if provider == "claude_code" {
         composites.extend(plugin_packages(env));
+        composites.extend(codex_plugin_packages(env));
     }
     let wanted = match provider {
         "claude_code" => ProviderId::ClaudeCode,
@@ -471,6 +473,7 @@ fn scan_with(env: &Environment, only: Option<Only<'_>>) -> Scan {
         scan.candidates.extend(read_only_entries(env));
         scan.composites = composites(env, &scan.candidates);
         scan.composites.extend(plugin_packages(env));
+        scan.composites.extend(codex_plugin_packages(env));
     }
     scan
 }
@@ -1221,6 +1224,164 @@ pub fn plugin_packages(env: &Environment) -> Vec<Composite> {
     packages
 }
 
+/// Codex plugins named in the account's `config.toml` (`[plugins."<plugin>@<marketplace>"]`), each
+/// described from its manifest in Codex's plugin cache. Only the switch is read from the
+/// configuration, and of a manifest only its text fields and which kinds of parts it declares: an
+/// MCP or app definition can hold credentials, so its contents are never read into the scan.
+pub fn codex_plugin_packages(env: &Environment) -> Vec<Composite> {
+    let codex = env.codex_dir();
+    let cache = codex.join("plugins/cache");
+    let Some(reader) = ApprovedRoots::new([codex.clone()])
+        .ok()
+        .and_then(|roots| ConfigReader::new(roots, Bounds::PROPOSED).ok())
+    else {
+        return Vec::new();
+    };
+    let Ok(config) = reader.read_file(&codex.join("config.toml")) else {
+        return Vec::new();
+    };
+    let Ok(Some(config)) = super::reader::parse_toml(config.bytes(), &Bounds::PROPOSED) else {
+        return Vec::new();
+    };
+    let Some(configured) = config["plugins"].as_object() else {
+        return Vec::new();
+    };
+    let cache_real = std::fs::canonicalize(&cache).ok();
+    let mut packages = Vec::new();
+    for (key, switch) in configured.iter().take(MAX_PLUGINS) {
+        let Some((plugin, marketplace)) = key.split_once('@') else {
+            continue;
+        };
+        if !name_ok(plugin) || !name_ok(marketplace) || key.len() > 128 {
+            continue;
+        }
+        let enabled = switch["enabled"].as_bool();
+        // The one cached version, read only inside the cache: a link out of it is not followed.
+        let installed = cache_real.as_ref().and_then(|cache_real| {
+            let folder = std::fs::canonicalize(cache.join(marketplace).join(plugin)).ok()?;
+            if !folder.starts_with(cache_real) {
+                return None;
+            }
+            let listing = reader.list_directory(&folder).ok()?;
+            let mut versions: Vec<String> = listing
+                .entries
+                .iter()
+                .filter(|entry| matches!(entry.kind, EntryKind::Directory))
+                .filter_map(|entry| entry.name.to_str().filter(|name| name_ok(name)))
+                .map(str::to_owned)
+                .collect();
+            versions.sort();
+            let count = versions.len();
+            Some((folder.join(versions.pop()?), count))
+        });
+        let mut limitations = vec![
+            "Codex enables or disables a plugin as a whole in config.toml; Arsenal does not switch it per terminal.",
+            "Importing a plugin is not available: it brings code, hooks or servers.",
+        ];
+        let Some((real, versions)) = installed else {
+            limitations.push("It is named in config.toml but is not in Codex's plugin cache.");
+            packages.push(Composite {
+                key: format!("codex_plugin:{key}"),
+                kind: "codex_plugin",
+                provider: "codex",
+                name: plugin.to_owned(),
+                version: String::new(),
+                description: String::new(),
+                artifacts: 0,
+                members: 0,
+                origin: format!(
+                    "{} [plugins.\"{key}\"]",
+                    origin(&env.home, &codex, "config.toml")
+                ),
+                enabled,
+                methodology: false,
+                skills: Vec::new(),
+                agents: Vec::new(),
+                commands: 0,
+                hooks: false,
+                mcp: false,
+                categories: Vec::new(),
+                limitations,
+            });
+            continue;
+        };
+        if versions > 1 {
+            limitations.push("Several versions are cached; the newest name is shown.");
+        }
+        let manifest = reader
+            .read_file(&real.join(".codex-plugin/plugin.json"))
+            .ok()
+            .and_then(|file| serde_json::from_slice::<serde_json::Value>(file.bytes()).ok())
+            .unwrap_or(serde_json::Value::Null);
+        let text = |field: &str| {
+            manifest[field]
+                .as_str()
+                .map(|value| value.chars().take(DESCRIPTION_CHARS).collect::<String>())
+                .unwrap_or_default()
+        };
+        let declares = |field: &str| !manifest[field].is_null();
+        let skills: Vec<String> = reader
+            .list_directory(&real.join("skills"))
+            .map(|listing| {
+                let mut names: Vec<String> = listing
+                    .entries
+                    .iter()
+                    .filter(|entry| matches!(entry.kind, EntryKind::Directory))
+                    .filter_map(|entry| entry.name.to_str().filter(|name| name_ok(name)))
+                    .map(str::to_owned)
+                    .collect();
+                names.sort();
+                names.truncate(MAX_ENTRIES);
+                names
+            })
+            .unwrap_or_default();
+        let hooks = declares("hooks");
+        let mcp = declares("mcpServers");
+        if hooks {
+            limitations.push("It registers hooks, which run code at session events.");
+        }
+        if mcp {
+            limitations.push("It declares MCP servers.");
+        }
+        if declares("apps") {
+            limitations.push("It connects apps through the account's connectors.");
+        }
+        let version = Some(text("version"))
+            .filter(|version| !version.is_empty())
+            .unwrap_or_else(|| {
+                real.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_owned()
+            });
+        packages.push(Composite {
+            key: format!("codex_plugin:{key}"),
+            kind: "codex_plugin",
+            provider: "codex",
+            name: plugin.to_owned(),
+            version,
+            description: text("description"),
+            artifacts: 0,
+            members: skills.len(),
+            origin: origin(
+                &env.home,
+                real.parent().unwrap_or(&real),
+                real.file_name().and_then(|n| n.to_str()).unwrap_or(""),
+            ),
+            enabled,
+            methodology: false,
+            skills,
+            agents: Vec::new(),
+            commands: 0,
+            hooks,
+            mcp,
+            categories: Vec::new(),
+            limitations,
+        });
+    }
+    packages
+}
+
 /// `enabledPlugins` from the account's Claude Code settings, as written there.
 fn enabled_plugins(env: &Environment) -> BTreeMap<String, bool> {
     let claude = env.claude_dir();
@@ -1434,6 +1595,69 @@ mod tests {
         assert_eq!(system[0].name, "imagegen");
         assert_eq!(system[0].blocked, Some("provider_managed"));
         assert!(system[0].files.is_empty() && system[0].content.is_empty());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn codex_plugins_come_from_config_and_their_cached_manifest_and_never_leave_the_cache() {
+        let home = home();
+        let codex = home.join(".codex");
+        fs::create_dir_all(&codex).unwrap();
+        fs::write(
+            codex.join("config.toml"),
+            concat!(
+                "[plugins.\"pdf@runtime\"]\nenabled = true\n\n",
+                "[plugins.\"gone@curated\"]\nenabled = false\n\n",
+                "[plugins.\"escape@curated\"]\nenabled = true\n",
+            ),
+        )
+        .unwrap();
+        let pdf = codex.join("plugins/cache/runtime/pdf/1.2.3");
+        fs::create_dir_all(pdf.join(".codex-plugin")).unwrap();
+        fs::create_dir_all(pdf.join("skills/pdf")).unwrap();
+        fs::write(pdf.join("skills/pdf/SKILL.md"), "---\nname: pdf\n---\n").unwrap();
+        fs::write(
+            pdf.join(".codex-plugin/plugin.json"),
+            r#"{"name":"pdf","version":"1.2.3","description":"Reads PDFs","mcpServers":{"x":{"env":{"TOKEN":"never-read"}}}}"#,
+        )
+        .unwrap();
+        let outside = home.join("outside/escape/9.9.9");
+        fs::create_dir_all(outside.join(".codex-plugin")).unwrap();
+        fs::write(
+            outside.join(".codex-plugin/plugin.json"),
+            r#"{"name":"escape"}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(codex.join("plugins/cache/curated")).unwrap();
+        std::os::unix::fs::symlink(
+            home.join("outside/escape"),
+            codex.join("plugins/cache/curated/escape"),
+        )
+        .unwrap();
+        let scan = scan_home(home.clone(), None);
+        let plugin = |name: &str| {
+            scan.composites
+                .iter()
+                .find(|composite| composite.kind == "codex_plugin" && composite.name == name)
+                .unwrap_or_else(|| panic!("{name} is listed"))
+        };
+        let pdf = plugin("pdf");
+        assert_eq!(pdf.key, "codex_plugin:pdf@runtime");
+        assert_eq!(pdf.provider, "codex");
+        assert_eq!((pdf.version.as_str(), pdf.enabled), ("1.2.3", Some(true)));
+        assert_eq!(pdf.description, "Reads PDFs");
+        assert_eq!(pdf.skills, ["pdf"]);
+        assert!(pdf.mcp && !pdf.hooks);
+        assert!(!serde_json::to_string(pdf).unwrap().contains("never-read"));
+        let gone = plugin("gone");
+        assert_eq!((gone.enabled, gone.members), (Some(false), 0));
+        assert!(
+            gone.limitations
+                .iter()
+                .any(|l| l.contains("not in Codex's plugin cache"))
+        );
+        let escape = plugin("escape");
+        assert!(escape.version.is_empty() && escape.skills.is_empty());
         fs::remove_dir_all(home).unwrap();
     }
 

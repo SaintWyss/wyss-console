@@ -7,6 +7,7 @@
     CandidateStatus,
     Compatibility,
     Composite,
+    CompositeKind,
     Dependency,
     Item,
     Preset,
@@ -95,6 +96,11 @@
       'An MCP definition can hold credentials. Arsenal lists it and never copies it.',
     plugin:
       'A plugin brings code and hooks. Arsenal lists it; importing plugins is not available yet.',
+  };
+  const COMPOSITE_KIND_LABEL: Record<CompositeKind, string> = {
+    gsd_core: 'GSD Core payload',
+    claude_plugin: 'Claude Code plugin',
+    codex_plugin: 'Codex plugin',
   };
   const SOURCE_LABEL: Record<string, string> = {
     claude_user_skills: 'Claude user skills',
@@ -970,7 +976,8 @@
       >
         <p class="configuration-note">
           A composite is installed by its own tool: GSD Core by its installer, a
-          plugin by Claude Code. Arsenal describes it and never copies it.
+          plugin by Claude Code or Codex. Arsenal describes it and never copies
+          it.
         </p>
         {#if arsenal.discovering && arsenal.discover === null}
           <p role="status">Reading installed composites…</p>
@@ -984,11 +991,7 @@
           <section class="arsenal-detail" aria-label={composite.name}>
             <h3>{composite.name}</h3>
             <p class="arsenal-badges">
-              <span class="pill"
-                >{composite.kind === 'gsd_core'
-                  ? 'GSD Core payload'
-                  : 'Claude Code plugin'}</span
-              >
+              <span class="pill">{COMPOSITE_KIND_LABEL[composite.kind]}</span>
               {#if composite.version}<span class="pill"
                   >Version {composite.version}</span
                 >{/if}

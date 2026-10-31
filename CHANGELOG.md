@@ -14,6 +14,9 @@
 - The Arsenal selection of a terminal and a preset added to a selection are chosen with radio buttons and one
   button per preset instead of drop-downs: every choice is visible and each one can be operated by assistive
   technology.
+- Composites lists the Codex plugins named in `~/.codex/config.toml` with their switch, cached version,
+  description, skills and whether they bring hooks, MCP servers or app connectors. The values of those
+  definitions are never read; a plugin named in the configuration but absent from Codex's cache says so.
 
 ## 2026-10-30 — Arsenal integration gate
 

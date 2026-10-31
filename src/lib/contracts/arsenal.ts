@@ -172,7 +172,7 @@ export interface CandidateDetail {
   review: Excluded[];
 }
 
-export type CompositeKind = 'gsd_core' | 'claude_plugin';
+export type CompositeKind = 'gsd_core' | 'claude_plugin' | 'codex_plugin';
 export interface Composite {
   key: string;
   kind: CompositeKind;
@@ -609,7 +609,7 @@ export function parseCandidateDetail(value: unknown): CandidateDetail {
   };
 }
 
-const COMPOSITE_KINDS = ['gsd_core', 'claude_plugin'] as const;
+const COMPOSITE_KINDS = ['gsd_core', 'claude_plugin', 'codex_plugin'] as const;
 const strings = (value: unknown, what: string): string[] =>
   list(value, what, (item) => text(item, what));
 

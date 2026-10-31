@@ -334,6 +334,37 @@ describe('Arsenal view', () => {
     expect(buttonNamed(root, 'Import')?.disabled).toBe(true);
   });
 
+  it('names a Codex plugin as one, with its switch and what it brings, and never as importable', () => {
+    const plugin: Composite = {
+      key: 'codex_plugin:pdf@runtime',
+      kind: 'codex_plugin',
+      provider: 'codex',
+      name: 'pdf',
+      version: '1.2.3',
+      description: 'Reads PDFs',
+      artifacts: 0,
+      members: 1,
+      origin: '~/.codex/plugins/cache/runtime/pdf/1.2.3',
+      enabled: true,
+      methodology: false,
+      skills: ['pdf'],
+      agents: [],
+      commands: 0,
+      hooks: false,
+      mcp: true,
+      categories: [],
+      limitations: ['It declares MCP servers.'],
+    };
+    const { root } = render(
+      stateWith({ tab: 'composites', discover: discoverWith([], [plugin]) }),
+    );
+    const section = root.querySelector('section[aria-label="pdf"]');
+    expect(text(section)).toContain('Codex plugin');
+    expect(text(section)).toContain('Enabled in your settings');
+    expect(text(section)).toContain('It declares MCP servers.');
+    expect(text(section)).toContain('Not importable');
+  });
+
   it('says when no project is selected, so project capabilities are not mistaken for absent ones', () => {
     const { root } = render(
       stateWith({ tab: 'discover', discover: discoverWith([]) }),
