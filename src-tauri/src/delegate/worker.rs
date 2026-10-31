@@ -27,7 +27,7 @@ pub fn codex_argv(
     skill_words: &[String],
     mcp_servers: &BTreeSet<String>,
     plugins: &BTreeSet<String>,
-) -> Vec<String> {
+) -> Result<Vec<String>, String> {
     let mut argv: Vec<String> = [
         "exec",
         "--json",
@@ -53,20 +53,20 @@ pub fn codex_argv(
     for name in mcp_servers {
         argv.extend([
             "-c".to_owned(),
-            format!("mcp_servers.{}.enabled=false", toml_key(name)),
+            format!("mcp_servers.{}.enabled=false", config_key(name)?),
         ]);
     }
     for key in plugins {
         argv.extend([
             "-c".to_owned(),
-            format!("plugins.{}.enabled=false", toml_key(key)),
+            format!("plugins.{}.enabled=false", config_key(key)?),
         ]);
     }
     argv.extend(skill_words.iter().cloned());
     argv.extend(["-o".to_owned(), last_message.display().to_string()]);
     argv.push("--".to_owned());
     argv.push(launch.task.to_owned());
-    argv
+    Ok(argv)
 }
 
 /// `claude -p` (2.1.316): stream-json events, the model and effort asked for, the session settings
@@ -100,8 +100,17 @@ pub fn claude_argv(launch: &Launch<'_>, settings: &Path, allow_bash: bool) -> Ve
 }
 
 /// A TOML key that is a quoted string, so no name can add a path segment.
-fn toml_key(name: &str) -> String {
-    toml::Value::String(name.to_owned()).to_string()
+/// A name `codex -c` can address. Codex splits the key path on every dot and keeps quotes as
+/// written (`mcp_servers."context7"` names a new server and fails to load), so a name with a dot,
+/// `=`, a quote or white space cannot be turned off from the command line: the delegation is
+/// refused rather than run with it on.
+fn config_key(name: &str) -> Result<&str, String> {
+    if name.is_empty() || name.contains(['.', '=', '"', '\'']) || name.contains(char::is_whitespace)
+    {
+        Err(name.to_owned())
+    } else {
+        Ok(name)
+    }
 }
 
 /// What one line of a worker's output says, folded into what the record shows.
@@ -350,7 +359,7 @@ mod tests {
     #[test]
     fn codex_runs_confined_never_asks_and_takes_the_task_after_the_options() {
         let ws = Path::new("/w/ws");
-        let mcp: BTreeSet<String> = ["context7".to_owned(), "odd\"name".to_owned()].into();
+        let mcp: BTreeSet<String> = ["context7".to_owned(), "node_repl".to_owned()].into();
         let plugins: BTreeSet<String> = ["github@openai-curated".to_owned()].into();
         let argv = codex_argv(
             &launch(ws),
@@ -358,24 +367,18 @@ mod tests {
             &["-c".into(), "skills.config=[]".into()],
             &mcp,
             &plugins,
-        );
+        )
+        .unwrap();
         let joined = argv.join(" ");
         assert_eq!(argv[..3], ["exec", "--json", "--skip-git-repo-check"]);
         assert!(joined.contains("-s workspace-write -C /w/ws"));
         assert!(joined.contains("approval_policy=\"never\""));
         assert!(joined.contains("sandbox_workspace_write.network_access=false"));
         assert!(joined.contains("model_reasoning_effort=\"low\""));
-        // Each key is one quoted TOML key, whatever the name holds.
-        let odd = argv
-            .iter()
-            .find(|w| w.starts_with("mcp_servers.") && w.contains("odd"))
-            .unwrap();
-        let parsed: toml::Table = toml::from_str(odd).unwrap();
-        assert_eq!(
-            parsed["mcp_servers"]["odd\"name"]["enabled"].as_bool(),
-            Some(false)
-        );
-        assert!(argv.contains(&"plugins.\"github@openai-curated\".enabled=false".to_owned()));
+        // Bare keys: Codex keeps quotes as part of the name.
+        assert!(argv.contains(&"mcp_servers.context7.enabled=false".to_owned()));
+        assert!(argv.contains(&"mcp_servers.node_repl.enabled=false".to_owned()));
+        assert!(argv.contains(&"plugins.github@openai-curated.enabled=false".to_owned()));
         assert!(
             !argv
                 .iter()
@@ -383,6 +386,23 @@ mod tests {
         );
         // The task is one word after `--`, so a task starting with a dash is not an option.
         assert_eq!(argv[argv.len() - 2..], ["--", "--write a file"]);
+    }
+
+    #[test]
+    fn a_server_or_plugin_codex_cannot_address_refuses_the_worker_instead_of_leaving_it_on() {
+        for odd in ["a.b", "a=b", "\"q\"", "two words", ""] {
+            let named: BTreeSet<String> = [odd.to_owned()].into();
+            let none = BTreeSet::new();
+            let ws = Path::new("/w");
+            assert_eq!(
+                codex_argv(&launch(ws), Path::new("/l"), &[], &named, &none),
+                Err(odd.to_owned())
+            );
+            assert_eq!(
+                codex_argv(&launch(ws), Path::new("/l"), &[], &none, &named),
+                Err(odd.to_owned())
+            );
+        }
     }
 
     #[test]

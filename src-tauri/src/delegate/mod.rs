@@ -633,14 +633,21 @@ impl Manager {
                         _ => None,
                     })
                     .collect();
+                let argv = worker::codex_argv(
+                    &task,
+                    &last,
+                    &skill_words,
+                    &installed.mcp_servers,
+                    &enabled_plugins,
+                )
+                .map_err(|name| {
+                    fail(Refusal::new(
+                        "tools_not_closable",
+                        format!("Codex cannot turn off \"{name}\" from the command line"),
+                    ))
+                })?;
                 (
-                    worker::codex_argv(
-                        &task,
-                        &last,
-                        &skill_words,
-                        &installed.mcp_servers,
-                        &enabled_plugins,
-                    ),
+                    argv,
                     vec![
                         format!("{} MCP server(s) off", installed.mcp_servers.len()),
                         format!("{} plugin(s) off", enabled_plugins.len()),
