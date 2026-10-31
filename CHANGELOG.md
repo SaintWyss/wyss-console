@@ -12,6 +12,8 @@ enabled = false}, …]` for each installed skill the selection leaves out. Quali
   off (Claude Code `skillOverrides` in the account, project and local settings; Codex `[[skills.config]]`)
   and shows those kept skills as "already off in your settings": Arsenal never switches a skill on.
 - A Claude plan no longer lists Codex plugins among its composites.
+- Claude Code `2.1.316` (installed by its own update) passed the same nine pre-registered cases as `2.1.314`
+  and applies selections; record in `docs/research/arsenal-am1a/ARSENAL-Q316-QUALIFICATION-2026-10-31.md`.
 
 ## 2026-10-31 — Arsenal: every Codex skill folder, and presets from a capability
 

@@ -150,13 +150,22 @@ pub struct ArsenalEvidence {
 /// Claude Code builds whose skill exclusion passed a focused qualification. The A0 runs on 2.1.312
 /// were judged NO-GO by the independent review and are not listed; any build without a record here
 /// is previewed and recorded, never applied.
-const ARSENAL_CLAUDE: &[ArsenalEvidence] = &[ArsenalEvidence {
-    qualified_version: "2.1.314 (Claude Code)",
-    checked_on: "2026-10-30",
-    operation: "--settings overlay holding only skillOverrides=off for installed user and project skills",
-    source: "docs/research/arsenal-am1a/ARSENAL-Q314-QUALIFICATION-2026-10-30.md (harness-v2, 9/9 pre-registered cases)",
-    limitation: "plugin and built-in skills are not switched off; concurrent sessions and provider use of each skill are not observed",
-}];
+const ARSENAL_CLAUDE: &[ArsenalEvidence] = &[
+    ArsenalEvidence {
+        qualified_version: "2.1.314 (Claude Code)",
+        checked_on: "2026-10-30",
+        operation: "--settings overlay holding only skillOverrides=off for installed user and project skills",
+        source: "docs/research/arsenal-am1a/ARSENAL-Q314-QUALIFICATION-2026-10-30.md (harness-v2, 9/9 pre-registered cases)",
+        limitation: "plugin and built-in skills are not switched off; concurrent sessions and provider use of each skill are not observed",
+    },
+    ArsenalEvidence {
+        qualified_version: "2.1.316 (Claude Code)",
+        checked_on: "2026-10-31",
+        operation: "--settings overlay holding only skillOverrides=off for installed user and project skills",
+        source: "docs/research/arsenal-am1a/ARSENAL-Q316-QUALIFICATION-2026-10-31.md (harness-v2, the same 9 pre-registered cases)",
+        limitation: "plugin and built-in skills are not switched off; provider use of each skill is not observed",
+    },
+];
 
 /// Codex builds whose per-session skill switch passed a focused qualification: the session runs with
 /// `--no-daemon` (its own embedded server, not the shared one) and one
@@ -235,6 +244,14 @@ mod tests {
         assert!(!permits_arsenal_exclusion(
             AgentId::Codex,
             Some(ARSENAL_TEST_VERSION)
+        ));
+        assert!(permits_arsenal_exclusion(
+            AgentId::ClaudeCode,
+            Some("2.1.316 (Claude Code)")
+        ));
+        assert!(!permits_arsenal_exclusion(
+            AgentId::ClaudeCode,
+            Some("2.1.315 (Claude Code)")
         ));
         assert!(permits_arsenal_exclusion(
             AgentId::Codex,
