@@ -119,9 +119,9 @@ function render(
 }
 
 function choose(id: string) {
-  const select = document.querySelector<HTMLSelectElement>('#native-arsenal')!;
-  select.value = id;
-  select.dispatchEvent(new Event('change'));
+  document
+    .querySelector<HTMLInputElement>(`#native-arsenal input[value="${id}"]`)!
+    .click();
   flushSync();
 }
 
@@ -236,8 +236,8 @@ describe('Arsenal in a terminal start', () => {
     props.refreshKey = 1;
     await settle();
     const options = [
-      ...document.querySelectorAll<HTMLOptionElement>('#native-arsenal option'),
-    ].map((option) => option.textContent);
+      ...document.querySelectorAll<HTMLLabelElement>('#native-arsenal label'),
+    ].map((option) => option.textContent?.trim());
     expect(options).toContain('Later');
   });
 

@@ -161,7 +161,6 @@
     items: [] as Item[],
     composites: [] as string[],
   });
-  let startFromPreset = $state<string>('');
   let selectionError = $state<string | null>(null);
   let confirmDelete = $state<string | null>(null);
 
@@ -252,7 +251,6 @@
         .filter((item) => !known.has(item.capability))
         .map((item) => ({ ...item })),
     ];
-    startFromPreset = '';
   }
   function copySelection(selection: Selection) {
     selectionDraft = {
@@ -1399,18 +1397,21 @@
               {/each}
             </fieldset>
             {#if arsenal.presets.length > 0}
-              <label
-                >Add a preset's capabilities
-                <select
-                  bind:value={startFromPreset}
-                  onchange={() => applyPreset(startFromPreset)}
-                >
-                  <option value="">Choose a preset…</option>
-                  {#each arsenal.presets as preset (preset.id)}
-                    <option value={preset.id}>{preset.name}</option>
-                  {/each}
-                </select>
-              </label>
+              <div
+                class="arsenal-actions"
+                role="group"
+                aria-label="Add a preset's capabilities"
+              >
+                <span class="arsenal-muted">Add a preset's capabilities</span>
+                {#each arsenal.presets as preset (preset.id)}
+                  <button
+                    class="action"
+                    type="button"
+                    onclick={() => applyPreset(preset.id)}
+                    >Add {preset.name}</button
+                  >
+                {/each}
+              </div>
             {/if}
             {#if selectionDraft.items.length > 0}
               <ul

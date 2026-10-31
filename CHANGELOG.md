@@ -11,6 +11,9 @@
   edited keeps its name and gets the capability added; a selection for the other provider is left as it is.
 - Workspace › Start an agent offers a selection saved in Arsenal as soon as Workspace is shown again; it no
   longer needs Reload.
+- The Arsenal selection of a terminal and a preset added to a selection are chosen with radio buttons and one
+  button per preset instead of drop-downs: every choice is visible and each one can be operated by assistive
+  technology.
 
 ## 2026-10-30 — Arsenal integration gate
 

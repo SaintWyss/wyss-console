@@ -189,11 +189,11 @@
   });
 </script>
 
-<div
+<fieldset
   class="native-field arsenal-terminal"
   aria-label="Arsenal for this terminal"
 >
-  <label for="native-arsenal">Arsenal selection</label>
+  <legend id="native-arsenal-label">Arsenal selection</legend>
   {#if !agent}
     <p class="event-meta">Choose an agent first.</p>
   {:else if !provider}
@@ -203,12 +203,34 @@
     </p>
   {:else}
     <div class="native-row">
-      <select id="native-arsenal" bind:value={selected}>
-        <option value="">None — skills as installed</option>
+      <!-- Radios, not a drop-down: every choice is visible and each one is a control of its own. -->
+      <div
+        id="native-arsenal"
+        class="arsenal-choices"
+        role="radiogroup"
+        aria-labelledby="native-arsenal-label"
+      >
+        <label class="arsenal-check">
+          <input
+            type="radio"
+            name="native-arsenal"
+            value=""
+            bind:group={selected}
+          />
+          None — skills as installed
+        </label>
         {#each offered as selection (selection.id)}
-          <option value={selection.id}>{selection.name}</option>
+          <label class="arsenal-check">
+            <input
+              type="radio"
+              name="native-arsenal"
+              value={selection.id}
+              bind:group={selected}
+            />
+            {selection.name}
+          </label>
         {/each}
-      </select>
+      </div>
       <button type="button" class="action" onclick={load}>Reload</button>
     </div>
     {#if loadFailed}
@@ -317,7 +339,7 @@
       </div>
     {/if}
   {/if}
-</div>
+</fieldset>
 
 <style>
   .arsenal-plan {
@@ -334,6 +356,11 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
+  }
+  .arsenal-choices {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
   }
   .arsenal-check {
     display: flex;

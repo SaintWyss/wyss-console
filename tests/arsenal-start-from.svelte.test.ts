@@ -199,4 +199,35 @@ describe('Starting from a library capability', () => {
       composites: [],
     });
   });
+
+  it('adds a preset to the selection being edited with one button per preset', () => {
+    const { controller, state } = start();
+    state.library = [
+      ...state.library,
+      { ...tracer, id: 'cap-notes', name: 'notes' },
+    ];
+    state.presets = [
+      {
+        id: 'pre-1',
+        name: 'Frontend kit',
+        description: '',
+        items: [{ capability: 'cap-notes', revision: 1 }],
+        created_at: 1,
+        updated_at: 1,
+      },
+    ];
+    button('Start a selection with this').click();
+    flushSync();
+    button('Add Frontend kit').click();
+    flushSync();
+    submit('Selection editor');
+    expect(controller.saveSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [
+          { capability: 'cap-tracer', revision: null },
+          { capability: 'cap-notes', revision: 1 },
+        ],
+      }),
+    );
+  });
 });
