@@ -925,9 +925,10 @@ fn insert_revision(
 
 /// The folders a capability is read from. Each belongs to one provider, and a project's folders
 /// are named apart from the account's, so the same name in two projects never shares an identity.
-const SOURCES: [&str; 12] = [
+const SOURCES: [&str; 13] = [
     "claude_user_skills",
     "codex_user_skills",
+    "codex_home_skills",
     "claude_project_skills",
     "codex_project_skills",
     "claude_user_agents",
@@ -1218,6 +1219,25 @@ mod tests {
         assert_eq!(reopened.import(&skill("other", b"x")), Err(Error::Busy));
         holder.execute_batch("ROLLBACK;").unwrap();
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_skill_from_the_codex_home_is_importable_and_a_codex_system_skill_is_not() {
+        let mut store = memory();
+        let from = |source: &str| NewCapability {
+            identity: identity("codex", "skill", source, "tracer"),
+            provider: "codex".into(),
+            source: source.into(),
+            ..skill("tracer", b"---\nname: tracer\n---\n")
+        };
+        assert_eq!(
+            store.import(&from("codex_home_skills")).unwrap().outcome,
+            Outcome::Created
+        );
+        assert_eq!(
+            store.import(&from("codex_system_skills")),
+            Err(Error::Invalid)
+        );
     }
 
     #[test]

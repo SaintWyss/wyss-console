@@ -36,6 +36,8 @@ const GSD_BASE: &str = ".local/share/wyss/gsd-core";
 const GSD_SCHEMA: &str = "wyss.gsd-core-additive-payload-manifest.v1";
 /// Why a read-only entry is listed but never imported.
 const READ_ONLY: &str = "read_only_kind";
+/// The skills Codex installs and replaces itself: listed, never read or imported.
+const SYSTEM_SKILLS: &str = "codex_system_skills";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -289,6 +291,24 @@ fn folders(env: &Environment) -> Vec<Folder> {
             "codex_user_skills",
             "user",
             env.agents_skills_dir(),
+            Shape::Skills,
+        ),
+        // Codex also reads skills from its own home: the folder of the account's skills, and a
+        // hidden `.system` folder of skills Codex installs and replaces itself.
+        folder(
+            "skill",
+            "codex",
+            "codex_home_skills",
+            "user",
+            codex.join("skills"),
+            Shape::Skills,
+        ),
+        folder(
+            "skill",
+            "codex",
+            "codex_system_skills",
+            "user",
+            codex.join("skills/.system"),
             Shape::Skills,
         ),
         folder(
@@ -555,6 +575,9 @@ fn candidate_of(
 ) -> Option<Candidate> {
     let origin = origin(&env.home, &folder.path, &entry.name);
     let link = folder.path.join(&entry.name);
+    if folder.source == SYSTEM_SKILLS && entry.kind != EntryKind::Other {
+        return Some(blocked(folder, &entry.stem, origin, "provider_managed"));
+    }
     match entry.kind {
         EntryKind::Link => {
             let mut candidate = blocked(folder, &entry.stem, origin, "symbolic_link");
@@ -1374,6 +1397,43 @@ mod tests {
                 .any(|source| source.source == "codex_user_skills"
                     && source.state == SourceState::Absent)
         );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn codex_home_skills_are_read_and_its_system_skills_are_listed_without_reading() {
+        let home = home();
+        let own = home.join(".codex/skills/tracer");
+        fs::create_dir_all(&own).unwrap();
+        fs::write(
+            own.join("SKILL.md"),
+            "---\nname: tracer\ndescription: Traces\n---\n",
+        )
+        .unwrap();
+        let system = home.join(".codex/skills/.system/imagegen");
+        fs::create_dir_all(&system).unwrap();
+        fs::write(system.join("SKILL.md"), "---\nname: imagegen\n---\n").unwrap();
+        let scan = scan_home(home.clone(), None);
+        let from = |source: &str| -> Vec<&Candidate> {
+            scan.candidates
+                .iter()
+                .filter(|candidate| candidate.source == source)
+                .collect()
+        };
+        let own = from("codex_home_skills");
+        assert_eq!(
+            own.len(),
+            1,
+            "the hidden .system folder is not a skill of its own"
+        );
+        assert_eq!((own[0].name.as_str(), own[0].provider), ("tracer", "codex"));
+        assert_eq!(own[0].blocked, None);
+        assert_eq!(own[0].description, "Traces");
+        let system = from("codex_system_skills");
+        assert_eq!(system.len(), 1);
+        assert_eq!(system[0].name, "imagegen");
+        assert_eq!(system[0].blocked, Some("provider_managed"));
+        assert!(system[0].files.is_empty() && system[0].content.is_empty());
         fs::remove_dir_all(home).unwrap();
     }
 

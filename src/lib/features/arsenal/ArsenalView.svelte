@@ -99,6 +99,8 @@
   const SOURCE_LABEL: Record<string, string> = {
     claude_user_skills: 'Claude user skills',
     codex_user_skills: 'Codex user skills',
+    codex_home_skills: 'Codex home skills',
+    codex_system_skills: 'Codex system skills',
     claude_project_skills: 'Claude project skills',
     codex_project_skills: 'Codex project skills',
     claude_user_agents: 'Claude user agents',
