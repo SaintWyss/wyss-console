@@ -51,3 +51,8 @@ installed Wyss Console after deployment.
 - A switched-off skill is not listed to the model; its files stay readable on disk.
 - The session does not join the shared Codex server: it does not appear in `codex agents`.
 - Whether the provider used a kept skill is not observed by Wyss.
+- A file is checked when the plan is built, again by the host just before the start (inside a Codex
+  skill folder, a regular file, not a link), but Codex reads it a moment later. If it disappears in
+  between, Codex ignores that entry; the skill it named is gone with it, so nothing extra is exposed.
+- A nested `SKILL.md` that is a link, a folder that cannot be read, or a folder past the walk's
+  bounds make the inventory incomplete, and an incomplete inventory is never applied.

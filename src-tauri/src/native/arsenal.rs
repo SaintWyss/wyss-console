@@ -43,6 +43,19 @@ fn skill_file_ok(path: &str) -> bool {
             .any(|part| part == ".." || part == "." || part == ".system")
 }
 
+/// A `SKILL.md` the host may name for Codex: inside a Codex skill folder (`<CODEX_HOME>/skills`, or an
+/// `.agents/skills` folder of the account or a project), and a regular file now, not a link.
+fn codex_skill_file_on_disk(file: &str, codex_home: Option<&std::path::Path>) -> bool {
+    let path = std::path::Path::new(file);
+    let in_codex_home = codex_home.is_some_and(|home| path.starts_with(home.join("skills")));
+    let parts: Vec<&std::ffi::OsStr> = path.iter().collect();
+    let in_agents = parts
+        .windows(2)
+        .any(|pair| pair[0] == ".agents" && pair[1] == "skills");
+    (in_codex_home || in_agents)
+        && std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_file())
+}
+
 /// The value of Codex's `-c` flag that switches these skills off for one session:
 /// `skills.config=[{path = "…/SKILL.md", enabled = false}, …]`, serialized as TOML so no path can
 /// change its shape. Codex adds these entries to the account's own and never switches one on.
@@ -190,10 +203,14 @@ fn apply_codex(plan: &mut LaunchPlan, launch: &ArsenalLaunch) {
             .push("The Arsenal selection names skills but not their files.".to_owned());
         return;
     }
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let codex_home = std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| home.as_ref().map(|home| home.join(".codex")));
     if launch
         .skill_files_off
         .iter()
-        .any(|file| !std::path::Path::new(file).is_file())
+        .any(|file| !codex_skill_file_on_disk(file, codex_home.as_deref()))
     {
         plan.not_applicable.push(
             "A skill the Arsenal selection switches off is no longer installed. Check the plan again."
@@ -283,9 +300,35 @@ mod tests {
     #[test]
     fn a_codex_exclusion_runs_without_the_shared_server_and_names_each_file_off() {
         let dir = std::env::temp_dir().join(format!("arsenal-codex-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("a b")).unwrap();
-        std::fs::write(dir.join("a b/SKILL.md"), "x").unwrap();
-        let file = dir.join("a b/SKILL.md").to_string_lossy().into_owned();
+        let skills = dir.join("project/.agents/skills");
+        std::fs::create_dir_all(skills.join("a b")).unwrap();
+        std::fs::write(skills.join("a b/SKILL.md"), "x").unwrap();
+        let file = skills.join("a b/SKILL.md").to_string_lossy().into_owned();
+        // Outside a Codex skill folder, or a link, it is refused at the host as well.
+        std::fs::create_dir_all(dir.join("elsewhere")).unwrap();
+        std::fs::write(dir.join("elsewhere/SKILL.md"), "x").unwrap();
+        std::fs::create_dir_all(skills.join("linked")).unwrap();
+        std::os::unix::fs::symlink(
+            dir.join("elsewhere/SKILL.md"),
+            skills.join("linked/SKILL.md"),
+        )
+        .unwrap();
+        for refused in [
+            dir.join("elsewhere/SKILL.md"),
+            skills.join("linked/SKILL.md"),
+        ] {
+            let mut plan = LaunchPlan::default();
+            apply(
+                &mut plan,
+                AgentId::Codex,
+                &ArsenalLaunch {
+                    skill_files_off: vec![refused.to_string_lossy().into_owned()],
+                    ..launch(&["a"])
+                },
+            );
+            assert_eq!(plan.not_applicable.len(), 1, "{refused:?}");
+            assert!(plan.words.is_empty());
+        }
         let with = |files: Vec<String>| ArsenalLaunch {
             skill_files_off: files,
             ..launch(&["a"])

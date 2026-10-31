@@ -283,21 +283,26 @@ pub fn launch_scan(env: &Environment, provider: &str) -> LaunchScan {
 
 /// Most entries read while looking for skills nested in one skill's folder.
 const MAX_NESTED_WALK: usize = 4096;
-/// How deep below a skill's folder a nested skill is looked for.
-const MAX_NESTED_DEPTH: usize = 4;
+/// How deep below a skill's folder a nested skill is looked for. Deeper folders make the walk
+/// incomplete rather than being skipped.
+const MAX_NESTED_DEPTH: usize = 12;
 
 /// `SKILL.md` files below a skill's own folder: in its subfolders, not following links and not
-/// entering hidden folders or `node_modules`. Returns them and whether the walk finished within its
-/// bounds; an unfinished walk means the exclusion could be incomplete.
+/// entering hidden folders or `node_modules`. Returns them and whether the walk is complete: a folder
+/// that cannot be read, one past the depth or entry bounds, or a nested `SKILL.md` that is a link
+/// (it could name a file elsewhere) make it incomplete, and an incomplete walk is never applied.
 fn nested_skill_files(folder: &Path) -> (Vec<PathBuf>, bool) {
     let mut found = Vec::new();
     let mut seen = 0_usize;
     let mut stack = vec![(folder.to_path_buf(), 0_usize)];
     while let Some((dir, depth)) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
+            return (found, false);
         };
-        for entry in entries.flatten() {
+        for entry in entries {
+            let Ok(entry) = entry else {
+                return (found, false);
+            };
             seen += 1;
             if seen > MAX_NESTED_WALK {
                 return (found, false);
@@ -313,12 +318,16 @@ fn nested_skill_files(folder: &Path) -> (Vec<PathBuf>, bool) {
                 continue;
             }
             let path = entry.path();
-            if path.join("SKILL.md").is_file() {
-                found.push(path.join("SKILL.md"));
+            let skill = path.join("SKILL.md");
+            match std::fs::symlink_metadata(&skill) {
+                Ok(meta) if meta.file_type().is_file() => found.push(skill),
+                Ok(_) => return (found, false),
+                Err(_) => {}
             }
-            if depth + 1 < MAX_NESTED_DEPTH {
-                stack.push((path, depth + 1));
+            if depth + 1 >= MAX_NESTED_DEPTH {
+                return (found, false);
             }
+            stack.push((path, depth + 1));
         }
     }
     found.sort();
@@ -385,25 +394,29 @@ fn codex_base_off(
     let Ok(Some(config)) = super::reader::parse_toml(config.bytes(), &Bounds::PROPOSED) else {
         return Default::default();
     };
-    let mut enabled: BTreeMap<PathBuf, bool> = BTreeMap::new();
-    for entry in config["skills"]["config"].as_array().into_iter().flatten() {
-        let (Some(path), Some(on)) = (entry["path"].as_str(), entry["enabled"].as_bool()) else {
-            continue;
-        };
-        enabled.insert(PathBuf::from(path), on);
-    }
+    let entries: Vec<(PathBuf, bool)> = config["skills"]["config"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            Some((
+                PathBuf::from(entry["path"].as_str()?),
+                entry["enabled"].as_bool()?,
+            ))
+        })
+        .collect();
     skills
         .iter()
         .zip(files)
         .filter_map(|(skill, file)| {
             let file = file.as_ref()?;
             let real = std::fs::canonicalize(file).ok();
-            let off = [Some(file.clone()), real]
-                .into_iter()
-                .flatten()
-                .filter_map(|path| enabled.get(&path))
-                .next_back()
-                .is_some_and(|on| !on);
+            // The last entry naming this file, by either of its paths, decides.
+            let off = entries
+                .iter()
+                .rev()
+                .find(|(path, _)| path == file || Some(path) == real.as_ref())
+                .is_some_and(|(_, on)| !on);
             off.then(|| skill.name.clone())
         })
         .collect()
@@ -1903,8 +1916,36 @@ mod tests {
         let at = codex.skills.iter().position(|s| s.name == "pack").unwrap();
         // Codex lists a SKILL.md inside a skill's folder as a skill of its own.
         assert_eq!(codex.nested_files[at], [pack.join("inner/SKILL.md")]);
+        assert!(!codex.truncated);
+        // A nested SKILL.md that is a link could name a file elsewhere: the inventory is incomplete.
+        fs::create_dir_all(pack.join("odd")).unwrap();
+        std::os::unix::fs::symlink(file("alpha"), pack.join("odd/SKILL.md")).unwrap();
+        assert!(launch_scan(&launch_env(&home, None), "codex").truncated);
+        fs::remove_file(pack.join("odd/SKILL.md")).unwrap();
+        // So is a folder that cannot be read.
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(pack.join("inner"), fs::Permissions::from_mode(0o000)).unwrap();
+        let unreadable = launch_scan(&launch_env(&home, None), "codex").truncated;
+        fs::set_permissions(pack.join("inner"), fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(unreadable);
         // A folder path is ignored, as Codex ignores it; the last entry for a file wins.
         assert_eq!(codex.base_off.iter().collect::<Vec<_>>(), ["alpha"]);
+        // The order of the entries decides, whichever of a skill's paths each one names.
+        let real = fs::canonicalize(file("beta")).unwrap();
+        fs::write(
+            home.join(".codex/config.toml"),
+            format!(
+                "[[skills.config]]\npath = {:?}\nenabled = false\n\n[[skills.config]]\npath = {:?}\nenabled = true\n",
+                file("beta").display().to_string(),
+                real.display().to_string(),
+            ),
+        )
+        .unwrap();
+        assert!(
+            launch_scan(&launch_env(&home, None), "codex")
+                .base_off
+                .is_empty()
+        );
         let alpha = codex
             .skills
             .iter()
