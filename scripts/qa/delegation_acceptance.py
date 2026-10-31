@@ -72,6 +72,12 @@ def screen_text(terminal_id):
     return re.sub(r"[ \t]+", " ", text)
 
 
+def replied(screen, marker):
+    """Whether the parent wrote `marker` itself: the brief it was given holds it once, and the
+    terminal may wrap it across lines."""
+    return re.sub(r"\s+", "", screen).count(marker) >= 2
+
+
 def records(parent_session):
     found = []
     if not STATE.is_dir():
@@ -264,7 +270,7 @@ def judge_single(s, recs, screen):
     hello = Path(r["workspace"]) / "hello.txt"
     if not hello.is_file() or s["marker"] not in hello.read_text(errors="replace"):
         problems.append("hello.txt missing or without the marker")
-    if f"PARENT_RECEIVED_{s['marker']}" not in screen:
+    if not replied(screen, f"PARENT_RECEIVED_{s['marker']}"):
         problems.append("parent did not report the received result")
     return problems
 
@@ -282,7 +288,7 @@ def judge_concurrency(s, recs, screen):
         problems.append("third delegation started although the policy allows two at a time")
     if "delegation_limit" not in screen and "already running" not in screen:
         problems.append("parent screen shows no delegation_limit refusal for the third call")
-    if f"PARENT_RECEIVED_{s['marker']}" not in screen:
+    if not replied(screen, f"PARENT_RECEIVED_{s['marker']}"):
         problems.append("parent did not report back")
     return problems
 
@@ -308,7 +314,7 @@ def run(name, parent_dir, out, codex_profile, minutes):
             break
         recs = records(session)
         running = any(r["status"] in ("running", "starting") for r in recs)
-        if marker in screen and recs and not running:
+        if replied(screen, marker) and recs and not running:
             break
     time.sleep(3)
     screen = screen_text(terminal)
