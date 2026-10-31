@@ -1002,12 +1002,7 @@ impl Manager {
                     .unwrap_or_default();
                 overlay.insert(
                     "enabledPlugins".into(),
-                    Value::Object(
-                        enabled_plugins
-                            .iter()
-                            .map(|key| (key.clone(), Value::Bool(false)))
-                            .collect(),
-                    ),
+                    claude_plugins_off(&enabled_plugins),
                 );
                 let settings = dir.join("settings.json");
                 let written = serde_json::to_vec_pretty(&Value::Object(overlay))
@@ -1403,6 +1398,26 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .mode(0o600)
         .open(path)?;
     file.write_all(bytes)
+}
+
+/// Plugins Claude Code loads from its own build, outside the owner's settings: the worker's
+/// `init` reported these for 2.1.316. A build that brings another one still stops at the init
+/// check, which refuses any loaded plugin.
+const CLAUDE_BUILTIN_PLUGINS: &[&str] = &[
+    "cc-plugin-telemetry@builtin",
+    "cc-plugin-plugin-authoring@builtin",
+];
+
+/// The worker's `enabledPlugins`: every plugin the owner enabled, and Claude's built-in ones, off.
+fn claude_plugins_off(enabled: &BTreeSet<String>) -> Value {
+    Value::Object(
+        enabled
+            .iter()
+            .map(String::as_str)
+            .chain(CLAUDE_BUILTIN_PLUGINS.iter().copied())
+            .map(|key| (key.to_owned(), Value::Bool(false)))
+            .collect(),
+    )
 }
 
 /// What `command` prints, if it closes its output within `timeout` after at most `limit` bytes.

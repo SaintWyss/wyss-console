@@ -321,7 +321,9 @@ def run(name, parent_dir, out, codex_profile, minutes):
         try:
             call(*step)
         except RuntimeError as error:
-            problems.append(f"cleanup {step[0]}: {error}")
+            # Stopping the agent can already have closed its terminal.
+            if "already_closed" not in str(error):
+                problems.append(f"cleanup {step[0]}: {error}")
     verdict = {
         "scenario": name,
         "parent_session": session,

@@ -987,3 +987,19 @@ fn the_folders_a_worker_cannot_see_come_from_the_hosts_own_variables() {
         ["/cfg/wyss-console", "/h/.local/share/wyss-console"]
     );
 }
+
+#[test]
+fn a_claude_worker_switches_off_the_owners_plugins_and_claudes_built_in_ones() {
+    let enabled: BTreeSet<String> = ["caveman@caveman".to_owned()].into();
+    let off = claude_plugins_off(&enabled);
+    let off = off.as_object().unwrap();
+    assert_eq!(off.len(), 3);
+    assert!(off.values().all(|v| v == &Value::Bool(false)));
+    for key in [
+        "caveman@caveman",
+        "cc-plugin-telemetry@builtin",
+        "cc-plugin-plugin-authoring@builtin",
+    ] {
+        assert!(off.contains_key(key), "{key}");
+    }
+}
