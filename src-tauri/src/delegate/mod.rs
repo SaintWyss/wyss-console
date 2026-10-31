@@ -272,6 +272,8 @@ impl Refusal {
 struct Live {
     record: Arc<Mutex<Record>>,
     child_id: u32,
+    /// Read by the tests that check the worker's process group is gone.
+    #[cfg_attr(not(test), allow(dead_code))]
     pgid: i32,
 }
 
@@ -532,16 +534,16 @@ impl Manager {
         let live = lock(&self.live).workers.get(id).cloned();
         if let Some(live) = live {
             let mut record = lock(&live.record);
-            if record.status == "running" && !record.finished() {
-                if !child_has_exited(live.child_id) {
-                    record.status = "cancelled".into();
-                    record.error = Some("Cancelled.".into());
-                }
+            if record.status == "running" && !record.finished() && !child_has_exited(live.child_id)
+            {
+                record.status = "cancelled".into();
+                record.error = Some("Cancelled.".into());
             }
         }
         self.get(id, token)
     }
 
+    #[cfg(test)]
     fn running(&self) -> usize {
         let live = lock(&self.live);
         live.workers.len() + live.starting
@@ -1039,6 +1041,7 @@ impl Manager {
 
     /// Starts a planned worker in its own process group with only its own environment, reads its
     /// stream into the record, checks the configuration it reports, and stops it at its deadline.
+    #[cfg(test)]
     fn launch_worker(&self, record: Record, spec: WorkerSpec) -> Result<Record, Refusal> {
         self.launch_worker_with_reservation(record, spec, None)
     }
@@ -1543,8 +1546,8 @@ fn codex_verification_from_text(
     kept: &[PathBuf],
     source: String,
 ) -> Verification {
-    let listed = worker::codex_listed_files(&text);
-    let runtime = worker::codex_runtime(&text, thread);
+    let listed = worker::codex_listed_files(text);
+    let runtime = worker::codex_runtime(text, thread);
     let mut problems = Vec::new();
     let mut mismatch = false;
     if let Some(listed) = &listed {

@@ -64,3 +64,19 @@ model/effort from observed provider metadata.
 Provider catalogue or CLI syntax support does not prove account availability for every offered
 model. A skill's inclusion in the provider catalogue verifies exposure; reading or invoking it
 is separate evidence of use.
+
+## Real-provider acceptance
+
+`scripts/qa/delegation_acceptance.py` drives the installed host: it starts a real orchestrator
+session with the delegation tool and a one-message brief, then judges the delegation records on
+disk (status, verification, kept skills, the worker's file) and the parent's screen. It never
+answers a trust prompt: the parent folder must already be trusted by the provider.
+
+```
+python3 -I scripts/qa/delegation_acceptance.py list
+python3 -I scripts/qa/delegation_acceptance.py run claude-to-claude --parent-dir <trusted dir> --out <dir>
+```
+
+`claude-to-codex`, `codex-to-claude` and `concurrency-codex` spend Codex quota;
+`claude-to-claude` and `concurrency-claude` spend only Claude quota. Each run writes
+`<scenario>-verdict.json` (PASS/FAIL with the problems found), the records and the screen.

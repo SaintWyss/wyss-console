@@ -294,6 +294,9 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     // A handoff brief (F11a): prepared for review, and saved to a chosen file.
     'allow-native-handoff-prepare',
     'allow-native-handoff-save',
+    // Delegated agents: the list of the tasks sessions handed to other agents, and a cancel.
+    'allow-native-delegations',
+    'allow-native-delegation-cancel',
     // Whether the protocol-2 interface exists (F8). The rest of it is the `f8` capability,
     // which the installed configuration does not enable.
     'allow-f8-state',

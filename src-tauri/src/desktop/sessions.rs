@@ -633,6 +633,10 @@ mod tests {
             // A handoff brief (F11a): prepared for review, and saved to a chosen file.
             "allow-native-handoff-prepare",
             "allow-native-handoff-save",
+            // Delegated agents: the list of the tasks sessions handed to other agents, and a
+            // cancel.
+            "allow-native-delegations",
+            "allow-native-delegation-cancel",
             // Protocol 2 (F8): the window may only ask whether the interface is active. The
             // other commands belong to capability `f8`, which the installed configuration does
             // not list (tests/f8-capability.test.ts holds that side).

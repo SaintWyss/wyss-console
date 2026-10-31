@@ -134,9 +134,7 @@ fn concurrent_start_reservations_respect_the_limit() {
             std::thread::spawn(move || {
                 let reservation = manager.reserve_start(1).ok();
                 gate.wait();
-                let Some(reservation) = reservation else {
-                    return None;
-                };
+                let reservation = reservation?;
                 let record = record(&manager, "codex", "s1");
                 let id = record.id.clone();
                 manager
