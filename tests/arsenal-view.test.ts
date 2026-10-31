@@ -73,6 +73,7 @@ function stateWith(overrides: Partial<ArsenalState>): ArsenalState {
     discovering: false,
     chosen: null,
     busy: null,
+    bulk: null,
     notice: null,
     presets: [],
     selections: [],

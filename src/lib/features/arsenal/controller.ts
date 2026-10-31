@@ -31,6 +31,26 @@ export interface Notice {
   text: string;
 }
 
+/** One bulk import run: what each entry did, and what stayed out and why. */
+export interface BulkRun {
+  total: number;
+  done: number;
+  created: number;
+  newRevision: number;
+  unchanged: number;
+  failures: { name: string; text: string }[];
+  /** Why the run stopped early, when the library itself refused writes. */
+  stopped: string | null;
+  finished: boolean;
+}
+
+/** Codes that say the library cannot take writes at all: the run stops instead of failing item by item. */
+const LIBRARY_STOPS = new Set([
+  'storage_unavailable',
+  'storage_corrupt',
+  'storage_unsupported',
+]);
+
 export interface ArsenalState {
   tab: ArsenalTab;
   /** `unavailable`: the library could not be opened at all. `failed`: a read did not come back whole. */
@@ -44,6 +64,8 @@ export interface ArsenalState {
   /** The files and exclusions of the chosen capability, read on selection. */
   chosenDetail: CandidateDetail | null;
   busy: 'import' | 'restore' | 'save' | null;
+  /** The bulk run in progress or the last one finished, shown until the next run starts. */
+  bulk: BulkRun | null;
   notice: Notice | null;
   presets: Preset[];
   selections: Selection[];
@@ -69,6 +91,7 @@ export class ArsenalController {
     chosen: null,
     chosenDetail: null,
     busy: null,
+    bulk: null,
     notice: null,
     presets: [],
     selections: [],
@@ -262,6 +285,77 @@ export class ArsenalController {
     }
   }
 
+  /**
+   * Imports every eligible entry of the last scan, one request each. The scan is not read again
+   * until the run ends. A failed entry is recorded and the run goes on; a library that cannot take
+   * writes stops it, since every later entry would fail the same way.
+   */
+  async importEligible() {
+    if (this.state.busy !== null) return;
+    const eligible = (this.state.discover?.candidates ?? []).filter(
+      (candidate) =>
+        candidate.importable &&
+        (candidate.status === 'not_imported' ||
+          candidate.status === 'source_changed'),
+    );
+    if (eligible.length === 0) {
+      this.set({
+        notice: {
+          tone: 'ok',
+          text: 'Nothing to import: every eligible skill is already in the library.',
+        },
+      });
+      return;
+    }
+    const run: BulkRun = {
+      total: eligible.length,
+      done: 0,
+      created: 0,
+      newRevision: 0,
+      unchanged: 0,
+      failures: [],
+      stopped: null,
+      finished: false,
+    };
+    this.set({ busy: 'import', notice: null, bulk: { ...run } });
+    for (const candidate of eligible) {
+      try {
+        const imported = await this.client.importSkill({
+          id: candidate.id,
+          kind: candidate.kind,
+          source: candidate.source,
+          name: candidate.name,
+        });
+        if (imported.outcome === 'created') run.created += 1;
+        else if (imported.outcome === 'new_revision') run.newRevision += 1;
+        else run.unchanged += 1;
+      } catch (error) {
+        if (LIBRARY_STOPS.has(failureOf(error))) {
+          run.stopped = failureMessage(error);
+          break;
+        }
+        run.failures.push({
+          name: candidate.name,
+          text: failureMessage(error),
+        });
+      }
+      run.done += 1;
+      this.set({ bulk: { ...run, failures: [...run.failures] } });
+    }
+    run.finished = true;
+    this.set({ bulk: { ...run, failures: [...run.failures] } });
+    await this.discover();
+    await this.refresh();
+    const failed = run.failures.length + (run.stopped ? 1 : 0);
+    this.set({
+      busy: null,
+      notice: {
+        tone: failed > 0 ? 'error' : 'ok',
+        text: bulkSummary(run),
+      },
+    });
+  }
+
   async loadPresets() {
     try {
       this.set({ presets: await this.client.presets() });
@@ -381,4 +475,16 @@ export class ArsenalController {
 
 function failureOf(error: unknown): string {
   return error instanceof ArsenalCallError ? error.code : 'internal';
+}
+
+/** The result a run leaves on screen: counts first, then what did not import and why. */
+export function bulkSummary(run: BulkRun): string {
+  const parts = [
+    `${run.created} imported`,
+    `${run.newRevision} updated to a new revision`,
+    `${run.unchanged} already in the library, unchanged`,
+  ];
+  if (run.failures.length > 0) parts.push(`${run.failures.length} failed`);
+  const text = `Bulk import: ${parts.join(', ')}.`;
+  return run.stopped ? `${text} Stopped: ${run.stopped}` : text;
 }

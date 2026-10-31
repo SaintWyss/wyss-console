@@ -275,6 +275,167 @@ describe('Arsenal controller', () => {
     expect(last().busy).toBeNull();
   });
 
+  describe('bulk import', () => {
+    const entry = (
+      id: string,
+      name: string,
+      patch: Partial<Candidate> = {},
+    ): Candidate => ({ ...candidate, id, name, ...patch });
+
+    const batch: DiscoverReply = {
+      ...discovered,
+      candidates: [
+        entry('id-new', 'alpha'),
+        entry('id-changed', 'beta', { status: 'source_changed' }),
+        entry('id-done', 'gamma', { status: 'imported', capability: 'cap-g' }),
+        entry('id-hook', 'pre-commit', {
+          kind: 'hook',
+          status: 'read_only',
+          importable: false,
+          blocked: 'read_only_kind',
+        }),
+        entry('id-secret', 'delta', {
+          importable: false,
+          blocked: 'needs_secret',
+        }),
+        entry('id-fails', 'epsilon'),
+      ],
+    };
+
+    it('imports only eligible entries, counts each outcome and rescans once at the end', async () => {
+      const outcomes = ['created', 'new_revision', 'created'] as const;
+      let call = 0;
+      const client = fakeClient({
+        discover: vi.fn(async () => batch),
+        importSkill: vi.fn(async () => ({
+          capability: 'cap',
+          revision: 1,
+          outcome: outcomes[call++ % outcomes.length],
+        })),
+      });
+      const { controller, last } = controllerWith(client);
+      await controller.discover();
+      await controller.importEligible();
+      expect(client.importSkill).toHaveBeenCalledTimes(3);
+      expect(client.importSkill).toHaveBeenCalledWith({
+        id: 'id-new',
+        kind: 'skill',
+        source: 'claude_user_skills',
+        name: 'alpha',
+      });
+      expect(client.importSkill).not.toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'id-hook' }),
+      );
+      expect(client.importSkill).not.toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'id-done' }),
+      );
+      expect(last().bulk).toMatchObject({
+        total: 3,
+        done: 3,
+        created: 2,
+        newRevision: 1,
+        unchanged: 0,
+        failures: [],
+        stopped: null,
+        finished: true,
+      });
+      expect(last().notice).toEqual({
+        tone: 'ok',
+        text: 'Bulk import: 2 imported, 1 updated to a new revision, 0 already in the library, unchanged.',
+      });
+      expect(last().busy).toBeNull();
+      // One scan at the start, one after the run: the run itself never rescans.
+      expect(client.discover).toHaveBeenCalledTimes(2);
+    });
+
+    it('records a failed entry and keeps importing the rest', async () => {
+      const client = fakeClient({
+        discover: vi.fn(async () => batch),
+        importSkill: vi.fn(async (target: { id: string }) => {
+          if (target.id === 'id-new') {
+            throw new ArsenalCallError({
+              code: 'blocked',
+              reason: 'tree_too_large',
+            });
+          }
+          return {
+            capability: 'cap',
+            revision: 1,
+            outcome: 'created' as const,
+          };
+        }),
+      });
+      const { controller, last } = controllerWith(client);
+      await controller.discover();
+      await controller.importEligible();
+      expect(client.importSkill).toHaveBeenCalledTimes(3);
+      expect(last().bulk?.failures).toEqual([
+        {
+          name: 'alpha',
+          text: expect.stringContaining('larger than the import limit'),
+        },
+      ]);
+      expect(last().bulk?.created).toBe(2);
+      expect(last().notice?.tone).toBe('error');
+      expect(last().notice?.text).toBe(
+        'Bulk import: 2 imported, 0 updated to a new revision, 0 already in the library, unchanged, 1 failed.',
+      );
+    });
+
+    it('keeps going past a busy library, because the next entry can still succeed', async () => {
+      const client = fakeClient({
+        discover: vi.fn(async () => batch),
+        importSkill: vi.fn(async () => {
+          throw new ArsenalCallError({ code: 'storage_busy', reason: null });
+        }),
+      });
+      const { controller, last } = controllerWith(client);
+      await controller.discover();
+      await controller.importEligible();
+      expect(client.importSkill).toHaveBeenCalledTimes(3);
+      expect(last().bulk?.failures).toHaveLength(3);
+      expect(last().bulk?.stopped).toBeNull();
+      expect(last().busy).toBeNull();
+    });
+
+    it('stops at once and says so when the library cannot be opened', async () => {
+      const client = fakeClient({
+        discover: vi.fn(async () => batch),
+        importSkill: vi.fn(async () => {
+          throw new ArsenalCallError({
+            code: 'storage_unavailable',
+            reason: null,
+          });
+        }),
+      });
+      const { controller, last } = controllerWith(client);
+      await controller.discover();
+      await controller.importEligible();
+      expect(client.importSkill).toHaveBeenCalledTimes(1);
+      expect(last().bulk?.stopped).toContain('could not be opened');
+      expect(last().notice?.text).toContain(
+        'Stopped: The Arsenal library could not be opened',
+      );
+    });
+
+    it('says nothing is left to import without calling the desktop', async () => {
+      const client = fakeClient({
+        discover: vi.fn(async () => ({
+          ...discovered,
+          candidates: [entry('id-done', 'gamma', { status: 'imported' })],
+        })),
+      });
+      const { controller, last } = controllerWith(client);
+      await controller.discover();
+      await controller.importEligible();
+      expect(client.importSkill).not.toHaveBeenCalled();
+      expect(last().notice).toEqual({
+        tone: 'ok',
+        text: 'Nothing to import: every eligible skill is already in the library.',
+      });
+    });
+  });
+
   it('restores an earlier revision and says that no revision was created', async () => {
     const client = fakeClient();
     const { controller, last } = controllerWith(client);

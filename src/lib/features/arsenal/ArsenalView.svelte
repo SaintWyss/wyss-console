@@ -187,6 +187,14 @@
     ) ?? null,
   );
   const busy = $derived(arsenal.busy !== null);
+  const eligibleCount = $derived(
+    arsenal.discover?.candidates.filter(
+      (candidate) =>
+        candidate.importable &&
+        (candidate.status === 'not_imported' ||
+          candidate.status === 'source_changed'),
+    ).length ?? 0,
+  );
   const detail = $derived(
     arsenal.chosenDetail && chosen && arsenal.chosenDetail.id === chosen.id
       ? arsenal.chosenDetail
@@ -673,7 +681,25 @@
           >
             {arsenal.discovering ? 'Reading…' : 'Scan again'}
           </button>
+          <button
+            class="action"
+            type="button"
+            disabled={busy || arsenal.discovering || eligibleCount === 0}
+            onclick={() => controller.importEligible()}
+          >
+            {busy && arsenal.bulk && !arsenal.bulk.finished
+              ? `Importing ${arsenal.bulk.done} of ${arsenal.bulk.total}…`
+              : `Import ${eligibleCount} eligible`}
+          </button>
         </div>
+
+        {#if arsenal.bulk && !arsenal.bulk.finished}
+          <progress
+            max={arsenal.bulk.total}
+            value={arsenal.bulk.done}
+            aria-label="Bulk import progress"
+          ></progress>
+        {/if}
 
         {#if arsenal.discovering && arsenal.discover === null}
           <p role="status">Reading installed capabilities…</p>
