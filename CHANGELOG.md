@@ -9,6 +9,8 @@
 - Library › a capability has "Start a preset with this" and "Start a selection with this": the editor opens
   named after the capability with it already in, so a first preset needs no typing. A draft already being
   edited keeps its name and gets the capability added; a selection for the other provider is left as it is.
+- Workspace › Start an agent offers a selection saved in Arsenal as soon as Workspace is shown again; it no
+  longer needs Reload.
 
 ## 2026-10-30 — Arsenal integration gate
 

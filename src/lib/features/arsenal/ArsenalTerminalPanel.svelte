@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import type {
     ArsenalProvider,
     Selection,
@@ -67,8 +67,7 @@
   const counts = $derived(plan ? planCounts(plan) : null);
   const applying = $derived(!!plan && plan.can_apply && apply);
 
-  async function load() {
-    reloads++;
+  async function readSelections() {
     try {
       selections = await client.selections();
       loadFailed = null;
@@ -76,8 +75,15 @@
       loadFailed = failureMessage(error);
     }
   }
-  onMount(() => {
-    void load();
+  async function load() {
+    reloads++;
+    await readSelections();
+  }
+  // Selections are read when the panel appears and each time the view is shown again, so one saved
+  // in Arsenal meanwhile is offered without a Reload.
+  $effect(() => {
+    void refreshKey;
+    untrack(() => void readSelections());
   });
 
   // A project remembers the selection its last terminal of this provider started with.

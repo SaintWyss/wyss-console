@@ -217,6 +217,30 @@ describe('Arsenal in a terminal start', () => {
     expect(fake.terminalPlan).toHaveBeenCalledTimes(2);
   });
 
+  it('offers a selection saved meanwhile when the view is shown again, without a Reload', async () => {
+    const fake = client(plan());
+    const later = { ...selection, id: 'sel-2', name: 'Later' };
+    const props = $state({
+      agent: 'claude_code' as const,
+      project: '/home/u/app',
+      profile: null,
+      refreshKey: 0,
+      previewer: vi.fn(async () => preview(true)),
+      onchange: () => {},
+      client: fake,
+    });
+    component = mount(ArsenalTerminalPanel, { target: document.body, props });
+    await settle();
+    expect(text()).not.toContain('Later');
+    vi.mocked(fake.selections).mockResolvedValue([selection, later]);
+    props.refreshKey = 1;
+    await settle();
+    const options = [
+      ...document.querySelectorAll<HTMLOptionElement>('#native-arsenal option'),
+    ].map((option) => option.textContent);
+    expect(options).toContain('Later');
+  });
+
   it('says a session line from the host record first, and never says a skill was used', () => {
     const binding: Binding = {
       session_id: 's1',
