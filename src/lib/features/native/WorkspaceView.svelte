@@ -533,7 +533,7 @@
         </div>
       </section>
 
-      <section aria-label="Native sessions">
+      <section class="native-sessions" aria-label="Native sessions">
         <h3 class="native-heading">
           Sessions <span class="pill compact" data-tone="idle"
             ><span class="dot" aria-hidden="true"></span>Native plane</span

@@ -80,11 +80,75 @@ describe('Delegated agents', () => {
     expect(text).toContain('effort not reported');
     expect(text).toContain('From Codex session 12345678');
     expect(text).toContain('hello.py');
-    const buttons = [...document.querySelectorAll('button')];
-    expect(buttons.map((b) => b.textContent?.trim())).toEqual(['Cancel']);
-    buttons[0].click();
+    const labels = () =>
+      [...document.querySelectorAll('button')].map((b) =>
+        b.textContent?.trim(),
+      );
+    expect(labels()).toEqual(['Cancel']);
+    // Stopping a running agent ends its work: it asks once more, and can be taken back.
+    document.querySelector('button')!.click();
+    await settle();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(labels()).toEqual(['Stop agent', 'Keep running']);
+    expect(document.body.textContent).toContain('Stop this agent?');
+    [...document.querySelectorAll('button')][1]!.click();
+    await settle();
+    expect(labels()).toEqual(['Cancel']);
+    expect(cancel).not.toHaveBeenCalled();
+    document.querySelector('button')!.click();
+    await settle();
+    [...document.querySelectorAll('button')][0]!.click();
     await settle();
     expect(cancel).toHaveBeenCalledWith('a'.repeat(32));
+  });
+
+  it('keeps each parent’s agents together and counts them by state', async () => {
+    const read = vi.fn(async () => [
+      delegation({ id: '1'.repeat(32), title: 'First of A' }),
+      delegation({
+        id: '2'.repeat(32),
+        parent_session: 'bbbbbbbbbbbbbbbb',
+        parent_provider: 'codex',
+        title: 'Only of B',
+        status: 'failed',
+        ended_at: 2,
+      }),
+      delegation({
+        id: '3'.repeat(32),
+        title: 'Second of A',
+        status: 'succeeded',
+        ended_at: 2,
+      }),
+    ]);
+    component = mount(DelegationsPanel, {
+      target: document.body,
+      props: { visible: true, read, cancel: vi.fn() },
+    });
+    await settle();
+    const groups = [...document.querySelectorAll('.delegation-group')].map(
+      (g) => g.textContent?.replace(/\s+/g, ' ') ?? '',
+    );
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toContain('From Claude Code session 12345678');
+    expect(groups[0]).toContain('2 agents');
+    expect(groups[0]!.indexOf('First of A')).toBeLessThan(
+      groups[0]!.indexOf('Second of A'),
+    );
+    expect(groups[1]).toContain('From Codex session bbbbbbbb');
+    const tally = document
+      .querySelector('.delegations-tally')
+      ?.textContent?.replace(/\s+/g, ' ');
+    expect(tally).toContain('1 running');
+    expect(tally).toContain('1 done');
+    expect(tally).toContain('1 failed');
+    expect(tally).not.toContain('cancelled');
+    // Every state has its word and a tone, never the tone alone.
+    for (const item of document.querySelectorAll('.delegation')) {
+      expect(item.getAttribute('data-tone')).toMatch(/^(pending|ok|error)$/);
+      expect(item.querySelector('.badge')?.textContent?.trim()).toMatch(
+        /Running|Done|Failed/,
+      );
+    }
   });
 
   it('says when the host cannot list them', async () => {
