@@ -408,7 +408,11 @@ fn discover_reply(
         .map(|candidate| {
             format!(
                 "{}\0{}\0{}\0{}\0{}",
-                candidate.provider, candidate.kind, candidate.source, candidate.scope, candidate.name
+                candidate.provider,
+                candidate.kind,
+                candidate.source,
+                candidate.scope,
+                candidate.name
             )
         })
         .collect();
