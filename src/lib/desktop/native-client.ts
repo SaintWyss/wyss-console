@@ -75,6 +75,7 @@ export async function startNative(
   brief: string | null = null,
   preview: Pick<Preview, 'plan_token' | 'provider_version'> | null = null,
   arsenal: ArsenalStart | null = null,
+  delegation = false,
 ): Promise<StartReply> {
   const request: Record<string, unknown> = {
     agent_id,
@@ -86,6 +87,7 @@ export async function startNative(
     expected_cli_version: preview?.provider_version ?? null,
   };
   if (arsenal) request.arsenal = arsenal;
+  if (delegation) request.delegation = true;
   const reply = checked(
     await call('native_start', { request }),
     parseStartReply,
@@ -210,4 +212,89 @@ export async function prepareHandoff(id: string): Promise<HandoffBrief> {
 export async function saveHandoff(text: string): Promise<boolean> {
   const answer = await call('native_handoff_save', { request: { text } });
   return (answer as { done?: unknown }).done === true;
+}
+
+/** A delegated agent as the terminal host records it. */
+export interface Delegation {
+  id: string;
+  parent_session: string;
+  parent_provider: string;
+  provider: string;
+  model: string;
+  effort: string;
+  title: string;
+  workspace: string;
+  created_at: number;
+  ended_at: number | null;
+  timeout_minutes: number;
+  status: string;
+  error: string | null;
+  result: string | null;
+  steps: number;
+  verification: { state: string; problems: string[]; model: string | null };
+  applied: {
+    skills: { name: string; revision: number | null }[];
+    switched_off: number;
+  };
+  artifacts: { path: string; size: number }[];
+}
+
+function parseDelegation(value: unknown): Delegation {
+  if (!value || typeof value !== 'object') throw new Error('delegation');
+  const v = value as Record<string, unknown>;
+  const text = (x: unknown) => (typeof x === 'string' ? x : '');
+  const number = (x: unknown) => (typeof x === 'number' ? x : 0);
+  const verification = (v.verification ?? {}) as Record<string, unknown>;
+  const applied = (v.applied ?? {}) as Record<string, unknown>;
+  return {
+    id: text(v.id),
+    parent_session: text(v.parent_session),
+    parent_provider: text(v.parent_provider),
+    provider: text(v.provider),
+    model: text(v.model),
+    effort: text(v.effort),
+    title: text(v.title),
+    workspace: text(v.workspace),
+    created_at: number(v.created_at),
+    ended_at: typeof v.ended_at === 'number' ? v.ended_at : null,
+    timeout_minutes: number(v.timeout_minutes),
+    status: text(v.status),
+    error: typeof v.error === 'string' ? v.error : null,
+    result: typeof v.result === 'string' ? v.result : null,
+    steps: number(v.steps),
+    verification: {
+      state: text(verification.state),
+      problems: Array.isArray(verification.problems)
+        ? verification.problems.map(text)
+        : [],
+      model: typeof verification.model === 'string' ? verification.model : null,
+    },
+    applied: {
+      skills: Array.isArray(applied.skills)
+        ? applied.skills.map((s) => {
+            const r = (s ?? {}) as Record<string, unknown>;
+            return {
+              name: text(r.name),
+              revision: typeof r.revision === 'number' ? r.revision : null,
+            };
+          })
+        : [],
+      switched_off: number(applied.switched_off),
+    },
+    artifacts: Array.isArray(v.artifacts)
+      ? v.artifacts.map((a) => {
+          const r = (a ?? {}) as Record<string, unknown>;
+          return { path: text(r.path), size: number(r.size) };
+        })
+      : [],
+  };
+}
+
+export async function readDelegations(): Promise<Delegation[]> {
+  const list = await call('native_delegations', {});
+  return Array.isArray(list) ? list.map(parseDelegation) : [];
+}
+
+export async function cancelDelegation(id: string): Promise<void> {
+  await call('native_delegation_cancel', { request: { id } });
 }

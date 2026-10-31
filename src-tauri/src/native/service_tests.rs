@@ -111,6 +111,15 @@ impl World {
         agent: AgentId,
         profile: Option<&str>,
     ) -> Result<super::service::StartReply, super::service::NativeError> {
+        self.start_with(agent, profile, false)
+    }
+
+    fn start_with(
+        &self,
+        agent: AgentId,
+        profile: Option<&str>,
+        delegation: bool,
+    ) -> Result<super::service::StartReply, super::service::NativeError> {
         let preview = self.service.preview(agent, profile, None)?;
         let expected_cli_version = match agent {
             AgentId::ClaudeCode => Some("2.1.309 (Claude Code)".to_owned()),
@@ -122,6 +131,7 @@ impl World {
             &self.terminal,
             StartRequest {
                 arsenal: None,
+                delegation,
                 agent_id: agent,
                 project: self.home.to_string_lossy().into_owned(),
                 profile_id: profile.map(str::to_owned),
@@ -245,6 +255,7 @@ fn opencode_is_version_pinned_and_receives_reviewed_handoff_as_an_explicit_promp
 
     let request = |expected_cli_version| StartRequest {
         arsenal: None,
+        delegation: false,
         agent_id: AgentId::Opencode,
         project: world.home.to_string_lossy().into_owned(),
         profile_id: None,
@@ -396,6 +407,7 @@ fn direct_opencode_handoff_rechecks_the_resolved_binary_version() {
         &direct_terminal,
         StartRequest {
             arsenal: None,
+            delegation: false,
             agent_id: AgentId::Opencode,
             project: world.home.to_string_lossy().into_owned(),
             profile_id: None,
@@ -662,6 +674,7 @@ fn a_failed_clear_in_one_project_does_not_block_legacy_launch_in_another() {
             &world.terminal,
             StartRequest {
                 arsenal: None,
+                delegation: false,
                 agent_id: AgentId::ClaudeCode,
                 project,
                 profile_id: None,
@@ -824,6 +837,7 @@ fn a_corrupt_m9_sidecar_blocks_only_m9_and_keeps_legacy_state_writable() {
         &reopened.terminal,
         StartRequest {
             arsenal: None,
+            delegation: false,
             agent_id: AgentId::Opencode,
             project: reopened.home.to_string_lossy().into_owned(),
             profile_id: None,
@@ -1285,6 +1299,7 @@ fn hermes_native_launches_as_configured_without_probe_or_automatic_handoff() {
             &world.terminal,
             StartRequest {
                 arsenal: None,
+                delegation: false,
                 agent_id: AgentId::Hermes,
                 project: world.home.to_string_lossy().into_owned(),
                 profile_id: None,
@@ -1514,6 +1529,7 @@ fn only_a_folder_the_user_chose_or_a_known_project_can_be_a_project() {
     fs::create_dir_all(&elsewhere).unwrap();
     let request = |path: &Path| StartRequest {
         arsenal: None,
+        delegation: false,
         agent_id: AgentId::Codex,
         project: path.to_string_lossy().into_owned(),
         profile_id: None,
@@ -1625,6 +1641,7 @@ fn a_profile_change_after_preview_refuses_the_stale_start_without_creating_a_ses
             &world.terminal,
             StartRequest {
                 arsenal: None,
+                delegation: false,
                 agent_id: AgentId::ClaudeCode,
                 project: world.home.to_string_lossy().into_owned(),
                 profile_id: Some(id),
@@ -1855,6 +1872,7 @@ fn real_agents_start_in_native_terminals_and_stop() {
                 &terminal,
                 StartRequest {
                     arsenal: None,
+                    delegation: false,
                     agent_id: agent,
                     project: project.to_string_lossy().into_owned(),
                     profile_id: None,
@@ -1939,6 +1957,7 @@ fn a_reviewed_brief_is_the_agents_first_message_as_one_word_and_a_bad_one_is_ref
             &world.terminal,
             StartRequest {
                 arsenal: None,
+                delegation: false,
                 agent_id: AgentId::ClaudeCode,
                 project: world.home.to_string_lossy().into_owned(),
                 profile_id: None,
@@ -1996,6 +2015,7 @@ fn arsenal_start(
             plan_token,
             expected_cli_version: Some(version.to_owned()),
             arsenal: launch,
+            delegation: false,
         },
     )
 }
@@ -2075,4 +2095,53 @@ fn a_qualified_build_launches_with_only_the_exclusion_overlay_and_keeps_it_for_r
         )
         .unwrap();
     assert_eq!(restarted.session.session.arsenal.as_ref(), Some(&launch));
+}
+
+#[test]
+fn an_orchestrator_gets_the_delegation_tool_for_its_own_session_and_never_on_its_command_line() {
+    let world = World::new();
+    let claude = world.start_with(AgentId::ClaudeCode, None, true).unwrap();
+    assert!(claude.session.session.delegation);
+    let out = world.output_until(&claude.terminal.terminal_id, "SESSION=");
+    let config = out
+        .lines()
+        .find_map(|line| line.strip_prefix("[--mcp-config=")?.strip_suffix(']'))
+        .unwrap_or_else(|| panic!("{out:?}"));
+    let config: serde_json::Value = serde_json::from_slice(&fs::read(config).unwrap()).unwrap();
+    let server = &config["mcpServers"]["wyss-delegate"];
+    assert_eq!(server["args"], serde_json::json!(["--wyss-delegate-mcp"]));
+    let token = server["env"][crate::delegate::TOKEN_VAR]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(token.len(), 64);
+    assert!(
+        !out.contains(&token),
+        "the token must not be on the command line"
+    );
+    // The right is this session's: the host knows it, and it lists nothing of another session.
+    assert!(
+        crate::delegate::manager()
+            .list(Some(&token))
+            .unwrap()
+            .is_empty()
+    );
+
+    let codex = world.start_with(AgentId::Codex, None, true).unwrap();
+    let out = world.output_until(&codex.terminal.terminal_id, "tool_timeout_sec");
+    assert!(out.contains("[--no-daemon]"), "{out:?}");
+    assert!(
+        out.contains("[mcp_servers.wyss_delegate.args=[\"--wyss-delegate-mcp\"]]"),
+        "{out:?}"
+    );
+    assert!(out.contains(&format!(
+        "[mcp_servers.wyss_delegate.env_vars=[\"{}\"]]",
+        crate::delegate::TOKEN_VAR
+    )));
+
+    // Without delegation nothing of it is added.
+    let plain = world.start(AgentId::ClaudeCode, None).unwrap();
+    let out = world.output_until(&plain.terminal.terminal_id, "SESSION=");
+    assert!(!out.contains("mcp-config"), "{out:?}");
+    assert!(!plain.session.session.delegation);
 }

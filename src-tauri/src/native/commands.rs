@@ -491,9 +491,14 @@ pub struct WindowStart {
     expected_cli_version: Option<String>,
     #[serde(default)]
     arsenal: Option<ArsenalStart>,
+    #[serde(default)]
+    delegation: bool,
 }
 
 fn start_with_link(link: &HostLink, request: StartRequest) -> Answer {
+    if request.delegation && !link.has_feature("agent_delegation_v1") {
+        return Err(HostError::new("host_outdated"));
+    }
     if !request.agent_id.is_legacy() && !link.has_feature("native_extended_catalogue_v1") {
         return Err(HostError::new("host_outdated"));
     }
@@ -536,6 +541,10 @@ fn start_with_link(link: &HostLink, request: StartRequest) -> Answer {
     if let Some(launch) = &request.arsenal {
         params["arsenal"] = json!(launch);
     }
+    // Only sent when asked for: older hosts refuse fields they do not know.
+    if request.delegation {
+        params["delegation"] = json!(true);
+    }
     link.call("native_start", params)
 }
 
@@ -570,9 +579,41 @@ pub async fn native_start(
         plan_token: request.plan_token,
         expected_cli_version: request.expected_cli_version,
         arsenal: launch,
+        delegation: request.delegation,
     };
     let link = link.inner().clone();
     blocking(move || start_with_link(&link, request)).await
+}
+
+/// Every delegated agent on record, for the window; the host answers without a token.
+#[tauri::command]
+pub async fn native_delegations(link: State<'_, HostLink>) -> Answer {
+    let link = link.inner().clone();
+    blocking(move || {
+        if !link.has_feature("agent_delegation_v1") {
+            return Ok(json!([]));
+        }
+        link.call_attached("delegate_list", json!({}))
+    })
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DelegationCancel {
+    id: String,
+}
+
+#[tauri::command]
+pub async fn native_delegation_cancel(
+    link: State<'_, HostLink>,
+    request: DelegationCancel,
+) -> Answer {
+    if request.id.len() != 32 || !request.id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(HostError::new("request_invalid"));
+    }
+    let link = link.inner().clone();
+    blocking(move || link.call_attached("delegate_cancel", json!({"id": request.id}))).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -1023,6 +1064,8 @@ const COMMANDS: &[&str] = &[
     "native_profile_import",
     "native_handoff_prepare",
     "native_handoff_save",
+    "native_delegations",
+    "native_delegation_cancel",
 ];
 
 pub fn extension() -> wyss_console::Extension {
@@ -1033,6 +1076,8 @@ pub fn extension() -> wyss_console::Extension {
             native_readiness,
             native_preview,
             native_start,
+            native_delegations,
+            native_delegation_cancel,
             native_sessions,
             native_stop,
             native_restart,
@@ -1216,6 +1261,7 @@ mod capability_tests {
     fn start_request() -> StartRequest {
         StartRequest {
             arsenal: None,
+            delegation: false,
             agent_id: AgentId::ClaudeCode,
             project: "/tmp/fixture-project".into(),
             profile_id: Some(PROFILE_ID.into()),
@@ -1242,6 +1288,7 @@ mod capability_tests {
         let link = host.link();
         let request = StartRequest {
             arsenal: Some(arsenal_launch()),
+            delegation: false,
             profile_id: None,
             ..start_request()
         };
@@ -1503,6 +1550,7 @@ mod capability_tests {
             &link,
             StartRequest {
                 arsenal: None,
+                delegation: false,
                 agent_id: AgentId::Opencode,
                 project: "/tmp/fixture-project".into(),
                 profile_id: None,

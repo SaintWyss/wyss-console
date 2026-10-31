@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-31 — Agent delegation in both directions
+
+- A Claude Code or Codex session started from Workspace with "Let it delegate…" gets the Wyss delegation
+  tool (an MCP server of the Wyss binary) and can give tasks to a separate Codex or Claude Code agent: its
+  model and reasoning effort (checked against the installed provider), its Arsenal skills (ids, pinned
+  revisions, a preset or a selection; nothing else of the owner's), its own workspace and process group,
+  workspace-only writes, no tool network, no approvals asked, and a deadline. The worker's configuration is
+  checked against the plan from what the provider itself reports. Workspace › Delegated agents shows every
+  delegation and can cancel a running one. Limits live in `~/.config/wyss-console/delegation.json` (2 at a
+  time, 20 minutes by default). See `docs/product/agent-delegation.md`.
+
 ## 2026-10-31 — Arsenal applies selections to Codex; plans respect the provider's own settings
 
 - **Codex `codex-cli 0.159.0`** applies an Arsenal selection to one terminal: the session starts with

@@ -67,6 +67,35 @@ impl Arsenal {
     }
 }
 
+/// The library for reading only, as the terminal host needs it to plan a delegated agent's skills
+/// while the window may be writing. Never creates the file or its schema.
+pub fn open_read_only() -> Result<Store, Error> {
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .filter(|home| home.is_absolute())
+                .map(|home| home.join(".local/share"))
+        })
+        .ok_or(Error::Storage)?;
+    let path = data
+        .join("wyss-console")
+        .join("arsenal")
+        .join("arsenal.sqlite");
+    if !fs::symlink_metadata(&path)
+        .map_err(|_| Error::Storage)?
+        .is_file()
+    {
+        return Err(Error::Storage);
+    }
+    Store::open(Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?)
+}
+
 /// `wyss-console/arsenal` under `XDG_DATA_HOME` (or `~/.local/share`), in a folder only its owner
 /// can open. The database file itself is created 0600.
 fn open() -> Result<Store, Error> {

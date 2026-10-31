@@ -61,6 +61,9 @@ pub struct Session {
     /// The Arsenal exclusion it was launched with; a restart launches with the same one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arsenal: Option<super::arsenal::ArsenalRef>,
+    /// Started as an orchestrator: it was given the Wyss delegation tool.
+    #[serde(default)]
+    pub delegation: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

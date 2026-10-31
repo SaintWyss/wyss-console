@@ -168,6 +168,10 @@ pub struct StartRequest {
     /// token like a profile, and refused for any build without its own exclusion evidence.
     #[serde(default)]
     pub arsenal: Option<ArsenalLaunch>,
+    /// Gives this session the Wyss delegation tool (Claude Code and Codex): it may start agents of
+    /// either provider within the owner's delegation policy.
+    #[serde(default)]
+    pub delegation: bool,
 }
 
 /// A session as the window sees it: the registry's record plus what is observed now.
@@ -462,6 +466,85 @@ impl NativeService {
     }
 
     // ---- what can be started --------------------------------------------------------------
+
+    /// The executable of an installed provider, as the catalogue resolved it.
+    pub fn executable_of(&self, agent: AgentId) -> Option<PathBuf> {
+        self.agents()
+            .into_iter()
+            .find(|a| a.agent_id == agent && a.installed)
+            .and_then(|a| a.path)
+            .map(PathBuf::from)
+    }
+
+    /// Gives an orchestrator session the Wyss delegation tool for this session only: Claude Code
+    /// through its own `--mcp-config` file, Codex through `-c mcp_servers.wyss_delegate…` on its
+    /// own server (`--no-daemon`, so the tool is not handed to the shared one). The right itself is a
+    /// token in the session's environment, never on its command line.
+    fn delegation_words(
+        &self,
+        agent: AgentId,
+        id: &str,
+        dir: &Path,
+        project: &Path,
+        words: &mut Vec<String>,
+    ) -> Result<String, NativeError> {
+        let executable = std::env::current_exe()
+            .ok()
+            .filter(|path| path.is_file())
+            .ok_or_else(|| NativeError::new("delegation_unavailable"))?;
+        let provider = match agent {
+            AgentId::ClaudeCode => "claude_code",
+            AgentId::Codex => "codex",
+            _ => return Err(NativeError::new("delegation_unavailable")),
+        };
+        let token = crate::delegate::manager().register(crate::delegate::Parent {
+            session_id: id.to_owned(),
+            provider: provider.to_owned(),
+            project: project.to_string_lossy().into_owned(),
+        });
+        match agent {
+            AgentId::ClaudeCode => {
+                let config = serde_json::json!({"mcpServers": {"wyss-delegate": {
+                    "type": "stdio",
+                    "command": executable,
+                    "args": ["--wyss-delegate-mcp"],
+                    "env": {crate::delegate::TOKEN_VAR: token},
+                }}});
+                let path = dir.join("wyss-delegate.mcp.json");
+                let write = || -> std::io::Result<()> {
+                    store::private_dir(dir)?;
+                    store::write_atomic(&path, config.to_string().as_bytes())
+                };
+                write().map_err(|_| NativeError::new("store_unavailable"))?;
+                // One word: the flag takes several values and must not take what follows.
+                words.push(format!("--mcp-config={}", path.to_string_lossy()));
+            }
+            _ => {
+                if !words.iter().any(|w| w == "--no-daemon") {
+                    words.push("--no-daemon".to_owned());
+                }
+                let value = |v: toml::Value| v.to_string();
+                for setting in [
+                    format!(
+                        "mcp_servers.wyss_delegate.command={}",
+                        value(toml::Value::String(
+                            executable.to_string_lossy().into_owned()
+                        ))
+                    ),
+                    "mcp_servers.wyss_delegate.args=[\"--wyss-delegate-mcp\"]".to_owned(),
+                    format!(
+                        "mcp_servers.wyss_delegate.env_vars=[\"{}\"]",
+                        crate::delegate::TOKEN_VAR
+                    ),
+                    "mcp_servers.wyss_delegate.tool_timeout_sec=660".to_owned(),
+                ] {
+                    words.push("-c".to_owned());
+                    words.push(setting);
+                }
+            }
+        }
+        Ok(token)
+    }
 
     fn agents(&self) -> Vec<CatalogueEntry> {
         let mut cache = lock(&self.inner.found);
@@ -873,6 +956,11 @@ impl NativeService {
                 AgentId::ClaudeCode | AgentId::Codex => words.push(brief.clone()),
             }
         }
+        let delegation_token = if request.delegation {
+            Some(self.delegation_words(request.agent_id, &id, &dir, &project, &mut words)?)
+        } else {
+            None
+        };
         if let Some(overlay) = &plan.overlay {
             let write = || -> std::io::Result<()> {
                 store::private_dir(&dir)?;
@@ -912,8 +1000,12 @@ impl NativeService {
             restart_of: restart.map(|(of, _)| of.to_owned()),
             restarts: restart.map_or(0, |(_, n)| n),
             arsenal: request.arsenal.clone(),
+            delegation: request.delegation,
         };
         let mut env = vec![("WYSS_NATIVE_SESSION_ID".to_owned(), id.clone())];
+        if let Some(token) = delegation_token {
+            env.push((crate::delegate::TOKEN_VAR.to_owned(), token));
+        }
         if version_guard {
             env.push((
                 "WYSS_NATIVE_VERSION_GUARD".to_owned(),
@@ -1191,6 +1283,7 @@ impl NativeService {
                 plan_token,
                 expected_cli_version,
                 arsenal: old.arsenal.clone(),
+                delegation: old.delegation,
             },
             Some((id, old.restarts + 1)),
         )?;

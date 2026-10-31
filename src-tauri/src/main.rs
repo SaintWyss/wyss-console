@@ -14,6 +14,8 @@ mod configuration;
 #[cfg(target_os = "linux")]
 mod credentials;
 #[cfg(target_os = "linux")]
+mod delegate;
+#[cfg(target_os = "linux")]
 mod diagnose;
 #[cfg(target_os = "linux")]
 mod handoff;
@@ -89,6 +91,13 @@ fn main() {
         .is_some_and(|a| a == "--wyss-host-stop")
     {
         std::process::exit(host::stop());
+    }
+    #[cfg(target_os = "linux")]
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|a| a == "--wyss-delegate-mcp")
+    {
+        std::process::exit(delegate::mcp::run());
     }
     #[cfg(target_os = "linux")]
     if std::env::args_os()

@@ -280,6 +280,35 @@ describe('the controller', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  it('gives the delegation tool only to a Claude Code or Codex start that asked for it', async () => {
+    const client = fakeClient();
+    const controller = new NativeController(() => undefined, vi.fn(), client);
+    controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+    controller.setDelegation(true);
+    expect(await controller.startAgent('codex', '/home/u', null)).toBe(true);
+    expect(client.start).toHaveBeenLastCalledWith(
+      'codex',
+      '/home/u',
+      null,
+      null,
+      null,
+      null,
+      true,
+    );
+    controller.setDelegation(false);
+    expect(await controller.startAgent('claude_code', '/home/u', null)).toBe(
+      true,
+    );
+    expect(client.start).toHaveBeenLastCalledWith(
+      'claude_code',
+      '/home/u',
+      null,
+      null,
+      null,
+    );
+  });
+
   it('starts an agent once at a time, hands the terminal to the window and says why not', async () => {
     const client = fakeClient();
     const started = vi.fn();

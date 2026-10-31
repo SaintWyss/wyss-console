@@ -195,6 +195,33 @@ fn native_error(error: &NativeError) -> HostError {
 fn bad(_: serde_json::Error) -> HostError {
     HostError::new("request_invalid")
 }
+fn delegate_error(refusal: &crate::delegate::Refusal) -> HostError {
+    HostError {
+        code: refusal.code.to_owned(),
+        reasons: refusal.reasons.clone(),
+        bytes_written: 0,
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DelegateRef {
+    id: String,
+    #[serde(default)]
+    token: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DelegateList {
+    #[serde(default)]
+    token: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DelegateProvider {
+    provider: String,
+    #[serde(default)]
+    query: Option<String>,
+}
 fn params<T: for<'de> Deserialize<'de>>(value: Value) -> Result<T, HostError> {
     serde_json::from_value(value).map_err(bad)
 }
@@ -645,6 +672,68 @@ impl HostCore {
                             request.arsenal.as_ref(),
                         )
                         .map_err(|e| native_error(&e))?,
+                )
+            }
+            "delegate_start" => {
+                let request: crate::delegate::Request = params(value)?;
+                let agent = match request.provider.as_str() {
+                    "codex" => crate::native::catalogue::AgentId::Codex,
+                    "claude_code" => crate::native::catalogue::AgentId::ClaudeCode,
+                    _ => return Err(HostError::new("provider_unsupported")),
+                };
+                let executable = self
+                    .native()?
+                    .executable_of(agent)
+                    .ok_or_else(|| HostError::new("agent_not_installed"))?;
+                to_value(
+                    crate::delegate::manager()
+                        .start(request, &executable)
+                        .map_err(|r| delegate_error(&r))?,
+                )
+            }
+            "delegate_get" => {
+                let request: DelegateRef = params(value)?;
+                to_value(
+                    crate::delegate::manager()
+                        .get(&request.id, request.token.as_deref())
+                        .map_err(|r| delegate_error(&r))?,
+                )
+            }
+            "delegate_cancel" => {
+                let request: DelegateRef = params(value)?;
+                to_value(
+                    crate::delegate::manager()
+                        .cancel(&request.id, request.token.as_deref())
+                        .map_err(|r| delegate_error(&r))?,
+                )
+            }
+            "delegate_list" => {
+                let request: DelegateList =
+                    params(if value.is_null() { json!({}) } else { value })?;
+                to_value(
+                    crate::delegate::manager()
+                        .list(request.token.as_deref())
+                        .map_err(|r| delegate_error(&r))?,
+                )
+            }
+            "delegate_options" => {
+                let request: DelegateProvider = params(value)?;
+                let agent = match request.provider.as_str() {
+                    "codex" => crate::native::catalogue::AgentId::Codex,
+                    "claude_code" => crate::native::catalogue::AgentId::ClaudeCode,
+                    _ => return Err(HostError::new("provider_unsupported")),
+                };
+                let executable = self.native()?.executable_of(agent);
+                to_value(
+                    crate::delegate::manager().options(&request.provider, executable.as_deref()),
+                )
+            }
+            "delegate_capabilities" => {
+                let request: DelegateProvider = params(value)?;
+                to_value(
+                    crate::delegate::manager()
+                        .capabilities(&request.provider, request.query.as_deref())
+                        .map_err(|r| delegate_error(&r))?,
                 )
             }
             "native_start" => {

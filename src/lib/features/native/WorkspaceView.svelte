@@ -2,6 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import HandoffPanel from './HandoffPanel.svelte';
   import ArsenalTerminalPanel from '../arsenal/ArsenalTerminalPanel.svelte';
+  import DelegationsPanel from './DelegationsPanel.svelte';
   import { sessionArsenalLine, type ArsenalChoice } from '../arsenal/terminal';
   import { arsenalClient } from '../../desktop/arsenal-client';
   import type { Binding } from '../../contracts/arsenal';
@@ -44,6 +45,7 @@
   } = $props();
 
   let agent = $state<AgentId | null>(null);
+  let delegate = $state(false);
   let project = $state<string | null>(null);
   let profile = $state<string | null>(null);
   let preview = $state<Preview | null>(null);
@@ -208,6 +210,9 @@
   }
   async function launch() {
     if (!canStart || !agent || !project) return;
+    controller.setDelegation(
+      delegate && (agent === 'claude_code' || agent === 'codex'),
+    );
     const choice = arsenalChoice;
     if (choice && !choice.pending) {
       // Applied: the preview that binds the exclusion. Recorded only: the profile's own preview.
@@ -493,6 +498,14 @@
         {#if arsenalNote}
           <p class="event-meta" role="status">{arsenalNote}</p>
         {/if}
+        {#if agent === 'claude_code' || agent === 'codex'}
+          <label class="native-check">
+            <input type="checkbox" bind:checked={delegate} />
+            Let it delegate tasks to Claude Code and Codex through Wyss (as your delegation
+            policy allows: by default 2 agents at a time, 20 minutes each, workspace-only
+            writes)
+          </label>
+        {/if}
 
         {#if launcher.shell}
           <p class="event-meta">
@@ -701,6 +714,8 @@
           {/each}
         {/if}
       </section>
+
+      <DelegationsPanel {visible} />
     </div>
   {/if}
 </section>

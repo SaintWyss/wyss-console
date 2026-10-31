@@ -59,6 +59,7 @@ export interface NativeClient {
     brief?: string | null,
     preview?: Pick<Preview, 'plan_token' | 'provider_version'> | null,
     arsenal?: ArsenalStart | null,
+    delegation?: boolean,
   ): Promise<StartReply>;
   prepareHandoff(id: string): Promise<HandoffBrief>;
   saveHandoff(text: string): Promise<boolean>;
@@ -92,8 +93,18 @@ const desktopClient: NativeClient = {
     brief = null,
     preview = null,
     arsenal = null,
+    delegation = false,
   ) =>
-    startNative(agent, project, profile, FIRST_SIZE, brief, preview, arsenal),
+    startNative(
+      agent,
+      project,
+      profile,
+      FIRST_SIZE,
+      brief,
+      preview,
+      arsenal,
+      delegation,
+    ),
   prepareHandoff,
   saveHandoff,
   restart: (id) => restartNative(id, FIRST_SIZE),
@@ -584,6 +595,12 @@ export class NativeController {
   }
 
   /** Starts the agent; the window gets its terminal. One start at a time. */
+  /** Whether the next Claude Code or Codex start gets the Wyss delegation tool. */
+  private delegation = false;
+  setDelegation(on: boolean) {
+    this.delegation = on;
+  }
+
   async startAgent(
     agent: AgentId,
     project: string,
@@ -626,7 +643,9 @@ export class NativeController {
     this.beginMutation();
     this.emit();
     try {
-      const reply = arsenal
+      const delegation =
+        this.delegation && (agent === 'claude_code' || agent === 'codex');
+      const reply = delegation
         ? await this.client.start(
             agent,
             project,
@@ -634,8 +653,18 @@ export class NativeController {
             brief,
             preview,
             arsenal,
+            true,
           )
-        : await this.client.start(agent, project, profile, brief, preview);
+        : arsenal
+          ? await this.client.start(
+              agent,
+              project,
+              profile,
+              brief,
+              preview,
+              arsenal,
+            )
+          : await this.client.start(agent, project, profile, brief, preview);
       if (this.disposed) return null;
       this.afterStart(reply);
       return reply;

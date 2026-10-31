@@ -268,8 +268,8 @@
         <p class="event-meta">
           {counts.prepared} prepared · {counts.rejected} rejected · {counts.unsupported}
           not carried · {plan.kept.length - plan.inherited_off.length} installed skill(s)
-          stay{#if plan.inherited_off.length > 0}{' · '}{plan.inherited_off
-              .length} already off in your settings{/if} ·
+          stay{#if plan.inherited_off.length > 0}<span>&nbsp;·&nbsp;</span>{plan
+              .inherited_off.length} already off in your settings{/if} ·
           {plan.excluded.length} would be switched off
         </p>
         {#each plan.conflicts as conflict, index (index)}
