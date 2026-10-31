@@ -16,14 +16,15 @@ running (0.166.0). Evidence (rollouts, probe outputs) is kept outside the reposi
 
 ## Findings that shape the implementation
 
-| #   | Probe                                                                                            | Result                                                                                                   |
-| --- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| F1  | `-c skills.config=[{path=<SKILL.md>, enabled=false}]` (`codex debug prompt-input`, no inference) | the skill leaves the model-visible list                                                                  |
-| F2  | same with the skill **folder** path                                                              | silently ignored: the skill stays → Wyss only emits `SKILL.md` paths and refuses unknown or missing ones |
-| F3  | `-c` with one entry, against the 93 account entries                                              | entries are **added**: every skill the account switches off stays off, only the new one leaves           |
-| F4  | `-c … enabled=true` for a skill the account switches off                                         | it **reappears** → Wyss never emits `enabled = true`                                                     |
-| F5  | linked GSD skill by link path and by resolved path                                               | both switch it off                                                                                       |
-| F6  | Codex system skills (`~/.codex/skills/.system`)                                                  | left as they are: never named (also refused by the host)                                                 |
+| #   | Probe                                                                                                               | Result                                                                                                                      |
+| --- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| F1  | `-c skills.config=[{path=<SKILL.md>, enabled=false}]` (`codex debug prompt-input`, no inference)                    | the skill leaves the model-visible list                                                                                     |
+| F2  | same with the skill **folder** path                                                                                 | silently ignored: the skill stays → Wyss only emits `SKILL.md` paths and refuses unknown or missing ones                    |
+| F3  | `-c` with one entry, against the 93 account entries                                                                 | entries are **added**: every skill the account switches off stays off, only the new one leaves                              |
+| F4  | `-c … enabled=true` for a skill the account switches off                                                            | it **reappears** → Wyss never emits `enabled = true`                                                                        |
+| F5  | linked GSD skill by link path and by resolved path                                                                  | both switch it off                                                                                                          |
+| F6  | Codex system skills (`~/.codex/skills/.system`)                                                                     | left as they are: never named (also refused by the host)                                                                    |
+| F7  | first end-to-end start through Wyss: `gstack-upgrade` (a `SKILL.md` inside `~/.codex/skills/gstack/`) stayed listed | Codex lists nested `SKILL.md` files as skills of their own → Wyss now names the nested files of every skill it switches off |
 
 ## Cases
 
