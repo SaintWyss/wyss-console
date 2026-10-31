@@ -812,20 +812,59 @@ code,
   min-height: 0;
   position: relative;
 }
+/* A pane: a header bar (state, shell or agent) over the terminal. Panes keep a 3 px gutter. */
 .terminal-panel {
   position: absolute;
   box-sizing: border-box;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 3px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-lg);
+  border: 3px solid var(--bg);
+  border-radius: calc(var(--radius-lg) + 3px);
+  background: var(--bg);
+}
+.terminal-panel > * {
+  border-inline: 1px solid var(--line);
+}
+.terminal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+  min-height: 32px;
+  padding: 5px 12px;
+  border-top: 1px solid var(--line);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--surface);
 }
 /* Where the keyboard goes, when there is more than one pane to tell apart. */
-.terminal-panel.focused {
+.pane-area:has(> .terminal-panel:not([hidden]) ~ .terminal-panel:not([hidden]))
+  .terminal-panel.focused
+  > * {
   border-color: var(--accent-line);
+}
+.pane-area:has(> .terminal-panel:not([hidden]) ~ .terminal-panel:not([hidden]))
+  .terminal-panel.focused
+  .terminal-toolbar {
+  background: var(--accent-soft);
+}
+.terminal-state-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--faint);
+}
+.terminal-panel[data-state='running'] .terminal-state-dot {
+  background: var(--ok);
+}
+.terminal-panel[data-state='starting'] .terminal-state-dot {
+  background: var(--pending);
+}
+.terminal-panel[data-state='failed'] .terminal-state-dot {
+  background: var(--error);
 }
 .pane-divider {
   position: absolute;
@@ -923,20 +962,23 @@ code,
   color: var(--muted);
   overflow-wrap: anywhere;
 }
-.terminal-toolbar .terminal-parser {
-  margin-top: 2px;
-}
 .terminal-toolbar .terminal-parser[data-tone='warn'] {
   color: var(--warn);
 }
-/* The one solid region: the terminal stays legible over any desktop. */
+.terminal-panel > .terminal-search {
+  border-radius: 0;
+  border-top: 1px solid var(--line);
+}
+/* The terminal itself: its own opaque color, framed under its header. */
 .terminal-surface {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 12px;
-  border-radius: var(--radius-lg);
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   background: var(--terminal-bg);
 }
 .terminal-host {

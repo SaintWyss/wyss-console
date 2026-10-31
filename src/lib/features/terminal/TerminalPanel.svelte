@@ -63,6 +63,7 @@
   tabindex="-1"
   class="terminal-panel"
   class:focused
+  data-state={session.view.state}
   role="tabpanel"
   id={`panel-${session.id}`}
   aria-labelledby={`tab-${tabId}`}
@@ -78,6 +79,7 @@
 >
   <div class="terminal-toolbar">
     <p role="status" aria-live={focused ? 'polite' : 'off'}>
+      <span class="terminal-state-dot" aria-hidden="true"></span>
       {#if session.native}
         <span
           class="pill compact"
