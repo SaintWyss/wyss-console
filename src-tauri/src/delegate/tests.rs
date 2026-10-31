@@ -299,8 +299,8 @@ fn an_orchestrator_sees_and_stops_only_its_own_delegations() {
             .map(|r| r.id)
             .collect()
     };
-    assert_eq!(ids(&mine), [a.id.clone()]);
-    assert_eq!(ids(&theirs), [b.id.clone()]);
+    assert_eq!(ids(&mine), std::slice::from_ref(&a.id));
+    assert_eq!(ids(&theirs), std::slice::from_ref(&b.id));
     assert_eq!(
         manager.get(&b.id, Some(&mine)).unwrap_err().code,
         "delegation_unknown"

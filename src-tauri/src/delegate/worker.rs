@@ -273,10 +273,10 @@ pub fn codex_listed_files(rollout: &str) -> Option<BTreeSet<PathBuf>> {
             let mut roots = std::collections::BTreeMap::new();
             for row in text.lines() {
                 let row = row.trim();
-                if let Some(rest) = row.strip_prefix("- `r") {
-                    if let Some((index, path)) = rest.split_once("` = `") {
-                        roots.insert(format!("r{index}"), path.trim_end_matches('`').to_owned());
-                    }
+                if let Some(rest) = row.strip_prefix("- `r")
+                    && let Some((index, path)) = rest.split_once("` = `")
+                {
+                    roots.insert(format!("r{index}"), path.trim_end_matches('`').to_owned());
                 }
             }
             let mut files = BTreeSet::new();

@@ -450,10 +450,10 @@ impl Manager {
     /// `codex debug models` (no inference, no network for the catalogue it reads), kept ten minutes.
     fn codex_models(&self, codex: &Path) -> Option<Value> {
         let mut cache = lock(&self.models);
-        if let Some((at, value)) = cache.as_ref() {
-            if at.elapsed() < Duration::from_secs(600) {
-                return Some(value.clone());
-            }
+        if let Some((at, value)) = cache.as_ref()
+            && at.elapsed() < Duration::from_secs(600)
+        {
+            return Some(value.clone());
         }
         let output = Command::new(codex)
             .args(["debug", "models"])
