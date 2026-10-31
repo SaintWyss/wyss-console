@@ -16,6 +16,8 @@
   } from '../../contracts/arsenal';
   import { blockedText } from './messages';
   import {
+    candidateMark,
+    compatibilityMark,
     filterDiscover,
     filterLibrary,
     libraryCompatibility,
@@ -532,29 +534,40 @@
           </p>
         {:else if visibleLibrary.length === 0 && arsenal.library.length > 0}
           <p class="arsenal-empty">No capabilities match these filters.</p>
+        {:else if arsenal.library.length > 0}
+          <p class="arsenal-count" aria-live="polite">
+            {visibleLibrary.length === arsenal.library.length
+              ? `${arsenal.library.length} imported`
+              : `${visibleLibrary.length} of ${arsenal.library.length} imported`}
+          </p>
         {/if}
 
         <ul class="arsenal-list" aria-label="Imported capabilities">
           {#each visibleLibrary as item (item.id)}
+            {@const mark = compatibilityMark(libraryCompatibility(item))}
             <li class="arsenal-row-item">
               <button
-                class="arsenal-row"
+                class="arsenal-row stripe"
+                data-tone={mark.tone}
                 type="button"
                 aria-pressed={arsenal.opened?.summary.id === item.id}
                 onclick={() => controller.open(item.id)}
               >
-                <span class="arsenal-row-name">{item.name}</span>
-                <span class="arsenal-badges">
-                  <span class="pill">{kindOf(item)}</span>
-                  <span class="pill">{PROVIDER_LABEL[item.provider]}</span>
-                  <span class="pill"
-                    >{SOURCE_LABEL[item.source] ?? item.source}</span
-                  >
-                  <span class="pill">Revision {item.revision}</span>
-                  <span class="pill"
-                    >{COMPATIBILITY_LABEL[libraryCompatibility(item)]}</span
+                <span class="arsenal-row-top">
+                  <span class="arsenal-row-name">{item.name}</span>
+                  <span class="badge" data-tone={mark.tone}
+                    ><span aria-hidden="true">{mark.symbol}</span>
+                    {COMPATIBILITY_LABEL[libraryCompatibility(item)]}</span
                   >
                 </span>
+                {#if item.description}
+                  <span class="arsenal-row-desc">{item.description}</span>
+                {/if}
+                <span class="arsenal-row-meta"
+                  >{kindOf(item)} · {PROVIDER_LABEL[item.provider]} · {SOURCE_LABEL[
+                    item.source
+                  ] ?? item.source} · Revision {item.revision}</span
+                >
               </button>
             </li>
           {/each}
@@ -580,8 +593,15 @@
               <dd><code>{opened.summary.tree_hash.slice(0, 16)}</code></dd>
               <dt>Compatibility</dt>
               <dd>
-                <span class="pill"
-                  >{COMPATIBILITY_LABEL[opened.compatibility.status]}</span
+                <span
+                  class="badge"
+                  data-tone={compatibilityMark(opened.compatibility.status)
+                    .tone}
+                  ><span aria-hidden="true"
+                    >{compatibilityMark(opened.compatibility.status)
+                      .symbol}</span
+                  >
+                  {COMPATIBILITY_LABEL[opened.compatibility.status]}</span
                 >
                 {opened.compatibility.reason}
               </dd>
@@ -816,35 +836,54 @@
 
           <ul class="arsenal-list" aria-label="Discovered capabilities">
             {#each candidates as candidate (candidate.id)}
+              {@const mark = candidateMark(candidate.status)}
+              {@const blocked =
+                candidate.blocked &&
+                candidate.status !== 'read_only' &&
+                !candidate.managed_by}
               <li class="arsenal-row-item">
                 <button
-                  class="arsenal-row"
+                  class="arsenal-row stripe"
+                  data-tone={blocked ? 'error' : mark.tone}
                   type="button"
                   aria-pressed={arsenal.chosen === candidate.id}
                   onclick={() => controller.choose(candidate.id)}
                 >
-                  <span class="arsenal-row-name">{candidate.name}</span>
-                  <span class="arsenal-badges">
-                    <span class="pill">{KIND_LABEL[candidate.kind]}</span>
-                    <span class="pill"
-                      >{PROVIDER_LABEL[candidate.provider]}</span
-                    >
-                    <span class="pill">{SCOPE_LABEL[candidate.scope]}</span>
-                    <span class="pill">{STATUS_LABEL[candidate.status]}</span>
-                    {#if candidate.managed_by}<span class="pill"
-                        >{candidate.managed_by.composite}
-                        {candidate.managed_by.version}</span
-                      >{/if}
-                    {#if candidate.blocked && candidate.status !== 'read_only' && !candidate.managed_by}<span
-                        class="pill">Blocked</span
-                      >{/if}
-                    {#if candidate.duplicates.length > 0}<span class="pill"
-                        >Duplicate content</span
-                      >{/if}
-                    {#if candidate.name_collisions.length > 0}<span class="pill"
-                        >Name collision</span
-                      >{/if}
+                  <span class="arsenal-row-top">
+                    <span class="arsenal-row-name">{candidate.name}</span>
+                    <span class="arsenal-badges">
+                      <span class="badge" data-tone={mark.tone}
+                        ><span aria-hidden="true">{mark.symbol}</span>
+                        {STATUS_LABEL[candidate.status]}</span
+                      >
+                      {#if blocked}<span class="badge" data-tone="error"
+                          ><span aria-hidden="true">✕</span> Blocked</span
+                        >{/if}
+                      {#if candidate.duplicates.length > 0}<span
+                          class="badge"
+                          data-tone="warn"
+                          ><span aria-hidden="true">!</span> Duplicate content</span
+                        >{/if}
+                      {#if candidate.name_collisions.length > 0}<span
+                          class="badge"
+                          data-tone="warn"
+                          ><span aria-hidden="true">!</span> Name collision</span
+                        >{/if}
+                    </span>
                   </span>
+                  {#if candidate.description}
+                    <span class="arsenal-row-desc">{candidate.description}</span
+                    >
+                  {/if}
+                  <span class="arsenal-row-meta"
+                    >{KIND_LABEL[candidate.kind]} · {PROVIDER_LABEL[
+                      candidate.provider
+                    ]} · {SCOPE_LABEL[
+                      candidate.scope
+                    ]}{#if candidate.managed_by}
+                      · {candidate.managed_by.composite}
+                      {candidate.managed_by.version}{/if}</span
+                  >
                 </button>
               </li>
             {/each}
@@ -1085,12 +1124,19 @@
             <li class="arsenal-detail">
               <h3>{binding.selection_name}</h3>
               <p class="arsenal-badges">
-                <span class="pill"
-                  >{binding.state === 'applied'
+                <span
+                  class="badge"
+                  data-tone={binding.state === 'applied' ? 'ok' : 'warn'}
+                  ><span aria-hidden="true"
+                    >{binding.state === 'applied' ? '✓' : '!'}</span
+                  >
+                  {binding.state === 'applied'
                     ? 'APPLIED'
                     : 'NOT APPLIED'}</span
                 >
-                <span class="pill">Use not observed</span>
+                <span class="badge" data-tone="pending"
+                  ><span aria-hidden="true">?</span> Use not observed</span
+                >
                 <span class="pill">{PROVIDER_LABEL[binding.provider]}</span>
                 {#if binding.provider_version}<span class="pill"
                     >{binding.provider_version}</span
@@ -1496,8 +1542,9 @@
           <section class="arsenal-detail" aria-label="Configuration preview">
             <h3>Configuration preview: {preview.selection.name}</h3>
             <p class="arsenal-status">
-              <span class="pill">NOT APPLIED</span> Saved for later. No provider session
-              uses it.
+              <span class="badge" data-tone="warn"
+                ><span aria-hidden="true">!</span> NOT APPLIED</span
+              > Saved for later. No provider session uses it.
             </p>
             <ul class="arsenal-files">
               {#each preview.items as item (item.capability)}
@@ -1510,8 +1557,10 @@
                         ? ' (pinned)'
                         : ' (current)'}</span
                     >
-                    <span class="pill"
-                      >{COMPATIBILITY_LABEL[item.compatibility]}</span
+                    {@const itemMark = compatibilityMark(item.compatibility)}
+                    <span class="badge" data-tone={itemMark.tone}
+                      ><span aria-hidden="true">{itemMark.symbol}</span>
+                      {COMPATIBILITY_LABEL[item.compatibility]}</span
                     >
                     <span class="arsenal-muted">{item.reason}</span>
                     {#each item.dependencies.filter((dep) => dep.state === 'missing') as dep (dep.kind + dep.name)}
@@ -1567,66 +1616,87 @@
     gap: 12px;
     overflow-y: auto;
     scrollbar-width: thin;
-    scrollbar-color: var(--glass-line-strong) transparent;
+    scrollbar-color: var(--line-strong) transparent;
     padding-bottom: 16px;
   }
+  /* Sections are tabs, drawn as tabs: an underline on the open one, not a row of buttons. */
   .arsenal-tabs {
     display: flex;
-    gap: 8px;
+    gap: 2px;
     flex-wrap: wrap;
-    margin-block: 8px;
+    margin-top: 4px;
+    border-bottom: 1px solid var(--line);
   }
   .arsenal-tab {
-    min-height: 44px;
+    position: relative;
+    min-height: 38px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    background: transparent;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .arsenal-tab:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--surface-hover);
+  }
+  .arsenal-tab[aria-selected='true'] {
+    color: var(--text);
+    font-weight: 600;
+    background: transparent;
+  }
+  .arsenal-tab[aria-selected='true']::after {
+    content: '';
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: -1px;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: var(--accent);
+  }
+  .arsenal-tab:focus-visible {
+    outline-offset: -2px;
   }
   .arsenal-pin {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--text-xs);
   }
   .arsenal-member-list {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-xs);
     overflow-wrap: anywhere;
-  }
-  .arsenal-tab[aria-selected='true'] {
-    background: var(--accent-soft);
-    border-color: var(--accent-line);
-  }
-  .arsenal-tab:focus-visible,
-  .arsenal-feature button:focus-visible,
-  .arsenal-feature input:focus-visible,
-  .arsenal-feature select:focus-visible,
-  .arsenal-feature textarea:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
   }
   .arsenal-filters {
     display: grid;
-    gap: 8px;
+    gap: 8px 10px;
     grid-template-columns: 1fr;
-    margin-block: 8px;
+    margin-block: 4px;
   }
   .arsenal-filters label,
   .arsenal-editor label {
     display: grid;
     gap: 4px;
-    font-size: 14px;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--muted);
   }
   .arsenal-filters input,
   .arsenal-filters select,
   .arsenal-editor input,
   .arsenal-editor select,
   .arsenal-editor textarea {
-    min-height: 44px;
-    box-sizing: border-box;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--glass-line);
-    background: var(--surface-control);
+    width: 100%;
+    min-width: 0;
     color: var(--text);
-    padding: 8px 12px;
-    font: inherit;
+    font-weight: 400;
+  }
+  .arsenal-count {
+    font-size: var(--text-xs);
+    color: var(--muted);
   }
   .arsenal-list,
   .arsenal-files,
@@ -1634,34 +1704,78 @@
   .arsenal-sources {
     list-style: none;
     padding: 0;
-    margin: 8px 0;
+    margin: 4px 0;
     display: grid;
-    gap: 8px;
+    gap: 6px;
   }
   .arsenal-row {
     width: 100%;
     min-height: 44px;
     text-align: left;
     display: grid;
-    gap: 4px;
-    padding: 8px 12px;
-    border-radius: var(--radius-sm);
-    border: 1px solid transparent;
+    gap: 3px;
+    padding: 9px 12px 9px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
     background: var(--surface);
     color: var(--text);
     cursor: pointer;
   }
-  .arsenal-row:hover {
+  .arsenal-row:hover:not(:disabled) {
     background: var(--surface-hover);
   }
   .arsenal-row[aria-pressed='true'] {
     background: var(--accent-soft);
     border-color: var(--accent-line);
   }
+  .arsenal-row-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px 10px;
+    min-width: 0;
+  }
   .arsenal-row-name {
-    font-size: 14px;
+    font-size: var(--text-md);
     font-weight: 600;
     overflow-wrap: anywhere;
+  }
+  .arsenal-row-desc {
+    font-size: var(--text-sm);
+    color: var(--muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .arsenal-row-meta {
+    font-size: var(--text-xs);
+    color: var(--faint);
+    overflow-wrap: anywhere;
+  }
+  /* Wide windows: the list and what is open side by side, so opening one of hundreds
+     never sends the reader to the end of the list. */
+  @media (min-width: 1100px) {
+    .arsenal-panel:has(> .arsenal-detail) {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(340px, 44%);
+      column-gap: 16px;
+      align-items: start;
+    }
+    .arsenal-panel:has(> .arsenal-detail) > * {
+      grid-column: 1;
+    }
+    .arsenal-panel > .arsenal-detail {
+      grid-column: 2;
+      grid-row: 1 / span 40;
+      position: sticky;
+      top: 0;
+      margin-top: 0;
+      max-height: calc(100dvh - var(--topbar-h) - 140px);
+      overflow-y: auto;
+    }
   }
   .arsenal-actions {
     display: flex;
@@ -1677,17 +1791,29 @@
   .arsenal-editor {
     margin-top: 16px;
     padding: 16px;
-    border-radius: var(--radius-md);
-    background: var(--surface-raised);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
     display: grid;
-    gap: 8px;
+    gap: 10px;
+    align-content: start;
+  }
+  .arsenal-detail h3,
+  .arsenal-editor h3 {
+    margin: 0;
+    font-size: var(--text-lg);
+    font-weight: 600;
+    overflow-wrap: anywhere;
   }
   .arsenal-facts {
     display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 4px 12px;
-    font-size: 14px;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 6px 14px;
+    font-size: var(--text-sm);
     margin: 0;
+  }
+  .arsenal-facts dt {
+    color: var(--muted);
   }
   .arsenal-facts dd,
   .arsenal-facts dt {
@@ -1697,7 +1823,7 @@
   .arsenal-preview,
   .arsenal-detail code {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-xs);
     overflow-wrap: anywhere;
   }
   .arsenal-preview {
@@ -1709,18 +1835,18 @@
   }
   .arsenal-muted {
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--text-xs);
   }
   .arsenal-empty {
     color: var(--muted);
-    font-size: 14px;
+    font-size: var(--text-md);
   }
   .arsenal-warn {
     color: var(--warn);
-    font-size: 14px;
+    font-size: var(--text-md);
   }
   .arsenal-notice {
-    font-size: 14px;
+    font-size: var(--text-md);
     padding: 8px 12px;
     border-radius: var(--radius-sm);
   }
@@ -1744,12 +1870,46 @@
     min-height: 44px;
   }
   .arsenal-status {
-    font-size: 14px;
+    font-size: var(--text-md);
   }
+  .arsenal-detail h4,
+  .arsenal-editor h4 {
+    margin: 6px 0 0;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .arsenal-files li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    min-width: 0;
+    font-size: var(--text-sm);
+  }
+  .arsenal-files .action {
+    min-height: 30px;
+    padding: 0 10px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+    text-align: left;
+  }
+  /* Filters wrap by the room they have, not by the window: the list column can be narrow. */
   @media (min-width: 768px) {
     .arsenal-filters {
-      grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr auto;
+      display: flex;
+      flex-wrap: wrap;
       align-items: end;
+    }
+    .arsenal-filters > * {
+      flex: 1 1 140px;
+    }
+    .arsenal-filters > label:first-child {
+      flex: 2 1 240px;
+    }
+    .arsenal-filters > button {
+      flex: 0 0 auto;
     }
     .arsenal-split {
       grid-template-columns: 1fr 1fr;

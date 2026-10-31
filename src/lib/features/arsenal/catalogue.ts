@@ -41,6 +41,35 @@ export function libraryCompatibility(item: LibraryItem): Compatibility {
   return item.compatibility.status;
 }
 
+/** How a state is drawn: a tone for its color and a symbol, so it is never told by color alone. */
+export type StateTone = 'ok' | 'pending' | 'warn' | 'error' | 'neutral';
+export interface StateMark {
+  tone: StateTone;
+  symbol: string;
+}
+
+const COMPATIBILITY_MARK: Record<Compatibility, StateMark> = {
+  supported: { tone: 'ok', symbol: '✓' },
+  unverified: { tone: 'pending', symbol: '?' },
+  requires_qualification: { tone: 'pending', symbol: '?' },
+  missing_dependency: { tone: 'warn', symbol: '!' },
+  conflicting: { tone: 'warn', symbol: '!' },
+  unsupported: { tone: 'error', symbol: '✕' },
+};
+export function compatibilityMark(value: Compatibility): StateMark {
+  return COMPATIBILITY_MARK[value];
+}
+
+const STATUS_MARK: Record<CandidateStatus, StateMark> = {
+  imported: { tone: 'ok', symbol: '✓' },
+  source_changed: { tone: 'warn', symbol: '!' },
+  not_imported: { tone: 'neutral', symbol: '+' },
+  read_only: { tone: 'neutral', symbol: '–' },
+};
+export function candidateMark(value: CandidateStatus): StateMark {
+  return STATUS_MARK[value];
+}
+
 /** Filters the library. Matching is plain text over name, description and origin. */
 export function filterLibrary(
   items: readonly LibraryItem[],
